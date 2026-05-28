@@ -234,6 +234,8 @@ _FACTUAL_KWS: frozenset[str] = frozenset(
         "which",
         "what year",
         "what time",
+        "discuss",
+        "talk about",
     }
 )
 
@@ -314,7 +316,9 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                         "a book or find gaps. "
                         "Use 'notes' for questions about the user's personal notes or annotations. "
                         "Use 'summary' for broad questions about themes, topics, patterns, "
-                        "or overviews -- especially when scope is the entire library."
+                        "or overviews -- especially when scope is the entire library. "
+                        "Use 'factual' for questions about specific people, facts, concepts, or entities, "
+                        "even if they ask what that person 'discusses' or 'explains'."
                     ),
                 },
                 {"role": "user", "content": question},

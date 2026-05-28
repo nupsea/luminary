@@ -205,3 +205,65 @@ async def test_streaming_is_progressive(test_db):
         f"Streaming is buffered: first SSE (idx={first_sse_idx}) came after "
         f"last LLM token (idx={last_llm_idx}). Order: {order}"
     )
+
+
+@pytest.mark.asyncio
+async def test_summary_question_resolves_targeted_book(test_db):
+    """If scope='all' but a specific book's title is mentioned, classify_node resolves it first."""
+    _, factory, _ = test_db
+
+    # Ingest a mock document in the DB
+    from app.models import DocumentModel
+    async with factory() as session:
+        doc = DocumentModel(
+            id="odyssey-id",
+            title="The Odyssey: Fagles Translation.pdf",
+            format="pdf",
+            content_type="book",
+            file_path="/path/to/odyssey",
+        )
+        session.add(doc)
+        await session.commit()
+
+    from app.runtime.chat_graph import classify_node
+
+    state = _make_initial_state("What is the summary of the Odyssey book?")
+    # Initially scope='all', doc_ids=[]
+    assert state["scope"] == "all"
+    assert not state["doc_ids"]
+
+    result = await classify_node(state)
+
+    # Assert that scope and doc_ids are updated correctly
+    assert result["scope"] == "single"
+    assert result["doc_ids"] == ["odyssey-id"]
+
+
+@pytest.mark.asyncio
+async def test_summary_question_resolves_targeted_book_fuzzy(test_db):
+    """If scope='all' but a specific book's title is mentioned with a typo, classify_node resolves it using fuzzy match."""
+    _, factory, _ = test_db
+
+    from app.models import DocumentModel
+    async with factory() as session:
+        doc = DocumentModel(
+            id="frankenstein-id",
+            title="Frankenstein.epub",
+            format="epub",
+            content_type="book",
+            file_path="/path/to/frankenstein",
+        )
+        session.add(doc)
+        await session.commit()
+
+    from app.runtime.chat_graph import classify_node
+
+    state = _make_initial_state("how is Frankenstien born?")
+    assert state["scope"] == "all"
+    assert not state["doc_ids"]
+
+    result = await classify_node(state)
+
+    # Assert that scope and doc_ids are updated correctly because of the fuzzy match (ratio > 0.85)
+    assert result["scope"] == "single"
+    assert result["doc_ids"] == ["frankenstein-id"]

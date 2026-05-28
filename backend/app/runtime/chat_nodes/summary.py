@@ -144,12 +144,11 @@ async def summary_node(state: ChatState) -> dict:
 
     if library_summary:
         logger.info(
-            "summary_node: serving cached library summary (%d chars)",
+            "summary_node: passing cached library summary (%d chars) as context for LLM tailoring",
             len(library_summary),
         )
         return {
-            "answer": library_summary,
-            "confidence": "high",
+            "section_context": f"[Library Summary]\n{library_summary}",
             "chunks": [],
         }
 

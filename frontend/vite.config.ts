@@ -37,6 +37,9 @@ export default defineConfig(({ mode }) => {
     define: {
       "import.meta.env.VITE_SURFACE_TIER": JSON.stringify(tier),
     },
+    build: {
+      chunkSizeWarningLimit: 2000,
+    },
     server: {
       // surface-manifest.json lives at the repo root, one level above the vite root.
       fs: { allow: [path.resolve(__dirname, "..")] },

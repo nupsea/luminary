@@ -24,6 +24,10 @@ Strategy nodes:
 """
 
 import logging
+import re
+from sqlalchemy import select
+from app.database import get_session_factory
+from app.models import DocumentModel
 
 from langgraph.graph import END, StateGraph
 
@@ -82,11 +86,114 @@ logger = logging.getLogger(__name__)
 # classify_node — intent detection + query rewriting
 
 
+async def _resolve_targeted_document(question: str) -> str | None:
+    """Check if the question specifically names a document in the database.
+
+    Returns the document ID if a unique match is found, else None.
+    """
+    try:
+        async with get_session_factory()() as session:
+            rows = await session.execute(
+                select(DocumentModel.id, DocumentModel.title)
+            )
+            docs = [(row.id, row.title) for row in rows]
+    except Exception:
+        logger.warning("Failed to fetch documents for query routing", exc_info=True)
+        return None
+
+    # Clean the question for matching
+    cleaned_q = question.lower()
+    # Normalize punctuation/whitespaces
+    cleaned_q = re.sub(r'[^\w\s]', ' ', cleaned_q)
+    cleaned_q = re.sub(r'\s+', ' ', cleaned_q).strip()
+
+    matched_doc_id = None
+    max_match_len = 0
+
+    for doc_id, title in docs:
+        # Split by common title separators to get the main title part (e.g. "Odyssey: translation by Fagles" -> "Odyssey")
+        for separator in (':', ' - ', ' – '):
+            if separator in title:
+                title = title.split(separator, 1)[0]
+
+        # Clean title: lowercase
+        t_lower = title.lower()
+        # Strip common file extensions
+        for ext in ('.pdf', '.docx', '.txt', '.md', '.epub'):
+            if t_lower.endswith(ext):
+                t_lower = t_lower[:-len(ext)]
+                break
+
+        # Normalize punctuation/whitespaces in title
+        t_clean = re.sub(r'[^\w\s]', ' ', t_lower)
+        t_clean = re.sub(r'\s+', ' ', t_clean).strip()
+
+        # Ignore empty/short titles, or common generic words to avoid false matches
+        if not t_clean or len(t_clean) < 3 or t_clean in {"all", "doc", "docs", "book", "books", "notes", "summary", "summarize", "library"}:
+            continue
+
+        # Check matching of cleaned title
+        patterns = [t_clean]
+        if t_clean.startswith("the "):
+            core_t = t_clean[4:]
+        elif t_clean.startswith("a "):
+            core_t = t_clean[2:]
+        elif t_clean.startswith("an "):
+            core_t = t_clean[3:]
+        else:
+            core_t = None
+
+        if core_t and len(core_t) >= 3:
+            patterns.append(core_t)
+
+        import difflib
+        q_words = cleaned_q.split()
+        matched = False
+        
+        for pattern in patterns:
+            # 1. Exact regex boundary match
+            if re.search(r'\b' + re.escape(pattern) + r'\b', cleaned_q):
+                matched = True
+                break
+                
+            # 2. Fuzzy sliding window match (catches typos like "frankenstien")
+            p_words = pattern.split()
+            n = len(p_words)
+            if n > 0 and len(q_words) >= n:
+                for i in range(len(q_words) - n + 1):
+                    window_str = " ".join(q_words[i:i+n])
+                    if difflib.SequenceMatcher(None, pattern, window_str).ratio() >= 0.85:
+                        matched = True
+                        break
+                        
+            if matched:
+                break
+
+        if matched:
+            # If we find a match, we prefer the longest matching title to resolve ambiguity
+            if len(t_clean) > max_match_len:
+                max_match_len = len(t_clean)
+                matched_doc_id = doc_id
+
+    return matched_doc_id
+
+
+# classify_node — intent detection + query rewriting
+
+
 async def classify_node(state: ChatState) -> dict:
     """Detect intent (heuristic + optional LLM fallback) and rewrite vague queries."""
     question = state["question"]
     scope = state.get("scope", "all")
     doc_ids = state.get("doc_ids") or []
+
+    if scope == "all":
+        # Resolve targeted document if the user mentions a specific book title in the query.
+        resolved_doc_id = await _resolve_targeted_document(question)
+        if resolved_doc_id:
+            logger.info("classify_node: resolved targeted doc_id=%s from question", resolved_doc_id)
+            scope = "single"
+            doc_ids = [resolved_doc_id]
 
     logger.info(
         "chat: question=%r scope=%s docs=%d",
@@ -112,7 +219,7 @@ async def classify_node(state: ChatState) -> dict:
     # Query rewriting via Kuzu entities — non-fatal
     # Supply last user turn from history as prior_context so vague follow-ups
     # like "Are there no similarities?" can be grounded without a Kuzu lookup.
-    effective_doc_ids = doc_ids if state.get("scope") == "single" else None
+    effective_doc_ids = doc_ids if scope == "single" else None
     history = state.get("conversation_history") or []
     prior_context: str | None = None
     for msg in reversed(history):
@@ -140,6 +247,8 @@ async def classify_node(state: ChatState) -> dict:
         "intent": intent,
         "rewritten_question": rewritten,
         "primary_strategy": primary_strategy,
+        "scope": scope,
+        "doc_ids": doc_ids,
     }
 
 
