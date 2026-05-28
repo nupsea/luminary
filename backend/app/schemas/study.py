@@ -206,6 +206,19 @@ class DueCountResponse(BaseModel):
     due_today: int
 
 
+class DecayDebtItem(BaseModel):
+    document_id: str
+    document_title: str
+    card_count: int
+    avg_retention: float  # 0..1 current estimated retention across these cards
+    due_within_days: int  # days until the weakest card in the group crosses threshold
+
+
+class DecayDebtResponse(BaseModel):
+    items: list[DecayDebtItem]
+    total_at_risk: int  # total individual cards across all items
+
+
 # Collection dashboard
 
 

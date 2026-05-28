@@ -47,6 +47,8 @@ from app.schemas.study import (
     CollectionSubEnclave,
     CollectionTopic,
     DailyHistoryItem,
+    DecayDebtItem,
+    DecayDebtResponse,
     DueCountResponse,
     GapResult,
     RubricCompletenessResponse,
@@ -1798,6 +1800,88 @@ async def get_struggling_cards(
         days=days,
     )
     return [StrugglingCardItem(**r) for r in rows]
+
+
+_DECAY_DEBT_RETENTION_THRESHOLD = 0.80
+_DECAY_DEBT_WINDOW_DAYS = 7
+_DECAY_DEBT_LIMIT = 10
+
+
+@router.get("/decay-debt", response_model=DecayDebtResponse)
+async def get_decay_debt(
+    limit: int = Query(default=_DECAY_DEBT_LIMIT, ge=1, le=50),
+    session: AsyncSession = Depends(get_db),
+) -> DecayDebtResponse:
+    """Return documents whose flashcards are approaching the forgetting threshold.
+
+    A card is 'at risk' when its estimated current retention R = e^(-t/S)
+    drops below _DECAY_DEBT_RETENTION_THRESHOLD within the next
+    _DECAY_DEBT_WINDOW_DAYS days. Results are grouped by document and sorted
+    by avg_retention ascending (weakest first).
+    """
+    now = datetime.now(UTC)
+    # Fetch all reviewed cards with enough data to compute retention.
+    cards_result = await session.execute(
+        select(
+            FlashcardModel.id,
+            FlashcardModel.document_id,
+            FlashcardModel.fsrs_stability,
+            FlashcardModel.due_date,
+        ).where(
+            FlashcardModel.document_id.is_not(None),
+            FlashcardModel.fsrs_stability > 0,
+            FlashcardModel.due_date.is_not(None),
+        )
+    )
+    cards = cards_result.all()
+
+    if not cards:
+        return DecayDebtResponse(items=[], total_at_risk=0)
+
+    # Collect at-risk card IDs grouped by document.
+    doc_ids: list[str] = list({c[1] for c in cards})
+    docs_result = await session.execute(
+        select(DocumentModel.id, DocumentModel.title).where(
+            DocumentModel.id.in_(doc_ids)
+        )
+    )
+    doc_title_map: dict[str, str] = {r[0]: r[1] for r in docs_result.all()}
+
+    # Group at-risk cards by document.
+    from collections import defaultdict
+    doc_cards: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    for card_id, doc_id, stability, due_date in cards:
+        # days elapsed since the scheduled due date (positive = overdue)
+        due_aware = due_date.replace(tzinfo=UTC) if due_date.tzinfo is None else due_date
+        days_since_due = (now - due_aware).total_seconds() / 86400
+        # stability is measured in days; retention at 'days_since_due' days past due
+        current_retention = math.exp(-max(0.0, days_since_due) / stability)
+        # days until retention crosses threshold from now
+        # R_target = e^(-t/S)  =>  t = -S * ln(R_target)
+        days_to_threshold = -stability * math.log(_DECAY_DEBT_RETENTION_THRESHOLD) - max(0.0, days_since_due)
+        if current_retention < _DECAY_DEBT_RETENTION_THRESHOLD or days_to_threshold <= _DECAY_DEBT_WINDOW_DAYS:
+            doc_cards[doc_id].append((current_retention, int(max(0, days_to_threshold))))
+
+    if not doc_cards:
+        return DecayDebtResponse(items=[], total_at_risk=0)
+
+    items: list[DecayDebtItem] = []
+    for doc_id, at_risk in doc_cards.items():
+        avg_ret = sum(r for r, _ in at_risk) / len(at_risk)
+        min_days = min(d for _, d in at_risk)
+        items.append(
+            DecayDebtItem(
+                document_id=doc_id,
+                document_title=doc_title_map.get(doc_id, "(unknown)"),
+                card_count=len(at_risk),
+                avg_retention=round(avg_ret, 3),
+                due_within_days=min_days,
+            )
+        )
+
+    items.sort(key=lambda x: x.avg_retention)
+    total_at_risk = sum(i.card_count for i in items)
+    return DecayDebtResponse(items=items[:limit], total_at_risk=total_at_risk)
 
 
 @router.get("/section-heatmap", response_model=SectionHeatmapResponse)

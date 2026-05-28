@@ -8,6 +8,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ArrowRight,
   BookOpen,
   Clock,
@@ -72,6 +73,8 @@ export default function Hub() {
           <FadingCard items={data.fading_items ?? []} />
         </div>
       )}
+
+      <DecayDebtWidget />
 
       {data.recent_tags.length > 0 && (
         <Section
@@ -597,6 +600,71 @@ function HubLoading() {
         ))}
       </div>
     </PageSurface>
+  )
+}
+
+interface DecayDebtItem {
+  document_id: string
+  document_title: string
+  card_count: number
+  avg_retention: number
+  due_within_days: number
+}
+
+interface DecayDebtResponse {
+  items: DecayDebtItem[]
+  total_at_risk: number
+}
+
+function DecayDebtWidget() {
+  const { data } = useQuery<DecayDebtResponse>({
+    queryKey: ["study-decay-debt"],
+    queryFn: () => apiGet<DecayDebtResponse>("/study/decay-debt", { limit: 5 }),
+    staleTime: 60_000,
+  })
+  const navigate = useNavigate()
+
+  if (!data || data.items.length === 0) return null
+
+  return (
+    <Section
+      icon={AlertTriangle}
+      title="About to slip"
+      subtitle={`${data.total_at_risk} card${data.total_at_risk !== 1 ? "s" : ""} approaching the forgetting threshold`}
+    >
+      <div className="flex flex-col gap-2">
+        {data.items.map((item) => {
+          const retPct = Math.round(item.avg_retention * 100)
+          return (
+            <button
+              key={item.document_id}
+              onClick={() => navigate("/study")}
+              className="flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                <AlertTriangle size={13} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                {item.document_title}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {item.card_count} card{item.card_count !== 1 ? "s" : ""}
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                  retPct < 50
+                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                )}
+              >
+                {retPct}% retained
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </Section>
   )
 }
 
