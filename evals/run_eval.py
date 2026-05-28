@@ -285,6 +285,68 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
+def _export_html_report(
+    *,
+    path: str,
+    dataset: str,
+    model: str,
+    metrics: dict,
+    samples: list[dict],
+    eval_kind: str,
+    passed: bool,
+    violations: list[str],
+) -> None:
+    from datetime import datetime
+    import html as _html
+
+    status_color = "#22c55e" if passed else "#ef4444"
+    status_label = "PASS" if passed else "FAIL"
+
+    metric_rows = ""
+    for k, v in metrics.items():
+        if v is None:
+            continue
+        metric_rows += f"<tr><td>{_html.escape(k)}</td><td>{v:.4f}</td></tr>"
+
+    violation_html = ""
+    if violations:
+        items = "".join(f"<li>{_html.escape(v)}</li>" for v in violations)
+        violation_html = f"<h3 style='color:#ef4444'>Quality gate failures</h3><ul>{items}</ul>"
+
+    sample_rows = ""
+    for s in samples[:50]:
+        q = _html.escape(s.get("question", ""))
+        ctx_snippet = _html.escape((s.get("contexts") or [""])[0][:200])
+        sample_rows += f"<tr><td style='max-width:300px'>{q}</td><td style='max-width:400px;font-size:0.8em'>{ctx_snippet}…</td></tr>"
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Luminary Eval — {_html.escape(dataset)}</title>
+<style>
+  body{{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;color:#1a1a1a}}
+  h1{{font-size:1.5rem}}h2{{font-size:1.1rem;border-bottom:1px solid #ddd;padding-bottom:4px}}
+  table{{border-collapse:collapse;width:100%}}th,td{{padding:8px 12px;text-align:left;border:1px solid #e5e7eb}}
+  th{{background:#f9fafb}}.badge{{display:inline-block;padding:4px 12px;border-radius:99px;font-weight:600;color:#fff;background:{status_color}}}
+  tr:nth-child(even){{background:#f9fafb}}
+</style></head>
+<body>
+<h1>Luminary Retrieval Eval — {_html.escape(dataset)}</h1>
+<p>Model: <code>{_html.escape(model)}</code> &nbsp; Kind: {_html.escape(eval_kind)} &nbsp; Run: {now}</p>
+<p><span class="badge">{status_label}</span></p>
+{violation_html}
+<h2>Metrics</h2>
+<table><tr><th>Metric</th><th>Score</th></tr>{metric_rows}</table>
+<h2>Sample results (first {min(len(samples),50)} of {len(samples)})</h2>
+<table><tr><th>Question</th><th>Top context chunk</th></tr>{sample_rows}</table>
+</body></html>"""
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html_content, encoding="utf-8")
+    print(f"\nHTML report written to {out.resolve()}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation against a golden dataset.")
     parser.add_argument("--dataset", required=False, help="Golden dataset name")
@@ -352,6 +414,13 @@ def main() -> None:
         "--ablation",
         action="store_true",
         help="Run retrieval ablation across vector, fts, graph, and rrf strategies.",
+    )
+    parser.add_argument(
+        "--export-html",
+        default="",
+        dest="export_html",
+        metavar="PATH",
+        help="Write a self-contained HTML report to PATH after the run.",
     )
     args = parser.parse_args()
 
@@ -544,6 +613,18 @@ def main() -> None:
     _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)
 
     print_table(dataset_label, history_model, metrics)
+
+    if args.export_html:
+        _export_html_report(
+            path=args.export_html,
+            dataset=dataset_label,
+            model=history_model,
+            metrics=metrics,
+            samples=samples,
+            eval_kind=eval_kind,
+            passed=passed,
+            violations=threshold_violations,
+        )
 
     n_questions = len(samples)
     # context_precision / context_recall are intentionally skipped now (they

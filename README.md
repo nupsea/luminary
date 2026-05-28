@@ -1,131 +1,91 @@
 # Luminary
 
-A local-first personal knowledge and learning assistant. Upload documents, build a knowledge graph, chat with your library, and study with AI-generated flashcards -- all running on your machine.
+**Study smarter, locally.** Upload a book or paper, ask questions with source citations, and review with FSRS-scheduled flashcards — your data never leaves your machine.
 
-No data leaves your device unless you explicitly configure a cloud LLM key.
+> Local-first document learning with cited Q&A and science-backed spaced repetition.
+
+No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any API key you supply.
 
 ---
 
-## Quick Start (5 minutes)
-
-### 1. Install prerequisites
-
-| Tool | Install |
-|------|---------|
-| [uv](https://docs.astral.sh/uv/) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| [Node 20+](https://nodejs.org/) | `brew install node` or download from nodejs.org |
-| [Ollama](https://ollama.com/) | `brew install ollama` or download from ollama.com |
-
-### 2. Pull the default models
+## Install and run (one command)
 
 ```bash
-# Start Ollama (if not already running)
-brew services start ollama
-
-# Pull Gemma 4 (default chat model)
-ollama pull gemma4
-
-# Pull LLaVA 7B (default vision model)
-ollama pull llava:7b
-```
-
-> Requires Ollama v0.20.0+. Check with `ollama --version` and upgrade if needed.
-
-### 3. Clone and launch
-
-```bash
-git clone <repo-url>
+git clone https://github.com/nupsea/luminary.git
 cd luminary
-
-# One command does everything
-make luminary
+make install   # installs uv, Node, Ollama; pulls default models; builds the app
+make start     # starts the prod server on http://localhost:7820
 ```
 
-`make luminary` installs or refreshes frontend dependencies when `package.json` or `package-lock.json` changes, starts the backend (port 7820) and frontend (port 5173), and prints a ready banner when everything is up.
+`make install` is idempotent — safe to run again when you update. It handles Ollama, model pulls, Python deps, and frontend build automatically.
 
-Open **http://localhost:5173** when you see:
+> **macOS Intel?** Docker is required for the backend. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) first, then `make docker-build && make docker-run`.
 
-```
-  Luminary is ready  --  0 document(s) in library
-  http://localhost:5173
-```
-
-### 4. Upload your first document
-
-1. Go to the **Learning** tab
-2. Click **Upload** and select a PDF or text file
-3. Luminary parses, chunks, embeds, and indexes it automatically
-4. Switch to **Chat** and ask a question about your document
+Open **http://localhost:7820** when the terminal shows a ready banner.
 
 ---
 
-## What you can do
+## Your first 5 minutes
 
-### Learning -- your document library
+1. **Upload a document** — Learning tab → Upload → select a PDF or text file
+2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
+3. **Ask a question** — Chat tab → ask anything about your document; citations link back to the source section
+4. **Review flashcards** — Study tab → Start Review → grade cards; Luminary schedules the next review using FSRS
 
-Upload PDFs and text files. Luminary parses, chunks, embeds, and indexes them. Browse your library, view summaries, and open documents in the built-in reader.
-
-![Library overview](assets/images/main_library.png)
-
-### Reader -- read and annotate
-
-Side-by-side PDF viewer with text search, section navigation, and Key Points summaries.
-
-![Document reader](assets/images/reader.png)
-
-### Notes -- write and search
-
-Markdown editor with live preview. Notes are indexed alongside your documents and appear in search results.
-
-Notes also support diagrams:
-- Use Mermaid fenced blocks for text-authored architecture and design diagrams.
-- Click **Draw** in the note editor to open the embedded Excalidraw editor for freeform diagrams, flowcharts, arrows, and process sketches.
-- Saving an Excalidraw diagram stores an exported SVG plus editable Excalidraw JSON in Luminary's local `.luminary/images/notes` asset directory, then inserts the SVG into the note. Use **Edit diagram** to reopen the latest editable Excalidraw scene in that note.
-
-![Notes editor](assets/images/notes.png)
-
-### Other tabs
-
-| Tab | Purpose |
-|-----|---------|
-| **Chat** | Ask questions across your entire library with source citations |
-| **Viz** | Explore the knowledge graph -- entities and relationships extracted from your documents |
-| **Study** | Review AI-generated flashcards with spaced repetition (FSRS) |
-| **Monitoring** | System health, model usage, and retrieval quality metrics |
+That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), and a prediction-calibration graph on Progress.
 
 ---
 
-## Choosing a local model
+## Features
 
-Luminary defaults to **Gemma 4** via Ollama. You can switch to any Ollama-supported model.
+### Cited Q&A — Ask across your library
 
-### Recommended models
+Chat with every document you've uploaded. Every answer includes citations with section heading, excerpt, and page number.
 
-| Model | Pull command | Best for | VRAM |
-|-------|-------------|----------|------|
-| **Gemma 4 E4B** | `ollama pull gemma4` | Everyday use, laptops | ~4 GB |
-| **Gemma 4 26B A4B** (MoE) | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
-| **Gemma 4 31B** | `ollama pull gemma4:31b` | Maximum quality | ~20 GB |
-| Mistral 7B | `ollama pull mistral` | Lightweight alternative | ~4 GB |
-| Llama 3.1 8B | `ollama pull llama3.1` | Good general purpose | ~5 GB |
+Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall.
 
-### Switching models
+### Spaced repetition — Remember what you read
 
-Create or edit `backend/.env`:
+AI-generated flashcards (regular, cloze-deletion, code-trace) scheduled by the FSRS algorithm. Review sessions are shaped into three phases:
 
-```bash
-LITELLM_DEFAULT_MODEL=ollama/gemma4
-```
+- **Warm-up** — well-retained cards to build momentum
+- **Engage** — cards that need work
+- **Reflect** — phase label on the last 15%
 
-Restart Luminary after changing the model. Verify in the **Monitoring** tab or:
+Before flipping a card, predict your confidence (Know it / Unsure / Blank). Luminary tracks your prediction accuracy on the Progress tab.
 
-```bash
-curl http://localhost:7820/settings
-```
+### Local-first reader — Read and annotate
 
-### Using cloud models (optional)
+Side-by-side PDF viewer with section navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection in the reader.
 
-Add your API key to `backend/.env`:
+### Notes — Write alongside reading
+
+Markdown editor with live preview. Notes are indexed and appear in search. Supports Mermaid diagrams and Excalidraw sketches.
+
+### Progress — See what's sticking
+
+- Mastery rings on every document card (weighted FSRS stability)
+- "What's about to slip" widget (cards approaching the forgetting threshold)
+- Study activity chart (last 30 days)
+- Prediction calibration graph (are your confidence ratings accurate?)
+- Sort library by "Weakest first" to target the documents that need the most work
+
+---
+
+## Models
+
+Luminary defaults to **Gemma 4** via Ollama (pulled by `make install`).
+
+| Model | Command | Best for | VRAM |
+|-------|---------|----------|------|
+| Gemma 4 E4B (default) | `ollama pull gemma4` | Everyday use, laptops | ~4 GB |
+| Gemma 4 26B A4B | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
+| Gemma 4 31B | `ollama pull gemma4:31b` | Maximum quality | ~20 GB |
+| Llama 3.1 8B | `ollama pull llama3.1` | Lightweight alternative | ~5 GB |
+
+### Switch to a cloud model (optional)
+
+Create `backend/.env`:
 
 ```bash
 # OpenAI
@@ -133,8 +93,8 @@ LITELLM_DEFAULT_MODEL=openai/gpt-4o
 OPENAI_API_KEY=sk-...
 
 # Anthropic
-LITELLM_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514
 ANTHROPIC_API_KEY=sk-ant-...
+LITELLM_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514
 
 # Google
 LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-flash
@@ -145,90 +105,61 @@ GOOGLE_API_KEY=...
 
 ## Configuration
 
-All settings are environment variables in `backend/.env`. The file is gitignored.
+All settings are environment variables in `backend/.env` (gitignored).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LITELLM_DEFAULT_MODEL` | `ollama/gemma4` | LLM model for chat, summaries, flashcards |
+| `LITELLM_DEFAULT_MODEL` | `ollama/gemma4` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (use `:13b` for higher quality) |
-| `GLINER_ENABLED` | `true` | Entity extraction (disable on low-memory machines) |
-| `WEB_SEARCH_PROVIDER` | `none` | `none`, `brave`, `tavily`, or `duckduckgo` |
-| `PHOENIX_ENABLED` | `true` | Arize Phoenix tracing at localhost:6006 |
-| `DATA_DIR` | `.luminary` | Where Luminary stores its databases |
+| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis |
+| `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
+| `DATA_DIR` | `.luminary` | Where databases and embeddings live |
 
 ---
 
-## Data Management
+## Your data
 
-### Backup & Transfer
-Luminary is local-first. All your data—including the library database, vector embeddings, knowledge graph, and notes—is stored in the **`.luminary`** directory at the root of the project.
+Everything — library database, vector embeddings, knowledge graph, notes — is in `.luminary/` at the project root. To move to a new machine: copy `.luminary/`, `DATA/` (source files), and `backend/.env`.
 
-To move your data to a new device:
-1.  **Stop the application** to ensure database files are closed.
-2.  Copy the **`.luminary/`** and **`DATA/`** (source books) directories to the same location on your new device.
-3.  Copy your **`.env`** file to preserve your configuration and API keys.
-
-### Exporting Content
-If you want to use your data in other tools, you can export from the UI:
-- **Markdown:** Export collections as an Obsidian-compatible Markdown vault.
-- **Anki:** Export flashcard decks as `.apkg` files for study in Anki.
-- **CSV:** Export individual flashcard sets for spreadsheet use.
+Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flashcard CSV.
 
 ---
 
-## Platform Notes
+## Make commands
 
-### macOS Apple Silicon (recommended)
+| Command | What it does |
+|---------|-------------|
+| `make install` | One-time setup (uv, Node, Ollama, models, build) |
+| `make start` | Start the prod server on :7820 |
+| `make luminary` | Start backend + frontend in dev mode (:7820 + :5173) |
+| `make stop` | Stop all Luminary processes |
+| `make test` | Unit + integration tests |
+| `make lint` | Ruff + tsc |
+| `make ci` | Full CI: deps, lint, layer check, tests, build |
+| `make docker-build` | Build the Docker image |
+| `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
 
-Everything works natively. Follow the Quick Start above.
+---
 
-### macOS Intel (x86_64)
+## Evaluation harness
 
-Core packages (`lancedb`, `onnxruntime`, `kuzu`) have no Intel macOS wheels for Python 3.13. **Docker is required for the backend.**
+Luminary ships a RAGAS-based retrieval eval harness with golden Q&A datasets. See [`evals/README.md`](evals/README.md) for the full picture.
 
 ```bash
-# Install Docker Desktop, then:
-make luminary
+cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
 ```
 
-The script detects Intel Mac automatically and runs the backend in a container. The frontend still runs natively.
-
-### Linux / Windows WSL
-
-Works natively. Same Quick Start steps apply.
+Thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45, Faithfulness ≥ 0.65.
 
 ---
 
-## Make Commands
+## Platform notes
 
-### Daily use
-
-| Command | Description |
-|---------|-------------|
-| `make luminary` | Start backend + frontend with readiness check (recommended) |
-| `make logs` | Same as above but with DEBUG-level log output |
-| `make backend` | Start backend only (port 7820) |
-| `make frontend` | Start frontend only (port 5173) |
-
-### Testing
-
-| Command | Description |
-|---------|-------------|
-| `make test` | Unit + integration tests |
-| `make lint` | Ruff (Python) + tsc (TypeScript) |
-| `make ci` | Full CI: sync deps, lint, layer check, tests, build |
-| `make smoke` | Smoke tests (requires running backend) |
-
-### Advanced testing
-
-| Command | Description |
-|---------|-------------|
-| `make test-full` | Corpus tests with real ML models (slow, downloads models on first run) |
-| `make test-e2e` | End-to-end upload tests (requires running backend + Ollama) |
-| `make test-perf` | Performance/latency assertions |
-| `make test-books-all` | Ingest all 3 corpus books, run all book tests |
-| `make eval` | RAGAS retrieval quality evaluation with threshold assertions |
+| Platform | Status |
+|---------|--------|
+| macOS Apple Silicon | Native, fully supported |
+| macOS Intel | Docker required for backend (auto-detected by `make luminary`) |
+| Linux / WSL | Native, same steps |
 
 ---
 
@@ -236,95 +167,45 @@ Works natively. Same Quick Start steps apply.
 
 ```
 Types -> Config -> Repo -> Service -> Runtime -> API
-         (6-layer dependency rule -- no reverse imports)
+         (6-layer dependency rule — no reverse imports)
 ```
 
 | Layer | Technology |
-|-------|------------|
+|-------|-----------|
 | Backend | Python 3.13, FastAPI, LangGraph, LiteLLM |
-| Storage | SQLite (metadata), LanceDB (vectors), Kuzu (graph), FTS5 (keyword search) |
-| ML | BAAI/bge-m3 embeddings (1024-dim, ONNX), GLiNER (zero-shot NER) |
-| Retrieval | RRF hybrid: vector + BM25 keyword + graph traversal |
+| Storage | SQLite (metadata), LanceDB (vectors), Kuzu (graph), FTS5 |
+| ML | BAAI/bge-m3 embeddings (ONNX), GLiNER (zero-shot NER) |
+| Retrieval | RRF hybrid: vector + BM25 + graph traversal |
 | Spaced rep | FSRS algorithm |
 | Frontend | React 18, TypeScript 5, Vite, shadcn/ui, Tailwind CSS |
-| Graph viz | Sigma.js v3 + Graphology (WebGL, handles 10K+ nodes) |
+| Graph viz | Sigma.js v3 + Graphology |
 | State | Zustand + TanStack Query |
-
-### Backend structure
 
 ```
 backend/app/
-  config.py          Settings (env vars)
-  models.py          SQLAlchemy ORM models
-  db_init.py         DDL (tables, indexes)
-  database.py        Engine + session factory
-  services/          Business logic (one file per domain)
-  routers/           FastAPI endpoints (one file per domain)
-  runtime/           LangGraph workflows, background workers
-  workflows/         Ingestion pipeline
-```
+  config.py       Settings
+  models.py       SQLAlchemy ORM
+  services/       Business logic (one file per domain)
+  routers/        FastAPI endpoints
+  runtime/        LangGraph workflows, background workers
+  workflows/      Ingestion pipeline
 
-### Frontend structure
-
-```
 frontend/src/
-  pages/             Tab-level components (Learning, Chat, Viz, Study, Notes, Monitoring)
-  components/        Reusable UI components
-  store/             Zustand stores
-  lib/               Utilities, API client, config
-  hooks/             Custom React hooks
+  pages/          Tab-level components
+  components/     Reusable UI
+  store/          Zustand stores
+  lib/            Utilities, API client
+  hooks/          Custom React hooks
 ```
 
----
+### Contributing
 
-## Running Evaluations
-
-Luminary includes a RAGAS-based evaluation framework with golden datasets.
-
-```bash
-# Start Langfuse (optional, requires Docker)
-docker compose -f docker-compose.langfuse.yml up -d
-
-# Run retrieval evals
-cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
-
-# Run with threshold assertions (CI mode)
-make eval
-```
-
-Quality thresholds:
-
-| Metric | Threshold |
-|--------|-----------|
-| HR@5 | >= 0.60 |
-| MRR | >= 0.45 |
-| Faithfulness | >= 0.65 |
-
-Detailed LLM traces are available in Arize Phoenix at **http://localhost:6006**.
-
----
-
-## Monitoring
-
-The **Monitoring** tab shows:
-
-- RAG quality metrics (HR@5, MRR, Faithfulness, Context Precision)
-- Ingestion queue status and progress
-- Active model and provider (local vs cloud)
-- Evaluation run history
-- Dynamic eval runner -- select any golden dataset and trigger a RAGAS run from the UI
-
-
----
-
-## Contributing
-
-1. Fork the repo and create a feature branch
-2. Install deps: `cd backend && uv sync` and `cd frontend && npm install`
-3. Run `make ci` before opening a PR -- it must pass cleanly
-4. Follow the 6-layer import rule. No reverse imports.
-5. All LLM calls go through LiteLLM -- no direct provider SDK imports
-6. New endpoints and service methods require at least one pytest test
+1. Fork and create a feature branch
+2. `cd backend && uv sync` / `cd frontend && npm install`
+3. `make ci` must pass before opening a PR
+4. Follow the 6-layer import rule (no reverse imports)
+5. All LLM calls go through LiteLLM
+6. New endpoints require at least one pytest test
 
 ---
 
