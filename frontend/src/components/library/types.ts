@@ -10,7 +10,7 @@ export type ContentType =
   | "tech_book"
   | "tech_article"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
-export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed"
+export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed" | "weakest-first"
 export type ViewMode = "grid" | "list"
 
 export interface CollectionRef {
@@ -41,6 +41,7 @@ export interface DocumentListItem {
   enrichment_status: string | null
   // null = no objectives extracted; 0 = objectives exist but none covered
   objective_progress_pct: number | null
+  mastery_pct: number | null
   // Membership chips (plan 2E.5). Stable sort: CollectionModel.sort_order
   // then name. Card UI lands in step 8.
   collections: CollectionRef[]

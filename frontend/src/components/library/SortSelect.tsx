@@ -5,6 +5,7 @@ const OPTIONS: { value: SortOption; label: string }[] = [
   { value: "oldest", label: "Oldest first" },
   { value: "alphabetical", label: "Alphabetical" },
   { value: "most-studied", label: "Most studied" },
+  { value: "weakest-first", label: "Weakest first" },
 ]
 
 interface SortSelectProps {

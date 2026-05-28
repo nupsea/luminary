@@ -33,6 +33,11 @@ export function DocumentRow({ doc, onClick }: DocumentRowProps) {
           {Math.round(doc.reading_progress_pct * 100)}% read
         </span>
       )}
+      {doc.mastery_pct !== null && (
+        <span className="hidden text-xs text-muted-foreground xl:block" title={`Mastery: ${doc.mastery_pct}%`}>
+          {Math.round(doc.mastery_pct)}% mastery
+        </span>
+      )}
       {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && (
         <span className="hidden text-xs text-blue-600 sm:block">Enriching...</span>
       )}

@@ -160,7 +160,7 @@ async def list_documents(
     collection_id: str | None = Query(
         default=None, description="Restrict to documents in this collection"
     ),
-    sort: Literal["newest", "oldest", "alphabetical", "most-studied", "last_accessed"] = Query(
+    sort: Literal["newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"] = Query(
         default="newest"
     ),
     page: int = Query(default=1, ge=1),
@@ -331,6 +331,15 @@ async def list_documents(
             order_clauses = [func.lower(DocumentModel.title).asc()]
         elif sort == "last_accessed":
             order_clauses = [DocumentModel.last_accessed_at.desc()]
+        elif sort == "weakest-first":
+            # Docs with cards sorted ascending by mastery (nulls/no-cards last).
+            # mastery_sum_weight==0 means no cards; treat as highest mastery so
+            # they sink to the bottom and don't crowd out real weak docs.
+            order_clauses = [
+                case((mastery_sum_weight_sq > 0, 0), else_=1).asc(),
+                (mastery_sum_contribution_sq / mastery_sum_weight_sq).asc(),
+                DocumentModel.created_at.desc(),
+            ]
         else:  # most-studied
             order_clauses = [learning_status_order_sq.desc(), DocumentModel.created_at.desc()]
 

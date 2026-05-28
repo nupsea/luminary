@@ -486,9 +486,21 @@ export function DocumentCard({
       )}
 
       {doc.flashcard_count > 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          {doc.flashcard_count} flashcard{doc.flashcard_count !== 1 ? "s" : ""}
-        </p>
+        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{doc.flashcard_count} flashcard{doc.flashcard_count !== 1 ? "s" : ""}</span>
+          {doc.mastery_pct !== null && (
+            <>
+              <span>·</span>
+              <span
+                className="flex items-center gap-1"
+                title={`Mastery: ${doc.mastery_pct}%`}
+              >
+                <ProgressRing pct={doc.mastery_pct} size={16} />
+                <span>{Math.round(doc.mastery_pct)}% mastery</span>
+              </span>
+            </>
+          )}
+        </div>
       )}
 
       {/* Compact tag-count indicator. The full chip cloud + add/remove lives
