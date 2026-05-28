@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types install
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types install docker-build docker-run
 
 LUMINARY_PORT ?= 7820
 
@@ -34,6 +34,12 @@ build:
 
 start:
 	bash scripts/start.sh
+
+docker-build:
+	docker build -t luminary:latest .
+
+docker-run:
+	docker compose --profile ai up
 
 stop:
 	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \

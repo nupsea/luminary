@@ -1,0 +1,33 @@
+# data and state
+.luminary/
+*.db
+*.db-shm
+*.db-wal
+
+# deps and build artefacts
+frontend/node_modules/
+frontend/dist/
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+**/*.pyc
+
+# dev tooling
+.git/
+.github/
+.claude/
+scripts/ralph/
+scripts/corpus/
+evals/
+DATA/
+
+# docs
+docs/
+*.md
+!README.md
+
+# test artefacts
+backend/tests/
+backend/.pytest_cache/
+backend/htmlcov/
+backend/.coverage
