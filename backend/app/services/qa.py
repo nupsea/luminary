@@ -294,6 +294,7 @@ class QAService:
         model: str | None,
         conversation_history: list[dict] | None = None,
         web_enabled: bool = False,
+        socratic: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -467,6 +468,14 @@ class QAService:
                 # called until iteration begins. The try/except must therefore cover both
                 # the generate() call AND the subsequent iteration loops.
                 system_prompt = result.get("_system_prompt") or ""
+                if socratic and system_prompt:
+                    system_prompt = (
+                        "Before answering, start with one probing question (1-2 sentences) "
+                        "that activates the user's prior knowledge about this topic. "
+                        "Format: [Your probing question?]\\n\\n"
+                        "[Full answer with citations below]\\n\\n"
+                        + system_prompt
+                    )
                 llm = get_llm_service()
                 collected: list[str] = []
                 try:

@@ -27,6 +27,7 @@ class QARequest(BaseModel):
     model: str | None = None
     messages: list[ConversationMessage] | None = None  # sliding-window history
     web_enabled: bool = False  # optional web augmentation
+    socratic: bool = False  # when True, LLM asks a probing question before answering
 
 
 class ClassifyOnlyResponse(BaseModel):
@@ -57,6 +58,7 @@ async def ask_question(req: QARequest) -> StreamingResponse:
             req.model,
             history,
             web_enabled=req.web_enabled,
+            socratic=req.socratic,
         ),
         media_type="text/event-stream",
     )
