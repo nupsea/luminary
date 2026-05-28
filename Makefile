@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types install
 
 LUMINARY_PORT ?= 7820
 
@@ -24,6 +24,9 @@ backend:
 
 frontend:
 	cd frontend && npm run dev
+
+install:
+	bash scripts/install.sh
 
 build:
 	@echo "Building production SPA (public tier, /api base)..."
