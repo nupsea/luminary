@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-05-25
+## [0.1.0] - 2026-05-29
 
 First public release. Luminary is a local-first learning app: upload a document,
 get a cited chat, and review it on an FSRS schedule — all on your own machine.
@@ -47,6 +47,24 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
   the API (under `/api`) on one port with no CORS. `make build` and `make start`.
 - **CI lints** — manifest schema + coverage checks ensure every router and page
   declares a tier.
+- **One-command install** — `make install` idempotently provisions uv, Node,
+  Ollama, pulls default models, and builds the app.
+- **Docker** — single-image multi-stage build + `docker-compose.yml` with an
+  optional Ollama sidecar (`--profile ai`).
+
+#### Learner-science features (Phase 3.2)
+- **Mastery rings** on every `DocumentCard` — weighted FSRS stability as a
+  visual progress indicator; "Weakest first" sort in the library.
+- **Decay-debt widget** on the hub — surfaces documents with cards approaching
+  the FSRS forgetting threshold.
+- **Calibration delta tracking** — predict your grade before flipping (Know it /
+  Unsure / Blank); match rate tracked weekly and shown on the Progress tab.
+- **Session shape** — study queue sorted warm-up → engage → reflect; phase
+  label in the session header.
+- **Ask panel in ⌘K** — quick Q&A from any tab with Socratic mode (LLM asks a
+  probing question before answering) and inline citations.
+- **Chat auto-scope** — mentioning a document title in a question automatically
+  scopes the answer to that document.
 
 [Unreleased]: https://github.com/nupsea/luminary/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/nupsea/luminary/releases/tag/v0.1.0
