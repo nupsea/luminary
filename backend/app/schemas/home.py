@@ -19,7 +19,13 @@ class TodayAction(BaseModel):
     kind: Literal["review_cards", "continue_reading", "resume_note"]
     target_id: str | None = None  # document_id for read; note_id for resume
     label: str
-    count: int | None = None  # e.g. due-card count for kind='review_cards'
+    count: int | None = None  # total due-card count for kind='review_cards'
+    # Focused collection context for review_cards — the most active project
+    # with due cards. Lets the hub lead with project name, not raw count.
+    collection_id: str | None = None
+    collection_name: str | None = None
+    collection_color: str | None = None
+    scoped_count: int | None = None  # due cards scoped to that collection
 
 
 class RecentItem(BaseModel):
@@ -39,6 +45,7 @@ class ActiveCollection(BaseModel):
     document_count: int
     note_count: int
     flashcard_count: int
+    due_card_count: int = 0  # flashcards due now from docs in this collection
 
 
 class RecentTag(BaseModel):
