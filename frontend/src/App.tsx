@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { Activity, AlertTriangle, BookOpen, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
@@ -27,6 +27,7 @@ import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
 import { IngestionProgressPills } from "./components/IngestionProgressPills"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog"
 // All pages are lazy-loaded to reduce the initial bundle and improve tab-switch
 // performance. Keyed by their manifest `frontend.component` path so the router
 // and nav rail can be generated from surface-manifest.json.
@@ -277,10 +278,89 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
             <Sun size={14} className="dark:hidden" />
             <Moon size={14} className="hidden dark:block" />
           </button>
+          <AboutButton />
         </div>
       </nav>
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
+  )
+}
+
+// About dialog — version + surface tier info for the end user.
+
+const TIER_META: Record<string, { label: string; color: string; description: string }> = {
+  dev: {
+    label: "dev",
+    color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",
+    description: "All surfaces enabled, including quality tools and admin panels.",
+  },
+  labs: {
+    label: "labs",
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    description: "Experimental features toggled per-surface via the Labs panel.",
+  },
+  public: {
+    label: "public",
+    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+    description: "Stable, minimal install — only learner-facing surfaces.",
+  },
+}
+
+function AboutButton() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground"
+        title="About Luminary"
+      >
+        <Info size={14} />
+      </button>
+      <AboutDialog open={open} onClose={() => setOpen(false)} />
+    </>
+  )
+}
+
+function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { data } = useQuery<{ version: string; status: string }>({
+    queryKey: ["health"],
+    queryFn: () => apiGet("/health"),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const tier = SURFACE_TIER
+  const meta = TIER_META[tier] ?? TIER_META.public
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <LuminaryGlyph size={18} className="text-primary" />
+            Luminary
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 pt-1 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Version</span>
+            <span className="font-medium">{data?.version ?? "—"}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Build tier</span>
+            <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", meta.color)}>
+              {meta.label}
+            </span>
+          </div>
+          <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            {meta.description}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Local-first knowledge and learning assistant. Your documents, notes, and review history
+            stay on your machine.
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -371,6 +451,7 @@ function AppShell() {
         prefilledContent?: string
         collectionId?: string
       }>).detail
+      const fromState = { state: { from: window.location.pathname } }
       if (detail.tab === "notes") {
         // prefilled note from gap analysis "Take a note" action
         if (detail.prefilledContent) {
@@ -379,19 +460,19 @@ function AppShell() {
         // Support both legacy shape (detail.tagFilter) and new shape (detail.filter.tag)
         const tagPath = detail.filter?.tag ?? detail.tagFilter ?? null
         setActiveTag(tagPath)
-        navigate("/notes")
+        navigate("/notes", fromState)
       } else if (detail.tab === "learning") {
         // source document subtitle click from NoteReaderSheet
         const target = detail.documentId ? `/library?doc=${detail.documentId}` : "/library"
-        navigate(target)
+        navigate(target, fromState)
       } else if (detail.tab === "chat") {
         // document action menu -> Chat about this
         // Store updates (chatSelectedDocId, chatScope) happen at dispatch site
-        navigate("/chat")
+        navigate("/chat", fromState)
       } else if (detail.tab === "study") {
         // cards due pill or document action menu
         if (detail.documentId) setActiveDocument(detail.documentId)
-        navigate("/study")
+        navigate("/study", fromState)
       } else if (detail.tab === "viz") {
         // document action menu -> View in graph
         if (detail.documentId) setActiveDocument(detail.documentId)

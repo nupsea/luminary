@@ -8,7 +8,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import {
-  AlertTriangle,
   ArrowRight,
   BookOpen,
   Clock,
@@ -16,6 +15,7 @@ import {
   FolderPlus,
   Hourglass,
   Pencil,
+  RefreshCw,
   Sparkles,
   StickyNote,
   Tag,
@@ -33,9 +33,16 @@ import type { components } from "@/types/api"
 type HomeOverview = components["schemas"]["HomeOverviewResponse"]
 type ContinueReadingItem = components["schemas"]["ContinueReadingItem"]
 type FadingItem = components["schemas"]["FadingItem"]
-type ActiveCollection = components["schemas"]["ActiveCollection"]
+type ActiveCollection = components["schemas"]["ActiveCollection"] & {
+  due_card_count?: number
+}
 type RecentTag = components["schemas"]["RecentTag"]
-type TodayAction = components["schemas"]["TodayAction"]
+type TodayAction = components["schemas"]["TodayAction"] & {
+  collection_id?: string | null
+  collection_name?: string | null
+  collection_color?: string | null
+  scoped_count?: number | null
+}
 type WeeklyStats = components["schemas"]["WeeklyStats"]
 
 const fetchHomeOverview = (): Promise<HomeOverview> =>
@@ -68,9 +75,16 @@ export default function Hub() {
       {data.today_action && <TodayHero action={data.today_action} />}
 
       {((data.continue_reading?.length ?? 0) > 0 || (data.fading_items?.length ?? 0) > 0) && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            (data.fading_items?.length ?? 0) > 0 && "md:grid-cols-2",
+          )}
+        >
           <ContinueReadingCard items={data.continue_reading ?? []} />
-          <FadingCard items={data.fading_items ?? []} />
+          {(data.fading_items?.length ?? 0) > 0 && (
+            <FadingCard items={data.fading_items ?? []} />
+          )}
         </div>
       )}
 
@@ -188,24 +202,21 @@ function greeting() {
 
 function TodayHero({ action }: { action: TodayAction }) {
   const navigate = useNavigate()
+
+  if (action.kind === "review_cards") {
+    return <ReviewFocusHero action={action} />
+  }
+
   const reason =
-    action.kind === "review_cards"
-      ? "Spaced repetition works best when reviewed within the day."
-      : action.kind === "continue_reading"
-        ? "Pick up while the context is still warm — cold restarts cost more."
-        : "A quick note while it's fresh tends to stick."
-  const Icon =
-    action.kind === "review_cards"
-      ? Zap
-      : action.kind === "continue_reading"
-        ? BookOpen
-        : Pencil
+    action.kind === "continue_reading"
+      ? "Pick up while the context is still warm — cold restarts cost more."
+      : "A quick note while it's fresh tends to stick."
+  const Icon = action.kind === "continue_reading" ? BookOpen : Pencil
   const onClick = () => {
-    if (action.kind === "review_cards") navigate("/study")
-    else if (action.kind === "continue_reading" && action.target_id) {
-      navigate(`/library?doc=${encodeURIComponent(action.target_id)}`)
-    } else if (action.kind === "resume_note") {
-      navigate("/notes")
+    if (action.kind === "continue_reading" && action.target_id) {
+      navigate(`/library?doc=${encodeURIComponent(action.target_id)}`, { state: { from: "/" } })
+    } else {
+      navigate("/notes", { state: { from: "/" } })
     }
   }
   return (
@@ -213,16 +224,8 @@ function TodayHero({ action }: { action: TodayAction }) {
       onClick={onClick}
       className="group relative flex w-full cursor-pointer select-none flex-col gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 text-left text-primary-foreground shadow-md shadow-primary/15 transition-all hover:shadow-lg hover:shadow-primary/20"
     >
-      {/* Two ambient orbs give the card a sense of weight without committing
-          to an image; they're positioned diagonally so the eye picks up depth. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/15 blur-3xl"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -left-8 -bottom-12 h-32 w-32 rounded-full bg-white/10 blur-3xl"
-      />
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-32 w-32 rounded-full bg-white/10 blur-3xl" />
       <div className="relative z-10 flex items-center gap-2.5">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
           <Icon size={14} />
@@ -233,13 +236,108 @@ function TodayHero({ action }: { action: TodayAction }) {
       </div>
       <div className="relative z-10 flex items-center justify-between gap-3 pt-0.5">
         <span className="truncate text-lg font-semibold sm:text-xl">{action.label}</span>
-        <ArrowRight
-          size={20}
-          className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5"
-        />
+        <ArrowRight size={20} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
       </div>
       <p className="relative z-10 max-w-xl text-xs text-primary-foreground/75">{reason}</p>
     </button>
+  )
+}
+
+const _SESSION_SIZE = 15
+
+function ReviewFocusHero({ action }: { action: TodayAction }) {
+  const navigate = useNavigate()
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const total = action.count ?? 0
+  const scoped = action.scoped_count ?? 0
+  const focusCount = scoped > 0 ? scoped : total
+  const sessionSize = Math.min(_SESSION_SIZE, focusCount)
+  const estimatedMin = Math.max(1, Math.round(sessionSize * 0.9))
+  const overflow = total - focusCount
+
+  return (
+    <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 shadow-md shadow-primary/15">
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-32 w-32 rounded-full bg-white/10 blur-3xl" />
+
+      <div className="relative z-10 flex flex-col gap-3">
+        {/* label row */}
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
+            <Zap size={14} />
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+            Today's focus
+          </span>
+        </div>
+
+        {/* project name + due count */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-0.5">
+            {action.collection_name ? (
+              <>
+                <div className="flex items-center gap-2">
+                  {action.collection_color && (
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
+                      style={{ backgroundColor: action.collection_color }}
+                    />
+                  )}
+                  <h2 className="text-xl font-bold tracking-tight text-primary-foreground sm:text-2xl">
+                    {action.collection_name}
+                  </h2>
+                </div>
+                <p className="text-sm text-primary-foreground/80">
+                  {focusCount} card{focusCount !== 1 ? "s" : ""} due from this project
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-xl font-bold text-primary-foreground sm:text-2xl">
+                  Your daily review
+                </h2>
+                <p className="text-sm text-primary-foreground/80">
+                  {total} card{total !== 1 ? "s" : ""} ready to review
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            onClick={() => {
+              setActiveDocument(null)
+              setActiveCollectionId(action.collection_id ?? null)
+              navigate("/study", { state: { from: "/" } })
+            }}
+            className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold text-primary-foreground ring-1 ring-white/25 transition-all hover:bg-white/30"
+          >
+            Start {sessionSize}-card session
+            <ArrowRight size={14} />
+          </button>
+          <span className="text-xs text-primary-foreground/70">
+            ~{estimatedMin} min
+          </span>
+        </div>
+
+        {/* overflow footnote */}
+        {overflow > 0 && (
+          <button
+            onClick={() => {
+              setActiveDocument(null)
+              setActiveCollectionId(null)
+              navigate("/study", { state: { from: "/" } })
+            }}
+            className="self-start text-xs text-primary-foreground/60 underline-offset-2 hover:text-primary-foreground/90 hover:underline"
+          >
+            +{overflow} more cards across your library
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -314,7 +412,7 @@ function ContinueReadingCard({ items }: { items: ContinueReadingItem[] }) {
             <li key={item.document_id}>
               <button
                 onClick={() =>
-                  navigate(`/library?doc=${encodeURIComponent(item.document_id)}`)
+                  navigate(`/library?doc=${encodeURIComponent(item.document_id)}`, { state: { from: "/" } })
                 }
                 className="group/row flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-background"
               >
@@ -355,9 +453,9 @@ function FadingCard({ items }: { items: FadingItem[] }) {
             const Icon = item.member_type === "document" ? FileText : StickyNote
             const onClick = () => {
               if (item.member_type === "document") {
-                navigate(`/library?doc=${encodeURIComponent(item.member_id)}`)
+                navigate(`/library?doc=${encodeURIComponent(item.member_id)}`, { state: { from: "/" } })
               } else {
-                navigate("/notes")
+                navigate("/notes", { state: { from: "/" } })
               }
             }
             return (
@@ -619,17 +717,19 @@ interface DecayDebtResponse {
 function DecayDebtWidget() {
   const { data } = useQuery<DecayDebtResponse>({
     queryKey: ["study-decay-debt"],
-    queryFn: () => apiGet<DecayDebtResponse>("/study/decay-debt", { limit: 5 }),
+    queryFn: () => apiGet<DecayDebtResponse>("/study/decay-debt", { limit: 3 }),
     staleTime: 60_000,
   })
   const navigate = useNavigate()
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
 
   if (!data || data.items.length === 0) return null
 
   return (
     <Section
-      icon={AlertTriangle}
-      title="About to slip"
+      icon={RefreshCw}
+      title="Worth revisiting"
       subtitle={`${data.total_at_risk} card${data.total_at_risk !== 1 ? "s" : ""} approaching the forgetting threshold`}
     >
       <div className="flex flex-col gap-2">
@@ -638,11 +738,15 @@ function DecayDebtWidget() {
           return (
             <button
               key={item.document_id}
-              onClick={() => navigate("/study")}
+              onClick={() => {
+                setActiveCollectionId(null)
+                setActiveDocument(item.document_id)
+                navigate("/study", { state: { from: "/" } })
+              }}
               className="flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:bg-accent/50"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                <AlertTriangle size={13} />
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <RefreshCw size={12} />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                 {item.document_title}
@@ -650,21 +754,42 @@ function DecayDebtWidget() {
               <span className="shrink-0 text-xs text-muted-foreground">
                 {item.card_count} card{item.card_count !== 1 ? "s" : ""}
               </span>
-              <span
-                className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-                  retPct < 50
-                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-                )}
-              >
-                {retPct}% retained
-              </span>
+              <RetentionBar pct={retPct} />
             </button>
           )
         })}
+        {data.total_at_risk > 3 && (
+          <button
+            onClick={() => navigate("/study", { state: { from: "/" } })}
+            className="self-start pl-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            +{data.total_at_risk - 3} more in Study →
+          </button>
+        )}
       </div>
     </Section>
+  )
+}
+
+function RetentionBar({ pct }: { pct: number }) {
+  const barColor =
+    pct === 0
+      ? "bg-red-400 dark:bg-red-500"
+      : pct < 50
+        ? "bg-amber-400 dark:bg-amber-500"
+        : "bg-emerald-400 dark:bg-emerald-500"
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-0.5">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full transition-all", barColor)}
+          style={{ width: pct === 0 ? "4%" : `${pct}%` }}
+        />
+      </div>
+      <span className="text-[10px] text-muted-foreground">
+        {pct === 0 ? "review now" : `${pct}% retained`}
+      </span>
+    </div>
   )
 }
 

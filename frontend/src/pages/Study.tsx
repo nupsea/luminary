@@ -10,8 +10,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
+  ArrowLeft,
   BookOpen,
   ChevronRight,
   CornerDownRight,
@@ -20,7 +21,7 @@ import {
   Plus,
   StickyNote,
 } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { useAppStore } from "@/store"
@@ -64,10 +65,14 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 export default function Study() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromHub = !!(location.state as { from?: string } | null)?.from
   const {
     setActiveDocument,
     activeCollectionId,
     setActiveCollectionId,
+    pendingStudyResume,
+    setPendingStudyResume,
   } = useAppStore()
 
   // Effective doc: ready-only fallback so we never feed an in-progress doc
@@ -75,7 +80,10 @@ export default function Study() {
   // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
   const { doc: effectiveDoc, effectiveDocumentId, isFallingBack } =
     useEffectiveActiveDocument()
-  const studyDocumentId = effectiveDocumentId
+  // When a collection is active, suppress the lastReadyDocumentId fallback so
+  // the DocPicker shows no selection and startStudy doesn't mix a stale document
+  // scope into a collection-scoped session.
+  const studyDocumentId = activeCollectionId ? null : effectiveDocumentId
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
@@ -160,6 +168,19 @@ export default function Study() {
     void startStudy("teachback", filters ?? null, resumeId ?? null)
   }
 
+  // Auto-resume a session interrupted by "Open in reader" navigation.
+  // SourceContextPanel saves session info to the store before navigating away;
+  // when the user clicks "Back to Study" we land here in idle state and resume.
+  useEffect(() => {
+    if (pendingStudyResume && studyPhase.phase === "idle") {
+      const { sessionId, mode } = pendingStudyResume
+      setPendingStudyResume(null)
+      void startStudy(mode, null, sessionId)
+    }
+  // startStudy is re-created each render; only trigger when pendingStudyResume changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStudyResume])
+
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
     items: any[],
@@ -242,6 +263,15 @@ export default function Study() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
         <div className="flex items-center gap-8">
+          {fromHub && (
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowLeft size={12} />
+              Back
+            </button>
+          )}
           <h1
             className="cursor-pointer text-xl font-bold tracking-tight text-foreground"
             onClick={() => {

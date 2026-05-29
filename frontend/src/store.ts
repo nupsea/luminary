@@ -74,6 +74,10 @@ interface AppState {
   clearChatPreload: () => void
   setActiveCollectionId: (id: string | null) => void
   setActiveTag: (tag: string | null) => void
+  // Transient (not persisted): set before navigating to the reader from a
+  // flashcard session so Study.tsx can auto-resume on return.
+  pendingStudyResume: { sessionId: string; mode: "flashcard" | "teachback" } | null
+  setPendingStudyResume: (r: { sessionId: string; mode: "flashcard" | "teachback" } | null) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -128,6 +132,8 @@ export const useAppStore = create<AppState>()(
       clearChatPreload: () => set({ chatPreload: null }),
       setActiveCollectionId: (id) => set({ activeCollectionId: id }),
       setActiveTag: (tag) => set({ activeTag: tag }),
+      pendingStudyResume: null,
+      setPendingStudyResume: (r) => set({ pendingStudyResume: r }),
     }),
     {
       name: "luminary-app-store",

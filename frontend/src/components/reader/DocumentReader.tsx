@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, StickyNote, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 
 import { ExplanationSheet } from "@/components/ExplanationSheet"
@@ -177,6 +177,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromPath = (location.state as { from?: string } | null)?.from ?? null
+  const backLabel = fromPath === "/study" ? "Back to Study" : fromPath === "/chat" ? "Back to Chat" : "Back to library"
+  const backAction = fromPath ? () => navigate(-1) : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
 
@@ -888,11 +892,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
           <button
-            onClick={onBack}
+            onClick={backAction}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft size={14} />
-            Back to library
+            {backLabel}
           </button>
           <span className="text-muted-foreground/40">·</span>
           <button

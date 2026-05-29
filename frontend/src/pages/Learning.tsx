@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, useLocation } from "react-router-dom"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentCard } from "@/components/library/DocumentCard"
@@ -84,6 +84,7 @@ export default function Learning() {
   const queryClient = useQueryClient()
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const routeLocation = useLocation()
   const tagFilter = searchParams.get("tag")
   // citation deep-link params — doc opens DocumentReader, page sets initial PDF page
   // Capture into state so they survive URL param cleanup (params are cleared after first use
@@ -281,7 +282,7 @@ export default function Learning() {
         next.delete("chunk_id")
         next.delete("page")
         return next
-      })
+      }, { replace: true, state: routeLocation.state })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docParam])
