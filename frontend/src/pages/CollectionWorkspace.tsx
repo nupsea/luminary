@@ -55,6 +55,10 @@ export default function CollectionWorkspace() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const backFromPath = (location.state as { from?: string } | null)?.from ?? null
+  const backLabel = backFromPath === "/" ? "Back to Home"
+    : backFromPath === "/library" ? "Back to Library"
+    : "Back"
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const [tab, setTab] = useState<InlineTab>("overview")
@@ -126,7 +130,7 @@ export default function CollectionWorkspace() {
             className="flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft size={12} />
-            Back
+            {backLabel}
           </button>
           <div className="flex items-center gap-3 min-w-0">
             {meta && (

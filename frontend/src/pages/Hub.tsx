@@ -540,6 +540,7 @@ function ActiveCollectionCard({ collection }: { collection: ActiveCollection }) 
   return (
     <Link
       to={`/collections/${collection.id}`}
+      state={{ from: "/" }}
       className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
     >
       <span

@@ -206,7 +206,7 @@ export function LibraryTagRail({
             // Set the store tag so Notes' tree highlights it on arrival
             // and the notes list pre-filters; nav follows.
             setActiveTagInStore(activeTag)
-            navigate(`/notes?tag=${encodeURIComponent(activeTag)}`)
+            navigate(`/notes?tag=${encodeURIComponent(activeTag)}`, { state: { from: "/library" } })
           }}
           className="mt-1 flex items-center gap-1 self-start rounded-md border border-dashed border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-foreground"
           title={`Open Notes filtered to #${activeTag}`}
