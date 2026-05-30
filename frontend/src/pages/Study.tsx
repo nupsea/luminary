@@ -439,7 +439,7 @@ export default function Study() {
                 })()}
 
                 <motion.button
-                  onClick={() => navigate("/notes")}
+                  onClick={() => navigate("/notes", { state: { from: "/study" } })}
                   className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
                 >
                   <Plus size={24} className="group-hover:scale-110 transition-transform" />

@@ -183,6 +183,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     "/study": "Back to Study",
     "/chat": "Back to Chat",
     "/notes": "Back to Notes",
+    "/library": "Back to Library",
     "/": "Back to Home",
   }
   const backLabel = (fromPath && BACK_LABELS[fromPath]) ? BACK_LABELS[fromPath] : "Back to library"
@@ -549,7 +550,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
     setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
-    void navigate("/study")
+    void navigate("/study", { state: { from: "/library" } })
   }
 
   // Fetch FSRS fragility heatmap for section coloring
@@ -925,7 +926,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             <button
               onClick={() => {
                 setNotesDocumentId(documentId)
-                navigate("/notes")
+                navigate("/notes", { state: { from: "/library" } })
               }}
               className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground/80 hover:bg-muted transition-colors"
               title="Open notes for this document"

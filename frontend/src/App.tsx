@@ -476,10 +476,10 @@ function AppShell() {
       } else if (detail.tab === "viz") {
         // document action menu -> View in graph
         if (detail.documentId) setActiveDocument(detail.documentId)
-        navigate("/viz")
+        navigate("/viz", fromState)
       } else if (detail.tab === "progress") {
         // avg mastery pill click from LibraryStatsBar
-        navigate("/progress")
+        navigate("/progress", fromState)
       }
     }
     window.addEventListener("luminary:navigate", onLuminaryNavigate)
