@@ -83,7 +83,7 @@ export default function Study() {
   // Effective doc: ready-only fallback so we never feed an in-progress doc
   // into prepareStudySession or FlashcardManager. Both depend on populated
   // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
-  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack } =
+  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack, rawActiveId } =
     useEffectiveActiveDocument()
   // When a collection is active, suppress the lastReadyDocumentId fallback so
   // the DocPicker shows no selection and startStudy doesn't mix a stale document
@@ -311,12 +311,24 @@ export default function Study() {
           />
         ) : studyDocumentId ? (
           <>
-            {isFallingBack && (
-              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                The selected document is still ingesting. Showing your previous
-                document while it finishes.
-              </div>
-            )}
+            {isFallingBack && (() => {
+              const ingestingTitle = docList.find(d => d.id === rawActiveId)?.title ?? "A recently selected document"
+              const fallbackTitle = effectiveDoc?.title ?? "this document"
+              return (
+                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <span>
+                    <span className="font-medium">{ingestingTitle}</span> is still processing.
+                    {" "}Showing <span className="font-medium">{fallbackTitle}</span> in the meantime.
+                  </span>
+                  <button
+                    onClick={() => setActiveDocument(null)}
+                    className="shrink-0 text-xs underline underline-offset-2 hover:text-amber-900"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )
+            })()}
             <FlashcardManager
               documentId={studyDocumentId}
               onStartStudy={handleStartFlashcard}
