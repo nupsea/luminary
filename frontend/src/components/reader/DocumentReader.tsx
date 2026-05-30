@@ -186,7 +186,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     "/library": "Back to Library",
     "/": "Back to Home",
   }
-  const backLabel = (fromPath && BACK_LABELS[fromPath]) ? BACK_LABELS[fromPath] : "Back to library"
+  // Dynamic fromPaths like /collections/:id need prefix match
+  const dynamicBackLabel = fromPath?.startsWith("/collections/") ? "Back to Collection" : null
+  const backLabel = dynamicBackLabel ?? (fromPath ? (BACK_LABELS[fromPath] ?? "Back to library") : "Back to library")
   const backAction = fromPath ? () => navigate(-1) : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)

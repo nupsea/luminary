@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, BookOpen, FileText, Layers, LayoutGrid, StickyNote, Zap } from "lucide-react"
 import { useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useLocation } from "react-router-dom"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
@@ -54,6 +54,7 @@ const NAV_TABS: { id: NavTarget; label: string; icon: typeof BookOpen }[] = [
 export default function CollectionWorkspace() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const [tab, setTab] = useState<InlineTab>("overview")
@@ -62,9 +63,10 @@ export default function CollectionWorkspace() {
     // All three destinations read activeCollectionId on mount; Library
     // does so via the Learning page's useEffect that seeds + clears.
     setActiveCollectionId(collectionId)
-    if (target === "documents") navigate("/library")
-    else if (target === "notes") navigate("/notes")
-    else navigate("/study")
+    const from = { state: { from: location.pathname } }
+    if (target === "documents") navigate("/library", from)
+    else if (target === "notes") navigate("/notes", from)
+    else navigate("/study", from)
   }
 
   function handleTabClick(tabId: TabId) {
@@ -88,7 +90,7 @@ export default function CollectionWorkspace() {
 
   function handleStartStudy() {
     setActiveCollectionId(collectionId)
-    navigate("/study")
+    navigate("/study", { state: { from: location.pathname } })
   }
 
   const accentColor = meta?.color
