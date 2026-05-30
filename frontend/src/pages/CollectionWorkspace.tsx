@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, BookOpen, FileText, Layers, LayoutGrid, StickyNote, Zap } from "lucide-react"
 import { useState } from "react"
-import { useNavigate, useParams, useLocation } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
@@ -54,11 +55,7 @@ const NAV_TABS: { id: NavTarget; label: string; icon: typeof BookOpen }[] = [
 export default function CollectionWorkspace() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
-  const backFromPath = (location.state as { from?: string } | null)?.from ?? null
-  const backLabel = backFromPath === "/" ? "Back to Home"
-    : backFromPath === "/library" ? "Back to Library"
-    : "Back"
+  const { backLabel, goBack } = useBackNavigation()
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const [tab, setTab] = useState<InlineTab>("overview")
@@ -67,7 +64,7 @@ export default function CollectionWorkspace() {
     // All three destinations read activeCollectionId on mount; Library
     // does so via the Learning page's useEffect that seeds + clears.
     setActiveCollectionId(collectionId)
-    const from = { state: { from: location.pathname } }
+    const from = { state: { from: window.location.pathname } }
     if (target === "documents") navigate("/library", from)
     else if (target === "notes") navigate("/notes", from)
     else navigate("/study", from)
@@ -94,7 +91,7 @@ export default function CollectionWorkspace() {
 
   function handleStartStudy() {
     setActiveCollectionId(collectionId)
-    navigate("/study", { state: { from: location.pathname } })
+    navigate("/study", { state: { from: window.location.pathname } })
   }
 
   const accentColor = meta?.color
@@ -126,7 +123,7 @@ export default function CollectionWorkspace() {
         />
         <div className="relative z-10 flex flex-col gap-3 px-6 py-5 md:px-8">
           <button
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className="flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft size={12} />
@@ -217,11 +214,11 @@ export default function CollectionWorkspace() {
             onOpenDocument={(docId) => {
               setActiveDocument(docId)
               setActiveCollectionId(collectionId)
-              navigate("/library", { state: { from: location.pathname } })
+              navigate("/library", { state: { from: window.location.pathname } })
             }}
             onOpenNotes={() => {
               setActiveCollectionId(collectionId)
-              navigate("/notes", { state: { from: location.pathname } })
+              navigate("/notes", { state: { from: window.location.pathname } })
             }}
           />
         )}

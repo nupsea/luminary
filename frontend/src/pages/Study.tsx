@@ -21,7 +21,8 @@ import {
   Plus,
   StickyNote,
 } from "lucide-react"
-import { useNavigate, useLocation } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { useAppStore } from "@/store"
@@ -65,13 +66,7 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 export default function Study() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const fromPath = (location.state as { from?: string } | null)?.from ?? null
-  const fromHub = !!fromPath
-  const backLabel = fromPath?.startsWith("/collections/") ? "Back to Collection"
-    : fromPath === "/" ? "Back to Home"
-    : fromPath === "/library" ? "Back to Library"
-    : "Back"
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const {
     setActiveDocument,
     activeCollectionId,
@@ -268,9 +263,9 @@ export default function Study() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
         <div className="flex items-center gap-8">
-          {fromHub && (
+          {canGoBack && (
             <button
-              onClick={() => navigate(-1)}
+              onClick={goBack}
               className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowLeft size={12} />

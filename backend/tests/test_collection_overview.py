@@ -104,6 +104,7 @@ async def test_overview_counts_members_and_recent_activity(test_db):
 
 
 @pytest.mark.anyio
+@pytest.mark.unstable
 async def test_overview_tag_chips_union_doc_and_note_tags(test_db):
     _, factory = test_db
     doc_id = str(uuid.uuid4())

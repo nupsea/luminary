@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, StickyNote, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate, useLocation } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
 import { ExplanationSheet } from "@/components/ExplanationSheet"
@@ -177,19 +178,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const navigate = useNavigate()
-  const location = useLocation()
-  const fromPath = (location.state as { from?: string } | null)?.from ?? null
-  const BACK_LABELS: Record<string, string> = {
-    "/study": "Back to Study",
-    "/chat": "Back to Chat",
-    "/notes": "Back to Notes",
-    "/library": "Back to Library",
-    "/": "Back to Home",
-  }
-  // Dynamic fromPaths like /collections/:id need prefix match
-  const dynamicBackLabel = fromPath?.startsWith("/collections/") ? "Back to Collection" : null
-  const backLabel = dynamicBackLabel ?? (fromPath ? (BACK_LABELS[fromPath] ?? "Back to library") : "Back to library")
-  const backAction = fromPath ? () => navigate(-1) : onBack
+  const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
+  // DocumentReader falls back to onBack (library list) when no from state is set
+  const backLabel = canGoBack ? hookBackLabel : "Back to library"
+  const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
 

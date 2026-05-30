@@ -2,7 +2,8 @@ import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-quer
 import { ArrowLeft, GitBranch, Network, Tag, Zap } from "lucide-react"
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
-import { useNavigate, useLocation } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
@@ -84,8 +85,7 @@ export default function Viz() {
   const { effectiveDocumentId } = useEffectiveActiveDocument({ predicate: hasGraphData })
   const activeDocumentId = effectiveDocumentId
   const navigate = useNavigate()
-  const location = useLocation()
-  const fromPath = (location.state as { from?: string } | null)?.from ?? null
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())
 
@@ -410,13 +410,13 @@ export default function Viz() {
             void queryClient.invalidateQueries({ queryKey })
           }}
           graphStats={graphStats}
-          backButton={fromPath ? (
+          backButton={canGoBack ? (
             <button
-              onClick={() => navigate(-1)}
+              onClick={goBack}
               className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowLeft size={12} />
-              Back
+              {backLabel}
             </button>
           ) : undefined}
         />
