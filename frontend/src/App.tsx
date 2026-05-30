@@ -553,7 +553,7 @@ function AppShell() {
         const { activeDocumentId, setNotesDocumentId, setNotePreload } = useAppStore.getState()
         setNotesDocumentId(activeDocumentId)
         setNotePreload({ content: "" })
-        navigate("/notes")
+        navigate("/notes", { state: { from: window.location.pathname } })
       }
     }
     window.addEventListener("keydown", onKeyDown)
