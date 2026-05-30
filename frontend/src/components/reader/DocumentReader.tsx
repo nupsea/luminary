@@ -179,7 +179,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const navigate = useNavigate()
   const location = useLocation()
   const fromPath = (location.state as { from?: string } | null)?.from ?? null
-  const backLabel = fromPath === "/study" ? "Back to Study" : fromPath === "/chat" ? "Back to Chat" : "Back to library"
+  const BACK_LABELS: Record<string, string> = {
+    "/study": "Back to Study",
+    "/chat": "Back to Chat",
+    "/notes": "Back to Notes",
+    "/": "Back to Home",
+  }
+  const backLabel = (fromPath && BACK_LABELS[fromPath]) ? BACK_LABELS[fromPath] : "Back to library"
   const backAction = fromPath ? () => navigate(-1) : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
