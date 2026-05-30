@@ -213,11 +213,11 @@ export default function CollectionWorkspace() {
             onOpenDocument={(docId) => {
               setActiveDocument(docId)
               setActiveCollectionId(collectionId)
-              navigate("/library")
+              navigate("/library", { state: { from: location.pathname } })
             }}
             onOpenNotes={() => {
               setActiveCollectionId(collectionId)
-              navigate("/notes")
+              navigate("/notes", { state: { from: location.pathname } })
             }}
           />
         )}

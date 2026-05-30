@@ -333,15 +333,7 @@ export default function Study() {
               onContinueTeachback={(sessionId, documentId, collectionId) => {
                 if (documentId) setActiveDocument(documentId)
                 if (collectionId) setActiveCollectionId(collectionId)
-                
-                const filters: any = {}
-                if (documentId) filters.document_id = documentId
-                if (collectionId) filters.collection_id = collectionId
-                
-                handleStartTeachback(
-                  Object.keys(filters).length > 0 ? filters : null,
-                  sessionId
-                )
+                handleStartTeachback(undefined, sessionId)
               }}
             />
 
