@@ -66,7 +66,12 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 export default function Study() {
   const navigate = useNavigate()
   const location = useLocation()
-  const fromHub = !!(location.state as { from?: string } | null)?.from
+  const fromPath = (location.state as { from?: string } | null)?.from ?? null
+  const fromHub = !!fromPath
+  const backLabel = fromPath?.startsWith("/collections/") ? "Back to Collection"
+    : fromPath === "/" ? "Back to Home"
+    : fromPath === "/library" ? "Back to Library"
+    : "Back"
   const {
     setActiveDocument,
     activeCollectionId,
@@ -269,7 +274,7 @@ export default function Study() {
               className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowLeft size={12} />
-              Back
+              {backLabel}
             </button>
           )}
           <h1

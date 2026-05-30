@@ -673,7 +673,13 @@ export default function NotesPage() {
   const setNotePreload = useAppStore((s) => s.setNotePreload)
   const navigate = useNavigate()
   const location = useLocation()
-  const fromHub = !!(location.state as { from?: string } | null)?.from
+  const fromPath = (location.state as { from?: string } | null)?.from ?? null
+  const fromHub = !!fromPath
+  const backLabel = fromPath?.startsWith("/collections/") ? "Back to Collection"
+    : fromPath === "/" ? "Back to Home"
+    : fromPath === "/study" ? "Back to Study"
+    : fromPath === "/library" ? "Back to Library"
+    : "Back"
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -1088,7 +1094,7 @@ export default function NotesPage() {
             className="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft size={12} />
-            Back
+            {backLabel}
           </button>
         )}
         <button
