@@ -6,10 +6,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../backend"
 
-PUBLIC_ENV="${TMPDIR:-/tmp}/luminary-public-env"
+# Use a fixed path (not TMPDIR-dependent) and always recreate to avoid
+# stale environments that produce "unknown location" FastAPI import errors.
+PUBLIC_ENV="/tmp/luminary-public-env"
 export UV_PROJECT_ENVIRONMENT="$PUBLIC_ENV"
 
-echo "Syncing public profile into $PUBLIC_ENV ..."
+echo "Recreating public profile env in $PUBLIC_ENV ..."
+rm -rf "$PUBLIC_ENV"
 uv sync --no-default-groups --quiet
 
 echo "Importing app.main under LUMINARY_SURFACE_TIER=public ..."
