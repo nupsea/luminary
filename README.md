@@ -27,12 +27,12 @@ Open **http://localhost:7820** when the terminal shows a ready banner.
 
 ## Your first 5 minutes
 
-1. **Upload a document** — Learning tab → Upload → select a PDF or text file
+1. **Upload a document** — Library tab → Upload → select a PDF or text file
 2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
-3. **Ask a question** — Chat tab → ask anything about your document; citations link back to the source section
+3. **Ask a question** — Ask tab → ask anything about your document; citations link back to the source section
 4. **Review flashcards** — Study tab → Start Review → grade cards; Luminary schedules the next review using FSRS
 
-That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), and a prediction-calibration graph on Progress.
+That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), a references panel per section, and a prediction-calibration graph on Progress.
 
 ---
 
@@ -58,6 +58,10 @@ Before flipping a card, predict your confidence (Know it / Unsure / Blank). Lumi
 
 Side-by-side PDF viewer with section navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection in the reader.
 
+### References — Canonical sources per section
+
+Every document section gets a **References** panel with LLM-suggested canonical sources: official docs for software, Stanford Encyclopedia of Philosophy for philosophy, PubMed for science, and so on. Click any reference to open it; outdated references can be refreshed per-section.
+
 ### Notes — Write alongside reading
 
 Markdown editor with live preview. Notes are indexed and appear in search. Supports Mermaid diagrams and Excalidraw sketches.
@@ -69,6 +73,10 @@ Markdown editor with live preview. Notes are indexed and appear in search. Suppo
 - Study activity chart (last 30 days)
 - Prediction calibration graph (are your confidence ratings accurate?)
 - Sort library by "Weakest first" to target the documents that need the most work
+
+### Hub — Your daily learning cockpit
+
+The home screen surfaces the day's highest-leverage action (review due cards, continue reading, or take a note) and shows your most active projects with due-card counts. Collections keep related documents grouped; clicking one opens a focused study environment scoped to that project.
 
 ---
 
