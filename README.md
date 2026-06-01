@@ -102,10 +102,10 @@ OPENAI_API_KEY=sk-...
 
 # Anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-LITELLM_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514
+LITELLM_DEFAULT_MODEL=anthropic/claude-3-7-sonnet-latest
 
 # Google
-LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-flash
+LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-pro
 GOOGLE_API_KEY=...
 ```
 
