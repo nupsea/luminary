@@ -73,6 +73,7 @@ markers = [
     "e2e: requires live backend + Ollama; excluded from make ci",
     "integration_http: ASGITransport upload tests with mocked ML; included in make ci",
     "unstable: known-broken or environment-flaky; excluded from CI, runnable locally via `uv run pytest -m unstable`",
+    "flaky: mark test as flaky for rerunning or skipping",
 ]
 
 [dependency-groups]

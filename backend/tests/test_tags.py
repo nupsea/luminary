@@ -1,6 +1,7 @@
 """Tests for tag storage, retrieval, and filtering (S62 and S162)."""
 
 import asyncio
+import os
 import uuid
 
 import pytest
@@ -8,10 +9,19 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
+import app.services.embedder as embedder_module
+import app.services.graph as graph_module
+import app.services.vector_store as vs_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel
+
+
+class _MockEmbeddingService:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1] * 384 for _ in texts]
+
 
 # Fixture
 
@@ -32,10 +42,31 @@ async def test_db(tmp_path, monkeypatch):
     db_module._engine = engine
     db_module._session_factory = factory
 
+    from unittest.mock import MagicMock
+    orig_lancedb = vs_module._lancedb_service
+    orig_graph = graph_module._graph_service
+    orig_embedder = embedder_module._embedding_service
+
+    vs_module._lancedb_service = MagicMock()
+    graph_module._graph_service = MagicMock()
+    embedder_module._embedding_service = _MockEmbeddingService()  # type: ignore[assignment]
+
     yield engine, factory, tmp_path
 
     db_module._engine = orig_engine
     db_module._session_factory = orig_factory
+
+    vs_module._lancedb_service = orig_lancedb
+    graph_module._graph_service = orig_graph
+    embedder_module._embedding_service = orig_embedder
+
+    # Cancel any pending notes background tasks to prevent them from leaking into other tests
+    import app.routers.notes as notes_router
+    _pending = list(notes_router._background_tasks)
+    for _t in _pending:
+        _t.cancel()
+    notes_router._background_tasks.clear()
+
     get_settings.cache_clear()
     await engine.dispose()
 
@@ -418,7 +449,7 @@ async def test_s162_concurrent_creates_usage_count_accurate(test_db):
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Flaky in GitHub Actions env")
+@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in GitHub Actions env")
 @pytest.mark.flaky(retries=3)
 async def test_s165_merge_replaces_source_tag_in_notes(test_db):
     """POST /tags/merge replaces source tag with target in all affected notes."""
@@ -457,7 +488,7 @@ async def test_s165_merge_replaces_source_tag_in_notes(test_db):
         assert g2.json()["tags"].count(tgt_tag) == 1
 
 
-@pytest.mark.skip(reason="Flaky in GitHub Actions env")
+@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in GitHub Actions env")
 async def test_s165_merge_creates_alias_and_deletes_source(test_db):
     """POST /tags/merge creates TagAliasModel row and removes source CanonicalTagModel."""
     src_tag = f"source-alias-{id(object()):x}"
