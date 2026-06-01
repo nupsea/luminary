@@ -8,20 +8,32 @@ No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any A
 
 ---
 
-## Install and run (one command)
+## Install and run
 
+### macOS, Linux & WSL
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary
-make install   # installs uv, Node, Ollama; pulls default models; builds the app
-make start     # starts the prod server on http://localhost:7820
+make install   # Installs uv, Node, Ollama; pulls models; builds the app
+make start     # Starts the production server on http://localhost:7820
 ```
 
-`make install` is idempotent — safe to run again when you update. It handles Ollama, model pulls, Python deps, and frontend build automatically.
+### Windows (Zero-Hassle via Docker)
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and ensure it is running.
+2. Open PowerShell in the project directory and run:
+   ```powershell
+   docker compose --profile ai up
+   ```
 
-> **macOS Intel?** Docker is required for the backend. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) first, then `make docker-build && make docker-run`.
+### Windows (Native Fallback)
+If you are behind a corporate proxy/VPN that blocks Docker SSL traffic:
+1. Open **PowerShell as Administrator** in the project directory.
+2. Run:
+   ```powershell
+   Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
+   ```
 
-Open **http://localhost:7820** when the terminal shows a ready banner.
+Open **http://localhost:7820** in your browser when ready.
 
 ---
 
@@ -168,6 +180,7 @@ Thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45, Faithfulness ≥ 0.65.
 | macOS Apple Silicon | Native, fully supported |
 | macOS Intel | Docker required for backend (auto-detected by `make luminary`) |
 | Linux / WSL | Native, same steps |
+| Windows | Supported via Docker (Docker Desktop) or natively via `scripts/install.ps1` |
 
 ---
 
