@@ -42,23 +42,19 @@ function buildTextParts(textLayerDiv: HTMLDivElement) {
 }
 
 /**
- * Map a normalized-text index back to the original fullText offset.
- * Handles whitespace collapse where multiple chars map to one space.
+ * Build a whitespace-stripped view of the text plus a map from each compact
+ * index back to its offset in the original text.
  */
-function mapNormToFullOffset(fullText: string, normFull: string, normIdx: number): number {
-  let fi = 0
-  let ni = 0
-  while (ni < normIdx && fi < fullText.length) {
-    if (/\s/.test(fullText[fi])) {
-      fi++
-      if (ni < normFull.length && /\s/.test(normFull[ni])) ni++
-      while (fi < fullText.length && /\s/.test(fullText[fi])) fi++
-    } else {
-      fi++
-      ni++
+function buildWhitespaceMap(fullText: string): { compact: string; map: number[] } {
+  let compact = ""
+  const map: number[] = []
+  for (let i = 0; i < fullText.length; i++) {
+    if (!/\s/.test(fullText[i])) {
+      compact += fullText[i]
+      map.push(i)
     }
   }
-  return fi
+  return { compact, map }
 }
 
 /** Apply annotation highlight overlays using absolutely-positioned divs. */
@@ -100,20 +96,26 @@ function applyPdfHighlights(
 
   const containerRect = overlayContainer.getBoundingClientRect()
 
-  // 2. Pre-calculate normalized full text once outside loop
-  const normFull = fullText.replace(/\s+/g, " ")
+  // Whitespace-insensitive view of the text layer, computed once. The text
+  // layer joins spans with single spaces, but a selection captured via
+  // selection.toString() may differ in spacing around bullets, line breaks,
+  // and punctuation (e.g. "data. •" in the layer vs "data.•" in the
+  // selection). Matching on whitespace-stripped text and mapping back to the
+  // full offset tolerates those differences.
+  const { compact: compactFull, map: compactMap } = buildWhitespaceMap(fullText)
 
   const usedFullOffsets = new Set<number>()
-  const usedNormOffsets = new Set<number>()
+  const usedCompactOffsets = new Set<number>()
 
   for (const ann of sortedAnnotations) {
     const searchVal = ann.selected_text
     if (!searchVal) continue
 
     let idx = -1
+    let matchEnd = -1
     let searchStart = 0
 
-    // Try finding the next unused exact occurrence
+    // Fast path: next unused exact occurrence in the joined text.
     while (true) {
       idx = fullText.indexOf(searchVal, searchStart)
       if (idx < 0) break
@@ -124,32 +126,31 @@ function applyPdfHighlights(
       searchStart = idx + 1
     }
 
-    let searchText = searchVal
+    if (idx >= 0) {
+      matchEnd = idx + searchVal.length
+    } else {
+      // Fallback: whitespace-insensitive next-occurrence search.
+      const compactSearch = searchVal.replace(/\s+/g, "")
+      if (!compactSearch) continue
 
-    if (idx < 0) {
-      // 3. Fallback: Normalized next-occurrence search
-      const normSearch = searchVal.replace(/\s+/g, " ")
-      let normIdx = -1
-      let normSearchStart = 0
-      
+      let cIdx = -1
+      let cStart = 0
       while (true) {
-        normIdx = normFull.indexOf(normSearch, normSearchStart)
-        if (normIdx < 0) break
-        if (!usedNormOffsets.has(normIdx)) {
-          usedNormOffsets.add(normIdx)
+        cIdx = compactFull.indexOf(compactSearch, cStart)
+        if (cIdx < 0) break
+        if (!usedCompactOffsets.has(cIdx)) {
+          usedCompactOffsets.add(cIdx)
           break
         }
-        normSearchStart = normIdx + 1
+        cStart = cIdx + 1
       }
 
-      if (normIdx < 0) continue
+      if (cIdx < 0) continue
 
-      idx = mapNormToFullOffset(fullText, normFull, normIdx)
-      const endIdx = mapNormToFullOffset(fullText, normFull, normIdx + normSearch.length)
-      searchText = fullText.slice(idx, endIdx)
+      idx = compactMap[cIdx]
+      matchEnd = compactMap[cIdx + compactSearch.length - 1] + 1
     }
 
-    const matchEnd = idx + searchText.length
     const bgColor = PDF_HIGHLIGHT_COLORS[ann.color] ?? PDF_HIGHLIGHT_COLORS.yellow
 
     const rects = computeHighlightRects(spans, parts, idx, matchEnd, containerRect)
@@ -198,10 +199,10 @@ function applySearchHighlights(
 }
 
 const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
-  yellow: "rgba(254, 240, 138, 0.5)",
-  green: "rgba(187, 247, 208, 0.5)",
-  blue: "rgba(191, 219, 254, 0.5)",
-  pink: "rgba(251, 207, 232, 0.5)",
+  yellow: "rgba(250, 204, 21, 0.4)",  // yellow-400
+  green: "rgba(74, 222, 128, 0.4)",   // green-400
+  blue: "rgba(96, 165, 250, 0.4)",    // blue-400
+  pink: "rgba(244, 114, 182, 0.4)",   // pink-400
 }
 
 interface PDFViewerProps {

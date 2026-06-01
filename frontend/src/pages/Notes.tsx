@@ -18,9 +18,10 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowLeft, BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
@@ -672,6 +673,7 @@ export default function NotesPage() {
   const notePreload = useAppStore((s) => s.notePreload)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
   const navigate = useNavigate()
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
 
   useEffect(() => {
     logger.info("[Notes] mounted")
@@ -1080,6 +1082,15 @@ export default function NotesPage() {
     <div className="flex h-full overflow-hidden">
       {/* Left sidebar */}
       <div className="flex w-[280px] shrink-0 flex-col gap-1 overflow-auto border-r border-border p-4">
+        {canGoBack && (
+          <button
+            onClick={goBack}
+            className="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ArrowLeft size={12} />
+            {backLabel}
+          </button>
+        )}
         <button
           onClick={() => {
             setFilter({ type: "all" })

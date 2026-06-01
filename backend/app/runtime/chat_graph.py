@@ -23,14 +23,15 @@ Strategy nodes:
     search_node      — intent='factual'|'exploratory': hybrid retrieval + section augmentation
 """
 
+import difflib
 import logging
 import re
-from sqlalchemy import select
-from app.database import get_session_factory
-from app.models import DocumentModel
 
 from langgraph.graph import END, StateGraph
+from sqlalchemy import select
 
+from app.database import get_session_factory
+from app.models import DocumentModel
 from app.runtime.chat_nodes.comparative import (
     _decompose_comparison,  # noqa: F401  re-exported for back-compat
     _resolve_side_to_docs,  # noqa: F401  re-exported for back-compat
@@ -110,70 +111,57 @@ async def _resolve_targeted_document(question: str) -> str | None:
     matched_doc_id = None
     max_match_len = 0
 
-    for doc_id, title in docs:
-        # Split by common title separators to get the main title part (e.g. "Odyssey: translation by Fagles" -> "Odyssey")
-        for separator in (':', ' - ', ' – '):
-            if separator in title:
-                title = title.split(separator, 1)[0]
+    _GENERIC = {"all", "doc", "docs", "book", "books", "notes", "summary", "summarize", "library"}
+    _EXTS = ('.pdf', '.docx', '.txt', '.md', '.epub')
+    _SEPARATORS = (':', ' - ', ' – ')
 
-        # Clean title: lowercase
-        t_lower = title.lower()
-        # Strip common file extensions
-        for ext in ('.pdf', '.docx', '.txt', '.md', '.epub'):
-            if t_lower.endswith(ext):
-                t_lower = t_lower[:-len(ext)]
+    q_words = cleaned_q.split()
+
+    for doc_id, raw_title in docs:
+        title = raw_title
+        for sep in _SEPARATORS:
+            if sep in title:
+                title = title.split(sep, 1)[0]
                 break
 
-        # Normalize punctuation/whitespaces in title
-        t_clean = re.sub(r'[^\w\s]', ' ', t_lower)
-        t_clean = re.sub(r'\s+', ' ', t_clean).strip()
+        t_lower = title.lower()
+        for ext in _EXTS:
+            if t_lower.endswith(ext):
+                t_lower = t_lower[: -len(ext)]
+                break
 
-        # Ignore empty/short titles, or common generic words to avoid false matches
-        if not t_clean or len(t_clean) < 3 or t_clean in {"all", "doc", "docs", "book", "books", "notes", "summary", "summarize", "library"}:
+        t_clean = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", t_lower)).strip()
+
+        if not t_clean or len(t_clean) < 3 or t_clean in _GENERIC:
             continue
 
-        # Check matching of cleaned title
         patterns = [t_clean]
-        if t_clean.startswith("the "):
-            core_t = t_clean[4:]
-        elif t_clean.startswith("a "):
-            core_t = t_clean[2:]
-        elif t_clean.startswith("an "):
-            core_t = t_clean[3:]
-        else:
-            core_t = None
+        for prefix in ("the ", "a ", "an "):
+            if t_clean.startswith(prefix):
+                core = t_clean[len(prefix):]
+                if len(core) >= 3:
+                    patterns.append(core)
+                break
 
-        if core_t and len(core_t) >= 3:
-            patterns.append(core_t)
-
-        import difflib
-        q_words = cleaned_q.split()
         matched = False
-        
         for pattern in patterns:
-            # 1. Exact regex boundary match
-            if re.search(r'\b' + re.escape(pattern) + r'\b', cleaned_q):
+            if re.search(r"\b" + re.escape(pattern) + r"\b", cleaned_q):
                 matched = True
                 break
-                
-            # 2. Fuzzy sliding window match (catches typos like "frankenstien")
             p_words = pattern.split()
             n = len(p_words)
             if n > 0 and len(q_words) >= n:
                 for i in range(len(q_words) - n + 1):
-                    window_str = " ".join(q_words[i:i+n])
-                    if difflib.SequenceMatcher(None, pattern, window_str).ratio() >= 0.85:
+                    window = " ".join(q_words[i : i + n])
+                    if difflib.SequenceMatcher(None, pattern, window).ratio() >= 0.85:
                         matched = True
                         break
-                        
             if matched:
                 break
 
-        if matched:
-            # If we find a match, we prefer the longest matching title to resolve ambiguity
-            if len(t_clean) > max_match_len:
-                max_match_len = len(t_clean)
-                matched_doc_id = doc_id
+        if matched and len(t_clean) > max_match_len:
+            max_match_len = len(t_clean)
+            matched_doc_id = doc_id
 
     return matched_doc_id
 

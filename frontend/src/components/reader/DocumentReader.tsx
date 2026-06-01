@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, StickyNote, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
 import { ExplanationSheet } from "@/components/ExplanationSheet"
@@ -177,6 +178,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
   const navigate = useNavigate()
+  const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
+  // DocumentReader falls back to onBack (library list) when no from state is set
+  const backLabel = canGoBack ? hookBackLabel : "Back to library"
+  const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
 
@@ -539,7 +544,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
     setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
-    void navigate("/study")
+    void navigate("/study", { state: { from: "/library" } })
   }
 
   // Fetch FSRS fragility heatmap for section coloring
@@ -888,11 +893,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       <div className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex items-center gap-3">
           <button
-            onClick={onBack}
+            onClick={backAction}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft size={14} />
-            Back to library
+            {backLabel}
           </button>
           <span className="text-muted-foreground/40">·</span>
           <button
@@ -915,7 +920,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             <button
               onClick={() => {
                 setNotesDocumentId(documentId)
-                navigate("/notes")
+                navigate("/notes", { state: { from: "/library" } })
               }}
               className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground/80 hover:bg-muted transition-colors"
               title="Open notes for this document"

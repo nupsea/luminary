@@ -21,6 +21,7 @@ import {
   X as XIcon,
   Zap,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { ClozeCard } from "@/components/ClozeCard"
@@ -36,25 +37,29 @@ import {
   fetchSourceContext,
 } from "@/lib/studyApi"
 import { apiGet } from "@/lib/apiClient"
+import { useAppStore } from "@/store"
 
 // SourceContextPanel
 
 interface SourceContextPanelProps {
   context: SourceContext
   onDismiss: () => void
+  onOpenInReader: () => void
 }
 
-function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
+function SourceContextPanel({ context, onDismiss, onOpenInReader }: SourceContextPanelProps) {
   const [expanded, setExpanded] = useState(true)
+  const navigate = useNavigate()
 
-  function buildReaderUrl(): string {
+  function openInReader() {
+    onOpenInReader()
     const params = new URLSearchParams()
     params.set("doc", context.document_id)
     params.set("section_id", context.section_id)
     if (context.pdf_page_number != null) {
       params.set("page", String(context.pdf_page_number))
     }
-    return `/?${params.toString()}`
+    navigate(`/library?${params.toString()}`, { state: { from: "/study" } })
   }
 
   return (
@@ -91,15 +96,13 @@ function SourceContextPanel({ context, onDismiss }: SourceContextPanelProps) {
             <span className="text-xs text-muted-foreground">
               {context.section_heading} -- {context.document_title}
             </span>
-            <a
-              href={buildReaderUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={openInReader}
               className="flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
             >
               <ExternalLink size={10} />
               Open in reader
-            </a>
+            </button>
           </div>
         </div>
       )}
@@ -657,7 +660,18 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
 
           {sourceContext !== null && (
             <>
-              <SourceContextPanel context={sourceContext} onDismiss={handleDismissSourceContext} />
+              <SourceContextPanel
+                context={sourceContext}
+                onDismiss={handleDismissSourceContext}
+                onOpenInReader={() => {
+                  if (sessionId) {
+                    useAppStore.getState().setPendingStudyResume({
+                      sessionId,
+                      mode: scopeForBeginNew.mode,
+                    })
+                  }
+                }}
+              />
               <button
                 onClick={() => void advanceCard()}
                 className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"

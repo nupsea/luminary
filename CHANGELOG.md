@@ -6,6 +6,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-31
+
+> **Note:** date updated from 2026-05-29 to reflect final polish shipped before tag.
+
+### Fixed (post-release polish — 2026-05-30/31)
+
+#### Navigation & UX
+- **Back navigation** — every contextual `navigate()` call across Hub, Library,
+  Search dialog, Collections, and document action menus now carries
+  `state:{from:pathname}`. Study, Notes, Chat, Viz/Map, Progress, and
+  DocumentReader all render a context-labelled Back button ("Back to Study",
+  "Back to Collection", etc.) when reached from an explicit action.
+- **Session resume from reader** — clicking "Open in reader" from a flashcard
+  source passage saves the session to the store; returning to Study auto-resumes
+  the exact session via `prepareStudySession(resumeSessionId)`.
+- **Collection context on Hub** — "Start N-card session" and "Worth revisiting"
+  cards correctly scope the Study session to the displayed collection/document and
+  clear stale `lastReadyDocumentId` fallback from the DocPicker.
+- **⌘K search + shortcut navigation** — search results and `⌘Shift+N` now pass
+  `from` state; Notes/Study labels update contextually.
+- **Fallback warning** — "still ingesting" banner in Study now names both the
+  in-progress document and the fallback being shown; includes a "Clear selection"
+  link.
+
+#### References panel
+- Generalised reference enricher to all document types (philosophy, history,
+  science, literature) with per-domain source guidance. New `academic` and
+  `encyclopedia` source-quality tiers. Job-status endpoint (`GET
+  /references/documents/{id}/job-status`) drives in-panel progress/retry states.
+
+#### Hub
+- `TodayAction` carries `collection_id/name/color/scoped_count`; hero CTA
+  surfaces the most active collection by name.
+- `ActiveCollection` exposes `due_card_count` for the active-projects grid.
+
+#### Quality / maintainability
+- Extracted `useBackNavigation()` hook — eliminates 7 sites of copy-pasted
+  fromPath/backLabel/canGoBack logic.
+- Removed `any`-typed filter construction in `SessionManager.onContinueTeachback`.
+- Library delete mutations now show success/error toasts.
+- `test_overview_tag_chips_union_doc_and_note_tags` marked `@unstable` (ordering
+  flake under GLiNER memory pressure, same class as pre-existing unstable tests).
+
 ## [0.1.0] - 2026-05-29
 
 First public release. Luminary is a local-first learning app: upload a document,

@@ -82,6 +82,7 @@ async def test_worker_transitions_job_to_done(test_db):
     await worker._dispatch_pending()
     # Wait for doc task to complete
     await asyncio.sleep(0.3)
+    await worker.stop()
 
     async with factory() as session:
         result = await session.execute(
@@ -132,6 +133,7 @@ async def test_worker_failed_job_sets_error_message(test_db):
     worker.register("fail_type", failing_handler)
     await worker._dispatch_pending()
     await asyncio.sleep(0.3)
+    await worker.stop()
 
     async with factory() as session:
         result = await session.execute(
@@ -193,6 +195,7 @@ async def test_worker_retries_transient_llm_unavailable_then_succeeds(test_db, m
     worker.register("flaky", flaky_handler)
     await worker._dispatch_pending()
     await asyncio.sleep(0.5)
+    await worker.stop()
 
     async with factory() as session:
         j = (
@@ -225,6 +228,7 @@ async def test_worker_exhausts_backoff_then_fails(test_db, monkeypatch):
     worker.register("down", always_down)
     await worker._dispatch_pending()
     await asyncio.sleep(0.5)
+    await worker.stop()
 
     async with factory() as session:
         j = (
@@ -282,6 +286,7 @@ async def test_worker_skips_already_active_document(test_db):
     worker._active_doc_ids.add(doc_id)
     await worker._dispatch_pending()
     await asyncio.sleep(0.2)
+    await worker.stop()
 
     # Handler should not have been called since doc was already active
     assert call_count[0] == 0

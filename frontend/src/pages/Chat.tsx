@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 import { ChatSessionList } from "@/components/chat/ChatSessionList"
 import {
@@ -407,6 +408,7 @@ export default function Chat() {
   const chatPreload = useAppStore((s) => s.chatPreload)
   const clearChatPreload = useAppStore((s) => s.clearChatPreload)
   const navigate = useNavigate()
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
   const messages = useAppStore((s) => s.chatMessages) as ChatMessage[]
@@ -904,7 +906,7 @@ export default function Chat() {
     if (c.section_id) params.set("section_id", c.section_id)
     if (c.chunk_id) params.set("chunk_id", c.chunk_id)
     if (c.pdf_page_number) params.set("page", String(c.pdf_page_number))
-    navigate(`/?${params.toString()}`)
+    navigate(`/library?${params.toString()}`, { state: { from: "/chat" } })
   }
 
   const effectiveDocId = selectedDocId ?? activeDocumentId
@@ -931,6 +933,15 @@ export default function Chat() {
       <div className="flex h-full flex-col flex-1 min-w-0">
       {/* Header controls */}
       <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+        {canGoBack && (
+          <button
+            onClick={goBack}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ArrowLeft size={12} />
+            {backLabel}
+          </button>
+        )}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"

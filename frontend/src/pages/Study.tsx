@@ -10,8 +10,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
+  ArrowLeft,
   BookOpen,
   ChevronRight,
   CornerDownRight,
@@ -21,6 +22,7 @@ import {
   StickyNote,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { useAppStore } from "@/store"
@@ -64,18 +66,24 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 export default function Study() {
   const navigate = useNavigate()
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const {
     setActiveDocument,
     activeCollectionId,
     setActiveCollectionId,
+    pendingStudyResume,
+    setPendingStudyResume,
   } = useAppStore()
 
   // Effective doc: ready-only fallback so we never feed an in-progress doc
   // into prepareStudySession or FlashcardManager. Both depend on populated
   // chunks/embeddings/flashcards, which simply don't exist mid-ingestion.
-  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack } =
+  const { doc: effectiveDoc, effectiveDocumentId, isFallingBack, rawActiveId } =
     useEffectiveActiveDocument()
-  const studyDocumentId = effectiveDocumentId
+  // When a collection is active, suppress the lastReadyDocumentId fallback so
+  // the DocPicker shows no selection and startStudy doesn't mix a stale document
+  // scope into a collection-scoped session.
+  const studyDocumentId = activeCollectionId ? null : effectiveDocumentId
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
@@ -160,6 +168,19 @@ export default function Study() {
     void startStudy("teachback", filters ?? null, resumeId ?? null)
   }
 
+  // Auto-resume a session interrupted by "Open in reader" navigation.
+  // SourceContextPanel saves session info to the store before navigating away;
+  // when the user clicks "Back to Study" we land here in idle state and resume.
+  useEffect(() => {
+    if (pendingStudyResume && studyPhase.phase === "idle") {
+      const { sessionId, mode } = pendingStudyResume
+      setPendingStudyResume(null)
+      void startStudy(mode, null, sessionId)
+    }
+  // startStudy is re-created each render; only trigger when pendingStudyResume changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStudyResume])
+
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
     items: any[],
@@ -242,6 +263,15 @@ export default function Study() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
         <div className="flex items-center gap-8">
+          {canGoBack && (
+            <button
+              onClick={goBack}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowLeft size={12} />
+              {backLabel}
+            </button>
+          )}
           <h1
             className="cursor-pointer text-xl font-bold tracking-tight text-foreground"
             onClick={() => {
@@ -276,12 +306,24 @@ export default function Study() {
           />
         ) : studyDocumentId ? (
           <>
-            {isFallingBack && (
-              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                The selected document is still ingesting. Showing your previous
-                document while it finishes.
-              </div>
-            )}
+            {isFallingBack && (() => {
+              const ingestingTitle = docList.find(d => d.id === rawActiveId)?.title ?? "A recently selected document"
+              const fallbackTitle = effectiveDoc?.title ?? "this document"
+              return (
+                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <span>
+                    <span className="font-medium">{ingestingTitle}</span> is still processing.
+                    {" "}Showing <span className="font-medium">{fallbackTitle}</span> in the meantime.
+                  </span>
+                  <button
+                    onClick={() => setActiveDocument(null)}
+                    className="shrink-0 text-xs underline underline-offset-2 hover:text-amber-900"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )
+            })()}
             <FlashcardManager
               documentId={studyDocumentId}
               onStartStudy={handleStartFlashcard}
@@ -298,15 +340,7 @@ export default function Study() {
               onContinueTeachback={(sessionId, documentId, collectionId) => {
                 if (documentId) setActiveDocument(documentId)
                 if (collectionId) setActiveCollectionId(collectionId)
-                
-                const filters: any = {}
-                if (documentId) filters.document_id = documentId
-                if (collectionId) filters.collection_id = collectionId
-                
-                handleStartTeachback(
-                  Object.keys(filters).length > 0 ? filters : null,
-                  sessionId
-                )
+                handleStartTeachback(undefined, sessionId)
               }}
             />
 
@@ -409,7 +443,7 @@ export default function Study() {
                 })()}
 
                 <motion.button
-                  onClick={() => navigate("/notes")}
+                  onClick={() => navigate("/notes", { state: { from: "/study" } })}
                   className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
                 >
                   <Plus size={24} className="group-hover:scale-110 transition-transform" />

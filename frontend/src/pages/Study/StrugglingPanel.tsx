@@ -32,9 +32,9 @@ export function StrugglingPanel({ documentId }: StrugglingPanelProps) {
     if (!card.document_id) return
     setActiveDocument(card.document_id)
     if (card.source_section_id) {
-      void navigate(`/library?section_id=${encodeURIComponent(card.source_section_id)}`)
+      void navigate(`/library?section_id=${encodeURIComponent(card.source_section_id)}`, { state: { from: "/study" } })
     } else {
-      void navigate("/library")
+      void navigate("/library", { state: { from: "/study" } })
     }
   }
 

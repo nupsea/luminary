@@ -185,7 +185,7 @@ class ReviewEventModel(Base):
     rating: Mapped[str] = mapped_column(String, nullable=False)  # again|hard|good|easy
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
-    predicted_rating: Mapped[str | None] = mapped_column(String, nullable=True)  # again|hard|good|easy; null = no prediction
+    predicted_rating: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class TeachbackResultModel(Base):
@@ -591,10 +591,10 @@ class ImageModel(Base):
 
 
 class WebReferenceModel(Base):
-    """LLM-generated canonical web reference for a technical term in a section.
+    """LLM-generated canonical web reference for a key concept in a section.
 
     source_quality values (ordered best to worst):
-      official_docs | spec | wiki | tutorial | blog | unknown
+      official_docs | spec | academic | encyclopedia | wiki | tutorial | blog | unknown
 
     is_llm_suggested=True means URL was produced by the LLM from training knowledge
     and has not been verified via a live HEAD request.

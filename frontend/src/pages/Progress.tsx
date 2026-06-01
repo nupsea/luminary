@@ -12,7 +12,8 @@
  */
 
 import { useEffect, useState } from "react"
-import { AlertCircle, BookOpen, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
+import { AlertCircle, ArrowLeft, BookOpen, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import {
   Bar,
   BarChart,
@@ -379,6 +380,7 @@ function CalibrationWidget() {
 }
 
 export default function Progress() {
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
   const [history, setHistory] = useState<DailyHistoryItem[]>([])
@@ -518,7 +520,18 @@ export default function Progress() {
   return (
     <div className="flex flex-col gap-8 px-6 py-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Progress</h1>
+        <div className="flex items-center gap-3">
+          {canGoBack && (
+            <button
+              onClick={goBack}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowLeft size={12} />
+              {backLabel}
+            </button>
+          )}
+          <h1 className="text-2xl font-semibold text-foreground">Progress</h1>
+        </div>
       </div>
 
       {/* Empty state -- no study history yet */}

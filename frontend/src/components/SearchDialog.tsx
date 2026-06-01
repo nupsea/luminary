@@ -8,7 +8,7 @@
 
 import { FileText, Layers, Loader2, MessageCircle, Search, StickyNote, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 
 import { useDebounce } from "@/hooks/useDebounce"
 import {
@@ -55,6 +55,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const navigate = useNavigate()
+  const location = useLocation()
 
   // Ask panel state
   const [askQuestion, setAskQuestion] = useState("")
@@ -161,21 +162,22 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   const handleResultClick = useCallback(
     (r: UnifiedSearchResult) => {
       pushRecentSeek(query)
+      const fromState = { state: { from: location.pathname } }
       if (r.kind === "document") {
         if (r.documentId) setActiveDocument(r.documentId)
-        navigate("/library")
+        navigate("/library", fromState)
       } else if (r.kind === "note") {
         if (r.documentId) setNotesDocumentId(r.documentId)
-        navigate("/notes")
+        navigate("/notes", fromState)
       } else {
         // Flashcard: route to Study. Use documentId so the study page can
         // restore deck context; falls through to landing when null.
         if (r.documentId) setActiveDocument(r.documentId)
-        navigate("/study")
+        navigate("/study", fromState)
       }
       onClose()
     },
-    [navigate, onClose, query, setActiveDocument, setNotesDocumentId],
+    [navigate, location.pathname, onClose, query, setActiveDocument, setNotesDocumentId],
   )
 
   const handleRecentClick = useCallback((q: string) => {

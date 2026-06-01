@@ -1,7 +1,8 @@
 """Reference enricher service for web reference grounding.
 
-Generates LLM-suggested canonical web references per technical term
-extracted from section summaries. Stored in WebReferenceModel table.
+Generates LLM-suggested canonical web references for key concepts and terms
+extracted from section summaries. Works across all document types (technical,
+philosophy, history, science, literature, etc.). Stored in WebReferenceModel.
 
 No live HTTP calls when WEB_SEARCH_PROVIDER == 'none' (default).
 """
@@ -25,25 +26,33 @@ logger = logging.getLogger(__name__)
 _SOURCE_QUALITY_RANK: dict[str, int] = {
     "official_docs": 0,
     "spec": 1,
-    "wiki": 2,
-    "tutorial": 3,
-    "blog": 4,
-    "unknown": 5,
+    "academic": 1,
+    "encyclopedia": 2,
+    "wiki": 3,
+    "tutorial": 4,
+    "blog": 5,
+    "unknown": 6,
 }
 
 _MAX_REFS_PER_SECTION = 5
 
 _SYSTEM_PROMPT = (
-    "You are a technical documentation expert. "
-    "For each technical term found in the provided section summary, output a JSON array "
-    "of up to 5 canonical reference objects. "
-    "Order them: official language/framework docs first, then specification/RFC, "
-    "then recognized book publisher, then trusted community wiki, then tutorial, then blog. "
+    "You are a research librarian with expertise across all domains. "
+    "For each key concept or term found in the provided section summary, output a JSON array "
+    "of up to 5 canonical reference objects from the most authoritative sources for that domain. "
+    "Domain guidance: philosophy/ethics -> Stanford Encyclopedia of Philosophy, PhilPapers; "
+    "science/medicine -> peer-reviewed journals, PubMed, authoritative textbook publishers; "
+    "history/humanities -> encyclopedias, academic publishers (OUP, Cambridge); "
+    "mathematics -> MathWorld, arXiv, textbook publishers; "
+    "software/technology -> official language/framework docs, specs/RFCs; "
+    "general -> Wikipedia or trusted encyclopedias, then tutorials, then blogs. "
+    "Order them: domain-specific authoritative source first, then encyclopedia/wiki, "
+    "then tutorial or explainer, then blog. "
     "For each reference use this exact JSON shape: "
     '{"term": "...", "url": "...", "title": "...", "excerpt": "...", '
-    '"source_quality": "official_docs|spec|wiki|tutorial|blog|unknown"}. '
+    '"source_quality": "official_docs|spec|academic|encyclopedia|wiki|tutorial|blog|unknown"}. '
     "Return only the JSON array with no prose or markdown fences outside the array. "
-    "If the section contains no recognizable technical terms, return an empty array []."
+    "If the section contains no concepts or terms worth referencing, return an empty array []."
 )
 
 
@@ -76,7 +85,7 @@ async def _extract_references(section_content: str) -> list[dict]:
     """
     user_prompt = (
         f"Section summary:\n{section_content}\n\n"
-        "Extract up to 5 key technical terms and for each provide a canonical reference."
+        "Extract up to 5 key concepts or terms and for each provide a canonical reference."
     )
     from app.services.enrichment_concurrency import get_enrichment_llm_semaphore  # noqa: PLC0415
 

@@ -3,6 +3,7 @@
 // owns the state and passes the values + callbacks in.
 
 import type { LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
 
 interface ViewModeOption {
   key: string
@@ -17,6 +18,7 @@ interface HeaderBarProps {
   scope: "document" | "all"
   onSelectScope: (scope: "document" | "all") => void
   graphStats: { nodeCount: number; edgeCount: number } | null
+  backButton?: ReactNode
 }
 
 export function HeaderBar({
@@ -26,10 +28,12 @@ export function HeaderBar({
   scope,
   onSelectScope,
   graphStats,
+  backButton,
 }: HeaderBarProps) {
   return (
     <div className="flex items-center justify-between border-b border-border bg-card/30 px-6 py-2.5 backdrop-blur-md shrink-0">
       <div className="flex items-center gap-6">
+        {backButton}
         <h1 className="text-xl font-bold tracking-tight text-foreground">Map</h1>
 
         {/* View mode pills */}

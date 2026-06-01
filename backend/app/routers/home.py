@@ -155,6 +155,24 @@ async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollect
         )
     ).all()
     fc_by_col = {cid: count for cid, count in fc_rows}
+    due_rows = (
+        await session.execute(
+            text(
+                f"""
+                SELECT cm.collection_id, COUNT(DISTINCT fc.id)
+                FROM collection_members cm
+                JOIN flashcards fc ON cm.member_type = 'document'
+                                   AND fc.document_id = cm.member_id
+                WHERE cm.collection_id IN ({placeholders})
+                  AND fc.due_date IS NOT NULL
+                  AND fc.due_date <= datetime('now')
+                GROUP BY cm.collection_id
+                """
+            ),
+            params,
+        )
+    ).all()
+    due_by_col = {cid: int(count) for cid, count in due_rows}
     return [
         ActiveCollection(
             id=r[0],
@@ -163,6 +181,7 @@ async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollect
             document_count=int(r[3] or 0),
             note_count=int(r[4] or 0),
             flashcard_count=int(fc_by_col.get(r[0], 0)),
+            due_card_count=due_by_col.get(r[0], 0),
         )
         for r in rows
     ]
@@ -215,11 +234,32 @@ async def _pick_today_action(
     ).first()
     due_count = int(due_row[0]) if due_row else 0
     if due_count > 0:
+        top_col = (
+            await session.execute(
+                text(
+                    """
+                    SELECT c.id, c.name, c.color, COUNT(DISTINCT fc.id) AS n
+                    FROM collections c
+                    JOIN collection_members cm ON cm.collection_id = c.id
+                                              AND cm.member_type = 'document'
+                    JOIN flashcards fc ON fc.document_id = cm.member_id
+                    WHERE fc.due_date IS NOT NULL AND fc.due_date <= datetime('now')
+                    GROUP BY c.id, c.name, c.color
+                    ORDER BY n DESC
+                    LIMIT 1
+                    """
+                )
+            )
+        ).first()
         return TodayAction(
             kind="review_cards",
             target_id=None,
             label=f"Review {due_count} {'card' if due_count == 1 else 'cards'} due",
             count=due_count,
+            collection_id=top_col[0] if top_col else None,
+            collection_name=top_col[1] if top_col else None,
+            collection_color=top_col[2] if top_col else None,
+            scoped_count=int(top_col[3]) if top_col else None,
         )
     # 2. Continue reading the most-recently-touched document if its progress < 1.0.
     for item in recent_items:

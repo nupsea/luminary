@@ -317,8 +317,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                         "Use 'notes' for questions about the user's personal notes or annotations. "
                         "Use 'summary' for broad questions about themes, topics, patterns, "
                         "or overviews -- especially when scope is the entire library. "
-                        "Use 'factual' for questions about specific people, facts, concepts, or entities, "
-                        "even if they ask what that person 'discusses' or 'explains'."
+                        "Use 'factual' for questions about specific people, facts, concepts, "
+                        "or entities, even if phrased as what they 'discuss' or 'explain'."
                     ),
                 },
                 {"role": "user", "content": question},

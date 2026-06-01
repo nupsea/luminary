@@ -30,7 +30,7 @@ export function TodayHero({ recentItem, onContinue }: TodayHeroProps) {
     return (
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <button
-          onClick={() => navigate("/study")}
+          onClick={() => navigate("/study", { state: { from: "/library" } })}
           className="group flex flex-1 cursor-pointer select-none items-center gap-3 rounded-lg bg-primary px-4 py-3 text-left text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-md"
         >
           <Zap size={16} className="shrink-0" />

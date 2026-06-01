@@ -22,7 +22,7 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 // than `: T | null`. Both differences cascade into the UI's typed
 // badge map and panel state, so we keep the narrower local shape.
 
-type SourceQuality = "official_docs" | "spec" | "wiki" | "tutorial" | "blog" | "unknown"
+type SourceQuality = "official_docs" | "spec" | "academic" | "encyclopedia" | "wiki" | "tutorial" | "blog" | "unknown"
 
 interface WebReferenceItem {
   id: string
@@ -49,6 +49,8 @@ interface DocumentReferencesResponse {
 const QUALITY_LABEL: Record<SourceQuality, string> = {
   official_docs: "Official",
   spec: "Spec",
+  academic: "Academic",
+  encyclopedia: "Encyclopedia",
   wiki: "Wiki",
   tutorial: "Tutorial",
   blog: "Blog",
@@ -58,6 +60,8 @@ const QUALITY_LABEL: Record<SourceQuality, string> = {
 const QUALITY_CLASS: Record<SourceQuality, string> = {
   official_docs: "bg-green-100 text-green-800",
   spec: "bg-blue-100 text-blue-800",
+  academic: "bg-purple-100 text-purple-800",
+  encyclopedia: "bg-indigo-100 text-indigo-800",
   wiki: "bg-gray-100 text-gray-800",
   tutorial: "bg-gray-100 text-gray-700",
   blog: "bg-gray-100 text-gray-600",
@@ -189,6 +193,22 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
     refetchOnWindowFocus: false,
   })
 
+  const references = data?.references ?? []
+
+  // Job status — only queried when refs are empty; polls while pending/running
+  const { data: jobStatusData } = useQuery<{ status: string | null }>({
+    queryKey: ["doc-refs-job-status", documentId],
+    queryFn: () =>
+      apiGet<{ status: string | null }>(`/references/documents/${documentId}/job-status`),
+    enabled: !isLoading && !isError && references.length === 0,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === "pending" || s === "running" ? 3000 : false
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  })
+
   // Validation mutation
   const validateMutation = useMutation({
     mutationFn: () =>
@@ -208,7 +228,6 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
   })
 
   // Auto-trigger validation on mount if any refs have is_valid=null
-  const references = data?.references ?? []
   const hasUnchecked = references.some((r) => r.is_valid === null)
 
   useEffect(() => {
@@ -220,6 +239,7 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
   }, [hasUnchecked])
 
   const isValidating = validateMutation.isPending
+  const jobStatus = jobStatusData?.status ?? null
 
   // Loading state
   if (isLoading) {
@@ -245,12 +265,37 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
     )
   }
 
-  // Empty state
+  // Empty state — branch on job status
   if (references.length === 0) {
+    if (jobStatus === "pending" || jobStatus === "running") {
+      return (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 size={12} className="animate-spin shrink-0" />
+          Extracting references...
+        </div>
+      )
+    }
+    if (jobStatus === "failed") {
+      return (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-red-600">Reference extraction failed.</p>
+          <button
+            onClick={() => {
+              refreshMutation.mutate()
+              void queryClient.invalidateQueries({ queryKey: ["doc-refs-job-status", documentId] })
+            }}
+            disabled={refreshMutation.isPending}
+            className="flex w-fit items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={refreshMutation.isPending ? "animate-spin" : ""} />
+            Retry
+          </button>
+        </div>
+      )
+    }
     return (
       <p className="text-xs text-muted-foreground">
-        No references generated yet. References are extracted automatically after ingestion
-        completes for technical documents.
+        No references found for this document.
       </p>
     )
   }

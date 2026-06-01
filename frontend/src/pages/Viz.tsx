@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
-import { GitBranch, Network, Tag, Zap } from "lucide-react"
+import { ArrowLeft, GitBranch, Network, Tag, Zap } from "lucide-react"
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
+import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "../store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
@@ -84,6 +85,7 @@ export default function Viz() {
   const { effectiveDocumentId } = useEffectiveActiveDocument({ predicate: hasGraphData })
   const activeDocumentId = effectiveDocumentId
   const navigate = useNavigate()
+  const { canGoBack, backLabel, goBack } = useBackNavigation()
   const queryClient = useQueryClient()
   const mountTime = useRef(Date.now())
 
@@ -408,6 +410,15 @@ export default function Viz() {
             void queryClient.invalidateQueries({ queryKey })
           }}
           graphStats={graphStats}
+          backButton={canGoBack ? (
+            <button
+              onClick={goBack}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowLeft size={12} />
+              {backLabel}
+            </button>
+          ) : undefined}
         />
 
         {/* ---- Main content: sidebar + graph canvas ---- */}

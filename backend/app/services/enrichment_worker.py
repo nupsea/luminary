@@ -98,6 +98,14 @@ class EnrichmentQueueWorker:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+        for task in list(self._doc_tasks):
+            task.cancel()
+        if self._doc_tasks:
+            await asyncio.gather(*self._doc_tasks, return_exceptions=True)
+            self._doc_tasks.clear()
+            self._active_doc_ids.clear()
+
         logger.info("EnrichmentQueueWorker: stopped")
 
     async def _poll_loop(self) -> None:

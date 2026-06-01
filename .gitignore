@@ -43,8 +43,9 @@ DATA/conversations/
 DATA/notes/
 DATA/papers/
 
-# Claude Code local config
+# LLM Code local config
 .claude/
+.antigravitycli/
 
 # OS
 .DS_Store

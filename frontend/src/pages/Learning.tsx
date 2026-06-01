@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, useLocation } from "react-router-dom"
+import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { DocumentCard } from "@/components/library/DocumentCard"
@@ -84,6 +85,7 @@ export default function Learning() {
   const queryClient = useQueryClient()
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const routeLocation = useLocation()
   const tagFilter = searchParams.get("tag")
   // citation deep-link params — doc opens DocumentReader, page sets initial PDF page
   // Capture into state so they survive URL param cleanup (params are cleared after first use
@@ -157,13 +159,15 @@ export default function Learning() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: (ids: string[]) => bulkDelete(ids),
-    onSuccess: () => {
+    onSuccess: (_data, ids) => {
       setSelectedIds(new Set())
       setSelectMode(false)
       setBulkConfirm(false)
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      toast.success(`Deleted ${ids.length} document${ids.length === 1 ? "" : "s"}`)
     },
+    onError: () => toast.error("Failed to delete documents. Please try again."),
   })
 
   const deleteDocumentMutation = useMutation({
@@ -171,7 +175,9 @@ export default function Learning() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       void queryClient.invalidateQueries({ queryKey: ["documents-recent"] })
+      toast.success("Document deleted")
     },
+    onError: () => toast.error("Failed to delete document. Please try again."),
   })
 
   function handleDocumentClick(id: string) {
@@ -281,7 +287,7 @@ export default function Learning() {
         next.delete("chunk_id")
         next.delete("page")
         return next
-      })
+      }, { replace: true, state: routeLocation.state })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docParam])

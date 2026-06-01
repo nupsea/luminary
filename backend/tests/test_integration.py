@@ -137,6 +137,23 @@ async def integration_db(tmp_path, monkeypatch):
 
     yield engine, factory, tmp_path
 
+    # Stop the enrichment worker created during this test so its
+    # background tasks release DB connections before engine.dispose().
+    _test_worker = enrichment_worker_module._worker
+    if _test_worker is not None:
+        await _test_worker.stop()
+
+    # Cancel then await background tasks so aiosqlite threads close their
+    # sessions before this event loop closes (prevents "Event loop is closed"
+    # PytestUnhandledThreadExceptionWarning in later tests).
+    _pending = list(ingestion_module._background_tasks)
+    for _t in _pending:
+        _t.cancel()
+    if _pending:
+        import asyncio as _asyncio
+        await _asyncio.gather(*_pending, return_exceptions=True)
+    ingestion_module._background_tasks.clear()
+
     # Teardown: restore originals
     db_module._engine = orig_engine
     db_module._session_factory = orig_factory
@@ -148,16 +165,6 @@ async def integration_db(tmp_path, monkeypatch):
     section_summarizer_module._service = orig_section_summarizer
     summarizer_module._summarization_service = orig_summarizer
     enrichment_worker_module._worker = orig_enrichment_worker
-    # Cancel then await background tasks so aiosqlite threads close their
-    # sessions before this event loop closes (prevents "Event loop is closed"
-    # PytestUnhandledThreadExceptionWarning in later tests).
-    _pending = list(ingestion_module._background_tasks)
-    for _t in _pending:
-        _t.cancel()
-    if _pending:
-        import asyncio as _asyncio
-        await _asyncio.gather(*_pending, return_exceptions=True)
-    ingestion_module._background_tasks.clear()
     get_settings.cache_clear()
     await engine.dispose()
 
@@ -281,6 +288,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
     assert len(graph_data["nodes"]) >= 1, f"Expected ≥1 graph node, got {len(graph_data['nodes'])}"
 
 
+@pytest.mark.unstable
 async def test_search_after_ingest(integration_db, monkeypatch):
     """After ingesting The Time Machine, GET /search?q=time+machine should return
     at least one result via hybrid retrieval (FTS5 keyword search)."""

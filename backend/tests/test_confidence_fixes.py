@@ -144,7 +144,7 @@ async def test_library_summary_missing_returns_medium(test_db):
 
 @pytest.mark.asyncio
 async def test_library_summary_present_returns_high(test_db):
-    """summary_node with scope='all' and existing LibrarySummaryModel returns confidence='high'."""
+    """summary_node with scope='all' and existing LibrarySummaryModel sets section_context."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     await _insert_document(factory, doc_id)
@@ -169,11 +169,13 @@ async def test_library_summary_present_returns_high(test_db):
 
     result = await summary_node(state)
 
-    assert result.get("confidence") == "high", (
-        f"Expected confidence='high', got {result.get('confidence')!r}"
+    # summary_node now passes the library summary as section_context so
+    # synthesize_node can tailor the answer to the specific question.
+    assert result.get("section_context") is not None, (
+        f"Expected section_context to be set, got {result!r}"
     )
-    assert "Thematic overview" in result.get("answer", ""), (
-        "Expected library summary content in answer"
+    assert "Thematic overview" in result.get("section_context", ""), (
+        "Expected library summary content in section_context"
     )
 
 
