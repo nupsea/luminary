@@ -8,6 +8,14 @@
 
 $ErrorActionPreference = "Stop"
 
+# ---------------------------------------------------------------------------
+# Verify Administrator Privileges
+# ---------------------------------------------------------------------------
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Error "This installer script must be run in a PowerShell session opened as Administrator. Please right-click PowerShell, choose 'Run as Administrator', and try again."
+}
+
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "   Starting Luminary Windows Installer" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -148,7 +156,13 @@ if ($installNode) {
             Write-Host "[install] Node.js installed/updated successfully: $newNodeVersion" -ForegroundColor Green
         } else {
             Write-Warning "Node.js was installed, but the active version in this shell is still $newNodeVersion (requires >= 20)."
-            Write-Warning "If you are using a version manager (nvm, fnm, etc.), please run 'nvm use 20' or 'fnm use 20' manually in a new shell, then re-run this script."
+            $activeNodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
+            Write-Warning "Active node binary is resolved at: '$activeNodePath'"
+            if ($activeNodePath -and $activeNodePath -notlike "*C:\Program Files\nodejs*") {
+                Write-Warning "This old Node path is overriding the new Node.js 20 installation. Please uninstall the old version or ensure 'C:\Program Files\nodejs\' is placed higher in your system/user PATH environment variable."
+            } else {
+                Write-Warning "Please close this PowerShell console, open a new Administrator PowerShell window, and run the script again to pick up the updated PATH."
+            }
         }
     } else {
         Write-Warning "Node.js was installed, but is not yet on the PATH. You may need to restart PowerShell after installation."
