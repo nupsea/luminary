@@ -63,6 +63,7 @@ if (Test-CommandExists "node") {
     # Parse version string (e.g. "v14.15.1" -> "14")
     $cleanVersion = $nodeVersion.TrimStart('v')
     $majorVersionStr = $cleanVersion.Split('.')[0]
+    $majorVersion = 0
     if ([int]::TryParse($majorVersionStr, [ref]$majorVersion)) {
         if ($majorVersion -ge 20) {
             Write-Host "[install] Node.js is already installed: $nodeVersion" -ForegroundColor Green
