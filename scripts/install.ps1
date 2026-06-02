@@ -75,22 +75,81 @@ if (Test-CommandExists "node") {
 }
 
 if ($installNode) {
-    Write-Host "[install] Installing Node.js 20 LTS silently..." -ForegroundColor Yellow
+    # Check if a Node version manager is available
+    if (Test-CommandExists "fnm") {
+        Write-Host "[install] Detected fnm. Using fnm to install/use Node 20..." -ForegroundColor Yellow
+        try {
+            Start-Process -FilePath "fnm" -ArgumentList "install", "20" -Wait -NoNewWindow
+            Start-Process -FilePath "fnm" -ArgumentList "use", "20" -Wait -NoNewWindow
+            # Apply fnm to the current PowerShell session environment
+            $fnmEnv = fnm env --use-on-cd | Out-String
+            Invoke-Expression $fnmEnv
+            if (Test-CommandExists "node") {
+                $nodeVersion = node --version
+                $cleanVersion = $nodeVersion.TrimStart('v')
+                $majorVersionStr = $cleanVersion.Split('.')[0]
+                $majorVersion = 0
+                if ([int]::TryParse($majorVersionStr, [ref]$majorVersion) -and $majorVersion -ge 20) {
+                    Write-Host "[install] Node.js updated successfully via fnm: $nodeVersion" -ForegroundColor Green
+                    $installNode = $false
+                }
+            }
+        } catch {
+            Write-Warning "fnm failed to install/use Node 20. Falling back to MSI installer."
+        }
+    }
+    elseif (Test-CommandExists "nvm") {
+        Write-Host "[install] Detected nvm. Using nvm to install/use Node 20..." -ForegroundColor Yellow
+        try {
+            Start-Process -FilePath "nvm" -ArgumentList "install", "20.11.1" -Wait -NoNewWindow
+            Start-Process -FilePath "nvm" -ArgumentList "use", "20.11.1" -Wait -NoNewWindow
+            # nvm-windows updates the symlink at C:\Program Files\nodejs, but the current PATH might need to point to it
+            $env:PATH = "C:\Program Files\nodejs\;$env:PATH"
+            if (Test-CommandExists "node") {
+                $nodeVersion = node --version
+                $cleanVersion = $nodeVersion.TrimStart('v')
+                $majorVersionStr = $cleanVersion.Split('.')[0]
+                $majorVersion = 0
+                if ([int]::TryParse($majorVersionStr, [ref]$majorVersion) -and $majorVersion -ge 20) {
+                    Write-Host "[install] Node.js updated successfully via nvm: $nodeVersion" -ForegroundColor Green
+                    $installNode = $false
+                }
+            }
+        } catch {
+            Write-Warning "nvm failed to install/use Node 20. Falling back to MSI installer."
+        }
+    }
+}
+
+if ($installNode) {
+    Write-Host "[install] Downloading Node.js 20 LTS installer..." -ForegroundColor Yellow
     $nodeUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-x64.msi"
     $nodePath = "$env:TEMP\node-v20.msi"
     
-    Write-Host "[install] Downloading Node.js installer..." -ForegroundColor Gray
     Invoke-WebRequest -Uri $nodeUrl -OutFile $nodePath
     
-    Write-Host "[install] Running installer (this may take a minute)..." -ForegroundColor Gray
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$nodePath`"", "/quiet", "/norestart" -Wait
+    Write-Host "[install] Running installer silently (this may take a minute)..." -ForegroundColor Gray
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$nodePath`"", "/quiet", "/norestart" -Wait -PassThru
     
-    # Update PATH for the current session
+    # Check if installer failed
+    if ($process.ExitCode -ne 0) {
+        Write-Warning "Node.js MSI installer exited with code $($process.ExitCode)."
+    }
+
+    # Prepend default Node.js installation directory to PATH
     $env:PATH = "C:\Program Files\nodejs\;$env:PATH"
     
     if (Test-CommandExists "node") {
         $newNodeVersion = node --version
-        Write-Host "[install] Node.js installed successfully: $newNodeVersion" -ForegroundColor Green
+        $cleanVersion = $newNodeVersion.TrimStart('v')
+        $majorVersionStr = $cleanVersion.Split('.')[0]
+        $majorVersion = 0
+        if ([int]::TryParse($majorVersionStr, [ref]$majorVersion) -and $majorVersion -ge 20) {
+            Write-Host "[install] Node.js installed/updated successfully: $newNodeVersion" -ForegroundColor Green
+        } else {
+            Write-Warning "Node.js was installed, but the active version in this shell is still $newNodeVersion (requires >= 20)."
+            Write-Warning "If you are using a version manager (nvm, fnm, etc.), please run 'nvm use 20' or 'fnm use 20' manually in a new shell, then re-run this script."
+        }
     } else {
         Write-Warning "Node.js was installed, but is not yet on the PATH. You may need to restart PowerShell after installation."
     }
@@ -172,18 +231,45 @@ uv sync --no-default-groups
 # Frontend build
 Write-Host "[install] Installing frontend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\frontend"
+
+# We must run npm using npm.cmd on Windows to prevent execution issues
+$npmCommand = "npm.cmd"
+if (-not (Test-CommandExists $npmCommand)) {
+    $npmCommand = "npm"
+}
+
+Write-Host "[install] Running npm ci..." -ForegroundColor Gray
+$npmCiFailed = $false
 try {
-    Write-Host "[install] Running npm ci..." -ForegroundColor Gray
-    npm ci --legacy-peer-deps
+    & $npmCommand ci --legacy-peer-deps
+    if ($LASTEXITCODE -ne 0) { $npmCiFailed = $true }
 } catch {
+    $npmCiFailed = $true
+}
+
+if ($npmCiFailed) {
     Write-Host "[install] npm ci failed. Trying npm install instead..." -ForegroundColor Yellow
-    npm install --no-audit --no-fund --legacy-peer-deps
+    try {
+        & $npmCommand install --no-audit --no-fund --legacy-peer-deps
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "npm install failed. Frontend dependencies could not be installed."
+        }
+    } catch {
+        Write-Error "npm install failed. Frontend dependencies could not be installed."
+    }
 }
 
 Write-Host "[install] Building production SPA..." -ForegroundColor Yellow
 $env:VITE_SURFACE_TIER="public"
 $env:VITE_API_BASE="/api"
-npm run build
+try {
+    & $npmCommand run build
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Production build failed. Please ensure Node >= 20 is active in your terminal."
+    }
+} catch {
+    Write-Error "Production build failed. Please ensure Node >= 20 is active in your terminal."
+}
 
 # ---------------------------------------------------------------------------
 # 7. Create local startup scripts
