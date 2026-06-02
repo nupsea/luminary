@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     LUMINARY_MODE: Literal["dev", "prod"] = "dev"
     OLLAMA_URL: str = "http://localhost:11434"
     LOG_LEVEL: str = "INFO"
-    LITELLM_DEFAULT_MODEL: str = "ollama/gemma4"
+    LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""

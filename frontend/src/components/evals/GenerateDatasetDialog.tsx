@@ -18,7 +18,7 @@ const PRESETS = [
   { label: "100", count: 100 },
 ]
 
-const MODEL_OPTIONS = ["openai/gpt-4.1", "openai/gpt-4o", "openai/o4-mini", "openai/gpt-4o-mini", "ollama/gemma4", "ollama/mistral", "anthropic/claude-3-5-haiku"]
+const MODEL_OPTIONS = ["openai/gpt-4.1", "openai/gpt-4o", "openai/o4-mini", "openai/gpt-4o-mini", "ollama/llama3.2", "ollama/mistral", "anthropic/claude-3-5-haiku"]
 
 interface GenerateDatasetDialogProps {
   open: boolean

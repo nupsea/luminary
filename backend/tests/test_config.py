@@ -4,17 +4,20 @@ from app.config import Settings, get_settings
 
 
 def test_settings_defaults():
-    # PHOENIX_ENABLED is set to 'false' by conftest for test isolation;
-    # temporarily unset it so we can verify the true default value.
-    prev = os.environ.pop("PHOENIX_ENABLED", None)
+    # Temporarily remove env vars that could override defaults
+    vars_to_pop = ["PHOENIX_ENABLED", "LITELLM_DEFAULT_MODEL", "LOG_LEVEL"]
+    saved_vars = {}
+    for var in vars_to_pop:
+        if var in os.environ:
+            saved_vars[var] = os.environ.pop(var)
     try:
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.LOG_LEVEL == "INFO"
-        assert settings.LITELLM_DEFAULT_MODEL == "ollama/gemma4"
+        assert settings.LITELLM_DEFAULT_MODEL == "ollama/llama3.2"
         assert settings.PHOENIX_ENABLED is True
     finally:
-        if prev is not None:
-            os.environ["PHOENIX_ENABLED"] = prev
+        for var, val in saved_vars.items():
+            os.environ[var] = val
 
 
 def test_get_settings_returns_singleton():

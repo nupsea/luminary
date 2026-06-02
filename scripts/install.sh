@@ -13,8 +13,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-CHAT_MODEL="${LUMINARY_CHAT_MODEL:-gemma4}"
-VISION_MODEL="${LUMINARY_VISION_MODEL:-llava:7b}"
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+VISION_MODEL="${LUMINARY_VISION_MODEL:-}"
 
 _info()  { printf '\033[0;36m[install]\033[0m %s\n' "$*"; }
 _warn()  { printf '\033[0;33m[install]\033[0m %s\n' "$*"; }
@@ -103,6 +103,7 @@ fi
 # Pull models only if not already cached.
 _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
 for model in "$CHAT_MODEL" "$VISION_MODEL"; do
+    [ -z "$model" ] && continue
     if _pulled "$model" || _pulled "${model}:latest"; then
         _info "Model already pulled: $model"
     else

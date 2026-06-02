@@ -16,7 +16,8 @@ Write-Host "=========================================" -ForegroundColor Cyan
 # 0. Global Corporate Proxy / SSL Bypass Settings
 # ---------------------------------------------------------------------------
 Write-Host "[install] Configuring SSL/TLS bypass variables for corporate networks..." -ForegroundColor Gray
-$env:UV_INSECURE = "true"
+$env:UV_SYSTEM_CERTS = "true"
+$env:UV_INSECURE_HOST = "pypi.org files.pythonhosted.org pythonhosted.org"
 try {
     Start-Process -FilePath "npm" -ArgumentList "config", "set", "strict-ssl", "false" -Wait -NoNewWindow
 } catch {}
@@ -54,13 +55,26 @@ if (Test-CommandExists "python") {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Install Node.js (if missing)
+# 3. Install Node.js (if missing or version < 20)
 # ---------------------------------------------------------------------------
+$installNode = $true
 if (Test-CommandExists "node") {
     $nodeVersion = node --version
-    Write-Host "[install] Node.js is already installed: $nodeVersion" -ForegroundColor Green
-} else {
-    Write-Host "[install] Node.js not found. Installing Node.js 20 LTS silently..." -ForegroundColor Yellow
+    # Parse version string (e.g. "v14.15.1" -> "14")
+    $cleanVersion = $nodeVersion.TrimStart('v')
+    $majorVersionStr = $cleanVersion.Split('.')[0]
+    if ([int]::TryParse($majorVersionStr, [ref]$majorVersion)) {
+        if ($majorVersion -ge 20) {
+            Write-Host "[install] Node.js is already installed: $nodeVersion" -ForegroundColor Green
+            $installNode = $false
+        } else {
+            Write-Host "[install] Node.js version $nodeVersion is too old. Luminary requires Node.js >= 20." -ForegroundColor Yellow
+        }
+    }
+}
+
+if ($installNode) {
+    Write-Host "[install] Installing Node.js 20 LTS silently..." -ForegroundColor Yellow
     $nodeUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-x64.msi"
     $nodePath = "$env:TEMP\node-v20.msi"
     
@@ -74,7 +88,8 @@ if (Test-CommandExists "node") {
     $env:PATH = "C:\Program Files\nodejs\;$env:PATH"
     
     if (Test-CommandExists "node") {
-        Write-Host "[install] Node.js installed successfully!" -ForegroundColor Green
+        $newNodeVersion = node --version
+        Write-Host "[install] Node.js installed successfully: $newNodeVersion" -ForegroundColor Green
     } else {
         Write-Warning "Node.js was installed, but is not yet on the PATH. You may need to restart PowerShell after installation."
     }
@@ -137,12 +152,10 @@ if ($portActive) {
 
 # Pull models
 try {
-    Write-Host "[install] Pulling Gemma4 chat model (this can take a few minutes)..." -ForegroundColor Yellow
-    ollama pull gemma4
-    Write-Host "[install] Pulling Llava vision model (this can take a few minutes)..." -ForegroundColor Yellow
-    ollama pull llava:7b
+    Write-Host "[install] Pulling Llama 3.2 chat model (this can take a few minutes)..." -ForegroundColor Yellow
+    ollama pull llama3.2
 } catch {
-    Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull gemma4' manually." -ForegroundColor Red
+    Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull llama3.2' manually." -ForegroundColor Red
 }
 
 # ---------------------------------------------------------------------------

@@ -94,18 +94,27 @@ The home screen surfaces the day's highest-leverage action (review due cards, co
 
 ## Models
 
-Luminary defaults to **Gemma 4** via Ollama (pulled by `make install`).
+Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
 
 | Model | Command | Best for | VRAM |
 |-------|---------|----------|------|
-| Gemma 4 E4B (default) | `ollama pull gemma4` | Everyday use, laptops | ~4 GB |
+| Llama 3.2 3B (default) | `ollama pull llama3.2` | Everyday use, lightweight laptops | ~2 GB |
+| Gemma 4 E4B | `ollama pull gemma4` | Excellent reasoning capability | ~4 GB |
 | Gemma 4 26B A4B | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
-| Gemma 4 31B | `ollama pull gemma4:31b` | Maximum quality | ~20 GB |
 | Llama 3.1 8B | `ollama pull llama3.1` | Lightweight alternative | ~5 GB |
+
+### How to switch to other models
+
+To use a different local model:
+1. Pull the desired model via Ollama (e.g., `ollama pull gemma4`).
+2. Add or update `LITELLM_DEFAULT_MODEL` in `backend/.env` (prefixed with `ollama/`):
+   ```bash
+   LITELLM_DEFAULT_MODEL=ollama/gemma4
+   ```
 
 ### Switch to a cloud model (optional)
 
-Create `backend/.env`:
+Create or update `backend/.env`:
 
 ```bash
 # OpenAI
@@ -129,9 +138,9 @@ All settings are environment variables in `backend/.env` (gitignored).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LITELLM_DEFAULT_MODEL` | `ollama/gemma4` | LLM for chat, summaries, flashcards |
+| `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis |
+| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (optional, labs-gated) |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |
 
