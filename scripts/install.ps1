@@ -295,6 +295,8 @@ $startScriptContent = @"
 `$ErrorActionPreference = "Stop"
 Set-Location -Path "`$PSScriptRoot\backend"
 `$env:DATA_DIR="`$PSScriptRoot\.luminary"
+`$env:LUMINARY_MODE="prod"
+`$env:LUMINARY_SURFACE_TIER="public"
 Write-Host "Starting Luminary Backend on http://localhost:7820 ..." -ForegroundColor Green
 uv run uvicorn app.main:app --host 0.0.0.0 --port 7820
 "@
