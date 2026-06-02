@@ -1,6 +1,6 @@
 # install.ps1 — Automated native Windows installer for Luminary.
 #
-# Safe to re-run. Handles dependencies gracefully.
+# Safe to re-run. Handles dependencies and corporate proxies gracefully.
 #
 # Usage:
 #   Open PowerShell as Administrator and run:
@@ -12,7 +12,16 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "   Starting Luminary Windows Installer" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
-# 1. Helper to check if a command exists
+# ---------------------------------------------------------------------------
+# 0. Global Corporate Proxy / SSL Bypass Settings
+# ---------------------------------------------------------------------------
+Write-Host "[install] Configuring SSL/TLS bypass variables for corporate networks..." -ForegroundColor Gray
+$env:UV_INSECURE = "true"
+try {
+    Start-Process -FilePath "npm" -ArgumentList "config", "set", "strict-ssl", "false" -Wait -NoNewWindow
+} catch {}
+
+# Helper to check if a command exists
 function Test-CommandExists($Command) {
     return (Get-Command $Command -ErrorAction SilentlyContinue) -ne $null
 }
@@ -112,26 +121,29 @@ if (Test-CommandExists "ollama") {
     $env:PATH = "$env:LOCALAPPDATA\Programs\Ollama\;$env:PATH"
 }
 
-# Ensure Ollama server is running in the background
-$ollamaRunning = $false
-try {
-    $resp = Invoke-RestMethod -Uri "http://localhost:11434/api/version" -TimeoutSec 2
-    $ollamaRunning = $true
-} catch {
-    # Not running
-}
-
-if (-not $ollamaRunning) {
+# Check if port 11434 is already active
+$portActive = Get-NetTCPConnection -LocalPort 11434 -ErrorAction SilentlyContinue
+if ($portActive) {
+    Write-Host "[install] Ollama is already running on port 11434." -ForegroundColor Green
+} else {
     Write-Host "[install] Starting Ollama background server..." -ForegroundColor Yellow
-    Start-Process -FilePath "ollama" -ArgumentList "serve" -NoNewWindow
-    Start-Sleep -Seconds 5
+    try {
+        Start-Process -FilePath "ollama" -ArgumentList "serve" -NoNewWindow
+        Start-Sleep -Seconds 5
+    } catch {
+        Write-Warning "Failed to start Ollama automatically. You may need to run 'ollama serve' manually."
+    }
 }
 
 # Pull models
-Write-Host "[install] Pulling Gemma4 chat model (this can take a few minutes)..." -ForegroundColor Yellow
-ollama pull gemma4
-Write-Host "[install] Pulling Llava vision model (this can take a few minutes)..." -ForegroundColor Yellow
-ollama pull llava:7b
+try {
+    Write-Host "[install] Pulling Gemma4 chat model (this can take a few minutes)..." -ForegroundColor Yellow
+    ollama pull gemma4
+    Write-Host "[install] Pulling Llava vision model (this can take a few minutes)..." -ForegroundColor Yellow
+    ollama pull llava:7b
+} catch {
+    Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull gemma4' manually." -ForegroundColor Red
+}
 
 # ---------------------------------------------------------------------------
 # 6. Install Backend & Frontend dependencies
@@ -146,7 +158,13 @@ uv sync --no-default-groups
 # Frontend build
 Write-Host "[install] Installing frontend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\frontend"
-npm ci
+try {
+    Write-Host "[install] Running npm ci..." -ForegroundColor Gray
+    npm ci --legacy-peer-deps
+} catch {
+    Write-Host "[install] npm ci failed. Trying npm install instead..." -ForegroundColor Yellow
+    npm install --no-audit --no-fund --legacy-peer-deps
+}
 
 Write-Host "[install] Building production SPA..." -ForegroundColor Yellow
 $env:VITE_SURFACE_TIER="public"
