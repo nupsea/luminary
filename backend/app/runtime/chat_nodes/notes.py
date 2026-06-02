@@ -27,6 +27,7 @@ from app.services import (
     note_search as _note_search_module,  # indirect: get_note_search_service is patched
 )
 from app.services.llm import LLMUnavailableError
+from app.services.settings_service import get_llm_error_message
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,7 @@ async def notes_gap_node(state: ChatState) -> dict:
 
     except Exception as exc:
         if isinstance(exc, LLMUnavailableError):
-            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
+            error_msg = get_llm_error_message()
         else:
             error_msg = "Gap analysis failed. Please try again."
         logger.warning("notes_gap_node: detect_gaps failed: %s", exc, exc_info=True)

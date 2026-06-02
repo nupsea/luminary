@@ -6,6 +6,8 @@ import { useState } from "react"
 
 import { type PendingTeachback, type TeachbackResultItem } from "@/lib/studyApi"
 
+import { useAppStore } from "@/store"
+
 import { ExpandableResultRow } from "./ExpandableResultRow"
 import type { TeachbackStats } from "./useTeachbackPolling"
 
@@ -21,6 +23,7 @@ export function TeachbackResultsPanel({
   results,
 }: TeachbackResultsPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const llmMode = useAppStore((s) => s.llmMode)
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
@@ -61,7 +64,11 @@ export function TeachbackResultsPanel({
             <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
               <p className="text-sm font-medium text-foreground">{tb.question}</p>
               <p className="mt-2 text-xs text-amber-700">
-                Submission failed. Check if Ollama is running.
+                {llmMode === "private"
+                  ? "Submission failed. Check if Ollama is running."
+                  : llmMode === "hybrid"
+                    ? "Submission failed. Check your internet connection, API key, or if Ollama is running."
+                    : "Submission failed. Check your internet connection or API key settings."}
               </p>
             </div>
           )

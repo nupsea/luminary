@@ -84,14 +84,14 @@ async function fetchCollectionPreview(
 
 function asGenerationError(err: unknown, fallback: string): never {
   if (err instanceof ApiError) {
-    if (err.status === 503) {
-      throw new Error("Ollama is unavailable. Start it with: ollama serve")
-    }
     try {
       const body = JSON.parse(err.body) as { detail?: string }
       if (body.detail) throw new Error(body.detail)
     } catch (e) {
-      if (e instanceof Error && e.message !== "Unexpected token") throw e
+      if (e instanceof Error && !e.message.startsWith("Unexpected")) throw e
+    }
+    if (err.status === 503) {
+      throw new Error("Ollama is unavailable. Start it with: ollama serve")
     }
     throw new Error(`HTTP ${err.status}`)
   }

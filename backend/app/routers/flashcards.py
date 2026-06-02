@@ -87,6 +87,7 @@ from app.services.flashcards_router_service import (
 from app.services.fsrs_service import FSRSService, get_fsrs_service
 from app.services.llm import LLMUnavailableError
 from app.services.objective_tracker import get_objective_tracker_service
+from app.services.settings_service import get_llm_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ async def generate_flashcards(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is not running. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     logger.info(
         "Generated flashcards",
@@ -235,7 +236,7 @@ async def generate_from_gaps(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is unreachable. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     logger.info("generate_from_gaps: created %d cards", created)
     return FromGapsResponse(created=created)
@@ -291,7 +292,7 @@ async def generate_flashcards_from_graph(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is not running. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     logger.info(
         "Generated graph flashcards",
@@ -318,7 +319,7 @@ async def generate_technical_flashcards(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is not running. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     logger.info(
         "Generated technical flashcards",
@@ -392,7 +393,7 @@ async def generate_cloze_flashcards(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is not running. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     logger.info(
         "Generated cloze flashcards",
@@ -445,7 +446,7 @@ async def fill_audit_gaps(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is unreachable. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
     return FillGapsResponse(created=created)
 

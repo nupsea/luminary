@@ -313,6 +313,13 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               </label>
             </div>
 
+            {localMode === "cloud" && (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 text-xs text-amber-800 dark:text-amber-300">
+                <span className="font-semibold block mb-0.5">⚠️ Cloud Cost Warning</span>
+                All LLM functionalities (chat, summarization, tags, references, teach-back, etc.) will consume your cloud API quota and incur costs from your configured cloud provider.
+              </div>
+            )}
+
             {(localMode === "cloud" || localMode === "hybrid") && (
               <div className="space-y-3">
                 <div>

@@ -292,6 +292,8 @@ export async function fetchSessions(
 
 export type Difficulty = "easy" | "medium" | "hard"
 
+import { useAppStore } from "@/store"
+
 export async function generateDocumentFlashcards(
   documentId: string,
   count: number = 10,
@@ -308,9 +310,23 @@ export async function generateDocumentFlashcards(
     }),
   })
   if (!res.ok) {
-    const msg = res.status === 503
-      ? "Ollama is not running. Start it with: ollama serve"
-      : "Failed to generate flashcards"
+    let msg = ""
+    try {
+      const body = await res.json() as { detail?: string }
+      if (body.detail) msg = body.detail
+    } catch {
+      // body wasn't JSON
+    }
+    if (!msg) {
+      if (res.status === 503) {
+        const mode = useAppStore.getState().llmMode
+        msg = mode === "private"
+          ? "Ollama is not running. Start it with: ollama serve"
+          : "LLM service is unreachable. Please check your internet connection or settings."
+      } else {
+        msg = "Failed to generate flashcards"
+      }
+    }
     throw new Error(msg)
   }
   const cards = (await res.json()) as unknown[]

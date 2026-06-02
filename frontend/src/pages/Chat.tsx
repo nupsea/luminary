@@ -434,6 +434,7 @@ export default function Chat() {
   const setActiveSessionId = useAppStore((s) => s.setActiveChatSessionId)
   const sidebarOpen = useAppStore((s) => s.chatSidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setChatSidebarOpen)
+  const llmMode = useAppStore((s) => s.llmMode)
   const [hydratingSession, setHydratingSession] = useState(false)
   const [webEnabled, setWebEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
@@ -793,7 +794,9 @@ export default function Chat() {
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
               const errorMsg =
                 errorCode === "llm_unavailable"
-                  ? "Ollama is not running. Start it with: ollama serve"
+                  ? (llmMode === "private"
+                      ? "Ollama is not running. Start it with: ollama serve"
+                      : "LLM service is unreachable. Please check your internet connection or settings.")
                   : errorCode === "no_context"
                     ? "No relevant content found. Make sure at least one document has been ingested."
                     : fallbackMsg

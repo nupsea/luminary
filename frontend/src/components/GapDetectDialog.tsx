@@ -99,18 +99,16 @@ async function runGapDetect(
     })
   } catch (err) {
     if (err instanceof ApiError) {
-      if (err.status === 503) {
-        throw new Error("Ollama is unavailable. Start it with: ollama serve")
-      }
       try {
         const body = JSON.parse(err.body) as { detail?: string }
         if (body.detail) throw new Error(body.detail)
       } catch (parseErr) {
-        if (parseErr instanceof Error && parseErr.message.startsWith("Unexpected")) {
-          // body wasn't JSON
-        } else if (parseErr instanceof Error) {
+        if (parseErr instanceof Error && !parseErr.message.startsWith("Unexpected")) {
           throw parseErr
         }
+      }
+      if (err.status === 503) {
+        throw new Error("Ollama is unavailable. Start it with: ollama serve")
       }
       throw new Error(`HTTP ${err.status}`)
     }

@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models import SectionSummaryModel, WebReferenceModel
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.settings_service import get_llm_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ class ReferenceEnricherService:
         except LLMUnavailableError as exc:
             raise HTTPException(
                 status_code=503,
-                detail="Ollama is unreachable. Start it with: ollama serve",
+                detail=get_llm_error_message(),
             ) from exc
 
         if not refs:

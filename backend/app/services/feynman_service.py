@@ -45,6 +45,7 @@ from app.services.feynman_strategies import (
     _strip_key_points_block,
 )
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.settings_service import get_llm_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ class FeynmanService:
         except LLMUnavailableError as exc:
             logger.warning("Feynman stream_turn: LLM unavailable: %s", exc)
             await db_session.rollback()
-            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
+            error_msg = get_llm_error_message()
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 
@@ -410,7 +411,7 @@ class FeynmanService:
         except LLMUnavailableError as exc:
             logger.warning("generate_model_explanation: LLM unavailable: %s", exc)
             await db_session.rollback()
-            error_msg = "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
+            error_msg = get_llm_error_message()
             yield f"data: {json.dumps({'error': 'llm_unavailable', 'message': error_msg})}\n\n"
             return
 

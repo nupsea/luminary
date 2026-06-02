@@ -197,7 +197,7 @@ export function NoteReaderSheet({
       setIsGeneratingTitle(false)
       return
     }
-    if (note && note.title && !note.title_auto_generated) {
+    if (note && note.title) {
       setGeneratedTitle(note.title)
       setIsGeneratingTitle(false)
       return
@@ -209,6 +209,11 @@ export function NoteReaderSheet({
           .then((title) => {
             setGeneratedTitle(title)
             setIsGeneratingTitle(false)
+            // Save it back to the db so it doesn't keep regenerating
+            void patchNote(note.id, { title }).then(() => {
+              void qc.invalidateQueries({ queryKey: ["notes"] })
+              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+            })
           })
           .catch(() => {
             setGeneratedTitle(
@@ -222,7 +227,7 @@ export function NoteReaderSheet({
         )
       }
     }
-  }, [note?.id, note?.content, note?.title, note?.title_auto_generated, isNew])
+  }, [note?.id, note?.content, note?.title, isNew])
 
   // Trigger tag suggestions on mode change or content threshold
   useEffect(() => {
@@ -326,12 +331,19 @@ export function NoteReaderSheet({
         setMode("read")
       }
       
-      if (savedNote.content.trim().length > 20) {
+      if (savedNote.title) {
+        setGeneratedTitle(savedNote.title)
+        setIsGeneratingTitle(false)
+      } else if (savedNote.content.trim().length > 20) {
         setIsGeneratingTitle(true)
         suggestNoteTitle(savedNote.content)
           .then((title) => {
             setGeneratedTitle(title)
             setIsGeneratingTitle(false)
+            void patchNote(savedNote.id, { title }).then(() => {
+              void qc.invalidateQueries({ queryKey: ["notes"] })
+              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+            })
           })
           .catch(() => {
             setIsGeneratingTitle(false)

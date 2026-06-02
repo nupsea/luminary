@@ -53,18 +53,21 @@ export function TeachBackResultCard({ data }: TeachBackResultCardProps) {
       setBtnState("done")
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 503) {
-          setErrorMsg("Ollama is unavailable. Start it with: ollama serve")
-        } else {
-          let detail = `HTTP ${err.status}`
-          try {
-            const parsed = JSON.parse(err.body) as { detail?: string }
-            if (parsed.detail) detail = parsed.detail
-          } catch {
-            // body wasn't JSON
-          }
-          setErrorMsg(detail)
+        let detail = ""
+        try {
+          const parsed = JSON.parse(err.body) as { detail?: string }
+          if (parsed.detail) detail = parsed.detail
+        } catch {
+          // body wasn't JSON
         }
+        if (!detail) {
+          if (err.status === 503) {
+            detail = "Ollama is unavailable. Start it with: ollama serve"
+          } else {
+            detail = `HTTP ${err.status}`
+          }
+        }
+        setErrorMsg(detail)
       } else {
         setErrorMsg("Request failed. Please try again.")
       }

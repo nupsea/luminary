@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ApiError, apiPost } from "@/lib/apiClient"
+import { useAppStore } from "@/store"
 
 interface FlashcardResult {
   id: string
@@ -45,6 +46,7 @@ export function DocumentFlashcardDialog({
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<FlashcardResult[]>([])
   const [error, setError] = useState<string | null>(null)
+  const llmMode = useAppStore((s) => s.llmMode)
 
   async function handleGenerate() {
     setGenerating(true)
@@ -71,7 +73,11 @@ export function DocumentFlashcardDialog({
         }
         setError(detail)
       } else {
-        setError("Generation failed. Is Ollama running?")
+        setError(
+          llmMode === "private"
+            ? "Generation failed. Is Ollama running?"
+            : "Generation failed. Check your internet connection or settings."
+        )
       }
     } finally {
       setGenerating(false)

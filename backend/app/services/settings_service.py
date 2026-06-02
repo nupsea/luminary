@@ -292,7 +292,25 @@ def read_labs_enabled_sync() -> set[str]:
     return set(value) if isinstance(value, list) else set()
 
 
+def get_llm_error_message() -> str:
+    """Return a descriptive error message based on the active LLM mode."""
+    mode = _cache.get("llm_mode", "private")
+    if mode == "private":
+        return "Ollama is not running. Start it with: ollama serve"
+    elif mode == "hybrid":
+        return (
+            "LLM service is unreachable. "
+            "Please check your internet connection, API key settings, or if Ollama is running."
+        )
+    else:
+        return (
+            "LLM service is unreachable. "
+            "Please check your internet connection or API key settings."
+        )
+
+
 # Routing helper — used by LLMService
+
 
 
 def get_effective_routing(background: bool = False) -> tuple[str, str | None]:

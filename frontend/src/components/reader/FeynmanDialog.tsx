@@ -20,6 +20,7 @@ import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
 
 import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
+import { useAppStore } from "@/store"
 import { API_BASE } from "@/lib/config"
 import {
   fetchSummary,
@@ -54,6 +55,7 @@ export function FeynmanDialog({
   onClose,
 }: FeynmanDialogProps) {
   const [activeTab, setActiveTab] = useState<DialogTab>("chat")
+  const llmMode = useAppStore((s) => s.llmMode)
 
   // Summary loading state
   const [summaryContent, setSummaryContent] = useState<string | null>(null)
@@ -158,7 +160,11 @@ export function FeynmanDialog({
         if (err instanceof ApiError && err.status !== 503) {
           setSessionError(`Failed to start session (HTTP ${err.status})`)
         } else {
-          setSessionError("Ollama is not running. Start it with: ollama serve")
+          setSessionError(
+            llmMode === "private"
+              ? "Ollama is not running. Start it with: ollama serve"
+              : "LLM service is unreachable. Please check your internet connection or settings."
+          )
         }
       } finally {
         if (!cancelled) setSessionLoading(false)
@@ -261,7 +267,9 @@ export function FeynmanDialog({
             if (payload["error"] === "llm_unavailable") {
               const msg = typeof payload["message"] === "string"
                 ? payload["message"]
-                : "Ollama is not running. Start it with: ollama serve"
+                : (llmMode === "private"
+                    ? "Ollama is not running. Start it with: ollama serve"
+                    : "LLM service is unreachable. Please check your connection or settings.")
               setMessages((prev) => [
                 ...prev.slice(0, -1),
                 { role: "tutor", content: msg },
@@ -288,7 +296,13 @@ export function FeynmanDialog({
       if ((err as { name?: string }).name !== "AbortError") {
         setMessages((prev) => [
           ...prev.slice(0, -1),
-          { role: "tutor", content: "Error: Connection failed. Check that Ollama is running." },
+          {
+            role: "tutor",
+            content:
+              llmMode === "private"
+                ? "Error: Connection failed. Check that Ollama is running."
+                : "Error: Connection failed. Check your internet connection or settings.",
+          },
         ])
       }
     } finally {
@@ -396,7 +410,11 @@ export function FeynmanDialog({
         }
       }
     } catch {
-      setModelExplanationError("Connection failed. Check that Ollama is running.")
+      setModelExplanationError(
+        llmMode === "private"
+          ? "Connection failed. Check that Ollama is running."
+          : "Connection failed. Check your internet connection or settings."
+      )
     } finally {
       setModelExplanationStreaming(false)
     }

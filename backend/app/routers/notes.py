@@ -97,6 +97,7 @@ from app.services.notes_service import (
 from app.services.notes_service import (
     upsert_note_graph as _upsert_note_graph,
 )
+from app.services.settings_service import get_llm_error_message
 from app.services.vector_store import get_lancedb_service
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,8 @@ async def create_note(
         content=req.content,
         content_hash=content_hash,
         group_name=req.group_name,
+        title=None,
+        title_auto_generated=True,
         created_at=now,
         updated_at=now,
     )
@@ -603,7 +606,7 @@ async def generate_note_flashcards(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is unavailable. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
 
     logger.info("Generated %d note flashcards tag=%s", len(cards), req.tag)
@@ -938,7 +941,7 @@ async def gap_detect(
     except LLMUnavailableError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Ollama is unavailable. Start it with: ollama serve",
+            detail=get_llm_error_message(),
         ) from exc
 
     logger.info(
