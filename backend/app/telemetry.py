@@ -43,15 +43,15 @@ _KIND_RETRIEVER = OpenInferenceSpanKindValues.RETRIEVER.value
 
 _initialized = False
 _PHOENIX_PORT = 6006
-_PHOENIX_OTLP_ENDPOINT = f"http://localhost:{_PHOENIX_PORT}/v1/traces"
+_PHOENIX_OTLP_ENDPOINT = f"http://127.0.0.1:{_PHOENIX_PORT}/v1/traces"
 
 
 def _wait_for_phoenix(timeout: float = 15.0, interval: float = 0.5) -> bool:
-    """Poll localhost:6006 until Phoenix is accepting connections or timeout."""
+    """Poll 127.0.0.1:6006 until Phoenix is accepting connections or timeout."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection(("localhost", _PHOENIX_PORT), timeout=1):
+            with socket.create_connection(("127.0.0.1", _PHOENIX_PORT), timeout=1):
                 return True
         except OSError:
             time.sleep(interval)

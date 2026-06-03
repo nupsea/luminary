@@ -33,7 +33,7 @@ async def test_db(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
 
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -53,19 +53,21 @@ async def test_db(tmp_path, monkeypatch):
 
     yield engine, factory, tmp_path
 
+    # Clean up note creation background tasks to avoid engine.dispose hang
+    from app.routers.notes import _background_tasks
+    pending = list(_background_tasks)
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    _background_tasks.clear()
+
     db_module._engine = orig_engine
     db_module._session_factory = orig_factory
 
     vs_module._lancedb_service = orig_lancedb
     graph_module._graph_service = orig_graph
     embedder_module._embedding_service = orig_embedder
-
-    # Cancel any pending notes background tasks to prevent them from leaking into other tests
-    import app.routers.notes as notes_router
-    _pending = list(notes_router._background_tasks)
-    for _t in _pending:
-        _t.cancel()
-    notes_router._background_tasks.clear()
 
     get_settings.cache_clear()
     await engine.dispose()

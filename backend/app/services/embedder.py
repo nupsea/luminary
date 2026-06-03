@@ -31,12 +31,32 @@ class EmbeddingService:
         # ONNX loop for this specific task.
         from sentence_transformers import SentenceTransformer
 
+        # Try loading locally first to prevent blocking name resolution attempts offline
         try:
-            self._model = SentenceTransformer(MODEL_NAME, cache_folder=str(cache_dir), device="cpu")
-            logger.info("Loaded %s via SentenceTransformer", MODEL_NAME)
-        except Exception as exc:
-            logger.error("Failed to load embedding model: %s", exc)
-            raise
+            self._model = SentenceTransformer(
+                MODEL_NAME,
+                cache_folder=str(cache_dir),
+                device="cpu",
+                local_files_only=True,
+            )
+            logger.info("Loaded %s via SentenceTransformer (local cache)", MODEL_NAME)
+        except Exception as local_exc:
+            logger.info(
+                "Could not load %s locally (local_files_only=True), trying online: %s",
+                MODEL_NAME,
+                local_exc,
+            )
+            try:
+                self._model = SentenceTransformer(
+                    MODEL_NAME,
+                    cache_folder=str(cache_dir),
+                    device="cpu",
+                    local_files_only=False,
+                )
+                logger.info("Loaded %s via SentenceTransformer (downloaded)", MODEL_NAME)
+            except Exception as exc:
+                logger.error("Failed to load embedding model: %s", exc)
+                raise
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """Encode texts into float embeddings in batches of BATCH_SIZE."""

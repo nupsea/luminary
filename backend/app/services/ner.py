@@ -411,11 +411,29 @@ class EntityExtractor:
         from gliner import GLiNER  # noqa: PLC0415
 
         logger.info("Loading GLiNER model", extra={"model_dir": str(self._model_dir)})
-        self._model = GLiNER.from_pretrained(
-            "urchade/gliner_multi_pii-v1",
-            cache_dir=str(self._model_dir),
-        )
-        logger.info("GLiNER model loaded")
+        # Try loading locally first to prevent blocking name resolution attempts offline
+        try:
+            self._model = GLiNER.from_pretrained(
+                "urchade/gliner_multi_pii-v1",
+                cache_dir=str(self._model_dir),
+                local_files_only=True,
+            )
+            logger.info("Loaded GLiNER model (local cache)")
+        except Exception as local_exc:
+            logger.info(
+                "GLiNER local load failed (local_files_only=True), trying online download: %s",
+                local_exc,
+            )
+            try:
+                self._model = GLiNER.from_pretrained(
+                    "urchade/gliner_multi_pii-v1",
+                    cache_dir=str(self._model_dir),
+                    local_files_only=False,
+                )
+                logger.info("GLiNER model loaded (downloaded)")
+            except Exception as exc:
+                logger.error("Failed to load GLiNER model: %s", exc)
+                raise
         return self._model
 
     def extract(

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # prod: serve the built SPA and mount the API under /api on one port (no CORS).
     # dev: routers at root, CORS open, frontend served separately by Vite.
     LUMINARY_MODE: Literal["dev", "prod"] = "dev"
-    OLLAMA_URL: str = "http://localhost:11434"
+    OLLAMA_URL: str = "http://127.0.0.1:11434"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

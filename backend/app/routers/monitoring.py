@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
-_PHOENIX_BASE = "http://localhost:6006"
+_PHOENIX_BASE = "http://127.0.0.1:6006"
 _TRACES_TIMEOUT = 3.0  # seconds
 _PHOENIX_REACHABILITY_TTL = 30.0  # seconds
 

@@ -24,7 +24,7 @@ async def test_db(tmp_path, monkeypatch):
     from app.config import get_settings
 
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 

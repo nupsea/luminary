@@ -264,7 +264,7 @@ async def test_stats_only_completed_count_total(test_db):
 
     # Seed 2 completed and 1 abandoned and 1 active.
     await _seed_completed(factory, now)()
-    await _seed_completed(factory, now - timedelta(hours=1))()
+    await _seed_completed(factory, now - timedelta(minutes=5))()
     async with factory() as db:
         db.add(
             PomodoroSessionModel(
