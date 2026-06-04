@@ -345,6 +345,10 @@ async def _graph_expand(query: str) -> str:
         # lazy imports to avoid retriever <-> services circular chains.
 
         extractor = _ner_module.get_entity_extractor()
+        if extractor._model is None:
+            logger.info("graph_expand: GLiNER model not loaded yet; skipping expansion")
+            return query
+
         # Direct sync call -- single short query, GLiNER inference takes ~30ms
         # warm. Wrapping in asyncio.to_thread here causes ThreadPoolExecutor /
         # LanceDB BackgroundLoop contention in pytest that surfaces as an

@@ -193,7 +193,7 @@ async def classify_node(state: ChatState) -> dict:
     intent, confidence = classify_intent_heuristic(question)
     source = "heuristic"
 
-    if confidence < 0.9:
+    if confidence < 0.7:
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"
 

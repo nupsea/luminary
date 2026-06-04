@@ -25,6 +25,7 @@ Entity types (13 total):
 
 import logging
 import re
+import threading
 import uuid
 from collections import Counter
 from pathlib import Path
@@ -395,6 +396,9 @@ def get_entity_extractor() -> "EntityExtractor":
     return _extractor
 
 
+_ner_lock = threading.Lock()
+
+
 class EntityExtractor:
     _model = None
 
@@ -405,10 +409,11 @@ class EntityExtractor:
 
     def _load_model(self):
         """Lazy-load GLiNER model, caching to DATA_DIR/models/gliner/."""
-        if self._model is not None:
-            return self._model
+        with _ner_lock:
+            if self._model is not None:
+                return self._model
 
-        from gliner import GLiNER  # noqa: PLC0415
+            from gliner import GLiNER  # noqa: PLC0415
 
         logger.info("Loading GLiNER model", extra={"model_dir": str(self._model_dir)})
         # Try loading locally first to prevent blocking name resolution attempts offline

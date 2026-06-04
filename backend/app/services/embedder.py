@@ -1,4 +1,5 @@
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -14,17 +15,21 @@ MODEL_NAME = "BAAI/bge-small-en-v1.5"
 BATCH_SIZE = 128  # Larger batches are more efficient for lighter models
 
 
+_embedder_lock = threading.Lock()
+
+
 class EmbeddingService:
     def __init__(self) -> None:
         self._model: Any = None
         logger.info("EmbeddingService created")
 
     def _load_model(self) -> None:
-        if self._model is not None:
-            return
-        settings = get_settings()
-        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "bge-small"
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        with _embedder_lock:
+            if self._model is not None:
+                return
+            settings = get_settings()
+            cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "bge-small"
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Use SentenceTransformer directly. It is highly optimized for CPU batching
         # and manages its own internal thread pool more effectively than a raw
