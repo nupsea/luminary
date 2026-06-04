@@ -31,7 +31,7 @@ class AudioTranscriber:
             )
             logger.info("AudioTranscriber: loaded model_size=%s from local cache", model_size)
         except Exception as local_exc:
-            logger.info(
+            logger.debug(
                 "AudioTranscriber: could not load model_size=%s locally, attempting download: %s",
                 model_size,
                 local_exc,

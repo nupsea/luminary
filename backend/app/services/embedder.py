@@ -41,7 +41,7 @@ class EmbeddingService:
             )
             logger.info("Loaded %s via SentenceTransformer (local cache)", MODEL_NAME)
         except Exception as local_exc:
-            logger.info(
+            logger.debug(
                 "Could not load %s locally (local_files_only=True), trying online: %s",
                 MODEL_NAME,
                 local_exc,

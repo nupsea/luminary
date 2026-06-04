@@ -420,7 +420,7 @@ class EntityExtractor:
             )
             logger.info("Loaded GLiNER model (local cache)")
         except Exception as local_exc:
-            logger.info(
+            logger.debug(
                 "GLiNER local load failed (local_files_only=True), trying online download: %s",
                 local_exc,
             )

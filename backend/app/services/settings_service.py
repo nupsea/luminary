@@ -312,7 +312,6 @@ def get_llm_error_message() -> str:
 # Routing helper — used by LLMService
 
 
-
 def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     """Return (litellm_model_string, api_key_or_none).
 

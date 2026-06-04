@@ -20,6 +20,7 @@ from app.services.settings_service import (
     decrypt_setting,
     encrypt_setting,
     get_effective_routing,
+    get_llm_error_message,
     update_llm_settings,
 )
 
@@ -335,3 +336,34 @@ def test_encrypt_returns_hex_not_plaintext():
     encrypted = encrypt_setting(original)
     assert encrypted != original
     bytes.fromhex(encrypted)
+
+
+@pytest.fixture
+def restore_mode():
+    original = svc_module._cache.get("llm_mode", "private")
+    yield
+    svc_module._cache["llm_mode"] = original
+
+
+def test_llm_error_message_private_mentions_ollama(restore_mode):
+    svc_module._cache["llm_mode"] = "private"
+    assert "ollama serve" in get_llm_error_message()
+
+
+def test_llm_error_message_hybrid_mentions_keys_and_ollama(restore_mode):
+    svc_module._cache["llm_mode"] = "hybrid"
+    msg = get_llm_error_message()
+    assert "API key" in msg
+    assert "Ollama" in msg
+
+
+def test_llm_error_message_cloud_mentions_keys_not_ollama(restore_mode):
+    svc_module._cache["llm_mode"] = "cloud"
+    msg = get_llm_error_message()
+    assert "API key" in msg
+    assert "Ollama" not in msg
+
+
+def test_llm_error_message_defaults_to_private_when_unset(restore_mode):
+    svc_module._cache.pop("llm_mode", None)
+    assert "ollama serve" in get_llm_error_message()
