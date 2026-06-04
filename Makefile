@@ -65,6 +65,7 @@ lint:
 	cd frontend && npx tsc --noEmit
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	bash scripts/check_powershell.sh
 
 test:
 	cd backend && uv run pytest
@@ -127,6 +128,7 @@ else
 endif
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	bash scripts/check_powershell.sh
 	cd frontend && npm run build
 	cd frontend && npx tsc --noEmit
 	@echo "CI passed."

@@ -164,6 +164,8 @@ if ($installNode) {
     if (Test-Path $nodeStage) { Remove-Item -Recurse -Force $nodeStage }
     Expand-Archive -Path $nodeZip -DestinationPath $nodeStage -Force
     if (Test-Path $nodeHome) { Remove-Item -Recurse -Force $nodeHome }
+    $nodeParent = Split-Path -Parent $nodeHome
+    if (-not (Test-Path $nodeParent)) { New-Item -ItemType Directory -Path $nodeParent -Force | Out-Null }
     Move-Item -Path "$nodeStage\$nodeDist" -Destination $nodeHome -Force
     Remove-Item -Recurse -Force $nodeStage -ErrorAction SilentlyContinue
 
@@ -361,7 +363,8 @@ Write-Host "  Luminary is ready  --  http://localhost:$port" -ForegroundColor Gr
 try {
     Wait-Process -Id $proc.Id
 } finally {
-    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    # Kill the whole tree: $proc is the `uv` launcher; uvicorn/python run as children.
+    if (-not $proc.HasExited) { taskkill /PID $proc.Id /T /F 2>$null | Out-Null }
 }
 '@
 

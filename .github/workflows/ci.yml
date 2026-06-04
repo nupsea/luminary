@@ -52,3 +52,15 @@ jobs:
 
       - name: Run CI checks
         run: make ci
+
+  powershell-syntax:
+    runs-on: ubuntu-latest
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    steps:
+      - uses: actions/checkout@v4
+      # pwsh is preinstalled on ubuntu-latest; run the parser directly so a
+      # missing pwsh fails the job rather than silently skipping.
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: ./scripts/check_powershell.ps1
