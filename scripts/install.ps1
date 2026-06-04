@@ -1,20 +1,12 @@
 # install.ps1 — Automated native Windows installer for Luminary.
 #
-# Safe to re-run. Handles dependencies and corporate proxies gracefully.
+# Installs everything per-user — no Administrator rights required. Safe to re-run.
+# Handles dependencies and corporate proxies gracefully.
 #
-# Usage:
-#   Open PowerShell as Administrator and run:
+# Usage (normal PowerShell window, no elevation needed):
 #   Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
 
 $ErrorActionPreference = "Stop"
-
-# ---------------------------------------------------------------------------
-# Verify Administrator Privileges
-# ---------------------------------------------------------------------------
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Error "This installer script must be run in a PowerShell session opened as Administrator. Please right-click PowerShell, choose 'Run as Administrator', and try again."
-}
 
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "   Starting Luminary Windows Installer" -ForegroundColor Cyan
@@ -45,6 +37,19 @@ function Test-CommandExists($Command) {
     return (Get-Command $Command -ErrorAction SilentlyContinue) -ne $null
 }
 
+# Persist a directory onto the *user* PATH (no admin needed) and the live session.
+function Add-UserPath($Dir) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not $userPath) { $userPath = "" }
+    if (($userPath -split ';') -notcontains $Dir) {
+        $newPath = if ($userPath) { "$Dir;$userPath" } else { $Dir }
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    }
+    if (($env:PATH -split ';') -notcontains $Dir) {
+        $env:PATH = "$Dir;$env:PATH"
+    }
+}
+
 # ---------------------------------------------------------------------------
 # 2. Install Python 3.13 (if missing)
 # ---------------------------------------------------------------------------
@@ -52,18 +57,20 @@ if (Test-CommandExists "python") {
     $pyVersion = python --version 2>&1
     Write-Host "[install] Python is already installed: $pyVersion" -ForegroundColor Green
 } else {
-    Write-Host "[install] Python not found. Installing Python 3.13 silently..." -ForegroundColor Yellow
+    Write-Host "[install] Python not found. Installing Python 3.13 (per-user, no admin)..." -ForegroundColor Yellow
+    # Pinned release — bump periodically as new 3.13.x patch releases land.
     $pyUrl = "https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
     $pyPath = "$env:TEMP\python-3.13.0.exe"
-    
+
     Write-Host "[install] Downloading Python installer..." -ForegroundColor Gray
     Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath
-    
+
     Write-Host "[install] Running installer (this may take a minute)..." -ForegroundColor Gray
-    Start-Process -FilePath $pyPath -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1" -Wait
-    
-    # Update PATH for the current session
-    $env:PATH = "C:\Program Files\Python313\;C:\Program Files\Python313\Scripts\;$env:PATH"
+    Start-Process -FilePath $pyPath -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1" -Wait
+
+    # Per-user install location; PrependPath=1 persists it to the user PATH.
+    $pyBase = "$env:LOCALAPPDATA\Programs\Python\Python313"
+    $env:PATH = "$pyBase\;$pyBase\Scripts\;$env:PATH"
     
     if (Test-CommandExists "python") {
         Write-Host "[install] Python installed successfully!" -ForegroundColor Green
@@ -113,7 +120,7 @@ if ($installNode) {
                 }
             }
         } catch {
-            Write-Warning "fnm failed to install/use Node 20. Falling back to MSI installer."
+            Write-Warning "fnm failed to install/use Node 20. Falling back to a per-user portable install."
         }
     }
     elseif (Test-CommandExists "nvm") {
@@ -134,48 +141,53 @@ if ($installNode) {
                 }
             }
         } catch {
-            Write-Warning "nvm failed to install/use Node 20. Falling back to MSI installer."
+            Write-Warning "nvm failed to install/use Node 20. Falling back to a per-user portable install."
         }
     }
 }
 
 if ($installNode) {
-    Write-Host "[install] Downloading Node.js 20 LTS installer..." -ForegroundColor Yellow
-    $nodeUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-x64.msi"
-    $nodePath = "$env:TEMP\node-v20.msi"
-    
-    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodePath
-    
-    Write-Host "[install] Running installer silently (this may take a minute)..." -ForegroundColor Gray
-    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$nodePath`"", "/quiet", "/norestart" -Wait -PassThru
-    
-    # Check if installer failed
-    if ($process.ExitCode -ne 0) {
-        Write-Warning "Node.js MSI installer exited with code $($process.ExitCode)."
-    }
+    # Per-user portable install (no admin): download the official ZIP and unpack it
+    # under %LOCALAPPDATA%, then put it on the user PATH. Pinned LTS — bump
+    # periodically as new Node 20.x releases land.
+    $nodeVer = "v20.11.1"
+    $nodeDist = "node-$nodeVer-win-x64"
+    $nodeUrl = "https://nodejs.org/dist/$nodeVer/$nodeDist.zip"
+    $nodeZip = "$env:TEMP\$nodeDist.zip"
+    $nodeHome = "$env:LOCALAPPDATA\Programs\nodejs"
+    $nodeStage = "$env:TEMP\luminary-node"
 
-    # Prepend default Node.js installation directory to PATH
-    $env:PATH = "C:\Program Files\nodejs\;$env:PATH"
-    
+    Write-Host "[install] Downloading Node.js $nodeVer (per-user portable)..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip
+
+    Write-Host "[install] Extracting Node.js to $nodeHome ..." -ForegroundColor Gray
+    if (Test-Path $nodeStage) { Remove-Item -Recurse -Force $nodeStage }
+    Expand-Archive -Path $nodeZip -DestinationPath $nodeStage -Force
+    if (Test-Path $nodeHome) { Remove-Item -Recurse -Force $nodeHome }
+    Move-Item -Path "$nodeStage\$nodeDist" -Destination $nodeHome -Force
+    Remove-Item -Recurse -Force $nodeStage -ErrorAction SilentlyContinue
+
+    Add-UserPath $nodeHome
+
     if (Test-CommandExists "node") {
         $newNodeVersion = node --version
         $cleanVersion = $newNodeVersion.TrimStart('v')
         $majorVersionStr = $cleanVersion.Split('.')[0]
         $majorVersion = 0
         if ([int]::TryParse($majorVersionStr, [ref]$majorVersion) -and $majorVersion -ge 20) {
-            Write-Host "[install] Node.js installed/updated successfully: $newNodeVersion" -ForegroundColor Green
+            Write-Host "[install] Node.js installed successfully: $newNodeVersion" -ForegroundColor Green
         } else {
-            Write-Warning "Node.js was installed, but the active version in this shell is still $newNodeVersion (requires >= 20)."
+            Write-Warning "Node.js was installed to $nodeHome, but the active version in this shell is still $newNodeVersion (requires >= 20)."
             $activeNodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
             Write-Warning "Active node binary is resolved at: '$activeNodePath'"
-            if ($activeNodePath -and $activeNodePath -notlike "*C:\Program Files\nodejs*") {
-                Write-Warning "This old Node path is overriding the new Node.js 20 installation. Please uninstall the old version or ensure 'C:\Program Files\nodejs\' is placed higher in your system/user PATH environment variable."
+            if ($activeNodePath -and $activeNodePath -notlike "*$nodeHome*") {
+                Write-Warning "An older Node on your PATH is overriding the new install. Remove it, or ensure '$nodeHome' is earlier in your user PATH."
             } else {
-                Write-Warning "Please close this PowerShell console, open a new Administrator PowerShell window, and run the script again to pick up the updated PATH."
+                Write-Warning "Please close this PowerShell console, open a new window, and run the script again to pick up the updated PATH."
             }
         }
     } else {
-        Write-Warning "Node.js was installed, but is not yet on the PATH. You may need to restart PowerShell after installation."
+        Write-Warning "Node.js was extracted to $nodeHome, but is not yet on the PATH. Open a new PowerShell window and re-run."
     }
 }
 
@@ -188,10 +200,9 @@ if (Test-CommandExists "uv") {
 } else {
     Write-Host "[install] Installing uv (Python package manager)..." -ForegroundColor Yellow
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    
-    # Update PATH for current session
-    $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
-    
+
+    Add-UserPath "$env:USERPROFILE\.local\bin"
+
     if (Test-CommandExists "uv") {
         Write-Host "[install] uv installed successfully!" -ForegroundColor Green
     } else {
@@ -213,11 +224,10 @@ if (Test-CommandExists "ollama") {
     Write-Host "[install] Downloading Ollama installer..." -ForegroundColor Gray
     Invoke-WebRequest -Uri $ollamaUrl -OutFile $ollamaPath
     
-    Write-Host "[install] Running installer..." -ForegroundColor Gray
+    Write-Host "[install] Running installer (per-user, no admin)..." -ForegroundColor Gray
     Start-Process -FilePath $ollamaPath -ArgumentList "/silent" -Wait
-    
-    # Update PATH for current session
-    $env:PATH = "$env:LOCALAPPDATA\Programs\Ollama\;$env:PATH"
+
+    Add-UserPath "$env:LOCALAPPDATA\Programs\Ollama"
 }
 
 # Check if port 11434 is already active
@@ -234,12 +244,31 @@ if ($portActive) {
     }
 }
 
-# Pull models
+# Pull the chat model
 try {
     Write-Host "[install] Pulling Llama 3.2 chat model (this can take a few minutes)..." -ForegroundColor Yellow
     ollama pull llama3.2
 } catch {
     Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull llama3.2' manually." -ForegroundColor Red
+}
+
+# Optional vision model (labs-gated; powers image/figure analysis). Skipped by
+# default — it's a large download. Choose via the LUMINARY_VISION_MODEL env var,
+# the prompt below, or install it later with: ollama pull llava:7b
+$visionModel = $env:LUMINARY_VISION_MODEL
+if (-not $visionModel -and [Environment]::UserInteractive) {
+    $answer = Read-Host "[install] Install the optional vision model (llava:7b, ~4.7 GB) for image/figure analysis? [y/N]"
+    if ($answer -match '^(y|yes)$') { $visionModel = "llava:7b" }
+}
+if ($visionModel) {
+    try {
+        Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
+        ollama pull $visionModel
+    } catch {
+        Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
+    }
+} else {
+    Write-Host "[install] Skipping vision model. To enable image/figure analysis later, run: ollama pull llava:7b" -ForegroundColor Gray
 }
 
 # ---------------------------------------------------------------------------
@@ -300,16 +329,41 @@ try {
 # ---------------------------------------------------------------------------
 Set-Location -Path $RepoRoot
 
-$startScriptContent = @"
+# Literal here-string (@'...'@): nothing is expanded at generation time, so the
+# script below is written to start.ps1 verbatim. Mirrors start.sh: launch the
+# server, poll /health until ready, print a banner, then stay attached.
+$startScriptContent = @'
 # start.ps1 — Startup script for Luminary
-`$ErrorActionPreference = "Stop"
-Set-Location -Path "`$PSScriptRoot\backend"
-`$env:DATA_DIR="`$PSScriptRoot\.luminary"
-`$env:LUMINARY_MODE="prod"
-`$env:LUMINARY_SURFACE_TIER="public"
-Write-Host "Starting Luminary Backend on http://localhost:7820 ..." -ForegroundColor Green
-uv run uvicorn app.main:app --host 127.0.0.1 --port 7820
-"@
+$ErrorActionPreference = "Stop"
+Set-Location -Path "$PSScriptRoot\backend"
+$env:DATA_DIR = "$PSScriptRoot\.luminary"
+$env:LUMINARY_MODE = "prod"
+$env:LUMINARY_SURFACE_TIER = "public"
+$port = 7820
+
+Write-Host "Starting Luminary on http://localhost:$port ..." -ForegroundColor Cyan
+$proc = Start-Process -FilePath "uv" `
+    -ArgumentList "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
+    -NoNewWindow -PassThru
+
+for ($i = 0; $i -lt 60; $i++) {
+    if ($proc.HasExited) {
+        Write-Error "Backend exited before becoming ready (exit code $($proc.ExitCode))."
+    }
+    try {
+        $resp = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 2
+        if ($resp.StatusCode -eq 200) { break }
+    } catch {}
+    Start-Sleep -Seconds 1
+}
+
+Write-Host "  Luminary is ready  --  http://localhost:$port" -ForegroundColor Green
+try {
+    Wait-Process -Id $proc.Id
+} finally {
+    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+}
+'@
 
 $startScriptContent | Out-File -FilePath "$RepoRoot\start.ps1" -Encoding utf8
 
@@ -317,8 +371,12 @@ Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "       Installation Complete!" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
+Write-Host "Installed per-user (no admin). If a tool is reported 'not on PATH'"
+Write-Host "above, open a NEW PowerShell window so the updated PATH takes effect."
+Write-Host ""
 Write-Host "To start the application, run:"
 Write-Host "  .\start.ps1" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Then open http://localhost:7820 in your browser."
+Write-Host "Optional: enable image/figure analysis later with 'ollama pull llava:7b'."
 Write-Host "=========================================" -ForegroundColor Green

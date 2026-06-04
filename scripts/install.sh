@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # install.sh — idempotent one-command install for Luminary.
 #
-# Installs uv, Node, Ollama (per-platform), pulls the default LLM + vision
-# models, syncs backend deps (public profile), builds the frontend SPA.
-# Safe to re-run.
+# Installs uv, Node, Ollama (per-platform), pulls the default chat LLM (and an
+# optional vision model on request), syncs backend deps (public profile), builds
+# the frontend SPA. Safe to re-run.
 #
 # Usage:   bash scripts/install.sh
 # Then:    make start
@@ -102,6 +102,18 @@ fi
 
 # Pull models only if not already cached.
 _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
+
+# Optional vision model (labs-gated; powers image/figure analysis). Skipped by
+# default — large download. Set LUMINARY_VISION_MODEL, answer the prompt, or add
+# it later with: ollama pull llava:7b
+if [ -z "$VISION_MODEL" ] && [ -t 0 ]; then
+    printf '\033[0;36m[install]\033[0m Install the optional vision model (llava:7b, ~4.7GB) for image/figure analysis? [y/N] '
+    read -r _ans
+    case "$_ans" in
+        y|Y|yes|YES) VISION_MODEL="llava:7b" ;;
+    esac
+fi
+
 for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     [ -z "$model" ] && continue
     if _pulled "$model" || _pulled "${model}:latest"; then
@@ -111,6 +123,8 @@ for model in "$CHAT_MODEL" "$VISION_MODEL"; do
         ollama pull "$model"
     fi
 done
+
+[ -z "$VISION_MODEL" ] && _info "Skipping vision model. Enable image/figure analysis later with: ollama pull llava:7b"
 
 # ---------------------------------------------------------------------------
 # Backend deps — public profile (no labs/dev groups)

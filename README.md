@@ -27,13 +27,14 @@ make start     # Starts the production server on http://localhost:7820
 
 ### Windows (Native Fallback)
 If you are behind a corporate proxy/VPN that blocks Docker SSL traffic:
-1. Open **PowerShell as Administrator** in the project directory.
+1. Open a normal **PowerShell** window in the project directory (no Administrator rights needed — everything installs per-user).
 2. Run:
    ```powershell
    Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
    ```
+3. The installer offers to pull the optional vision model (`llava:7b`) for image/figure analysis. You can skip it and add it later with `ollama pull llava:7b`.
 
-Open **http://localhost:7820** in your browser when ready.
+Open **http://localhost:7820** in your browser when ready (run `.\start.ps1`).
 
 ---
 
