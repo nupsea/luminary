@@ -362,6 +362,22 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
 app.include_router(misc_router, prefix=_API_PREFIX)
 
 
+def resolve_spa_asset(dist: Path, full_path: str) -> Path | None:
+    """Resolve a request path to a real file inside ``dist``, or None.
+
+    Returns None for empty paths and for any path that escapes ``dist`` (e.g.
+    ``../`` traversal), so callers fall back to index.html. Containment is the
+    load-bearing check: ``serve_spa`` is the only unauthenticated catch-all in
+    prod, so a path that resolves outside ``dist`` must never be served.
+    """
+    if not full_path:
+        return None
+    candidate = (dist / full_path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(dist.resolve()):
+        return candidate
+    return None
+
+
 # In prod, serve the built SPA. The API is under /api, so everything else falls
 # back to index.html for client-side routing (real files are served directly).
 if _mode == "prod":
@@ -371,7 +387,7 @@ if _mode == "prod":
     async def serve_spa(full_path: str) -> FileResponse:
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
-        candidate = _DIST / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
+        asset = resolve_spa_asset(_DIST, full_path)
+        if asset is not None:
+            return FileResponse(asset)
         return FileResponse(_DIST / "index.html")

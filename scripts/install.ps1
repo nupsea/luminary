@@ -21,14 +21,24 @@ Write-Host "   Starting Luminary Windows Installer" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# 0. Global Corporate Proxy / SSL Bypass Settings
+# 0. Corporate Proxy / TLS settings (this session only)
 # ---------------------------------------------------------------------------
-Write-Host "[install] Configuring SSL/TLS bypass variables for corporate networks..." -ForegroundColor Gray
+# UV_SYSTEM_CERTS makes uv trust the OS certificate store, which on a managed
+# machine already includes the corporate proxy's root CA -- this is the safe,
+# verification-preserving path and is preferred. UV_INSECURE_HOST and npm's
+# strict-ssl=false actually DISABLE certificate verification, so they are opt-in
+# and, when enabled, are applied only to this PowerShell process (env vars), never
+# written to the user's global npm config where they would silently weaken TLS for
+# every future install.
 $env:UV_SYSTEM_CERTS = "true"
-$env:UV_INSECURE_HOST = "pypi.org files.pythonhosted.org pythonhosted.org"
-try {
-    Start-Process -FilePath "npm" -ArgumentList "config", "set", "strict-ssl", "false" -Wait -NoNewWindow
-} catch {}
+
+if ($env:LUMINARY_INSECURE_TLS -eq "1") {
+    Write-Warning "LUMINARY_INSECURE_TLS=1 set: DISABLING TLS certificate verification for uv and npm for THIS session only. Prefer importing your corporate root CA instead. Do not use on an untrusted network."
+    $env:UV_INSECURE_HOST = "pypi.org files.pythonhosted.org pythonhosted.org"
+    $env:NPM_CONFIG_STRICT_SSL = "false"
+} else {
+    Write-Host "[install] Using system certificate store (UV_SYSTEM_CERTS). If installs fail behind a TLS-inspecting proxy, re-run with `$env:LUMINARY_INSECURE_TLS='1' (relaxes verification for this session only)." -ForegroundColor Gray
+}
 
 # Helper to check if a command exists
 function Test-CommandExists($Command) {
@@ -298,7 +308,7 @@ Set-Location -Path "`$PSScriptRoot\backend"
 `$env:LUMINARY_MODE="prod"
 `$env:LUMINARY_SURFACE_TIER="public"
 Write-Host "Starting Luminary Backend on http://localhost:7820 ..." -ForegroundColor Green
-uv run uvicorn app.main:app --host 0.0.0.0 --port 7820
+uv run uvicorn app.main:app --host 127.0.0.1 --port 7820
 "@
 
 $startScriptContent | Out-File -FilePath "$RepoRoot\start.ps1" -Encoding utf8
