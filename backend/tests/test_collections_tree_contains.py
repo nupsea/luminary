@@ -19,7 +19,7 @@ async def test_db(tmp_path, monkeypatch):
     from app.config import get_settings
 
     get_settings.cache_clear()
-    engine = make_engine("sqlite+aiosqlite:///:memory:")
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     await create_all_tables(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -28,6 +28,18 @@ async def test_db(tmp_path, monkeypatch):
     db_module._engine = engine
     db_module._session_factory = factory
     yield engine, factory
+
+    # Clean up note creation background tasks to avoid engine.dispose hang
+    import asyncio
+
+    from app.routers.notes import _background_tasks
+    pending = list(_background_tasks)
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    _background_tasks.clear()
+
     db_module._engine = orig_engine
     db_module._session_factory = orig_factory
     get_settings.cache_clear()

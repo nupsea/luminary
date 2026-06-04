@@ -6,7 +6,6 @@ neighbors) and section-summary augmentation. For scope='all',
 caps at 2 chunks per document so no single doc dominates context.
 """
 
-import asyncio
 import logging
 
 from sqlalchemy import and_, or_, select
@@ -62,6 +61,43 @@ async def _fetch_neighbor_chunks(
         return [(row.chunk_index, row.text) for row in rows]
 
 
+async def _fetch_neighbor_chunks_batch(
+    chunk_keys: list[tuple[str, int]],
+) -> dict[tuple[str, int], list[tuple[int, str]]]:
+    """Batch-fetch immediate neighbors (chunk_index - 1, chunk_index + 1)
+    for a list of (document_id, chunk_index) keys.
+    """
+    if not chunk_keys:
+        return {}
+
+    conditions = [
+        and_(
+            ChunkModel.document_id == doc_id,
+            ChunkModel.chunk_index.in_([idx - 1, idx + 1]),
+        )
+        for doc_id, idx in chunk_keys
+    ]
+
+    async with get_session_factory()() as session:
+        stmt = select(ChunkModel.document_id, ChunkModel.chunk_index, ChunkModel.text).where(
+            or_(*conditions)
+        )
+        rows = await session.execute(stmt)
+
+        # Index fetched chunks by (document_id, chunk_index)
+        fetched = {(row.document_id, row.chunk_index): row.text for row in rows}
+
+        # Build results mapping (document_id, chunk_index) -> list of neighbor tuples
+        results = {}
+        for doc_id, idx in chunk_keys:
+            neighbors = []
+            for n_idx in (idx - 1, idx + 1):
+                if (doc_id, n_idx) in fetched:
+                    neighbors.append((n_idx, fetched[(doc_id, n_idx)]))
+            results[(doc_id, idx)] = neighbors
+        return results
+
+
 async def search_node(state: ChatState) -> dict:
     """Hybrid retrieval with context expansion and section summary augmentation.
 
@@ -92,24 +128,22 @@ async def search_node(state: ChatState) -> dict:
         chunks: list[ScoredChunk]
         chunks, image_ids = await retriever.retrieve_with_images(q, effective_doc_ids, k=k)
 
-        # Batch-fetch section summaries for all (document_id, section_heading) pairs
-        pairs = [(c.document_id, c.section_heading) for c in chunks if c.section_heading]
+        # Batch-fetch section summaries for all unique (document_id, section_heading) pairs
+        pairs = list({(c.document_id, c.section_heading) for c in chunks if c.section_heading})
         section_summary_map = await _fetch_section_summaries(pairs)
 
-        # Context Expansion: fetch neighbors for each chunk
-        neighbor_tasks = [
-            _fetch_neighbor_chunks(c.chunk_id, c.document_id, c.chunk_index)
-            if hasattr(c, "chunk_index")
-            else asyncio.sleep(0, result=[])
+        # Context Expansion: batch fetch neighbors for all chunks to avoid looping db sessions
+        chunk_keys = [
+            (c.document_id, c.chunk_index)
             for c in chunks
+            if hasattr(c, "chunk_index")
         ]
-        neighbors_list = await asyncio.gather(*neighbor_tasks)
+        neighbors_map = await _fetch_neighbor_chunks_batch(chunk_keys)
 
-        for c, neighbors in zip(chunks, neighbors_list, strict=False):
+        for c in chunks:
+            neighbors = neighbors_map.get((c.document_id, c.chunk_index), [])
             # Sort and combine neighbors with the current chunk
-            all_parts = [(c.chunk_index, c.text)] + (
-                neighbors if isinstance(neighbors, list) else []
-            )
+            all_parts = [(c.chunk_index, c.text)] + neighbors
             all_parts.sort(key=lambda x: x[0])
             expanded_text = "\n\n".join([p[1] for p in all_parts])
 

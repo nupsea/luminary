@@ -195,6 +195,31 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
+    # Start pre-loading/warming up models in the background (skipped in test runs)
+    import sys
+
+    if "pytest" not in sys.modules:
+
+        async def warmup_models():
+            try:
+                logger.info("Warmup: pre-loading models in the background...")
+                from app.services.embedder import get_embedding_service
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, get_embedding_service()._load_model)
+                logger.info("Warmup: Embedding model pre-loaded.")
+            except Exception as exc:
+                logger.warning("Warmup: failed to pre-load embedding model: %s", exc)
+
+            try:
+                from app.services.ner import get_entity_extractor
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, get_entity_extractor()._load_model)
+                logger.info("Warmup: GLiNER model pre-loaded.")
+            except Exception as exc:
+                logger.warning("Warmup: failed to pre-load GLiNER model: %s", exc)
+
+        asyncio.create_task(warmup_models())
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
