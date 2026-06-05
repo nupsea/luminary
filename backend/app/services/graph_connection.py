@@ -18,19 +18,34 @@ import kuzu
 logger = logging.getLogger(__name__)
 
 
+class ThreadSafeKuzuConnection:
+    """Thread-safe proxy wrapper for kuzu.Connection to serialize all executions."""
+    def __init__(self, conn: kuzu.Connection, lock: threading.RLock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.execute(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+
 class KuzuConnection:
     """Thin wrapper around a Kuzu DB + Connection pair.
 
-    `.conn` is the raw `kuzu.Connection`; repos call `.conn.execute(...)`
-    so that the existing query strings can be lifted unchanged.
+    `.conn` is wrapped in ThreadSafeKuzuConnection to automatically serialize
+    all repos' `.conn.execute(...)` calls under the reentrant lock.
     """
 
     def __init__(self, data_dir: str) -> None:
         db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
         self.db = kuzu.Database(db_path)
-        self.conn = kuzu.Connection(self.db)
-        # Kuzu connection is not thread-safe. Serialise execute() calls.
-        self.lock = threading.Lock()
+        # Use RLock to allow reentrant query locking inside transactions (e.g. note_graph)
+        self.lock = threading.RLock()
+        raw_conn = kuzu.Connection(self.db)
+        self.conn = ThreadSafeKuzuConnection(raw_conn, self.lock)
         self._create_schema()
         logger.info("KuzuConnection initialized", extra={"db_path": db_path})
 
