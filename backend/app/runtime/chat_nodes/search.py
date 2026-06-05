@@ -7,6 +7,7 @@ caps at 2 chunks per document so no single doc dominates context.
 """
 
 import logging
+import time
 
 from sqlalchemy import and_, or_, select
 
@@ -124,9 +125,15 @@ async def search_node(state: ChatState) -> dict:
     chunks_dicts: list[dict] = []
     image_ids: list[str] = []
     try:
+        t_ret = time.perf_counter()
         retriever = get_retriever()
         chunks: list[ScoredChunk]
         chunks, image_ids = await retriever.retrieve_with_images(q, effective_doc_ids, k=k)
+        logger.info(
+            "[perf] search_node retrieve_with_images took %.2fs (%d chunks)",
+            time.perf_counter() - t_ret,
+            len(chunks),
+        )
 
         # Batch-fetch section summaries for all unique (document_id, section_heading) pairs
         pairs = list({(c.document_id, c.section_heading) for c in chunks if c.section_heading})

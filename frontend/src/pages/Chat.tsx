@@ -443,6 +443,8 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const mountTime = useRef(Date.now())
+  const didInitialHydrate = useRef(false)
+  const handledPreloadRef = useRef<object | null>(null)
 
   // Document list for the "This document" picker
   const { data: docList } = useQuery({
@@ -465,8 +467,17 @@ export default function Chat() {
   // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
   // S197: autoSubmit flag triggers immediate send
   useEffect(() => {
-    if (chatPreload) {
+    // Guard against StrictMode's double effect invocation (both share this
+    // render's closure, so the chatPreload check alone would fire the send
+    // twice). Key on the preload object identity so a later "Ask" still runs.
+    if (chatPreload && handledPreloadRef.current !== chatPreload) {
+      handledPreloadRef.current = chatPreload
       const shouldAutoSubmit = chatPreload.autoSubmit
+      // "Ask" from the reader always starts a fresh conversation rather than
+      // appending to whatever session happened to be active. Suppress the
+      // one-shot mount hydration so it can't reload the prior session over us.
+      didInitialHydrate.current = true
+      startNewChat()
       setInput(chatPreload.text)
       if (chatPreload.documentId) {
         setSelectedDocId(chatPreload.documentId)
@@ -565,7 +576,6 @@ export default function Chat() {
   }
 
   // One-shot hydration for the persisted active session at mount time.
-  const didInitialHydrate = useRef(false)
   useEffect(() => {
     if (didInitialHydrate.current) return
     didInitialHydrate.current = true
@@ -669,11 +679,17 @@ export default function Chat() {
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
 
+    // Read scope/doc from the store, not the render closure: callers like the
+    // reader "Ask" flow set these via state and immediately invoke sendMessage,
+    // so the closure values would be stale and retrieval would run unscoped.
+    const st = useAppStore.getState()
+    const effScope = st.chatScope
+    const effSelectedDocId = st.chatSelectedDocId ?? st.activeDocumentId
+
     // Resolve / create the persisted session before we start streaming, so we have
     // a stable id to attach both the user turn and the assistant turn to.
-    const effectiveDocIdAtSend = selectedDocId ?? activeDocumentId
     const sessionDocIds =
-      scope === "single" && effectiveDocIdAtSend ? [effectiveDocIdAtSend] : []
+      effScope === "single" && effSelectedDocId ? [effSelectedDocId] : []
     let sessionId = useAppStore.getState().activeChatSessionId
     const isFirstTurn =
       !sessionId ||
@@ -681,7 +697,7 @@ export default function Chat() {
     if (!sessionId) {
       try {
         const created = await createChatSession({
-          scope,
+          scope: effScope,
           document_ids: sessionDocIds,
           model: model || null,
         })
@@ -705,8 +721,7 @@ export default function Chat() {
     }
 
     try {
-      const effectiveDocId = selectedDocId ?? activeDocumentId
-      const documentIds = scope === "single" && effectiveDocId ? [effectiveDocId] : null
+      const documentIds = effScope === "single" && effSelectedDocId ? [effSelectedDocId] : null
 
       // Collect last 6 completed messages (3 exchanges) as conversation history.
       // Excludes the current streaming placeholder and not_found messages.
@@ -721,7 +736,7 @@ export default function Chat() {
         body: JSON.stringify({
           question,
           document_ids: documentIds,
-          scope,
+          scope: effScope,
           model: model || null,
           messages: historySlice.length > 0 ? historySlice : undefined,
           web_enabled: webEnabled,
@@ -837,7 +852,7 @@ export default function Chat() {
               )
               setIsStreaming(false)
               // S195: refresh suggestion pills after each answered question
-              const suggestDocId = scope === "single" ? (selectedDocId ?? activeDocumentId) : null
+              const suggestDocId = effScope === "single" ? effSelectedDocId : null
               void qc.invalidateQueries({ queryKey: ["chat-suggestions", suggestDocId] })
 
               // Persist the assistant turn + refresh sidebar list. For brand-new

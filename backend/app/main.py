@@ -221,7 +221,41 @@ async def lifespan(app: FastAPI):
                 except Exception as exc:
                     logger.warning("Warmup: failed to pre-load GLiNER model: %s", exc)
 
-            await asyncio.gather(load_embedder(), load_ner())
+            async def load_llm():
+                # Fire a tiny generation so the first user query doesn't pay the
+                # cold-start cost: for Ollama this loads the model into memory,
+                # for cloud it warms the connection / validates routing. Fails
+                # soft — a missing key or offline model must not block startup.
+                import time as _time
+
+                from app.services.llm import get_llm_service
+
+                async def _warm_one(model: str | None, label: str) -> None:
+                    try:
+                        t0 = _time.perf_counter()
+                        logger.info("Warmup: warming %s LLM...", label)
+                        await get_llm_service().generate(
+                            "ping", model=model, timeout=60.0
+                        )
+                        logger.info(
+                            "Warmup: %s LLM warm in %.2fs", label, _time.perf_counter() - t0
+                        )
+                    except Exception as exc:
+                        logger.warning("Warmup: failed to warm %s LLM: %s", label, exc)
+
+                # Resolve the interactive (foreground) and background models; warm
+                # each distinct one. In hybrid mode these differ (cloud vs Ollama).
+                try:
+                    from app.services.settings_service import get_effective_routing
+                    fg = get_effective_routing(background=False)[0]
+                    bg = get_effective_routing(background=True)[0]
+                except Exception:
+                    fg, bg = None, None
+                await _warm_one(None, "interactive")
+                if bg and bg != fg:
+                    await _warm_one(bg, "background")
+
+            await asyncio.gather(load_embedder(), load_ner(), load_llm())
 
         asyncio.create_task(warmup_models())
 

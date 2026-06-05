@@ -119,6 +119,10 @@ class LLMService:
             kwargs["api_key"] = override_key
         elif model.startswith("ollama/"):
             kwargs["api_base"] = settings.OLLAMA_URL
+            # Keep the model resident across requests and set the context window
+            # explicitly (Ollama defaults to 2048 and silently truncates beyond it).
+            kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
+            kwargs["num_ctx"] = settings.OLLAMA_NUM_CTX
         elif model.startswith("openai/"):
             kwargs["api_key"] = settings.OPENAI_API_KEY
         elif model.startswith("anthropic/"):

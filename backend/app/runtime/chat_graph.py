@@ -26,6 +26,7 @@ Strategy nodes:
 import difflib
 import logging
 import re
+import time
 
 from langgraph.graph import END, StateGraph
 from sqlalchemy import select
@@ -194,8 +195,12 @@ async def classify_node(state: ChatState) -> dict:
     source = "heuristic"
 
     if confidence < 0.7:
+        t_clf = time.perf_counter()
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"
+        logger.info(
+            "[perf] classify_node LLM fallback took %.2fs", time.perf_counter() - t_clf
+        )
 
     logger.info(
         "classify_node: intent=%s confidence=%.2f source=%s",
@@ -215,7 +220,9 @@ async def classify_node(state: ChatState) -> dict:
             prior_context = msg.get("content")
             break
     try:
+        t_rw = time.perf_counter()
         rewritten = await _maybe_rewrite_query(question, effective_doc_ids, prior_context)
+        logger.info("[perf] classify_node rewrite took %.2fs", time.perf_counter() - t_rw)
         if rewritten != question:
             logger.info("classify_node: query rewritten → %r", rewritten[:80])
     except Exception:

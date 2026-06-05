@@ -8,6 +8,7 @@ citation enrichment.  stream_answer() remains the thin SSE streaming layer.
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -171,6 +172,21 @@ QA_FACTUAL_SYSTEM_PROMPT = (
 )
 
 
+def _marker_prefix_holdback(text: str, markers: tuple[str, ...]) -> int:
+    """Length of the longest suffix of ``text`` that is a prefix of some marker.
+
+    Used while streaming to hold back only the tail that might be the start of a
+    stop marker split across tokens, so prose flushes immediately.
+    """
+    longest = 0
+    for marker in markers:
+        for k in range(min(len(text), len(marker) - 1), 0, -1):
+            if text[-k:] == marker[:k]:
+                longest = max(longest, k)
+                break
+    return longest
+
+
 def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str:
     """Format retrieved chunks as a numbered context block."""
     parts: list[str] = []
@@ -307,6 +323,7 @@ class QAService:
         All exceptions are caught and yielded as SSE error events so the HTTP
         stream is never silently dropped.
         """
+        t_start = time.perf_counter()
         try:
             # Compute store_model for _store_qa (NOT NULL constraint on model_used).
             # Do NOT reassign `model` — it must stay None for cloud routing so that
@@ -361,7 +378,12 @@ class QAService:
                 }
 
                 try:
+                    t_graph = time.perf_counter()
                     result = await graph.ainvoke(initial_state)
+                    logger.info(
+                        "[perf] graph.ainvoke (intent+retrieval+strategy) took %.2fs",
+                        time.perf_counter() - t_graph,
+                    )
                 except Exception as exc:
                     root_span.set_attribute("error", True)
                     root_span.set_attribute("error.message", "llm_unavailable")
@@ -479,26 +501,65 @@ class QAService:
                 llm = get_llm_service()
                 collected: list[str] = []
                 try:
+                    t_llm = time.perf_counter()
                     token_gen = await llm.generate(
                         llm_prompt, system=system_prompt, model=model, stream=True
                     )
+                    ttft_logged = False
 
-                    # Stream tokens as they arrive; stop before the citation JSON block.
-                    # NOT_FOUND_SENTINEL detection prevents yielding sentinel text as tokens.
+                    # Stream prose as it arrives but never surface the trailing
+                    # citation JSON or the not-found sentinel. Those markers can be
+                    # split across several tokens, so emitting each token verbatim
+                    # leaks the marker's leading characters (e.g. `{"citations`)
+                    # before the old contiguous regex could match. Instead we hold
+                    # back a tail window large enough that no marker prefix is ever
+                    # emitted, and cut cleanly once a marker actually appears.
+                    stop_markers = ('{"citations"', '{"answer"', NOT_FOUND_SENTINEL)
                     full_text_so_far = ""
+                    emitted = 0
+                    hit_marker = False
                     async for token in token_gen:
+                        if not ttft_logged:
+                            logger.info(
+                                "[perf] LLM time-to-first-token: %.2fs",
+                                time.perf_counter() - t_llm,
+                            )
+                            ttft_logged = True
                         collected.append(token)
                         full_text_so_far += token
-                        # Stop streaming tokens once we hit the citation JSON block or sentinel
-                        if re.search(r'\{"citations"|\{"answer"', full_text_so_far):
+                        positions = [
+                            p for p in (full_text_so_far.find(m) for m in stop_markers) if p != -1
+                        ]
+                        if positions:
+                            cut = min(positions)
+                            if cut > emitted:
+                                prose = full_text_so_far[emitted:cut]
+                                yield f"data: {json.dumps({'token': prose})}\n\n"
+                            emitted = cut
+                            hit_marker = True
                             break
-                        if NOT_FOUND_SENTINEL in full_text_so_far:
-                            break
-                        yield f"data: {json.dumps({'token': token})}\n\n"
+                        # Hold back only the trailing chars that could be the start
+                        # of a marker, so prose streams immediately while a marker
+                        # split across tokens never leaks its prefix.
+                        safe = len(full_text_so_far) - _marker_prefix_holdback(
+                            full_text_so_far, stop_markers
+                        )
+                        if safe > emitted:
+                            prose = full_text_so_far[emitted:safe]
+                            yield f"data: {json.dumps({'token': prose})}\n\n"
+                            emitted = safe
 
-                    # Drain any remaining tokens for full_text computation
-                    async for token in token_gen:
-                        collected.append(token)
+                    if hit_marker:
+                        # Drain any remaining tokens for full_text computation
+                        async for token in token_gen:
+                            collected.append(token)
+                    elif len(full_text_so_far) > emitted:
+                        # Stream ended with no marker — flush the held-back tail.
+                        yield f"data: {json.dumps({'token': full_text_so_far[emitted:]})}\n\n"
+
+                    logger.info(
+                        "[perf] LLM streaming complete: %.2fs", time.perf_counter() - t_llm
+                    )
 
                 except Exception as exc:
                     logger.warning(
@@ -613,6 +674,11 @@ class QAService:
                 "source_citations": result.get("source_citations") or [],
             }
             yield f"data: {json.dumps(final)}\n\n"
+            logger.info(
+                "[perf] stream_answer total: %.2fs (question=%r)",
+                time.perf_counter() - t_start,
+                question[:60],
+            )
 
         except Exception as exc:
             logger.error("stream_answer: unhandled error", exc_info=exc)

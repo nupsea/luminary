@@ -15,6 +15,7 @@ import logging
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel
 from app.runtime.chat_nodes._shared import _get_system_prompt
@@ -153,7 +154,8 @@ async def synthesize_node(state: ChatState) -> dict:
 
 
     # Assemble chunk context using the pure context packer (dedup + section grouping)
-    chunks_context = pack_context(chunks_dicts, token_budget=3000) if chunks_dicts else ""
+    token_budget = get_settings().QA_CONTEXT_TOKEN_BUDGET
+    chunks_context = pack_context(chunks_dicts, token_budget=token_budget) if chunks_dicts else ""
 
     # section_context (graph results, executive summary) capped at 1000 tokens
     context_parts: list[str] = []
