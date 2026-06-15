@@ -1,0 +1,20 @@
+/* Faithful replica of the Astro site's blog rendering (BlogPost.astro +
+   global.css): Inter, slate text, prose-lg, underlined blue links. Scoped to
+   .blog-preview and forced light so it matches the live site regardless of
+   Luminary's theme. */
+
+.blog-preview {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  background: #ffffff;
+  color: #0f172a; /* slate-900 */
+}
+
+.blog-preview .prose :where(a):not(:where([class~="not-prose"] *)) {
+  text-decoration: underline;
+  color: #2563eb; /* blue-600 */
+}
+
+.blog-preview .prose :where(a):hover:not(:where([class~="not-prose"] *)) {
+  color: #1e40af; /* blue-800 */
+}

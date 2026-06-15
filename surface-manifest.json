@@ -73,6 +73,16 @@
       "labels": { "en": "Tags" }
     },
     {
+      "id": "blog",
+      "tier": "labs",
+      "kind": "feature",
+      "frontend": { "components": ["components/blog/BlogPublishDialog"] },
+      "backend": { "routers": ["blog"], "services": ["blog_service"] },
+      "labels": { "en": "Blog Publishing" },
+      "description": "Publish a note as a post on your personal Astro site.",
+      "default_off": true
+    },
+    {
       "id": "feynman",
       "tier": "labs",
       "kind": "feature",

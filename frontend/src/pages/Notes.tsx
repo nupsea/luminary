@@ -18,8 +18,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { ArrowLeft, BookOpen, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -31,6 +31,10 @@ import { OrganizationPlanDialog, type NamingViolation } from "@/components/Organ
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
+import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
+import { BlogsPanel } from "@/components/blog/BlogsPanel"
+import { visibleSurfaces } from "@/lib/surfaceManifest"
+import { useSurfaceStore } from "@/store/surface"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -497,8 +501,14 @@ interface NoteCardProps {
 
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
+  const [blogOpen, setBlogOpen] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
+  const blogEnabled = useMemo(
+    () => visibleSurfaces(labsEnabled).some((s) => s.id === "blog"),
+    [labsEnabled],
+  )
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -517,6 +527,16 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         <span className="flex-1 truncate">{relativeDate(note.updated_at)}</span>
         {note.group_name && (
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
+        )}
+        {blogEnabled && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setBlogOpen(true) }}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
+            title="Publish as blog"
+          >
+            <Newspaper size={12} />
+            Blog
+          </button>
         )}
         <button
           onClick={() => { onEdit(); setConfirming(false) }}
@@ -635,6 +655,15 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           )}
         </div>
       )}
+
+      {blogOpen && (
+        <BlogPublishDialog
+          open={blogOpen}
+          onClose={() => setBlogOpen(false)}
+          noteId={note.id}
+          noteContent={note.content}
+        />
+      )}
     </div>
   )
 }
@@ -646,11 +675,17 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
 type FilterState =
   | { type: "all" }
   | { type: "journal" }
+  | { type: "blogs" }
   | { type: "group"; name: string }
   | { type: "tag"; name: string }
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
+  const pageLabsEnabled = useSurfaceStore((s) => s.labsEnabled)
+  const blogsEnabled = useMemo(
+    () => visibleSurfaces(pageLabsEnabled).some((s) => s.id === "blog"),
+    [pageLabsEnabled],
+  )
   const [isCreating, setIsCreating] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
@@ -845,6 +880,8 @@ export default function NotesPage() {
         navigate={navigate}
       />
     )
+  } else if (filter.type === "blogs") {
+    panelContent = <BlogsPanel />
   } else if (isSearchMode) {
     if (searchLoading) {
       panelContent = (
@@ -1123,6 +1160,24 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
+        {blogsEnabled && (
+          <button
+            onClick={() => {
+              setFilter({ type: "blogs" })
+              setActiveCollectionId(null)
+              setActiveTag(null)
+            }}
+            className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+              filter.type === "blogs"
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground hover:bg-accent/60"
+            }`}
+          >
+            <Newspaper size={13} />
+            Blogs
+          </button>
+        )}
+
         {/* Collections section */}
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between px-1">
@@ -1260,9 +1315,11 @@ export default function NotesPage() {
                     ? "All Notes"
                     : filter.type === "journal"
                       ? "Reading Journal"
-                      : filter.type === "group"
-                        ? filter.name
-                        : `#${filter.name}`}
+                      : filter.type === "blogs"
+                        ? "Blogs"
+                        : filter.type === "group"
+                          ? filter.name
+                          : `#${filter.name}`}
           </h2>
           {notesDocumentId && (
             <button

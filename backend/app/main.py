@@ -23,6 +23,7 @@ from app.db_init import create_all_tables
 from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
+from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
@@ -289,6 +290,7 @@ _API_PREFIX = "/api" if _mode == "prod" else ""
 ROUTER_REGISTRY = {
     "admin": admin_router,
     "annotations": annotations_router,
+    "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,
     "chat_meta": chat_meta_router,
