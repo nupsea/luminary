@@ -41,6 +41,7 @@ import {
   type BlogPublishResult,
 } from "@/lib/blogApi"
 import { renderMermaidSvgs, svgToDataUri } from "@/lib/blogMermaid"
+import { MarkdownSplitEditor } from "@/components/notes/MarkdownSplitEditor"
 import { BlogPreview } from "./BlogPreview"
 import { PushBlogButton } from "./PushBlogButton"
 
@@ -77,7 +78,6 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
   const [heroImage, setHeroImage] = useState("")
   const [subdir, setSubdir] = useState("")
   const [body, setBody] = useState("")
-  const [editingBody, setEditingBody] = useState(false)
 
   const [mermaidSvgs, setMermaidSvgs] = useState<Record<string, string>>({})
   const [loadingDraft, setLoadingDraft] = useState(false)
@@ -231,7 +231,6 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
     setDraft(null)
     setOverwriteOk(false)
     setResult(null)
-    setEditingBody(false)
     onClose()
   }
 
@@ -367,44 +366,36 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
                     </ul>
                   </div>
                 )}
-
-                <button
-                  onClick={() => setEditingBody((v) => !v)}
-                  className="w-fit text-xs font-medium text-primary hover:underline"
-                >
-                  {editingBody ? "Show preview" : "Edit body markdown"}
-                </button>
               </>
             )}
           </div>
 
-          {/* Right pane: large body editor (when editing) or faithful preview */}
+          {/* Right pane: body editor + faithful preview, side by side */}
           <div className="flex flex-1 flex-col overflow-hidden rounded-lg bg-slate-100 p-3">
             {loadingDraft ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Rendering preview…
               </div>
-            ) : editingBody ? (
-              <div className="flex h-full flex-col gap-2">
-                <span className="text-xs font-semibold text-slate-600">Body markdown</span>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
-                  spellCheck={false}
-                />
-              </div>
             ) : (
-              <div className="overflow-y-auto">
-                <BlogPreview
-                  title={title}
-                  description={description}
-                  pubDate={pubDate}
-                  updatedDate={updatedDate || undefined}
-                  heroImage={heroImage || undefined}
-                  markdown={previewMarkdown}
-                />
-              </div>
+              <MarkdownSplitEditor
+                layout="splitter"
+                content={body}
+                onContentChange={setBody}
+                editorLabel="Body markdown"
+                placeholder="Write your post in Markdown..."
+                textareaClassName="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                previewClassName="flex-1 overflow-auto"
+                preview={
+                  <BlogPreview
+                    title={title}
+                    description={description}
+                    pubDate={pubDate}
+                    updatedDate={updatedDate || undefined}
+                    heroImage={heroImage || undefined}
+                    markdown={previewMarkdown}
+                  />
+                }
+              />
             )}
           </div>
         </div>

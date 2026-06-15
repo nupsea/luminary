@@ -80,6 +80,7 @@ class BlogPublishResponse(BaseModel):
     committed: bool
     commit_sha: str
     files: list[str]
+    removed_assets: list[str] = []
     pushed: bool = False
     push_hint: str
     url: str

@@ -4,8 +4,8 @@
  * confirm), which commits the file + asset-dir removal.
  */
 
-import { useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, ExternalLink, Loader2, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -25,6 +25,8 @@ import {
   updateBlogPost,
   type BlogPublishResult,
 } from "@/lib/blogApi"
+import { MarkdownSplitEditor } from "@/components/notes/MarkdownSplitEditor"
+import { createImagePasteHandler } from "@/lib/noteEditorUtils"
 import { BlogPreview } from "./BlogPreview"
 import { PushBlogButton } from "./PushBlogButton"
 
@@ -58,11 +60,12 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
   const [updatedDate, setUpdatedDate] = useState("")
   const [heroImage, setHeroImage] = useState("")
   const [body, setBody] = useState("")
-  const [editingBody, setEditingBody] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [result, setResult] = useState<BlogPublishResult | null>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const qc = useQueryClient()
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["blog-post", slug],
@@ -70,10 +73,14 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
     enabled: open,
   })
 
-  // Published bodies reference assets as /blog/<slug>/… (site-absolute). Rewrite
-  // those to the backend asset endpoint so images render in the in-app preview.
+  // Make image refs resolve in the in-app preview: published assets live at
+  // /blog/<slug>/… (served by the backend asset endpoint); freshly pasted ones
+  // are still __LUMINARY_IMG__/… in Luminary's image store until saved.
   const previewBody = useMemo(
-    () => body.replaceAll(`/blog/${slug}/`, `${API_BASE}/blog/asset/${slug}/`),
+    () =>
+      body
+        .replaceAll(`/blog/${slug}/`, `${API_BASE}/blog/asset/${slug}/`)
+        .replaceAll("__LUMINARY_IMG__/", `${API_BASE}/images/local/`),
     [body, slug],
   )
 
@@ -100,7 +107,15 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
       })
       setResult(res)
       onChanged()
-      toast.success("Saved & committed locally")
+      // Refetch so the editor shows canonical /blog/<slug>/ refs for any images
+      // adopted on save (replacing the transient __LUMINARY_IMG__ paste refs).
+      void qc.invalidateQueries({ queryKey: ["blog-post", slug] })
+      const removed = res.removed_assets?.length ?? 0
+      toast.success(
+        removed > 0
+          ? `Saved & committed locally — removed ${removed} unused image${removed > 1 ? "s" : ""}`
+          : "Saved & committed locally",
+      )
     } catch (err) {
       toast.error(errorMessage(err, "Save failed"))
     } finally {
@@ -169,29 +184,27 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
                 <p className="break-all rounded bg-muted/50 px-2 py-1 font-mono text-[11px] text-muted-foreground">
                   src/content/blog/{slug}.md
                 </p>
-                <button
-                  onClick={() => setEditingBody((v) => !v)}
-                  className="w-fit text-xs font-medium text-primary hover:underline"
-                >
-                  {editingBody ? "Show preview" : "Edit body markdown"}
-                </button>
               </>
             )}
           </div>
 
           <div className="flex flex-1 flex-col overflow-hidden rounded-lg bg-slate-100 p-3">
-            {editingBody ? (
-              <div className="flex h-full flex-col gap-2">
-                <span className="text-xs font-semibold text-slate-600">Body markdown</span>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  spellCheck={false}
-                  className="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            ) : (
-              <div className="overflow-y-auto">
+            <MarkdownSplitEditor
+              layout="splitter"
+              content={body}
+              onContentChange={setBody}
+              textareaRef={bodyRef}
+              onPaste={createImagePasteHandler(
+                () => bodyRef.current,
+                () => body,
+                setBody,
+                (path) => `![image](${path})`,
+              )}
+              editorLabel="Body markdown"
+              placeholder="Write your post in Markdown... (paste an image to add it)"
+              textareaClassName="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+              previewClassName="flex-1 overflow-auto"
+              preview={
                 <BlogPreview
                   title={title}
                   description={description}
@@ -200,8 +213,8 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
                   heroImage={heroImage || undefined}
                   markdown={previewBody}
                 />
-              </div>
-            )}
+              }
+            />
           </div>
         </div>
 

@@ -225,6 +225,77 @@ def copy_disk_asset(images_root: Path, doc_id: str, filename: str, dest: Path) -
     shutil.copyfile(src, dest)
 
 
+def _unique_asset_name(asset_dir: Path, raw_filename: str) -> str:
+    """Pick a clean, collision-free filename for an adopted asset.
+
+    Drops the uuid prefix the note-upload endpoint prepends, slugifies the stem,
+    and disambiguates against files already in the post's asset dir.
+    """
+    name = re.sub(r"^[0-9a-f]{16,}_", "", raw_filename)
+    stem, dot, ext = name.rpartition(".")
+    base = re.sub(r"[^a-z0-9-]+", "-", (stem if dot else name).lower()).strip("-") or "image"
+    ext = (ext if dot else "png").lower()
+    candidate = f"{base}.{ext}"
+    n = 1
+    while (asset_dir / candidate).exists():
+        candidate = f"{base}-{n}.{ext}"
+        n += 1
+    return candidate
+
+
+def adopt_inline_assets(
+    body: str, slug: str, images_root: Path, asset_dir: Path
+) -> tuple[str, list[Path]]:
+    """Copy freshly pasted ``__LUMINARY_IMG__`` images into the post's asset dir
+    and rewrite their references to ``/blog/<slug>/<dest>``.
+
+    Returns the rewritten body and the list of files written. Each distinct
+    source token is copied once even if referenced multiple times.
+    """
+    written: list[Path] = []
+    mapping: dict[str, str] = {}
+
+    def _sub(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token in mapping:
+            return mapping[token]
+        doc_id, filename = match.group(1), match.group(2)
+        dest_name = _unique_asset_name(asset_dir, filename)
+        copy_disk_asset(images_root, doc_id, filename, asset_dir / dest_name)
+        written.append(asset_dir / dest_name)
+        ref = f"/blog/{slug}/{dest_name}"
+        mapping[token] = ref
+        return ref
+
+    return _LUMINARY_IMG_RE.sub(_sub, body), written
+
+
+def referenced_assets(body: str, slug: str, *extra: str | None) -> set[str]:
+    """Filenames referenced as ``/blog/<slug>/<name>`` in the body or extras."""
+    pattern = re.compile(rf"/blog/{re.escape(slug)}/([^\s)\"'\]]+)")
+    names = set(pattern.findall(body))
+    for value in extra:
+        if value:
+            names.update(pattern.findall(value))
+    return names
+
+
+def prune_orphan_assets(asset_dir: Path, keep: set[str]) -> list[Path]:
+    """Delete files in ``asset_dir`` whose name is not in ``keep``.
+
+    The asset dir is dedicated to one post, so any file no longer referenced by
+    the saved body (or hero image) is an orphan. Returns the removed paths.
+    """
+    if not asset_dir.is_dir():
+        return []
+    removed: list[Path] = []
+    for path in sorted(asset_dir.iterdir()):
+        if path.is_file() and path.name not in keep:
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
 def write_text_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")

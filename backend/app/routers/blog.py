@@ -264,22 +264,32 @@ async def get_post(slug: str) -> BlogPostDetail:
 async def update_post(slug: str, req: BlogPostUpdateRequest) -> BlogPublishResponse:
     repo, md_path, clean = _post_path(slug)
     settings = get_settings()
-    frontmatter = blog_service.render_frontmatter(
-        title=req.title,
-        description=req.description,
-        pub_date=req.pub_date,
-        updated_date=req.updated_date,
-        hero_image=req.hero_image,
-    )
+    asset_dir = _asset_root() / clean
     try:
-        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{req.body.strip()}\n")
-        sha = await blog_service.git_add_commit(repo, [md_path], f"blog: update {clean}")
+        # Pasted images arrive as __LUMINARY_IMG__ refs: copy them into the post's
+        # asset dir, then drop any asset the edited body no longer references.
+        body, written = blog_service.adopt_inline_assets(
+            req.body, clean, _images_root(), asset_dir
+        )
+        keep = blog_service.referenced_assets(body, clean, req.hero_image)
+        removed = blog_service.prune_orphan_assets(asset_dir, keep)
+        frontmatter = blog_service.render_frontmatter(
+            title=req.title,
+            description=req.description,
+            pub_date=req.pub_date,
+            updated_date=req.updated_date,
+            hero_image=req.hero_image,
+        )
+        blog_service.write_text_file(md_path, f"{frontmatter}\n\n{body.strip()}\n")
+        files = [md_path, *written, *removed]
+        sha = await blog_service.git_add_commit(repo, files, f"blog: update {clean}")
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return BlogPublishResponse(
         committed=True,
         commit_sha=sha,
-        files=[str(md_path.relative_to(repo))],
+        files=[str(f.relative_to(repo)) for f in files],
+        removed_assets=[str(f.relative_to(repo)) for f in removed],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
         url=_post_url(clean),

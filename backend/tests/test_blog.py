@@ -247,3 +247,75 @@ def test_posts_list_get_update_delete_lifecycle(client, blog_repo):
     assert dele.status_code == 200 and dele.json()["committed"] is True
     assert not (blog_dir / "beta.md").exists()
     assert client.get("/blog/posts/beta").status_code == 404
+
+
+def test_update_post_adopts_pasted_image_then_prunes_on_removal(client, blog_repo):
+    blog_dir = blog_repo / "src/content/blog"
+    (blog_dir / "gamma.md").write_text(
+        '---\ntitle: "Gamma"\ndescription: "g"\npubDate: "Jun 1 2026"\n---\n\nbody\n'
+    )
+    subprocess.run(["git", "add", "-A"], cwd=blog_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed gamma"], cwd=blog_repo, check=True)
+
+    # Mimic a pasted image landing in Luminary's local image store.
+    images_root = Path(get_settings().DATA_DIR).expanduser() / "images" / "notes"
+    images_root.mkdir(parents=True, exist_ok=True)
+    (images_root / "shot.png").write_bytes(b"\x89PNG\r\n")
+
+    add = client.put(
+        "/blog/posts/gamma",
+        json={
+            "title": "Gamma",
+            "description": "g",
+            "pub_date": "Jun 1 2026",
+            "body": "intro\n\n![pic](__LUMINARY_IMG__/notes/shot.png)\n",
+        },
+    )
+    assert add.status_code == 200, add.text
+    assert add.json()["removed_assets"] == []
+    copied = blog_repo / "public/blog/gamma/shot.png"
+    assert copied.is_file()
+
+    reread = client.get("/blog/posts/gamma").json()
+    assert "__LUMINARY_IMG__" not in reread["body"]
+    assert "/blog/gamma/shot.png" in reread["body"]
+
+    # Removing the image reference prunes the now-orphaned asset on save.
+    rem = client.put(
+        "/blog/posts/gamma",
+        json={
+            "title": "Gamma",
+            "description": "g",
+            "pub_date": "Jun 1 2026",
+            "body": "intro only\n",
+        },
+    )
+    assert rem.status_code == 200, rem.text
+    assert rem.json()["removed_assets"] == ["public/blog/gamma/shot.png"]
+    assert not copied.exists()
+
+
+def test_adopt_and_prune_helpers(tmp_path):
+    images_root = tmp_path / "images"
+    (images_root / "notes").mkdir(parents=True)
+    (images_root / "notes" / "deadbeefdeadbeefdeadbeef_photo.png").write_bytes(b"x")
+    asset_dir = tmp_path / "public/blog/post"
+
+    body, written = blog_service.adopt_inline_assets(
+        "![a](__LUMINARY_IMG__/notes/deadbeefdeadbeefdeadbeef_photo.png)",
+        "post",
+        images_root,
+        asset_dir,
+    )
+    # uuid prefix stripped, reference rewritten, file materialised once
+    assert "/blog/post/photo.png" in body
+    assert "__LUMINARY_IMG__" not in body
+    assert [p.name for p in written] == ["photo.png"]
+    assert (asset_dir / "photo.png").is_file()
+
+    # an extra unreferenced file is pruned; the referenced one is kept
+    (asset_dir / "stale.png").write_bytes(b"x")
+    keep = blog_service.referenced_assets(body, "post")
+    removed = blog_service.prune_orphan_assets(asset_dir, keep)
+    assert [p.name for p in removed] == ["stale.png"]
+    assert (asset_dir / "photo.png").is_file()

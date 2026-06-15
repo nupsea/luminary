@@ -69,6 +69,7 @@ export interface BlogPublishResult {
   committed: boolean
   commit_sha: string
   files: string[]
+  removed_assets?: string[]
   pushed: boolean
   push_hint: string
   url: string
