@@ -295,6 +295,39 @@ def test_update_post_adopts_pasted_image_then_prunes_on_removal(client, blog_rep
     assert not copied.exists()
 
 
+def test_thoughts_kind_routes_to_its_own_collection(client, blog_repo):
+    note_id = client.post(
+        "/notes", json={"content": "# A Thought\n\nshort musing\n", "tags": []}
+    ).json()["id"]
+
+    draft = client.post("/blog/draft?kind=thoughts", json={"note_id": note_id}).json()
+    resp = client.post(
+        "/blog/publish?kind=thoughts",
+        json={
+            "note_id": note_id,
+            "slug": draft["slug"],
+            "title": draft["title"],
+            "description": "musings",
+            "pub_date": draft["pub_date"],
+            "markdown": draft["markdown"],
+            "mermaid_svgs": {},
+            "overwrite": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["url"].endswith("/thoughts/a-thought/")
+    assert (blog_repo / "src/content/thoughts/a-thought.md").exists()
+    assert not (blog_repo / "src/content/blog/a-thought.md").exists()
+
+    # The thought shows under kind=thoughts but not under the default blog list.
+    thoughts = client.get("/blog/posts?kind=thoughts").json()
+    assert [p["slug"] for p in thoughts] == ["a-thought"]
+    assert client.get("/blog/posts").json() == []
+
+    # An invalid kind is rejected.
+    assert client.get("/blog/posts?kind=bogus").status_code == 422
+
+
 def test_adopt_and_prune_helpers(tmp_path):
     images_root = tmp_path / "images"
     (images_root / "notes").mkdir(parents=True)

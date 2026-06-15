@@ -23,6 +23,8 @@ import {
   deleteBlogPost,
   getBlogPost,
   updateBlogPost,
+  KIND_SINGULAR,
+  type BlogKind,
   type BlogPublishResult,
 } from "@/lib/blogApi"
 import { MarkdownSplitEditor } from "@/components/notes/MarkdownSplitEditor"
@@ -51,9 +53,17 @@ interface BlogEditDialogProps {
   open: boolean
   onClose: () => void
   onChanged: () => void
+  kind?: BlogKind
 }
 
-export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialogProps) {
+export function BlogEditDialog({
+  slug,
+  open,
+  onClose,
+  onChanged,
+  kind = "blog",
+}: BlogEditDialogProps) {
+  const kindLabel = KIND_SINGULAR[kind]
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [pubDate, setPubDate] = useState("")
@@ -68,20 +78,20 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
   const qc = useQueryClient()
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["blog-post", slug],
-    queryFn: () => getBlogPost(slug),
+    queryKey: ["blog-post", kind, slug],
+    queryFn: () => getBlogPost(slug, kind),
     enabled: open,
   })
 
   // Make image refs resolve in the in-app preview: published assets live at
-  // /blog/<slug>/… (served by the backend asset endpoint); freshly pasted ones
+  // /<kind>/<slug>/… (served by the backend asset endpoint); freshly pasted ones
   // are still __LUMINARY_IMG__/… in Luminary's image store until saved.
   const previewBody = useMemo(
     () =>
       body
-        .replaceAll(`/blog/${slug}/`, `${API_BASE}/blog/asset/${slug}/`)
+        .replaceAll(`/${kind}/${slug}/`, `${API_BASE}/blog/asset/${kind}/${slug}/`)
         .replaceAll("__LUMINARY_IMG__/", `${API_BASE}/images/local/`),
-    [body, slug],
+    [body, slug, kind],
   )
 
   useEffect(() => {
@@ -97,19 +107,23 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
   async function handleSave() {
     setSaving(true)
     try {
-      const res = await updateBlogPost(slug, {
-        title,
-        description,
-        pub_date: pubDate,
-        updated_date: updatedDate || undefined,
-        hero_image: heroImage || undefined,
-        body,
-      })
+      const res = await updateBlogPost(
+        slug,
+        {
+          title,
+          description,
+          pub_date: pubDate,
+          updated_date: updatedDate || undefined,
+          hero_image: heroImage || undefined,
+          body,
+        },
+        kind,
+      )
       setResult(res)
       onChanged()
-      // Refetch so the editor shows canonical /blog/<slug>/ refs for any images
+      // Refetch so the editor shows canonical /<kind>/<slug>/ refs for any images
       // adopted on save (replacing the transient __LUMINARY_IMG__ paste refs).
-      void qc.invalidateQueries({ queryKey: ["blog-post", slug] })
+      void qc.invalidateQueries({ queryKey: ["blog-post", kind, slug] })
       const removed = res.removed_assets?.length ?? 0
       toast.success(
         removed > 0
@@ -126,7 +140,7 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
   async function handleDelete() {
     setDeleting(true)
     try {
-      await deleteBlogPost(slug)
+      await deleteBlogPost(slug, kind)
       onChanged()
       toast.success(`Deleted ${slug} (committed locally)`)
       onClose()
@@ -141,7 +155,7 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="flex h-[92vh] max-h-[92vh] w-[94vw] max-w-[1500px] flex-col overflow-hidden p-0">
         <DialogHeader className="p-6 pb-2">
-          <DialogTitle className="text-xl">Edit blog post</DialogTitle>
+          <DialogTitle className="text-xl">Edit {kindLabel.toLowerCase()} post</DialogTitle>
           <DialogDescription>
             Edit the post, then commit to your site repo. Pushing stays manual.
           </DialogDescription>
@@ -182,7 +196,7 @@ export function BlogEditDialog({ slug, open, onClose, onChanged }: BlogEditDialo
                   <input value={heroImage} onChange={(e) => setHeroImage(e.target.value)} placeholder="/blog/…/hero.png" className={inputCls} />
                 </Field>
                 <p className="break-all rounded bg-muted/50 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                  src/content/blog/{slug}.md
+                  src/content/{kind}/{slug}.md
                 </p>
               </>
             )}

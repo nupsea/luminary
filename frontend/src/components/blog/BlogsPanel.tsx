@@ -10,9 +10,18 @@ import { ExternalLink, Loader2, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { deleteBlogPost, listBlogPosts, type BlogPostSummary } from "@/lib/blogApi"
+import {
+  deleteBlogPost,
+  listBlogPosts,
+  KIND_PLURAL,
+  KIND_SINGULAR,
+  type BlogKind,
+  type BlogPostSummary,
+} from "@/lib/blogApi"
 import { BlogEditDialog } from "./BlogEditDialog"
 import { PushBlogButton } from "./PushBlogButton"
+
+const KINDS: BlogKind[] = ["blog", "thoughts"]
 
 function formatDate(value: string): string {
   const d = new Date(value)
@@ -23,16 +32,17 @@ function formatDate(value: string): string {
 
 export function BlogsPanel() {
   const qc = useQueryClient()
+  const [kind, setKind] = useState<BlogKind>("blog")
   const [editing, setEditing] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["blog-posts"],
-    queryFn: listBlogPosts,
+    queryKey: ["blog-posts", kind],
+    queryFn: () => listBlogPosts(kind),
   })
 
   const deleteMut = useMutation({
-    mutationFn: (slug: string) => deleteBlogPost(slug),
+    mutationFn: (slug: string) => deleteBlogPost(slug, kind),
     onSuccess: (_res, slug) => {
       setConfirming(null)
       void qc.invalidateQueries({ queryKey: ["blog-posts"] })
@@ -65,8 +75,9 @@ export function BlogsPanel() {
   } else if (posts.length === 0) {
     content = (
       <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-        No published blog posts yet. Use the <span className="font-medium text-primary">Blog</span>{" "}
-        button on a note to publish one.
+        No published {KIND_PLURAL[kind].toLowerCase()} yet. Use the{" "}
+        <span className="font-medium text-primary">{KIND_SINGULAR[kind]}</span> button on a note in a{" "}
+        <span className="font-medium">{KIND_SINGULAR[kind].toUpperCase()}</span> collection to publish one.
       </div>
     )
   } else {
@@ -144,10 +155,30 @@ export function BlogsPanel() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">
-          {posts.length} post{posts.length === 1 ? "" : "s"} in your site repo
-        </span>
-        <PushBlogButton />
+        <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+          {KINDS.map((k) => (
+            <button
+              key={k}
+              onClick={() => {
+                setKind(k)
+                setConfirming(null)
+              }}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                kind === k
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {KIND_PLURAL[k]}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {posts.length} {posts.length === 1 ? "post" : "posts"} in your site repo
+          </span>
+          <PushBlogButton />
+        </div>
       </div>
 
       {content}
@@ -155,6 +186,7 @@ export function BlogsPanel() {
       {editing && (
         <BlogEditDialog
           slug={editing}
+          kind={kind}
           open={!!editing}
           onClose={() => setEditing(null)}
           onChanged={() => {

@@ -161,8 +161,12 @@ def render_frontmatter(
     return "\n".join(lines)
 
 
-def transform_note_to_blog(content: str, slug: str) -> BlogDraft:
-    """Clean note markdown for the public site and register external assets."""
+def transform_note_to_blog(content: str, slug: str, kind: str = "blog") -> BlogDraft:
+    """Clean note markdown for the public site and register external assets.
+
+    ``kind`` selects the destination content collection (``blog``/``thoughts``);
+    asset references are rewritten to ``/<kind>/<slug>/<file>``.
+    """
     warnings: list[str] = []
     assets: list[BlogAsset] = []
 
@@ -185,7 +189,7 @@ def transform_note_to_blog(content: str, slug: str) -> BlogDraft:
         assets.append(
             BlogAsset(kind="mermaid", dest_filename=dest, key=f"mermaid-{diagram_n}")
         )
-        return f"![diagram](/blog/{slug}/{dest})"
+        return f"![diagram](/{kind}/{slug}/{dest})"
 
     text = _MERMAID_BLOCK_RE.sub(_mermaid_sub, text)
     if diagram_n:
@@ -204,7 +208,7 @@ def transform_note_to_blog(content: str, slug: str) -> BlogDraft:
         assets.append(
             BlogAsset(kind="copy", dest_filename=dest, doc_id=doc_id, filename=filename)
         )
-        return f"/blog/{slug}/{dest}"
+        return f"/{kind}/{slug}/{dest}"
 
     text = _LUMINARY_IMG_RE.sub(_img_sub, text)
     if asset_n:
@@ -244,10 +248,10 @@ def _unique_asset_name(asset_dir: Path, raw_filename: str) -> str:
 
 
 def adopt_inline_assets(
-    body: str, slug: str, images_root: Path, asset_dir: Path
+    body: str, slug: str, images_root: Path, asset_dir: Path, kind: str = "blog"
 ) -> tuple[str, list[Path]]:
     """Copy freshly pasted ``__LUMINARY_IMG__`` images into the post's asset dir
-    and rewrite their references to ``/blog/<slug>/<dest>``.
+    and rewrite their references to ``/<kind>/<slug>/<dest>``.
 
     Returns the rewritten body and the list of files written. Each distinct
     source token is copied once even if referenced multiple times.
@@ -263,16 +267,16 @@ def adopt_inline_assets(
         dest_name = _unique_asset_name(asset_dir, filename)
         copy_disk_asset(images_root, doc_id, filename, asset_dir / dest_name)
         written.append(asset_dir / dest_name)
-        ref = f"/blog/{slug}/{dest_name}"
+        ref = f"/{kind}/{slug}/{dest_name}"
         mapping[token] = ref
         return ref
 
     return _LUMINARY_IMG_RE.sub(_sub, body), written
 
 
-def referenced_assets(body: str, slug: str, *extra: str | None) -> set[str]:
-    """Filenames referenced as ``/blog/<slug>/<name>`` in the body or extras."""
-    pattern = re.compile(rf"/blog/{re.escape(slug)}/([^\s)\"'\]]+)")
+def referenced_assets(body: str, slug: str, *extra: str | None, kind: str = "blog") -> set[str]:
+    """Filenames referenced as ``/<kind>/<slug>/<name>`` in the body or extras."""
+    pattern = re.compile(rf"/{re.escape(kind)}/{re.escape(slug)}/([^\s)\"'\]]+)")
     names = set(pattern.findall(body))
     for value in extra:
         if value:

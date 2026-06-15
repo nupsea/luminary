@@ -49,16 +49,27 @@ _DESC_SYSTEM = (
 )
 
 
+_VALID_KINDS = ("blog", "thoughts")
+
+
+def _check_kind(kind: str) -> str:
+    if kind not in _VALID_KINDS:
+        raise HTTPException(status_code=422, detail=f"invalid kind: {kind}")
+    return kind
+
+
 def _repo() -> Path:
     return Path(get_settings().LUMINARY_BLOG_REPO_PATH).expanduser()
 
 
-def _content_dir() -> Path:
-    return _repo() / get_settings().LUMINARY_BLOG_CONTENT_SUBDIR
+def _content_dir(kind: str) -> Path:
+    # Both collections live under the content root (src/content/<kind>); derive
+    # it from the configured blog subdir so the two stay in lockstep.
+    return _repo() / Path(get_settings().LUMINARY_BLOG_CONTENT_SUBDIR).parent / kind
 
 
-def _asset_root() -> Path:
-    return _repo() / get_settings().LUMINARY_BLOG_ASSET_SUBDIR
+def _asset_root(kind: str) -> Path:
+    return _repo() / Path(get_settings().LUMINARY_BLOG_ASSET_SUBDIR).parent / kind
 
 
 def _images_root() -> Path:
@@ -80,8 +91,9 @@ def _fallback_title(content: str) -> str:
 
 
 @router.get("/config", response_model=BlogConfigResponse)
-async def get_blog_config() -> BlogConfigResponse:
-    repo, content_dir = _repo(), _content_dir()
+async def get_blog_config(kind: str = "blog") -> BlogConfigResponse:
+    _check_kind(kind)
+    repo, content_dir = _repo(), _content_dir(kind)
     health = await blog_service.repo_health(repo, content_dir)
     ahead = (
         await blog_service.ahead_count(repo, health["branch"])
@@ -90,7 +102,7 @@ async def get_blog_config() -> BlogConfigResponse:
     )
     return BlogConfigResponse(
         repo_path=str(repo),
-        content_subdir=get_settings().LUMINARY_BLOG_CONTENT_SUBDIR,
+        content_subdir=str(_content_dir(kind).relative_to(repo)),
         url_base=get_settings().LUMINARY_BLOG_URL_BASE,
         existing_slugs=sorted(blog_service.existing_slugs(content_dir)),
         ahead=ahead,
@@ -101,15 +113,17 @@ async def get_blog_config() -> BlogConfigResponse:
 @router.post("/draft", response_model=BlogDraftResponse)
 async def create_draft(
     req: BlogDraftRequest,
+    kind: str = "blog",
     repo: NoteRepo = Depends(get_note_repo),
 ) -> BlogDraftResponse:
+    _check_kind(kind)
     note = await repo.get_or_404(req.note_id)
     title = (req.title or note.title or _fallback_title(note.content)).strip()
     slug = blog_service.slugify(req.slug or title)
     pub_date = req.pub_date or blog_service.format_pub_date(datetime.now(UTC))
     description = req.description or ""
 
-    draft = blog_service.transform_note_to_blog(note.content, slug)
+    draft = blog_service.transform_note_to_blog(note.content, slug, kind)
     frontmatter = blog_service.render_frontmatter(
         title=title,
         description=description,
@@ -126,7 +140,7 @@ async def create_draft(
         markdown=draft.markdown,
         warnings=draft.warnings,
         assets=[BlogAssetItem(**a.__dict__) for a in draft.assets],
-        collision=slug in blog_service.existing_slugs(_content_dir()),
+        collision=slug in blog_service.existing_slugs(_content_dir(kind)),
     )
 
 
@@ -154,10 +168,12 @@ async def suggest_description(
     return SuggestDescriptionResponse(description=desc)
 
 
-def _write_assets(slug: str, note_content: str, mermaid_svgs: dict[str, str]) -> list[Path]:
+def _write_assets(
+    slug: str, note_content: str, mermaid_svgs: dict[str, str], kind: str
+) -> list[Path]:
     """Recompute the asset manifest from the note and materialise each asset."""
-    draft = blog_service.transform_note_to_blog(note_content, slug)
-    asset_dir = _asset_root() / slug
+    draft = blog_service.transform_note_to_blog(note_content, slug, kind)
+    asset_dir = _asset_root(kind) / slug
     written: list[Path] = []
     for asset in draft.assets:
         dest = asset_dir / asset.dest_filename
@@ -179,14 +195,16 @@ def _write_assets(slug: str, note_content: str, mermaid_svgs: dict[str, str]) ->
 @router.post("/publish", response_model=BlogPublishResponse)
 async def publish(
     req: BlogPublishRequest,
+    kind: str = "blog",
     repo_dep: NoteRepo = Depends(get_note_repo),
 ) -> BlogPublishResponse:
+    _check_kind(kind)
     note = await repo_dep.get_or_404(req.note_id)
     settings = get_settings()
     repo = _repo()
 
     # Honor a user-edited destination folder, but never let it escape the repo.
-    subdir = req.subdir or settings.LUMINARY_BLOG_CONTENT_SUBDIR
+    subdir = req.subdir or str(_content_dir(kind).relative_to(repo))
     content_dir = (repo / subdir).resolve()
     if not _within(content_dir, repo):
         raise HTTPException(status_code=400, detail=f"destination escapes repo: {subdir}")
@@ -205,7 +223,7 @@ async def publish(
         updated_date = blog_service.format_pub_date(datetime.now(UTC))
 
     try:
-        asset_files = _write_assets(slug, note.content, req.mermaid_svgs)
+        asset_files = _write_assets(slug, note.content, req.mermaid_svgs, kind)
         frontmatter = blog_service.render_frontmatter(
             title=req.title,
             description=req.description,
@@ -215,7 +233,7 @@ async def publish(
         )
         blog_service.write_text_file(md_path, f"{frontmatter}\n\n{req.markdown.strip()}\n")
         files = [md_path, *asset_files]
-        sha = await blog_service.git_add_commit(repo, files, f"blog: {req.title}")
+        sha = await blog_service.git_add_commit(repo, files, f"{kind}: {req.title}")
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -225,53 +243,60 @@ async def publish(
         files=[str(f.relative_to(repo)) for f in files],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
-        url=f"{settings.LUMINARY_BLOG_URL_BASE}/blog/{slug}/",
+        url=_post_url(slug, kind),
     )
 
 
 # -- published posts: list / read / edit / delete -------------------------
 
 
-def _post_path(slug: str) -> tuple[Path, Path, str]:
+def _post_path(slug: str, kind: str) -> tuple[Path, Path, str]:
     """Resolve (repo, md_path, clean_slug); 404 if the post does not exist."""
     repo = _repo()
     clean = blog_service.slugify(slug)
-    md_path = _content_dir() / f"{clean}.md"
+    md_path = _content_dir(kind) / f"{clean}.md"
     if not md_path.is_file():
         raise HTTPException(status_code=404, detail=f"post not found: {clean}")
     return repo, md_path, clean
 
 
-def _post_url(slug: str) -> str:
-    return f"{get_settings().LUMINARY_BLOG_URL_BASE}/blog/{slug}/"
+def _post_url(slug: str, kind: str) -> str:
+    return f"{get_settings().LUMINARY_BLOG_URL_BASE}/{kind}/{slug}/"
 
 
 @router.get("/posts", response_model=list[BlogPostSummary])
-async def list_posts() -> list[BlogPostSummary]:
+async def list_posts(kind: str = "blog") -> list[BlogPostSummary]:
+    _check_kind(kind)
     return [
-        BlogPostSummary(**p, url=_post_url(p["slug"]))
-        for p in blog_service.list_posts(_content_dir())
+        BlogPostSummary(**p, url=_post_url(p["slug"], kind))
+        for p in blog_service.list_posts(_content_dir(kind))
     ]
 
 
 @router.get("/posts/{slug}", response_model=BlogPostDetail)
-async def get_post(slug: str) -> BlogPostDetail:
-    _, _, clean = _post_path(slug)
-    return BlogPostDetail(**blog_service.read_post(_content_dir(), clean), url=_post_url(clean))
+async def get_post(slug: str, kind: str = "blog") -> BlogPostDetail:
+    _check_kind(kind)
+    _, _, clean = _post_path(slug, kind)
+    return BlogPostDetail(
+        **blog_service.read_post(_content_dir(kind), clean), url=_post_url(clean, kind)
+    )
 
 
 @router.put("/posts/{slug}", response_model=BlogPublishResponse)
-async def update_post(slug: str, req: BlogPostUpdateRequest) -> BlogPublishResponse:
-    repo, md_path, clean = _post_path(slug)
+async def update_post(
+    slug: str, req: BlogPostUpdateRequest, kind: str = "blog"
+) -> BlogPublishResponse:
+    _check_kind(kind)
+    repo, md_path, clean = _post_path(slug, kind)
     settings = get_settings()
-    asset_dir = _asset_root() / clean
+    asset_dir = _asset_root(kind) / clean
     try:
         # Pasted images arrive as __LUMINARY_IMG__ refs: copy them into the post's
         # asset dir, then drop any asset the edited body no longer references.
         body, written = blog_service.adopt_inline_assets(
-            req.body, clean, _images_root(), asset_dir
+            req.body, clean, _images_root(), asset_dir, kind
         )
-        keep = blog_service.referenced_assets(body, clean, req.hero_image)
+        keep = blog_service.referenced_assets(body, clean, req.hero_image, kind=kind)
         removed = blog_service.prune_orphan_assets(asset_dir, keep)
         frontmatter = blog_service.render_frontmatter(
             title=req.title,
@@ -282,7 +307,7 @@ async def update_post(slug: str, req: BlogPostUpdateRequest) -> BlogPublishRespo
         )
         blog_service.write_text_file(md_path, f"{frontmatter}\n\n{body.strip()}\n")
         files = [md_path, *written, *removed]
-        sha = await blog_service.git_add_commit(repo, files, f"blog: update {clean}")
+        sha = await blog_service.git_add_commit(repo, files, f"{kind}: update {clean}")
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return BlogPublishResponse(
@@ -292,22 +317,23 @@ async def update_post(slug: str, req: BlogPostUpdateRequest) -> BlogPublishRespo
         removed_assets=[str(f.relative_to(repo)) for f in removed],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
-        url=_post_url(clean),
+        url=_post_url(clean, kind),
     )
 
 
 @router.delete("/posts/{slug}", response_model=BlogPublishResponse)
-async def delete_post(slug: str) -> BlogPublishResponse:
-    repo, md_path, clean = _post_path(slug)
+async def delete_post(slug: str, kind: str = "blog") -> BlogPublishResponse:
+    _check_kind(kind)
+    repo, md_path, clean = _post_path(slug, kind)
     settings = get_settings()
-    asset_dir = _asset_root() / clean
+    asset_dir = _asset_root(kind) / clean
     files = [md_path]
     try:
         md_path.unlink()
         if asset_dir.is_dir():
             shutil.rmtree(asset_dir)
             files.append(asset_dir)
-        sha = await blog_service.git_add_commit(repo, files, f"blog: delete {clean}")
+        sha = await blog_service.git_add_commit(repo, files, f"{kind}: delete {clean}")
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return BlogPublishResponse(
@@ -316,15 +342,16 @@ async def delete_post(slug: str) -> BlogPublishResponse:
         files=[str(f.relative_to(repo)) for f in files],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
-        url=f"{settings.LUMINARY_BLOG_URL_BASE}/blog/",
+        url=f"{settings.LUMINARY_BLOG_URL_BASE}/{kind}/",
     )
 
 
-@router.get("/asset/{slug}/{filename}")
-async def get_asset(slug: str, filename: str) -> FileResponse:
-    """Serve a published post's asset (public/blog/<slug>/<file>) so the edit
-    preview can render images whose markdown uses site-absolute /blog/... paths."""
-    asset_root = _asset_root()
+@router.get("/asset/{kind}/{slug}/{filename}")
+async def get_asset(kind: str, slug: str, filename: str) -> FileResponse:
+    """Serve a published post's asset (public/<kind>/<slug>/<file>) so the edit
+    preview can render images whose markdown uses site-absolute /<kind>/... paths."""
+    _check_kind(kind)
+    asset_root = _asset_root(kind)
     path = (asset_root / blog_service.slugify(slug) / filename).resolve()
     if not _within(path, asset_root) or not path.is_file():
         raise HTTPException(status_code=404, detail="asset not found")
@@ -333,7 +360,9 @@ async def get_asset(slug: str, filename: str) -> FileResponse:
 
 @router.post("/push", response_model=BlogPushResponse)
 async def push() -> BlogPushResponse:
-    repo, content_dir = _repo(), _content_dir()
+    # Push is repo-wide (both collections live in one repo); the content dir is
+    # only needed for the git-repo health check.
+    repo, content_dir = _repo(), _content_dir("blog")
     health = await blog_service.repo_health(repo, content_dir)
     if not health["is_git_repo"]:
         raise HTTPException(status_code=400, detail=f"not a git repository: {repo}")
@@ -412,8 +441,10 @@ def _preview_slug(slug: str) -> str:
 @router.post("/preview/live", response_model=BlogLivePreviewResponse)
 async def live_preview(
     req: BlogLivePreviewRequest,
+    kind: str = "blog",
     repo_dep: NoteRepo = Depends(get_note_repo),
 ) -> BlogLivePreviewResponse:
+    _check_kind(kind)
     note = await repo_dep.get_or_404(req.note_id)
     repo = _repo()
     pslug = _preview_slug(req.slug)
@@ -424,16 +455,18 @@ async def live_preview(
         updated_date=req.updated_date,
         hero_image=req.hero_image,
     )
-    # The edited body references /blog/<real-slug>/...; rewrite to the preview
+    # The edited body references /<kind>/<real-slug>/...; rewrite to the preview
     # slug so its assets resolve under the preview asset dir.
-    body = req.markdown.replace(f"/blog/{blog_service.slugify(req.slug)}/", f"/blog/{pslug}/")
-    blog_service.write_text_file(_content_dir() / f"{pslug}.md", f"{frontmatter}\n\n{body}\n")
+    body = req.markdown.replace(
+        f"/{kind}/{blog_service.slugify(req.slug)}/", f"/{kind}/{pslug}/"
+    )
+    blog_service.write_text_file(_content_dir(kind) / f"{pslug}.md", f"{frontmatter}\n\n{body}\n")
     try:
-        _write_assets(pslug, note.content, req.mermaid_svgs)
+        _write_assets(pslug, note.content, req.mermaid_svgs, kind)
     except HTTPException:
         pass  # best-effort: a missing diagram should not block the text preview
     await _ensure_astro_dev(repo)
-    url = f"http://{_LIVE_PREVIEW_HOST}:{_LIVE_PREVIEW_PORT}/blog/{pslug}/"
+    url = f"http://{_LIVE_PREVIEW_HOST}:{_LIVE_PREVIEW_PORT}/{kind}/{pslug}/"
     # Astro's content watcher needs a moment to register the new file as a route;
     # wait until it actually renders so the opened tab isn't a transient 404.
     await _wait_for_route(url)
@@ -441,7 +474,8 @@ async def live_preview(
 
 
 @router.post("/preview/live/cleanup", status_code=204)
-async def live_preview_cleanup(req: BlogLivePreviewCleanupRequest) -> None:
+async def live_preview_cleanup(req: BlogLivePreviewCleanupRequest, kind: str = "blog") -> None:
+    _check_kind(kind)
     pslug = _preview_slug(req.slug)
-    (_content_dir() / f"{pslug}.md").unlink(missing_ok=True)
-    shutil.rmtree(_asset_root() / pslug, ignore_errors=True)
+    (_content_dir(kind) / f"{pslug}.md").unlink(missing_ok=True)
+    shutil.rmtree(_asset_root(kind) / pslug, ignore_errors=True)

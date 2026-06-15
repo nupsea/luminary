@@ -30,7 +30,7 @@ export function PushBlogButton({ compact = false }: { compact?: boolean }) {
 
   const { data: config } = useQuery({
     queryKey: ["blog-config"],
-    queryFn: getBlogConfig,
+    queryFn: () => getBlogConfig(),
     staleTime: 5_000,
   })
 

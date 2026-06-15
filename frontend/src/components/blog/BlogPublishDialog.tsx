@@ -37,7 +37,9 @@ import {
   getBlogConfig,
   publishBlog,
   suggestBlogDescription,
+  KIND_SINGULAR,
   type BlogDraft,
+  type BlogKind,
   type BlogPublishResult,
 } from "@/lib/blogApi"
 import { renderMermaidSvgs, svgToDataUri } from "@/lib/blogMermaid"
@@ -50,6 +52,7 @@ interface BlogPublishDialogProps {
   onClose: () => void
   noteId: string
   noteContent: string
+  kind?: BlogKind
 }
 
 const inputCls =
@@ -68,7 +71,14 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPublishDialogProps) {
+export function BlogPublishDialog({
+  open,
+  onClose,
+  noteId,
+  noteContent,
+  kind = "blog",
+}: BlogPublishDialogProps) {
+  const kindLabel = KIND_SINGULAR[kind]
   const [draft, setDraft] = useState<BlogDraft | null>(null)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
@@ -90,8 +100,8 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
   const livePreviewSlugRef = useRef<string | null>(null)
 
   const { data: config, isLoading: configLoading } = useQuery({
-    queryKey: ["blog-config"],
-    queryFn: getBlogConfig,
+    queryKey: ["blog-config", kind],
+    queryFn: () => getBlogConfig(kind),
     enabled: open,
     staleTime: 10_000,
   })
@@ -106,7 +116,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
     setResult(null)
     void (async () => {
       try {
-        const d = await createBlogDraft({ note_id: noteId })
+        const d = await createBlogDraft({ note_id: noteId }, kind)
         if (cancelled) return
         setDraft(d)
         setTitle(d.title)
@@ -124,7 +134,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
     return () => {
       cancelled = true
     }
-  }, [open, noteId, noteContent])
+  }, [open, noteId, noteContent, kind])
 
   // Default the destination folder to the site's content collection dir.
   useEffect(() => {
@@ -133,7 +143,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
 
   function updateSlug(next: string) {
     const cleaned = next.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "")
-    setBody((prev) => prev.replaceAll(`/blog/${slug}/`, `/blog/${cleaned}/`))
+    setBody((prev) => prev.replaceAll(`/${kind}/${slug}/`, `/${kind}/${cleaned}/`))
     setSlug(cleaned)
     setOverwriteOk(false)
   }
@@ -146,7 +156,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
     if (!draft) return body
     let md = body
     for (const a of draft.assets) {
-      const token = `/blog/${slug}/${a.dest_filename}`
+      const token = `/${kind}/${slug}/${a.dest_filename}`
       if (a.kind === "copy" && a.doc_id && a.filename) {
         md = md.replaceAll(token, `${API_BASE}/images/local/${a.doc_id}/${a.filename}`)
       } else if (a.kind === "mermaid" && a.key && mermaidSvgs[a.key]) {
@@ -154,7 +164,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
       }
     }
     return md
-  }, [draft, body, slug, mermaidSvgs])
+  }, [draft, body, slug, mermaidSvgs, kind])
 
   const repoReady = !!config && config.is_git_repo && config.content_dir_exists
   const valid =
@@ -176,17 +186,20 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
   async function handleLivePreview() {
     setLivePreviewing(true)
     try {
-      const { url } = await blogLivePreview({
-        note_id: noteId,
-        slug,
-        title,
-        description,
-        pub_date: pubDate,
-        updated_date: updatedDate || undefined,
-        hero_image: heroImage || undefined,
-        markdown: body,
-        mermaid_svgs: mermaidSvgs,
-      })
+      const { url } = await blogLivePreview(
+        {
+          note_id: noteId,
+          slug,
+          title,
+          description,
+          pub_date: pubDate,
+          updated_date: updatedDate || undefined,
+          hero_image: heroImage || undefined,
+          markdown: body,
+          mermaid_svgs: mermaidSvgs,
+        },
+        kind,
+      )
       livePreviewSlugRef.current = slug
       window.open(url, "_blank", "noopener")
     } catch (err) {
@@ -199,19 +212,22 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
   async function handlePublish() {
     setPublishing(true)
     try {
-      const res = await publishBlog({
-        note_id: noteId,
-        slug,
-        subdir: subdir || undefined,
-        title,
-        description,
-        pub_date: pubDate,
-        updated_date: updatedDate || undefined,
-        hero_image: heroImage || undefined,
-        markdown: body,
-        mermaid_svgs: mermaidSvgs,
-        overwrite: collision,
-      })
+      const res = await publishBlog(
+        {
+          note_id: noteId,
+          slug,
+          subdir: subdir || undefined,
+          title,
+          description,
+          pub_date: pubDate,
+          updated_date: updatedDate || undefined,
+          hero_image: heroImage || undefined,
+          markdown: body,
+          mermaid_svgs: mermaidSvgs,
+          overwrite: collision,
+        },
+        kind,
+      )
       setResult(res)
       void qc.invalidateQueries({ queryKey: ["blog-posts"] })
       void qc.invalidateQueries({ queryKey: ["blog-config"] })
@@ -225,7 +241,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
 
   function handleClose() {
     if (livePreviewSlugRef.current) {
-      void blogLivePreviewCleanup(livePreviewSlugRef.current).catch(() => {})
+      void blogLivePreviewCleanup(livePreviewSlugRef.current, kind).catch(() => {})
       livePreviewSlugRef.current = null
     }
     setDraft(null)
@@ -238,7 +254,7 @@ export function BlogPublishDialog({ open, onClose, noteId, noteContent }: BlogPu
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose() }}>
       <DialogContent className="flex h-[92vh] max-h-[92vh] w-[94vw] max-w-[1500px] flex-col overflow-hidden p-0">
         <DialogHeader className="p-6 pb-2">
-          <DialogTitle className="text-xl">Publish as blog</DialogTitle>
+          <DialogTitle className="text-xl">Publish as {kindLabel.toLowerCase()}</DialogTitle>
           <DialogDescription>
             Preview the post, then commit it to your site repo. Pushing stays manual.
           </DialogDescription>

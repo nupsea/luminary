@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowLeft, BookOpen, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -33,6 +33,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
 import { BlogsPanel } from "@/components/blog/BlogsPanel"
+import type { BlogKind } from "@/lib/blogApi"
 import { visibleSurfaces } from "@/lib/surfaceManifest"
 import { useSurfaceStore } from "@/store/surface"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -501,7 +502,7 @@ interface NoteCardProps {
 
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
-  const [blogOpen, setBlogOpen] = useState(false)
+  const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
   const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
@@ -509,6 +510,14 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
     () => visibleSurfaces(labsEnabled).some((s) => s.id === "blog"),
     [labsEnabled],
   )
+  // A note is publishable to a collection only when it belongs to one named for
+  // that target (case-insensitive): "BLOG" -> blog, "THOUGHTS" -> thoughts.
+  const collectionNames = useMemo(
+    () => new Set((note.collections ?? []).map((c) => c.name.toLowerCase())),
+    [note.collections],
+  )
+  const canPublishBlog = blogEnabled && collectionNames.has("blog")
+  const canPublishThoughts = blogEnabled && collectionNames.has("thoughts")
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -528,14 +537,24 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         {note.group_name && (
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
         )}
-        {blogEnabled && (
+        {canPublishBlog && (
           <button
-            onClick={(e) => { e.stopPropagation(); setBlogOpen(true) }}
+            onClick={(e) => { e.stopPropagation(); setPublishKind("blog") }}
             className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
             title="Publish as blog"
           >
             <Newspaper size={12} />
             Blog
+          </button>
+        )}
+        {canPublishThoughts && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setPublishKind("thoughts") }}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
+            title="Publish as thought"
+          >
+            <Feather size={12} />
+            Thought
           </button>
         )}
         <button
@@ -656,10 +675,11 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {blogOpen && (
+      {publishKind && (
         <BlogPublishDialog
-          open={blogOpen}
-          onClose={() => setBlogOpen(false)}
+          open={!!publishKind}
+          kind={publishKind}
+          onClose={() => setPublishKind(null)}
           noteId={note.id}
           noteContent={note.content}
         />
@@ -1174,7 +1194,7 @@ export default function NotesPage() {
             }`}
           >
             <Newspaper size={13} />
-            Blogs
+            Blog & Thoughts
           </button>
         )}
 
@@ -1316,7 +1336,7 @@ export default function NotesPage() {
                     : filter.type === "journal"
                       ? "Reading Journal"
                       : filter.type === "blogs"
-                        ? "Blogs"
+                        ? "Blog & Thoughts"
                         : filter.type === "group"
                           ? filter.name
                           : `#${filter.name}`}

@@ -3,6 +3,14 @@
 
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 
+// Two publishable collections on the Astro site, sharing one mechanism.
+export type BlogKind = "blog" | "thoughts"
+
+export const KIND_SINGULAR: Record<BlogKind, string> = { blog: "Blog", thoughts: "Thought" }
+export const KIND_PLURAL: Record<BlogKind, string> = { blog: "Blogs", thoughts: "Thoughts" }
+
+const q = (kind: BlogKind) => `?kind=${kind}`
+
 export interface BlogConfig {
   repo_path: string
   content_subdir: string
@@ -87,22 +95,29 @@ export interface BlogLivePreviewRequest {
   mermaid_svgs: Record<string, string>
 }
 
-export const getBlogConfig = (): Promise<BlogConfig> => apiGet<BlogConfig>("/blog/config")
+export const getBlogConfig = (kind: BlogKind = "blog"): Promise<BlogConfig> =>
+  apiGet<BlogConfig>(`/blog/config${q(kind)}`)
 
-export const createBlogDraft = (req: BlogDraftRequest): Promise<BlogDraft> =>
-  apiPost<BlogDraft>("/blog/draft", req)
+export const createBlogDraft = (
+  req: BlogDraftRequest,
+  kind: BlogKind = "blog",
+): Promise<BlogDraft> => apiPost<BlogDraft>(`/blog/draft${q(kind)}`, req)
 
 export const suggestBlogDescription = (noteId: string): Promise<{ description: string }> =>
   apiPost<{ description: string }>("/blog/suggest-description", { note_id: noteId })
 
-export const publishBlog = (req: BlogPublishRequest): Promise<BlogPublishResult> =>
-  apiPost<BlogPublishResult>("/blog/publish", req)
+export const publishBlog = (
+  req: BlogPublishRequest,
+  kind: BlogKind = "blog",
+): Promise<BlogPublishResult> => apiPost<BlogPublishResult>(`/blog/publish${q(kind)}`, req)
 
-export const blogLivePreview = (req: BlogLivePreviewRequest): Promise<{ url: string }> =>
-  apiPost<{ url: string }>("/blog/preview/live", req)
+export const blogLivePreview = (
+  req: BlogLivePreviewRequest,
+  kind: BlogKind = "blog",
+): Promise<{ url: string }> => apiPost<{ url: string }>(`/blog/preview/live${q(kind)}`, req)
 
-export const blogLivePreviewCleanup = (slug: string): Promise<void> =>
-  apiPost<void>("/blog/preview/live/cleanup", { slug })
+export const blogLivePreviewCleanup = (slug: string, kind: BlogKind = "blog"): Promise<void> =>
+  apiPost<void>(`/blog/preview/live/cleanup${q(kind)}`, { slug })
 
 // -- published-post management --------------------------------------------
 
@@ -129,19 +144,20 @@ export interface BlogPostUpdateRequest {
   body: string
 }
 
-export const listBlogPosts = (): Promise<BlogPostSummary[]> =>
-  apiGet<BlogPostSummary[]>("/blog/posts")
+export const listBlogPosts = (kind: BlogKind = "blog"): Promise<BlogPostSummary[]> =>
+  apiGet<BlogPostSummary[]>(`/blog/posts${q(kind)}`)
 
-export const getBlogPost = (slug: string): Promise<BlogPostDetail> =>
-  apiGet<BlogPostDetail>(`/blog/posts/${slug}`)
+export const getBlogPost = (slug: string, kind: BlogKind = "blog"): Promise<BlogPostDetail> =>
+  apiGet<BlogPostDetail>(`/blog/posts/${slug}${q(kind)}`)
 
 export const updateBlogPost = (
   slug: string,
   req: BlogPostUpdateRequest,
-): Promise<BlogPublishResult> => apiPut<BlogPublishResult>(`/blog/posts/${slug}`, req)
+  kind: BlogKind = "blog",
+): Promise<BlogPublishResult> => apiPut<BlogPublishResult>(`/blog/posts/${slug}${q(kind)}`, req)
 
-export const deleteBlogPost = (slug: string): Promise<BlogPublishResult> =>
-  apiDelete<BlogPublishResult>(`/blog/posts/${slug}`)
+export const deleteBlogPost = (slug: string, kind: BlogKind = "blog"): Promise<BlogPublishResult> =>
+  apiDelete<BlogPublishResult>(`/blog/posts/${slug}${q(kind)}`)
 
 export const pushBlog = (): Promise<BlogPushResult> =>
   apiPost<BlogPushResult>("/blog/push")
