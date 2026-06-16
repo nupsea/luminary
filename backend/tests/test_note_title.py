@@ -85,6 +85,22 @@ async def test_background_description_is_generated_and_stored(test_db, monkeypat
 
 
 @pytest.mark.anyio
+async def test_backfill_endpoint_reports_queued_count(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.post(
+            "/notes",
+            json={
+                "content": "A note long enough to be eligible for a generated summary line.",
+                "tags": [],
+                "document_id": None,
+            },
+        )
+        r = await c.post("/notes/descriptions/backfill")
+        assert r.status_code == 200
+        assert r.json()["queued"] >= 1
+
+
+@pytest.mark.anyio
 async def test_backfill_fills_existing_null_descriptions(test_db, monkeypatch):
     """Existing notes (no description) get summarised by the startup backfill."""
     from datetime import UTC, datetime

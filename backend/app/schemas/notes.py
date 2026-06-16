@@ -91,6 +91,11 @@ class NoteTitleSuggestResponse(BaseModel):
     title: str
 
 
+class DescriptionBackfillResponse(BaseModel):
+    # How many notes were queued for (re)summarising in the background.
+    queued: int
+
+
 class NoteSearchItem(BaseModel):
     note_id: str
     content: str

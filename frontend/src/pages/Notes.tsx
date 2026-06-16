@@ -54,7 +54,7 @@ import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
 import { API_BASE } from "@/lib/config"
-import type { Note } from "@/lib/notesApi"
+import { backfillNoteDescriptions, type Note } from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -855,6 +855,27 @@ export default function NotesPage() {
     }
   }
 
+  const [summarizing, setSummarizing] = useState(false)
+  async function handleGenerateSummaries() {
+    setSummarizing(true)
+    try {
+      const { queued } = await backfillNoteDescriptions()
+      toast.success(
+        queued > 0
+          ? `Summarizing ${queued} note${queued > 1 ? "s" : ""} in the background…`
+          : "All note summaries are up to date",
+      )
+      // Surface results as the background job lands.
+      for (const delay of [6000, 15000, 30000]) {
+        setTimeout(() => void qc.invalidateQueries({ queryKey: ["notes"] }), delay)
+      }
+    } catch {
+      toast.error("Failed to start summary generation")
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   // Individual accept/reject kept as API helpers (backward compat) but UI uses OrganizationPlanDialog
 
   useEffect(() => {
@@ -1393,6 +1414,15 @@ export default function NotesPage() {
                 title="Generate flashcards from notes"
               >
                 Generate Flashcards
+              </button>
+              <button
+                onClick={() => void handleGenerateSummaries()}
+                disabled={summarizing}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+                title="Generate card summaries for notes missing one"
+              >
+                {summarizing ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                Generate Summaries
               </button>
               <button
                 onClick={() => setIsCreating(true)}

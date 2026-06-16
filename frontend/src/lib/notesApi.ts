@@ -53,6 +53,12 @@ export async function suggestNoteTitle(content: string): Promise<string> {
   return data.title
 }
 
+/** Trigger background (re)generation of card summaries. `force` refreshes every
+ *  note; otherwise only notes missing a description. Returns the queued count. */
+export async function backfillNoteDescriptions(force = false): Promise<{ queued: number }> {
+  return apiPost<{ queued: number }>(`/notes/descriptions/backfill?force=${force}`, {})
+}
+
 export async function fetchCollectionTree(
   contains?: "document" | "note",
 ): Promise<CollectionTreeItem[]> {

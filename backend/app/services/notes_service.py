@@ -388,24 +388,22 @@ async def generate_and_store_description(note_id: str, content: str) -> None:
         logger.warning("generate_and_store_description failed (non-fatal): %s", exc)
 
 
-async def backfill_missing_descriptions(limit: int = 500) -> int:
-    """Summarise existing notes that have no description yet (e.g. created before
-    the feature). Sequential and best-effort so it stays a gentle background job;
-    notes left null when the LLM is down are retried on the next startup.
+async def backfill_missing_descriptions(limit: int = 500, force: bool = False) -> int:
+    """Summarise existing notes. By default only fills notes that have no
+    description yet (e.g. created before the feature); ``force=True`` refreshes
+    every eligible note. Sequential and best-effort so it stays a gentle
+    background job; notes left null when the LLM is down are retried later.
     """
+    query = (
+        select(NoteModel.id, NoteModel.content)
+        .where(func.length(NoteModel.content) >= 40)
+        .where(NoteModel.archived.is_(False))
+        .limit(limit)
+    )
+    if not force:
+        query = query.where(NoteModel.description.is_(None))
     async with get_session_factory()() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(NoteModel.id, NoteModel.content)
-                    .where(NoteModel.description.is_(None))
-                    .where(func.length(NoteModel.content) >= 40)
-                    .where(NoteModel.archived.is_(False))
-                    .limit(limit)
-                )
-            )
-            .all()
-        )
+        rows = (await session.execute(query)).all()
     done = 0
     for note_id, content in rows:
         await generate_and_store_description(note_id, content)

@@ -31,6 +31,7 @@ from app.schemas.notes import (
     BatchAcceptRequest,
     ClusterNotePreview,
     ClusterSuggestionResponse,
+    DescriptionBackfillResponse,
     GapDetectRequest,
     GapDetectResponse,
     GroupInfo,
@@ -73,6 +74,9 @@ from app.services.naming import normalize_tag_slug
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
+from app.services.notes_service import (
+    backfill_missing_descriptions as _backfill_missing_descriptions,
+)
 from app.services.notes_service import (
     embed_and_store_note as _embed_and_store_note,
 )
@@ -127,6 +131,7 @@ __all__ = [
     "BatchAcceptRequest",
     "ClusterNotePreview",
     "ClusterSuggestionResponse",
+    "DescriptionBackfillResponse",
     "GapDetectRequest",
     "GapDetectResponse",
     "GroupInfo",
@@ -1003,3 +1008,27 @@ async def suggest_title(
 
     title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)
+
+
+@router.post("/descriptions/backfill", response_model=DescriptionBackfillResponse)
+async def backfill_descriptions(
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+) -> DescriptionBackfillResponse:
+    """Manually (re)generate card summaries. Default fills only notes missing
+    one; force=True refreshes every eligible note. Runs in the background; the
+    response reports how many notes were queued."""
+    query = (
+        select(func.count())
+        .select_from(NoteModel)
+        .where(func.length(NoteModel.content) >= 40)
+        .where(NoteModel.archived.is_(False))
+    )
+    if not force:
+        query = query.where(NoteModel.description.is_(None))
+    queued = (await session.execute(query)).scalar_one()
+
+    task = asyncio.create_task(_backfill_missing_descriptions(force=force))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return DescriptionBackfillResponse(queued=queued)
