@@ -500,6 +500,14 @@ interface NoteCardProps {
   onDeleted: () => void
 }
 
+// Fallback title when a note has none: the first few words of its content.
+function deriveTitle(content: string): string {
+  const firstLine = content.split("\n").map((l) => l.trim()).find(Boolean) ?? ""
+  const clean = firstLine.replace(/^#+\s*/, "").replace(/[`*_>#~[\]]/g, "").trim()
+  const words = clean.split(/\s+/).filter(Boolean)
+  return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : words.join(" ")
+}
+
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
   const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
@@ -593,21 +601,32 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Title + auto-generated description (card context) — click to edit */}
-      {!confirming && (
-        <div className="cursor-pointer" onClick={onEdit}>
-          {note.title && (
-            <h3 className="mb-1 text-sm font-semibold leading-snug text-foreground">
-              {note.title}
-            </h3>
-          )}
-          {note.description ? (
-            <p className="line-clamp-3 text-sm text-muted-foreground">{note.description}</p>
-          ) : (
-            <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
-          )}
-        </div>
-      )}
+      {/* Title (real, else first words) + summary/snippet — click to edit.
+          Skip the body when it would just repeat a derived title, so an empty
+          or title-only note doesn't reserve blank space. */}
+      {!confirming && (() => {
+        const realTitle = note.title?.trim()
+        const cardTitle = realTitle || deriveTitle(note.content)
+        const summary = note.description?.trim()
+        // Show the content snippet only when there's a real title to pair it
+        // with; otherwise the derived title already conveys the opening words.
+        const snippet = !summary && realTitle ? note.content.slice(0, 200) : ""
+        if (!cardTitle && !summary && !snippet) return null
+        return (
+          <div className="cursor-pointer" onClick={onEdit}>
+            {cardTitle && (
+              <h3 className="mb-1 text-sm font-semibold leading-snug text-foreground">
+                {cardTitle}
+              </h3>
+            )}
+            {summary ? (
+              <p className="line-clamp-3 text-sm text-muted-foreground">{summary}</p>
+            ) : snippet ? (
+              <MarkdownRenderer>{snippet}</MarkdownRenderer>
+            ) : null}
+          </div>
+        )
+      })()}
 
       {/* Source back-link — deep-links to the document section this note was created from */}
       {note.document_id && (
@@ -1152,7 +1171,7 @@ export default function NotesPage() {
     )
   } else {
     panelContent = (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {noteList.map((note) => (
           <NoteCard
             key={note.id}
