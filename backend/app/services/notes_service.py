@@ -56,6 +56,7 @@ def to_response(
         source_document_ids=source_document_ids or [],
         title=note.title,
         title_auto_generated=note.title_auto_generated,
+        description=note.description,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )

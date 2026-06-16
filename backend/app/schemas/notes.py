@@ -20,6 +20,8 @@ class NoteCreateRequest(BaseModel):
     content: str
     tags: list[str] = []
     group_name: str | None = None
+    # Optional user-provided title. When set, the note is flagged manual-title.
+    title: str | None = None
     # multi-document source linkage; legacy document_id still accepted
     source_document_ids: list[str] = []
 
@@ -36,6 +38,8 @@ class NoteUpdateRequest(BaseModel):
     # title_auto_generated=False so subsequent auto-gen passes never
     # overwrite the user's choice. Empty string is a legal "clear to null".
     title: str | None = None
+    # Auto-generated note summary. None = not supplied; "" clears to null.
+    description: str | None = None
 
 
 class NoteResponse(BaseModel):
@@ -54,6 +58,7 @@ class NoteResponse(BaseModel):
     source_document_ids: list[str] = []
     title: str | None = None
     title_auto_generated: bool = True
+    description: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -86,6 +91,14 @@ class NoteTitleSuggestRequest(BaseModel):
 
 class NoteTitleSuggestResponse(BaseModel):
     title: str
+
+
+class NoteDescriptionSuggestRequest(BaseModel):
+    content: str
+
+
+class NoteDescriptionSuggestResponse(BaseModel):
+    description: str
 
 
 class NoteSearchItem(BaseModel):

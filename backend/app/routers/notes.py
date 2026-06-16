@@ -40,6 +40,8 @@ from app.schemas.notes import (
     NamingViolation,
     NoteAutocompleteItem,
     NoteCreateRequest,
+    NoteDescriptionSuggestRequest,
+    NoteDescriptionSuggestResponse,
     NoteEntityItem,
     NoteFlashcardGenerateRequest,
     NoteFlashcardGenerateResponse,
@@ -70,6 +72,7 @@ from app.services.flashcard import get_flashcard_service
 from app.services.gap_detector import get_gap_detector
 from app.services.llm import LLMUnavailableError
 from app.services.naming import normalize_tag_slug
+from app.services.note_description_generator import get_description_generator
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
@@ -122,6 +125,8 @@ __all__ = [
     "NamingViolation",
     "NoteAutocompleteItem",
     "NoteCreateRequest",
+    "NoteDescriptionSuggestRequest",
+    "NoteDescriptionSuggestResponse",
     "NoteEntityItem",
     "NoteFlashcardGenerateRequest",
     "NoteFlashcardGenerateResponse",
@@ -209,8 +214,8 @@ async def create_note(
         content=req.content,
         content_hash=content_hash,
         group_name=req.group_name,
-        title=None,
-        title_auto_generated=True,
+        title=(req.title or "").strip() or None,
+        title_auto_generated=req.title is None,
         created_at=now,
         updated_at=now,
     )
@@ -420,6 +425,8 @@ async def _apply_note_update(
         cleaned = req.title.strip()
         note.title = cleaned or None
         note.title_auto_generated = False
+    if req.description is not None:
+        note.description = req.description.strip() or None
     note.updated_at = datetime.now(UTC)
 
     await session.flush()  # Ensure content update is visible to other queries if needed
@@ -984,3 +991,13 @@ async def suggest_title(
 
     title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)
+
+
+@router.post("/suggest-description", response_model=NoteDescriptionSuggestResponse)
+async def suggest_description(
+    req: NoteDescriptionSuggestRequest,
+) -> NoteDescriptionSuggestResponse:
+    """Return a one-sentence LLM summary used as the note's card context."""
+
+    description = await get_description_generator().suggest_description(req.content)
+    return NoteDescriptionSuggestResponse(description=description)

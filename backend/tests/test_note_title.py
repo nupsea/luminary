@@ -46,6 +46,52 @@ async def test_new_note_starts_auto_generated_with_null_title(test_db):
 
 
 @pytest.mark.anyio
+async def test_create_with_manual_title_is_persisted(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/notes",
+            json={"content": "body", "tags": [], "document_id": None, "title": "My Title"},
+        )
+        assert r.status_code == 201
+        body = r.json()
+        assert body["title"] == "My Title"
+        assert body["title_auto_generated"] is False
+
+
+@pytest.mark.anyio
+async def test_description_round_trips_and_suggest_endpoint(test_db, monkeypatch):
+    # Stub the LLM-backed generator so the test is deterministic and offline.
+    from app.services import note_description_generator as gen
+
+    async def _fake(self, content: str) -> str:
+        return "A short summary."
+
+    monkeypatch.setattr(
+        gen.NoteDescriptionGeneratorService, "suggest_description", _fake
+    )
+    gen.get_description_generator.cache_clear()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        created = (
+            await c.post("/notes", json={"content": "hello world", "tags": [], "document_id": None})
+        ).json()
+        assert created["description"] is None
+
+        suggested = (
+            await c.post(
+                "/notes/suggest-description",
+                json={"content": "long enough body text here"},
+            )
+        ).json()
+        assert suggested["description"] == "A short summary."
+
+        patched = (
+            await c.patch(f"/notes/{created['id']}", json={"description": suggested["description"]})
+        ).json()
+        assert patched["description"] == "A short summary."
+
+
+@pytest.mark.anyio
 async def test_patch_title_flips_auto_flag_off(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         created = (

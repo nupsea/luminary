@@ -238,6 +238,8 @@ class NoteModel(Base):
     title_auto_generated: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    # Short auto-generated summary shown as card context. NULL until generated.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # short hash of content for dedup (sha256[:16])
     content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # archived flag -- excluded from default GET /notes list; set by archive-stale

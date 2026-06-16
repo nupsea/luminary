@@ -593,10 +593,19 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Content — click to open editor dialog */}
+      {/* Title + auto-generated description (card context) — click to edit */}
       {!confirming && (
         <div className="cursor-pointer" onClick={onEdit}>
-          <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
+          {note.title && (
+            <h3 className="mb-1 text-sm font-semibold leading-snug text-foreground">
+              {note.title}
+            </h3>
+          )}
+          {note.description ? (
+            <p className="line-clamp-3 text-sm text-muted-foreground">{note.description}</p>
+          ) : (
+            <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
+          )}
         </div>
       )}
 
