@@ -5,10 +5,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Check,
-  ChevronsLeft,
-  ChevronsRight,
   FileText,
   LayoutGrid,
+  Maximize2,
+  Minimize2,
   Pencil,
   Search,
   Tag,
@@ -110,7 +110,7 @@ export function NoteReaderSheet({
 }: NoteReaderSheetProps) {
   const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
   // Per-open state; not persisted.
-  const [wideMode, setWideMode] = useState(false)
+  const [focusMode, setFocusMode] = useState(false)
   const [editContent, setEditContent] = useState("")
   const [editTags, setEditTags] = useState<string[]>([])
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
@@ -470,24 +470,29 @@ export function NoteReaderSheet({
     ? (documents.find((d) => d.id === note.document_id) ?? null)
     : null
 
+  // Editing always uses the big working area; reading stays compact.
+  const isEditing = mode === "edit" || isNew
+
   return (
     <Sheet open={note !== null || isNew} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent
         side="right"
-        className={
-          wideMode
-            ? "w-[90vw] max-w-none sm:max-w-none flex flex-col p-0 overflow-hidden transition-[width] duration-200"
-            : "w-[58vw] max-w-4xl sm:max-w-4xl flex flex-col p-0 overflow-hidden transition-[width] duration-200"
-        }
+        className={`flex flex-col p-0 overflow-hidden transition-[width] duration-200 ${
+          focusMode
+            ? "w-screen max-w-none sm:max-w-none"
+            : isEditing
+              ? "w-[90vw] max-w-none sm:max-w-none"
+              : "w-[58vw] max-w-4xl sm:max-w-4xl"
+        }`}
       >
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <button
-            onClick={() => setWideMode((v) => !v)}
+            onClick={() => setFocusMode((v) => !v)}
             className="absolute left-3 top-3 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title={wideMode ? "Minimize to default width" : "Expand to wide view"}
-            aria-label={wideMode ? "Minimize note sheet" : "Expand note sheet"}
+            title={focusMode ? "Exit focus mode" : "Focus mode — distraction-free, full screen"}
+            aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
           >
-            {wideMode ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+            {focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
           <SheetTitle className="text-xl font-semibold leading-tight pl-7 pr-8 truncate">
             {appendTarget ? (
@@ -525,7 +530,7 @@ export function NoteReaderSheet({
               </button>
             )}
           </SheetTitle>
-          {sourceDoc && !appendTarget && (
+          {!focusMode && sourceDoc && !appendTarget && (
             <SheetDescription asChild>
               <button
                 className="w-fit text-left text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
@@ -542,7 +547,7 @@ export function NoteReaderSheet({
               </button>
             </SheetDescription>
           )}
-          {isNew && (
+          {!focusMode && isNew && (
             <SheetDescription asChild>
               <div className="mt-1 flex flex-col gap-2">
                 {appendTarget ? (
@@ -650,6 +655,7 @@ export function NoteReaderSheet({
                     <p className="text-muted-foreground italic text-sm">Start writing...</p>
                   )}
                 </div>
+                {!focusMode && (
                 <div className="mt-12 pt-8 border-t border-border space-y-6 pb-24">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-muted-foreground">
@@ -738,6 +744,7 @@ export function NoteReaderSheet({
                     </div>
                   </div>
                 </div>
+                )}
               </>
             ) : (
               <NoteEditor
@@ -757,6 +764,7 @@ export function NoteReaderSheet({
                 collectionsLoading={collectionsLoading}
                 showCollections={!appendTarget}
                 showSourceDocs={!appendTarget}
+                showMeta={!focusMode}
                 suggestedTags={suggestedTags}
                 suggestionsBusy={isFetchingTags}
                 onSuggestTags={() => void handleFetchSuggestions()}

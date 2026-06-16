@@ -42,6 +42,7 @@ export interface NoteEditorProps {
   collectionsLoading?: boolean
   showCollections?: boolean
   showSourceDocs?: boolean
+  showMeta?: boolean
   showImageSize?: boolean
   suggestedTags?: string[]
   suggestionsBusy?: boolean
@@ -71,6 +72,7 @@ export function NoteEditor({
   collectionsLoading,
   showCollections = true,
   showSourceDocs = true,
+  showMeta = true,
   showImageSize = true,
   suggestedTags = [],
   suggestionsBusy = false,
@@ -184,6 +186,7 @@ export function NoteEditor({
         }
       />
 
+      {showMeta && (
       <div className="shrink-0 space-y-4 border-t border-border pt-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
@@ -268,6 +271,7 @@ export function NoteEditor({
           </div>
         )}
       </div>
+      )}
     </div>
     <NoteDiagramDialog
       open={diagramOpen}
