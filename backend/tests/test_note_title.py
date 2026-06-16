@@ -59,36 +59,29 @@ async def test_create_with_manual_title_is_persisted(test_db):
 
 
 @pytest.mark.anyio
-async def test_description_round_trips_and_suggest_endpoint(test_db, monkeypatch):
-    # Stub the LLM-backed generator so the test is deterministic and offline.
+async def test_background_description_is_generated_and_stored(test_db, monkeypatch):
+    """Save returns instantly with description=null; the background helper then
+    summarises the content and persists it for the card."""
     from app.services import note_description_generator as gen
+    from app.services.notes_service import generate_and_store_description
 
     async def _fake(self, content: str) -> str:
         return "A short summary."
 
-    monkeypatch.setattr(
-        gen.NoteDescriptionGeneratorService, "suggest_description", _fake
-    )
+    monkeypatch.setattr(gen.NoteDescriptionGeneratorService, "suggest_description", _fake)
     gen.get_description_generator.cache_clear()
 
+    body = "This note has more than forty characters so a summary is worth generating."
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         created = (
-            await c.post("/notes", json={"content": "hello world", "tags": [], "document_id": None})
+            await c.post("/notes", json={"content": body, "tags": [], "document_id": None})
         ).json()
-        assert created["description"] is None
+        assert created["description"] is None  # instant save, summary not yet ready
 
-        suggested = (
-            await c.post(
-                "/notes/suggest-description",
-                json={"content": "long enough body text here"},
-            )
-        ).json()
-        assert suggested["description"] == "A short summary."
-
-        patched = (
-            await c.patch(f"/notes/{created['id']}", json={"description": suggested["description"]})
-        ).json()
-        assert patched["description"] == "A short summary."
+        # Run the background work deterministically, then confirm it landed.
+        await generate_and_store_description(created["id"], body)
+        reread = (await c.get(f"/notes/{created['id']}")).json()
+        assert reread["description"] == "A short summary."
 
 
 @pytest.mark.anyio

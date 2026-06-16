@@ -22,8 +22,6 @@ export interface PatchNotePayload {
   source_document_ids?: string[]
   /** Empty string clears to NULL; either way flips title_auto_generated=False. */
   title?: string
-  /** Auto-generated summary shown as card context; "" clears to NULL. */
-  description?: string
 }
 
 export const createNote = (payload: CreateNotePayload): Promise<Note> =>
@@ -53,11 +51,6 @@ export async function fetchSuggestedTags(
 export async function suggestNoteTitle(content: string): Promise<string> {
   const data = await apiPost<{ title: string }>("/notes/suggest-title", { content })
   return data.title
-}
-
-export async function suggestNoteDescription(content: string): Promise<string> {
-  const data = await apiPost<{ description: string }>("/notes/suggest-description", { content })
-  return data.description
 }
 
 export async function fetchCollectionTree(

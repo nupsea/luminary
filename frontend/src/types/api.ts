@@ -3333,26 +3333,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/notes/suggest-description": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Suggest Description
-         * @description Return a one-sentence LLM summary used as the note's card context.
-         */
-        post: operations["suggest_description_notes_suggest_description_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/pomodoro/active": {
         parameters: {
             query?: never;
@@ -7212,16 +7192,6 @@ export interface components {
              */
             source_document_ids: string[];
         };
-        /** NoteDescriptionSuggestRequest */
-        NoteDescriptionSuggestRequest: {
-            /** Content */
-            content: string;
-        };
-        /** NoteDescriptionSuggestResponse */
-        NoteDescriptionSuggestResponse: {
-            /** Description */
-            description: string;
-        };
         /** NoteEntityItem */
         NoteEntityItem: {
             /** Name */
@@ -7418,8 +7388,6 @@ export interface components {
             source_document_ids?: string[] | null;
             /** Title */
             title?: string | null;
-            /** Description */
-            description?: string | null;
         };
         /** OllamaPullRequest */
         OllamaPullRequest: {
@@ -14404,39 +14372,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NoteTitleSuggestResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    suggest_description_notes_suggest_description_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NoteDescriptionSuggestRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoteDescriptionSuggestResponse"];
                 };
             };
             /** @description Validation Error */

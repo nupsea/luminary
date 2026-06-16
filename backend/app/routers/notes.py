@@ -40,8 +40,6 @@ from app.schemas.notes import (
     NamingViolation,
     NoteAutocompleteItem,
     NoteCreateRequest,
-    NoteDescriptionSuggestRequest,
-    NoteDescriptionSuggestResponse,
     NoteEntityItem,
     NoteFlashcardGenerateRequest,
     NoteFlashcardGenerateResponse,
@@ -72,7 +70,6 @@ from app.services.flashcard import get_flashcard_service
 from app.services.gap_detector import get_gap_detector
 from app.services.llm import LLMUnavailableError
 from app.services.naming import normalize_tag_slug
-from app.services.note_description_generator import get_description_generator
 from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
@@ -87,6 +84,9 @@ from app.services.notes_service import (
 )
 from app.services.notes_service import (
     fts_update as _fts_update,
+)
+from app.services.notes_service import (
+    generate_and_store_description as _generate_and_store_description,
 )
 from app.services.notes_service import (
     sync_note_sources as _sync_note_sources,
@@ -107,6 +107,17 @@ logger = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
 
+
+def _schedule_description(note_id: str, content: str) -> None:
+    """Fire-and-forget summary generation. Short notes keep the card's content
+    snippet (no point summarising a line or two), so skip them."""
+    if len(content.strip()) < 40:
+        return
+    task = asyncio.create_task(_generate_and_store_description(note_id, content))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 # Back-compat re-exports for tests and routers/tags.py that import these
@@ -125,8 +136,6 @@ __all__ = [
     "NamingViolation",
     "NoteAutocompleteItem",
     "NoteCreateRequest",
-    "NoteDescriptionSuggestRequest",
-    "NoteDescriptionSuggestResponse",
     "NoteEntityItem",
     "NoteFlashcardGenerateRequest",
     "NoteFlashcardGenerateResponse",
@@ -256,6 +265,8 @@ async def create_note(
     _xp_task = asyncio.create_task(_award_note_xp())
     _background_tasks.add(_xp_task)
     _xp_task.add_done_callback(_background_tasks.discard)
+
+    _schedule_description(note.id, note.content)
 
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)
@@ -425,8 +436,6 @@ async def _apply_note_update(
         cleaned = req.title.strip()
         note.title = cleaned or None
         note.title_auto_generated = False
-    if req.description is not None:
-        note.description = req.description.strip() or None
     note.updated_at = datetime.now(UTC)
 
     await session.flush()  # Ensure content update is visible to other queries if needed
@@ -466,6 +475,9 @@ async def _apply_note_update(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+    # Content changed -> refresh the auto-summary off the request path.
+    if req.content is not None:
+        _schedule_description(note.id, note.content)
     # Re-fetch collection refs for a fully populated response. Single-note
     # path; reuse the batch helper to keep one source of truth for ordering.
     coll_refs_raw = (
@@ -991,13 +1003,3 @@ async def suggest_title(
 
     title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)
-
-
-@router.post("/suggest-description", response_model=NoteDescriptionSuggestResponse)
-async def suggest_description(
-    req: NoteDescriptionSuggestRequest,
-) -> NoteDescriptionSuggestResponse:
-    """Return a one-sentence LLM summary used as the note's card context."""
-
-    description = await get_description_generator().suggest_description(req.content)
-    return NoteDescriptionSuggestResponse(description=description)

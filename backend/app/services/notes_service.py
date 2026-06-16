@@ -358,3 +358,29 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
         logger.debug("Note vector stored note_id=%s", note_id)
     except Exception as exc:
         logger.warning("embed_and_store_note failed (non-fatal): %s", exc)
+
+
+async def generate_and_store_description(note_id: str, content: str) -> None:
+    """Background: summarise note content and persist it as the card description.
+
+    Runs off the request path so saving stays instant. Skips the write if the
+    note was deleted or its content changed since this task was scheduled, so a
+    stale summary never clobbers a newer one. Non-fatal on any failure.
+    """
+    try:
+        from app.services.note_description_generator import (  # noqa: PLC0415
+            get_description_generator,
+        )
+
+        description = await get_description_generator().suggest_description(content)
+        async with get_session_factory()() as session:
+            note = (
+                await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+            ).scalar_one_or_none()
+            if note is None or note.content != content:
+                return
+            note.description = description
+            await session.commit()
+        logger.debug("Note description stored note_id=%s", note_id)
+    except Exception as exc:
+        logger.warning("generate_and_store_description failed (non-fatal): %s", exc)

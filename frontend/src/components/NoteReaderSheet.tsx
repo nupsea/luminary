@@ -38,7 +38,6 @@ import {
   fetchSuggestedTags,
   patchNote,
   removeNoteFromCollection,
-  suggestNoteDescription,
   type Note,
 } from "@/lib/notesApi"
 
@@ -279,18 +278,14 @@ export function NoteReaderSheet({
         setMode("read")
       }
 
-      // Auto-generate a short summary for the card context, then persist it.
-      // Fire-and-forget: failure (e.g. LLM offline) leaves description null and
-      // the card falls back to a content snippet.
+      // The backend summarises the note into `description` in the background, so
+      // refetch once shortly after to surface it on the card without a manual
+      // refresh. The card shows the content snippet until then.
       if (savedNote.content.trim().length >= 40) {
-        suggestNoteDescription(savedNote.content)
-          .then((description) =>
-            patchNote(savedNote.id, { description }).then(() => {
-              void qc.invalidateQueries({ queryKey: ["notes"] })
-              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            }),
-          )
-          .catch(() => {})
+        setTimeout(() => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+        }, 6000)
       }
       // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit'
       if (isNew && savedNote.content.trim().length > 30) {

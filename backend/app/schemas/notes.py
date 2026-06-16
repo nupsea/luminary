@@ -38,8 +38,6 @@ class NoteUpdateRequest(BaseModel):
     # title_auto_generated=False so subsequent auto-gen passes never
     # overwrite the user's choice. Empty string is a legal "clear to null".
     title: str | None = None
-    # Auto-generated note summary. None = not supplied; "" clears to null.
-    description: str | None = None
 
 
 class NoteResponse(BaseModel):
@@ -91,14 +89,6 @@ class NoteTitleSuggestRequest(BaseModel):
 
 class NoteTitleSuggestResponse(BaseModel):
     title: str
-
-
-class NoteDescriptionSuggestRequest(BaseModel):
-    content: str
-
-
-class NoteDescriptionSuggestResponse(BaseModel):
-    description: str
 
 
 class NoteSearchItem(BaseModel):
