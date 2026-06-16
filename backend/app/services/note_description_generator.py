@@ -15,20 +15,15 @@ _SYSTEM = (
 _USER_TMPL = "Note content:\n{content}\n\nSummary:"
 
 
-def _fallback(content: str) -> str:
-    # First non-empty line, trimmed to a card-sized snippet.
-    snippet = next((ln.strip() for ln in content.splitlines() if ln.strip()), "")
-    snippet = re.sub(r"^#+\s*", "", snippet)
-    return snippet[:160]
-
-
 class NoteDescriptionGeneratorService:
-    async def suggest_description(self, content: str) -> str:
-        """Return a one-sentence summary; falls back to a content snippet when
-        the note is too short or the LLM is unreachable."""
+    async def suggest_description(self, content: str) -> str | None:
+        """Return a one-sentence summary, or None when the note is too short or
+        the LLM is unavailable. Callers leave the description null in that case
+        and the card falls back to a content snippet, so nothing useless is
+        stored and the summary is retried on the next save/backfill."""
         content_stripped = content.strip()
         if len(content_stripped) < 40:
-            return _fallback(content_stripped)
+            return None
 
         from app.services.llm import LLMUnavailableError, get_llm_service  # noqa: PLC0415
 
@@ -41,11 +36,10 @@ class NoteDescriptionGeneratorService:
                 temperature=0.3,
                 max_tokens=60,
             )
-            desc = re.sub(r'^["\']|["\']$', "", raw.strip()).strip()
-            return desc or _fallback(content_stripped)
+            return re.sub(r'^["\']|["\']$', "", raw.strip()).strip() or None
         except LLMUnavailableError:
-            logger.warning("LLM unavailable during note description generation; using fallback")
-            return _fallback(content_stripped)
+            logger.warning("LLM unavailable during note description generation; skipping")
+            return None
 
 
 @lru_cache

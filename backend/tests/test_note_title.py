@@ -85,6 +85,42 @@ async def test_background_description_is_generated_and_stored(test_db, monkeypat
 
 
 @pytest.mark.anyio
+async def test_backfill_fills_existing_null_descriptions(test_db, monkeypatch):
+    """Existing notes (no description) get summarised by the startup backfill."""
+    from datetime import UTC, datetime
+
+    from app.models import NoteModel
+    from app.services import note_description_generator as gen
+    from app.services.notes_service import backfill_missing_descriptions
+
+    async def _fake(self, content: str) -> str:
+        return "Backfilled summary."
+
+    monkeypatch.setattr(gen.NoteDescriptionGeneratorService, "suggest_description", _fake)
+    gen.get_description_generator.cache_clear()
+
+    _, factory = test_db
+    nid = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(
+            NoteModel(
+                id=nid,
+                content="An existing note long enough to deserve a generated one-line summary.",
+                tags=[],
+                description=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await s.commit()
+
+    assert await backfill_missing_descriptions() >= 1
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        reread = (await c.get(f"/notes/{nid}")).json()
+        assert reread["description"] == "Backfilled summary."
+
+
+@pytest.mark.anyio
 async def test_patch_title_flips_auto_flag_off(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         created = (

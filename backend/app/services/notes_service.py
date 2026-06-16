@@ -13,7 +13,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
@@ -373,6 +373,8 @@ async def generate_and_store_description(note_id: str, content: str) -> None:
         )
 
         description = await get_description_generator().suggest_description(content)
+        if description is None:
+            return  # too short or LLM unavailable -> leave null, card shows snippet
         async with get_session_factory()() as session:
             note = (
                 await session.execute(select(NoteModel).where(NoteModel.id == note_id))
@@ -384,3 +386,30 @@ async def generate_and_store_description(note_id: str, content: str) -> None:
         logger.debug("Note description stored note_id=%s", note_id)
     except Exception as exc:
         logger.warning("generate_and_store_description failed (non-fatal): %s", exc)
+
+
+async def backfill_missing_descriptions(limit: int = 500) -> int:
+    """Summarise existing notes that have no description yet (e.g. created before
+    the feature). Sequential and best-effort so it stays a gentle background job;
+    notes left null when the LLM is down are retried on the next startup.
+    """
+    async with get_session_factory()() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(NoteModel.id, NoteModel.content)
+                    .where(NoteModel.description.is_(None))
+                    .where(func.length(NoteModel.content) >= 40)
+                    .where(NoteModel.archived.is_(False))
+                    .limit(limit)
+                )
+            )
+            .all()
+        )
+    done = 0
+    for note_id, content in rows:
+        await generate_and_store_description(note_id, content)
+        done += 1
+    if done:
+        logger.info("Backfilled descriptions for %d note(s)", done)
+    return done
