@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Check, FileText, LayoutGrid, Loader2, Tag, Wand2 } from "lucide-react"
+import { Check, ChevronUp, FileText, LayoutGrid, Loader2, Tag, Wand2, Wrench } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
@@ -43,6 +43,7 @@ export interface NoteEditorProps {
   showCollections?: boolean
   showSourceDocs?: boolean
   showMeta?: boolean
+  showToolbar?: boolean
   showImageSize?: boolean
   suggestedTags?: string[]
   suggestionsBusy?: boolean
@@ -73,6 +74,7 @@ export function NoteEditor({
   showCollections = true,
   showSourceDocs = true,
   showMeta = true,
+  showToolbar = true,
   showImageSize = true,
   suggestedTags = [],
   suggestionsBusy = false,
@@ -86,6 +88,7 @@ export function NoteEditor({
 
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
+  const [toolbarOpen, setToolbarOpen] = useState(true)
 
   function handleDiagramSaved(markdown: string) {
     if (editingDiagramRef) {
@@ -124,39 +127,52 @@ export function NoteEditor({
     setDiagramOpen(true)
   }
 
-  const editorToolbar = (
+  const editorToolbar = showToolbar ? (
     <>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {showImageSize && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground">Image spec:</span>
-            {IMAGE_SIZES.map((size) => (
-              <button
-                key={size}
-                type="button"
-                onClick={() => insertImageSizeMarkdown(size)}
-                className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
-              >
-                {size}
-              </button>
-            ))}
+      <div className="flex items-center justify-between gap-2">
+        {toolbarOpen ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {showImageSize && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-muted-foreground">Image spec:</span>
+                {IMAGE_SIZES.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => insertImageSizeMarkdown(size)}
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            )}
+            <MermaidQuickInsert
+              onInsert={(markdown) =>
+                insertAtTextareaCursor(textareaRef.current, content, onContentChange, markdown)
+              }
+              onDraw={() => {
+                setEditingDiagramRef(null)
+                setDiagramOpen(true)
+              }}
+            />
           </div>
+        ) : (
+          <span />
         )}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <MermaidQuickInsert
-            onInsert={(markdown) =>
-              insertAtTextareaCursor(textareaRef.current, content, onContentChange, markdown)
-            }
-            onDraw={() => {
-              setEditingDiagramRef(null)
-              setDiagramOpen(true)
-            }}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => setToolbarOpen((v) => !v)}
+          className="shrink-0 rounded border border-border bg-background p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
+          aria-label={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
+        >
+          {toolbarOpen ? <ChevronUp size={12} /> : <Wrench size={12} />}
+        </button>
       </div>
-      <MermaidCheatSheet />
+      {toolbarOpen && <MermaidCheatSheet />}
     </>
-  )
+  ) : null
 
   return (
     <>

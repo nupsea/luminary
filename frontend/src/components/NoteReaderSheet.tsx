@@ -765,6 +765,7 @@ export function NoteReaderSheet({
                 showCollections={!appendTarget}
                 showSourceDocs={!appendTarget}
                 showMeta={!focusMode}
+                showToolbar={!focusMode}
                 suggestedTags={suggestedTags}
                 suggestionsBusy={isFetchingTags}
                 onSuggestTags={() => void handleFetchSuggestions()}
