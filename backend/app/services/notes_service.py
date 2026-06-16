@@ -13,7 +13,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory
@@ -56,6 +56,7 @@ def to_response(
         source_document_ids=source_document_ids or [],
         title=note.title,
         title_auto_generated=note.title_auto_generated,
+        description=note.description,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -357,3 +358,56 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
         logger.debug("Note vector stored note_id=%s", note_id)
     except Exception as exc:
         logger.warning("embed_and_store_note failed (non-fatal): %s", exc)
+
+
+async def generate_and_store_description(note_id: str, content: str) -> None:
+    """Background: summarise note content and persist it as the card description.
+
+    Runs off the request path so saving stays instant. Skips the write if the
+    note was deleted or its content changed since this task was scheduled, so a
+    stale summary never clobbers a newer one. Non-fatal on any failure.
+    """
+    try:
+        from app.services.note_description_generator import (  # noqa: PLC0415
+            get_description_generator,
+        )
+
+        description = await get_description_generator().suggest_description(content)
+        if description is None:
+            return  # too short or LLM unavailable -> leave null, card shows snippet
+        async with get_session_factory()() as session:
+            note = (
+                await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+            ).scalar_one_or_none()
+            if note is None or note.content != content:
+                return
+            note.description = description
+            await session.commit()
+        logger.debug("Note description stored note_id=%s", note_id)
+    except Exception as exc:
+        logger.warning("generate_and_store_description failed (non-fatal): %s", exc)
+
+
+async def backfill_missing_descriptions(limit: int = 500, force: bool = False) -> int:
+    """Summarise existing notes. By default only fills notes that have no
+    description yet (e.g. created before the feature); ``force=True`` refreshes
+    every eligible note. Sequential and best-effort so it stays a gentle
+    background job; notes left null when the LLM is down are retried later.
+    """
+    query = (
+        select(NoteModel.id, NoteModel.content)
+        .where(func.length(NoteModel.content) >= 40)
+        .where(NoteModel.archived.is_(False))
+        .limit(limit)
+    )
+    if not force:
+        query = query.where(NoteModel.description.is_(None))
+    async with get_session_factory()() as session:
+        rows = (await session.execute(query)).all()
+    done = 0
+    for note_id, content in rows:
+        await generate_and_store_description(note_id, content)
+        done += 1
+    if done:
+        logger.info("Backfilled descriptions for %d note(s)", done)
+    return done

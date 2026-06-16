@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     # prod: serve the built SPA and mount the API under /api on one port (no CORS).
     # dev: routers at root, CORS open, frontend served separately by Vite.
     LUMINARY_MODE: Literal["dev", "prod"] = "dev"
+    # Labs "publish note as blog": target Astro content repo + layout. Labs-only;
+    # defaulted to the author's personal site checkout.
+    LUMINARY_BLOG_REPO_PATH: str = "/Users/sethurama/DEV/LM/nupsea.github.io"
+    LUMINARY_BLOG_CONTENT_SUBDIR: str = "src/content/blog"
+    LUMINARY_BLOG_ASSET_SUBDIR: str = "public/blog"
+    LUMINARY_BLOG_BRANCH: str = "master"
+    LUMINARY_BLOG_URL_BASE: str = "https://nupsea.github.io"
     OLLAMA_URL: str = "http://127.0.0.1:11434"
     # Keep the Ollama model resident in memory between requests so the first
     # query after an idle period does not re-pay the (large-model) load cost.

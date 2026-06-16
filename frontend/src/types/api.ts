@@ -71,6 +71,182 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/blog/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Blog Config */
+        get: operations["get_blog_config_blog_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Draft */
+        post: operations["create_draft_blog_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/suggest-description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Suggest Description */
+        post: operations["suggest_description_blog_suggest_description_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish */
+        post: operations["publish_blog_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Posts */
+        get: operations["list_posts_blog_posts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/posts/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Post */
+        get: operations["get_post_blog_posts__slug__get"];
+        /** Update Post */
+        put: operations["update_post_blog_posts__slug__put"];
+        post?: never;
+        /** Delete Post */
+        delete: operations["delete_post_blog_posts__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/asset/{kind}/{slug}/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Asset
+         * @description Serve a published post's asset (public/<kind>/<slug>/<file>) so the edit
+         *     preview can render images whose markdown uses site-absolute /<kind>/... paths.
+         */
+        get: operations["get_asset_blog_asset__kind___slug___filename__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push */
+        post: operations["push_blog_push_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/preview/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Live Preview */
+        post: operations["live_preview_blog_preview_live_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blog/preview/live/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Live Preview Cleanup */
+        post: operations["live_preview_cleanup_blog_preview_live_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clips": {
         parameters: {
             query?: never;
@@ -3360,6 +3536,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/references/documents/{document_id}/job-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Web Refs Job Status
+         * @description Return the status of the most recent web_refs enrichment job for a document.
+         *
+         *     status is one of: pending | running | done | failed | null (never enqueued).
+         */
+        get: operations["get_web_refs_job_status_references_documents__document_id__job_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/references/documents/{document_id}/validate": {
         parameters: {
             query?: never;
@@ -3592,6 +3790,40 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/settings/surface": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Surface */
+        get: operations["get_surface_settings_surface_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/labs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Labs */
+        patch: operations["patch_labs_settings_labs_patch"];
         trace?: never;
     };
     "/mastery/concepts": {
@@ -4044,6 +4276,48 @@ export interface paths {
          * @description Return flashcards rated 'again' at least again_threshold times in the last N days.
          */
         get: operations["get_struggling_cards_study_struggling_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/decay-debt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Decay Debt
+         * @description Return documents whose flashcards are approaching the forgetting threshold.
+         *
+         *     A card is 'at risk' when its estimated current retention R = e^(-t/S)
+         *     drops below _DECAY_DEBT_RETENTION_THRESHOLD within the next
+         *     _DECAY_DEBT_WINDOW_DAYS days. Results are grouped by document and sorted
+         *     by avg_retention ascending (weakest first).
+         */
+        get: operations["get_decay_debt_study_decay_debt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/calibration-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Calibration Stats */
+        get: operations["get_calibration_stats_study_calibration_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4678,6 +4952,11 @@ export interface components {
             note_count: number;
             /** Flashcard Count */
             flashcard_count: number;
+            /**
+             * Due Card Count
+             * @default 0
+             */
+            due_card_count: number;
         };
         /** AddMembersRequest */
         AddMembersRequest: {
@@ -4772,6 +5051,228 @@ export interface components {
             /** Items */
             items: components["schemas"]["BatchAcceptItem"][];
         };
+        /** BlogAssetItem */
+        BlogAssetItem: {
+            /** Kind */
+            kind: string;
+            /** Dest Filename */
+            dest_filename: string;
+            /** Key */
+            key?: string | null;
+            /** Doc Id */
+            doc_id?: string | null;
+            /** Filename */
+            filename?: string | null;
+        };
+        /** BlogConfigResponse */
+        BlogConfigResponse: {
+            /** Repo Path */
+            repo_path: string;
+            /** Content Subdir */
+            content_subdir: string;
+            /** Is Git Repo */
+            is_git_repo: boolean;
+            /** Content Dir Exists */
+            content_dir_exists: boolean;
+            /** Branch */
+            branch: string | null;
+            /** Dirty */
+            dirty: boolean;
+            /** Ahead */
+            ahead?: number | null;
+            /** Existing Slugs */
+            existing_slugs: string[];
+            /** Url Base */
+            url_base: string;
+        };
+        /** BlogDraftRequest */
+        BlogDraftRequest: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Pub Date */
+            pub_date?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Hero Image */
+            hero_image?: string | null;
+        };
+        /** BlogDraftResponse */
+        BlogDraftResponse: {
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Frontmatter */
+            frontmatter: string;
+            /** Markdown */
+            markdown: string;
+            /** Warnings */
+            warnings: string[];
+            /** Assets */
+            assets: components["schemas"]["BlogAssetItem"][];
+            /** Collision */
+            collision: boolean;
+        };
+        /** BlogLivePreviewCleanupRequest */
+        BlogLivePreviewCleanupRequest: {
+            /** Slug */
+            slug: string;
+        };
+        /** BlogLivePreviewRequest */
+        BlogLivePreviewRequest: {
+            /** Note Id */
+            note_id: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Hero Image */
+            hero_image?: string | null;
+            /** Markdown */
+            markdown: string;
+            /**
+             * Mermaid Svgs
+             * @default {}
+             */
+            mermaid_svgs: {
+                [key: string]: string;
+            };
+        };
+        /** BlogLivePreviewResponse */
+        BlogLivePreviewResponse: {
+            /** Url */
+            url: string;
+        };
+        /** BlogPostDetail */
+        BlogPostDetail: {
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Url */
+            url: string;
+            /** Hero Image */
+            hero_image?: string | null;
+            /** Body */
+            body: string;
+        };
+        /** BlogPostSummary */
+        BlogPostSummary: {
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Url */
+            url: string;
+        };
+        /** BlogPostUpdateRequest */
+        BlogPostUpdateRequest: {
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Hero Image */
+            hero_image?: string | null;
+            /** Body */
+            body: string;
+        };
+        /** BlogPublishRequest */
+        BlogPublishRequest: {
+            /** Note Id */
+            note_id: string;
+            /** Slug */
+            slug: string;
+            /** Subdir */
+            subdir?: string | null;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Pub Date */
+            pub_date: string;
+            /** Updated Date */
+            updated_date?: string | null;
+            /** Hero Image */
+            hero_image?: string | null;
+            /** Markdown */
+            markdown: string;
+            /**
+             * Mermaid Svgs
+             * @default {}
+             */
+            mermaid_svgs: {
+                [key: string]: string;
+            };
+            /**
+             * Overwrite
+             * @default false
+             */
+            overwrite: boolean;
+        };
+        /** BlogPublishResponse */
+        BlogPublishResponse: {
+            /** Committed */
+            committed: boolean;
+            /** Commit Sha */
+            commit_sha: string;
+            /** Files */
+            files: string[];
+            /**
+             * Removed Assets
+             * @default []
+             */
+            removed_assets: string[];
+            /**
+             * Pushed
+             * @default false
+             */
+            pushed: boolean;
+            /** Push Hint */
+            push_hint: string;
+            /** Url */
+            url: string;
+        };
+        /** BlogPushResponse */
+        BlogPushResponse: {
+            /** Pushed */
+            pushed: boolean;
+            /** Branch */
+            branch: string;
+            /** Output */
+            output: string;
+        };
         /** Body_ingest_document_documents_ingest_post */
         Body_ingest_document_documents_ingest_post: {
             /** File */
@@ -4801,6 +5302,26 @@ export interface components {
         BulkDeleteResponse: {
             /** Deleted */
             deleted: number;
+        };
+        /** CalibrationStatsResponse */
+        CalibrationStatsResponse: {
+            /** Overall Match Rate */
+            overall_match_rate: number | null;
+            /** Total Predictions */
+            total_predictions: number;
+            /** Weeks */
+            weeks: components["schemas"]["CalibrationWeekItem"][];
+        };
+        /** CalibrationWeekItem */
+        CalibrationWeekItem: {
+            /** Week Start */
+            week_start: string;
+            /** Total */
+            total: number;
+            /** Matched */
+            matched: number;
+            /** Match Rate */
+            match_rate: number;
         };
         /** CardStabilityItem */
         CardStabilityItem: {
@@ -5248,6 +5769,26 @@ export interface components {
             cards_reviewed: number;
             /** Study Time Minutes */
             study_time_minutes: number;
+        };
+        /** DecayDebtItem */
+        DecayDebtItem: {
+            /** Document Id */
+            document_id: string;
+            /** Document Title */
+            document_title: string;
+            /** Card Count */
+            card_count: number;
+            /** Avg Retention */
+            avg_retention: number;
+            /** Due Within Days */
+            due_within_days: number;
+        };
+        /** DecayDebtResponse */
+        DecayDebtResponse: {
+            /** Items */
+            items: components["schemas"]["DecayDebtItem"][];
+            /** Total At Risk */
+            total_at_risk: number;
         };
         /**
          * DeckHealthReportResponse
@@ -6395,6 +6936,25 @@ export interface components {
              */
             cloud_providers: unknown[];
         };
+        /** LabsPatch */
+        LabsPatch: {
+            /** Labs Enabled */
+            labs_enabled: string[];
+        };
+        /** LabsSurface */
+        LabsSurface: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Default Off
+             * @default false
+             */
+            default_off: boolean;
+        };
         /** LearningObjectiveItem */
         LearningObjectiveItem: {
             /** Id */
@@ -6624,6 +7184,8 @@ export interface components {
             tags: string[];
             /** Group Name */
             group_name?: string | null;
+            /** Title */
+            title?: string | null;
             /**
              * Source Document Ids
              * @default []
@@ -6763,6 +7325,8 @@ export interface components {
              * @default true
              */
             title_auto_generated: boolean;
+            /** Description */
+            description?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -6890,6 +7454,11 @@ export interface components {
              * @default false
              */
             web_enabled: boolean;
+            /**
+             * Socratic
+             * @default false
+             */
+            socratic: boolean;
         };
         /** ReadingPositionResponse */
         ReadingPositionResponse: {
@@ -6972,6 +7541,8 @@ export interface components {
             rating: "again" | "hard" | "good" | "easy";
             /** Session Id */
             session_id?: string | null;
+            /** Predicted Rating */
+            predicted_rating?: ("again" | "hard" | "good" | "easy") | null;
         };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {
@@ -7409,6 +7980,16 @@ export interface components {
             /** All Card Stabilities */
             all_card_stabilities: components["schemas"]["CardStabilityItem"][];
         };
+        /** SuggestDescriptionRequest */
+        SuggestDescriptionRequest: {
+            /** Note Id */
+            note_id: string;
+        };
+        /** SuggestDescriptionResponse */
+        SuggestDescriptionResponse: {
+            /** Description */
+            description: string;
+        };
         /** SuggestedTagsResponse */
         SuggestedTagsResponse: {
             /** Tags */
@@ -7440,6 +8021,15 @@ export interface components {
              * @default false
              */
             force_refresh: boolean;
+        };
+        /** SurfaceResponse */
+        SurfaceResponse: {
+            /** Tier */
+            tier: string;
+            /** Labs Enabled */
+            labs_enabled: string[];
+            /** Available Labs */
+            available_labs: components["schemas"]["LabsSurface"][];
         };
         /** TagAutocompleteResult */
         TagAutocompleteResult: {
@@ -7678,6 +8268,14 @@ export interface components {
             label: string;
             /** Count */
             count?: number | null;
+            /** Collection Id */
+            collection_id?: string | null;
+            /** Collection Name */
+            collection_name?: string | null;
+            /** Collection Color */
+            collection_color?: string | null;
+            /** Scoped Count */
+            scoped_count?: number | null;
         };
         /** TraceFlashcardRequest */
         TraceFlashcardRequest: {
@@ -8119,6 +8717,395 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_blog_config_blog_config_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_draft_blog_draft_post: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlogDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogDraftResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_description_blog_suggest_description_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestDescriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestDescriptionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_blog_publish_post: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlogPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_posts_blog_posts_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPostSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_post_blog_posts__slug__get: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPostDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_post_blog_posts__slug__put: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlogPostUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_post_blog_posts__slug__delete: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_asset_blog_asset__kind___slug___filename__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: string;
+                slug: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_blog_push_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogPushResponse"];
+                };
+            };
+        };
+    };
+    live_preview_blog_preview_live_post: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlogLivePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogLivePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    live_preview_cleanup_blog_preview_live_cleanup_post: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlogLivePreviewCleanupRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -9085,7 +10072,7 @@ export interface operations {
                 tag?: string | null;
                 /** @description Restrict to documents in this collection */
                 collection_id?: string | null;
-                sort?: "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed";
+                sort?: "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed" | "weakest-first";
                 page?: number;
                 page_size?: number;
             };
@@ -13728,6 +14715,39 @@ export interface operations {
             };
         };
     };
+    get_web_refs_job_status_references_documents__document_id__job_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     validate_document_references_references_documents__document_id__validate_post: {
         parameters: {
             query?: never;
@@ -14061,6 +15081,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebSearchSettingsResponse"];
+                };
+            };
+        };
+    };
+    get_surface_settings_surface_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SurfaceResponse"];
+                };
+            };
+        };
+    };
+    patch_labs_settings_labs_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SurfaceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -14760,6 +15833,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrugglingCardItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_decay_debt_study_decay_debt_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecayDebtResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_calibration_stats_study_calibration_stats_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationStatsResponse"];
                 };
             };
             /** @description Validation Error */

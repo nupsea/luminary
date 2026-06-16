@@ -31,6 +31,7 @@ from app.schemas.notes import (
     BatchAcceptRequest,
     ClusterNotePreview,
     ClusterSuggestionResponse,
+    DescriptionBackfillResponse,
     GapDetectRequest,
     GapDetectResponse,
     GroupInfo,
@@ -74,6 +75,9 @@ from app.services.note_graph import get_note_graph_service
 from app.services.note_search import get_note_search_service
 from app.services.note_title_generator import get_title_generator
 from app.services.notes_service import (
+    backfill_missing_descriptions as _backfill_missing_descriptions,
+)
+from app.services.notes_service import (
     embed_and_store_note as _embed_and_store_note,
 )
 from app.services.notes_service import (
@@ -84,6 +88,9 @@ from app.services.notes_service import (
 )
 from app.services.notes_service import (
     fts_update as _fts_update,
+)
+from app.services.notes_service import (
+    generate_and_store_description as _generate_and_store_description,
 )
 from app.services.notes_service import (
     sync_note_sources as _sync_note_sources,
@@ -104,6 +111,17 @@ logger = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
 
+
+def _schedule_description(note_id: str, content: str) -> None:
+    """Fire-and-forget summary generation. Short notes keep the card's content
+    snippet (no point summarising a line or two), so skip them."""
+    if len(content.strip()) < 40:
+        return
+    task = asyncio.create_task(_generate_and_store_description(note_id, content))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 # Back-compat re-exports for tests and routers/tags.py that import these
@@ -113,6 +131,7 @@ __all__ = [
     "BatchAcceptRequest",
     "ClusterNotePreview",
     "ClusterSuggestionResponse",
+    "DescriptionBackfillResponse",
     "GapDetectRequest",
     "GapDetectResponse",
     "GroupInfo",
@@ -209,8 +228,8 @@ async def create_note(
         content=req.content,
         content_hash=content_hash,
         group_name=req.group_name,
-        title=None,
-        title_auto_generated=True,
+        title=(req.title or "").strip() or None,
+        title_auto_generated=req.title is None,
         created_at=now,
         updated_at=now,
     )
@@ -251,6 +270,8 @@ async def create_note(
     _xp_task = asyncio.create_task(_award_note_xp())
     _background_tasks.add(_xp_task)
     _xp_task.add_done_callback(_background_tasks.discard)
+
+    _schedule_description(note.id, note.content)
 
     logger.info("Created note", extra={"note_id": note.id})
     return _to_response(note, source_document_ids=req.source_document_ids)
@@ -459,6 +480,9 @@ async def _apply_note_update(
     )
     _background_tasks.add(graph_task)
     graph_task.add_done_callback(_background_tasks.discard)
+    # Content changed -> refresh the auto-summary off the request path.
+    if req.content is not None:
+        _schedule_description(note.id, note.content)
     # Re-fetch collection refs for a fully populated response. Single-note
     # path; reuse the batch helper to keep one source of truth for ordering.
     coll_refs_raw = (
@@ -984,3 +1008,27 @@ async def suggest_title(
 
     title = await get_title_generator().suggest_title(req.content)
     return NoteTitleSuggestResponse(title=title)
+
+
+@router.post("/descriptions/backfill", response_model=DescriptionBackfillResponse)
+async def backfill_descriptions(
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+) -> DescriptionBackfillResponse:
+    """Manually (re)generate card summaries. Default fills only notes missing
+    one; force=True refreshes every eligible note. Runs in the background; the
+    response reports how many notes were queued."""
+    query = (
+        select(func.count())
+        .select_from(NoteModel)
+        .where(func.length(NoteModel.content) >= 40)
+        .where(NoteModel.archived.is_(False))
+    )
+    if not force:
+        query = query.where(NoteModel.description.is_(None))
+    queued = (await session.execute(query)).scalar_one()
+
+    task = asyncio.create_task(_backfill_missing_descriptions(force=force))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return DescriptionBackfillResponse(queued=queued)

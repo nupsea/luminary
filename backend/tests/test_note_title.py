@@ -46,6 +46,97 @@ async def test_new_note_starts_auto_generated_with_null_title(test_db):
 
 
 @pytest.mark.anyio
+async def test_create_with_manual_title_is_persisted(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/notes",
+            json={"content": "body", "tags": [], "document_id": None, "title": "My Title"},
+        )
+        assert r.status_code == 201
+        body = r.json()
+        assert body["title"] == "My Title"
+        assert body["title_auto_generated"] is False
+
+
+@pytest.mark.anyio
+async def test_background_description_is_generated_and_stored(test_db, monkeypatch):
+    """Save returns instantly with description=null; the background helper then
+    summarises the content and persists it for the card."""
+    from app.services import note_description_generator as gen
+    from app.services.notes_service import generate_and_store_description
+
+    async def _fake(self, content: str) -> str:
+        return "A short summary."
+
+    monkeypatch.setattr(gen.NoteDescriptionGeneratorService, "suggest_description", _fake)
+    gen.get_description_generator.cache_clear()
+
+    body = "This note has more than forty characters so a summary is worth generating."
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        created = (
+            await c.post("/notes", json={"content": body, "tags": [], "document_id": None})
+        ).json()
+        assert created["description"] is None  # instant save, summary not yet ready
+
+        # Run the background work deterministically, then confirm it landed.
+        await generate_and_store_description(created["id"], body)
+        reread = (await c.get(f"/notes/{created['id']}")).json()
+        assert reread["description"] == "A short summary."
+
+
+@pytest.mark.anyio
+async def test_backfill_endpoint_reports_queued_count(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.post(
+            "/notes",
+            json={
+                "content": "A note long enough to be eligible for a generated summary line.",
+                "tags": [],
+                "document_id": None,
+            },
+        )
+        r = await c.post("/notes/descriptions/backfill")
+        assert r.status_code == 200
+        assert r.json()["queued"] >= 1
+
+
+@pytest.mark.anyio
+async def test_backfill_fills_existing_null_descriptions(test_db, monkeypatch):
+    """Existing notes (no description) get summarised by the startup backfill."""
+    from datetime import UTC, datetime
+
+    from app.models import NoteModel
+    from app.services import note_description_generator as gen
+    from app.services.notes_service import backfill_missing_descriptions
+
+    async def _fake(self, content: str) -> str:
+        return "Backfilled summary."
+
+    monkeypatch.setattr(gen.NoteDescriptionGeneratorService, "suggest_description", _fake)
+    gen.get_description_generator.cache_clear()
+
+    _, factory = test_db
+    nid = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(
+            NoteModel(
+                id=nid,
+                content="An existing note long enough to deserve a generated one-line summary.",
+                tags=[],
+                description=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await s.commit()
+
+    assert await backfill_missing_descriptions() >= 1
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        reread = (await c.get(f"/notes/{nid}")).json()
+        assert reread["description"] == "Backfilled summary."
+
+
+@pytest.mark.anyio
 async def test_patch_title_flips_auto_flag_off(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         created = (

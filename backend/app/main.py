@@ -23,6 +23,7 @@ from app.db_init import create_all_tables
 from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
+from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
@@ -259,6 +260,19 @@ async def lifespan(app: FastAPI):
 
         asyncio.create_task(warmup_models())
 
+        # One-time-ish backfill: summarise notes created before card descriptions
+        # existed. Runs after a short delay so it doesn't compete with model
+        # warmup; no-ops once every note has a description.
+        async def backfill_descriptions():
+            try:
+                await asyncio.sleep(20)
+                from app.services.notes_service import backfill_missing_descriptions
+                await backfill_missing_descriptions()
+            except Exception as exc:
+                logger.warning("Description backfill failed (non-fatal): %s", exc)
+
+        asyncio.create_task(backfill_descriptions())
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
@@ -289,6 +303,7 @@ _API_PREFIX = "/api" if _mode == "prod" else ""
 ROUTER_REGISTRY = {
     "admin": admin_router,
     "annotations": annotations_router,
+    "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,
     "chat_meta": chat_meta_router,

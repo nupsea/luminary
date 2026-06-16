@@ -18,8 +18,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, FileText, Loader2, Network, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { ArrowLeft, BookOpen, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -29,8 +29,12 @@ import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
+import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
+import { BlogsPanel } from "@/components/blog/BlogsPanel"
+import type { BlogKind } from "@/lib/blogApi"
+import { visibleSurfaces } from "@/lib/surfaceManifest"
+import { useSurfaceStore } from "@/store/surface"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -49,7 +53,7 @@ import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
 import { API_BASE } from "@/lib/config"
-import type { Note } from "@/lib/notesApi"
+import { backfillNoteDescriptions, type Note } from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -495,10 +499,32 @@ interface NoteCardProps {
   onDeleted: () => void
 }
 
+// Fallback title when a note has none: the first few words of its content.
+function deriveTitle(content: string): string {
+  const firstLine = content.split("\n").map((l) => l.trim()).find(Boolean) ?? ""
+  const clean = firstLine.replace(/^#+\s*/, "").replace(/[`*_>#~[\]]/g, "").trim()
+  const words = clean.split(/\s+/).filter(Boolean)
+  return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : words.join(" ")
+}
+
 function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [confirming, setConfirming] = useState(false)
+  const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
+  const blogEnabled = useMemo(
+    () => visibleSurfaces(labsEnabled).some((s) => s.id === "blog"),
+    [labsEnabled],
+  )
+  // A note is publishable to a collection only when it belongs to one named for
+  // that target (case-insensitive): "BLOG" -> blog, "THOUGHTS" -> thoughts.
+  const collectionNames = useMemo(
+    () => new Set((note.collections ?? []).map((c) => c.name.toLowerCase())),
+    [note.collections],
+  )
+  const canPublishBlog = blogEnabled && collectionNames.has("blog")
+  const canPublishThoughts = blogEnabled && collectionNames.has("thoughts")
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -510,13 +536,33 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   })
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+    <div className="mb-4 flex break-inside-avoid flex-col gap-2 rounded-lg border border-border bg-card p-3">
       {/* Header row */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {note.document_id && <FileText size={12} />}
         <span className="flex-1 truncate">{relativeDate(note.updated_at)}</span>
         {note.group_name && (
           <span className="rounded-full bg-muted px-2 py-0.5">{note.group_name}</span>
+        )}
+        {canPublishBlog && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setPublishKind("blog") }}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
+            title="Publish as blog"
+          >
+            <Newspaper size={12} />
+            Blog
+          </button>
+        )}
+        {canPublishThoughts && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setPublishKind("thoughts") }}
+            className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
+            title="Publish as thought"
+          >
+            <Feather size={12} />
+            Thought
+          </button>
         )}
         <button
           onClick={() => { onEdit(); setConfirming(false) }}
@@ -554,12 +600,32 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {/* Content — click to open editor dialog */}
-      {!confirming && (
-        <div className="cursor-pointer" onClick={onEdit}>
-          <MarkdownRenderer>{note.content.slice(0, 200)}</MarkdownRenderer>
-        </div>
-      )}
+      {/* Title (real, else first words) + summary/snippet — click to edit.
+          Skip the body when it would just repeat a derived title, so an empty
+          or title-only note doesn't reserve blank space. */}
+      {!confirming && (() => {
+        const realTitle = note.title?.trim()
+        const cardTitle = realTitle || deriveTitle(note.content)
+        // Prefer the generated summary; otherwise a plain-text snippet, shown
+        // only when there's a real title (a derived title already conveys the
+        // opening words). Plain text — not rendered markdown — keeps every card
+        // a predictable height instead of blowing up on headings/math/diagrams.
+        const summary = note.description?.trim()
+        const bodyText = summary || (realTitle ? stripMarkdown(note.content).trim().slice(0, 200) : "")
+        if (!cardTitle && !bodyText) return null
+        return (
+          <div className="cursor-pointer" onClick={onEdit}>
+            {cardTitle && (
+              <h3 className="mb-1 text-sm font-semibold leading-snug text-foreground">
+                {cardTitle}
+              </h3>
+            )}
+            {bodyText && (
+              <p className="line-clamp-3 text-sm text-muted-foreground">{bodyText}</p>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Source back-link — deep-links to the document section this note was created from */}
       {note.document_id && (
@@ -635,6 +701,16 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           )}
         </div>
       )}
+
+      {publishKind && (
+        <BlogPublishDialog
+          open={!!publishKind}
+          kind={publishKind}
+          onClose={() => setPublishKind(null)}
+          noteId={note.id}
+          noteContent={note.content}
+        />
+      )}
     </div>
   )
 }
@@ -646,11 +722,17 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
 type FilterState =
   | { type: "all" }
   | { type: "journal" }
+  | { type: "blogs" }
   | { type: "group"; name: string }
   | { type: "tag"; name: string }
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
+  const pageLabsEnabled = useSurfaceStore((s) => s.labsEnabled)
+  const blogsEnabled = useMemo(
+    () => visibleSurfaces(pageLabsEnabled).some((s) => s.id === "blog"),
+    [pageLabsEnabled],
+  )
   const [isCreating, setIsCreating] = useState(false)
   const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
@@ -791,6 +873,27 @@ export default function NotesPage() {
     }
   }
 
+  const [summarizing, setSummarizing] = useState(false)
+  async function handleGenerateSummaries() {
+    setSummarizing(true)
+    try {
+      const { queued } = await backfillNoteDescriptions()
+      toast.success(
+        queued > 0
+          ? `Summarizing ${queued} note${queued > 1 ? "s" : ""} in the background…`
+          : "All note summaries are up to date",
+      )
+      // Surface results as the background job lands.
+      for (const delay of [6000, 15000, 30000]) {
+        setTimeout(() => void qc.invalidateQueries({ queryKey: ["notes"] }), delay)
+      }
+    } catch {
+      toast.error("Failed to start summary generation")
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   // Individual accept/reject kept as API helpers (backward compat) but UI uses OrganizationPlanDialog
 
   useEffect(() => {
@@ -845,6 +948,8 @@ export default function NotesPage() {
         navigate={navigate}
       />
     )
+  } else if (filter.type === "blogs") {
+    panelContent = <BlogsPanel />
   } else if (isSearchMode) {
     if (searchLoading) {
       panelContent = (
@@ -1065,7 +1170,7 @@ export default function NotesPage() {
     )
   } else {
     panelContent = (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
         {noteList.map((note) => (
           <NoteCard
             key={note.id}
@@ -1122,6 +1227,24 @@ export default function NotesPage() {
           <BookOpen size={13} />
           Reading Journal
         </button>
+
+        {blogsEnabled && (
+          <button
+            onClick={() => {
+              setFilter({ type: "blogs" })
+              setActiveCollectionId(null)
+              setActiveTag(null)
+            }}
+            className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+              filter.type === "blogs"
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground hover:bg-accent/60"
+            }`}
+          >
+            <Newspaper size={13} />
+            Blog & Thoughts
+          </button>
+        )}
 
         {/* Collections section */}
         <div className="mt-3">
@@ -1260,9 +1383,11 @@ export default function NotesPage() {
                     ? "All Notes"
                     : filter.type === "journal"
                       ? "Reading Journal"
-                      : filter.type === "group"
-                        ? filter.name
-                        : `#${filter.name}`}
+                      : filter.type === "blogs"
+                        ? "Blog & Thoughts"
+                        : filter.type === "group"
+                          ? filter.name
+                          : `#${filter.name}`}
           </h2>
           {notesDocumentId && (
             <button
@@ -1307,6 +1432,15 @@ export default function NotesPage() {
                 title="Generate flashcards from notes"
               >
                 Generate Flashcards
+              </button>
+              <button
+                onClick={() => void handleGenerateSummaries()}
+                disabled={summarizing}
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+                title="Generate card summaries for notes missing one"
+              >
+                {summarizing ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                Generate Summaries
               </button>
               <button
                 onClick={() => setIsCreating(true)}

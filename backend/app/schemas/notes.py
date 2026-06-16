@@ -20,6 +20,8 @@ class NoteCreateRequest(BaseModel):
     content: str
     tags: list[str] = []
     group_name: str | None = None
+    # Optional user-provided title. When set, the note is flagged manual-title.
+    title: str | None = None
     # multi-document source linkage; legacy document_id still accepted
     source_document_ids: list[str] = []
 
@@ -54,6 +56,7 @@ class NoteResponse(BaseModel):
     source_document_ids: list[str] = []
     title: str | None = None
     title_auto_generated: bool = True
+    description: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -86,6 +89,11 @@ class NoteTitleSuggestRequest(BaseModel):
 
 class NoteTitleSuggestResponse(BaseModel):
     title: str
+
+
+class DescriptionBackfillResponse(BaseModel):
+    # How many notes were queued for (re)summarising in the background.
+    queued: int
 
 
 class NoteSearchItem(BaseModel):

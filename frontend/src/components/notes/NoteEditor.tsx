@@ -1,8 +1,9 @@
 import { useRef, useState } from "react"
-import { Check, FileText, LayoutGrid, Loader2, Tag, Wand2 } from "lucide-react"
+import { Check, ChevronUp, FileText, LayoutGrid, Loader2, Tag, Wand2, Wrench } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
+import { MarkdownSplitEditor } from "@/components/notes/MarkdownSplitEditor"
 import { MermaidCheatSheet } from "@/components/notes/MermaidCheatSheet"
 import { MermaidQuickInsert } from "@/components/notes/MermaidQuickInsert"
 import {
@@ -41,6 +42,8 @@ export interface NoteEditorProps {
   collectionsLoading?: boolean
   showCollections?: boolean
   showSourceDocs?: boolean
+  showMeta?: boolean
+  showToolbar?: boolean
   showImageSize?: boolean
   suggestedTags?: string[]
   suggestionsBusy?: boolean
@@ -70,6 +73,8 @@ export function NoteEditor({
   collectionsLoading,
   showCollections = true,
   showSourceDocs = true,
+  showMeta = true,
+  showToolbar = true,
   showImageSize = true,
   suggestedTags = [],
   suggestionsBusy = false,
@@ -80,15 +85,10 @@ export function NoteEditor({
   textareaClassName,
 }: NoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const previewRef = useRef<HTMLDivElement>(null)
-  const splitContainerRef = useRef<HTMLDivElement>(null)
-  const syncingRef = useRef<"write" | "preview" | null>(null)
 
-  const [leftPct, setLeftPct] = useState(50)
-  const [dragging, setDragging] = useState(false)
-  const [activeTab, setActiveTab] = useState<"write" | "preview">("write")
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
+  const [toolbarOpen, setToolbarOpen] = useState(true)
 
   function handleDiagramSaved(markdown: string) {
     if (editingDiagramRef) {
@@ -97,21 +97,6 @@ export function NoteEditor({
       return
     }
     insertAtTextareaCursor(textareaRef.current, content, onContentChange, markdown)
-  }
-
-  function syncScroll(source: "write" | "preview") {
-    if (syncingRef.current && syncingRef.current !== source) return
-    const src = source === "write" ? textareaRef.current : previewRef.current
-    const dst = source === "write" ? previewRef.current : textareaRef.current
-    if (!src || !dst) return
-    const srcMax = src.scrollHeight - src.clientHeight
-    const dstMax = dst.scrollHeight - dst.clientHeight
-    if (srcMax <= 0 || dstMax <= 0) return
-    syncingRef.current = source
-    dst.scrollTop = (src.scrollTop / srcMax) * dstMax
-    requestAnimationFrame(() => {
-      syncingRef.current = null
-    })
   }
 
   function insertImageSizeMarkdown(size: (typeof IMAGE_SIZES)[number]) {
@@ -137,169 +122,87 @@ export function NoteEditor({
     }, 0)
   }
 
-  function handleSplitterMouseDown(e: React.MouseEvent) {
-    if (layout !== "splitter") return
-    e.preventDefault()
-    setDragging(true)
-    function onMove(ev: MouseEvent) {
-      const el = splitContainerRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      const pct = ((ev.clientX - rect.left) / rect.width) * 100
-      setLeftPct(Math.min(85, Math.max(15, pct)))
-    }
-    function onUp() {
-      setDragging(false)
-      window.removeEventListener("mousemove", onMove)
-      window.removeEventListener("mouseup", onUp)
-    }
-    window.addEventListener("mousemove", onMove)
-    window.addEventListener("mouseup", onUp)
-  }
-
   function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
     setEditingDiagramRef(ref)
     setDiagramOpen(true)
   }
 
-  const writePane = (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {showImageSize && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground">Image spec:</span>
-            {IMAGE_SIZES.map((size) => (
-              <button
-                key={size}
-                type="button"
-                onClick={() => insertImageSizeMarkdown(size)}
-                className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
-              >
-                {size}
-              </button>
-            ))}
+  const editorToolbar = showToolbar ? (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        {toolbarOpen ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {showImageSize && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-muted-foreground">Image spec:</span>
+                {IMAGE_SIZES.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => insertImageSizeMarkdown(size)}
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            )}
+            <MermaidQuickInsert
+              onInsert={(markdown) =>
+                insertAtTextareaCursor(textareaRef.current, content, onContentChange, markdown)
+              }
+              onDraw={() => {
+                setEditingDiagramRef(null)
+                setDiagramOpen(true)
+              }}
+            />
           </div>
+        ) : (
+          <span />
         )}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <MermaidQuickInsert
-            onInsert={(markdown) =>
-              insertAtTextareaCursor(textareaRef.current, content, onContentChange, markdown)
-            }
-            onDraw={() => {
-              setEditingDiagramRef(null)
-              setDiagramOpen(true)
-            }}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => setToolbarOpen((v) => !v)}
+          className="shrink-0 rounded border border-border bg-background p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
+          aria-label={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
+        >
+          {toolbarOpen ? <ChevronUp size={12} /> : <Wrench size={12} />}
+        </button>
       </div>
-      <MermaidCheatSheet />
-      <textarea
-        ref={textareaRef}
-        value={content}
-        onChange={(e) => onContentChange(e.target.value)}
-        onScroll={layout === "splitter" ? () => syncScroll("write") : undefined}
+      {toolbarOpen && <MermaidCheatSheet />}
+    </>
+  ) : null
+
+  return (
+    <>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <MarkdownSplitEditor
+        layout={layout}
+        content={content}
+        onContentChange={onContentChange}
+        textareaRef={textareaRef}
+        editorToolbar={editorToolbar}
+        placeholder="Write your note in Markdown..."
         onPaste={createImagePasteHandler(
-          // eslint-disable-next-line react-hooks/refs
           () => textareaRef.current,
           () => content,
           onContentChange,
           imageVariant,
         )}
-        placeholder="Write your note in Markdown..."
-        className={
-          textareaClassName ??
-          "w-full flex-1 resize-none overflow-auto rounded border-none bg-background px-2 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+        textareaClassName={textareaClassName}
+        preview={
+          content.trim() ? (
+            <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
+              {content}
+            </MarkdownRenderer>
+          ) : (
+            <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>
+          )
         }
       />
-    </div>
-  )
 
-  const previewPane = (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {layout === "splitter" && (
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Preview
-          </span>
-        </div>
-      )}
-      <div
-        ref={previewRef}
-        onScroll={layout === "splitter" ? () => syncScroll("preview") : undefined}
-        className="prose-sm flex-1 overflow-auto px-2 py-2"
-      >
-        {content.trim() ? (
-          <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
-            {content}
-          </MarkdownRenderer>
-        ) : (
-          <p className="text-muted-foreground italic text-sm">Preview will appear here...</p>
-        )}
-      </div>
-    </div>
-  )
-
-  return (
-    <>
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      {layout === "splitter" ? (
-        <div
-          ref={splitContainerRef}
-          className={`flex flex-1 min-h-0 items-stretch overflow-hidden ${dragging ? "select-none cursor-col-resize" : ""}`}
-        >
-          <div
-            className="flex flex-col gap-2 min-w-0 min-h-0 h-full"
-            style={{ width: `${leftPct}%` }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Editor
-              </span>
-            </div>
-            {writePane}
-          </div>
-          <div
-            onMouseDown={handleSplitterMouseDown}
-            className="mx-3 w-1 shrink-0 cursor-col-resize self-stretch rounded bg-border hover:bg-primary/40 transition-colors"
-            title="Drag to resize"
-          />
-          <div
-            className="flex flex-col gap-2 min-w-0 min-h-0 h-full"
-            style={{ width: `${100 - leftPct}%` }}
-          >
-            {previewPane}
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="flex shrink-0 items-center gap-1 border-b border-border">
-            <button
-              type="button"
-              onClick={() => setActiveTab("write")}
-              className={`px-3 py-1.5 text-xs font-medium ${
-                activeTab === "write"
-                  ? "border-b-2 border-primary text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Write
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("preview")}
-              className={`px-3 py-1.5 text-xs font-medium ${
-                activeTab === "preview"
-                  ? "border-b-2 border-primary text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Preview
-            </button>
-          </div>
-          {activeTab === "write" ? writePane : previewPane}
-        </div>
-      )}
-
+      {showMeta && (
       <div className="shrink-0 space-y-4 border-t border-border pt-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
@@ -384,6 +287,7 @@ export function NoteEditor({
           </div>
         )}
       </div>
+      )}
     </div>
     <NoteDiagramDialog
       open={diagramOpen}

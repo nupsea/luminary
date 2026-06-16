@@ -11,6 +11,8 @@ export interface CreateNotePayload {
   tags: string[]
   document_id: string | null
   source_document_ids?: string[]
+  /** Optional manual title; when set the note is flagged manual-title. */
+  title?: string
 }
 
 export interface PatchNotePayload {
@@ -49,6 +51,12 @@ export async function fetchSuggestedTags(
 export async function suggestNoteTitle(content: string): Promise<string> {
   const data = await apiPost<{ title: string }>("/notes/suggest-title", { content })
   return data.title
+}
+
+/** Trigger background (re)generation of card summaries. `force` refreshes every
+ *  note; otherwise only notes missing a description. Returns the queued count. */
+export async function backfillNoteDescriptions(force = false): Promise<{ queued: number }> {
+  return apiPost<{ queued: number }>(`/notes/descriptions/backfill?force=${force}`, {})
 }
 
 export async function fetchCollectionTree(

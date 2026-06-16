@@ -5,10 +5,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Check,
-  ChevronsLeft,
-  ChevronsRight,
   FileText,
   LayoutGrid,
+  Maximize2,
+  Minimize2,
   Pencil,
   Search,
   Tag,
@@ -29,7 +29,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
-import { stripMarkdown } from "@/lib/utils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
   addNoteToCollection,
@@ -39,7 +38,6 @@ import {
   fetchSuggestedTags,
   patchNote,
   removeNoteFromCollection,
-  suggestNoteTitle,
   type Note,
 } from "@/lib/notesApi"
 
@@ -110,7 +108,7 @@ export function NoteReaderSheet({
 }: NoteReaderSheetProps) {
   const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
   // Per-open state; not persisted.
-  const [wideMode, setWideMode] = useState(false)
+  const [focusMode, setFocusMode] = useState(false)
   const [editContent, setEditContent] = useState("")
   const [editTags, setEditTags] = useState<string[]>([])
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
@@ -118,10 +116,7 @@ export function NoteReaderSheet({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
-  const [generatedTitle, setGeneratedTitle] = useState("")
-  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false)
-  const [titleEditing, setTitleEditing] = useState(false)
-  const [titleDraft, setTitleDraft] = useState("")
+  const [editTitle, setEditTitle] = useState("")
   const abortRef = useRef<AbortController | null>(null)
   const prevNoteId = useRef<string | undefined>(undefined)
   const prevIsNew = useRef<boolean>(false)
@@ -137,6 +132,7 @@ export function NoteReaderSheet({
     if (isNew) {
       setEditContent(initialContent ?? "")
       setEditTags([])
+      setEditTitle("")
       setCheckedCollectionIds(initialCollectionId ? new Set([initialCollectionId]) : new Set())
       setSelectedDocIds(initialSourceDocIds ?? [])
       setMode("edit")
@@ -146,17 +142,11 @@ export function NoteReaderSheet({
       setAppendTarget(null)
       setPickerOpen(false)
       setPickerFilter("")
-      // Reset stale title state so a previously-generated title doesn't bleed
-      // into the next new-note open. The title effect will set "New Note"
-      // synchronously below.
-      setGeneratedTitle("")
-      setIsGeneratingTitle(false)
-      setTitleEditing(false)
-      setTitleDraft("")
       prevIsNew.current = true
     } else if (note) {
       setEditContent(note.content)
       setEditTags(note.tags ?? [])
+      setEditTitle(note.title ?? "")
       setCheckedCollectionIds(new Set((note.collections ?? []).map((c) => c.id)))
       setSelectedDocIds(
         note.source_document_ids?.length > 0
@@ -183,51 +173,6 @@ export function NoteReaderSheet({
       prevIsNew.current = isNew
     }
   }, [note?.id, isNew])
-
-  // Resolve the displayed title.
-  // 1. If the user has manually set a title (note.title_auto_generated === false),
-  //    use it verbatim and skip the LLM call entirely. Manual titles are sacred.
-  // 2. Otherwise on existing notes, run the LLM auto-gen path that already
-  //    existed -- falling back to the first content line on failure.
-  // 3. On new (unsaved) notes, show "New Note" so the previous note's title
-  //    doesn't linger when the sheet re-opens for a fresh capture.
-  useEffect(() => {
-    if (isNew) {
-      setGeneratedTitle("New Note")
-      setIsGeneratingTitle(false)
-      return
-    }
-    if (note && note.title) {
-      setGeneratedTitle(note.title)
-      setIsGeneratingTitle(false)
-      return
-    }
-    if (note && note.content) {
-      if (note.content.trim().length > 20) {
-        setIsGeneratingTitle(true)
-        suggestNoteTitle(note.content)
-          .then((title) => {
-            setGeneratedTitle(title)
-            setIsGeneratingTitle(false)
-            // Save it back to the db so it doesn't keep regenerating
-            void patchNote(note.id, { title }).then(() => {
-              void qc.invalidateQueries({ queryKey: ["notes"] })
-              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            })
-          })
-          .catch(() => {
-            setGeneratedTitle(
-              stripMarkdown(note.content).split("\n").find((l) => l.trim()) ?? "Untitled Note"
-            )
-            setIsGeneratingTitle(false)
-          })
-      } else {
-        setGeneratedTitle(
-          stripMarkdown(note.content).split("\n").find((l) => l.trim()) ?? "Untitled Note"
-        )
-      }
-    }
-  }, [note?.id, note?.content, note?.title, isNew])
 
   // Trigger tag suggestions on mode change or content threshold
   useEffect(() => {
@@ -303,6 +248,7 @@ export function NoteReaderSheet({
         const saved = await createNote({
           content: editContent,
           tags: editTags,
+          title: editTitle.trim() || undefined,
           document_id: selectedDocIds[0] || null,
           source_document_ids: selectedDocIds,
         })
@@ -320,6 +266,7 @@ export function NoteReaderSheet({
         return patchNote(note!.id, {
           content: editContent,
           tags: editTags,
+          title: editTitle.trim(),
           source_document_ids: selectedDocIds,
         })
       }
@@ -330,26 +277,17 @@ export function NoteReaderSheet({
       if (!isNew) {
         setMode("read")
       }
-      
-      if (savedNote.title) {
-        setGeneratedTitle(savedNote.title)
-        setIsGeneratingTitle(false)
-      } else if (savedNote.content.trim().length > 20) {
-        setIsGeneratingTitle(true)
-        suggestNoteTitle(savedNote.content)
-          .then((title) => {
-            setGeneratedTitle(title)
-            setIsGeneratingTitle(false)
-            void patchNote(savedNote.id, { title }).then(() => {
-              void qc.invalidateQueries({ queryKey: ["notes"] })
-              void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            })
-          })
-          .catch(() => {
-            setIsGeneratingTitle(false)
-          })
+
+      // The backend summarises the note into `description` in the background, so
+      // refetch once shortly after to surface it on the card without a manual
+      // refresh. The card shows the content snippet until then.
+      if (savedNote.content.trim().length >= 40) {
+        setTimeout(() => {
+          void qc.invalidateQueries({ queryKey: ["notes"] })
+          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+        }, 6000)
       }
-      // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit' 
+      // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit'
       if (isNew && savedNote.content.trim().length > 30) {
         void handleFetchSuggestions(false, savedNote)
       }
@@ -403,23 +341,6 @@ export function NoteReaderSheet({
     setEditTags([])
   }
 
-  function commitTitleEdit() {
-    if (!note) {
-      setTitleEditing(false)
-      return
-    }
-    const next = titleDraft.trim()
-    setTitleEditing(false)
-    // No-op if value didn't change.
-    if ((next || null) === (note.title || null)) return
-    void patchNote(note.id, { title: next }).then(() => {
-      // Reflect immediately; refetch in the parent list view too.
-      setGeneratedTitle(next)
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-    })
-  }
-
   function handleCollectionToggle(collectionId: string, checked: boolean) {
     // For new notes we don't have an id yet, so stage the selection in local
     // state. saveMut applies the staged set as memberships after createNote.
@@ -460,11 +381,15 @@ export function NoteReaderSheet({
     setSelectedDocIds(note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []))
   }
 
-  const title = isNew
-    ? "New Note"
-    : note
-      ? stripMarkdown(note.content).split("\n").find((l) => l.trim()) ?? "Untitled"
-      : ""
+  // Editing always uses the big working area; reading stays compact.
+  const isEditing = mode === "edit" || isNew
+
+  // Titles are manual now; the header just reflects the current value.
+  const displayTitle = appendTarget
+    ? `Appending to: ${firstLine(appendTarget.content) || "Untitled"}`
+    : isEditing
+      ? editTitle.trim() || "Untitled note"
+      : note?.title || "Untitled note"
 
   const sourceDoc = !isNew && note?.document_id
     ? (documents.find((d) => d.id === note.document_id) ?? null)
@@ -474,58 +399,27 @@ export function NoteReaderSheet({
     <Sheet open={note !== null || isNew} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent
         side="right"
-        className={
-          wideMode
-            ? "w-[90vw] max-w-none sm:max-w-none flex flex-col p-0 overflow-hidden transition-[width] duration-200"
-            : "w-[58vw] max-w-4xl sm:max-w-4xl flex flex-col p-0 overflow-hidden transition-[width] duration-200"
-        }
+        className={`flex flex-col p-0 overflow-hidden transition-[width] duration-200 ${
+          focusMode
+            ? "w-screen max-w-none sm:max-w-none"
+            : isEditing
+              ? "w-[90vw] max-w-none sm:max-w-none"
+              : "w-[58vw] max-w-4xl sm:max-w-4xl"
+        }`}
       >
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <button
-            onClick={() => setWideMode((v) => !v)}
+            onClick={() => setFocusMode((v) => !v)}
             className="absolute left-3 top-3 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title={wideMode ? "Minimize to default width" : "Expand to wide view"}
-            aria-label={wideMode ? "Minimize note sheet" : "Expand note sheet"}
+            title={focusMode ? "Exit focus mode" : "Focus mode — distraction-free, full screen"}
+            aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
           >
-            {wideMode ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+            {focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
           <SheetTitle className="text-xl font-semibold leading-tight pl-7 pr-8 truncate">
-            {appendTarget ? (
-              `Appending to: ${firstLine(appendTarget.content) || "Untitled"}`
-            ) : isGeneratingTitle ? (
-              "Generating Title..."
-            ) : titleEditing && note ? (
-              <input
-                autoFocus
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    commitTitleEdit()
-                  } else if (e.key === "Escape") {
-                    setTitleEditing(false)
-                    setTitleDraft("")
-                  }
-                }}
-                onBlur={commitTitleEdit}
-                className="w-full bg-transparent border-b border-primary/40 text-xl font-semibold leading-tight focus:outline-none focus:border-primary"
-              />
-            ) : (
-              <button
-                onClick={() => {
-                  if (!note) return  // can only rename a saved note
-                  setTitleDraft(note.title ?? generatedTitle ?? "")
-                  setTitleEditing(true)
-                }}
-                className="text-left w-full truncate hover:text-primary/90"
-                title={note ? "Click to rename" : undefined}
-              >
-                {generatedTitle || title}
-              </button>
-            )}
+            {displayTitle}
           </SheetTitle>
-          {sourceDoc && !appendTarget && (
+          {!focusMode && sourceDoc && !appendTarget && (
             <SheetDescription asChild>
               <button
                 className="w-fit text-left text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
@@ -542,7 +436,7 @@ export function NoteReaderSheet({
               </button>
             </SheetDescription>
           )}
-          {isNew && (
+          {!focusMode && isNew && (
             <SheetDescription asChild>
               <div className="mt-1 flex flex-col gap-2">
                 {appendTarget ? (
@@ -650,6 +544,7 @@ export function NoteReaderSheet({
                     <p className="text-muted-foreground italic text-sm">Start writing...</p>
                   )}
                 </div>
+                {!focusMode && (
                 <div className="mt-12 pt-8 border-t border-border space-y-6 pb-24">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-muted-foreground">
@@ -738,8 +633,18 @@ export function NoteReaderSheet({
                     </div>
                   </div>
                 </div>
+                )}
               </>
             ) : (
+              <>
+              {!appendTarget && (
+                <input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="Note title (optional)"
+                  className="w-full shrink-0 bg-transparent text-lg font-semibold leading-tight text-foreground placeholder:text-muted-foreground/60 placeholder:font-normal focus:outline-none"
+                />
+              )}
               <NoteEditor
                 layout="splitter"
                 content={editContent}
@@ -757,12 +662,15 @@ export function NoteReaderSheet({
                 collectionsLoading={collectionsLoading}
                 showCollections={!appendTarget}
                 showSourceDocs={!appendTarget}
+                showMeta={!focusMode}
+                showToolbar={!focusMode}
                 suggestedTags={suggestedTags}
                 suggestionsBusy={isFetchingTags}
                 onSuggestTags={() => void handleFetchSuggestions()}
                 onAddSuggestedTag={(tag) => void handleAddSuggestedTag(tag)}
                 onDismissSuggestions={() => setSuggestedTags([])}
               />
+              </>
             )}
           </div>
         </div>
