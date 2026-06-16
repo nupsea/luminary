@@ -29,7 +29,6 @@ import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
-import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteReaderSheet } from "@/components/NoteReaderSheet"
 import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
 import { BlogsPanel } from "@/components/blog/BlogsPanel"
@@ -537,7 +536,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   })
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+    <div className="mb-4 flex break-inside-avoid flex-col gap-2 rounded-lg border border-border bg-card p-3">
       {/* Header row */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {note.document_id && <FileText size={12} />}
@@ -607,11 +606,13 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
       {!confirming && (() => {
         const realTitle = note.title?.trim()
         const cardTitle = realTitle || deriveTitle(note.content)
+        // Prefer the generated summary; otherwise a plain-text snippet, shown
+        // only when there's a real title (a derived title already conveys the
+        // opening words). Plain text — not rendered markdown — keeps every card
+        // a predictable height instead of blowing up on headings/math/diagrams.
         const summary = note.description?.trim()
-        // Show the content snippet only when there's a real title to pair it
-        // with; otherwise the derived title already conveys the opening words.
-        const snippet = !summary && realTitle ? note.content.slice(0, 200) : ""
-        if (!cardTitle && !summary && !snippet) return null
+        const bodyText = summary || (realTitle ? stripMarkdown(note.content).trim().slice(0, 200) : "")
+        if (!cardTitle && !bodyText) return null
         return (
           <div className="cursor-pointer" onClick={onEdit}>
             {cardTitle && (
@@ -619,11 +620,9 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
                 {cardTitle}
               </h3>
             )}
-            {summary ? (
-              <p className="line-clamp-3 text-sm text-muted-foreground">{summary}</p>
-            ) : snippet ? (
-              <MarkdownRenderer>{snippet}</MarkdownRenderer>
-            ) : null}
+            {bodyText && (
+              <p className="line-clamp-3 text-sm text-muted-foreground">{bodyText}</p>
+            )}
           </div>
         )
       })()}
@@ -1171,7 +1170,7 @@ export default function NotesPage() {
     )
   } else {
     panelContent = (
-      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
         {noteList.map((note) => (
           <NoteCard
             key={note.id}
