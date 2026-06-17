@@ -91,7 +91,7 @@ if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
         luminary-backend 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 else
-    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
+    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" PHOENIX_ENABLED=true LITELLM_LOCAL_MODEL_COST_MAP=true PHOENIX_TELEMETRY_ENABLED=false uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 fi
 BACKEND_PIPE_PID=$!

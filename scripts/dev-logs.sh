@@ -9,8 +9,12 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Start backend with DEBUG logging; prefix each line with cyan [BACKEND]
-(cd "$REPO_ROOT/backend" && LOG_LEVEL=DEBUG uv run uvicorn app.main:app --reload --port 7820 2>&1) \
+# Start backend with DEBUG logging; prefix each line with cyan [BACKEND].
+# PHOENIX_ENABLED=true turns on the dev-only tracing UI (Monitoring view +
+# localhost:6006); the runtime default is off so end users skip it.
+# LITELLM_LOCAL_MODEL_COST_MAP / PHOENIX_TELEMETRY_ENABLED keep dev fully
+# offline-clean: no doomed GitHub cost-map fetch, no Phoenix phone-home.
+(cd "$REPO_ROOT/backend" && LOG_LEVEL=DEBUG PHOENIX_ENABLED=true LITELLM_LOCAL_MODEL_COST_MAP=true PHOENIX_TELEMETRY_ENABLED=false uv run uvicorn app.main:app --reload --port 7820 2>&1) \
     | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m "}{print p $0; fflush()}' &
 BACKEND_PID=$!
 

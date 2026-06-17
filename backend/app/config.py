@@ -37,7 +37,11 @@ class Settings(BaseSettings):
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""
-    PHOENIX_ENABLED: bool = True
+    # Opt-in: Phoenix is a dev observability server (launches on :6006, persists
+    # phoenix.db, instruments every LLM call). A local-first/offline runtime
+    # shouldn't pay that cost or its serializer noise by default — set
+    # PHOENIX_ENABLED=true in .env when you want tracing.
+    PHOENIX_ENABLED: bool = False
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
