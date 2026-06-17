@@ -193,3 +193,115 @@ class KuzuConceptRepo:
                 }
             )
         return clusters
+
+    # -------------------------------------------------------------------------
+    # Concept nodes (the studyable atom -- distinct from Entity; see docs/concepts.md)
+    # -------------------------------------------------------------------------
+
+    def upsert_concept_node(
+        self, concept_id: str, slug: str, label: str, kind: str, status: str
+    ) -> None:
+        """Create or update a Concept node. Idempotent on concept_id."""
+        existing = self._conn.execute(
+            "MATCH (c:Concept {id: $id}) RETURN c.id", {"id": concept_id}
+        )
+        if existing.has_next():
+            self._conn.execute(
+                "MATCH (c:Concept {id: $id})"
+                " SET c.slug = $slug, c.label = $label, c.kind = $kind, c.status = $status",
+                {"id": concept_id, "slug": slug, "label": label, "kind": kind, "status": status},
+            )
+            return
+        self._conn.execute(
+            "CREATE (c:Concept {id: $id, slug: $slug, label: $label,"
+            " kind: $kind, status: $status})",
+            {"id": concept_id, "slug": slug, "label": label, "kind": kind, "status": status},
+        )
+
+    def add_extracted_from(self, concept_id: str, document_id: str) -> None:
+        """Link a Concept to a Document it was extracted from (availability). Idempotent."""
+        existing = self._conn.execute(
+            "MATCH (c:Concept {id: $cid})-[:EXTRACTED_FROM]->(d:Document {id: $did}) RETURN c.id",
+            {"cid": concept_id, "did": document_id},
+        )
+        if existing.has_next():
+            return
+        self._conn.execute(
+            "MATCH (c:Concept {id: $cid}), (d:Document {id: $did})"
+            " CREATE (c)-[:EXTRACTED_FROM]->(d)",
+            {"cid": concept_id, "did": document_id},
+        )
+
+    def add_promoted_from(self, concept_id: str, entity_id: str, confidence: float = 1.0) -> None:
+        """Link a Concept to an Entity it was promoted from (the NER bridge). Idempotent."""
+        existing = self._conn.execute(
+            "MATCH (c:Concept {id: $cid})-[:PROMOTED_FROM]->(e:Entity {id: $eid}) RETURN c.id",
+            {"cid": concept_id, "eid": entity_id},
+        )
+        if existing.has_next():
+            return
+        self._conn.execute(
+            "MATCH (c:Concept {id: $cid}), (e:Entity {id: $eid})"
+            " CREATE (c)-[:PROMOTED_FROM {confidence: $conf}]->(e)",
+            {"cid": concept_id, "eid": entity_id, "conf": float(confidence)},
+        )
+
+    def add_concept_relation(
+        self, source_id: str, target_id: str, weight: float = 0.5, status: str = "proposed"
+    ) -> None:
+        """Create a CONCEPT_RELATED_TO edge between two concepts. Idempotent (one direction)."""
+        existing = self._conn.execute(
+            "MATCH (a:Concept {id: $a})-[r:CONCEPT_RELATED_TO]->(b:Concept {id: $b})"
+            " RETURN r.weight",
+            {"a": source_id, "b": target_id},
+        )
+        if existing.has_next():
+            return
+        self._conn.execute(
+            "MATCH (a:Concept {id: $a}), (b:Concept {id: $b})"
+            " CREATE (a)-[:CONCEPT_RELATED_TO {weight: $w, status: $s}]->(b)",
+            {"a": source_id, "b": target_id, "w": float(weight), "s": status},
+        )
+
+    def get_concept_neighbors(self, concept_id: str, limit: int = 10) -> list[str]:
+        """Return ids of concepts directly related to the given concept (both directions)."""
+        try:
+            result = self._conn.execute(
+                "MATCH (a:Concept {id: $id})-[:CONCEPT_RELATED_TO]-(b:Concept)"
+                " RETURN DISTINCT b.id LIMIT $lim",
+                {"id": concept_id, "lim": limit},
+            )
+            out: list[str] = []
+            while result.has_next():
+                out.append(result.get_next()[0])
+            return out
+        except Exception:
+            logger.debug("get_concept_neighbors failed for %s", concept_id, exc_info=True)
+            return []
+
+    def delete_concept_node(self, concept_id: str) -> None:
+        """Delete a Concept node and its edges. Idempotent."""
+        try:
+            self._conn.execute(
+                "MATCH (c:Concept {id: $id}) DETACH DELETE c", {"id": concept_id}
+            )
+        except Exception:
+            logger.debug("delete_concept_node failed for %s", concept_id, exc_info=True)
+
+    def get_concept_ids_for_documents(self, document_ids: list[str]) -> list[str]:
+        """Return ids of concepts EXTRACTED_FROM any of the given documents."""
+        if not document_ids:
+            return []
+        try:
+            result = self._conn.execute(
+                "MATCH (c:Concept)-[:EXTRACTED_FROM]->(d:Document)"
+                " WHERE d.id IN $dids RETURN DISTINCT c.id",
+                {"dids": list(document_ids)},
+            )
+            out: list[str] = []
+            while result.has_next():
+                out.append(result.get_next()[0])
+            return out
+        except Exception:
+            logger.debug("get_concept_ids_for_documents failed", exc_info=True)
+            return []
