@@ -14,7 +14,7 @@ def test_settings_defaults():
         settings = Settings(_env_file=None)
         assert settings.LOG_LEVEL == "INFO"
         assert settings.LITELLM_DEFAULT_MODEL == "ollama/llama3.2"
-        assert settings.PHOENIX_ENABLED is True
+        assert settings.PHOENIX_ENABLED is False
     finally:
         for var, val in saved_vars.items():
             os.environ[var] = val
