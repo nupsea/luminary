@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     CodeSnippetModel,
     CollectionMemberModel,
     CollectionModel,
+    ConceptModel,
     DocumentModel,
     EnrichmentJobModel,
     EvalRunModel,
@@ -40,6 +41,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     SectionModel,
     SectionSummaryModel,
     SettingsModel,
+    StudyEventModel,
     StudySessionModel,
     SummaryModel,
     TagAliasModel,
@@ -638,6 +640,22 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
             await conn.execute(text("DROP TABLE flashcards"))
             await conn.execute(text("ALTER TABLE flashcards_rebuild RENAME TO flashcards"))
+
+        # Concept-linkage columns (two-lane model). Added AFTER the rebuild block so a
+        # legacy table-rebuild can never drop them. Idempotent via try/except. The
+        # backfill (P0e) maps existing cards to concept_id and sets mapping_status.
+        for ddl in [
+            "ALTER TABLE flashcards ADD COLUMN concept_id TEXT",
+            "ALTER TABLE flashcards ADD COLUMN source_scope TEXT",
+            "ALTER TABLE flashcards ADD COLUMN mapping_status TEXT NOT NULL DEFAULT 'mapped'",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # Column already exists (idempotent)
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_flashcards_concept_id ON flashcards(concept_id)")
+        )
 
         # backfill flashcards_fts from existing flashcards (idempotent).
         # Uses LEFT JOIN on shadow content table to skip cards already indexed.

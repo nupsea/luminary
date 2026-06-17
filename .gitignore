@@ -71,3 +71,9 @@ evals/scores_history.jsonl
 
 # Design system reference inputs (local-only)
 REF/
+
+# Knowledge Universe design handoff -- local-only reference inputs.
+# The distilled system-of-record lives in docs/*.md (concepts, two-lane-model, etc.).
+docs/handoff/
+docs/Luminary Design System.zip
+docs/KNOWLEDGE_UNIVERSE.md

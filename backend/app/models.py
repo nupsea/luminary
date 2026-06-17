@@ -154,7 +154,47 @@ class FlashcardModel(Base):
     chunk_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # section heading denormalized at generation time for source grounding display
     section_heading: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Concept linkage (two-lane model). concept_id is NULLABLE: a card with no tracked
+    # concept is an "unmapped card" -- fully functional under FSRS, mapped later.
+    # source_scope records the scope the card was generated from (e.g. 'note:<id>').
+    # mapping_status: mapped | unmapped | proposed. See docs/two-lane-model.md.
+    concept_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    source_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    mapping_status: Mapped[str] = mapped_column(String, nullable=False, default="mapped")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class ConceptModel(Base):
+    """The studyable atom -- the SQLite source of truth for a Concept's hot state.
+
+    Distinct from a Kuzu Entity (a lexical NER mention). A Concept carries persistent
+    learning state and trust provenance and is the routing unit for sessions/goals/gaps.
+    Topology lives in Kuzu; the derived vector lives in LanceDB; the OKF file is a
+    projection. See docs/concepts.md.
+    """
+
+    __tablename__ = "concepts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # human-readable, stable across renames; the OKF filename and link target
+    slug: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    # 'concept' (strong claim) | 'keyword' (weak claim)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="concept")
+    # document | note | quiz | chat | import
+    origin: Mapped[str] = mapped_column(String, nullable=False, default="document")
+    # candidate | proposed | confirmed
+    status: Mapped[str] = mapped_column(String, nullable=False, default="proposed", index=True)
+    # learning state -- written by the assessment pipeline only (I-19). NOT text-matched.
+    mastery: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    stability: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    last_reviewed: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # the trust receipt: [{document_id, chunk_id, quote}]
+    evidence_json: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
 
 
 class StudySessionModel(Base):
@@ -186,6 +226,30 @@ class ReviewEventModel(Base):
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     predicted_rating: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class StudyEventModel(Base):
+    """The umbrella unit of assessment (generalizes 'session').
+
+    Every study handle in the app produces a StudyEvent through one pipeline.
+    A full_session also links to a StudySessionModel row. See docs/two-lane-model.md.
+    """
+
+    __tablename__ = "study_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # full_session | quick_quiz | drill | checkpoint
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    # scope taxonomy (see docs/study-launcher.md):
+    # daily | concept | collection | doc | note | tag | selection | chat | planWeek
+    scope_type: Mapped[str] = mapped_column(String, nullable=False)
+    # the id/name the scope points at (null for 'daily')
+    scope_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    # path to the sessions/*.json transcript
+    transcript_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    # link to study_sessions.id when kind == full_session
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class TeachbackResultModel(Base):
