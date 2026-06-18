@@ -392,6 +392,8 @@ async def assemble_study(
         req.scope_ref,
         length_min=req.length_min,
         want_generated=req.want_generated,
+        # actually generate only on Start (commit), not on live preview
+        do_generate=req.commit and req.want_generated,
     )
 
     event_id = ""

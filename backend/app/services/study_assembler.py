@@ -35,6 +35,7 @@ _ITEMS_PER_MIN = 1.2
 _MIN_ITEMS = 3
 _MAX_ITEMS = 40
 _THIN_SCOPE_ITEMS = 3
+_MAX_GENERATED = 10  # cap LLM-generated cards per event
 
 
 def items_for_budget(length_min: int) -> int:
@@ -97,8 +98,14 @@ async def assemble(
     *,
     length_min: int = 5,
     want_generated: bool = True,
+    do_generate: bool = False,
 ) -> AssemblyResult:
-    """Resolve scope -> due cards (mapped by concept + unmapped by material), budget-fit."""
+    """Resolve scope -> due cards + (on commit) freshly generated questions, budget-fit.
+
+    Lane B: `want_generated` surfaces an estimate in the preview; `do_generate` (set only on
+    commit, when the model is up) actually runs the generator for doc/note scopes and persists
+    the new cards. Honors constitution 9 -- generation failure degrades to the due-card set.
+    """
     concept_ids = await resolve_scope(session, scope_type, scope_ref)
     doc_ids, note_ids = await _material_ids(session, scope_type, scope_ref)
     budget = items_for_budget(length_min)
@@ -122,18 +129,26 @@ async def assemble(
         )
         cards = list((await session.execute(stmt)).scalars().all())
 
+    # Lane B generation. need = the gap to the budget; only doc/note scopes are wired.
+    need = max(0, budget - len(cards)) if want_generated else 0
+    generatable = scope_type in ("doc", "note") and scope_ref is not None
+    generated: list[FlashcardModel] = []
+    generated_estimate = min(need, _MAX_GENERATED) if (need and generatable) else 0
+    if do_generate and generated_estimate > 0:
+        generated = await _generate_for_scope(
+            session, scope_type, scope_ref, generated_estimate
+        )
+        cards.extend(generated)
+
     mapped = sum(1 for c in cards if c.concept_id)
     preview = AssemblyPreview(
-        due_count=len(cards),
-        generated_count=0,  # generation seam -- wired in a later Phase 1 increment
+        due_count=len(cards) - len(generated),
+        generated_count=len(generated) if do_generate else generated_estimate,
         mapped_count=mapped,
         unmapped_count=len(cards) - mapped,
         topic_mix=await _topic_mix(session, concept_ids),
     )
-    if want_generated:
-        # honest: generation is requested but not yet producing items
-        logger.debug("assemble: generation requested but not yet wired (generated=0)")
-    if len(cards) <= _THIN_SCOPE_ITEMS and not concept_ids:
+    if len(cards) <= _THIN_SCOPE_ITEMS and not concept_ids and not generatable:
         preview.thin_scope_warning = (
             "This scope has little tracked material -- expect a short event."
         )
@@ -144,6 +159,36 @@ async def assemble(
         cards=cards,
         preview=preview,
     )
+
+
+async def _generate_for_scope(
+    session: AsyncSession, scope_type: str, scope_ref: str, count: int
+) -> list[FlashcardModel]:
+    """Generate up to `count` new cards for a doc/note scope, tagged unmapped + scoped.
+
+    Reuses the shipped FlashcardService generators. Degrades to [] on any failure
+    (e.g. Ollama offline) so the event still starts from due cards (constitution 9).
+    """
+    from app.services.flashcard import FlashcardService  # noqa: PLC0415
+
+    svc = FlashcardService()
+    try:
+        if scope_type == "doc":
+            new = await svc.generate(scope_ref, "full", None, count, session)
+        else:  # note
+            new = await svc.generate_from_notes(None, [scope_ref], count, session)
+    except Exception:
+        logger.warning(
+            "assemble: generation failed for %s:%s", scope_type, scope_ref, exc_info=True
+        )
+        return []
+
+    # questions that map to no tracked concept are unmapped cards (docs/two-lane-model.md)
+    for c in new:
+        if c.concept_id is None:
+            c.mapping_status = "unmapped"
+        c.source_scope = f"{scope_type}:{scope_ref}"
+    return new
 
 
 async def _topic_mix(session: AsyncSession, concept_ids: list[str], limit: int = 4) -> list[str]:

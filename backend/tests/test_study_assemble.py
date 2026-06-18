@@ -16,7 +16,7 @@ import app.services.graph as graph_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ConceptModel, FlashcardModel, StudyEventModel
+from app.models import ConceptModel, FlashcardModel, NoteModel, StudyEventModel
 
 
 @pytest.fixture
@@ -96,6 +96,44 @@ async def test_assemble_empty_scope_is_valid_empty_event(test_db):
     async with factory() as s:
         events = (await s.execute(select(StudyEventModel))).scalars().all()
     assert len(events) == 1  # event still recorded
+
+
+async def test_assemble_note_scope_generates_unmapped_cards_on_commit(test_db, monkeypatch):
+    """Lane B: Start on a note scope generates new cards, tagged unmapped + scoped."""
+    factory = test_db
+    async with factory() as s:
+        s.add(NoteModel(id="n1", content="Caching strategies.", title="Caching"))
+        await s.commit()
+
+    # mock the shipped generator: persist + return one fresh card (no concept)
+    async def fake_gen(self, tag, note_ids, count, session, difficulty="medium"):
+        card = FlashcardModel(
+            id="genned", document_id=None, chunk_id=None, note_id=note_ids[0],
+            source="note", question="GQ", answer="GA", source_excerpt="e",
+        )
+        session.add(card)
+        await session.flush()
+        return [card]
+
+    monkeypatch.setattr(
+        "app.services.flashcard.FlashcardService.generate_from_notes", fake_gen
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.post(
+            "/study/assemble",
+            json={"scope_type": "note", "scope_ref": "n1", "want_generated": True},
+        )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert "genned" in [c["id"] for c in body["cards"]]
+    assert body["preview"]["generated_count"] == 1
+    assert body["preview"]["unmapped_count"] == 1
+
+    async with factory() as s:
+        card = await s.get(FlashcardModel, "genned")
+    assert card.mapping_status == "unmapped" and card.source_scope == "note:n1"
 
 
 async def test_assemble_preview_does_not_record_event(test_db):
