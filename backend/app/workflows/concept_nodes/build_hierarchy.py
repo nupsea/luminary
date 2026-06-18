@@ -27,19 +27,26 @@ from app.workflows.concept_nodes._shared import (
 
 
 def _cut_dendrogram(
-    vectors: list[list[float]], galaxy_d: float, con_d: float, concept_d: float
+    vectors: list[list[float]], galaxy_pct: float, con_pct: float, concept_pct: float
 ) -> tuple[list[int], list[int], list[int]]:
-    """Single average-linkage cosine tree, cut at 3 heights -> nested labels per leaf."""
+    """Single average-linkage cosine tree, cut at PERCENTILES of its own merge-heights.
+
+    Percentile cuts adapt to the embedding's distance scale (absolute thresholds collapse
+    to one cluster on bge-small's compressed cosine range). Galaxy = high percentile.
+    """
     import numpy as np  # noqa: PLC0415
     from scipy.cluster.hierarchy import fcluster, linkage  # noqa: PLC0415
     from scipy.spatial.distance import pdist  # noqa: PLC0415
 
     arr = np.array(vectors, dtype="float32")
     z = linkage(pdist(arr, metric="cosine"), method="average")
-    gal = [int(x) for x in fcluster(z, t=galaxy_d, criterion="distance")]
-    con = [int(x) for x in fcluster(z, t=con_d, criterion="distance")]
-    cpt = [int(x) for x in fcluster(z, t=concept_d, criterion="distance")]
-    return gal, con, cpt
+    heights = z[:, 2]
+
+    def _cut(pct: float) -> list[int]:
+        h = float(np.percentile(heights, pct))
+        return [int(x) for x in fcluster(z, t=h, criterion="distance")]
+
+    return _cut(galaxy_pct), _cut(con_pct), _cut(concept_pct)
 
 
 def _centroid(vectors: list[list[float]]) -> list[float]:
@@ -71,8 +78,8 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     cfg = PIPELINE_CONFIG
     vectors = [vec_of[n] for n in names]
     gal_l, con_l, cpt_l = await asyncio.to_thread(
-        _cut_dendrogram, vectors, cfg["galaxy_distance"],
-        cfg["constellation_distance"], cfg["concept_distance"],
+        _cut_dendrogram, vectors, cfg["galaxy_height_pct"],
+        cfg["constellation_height_pct"], cfg["concept_height_pct"],
     )
 
     # group entity indices by the finest (concept) label; roll up to con/gal (nested)

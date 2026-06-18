@@ -24,6 +24,35 @@ def clean_name(raw: str) -> str:
     """Normalize an entity surface form: strip zero-width/control chars, collapse space."""
     return re.sub(r"\s+", " ", _JUNK_CHARS.sub(" ", raw or "")).strip()
 
+
+# formula / latex / fragment markers, and ultra-generic abstract words that aren't
+# studyable concepts (they blur to the embedding centre and vacuum up noise as "suns").
+_MATHY = re.compile(r"[()\\=]|script(script)?style|divided by|\bd[xy]\b|\blim\b")
+_GENERIC_STOP = frozenset(
+    {
+        "performance", "thought", "information", "intelligence", "approach",
+        "proposed approach", "agreed", "affirmative", "affection", "for", "and",
+        "advanced systems", "advanced technologies", "new technologies", "true powers",
+        "critical information", "status information", "index information",
+    }
+)
+
+
+def is_junk_entity(name: str) -> bool:
+    """Heuristic noise filter for NER surface forms that slipped past the type filter.
+
+    Drops: pure numbers/symbols, digit-dominant strings, formula/latex fragments, and a
+    small stoplist of ultra-generic abstract words. Conservative -- format-driven.
+    """
+    n = name.strip().lower()
+    if not n or n in _GENERIC_STOP:
+        return True
+    letters = sum(c.isalpha() for c in n)
+    digits = sum(c.isdigit() for c in n)
+    if letters == 0 or digits > letters:
+        return True
+    return bool(_MATHY.search(n))
+
 # --- entity-type policy (relevance lever 1; docs/concept-model-design.md §2) ---
 # Concept-bearing types we keep as concept seeds.
 CONCEPT_TYPES: frozenset[str] = frozenset(
@@ -47,11 +76,13 @@ MIN_DOC_ENTITIES = 3       # below this a doc's entities form a single sub-conce
 
 
 PIPELINE_CONFIG = {
-    # dendrogram cut heights (cosine distance) for the nested Universe (§0):
-    # galaxy (domain) merges far apart; concept (solar system) merges close.
-    "galaxy_distance": 0.78,
-    "constellation_distance": 0.60,
-    "concept_distance": 0.38,
+    # Dendrogram cuts are taken at PERCENTILES of the tree's own merge-heights, so the
+    # levels adapt to whatever distance scale the embeddings have (absolute thresholds
+    # collapse to 1 cluster on bge-small's compressed range). Galaxy = high percentile
+    # (only the deepest splits), concept = low (fine splits).
+    "galaxy_height_pct": 90,
+    "constellation_height_pct": 68,
+    "concept_height_pct": 38,
     "max_concepts_cap": 400,            # safety cap on studyable (level-2) concepts
     # edges are similarity-weighted at each tier with a cutoff (no categorical walls):
     "concept_edge_cutoff": 0.45,        # concept<->concept link if centroid cosine >= this

@@ -22,6 +22,7 @@ from app.workflows.concept_nodes._shared import (
     ConceptPipelineState,
     EntityRec,
     clean_name,
+    is_junk_entity,
     record,
 )
 
@@ -68,6 +69,8 @@ async def select_entities(state: ConceptPipelineState) -> ConceptPipelineState:
             dropped_types[etype] += 1
         elif rec["frequency"] < MIN_FREQUENCY:
             dropped["below_freq_floor"] += 1
+        elif is_junk_entity(name):
+            dropped["junk"] += 1
         else:
             kept[name] = rec
 
