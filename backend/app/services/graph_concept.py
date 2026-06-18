@@ -288,6 +288,13 @@ class KuzuConceptRepo:
         except Exception:
             logger.debug("delete_concept_node failed for %s", concept_id, exc_info=True)
 
+    def delete_all_concepts(self) -> None:
+        """Drop every Concept node + its edges (for a full regenerate). Idempotent."""
+        try:
+            self._conn.execute("MATCH (c:Concept) DETACH DELETE c")
+        except Exception:
+            logger.debug("delete_all_concepts failed", exc_info=True)
+
     def get_concept_relations(self) -> list[dict]:
         """Return all CONCEPT_RELATED_TO edges as {source, target} (for the Universe lens)."""
         try:

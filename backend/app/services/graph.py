@@ -215,6 +215,9 @@ class KuzuService:
     def get_concept_relations(self) -> list[dict]:
         return self._concept.get_concept_relations()
 
+    def delete_all_concepts(self) -> None:
+        return self._concept.delete_all_concepts()
+
     def delete_concept_node(self, concept_id: str) -> None:
         return self._concept.delete_concept_node(concept_id)
 

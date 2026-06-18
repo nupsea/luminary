@@ -109,9 +109,13 @@ eval:
 luminary:
 	bash scripts/luminary.sh
 
-# One-time: promote the existing entity graph into Concept rows (Universe/launcher/
-# rollups). Run with the server STOPPED (it needs the Kuzu lock). Idempotent.
-# DATA_DIR matches scripts/luminary.sh so it hits the real repo-root DB.
+# Regenerate the Concept layer: wipe + rebuild higher-level themes from the entity graph
+# (the real concept model, not 1:1 promotion). Run with the server STOPPED (needs the
+# Kuzu lock + LLM, must not starve the live loop). Idempotent. DATA_DIR matches luminary.sh.
+concepts:
+	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.regenerate_concepts
+
+# Deprecated: naive 1:1 entity->concept promotion. Use `make concepts` instead.
 backfill-concepts:
 	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.backfill_concepts
 

@@ -658,6 +658,20 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             text("CREATE INDEX IF NOT EXISTS idx_flashcards_concept_id ON flashcards(concept_id)")
         )
 
+        # Concept hierarchy columns (theme -> sub-concept). Idempotent.
+        for ddl in [
+            "ALTER TABLE concepts ADD COLUMN parent_id TEXT",
+            "ALTER TABLE concepts ADD COLUMN level INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE concepts ADD COLUMN salience REAL NOT NULL DEFAULT 0",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # Column already exists (idempotent)
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_concepts_parent_id ON concepts(parent_id)")
+        )
+
         # backfill flashcards_fts from existing flashcards (idempotent).
         # Uses LEFT JOIN on shadow content table to skip cards already indexed.
         await conn.execute(

@@ -276,6 +276,15 @@ class LanceDBService:
         except Exception as exc:
             logger.warning("delete_concept_vector failed for concept_id=%s: %s", concept_id, exc)
 
+    def clear_concept_vectors(self) -> None:
+        """Drop the concept vector table (for a full regenerate). Idempotent."""
+        try:
+            self._connect()
+            if CONCEPT_TABLE_NAME in self._db.list_tables().tables:
+                self._db.drop_table(CONCEPT_TABLE_NAME)
+        except Exception as exc:
+            logger.warning("clear_concept_vectors failed: %s", exc)
+
     def search_concepts(
         self, query_vector: list[float], k: int = 10, threshold: float = 0.0
     ) -> list[dict]:

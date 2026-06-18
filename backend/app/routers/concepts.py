@@ -93,9 +93,13 @@ async def get_universe(session: AsyncSession = Depends(get_db)) -> UniverseRespo
     produced CONCEPT_RELATED_TO relations (degrades gracefully -- docs/universe.md).
     """
     now = datetime.now(UTC)
+    # The sky shows top-level themes (level 0); zoom/expand reveals sub-concepts.
     rows = (
         await session.execute(
-            select(ConceptModel).where(ConceptModel.status != "candidate")
+            select(ConceptModel).where(
+                ConceptModel.status != "candidate",
+                ConceptModel.level == 0,
+            )
         )
     ).scalars().all()
     stars = [
