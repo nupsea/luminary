@@ -66,6 +66,14 @@
       "labels": { "en": "Collections" }
     },
     {
+      "id": "doc_overview",
+      "tier": "public",
+      "kind": "feature",
+      "frontend": { "route": "/library/doc/:id", "component": "pages/DocumentOverview" },
+      "backend": { "routers": ["references"] },
+      "labels": { "en": "Document overview" }
+    },
+    {
       "id": "tags",
       "tier": "public",
       "kind": "feature",

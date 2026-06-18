@@ -56,6 +56,7 @@ const COMPONENT_REGISTRY: Record<string, LazyPage> = {
   "pages/Viz": Viz,
   "pages/Progress": Progress,
   "pages/CollectionWorkspace": CollectionWorkspace,
+  "pages/DocumentOverview": DocumentOverview,
   "pages/Quality": Quality,
   "pages/Admin": Admin,
   "pages/Monitoring": Monitoring,
@@ -603,10 +604,6 @@ function AppShell() {
             )
           })}
           {SURFACE_TIER === "dev" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
-          <Route
-            path="/library/doc/:id"
-            element={<Suspense fallback={<PageSkeleton />}><DocumentOverview /></Suspense>}
-          />
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </main>
