@@ -34,7 +34,8 @@ import sys
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session_factory
+from app.database import get_engine, get_session_factory
+from app.db_init import create_all_tables
 from app.models import ChunkModel, FlashcardModel
 from app.services.concept_service import get_concept_service
 from app.services.graph import get_graph_service
@@ -190,6 +191,9 @@ def _resolve_entity_ids(graph, label: str, doc_ids: list[str]) -> list[str]:  # 
 
 async def _run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO)
+    # self-migrate: ensure the concept schema exists even if the backend (which runs
+    # migrations at startup) hasn't been restarted with the new code yet. Idempotent.
+    await create_all_tables(get_engine())
     async with get_session_factory()() as session:
         stats = await backfill(session, dry_run=args.dry_run)
     logger.info("backfill_concepts done (dry_run=%s): %s", args.dry_run, stats)
