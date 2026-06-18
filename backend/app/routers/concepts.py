@@ -15,8 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ConceptModel
+from app.models import ConceptModel, FlashcardModel, NoteModel
 from app.services.concept_service import get_concept_service
+
+_LEXICAL_SCAN_CAP = 500
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,57 @@ async def apply_overrides(session: AsyncSession = Depends(get_db)) -> dict[str, 
     applied = await get_concept_service().apply_overrides(session)
     await session.commit()
     return {"applied": applied}
+
+
+@router.get("/for-note/{note_id}", response_model=list[ConceptOut])
+async def concepts_for_note(
+    note_id: str, session: AsyncSession = Depends(get_db)
+) -> list[ConceptOut]:
+    """Concepts a note touches (docs/03-notes-generation.md).
+
+    Two signals, unioned: (1) engagement -- concepts the note's mapped cards point at;
+    (2) lexical recall -- concepts whose label appears in the note's title/content. This
+    is the always-on degraded path; the concept_linker labs feature enriches it later.
+    """
+    note = await session.get(NoteModel, note_id)
+    if note is None:
+        raise HTTPException(status_code=404, detail="note not found")
+
+    mapped_ids = {
+        cid
+        for cid in (
+            await session.execute(
+                select(FlashcardModel.concept_id).where(
+                    FlashcardModel.note_id == note_id,
+                    FlashcardModel.concept_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+        if cid
+    }
+
+    text = f"{note.title or ''}\n{note.content or ''}".lower()
+    candidates = (
+        await session.execute(select(ConceptModel).limit(_LEXICAL_SCAN_CAP))
+    ).scalars().all()
+
+    out: list[ConceptModel] = []
+    seen: set[str] = set()
+    for c in candidates:
+        if c.id in mapped_ids or (c.label and c.label.lower() in text):
+            if c.id not in seen:
+                seen.add(c.id)
+                out.append(c)
+    # include mapped concepts that fell outside the lexical scan cap
+    missing = mapped_ids - seen
+    if missing:
+        extra = (
+            await session.execute(select(ConceptModel).where(ConceptModel.id.in_(missing)))
+        ).scalars().all()
+        out.extend(extra)
+
+    out.sort(key=lambda c: c.mastery)  # weakest first
+    return [_out(c) for c in out]
 
 
 @router.get("")

@@ -12,7 +12,7 @@ import app.services.graph as graph_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ConceptModel, FlashcardModel, OverrideModel
+from app.models import ConceptModel, FlashcardModel, NoteModel, OverrideModel
 from app.services.concept_service import get_concept_service
 
 
@@ -80,6 +80,33 @@ async def test_merge_reassigns_cards_and_deletes_source(test_db):
         assert await s.get(ConceptModel, "src") is None
         card = await s.get(FlashcardModel, "f1")
         assert card.concept_id == "tgt"
+
+
+async def test_concepts_for_note_unions_engagement_and_lexical(test_db):
+    factory = test_db
+    async with factory() as s:
+        s.add(NoteModel(id="n1", content="We discuss caching strategies at length.",
+                        title="Notes on caching"))
+        # lexical: label appears in the note text
+        s.add(ConceptModel(id="c_cache", slug="caching", label="caching", kind="concept",
+                           origin="document", status="proposed", mastery=10.0))
+        # engagement: mapped via a card, label NOT in the note text
+        s.add(ConceptModel(id="c_snap", slug="snapshots", label="Snapshots", kind="concept",
+                           origin="document", status="proposed", mastery=5.0))
+        s.add(FlashcardModel(id="f1", document_id="d1", chunk_id=None, note_id="n1",
+                             concept_id="c_snap", mapping_status="mapped", source="note",
+                             question="Q", answer="A", source_excerpt="e"))
+        # unrelated concept -- must NOT appear
+        s.add(ConceptModel(id="c_other", slug="kafka", label="Kafka", kind="concept",
+                           origin="document", status="proposed", mastery=0.0))
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/concepts/for-note/n1")
+    assert r.status_code == 200, r.text
+    ids = {c["id"] for c in r.json()}
+    assert ids == {"c_cache", "c_snap"}  # lexical + engagement, not the unrelated one
 
 
 async def test_apply_overrides_survives_reparse(test_db):
