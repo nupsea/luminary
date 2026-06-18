@@ -76,14 +76,14 @@ MIN_DOC_ENTITIES = 3       # below this a doc's entities form a single sub-conce
 
 
 PIPELINE_CONFIG = {
-    # Upper levels (galaxy, constellation) are cut at the LARGEST NATURAL GAP in the
-    # dendrogram's merge-heights within a bounded cluster-count range -- emergent (where
-    # domains truly separate) but never the 89-galaxy fragmentation a percentile gives on
-    # bge-small's skewed height distribution. Concept (fine) stays a percentile cut.
+    # Levels are cut to nested target COUNTS (maxclust), adaptive to library size and
+    # clamped to these ranges. Height/gap cuts are pathological on bge-small (outliers
+    # dominate the tree top; domains separate mid-tree) -> 89 or 2 galaxies. The groupings
+    # still emerge from the data; only the count is bounded. galaxy ~n/200, constellation
+    # ~n/45, concept ~n/4 entities.
     "galaxy_k_range": [4, 14],
     "constellation_k_range": [12, 55],
-    "concept_height_pct": 38,
-    "max_concepts_cap": 400,            # safety cap on studyable (level-2) concepts
+    "max_concepts_cap": 400,            # cap on studyable (level-2) concepts
     # edges are similarity-weighted at each tier with a cutoff (no categorical walls):
     "concept_edge_cutoff": 0.45,        # concept<->concept link if centroid cosine >= this
     "galaxy_edge_cutoff": 0.25,         # galaxy<->galaxy thin link if related (lower bar)

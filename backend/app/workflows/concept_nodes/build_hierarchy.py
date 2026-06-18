@@ -28,33 +28,16 @@ from app.workflows.concept_nodes._shared import (
 )
 
 
-def _gap_cut_height(z, lo_k: int, hi_k: int) -> float:
-    """Cut height for an EMERGENT cluster count: the largest merge-height gap whose cut
-    yields between lo_k and hi_k clusters. Finds where domains genuinely separate."""
-
-    h = z[:, 2]
-    n = len(z) + 1  # leaves
-    lo_k = max(2, lo_k)
-    hi_k = min(hi_k, n - 1)
-    best_gap, best_height = -1.0, float(h[-1])
-    for k in range(lo_k, hi_k + 1):
-        j = n - 1 - k  # cut just above merge j -> k clusters
-        if j < 0 or j + 1 >= len(h):
-            continue
-        gap = float(h[j + 1] - h[j])
-        if gap > best_gap:
-            best_gap, best_height = gap, float((h[j] + h[j + 1]) / 2.0)
-    return best_height
-
-
 def _cut_dendrogram(
-    vectors: list[list[float]], galaxy_k: list[int], con_k: list[int], concept_pct: float
+    vectors: list[list[float]], galaxy_k: list[int], con_k: list[int], concept_cap: int
 ) -> tuple[list[int], list[int], list[int]]:
-    """Single average-linkage cosine tree, cut at 3 heights -> nested labels per leaf.
+    """Single average-linkage cosine tree, cut to nested target COUNTS via maxclust.
 
-    Galaxy/constellation use gap cuts (emergent count in a bounded range, where domains
-    separate); concept uses a low percentile (fine splits). Heights are clamped to stay
-    ordered (galaxy >= constellation >= concept) so the levels nest.
+    Gap/percentile height cuts are pathological on bge-small (an outlier dominates the
+    top of the tree; domains separate at middle heights), giving either 89 or 2 galaxies.
+    maxclust cuts to a target count (adaptive to library size, clamped sane) -- the
+    *groupings* still emerge from the data, only the count is bounded; and maxclust is
+    monotonic so galaxy < constellation < concept counts nest cleanly.
     """
     import numpy as np  # noqa: PLC0415
     from scipy.cluster.hierarchy import fcluster, linkage  # noqa: PLC0415
@@ -62,15 +45,20 @@ def _cut_dendrogram(
 
     arr = np.array(vectors, dtype="float32")
     z = linkage(pdist(arr, metric="cosine"), method="average")
+    n = len(vectors)
 
-    h_gal = _gap_cut_height(z, galaxy_k[0], galaxy_k[1])
-    h_con = min(_gap_cut_height(z, con_k[0], con_k[1]), h_gal)
-    h_cpt = min(float(np.percentile(z[:, 2], concept_pct)), h_con)
+    def _clamp(v: float, lo: int, hi: int) -> int:
+        return int(max(lo, min(hi, round(v))))
 
-    def _cut(height: float) -> list[int]:
-        return [int(x) for x in fcluster(z, t=height, criterion="distance")]
+    # ~1 galaxy / 200 entities, ~1 constellation / 45, ~1 concept / 4 -- clamped.
+    tg = _clamp(n / 200, galaxy_k[0], galaxy_k[1])
+    tc = max(_clamp(n / 45, con_k[0], con_k[1]), tg + 1)
+    tp = max(_clamp(n / 4, tc + 1, concept_cap), tc + 1)
 
-    return _cut(h_gal), _cut(h_con), _cut(h_cpt)
+    def _mc(k: int) -> list[int]:
+        return [int(x) for x in fcluster(z, t=min(k, n), criterion="maxclust")]
+
+    return _mc(tg), _mc(tc), _mc(tp)
 
 
 def _centroid(vectors: list[list[float]]) -> list[float]:
@@ -103,7 +91,7 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     vectors = [vec_of[n] for n in names]
     gal_l, con_l, cpt_l = await asyncio.to_thread(
         _cut_dendrogram, vectors, cfg["galaxy_k_range"],
-        cfg["constellation_k_range"], cfg["concept_height_pct"],
+        cfg["constellation_k_range"], cfg["max_concepts_cap"],
     )
 
     # group entity indices by the finest (concept) label; roll up to con/gal (nested)
