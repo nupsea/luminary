@@ -22,6 +22,7 @@ import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
+import { StudyLauncher } from "./components/StudyLauncher"
 import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
@@ -630,6 +631,7 @@ function AppShell() {
       </div>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <StudyLauncher />
     </div>
   )
 }

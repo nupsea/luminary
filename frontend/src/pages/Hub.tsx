@@ -26,6 +26,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
+import { launchStudy } from "@/lib/studyLauncher"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
 import type { components } from "@/types/api"
@@ -311,7 +312,16 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
             onClick={() => {
               setActiveDocument(null)
               setActiveCollectionId(action.collection_id ?? null)
-              navigate("/study", { state: { from: "/" } })
+              // route the daily call through the Study Launcher (docs/study-launcher.md)
+              launchStudy(
+                action.collection_id
+                  ? {
+                      type: "collection",
+                      ref: action.collection_id,
+                      label: action.collection_name ?? "this collection",
+                    }
+                  : { type: "daily", label: "Today's pick" },
+              )
             }}
             className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold text-primary-foreground ring-1 ring-white/25 transition-all hover:bg-white/30"
           >

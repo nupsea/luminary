@@ -393,16 +393,18 @@ async def assemble_study(
         want_generated=req.want_generated,
     )
 
-    event_id = uuid.uuid4().hex
-    session.add(
-        StudyEventModel(
-            id=event_id,
-            kind=req.mode,
-            scope_type=req.scope_type,
-            scope_ref=req.scope_ref,
+    event_id = ""
+    if req.commit:
+        event_id = uuid.uuid4().hex
+        session.add(
+            StudyEventModel(
+                id=event_id,
+                kind=req.mode,
+                scope_type=req.scope_type,
+                scope_ref=req.scope_ref,
+            )
         )
-    )
-    await session.commit()
+        await session.commit()
 
     repo = StudyRepo(session)
     chunk_to_section = await repo.chunk_section_id_map(

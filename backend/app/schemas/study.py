@@ -360,6 +360,8 @@ class AssembleRequest(BaseModel):
     length_min: int = 5
     want_generated: bool = True
     keep: Literal["test", "save"] = "test"
+    # False = live preview (no StudyEvent written); True = Start (records the event).
+    commit: bool = True
 
 
 class AssemblePreview(BaseModel):

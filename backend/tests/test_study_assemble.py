@@ -96,3 +96,18 @@ async def test_assemble_empty_scope_is_valid_empty_event(test_db):
     async with factory() as s:
         events = (await s.execute(select(StudyEventModel))).scalars().all()
     assert len(events) == 1  # event still recorded
+
+
+async def test_assemble_preview_does_not_record_event(test_db):
+    factory = test_db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.post(
+            "/study/assemble",
+            json={"scope_type": "daily", "mode": "quick_quiz", "length_min": 5, "commit": False},
+        )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["event_id"] == ""
+    async with factory() as s:
+        events = (await s.execute(select(StudyEventModel))).scalars().all()
+    assert len(events) == 0  # preview writes nothing
