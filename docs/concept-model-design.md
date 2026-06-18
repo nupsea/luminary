@@ -10,6 +10,44 @@ Every design choice below exists to serve a downstream use case. If a piece of d
 isn't needed by a use case, we don't store it; if a use case can't be served, the model
 is wrong.
 
+## 0. The Universe is a nested hierarchy with distance-encoded edges (recalibrated)
+
+A flat "themes + sub-concepts" model renders as a hairball. A real **Universe** is nested,
+and the *distance* between things is the whole point:
+
+```
+Galaxy        domain        "Data Engineering", "Philosophy"      far apart, NO edges between
+  Constellation  theme       "Storage Formats", "Dharma"          thin link up to its galaxy
+    Solar system  concept     a sun (central idea) + orbiting      strong links within, to the sun
+      planets     entities/detail                                  the concept's material
+```
+
+Edge semantics encode proximity (the user's spec):
+- **Within a solar system** → strong, short links to the sun (closely related).
+- **System → constellation → galaxy** → progressively *thinner* structural links.
+- **Across galaxies** → **no link** (unrelated domains must not be connected).
+
+This falls out of a **single hierarchical-clustering dendrogram** cut at multiple heights.
+The merge *height* in the dendrogram IS the distance: galaxies merge only near the root
+(large distance → no lateral edge), solar systems merge low (small distance → strong
+edge). One tree → the levels nest consistently (a concept can't belong to two galaxies).
+
+Implementation: `scipy.cluster.hierarchy.linkage(seeds, method='average', metric='cosine')`
+once, then `fcluster` at three thresholds (galaxy > constellation > concept). A leaf's
+(galaxy, constellation, concept) all come from the same tree → guaranteed nesting.
+Lateral edges are drawn only between nodes whose **lowest common ancestor is at/below the
+constellation** (so cross-galaxy pairs get none); edge weight = cosine similarity (link
+strength). The **sun** of a solar system = its highest-salience / most-central member.
+
+`ConceptModel.level`: **0 = galaxy, 1 = constellation, 2 = concept (studyable)**. Mastery
+lives on level-2 concepts (you study a solar system); galaxies/constellations are
+containers whose mastery is a rollup. Each level is named bottom-up by the LLM (concept →
+constellation → galaxy), the most abstract names using the strongest model.
+
+The rest of this doc (lineage, identity, mastery, generation) is unchanged -- it now
+hangs off level-2 concepts; galaxies/constellations are additional container rows with
+`parent_id` chains. §4's clustering is superseded by this dendrogram approach.
+
 ## 1. The layered model -- and the lineage is STORED
 
 ```

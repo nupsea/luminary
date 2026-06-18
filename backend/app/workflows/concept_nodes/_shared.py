@@ -1,6 +1,6 @@
 """Shared state, diagnostics, and config for the concept-generation pipeline.
 
-The pipeline is a LangGraph StateGraph of swappable nodes (docs/concept-model-design.md
+The pipeline is a sequential workflow of swappable nodes (docs/concept-model-design.md
 §11). Every node reads/writes `ConceptPipelineState` and appends a structured block to
 `state["diagnostics"]` so a run is fully inspectable (--dry-run dumps it). Each stage can
 be evaluated, replaced, or A/B'd in isolation -- the point is to explore Lumen's reasoning.
@@ -47,10 +47,23 @@ MIN_DOC_ENTITIES = 3       # below this a doc's entities form a single sub-conce
 
 
 PIPELINE_CONFIG = {
-    "target_themes_cap": 30,            # salience cap for the Universe (themes still all stored)
+    # dendrogram cut heights (cosine distance) for the nested Universe (§0):
+    # galaxy (domain) merges far apart; concept (solar system) merges close.
+    "galaxy_distance": 0.78,
+    "constellation_distance": 0.60,
+    "concept_distance": 0.38,
+    "max_concepts_cap": 400,            # safety cap on studyable (level-2) concepts
+    "lateral_edge_min_sim": 0.45,       # min cosine sim to draw an intra-constellation link
+    # legacy 2-level knobs (superseded by the dendrogram; kept for the old path):
+    "target_themes_cap": 30,
     "subconcept_cosine_threshold": 0.45,
     "theme_cosine_threshold": 0.55,
 }
+
+# concept hierarchy levels
+LEVEL_GALAXY = 0
+LEVEL_CONSTELLATION = 1
+LEVEL_CONCEPT = 2
 
 
 class EntityRec(TypedDict):
