@@ -2,13 +2,14 @@
 // (docs/02-ingest-and-doc-overview.md). Replaces click-into-a-surprise-session.
 // Reads GET /documents/:id/overview; Study/Generate open the Study Launcher.
 
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, BookOpen, MessageSquare, Sparkles, Target } from "lucide-react"
+import { ArrowLeft, BookOpen, Check, MessageSquare, Pencil, Sparkles, Target, X } from "lucide-react"
 
 import { ReferencesPanel } from "@/components/reader/ReferencesPanel"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
 import { useAppStore } from "@/store"
 
@@ -173,29 +174,7 @@ export default function DocumentOverview() {
         ) : (
           <ul className="space-y-2">
             {data.concepts.map((c) => (
-              <li key={c.id} className="rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => launchStudy({ type: "concept", ref: c.id, label: c.label })}
-                    className="text-left text-sm font-medium text-foreground hover:text-primary"
-                  >
-                    {c.label}
-                  </button>
-                  <div className="flex items-center gap-2">
-                    {c.status !== "confirmed" && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                        {c.status}
-                      </span>
-                    )}
-                    <span className="text-xs text-muted-foreground">{Math.round(c.mastery)}%</span>
-                  </div>
-                </div>
-                {c.evidence.length > 0 && (
-                  <p className="mt-1.5 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
-                    "{c.evidence[0].quote}"
-                  </p>
-                )}
-              </li>
+              <ConceptRow key={c.id} docId={id} concept={c} />
             ))}
           </ul>
         )}
@@ -207,5 +186,97 @@ export default function DocumentOverview() {
         <ReferencesPanel documentId={id} />
       </section>
     </div>
+  )
+}
+
+// "Review what Lumen found" -- inline corrections per concept (docs/concepts.md).
+// confirm/reject/rename hit the /concepts endpoints; each records an override server-side.
+function ConceptRow({ docId, concept }: { docId: string; concept: OverviewConcept }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(concept.label)
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["doc-overview", docId] })
+
+  const confirm = useMutation({
+    mutationFn: () => apiPost(`/concepts/${concept.id}/confirm`),
+    onSuccess: invalidate,
+  })
+  const reject = useMutation({
+    mutationFn: () => apiPost(`/concepts/${concept.id}/reject`),
+    onSuccess: invalidate,
+  })
+  const rename = useMutation({
+    mutationFn: (newLabel: string) =>
+      apiPost(`/concepts/${concept.id}/rename`, { label: newLabel }),
+    onSuccess: () => {
+      setEditing(false)
+      invalidate()
+    },
+  })
+  const busy = confirm.isPending || reject.isPending || rename.isPending
+
+  return (
+    <li className="rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        {editing ? (
+          <input
+            autoFocus
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && label.trim()) rename.mutate(label.trim())
+              if (e.key === "Escape") setEditing(false)
+            }}
+            className="flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
+          />
+        ) : (
+          <button
+            onClick={() => launchStudy({ type: "concept", ref: concept.id, label: concept.label })}
+            className="text-left text-sm font-medium text-foreground hover:text-primary"
+          >
+            {concept.label}
+          </button>
+        )}
+        <div className="flex items-center gap-1.5">
+          {concept.status !== "confirmed" && !editing && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+              {concept.status}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">{Math.round(concept.mastery)}%</span>
+          {/* review affordances */}
+          {!editing && (
+            <div className="flex items-center gap-0.5 pl-1">
+              <button
+                title="Confirm" disabled={busy}
+                onClick={() => confirm.mutate()}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-green-600 disabled:opacity-50"
+              >
+                <Check size={14} />
+              </button>
+              <button
+                title="Rename" disabled={busy}
+                onClick={() => { setLabel(concept.label); setEditing(true) }}
+                className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                title="Not a concept" disabled={busy}
+                onClick={() => reject.mutate()}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-50"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {concept.evidence.length > 0 && !editing && (
+        <p className="mt-1.5 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
+          "{concept.evidence[0].quote}"
+        </p>
+      )}
+    </li>
   )
 }
