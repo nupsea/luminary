@@ -226,6 +226,37 @@ class LanceDBService:
             return self._db.open_table(CONCEPT_TABLE_NAME)
         return self._db.create_table(CONCEPT_TABLE_NAME, schema=CONCEPT_SCHEMA)
 
+    def fetch_chunk_vectors(self, chunk_ids: list[str]) -> dict[str, list[float]]:
+        """Bulk-load chunk_id -> vector for the given ids (one filtered scan).
+
+        Used to build context-centroid embeddings for concepts without a per-entity
+        LanceDB query. Returns {} on any error.
+        """
+        if not chunk_ids:
+            return {}
+        try:
+            table = self._get_table()
+            out: dict[str, list[float]] = {}
+            # chunk in batches to keep the IN(...) filter a sane size
+            ids = list(dict.fromkeys(chunk_ids))
+            for i in range(0, len(ids), 800):
+                batch = ids[i : i + 800]
+                id_list = ", ".join(f"'{c}'" for c in batch)
+                rows = (
+                    table.search()
+                    .where(f"chunk_id IN ({id_list})")
+                    .select(["chunk_id", "vector"])
+                    .limit(len(batch))
+                    .to_list()
+                )
+                for r in rows:
+                    if r.get("vector") is not None:
+                        out[r["chunk_id"]] = r["vector"]
+            return out
+        except Exception as exc:
+            logger.warning("fetch_chunk_vectors failed: %s", exc)
+            return {}
+
     def compute_centroid(self, chunk_ids: list[str]) -> list[float] | None:
         """Mean of the evidence chunks' vectors (chunk space, 384-dim).
 

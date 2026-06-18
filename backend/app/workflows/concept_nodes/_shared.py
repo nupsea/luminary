@@ -53,7 +53,9 @@ PIPELINE_CONFIG = {
     "constellation_distance": 0.60,
     "concept_distance": 0.38,
     "max_concepts_cap": 400,            # safety cap on studyable (level-2) concepts
-    "lateral_edge_min_sim": 0.45,       # min cosine sim to draw an intra-constellation link
+    # edges are similarity-weighted at each tier with a cutoff (no categorical walls):
+    "concept_edge_cutoff": 0.45,        # concept<->concept link if centroid cosine >= this
+    "galaxy_edge_cutoff": 0.25,         # galaxy<->galaxy thin link if related (lower bar)
     # legacy 2-level knobs (superseded by the dendrogram; kept for the old path):
     "target_themes_cap": 30,
     "subconcept_cosine_threshold": 0.45,

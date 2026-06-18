@@ -98,11 +98,13 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     concept_label_to_idx: dict[int, int] = {}
     for clabel, idxs in by_concept.items():
         ents = [names[i] for i in idxs]
-        sun = max(ents, key=_freq)
+        cen = _centroid([vectors[i] for i in idxs])
+        # sun = medoid (most central member), not most-frequent
+        sun = max(ents, key=lambda n: _cos(vec_of[n], cen))
         concepts.append(
             {
                 "level": LEVEL_CONCEPT, "label": "", "sun": sun, "entities": sorted(ents),
-                "centroid": _centroid([vectors[i] for i in idxs]),
+                "centroid": cen,
                 "salience": float(sum(_freq(n) for n in ents)),
                 "document_ids": _docs(idxs),
                 "_con": concept_con[clabel], "_gal": concept_gal[clabel],
@@ -147,6 +149,7 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
             {
                 "level": LEVEL_GALAXY, "label": "", "constellation_idxs": conidxs,
                 "entities": gal_entities,
+                "centroid": _centroid([constellations[coni]["centroid"] for coni in conidxs]),
                 "salience": float(sum(constellations[coni]["salience"] for coni in conidxs)),
                 "document_ids": sorted(
                     {d for coni in conidxs for d in constellations[coni]["document_ids"]}
@@ -156,22 +159,32 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
         for coni in conidxs:
             constellations[coni]["parent_idx"] = len(galaxies) - 1
 
-    # lateral edges: only between concepts in the SAME constellation (never cross-galaxy)
-    min_sim = cfg["lateral_edge_min_sim"]
+    # edges are similarity-weighted at each tier with a cutoff (no categorical walls;
+    # docs/concept-model-design.md §0). Concept<->concept: strong/medium links across the
+    # whole graph -- close ones (same constellation) score high, related-but-distant ones
+    # thin, unrelated drop below the cutoff. Galaxy<->galaxy: thin links between *related*
+    # domains (Data Eng <-> AI Eng), at a lower bar; truly distinct domains stay apart.
+    concept_cut = cfg["concept_edge_cutoff"]
     lateral: list[tuple[int, int, float]] = []
-    for con in constellations:
-        cidxs = con["concept_idxs"]
-        for a in range(len(cidxs)):
-            for b in range(a + 1, len(cidxs)):
-                ia, ib = cidxs[a], cidxs[b]
-                sim = _cos(concepts[ia]["centroid"], concepts[ib]["centroid"])
-                if sim >= min_sim:
-                    lateral.append((ia, ib, round(sim, 3)))
+    for a in range(len(concepts)):
+        for b in range(a + 1, len(concepts)):
+            sim = _cos(concepts[a]["centroid"], concepts[b]["centroid"])
+            if sim >= concept_cut:
+                lateral.append((a, b, round(sim, 3)))
+
+    galaxy_cut = cfg["galaxy_edge_cutoff"]
+    galaxy_edges: list[tuple[int, int, float]] = []
+    for a in range(len(galaxies)):
+        for b in range(a + 1, len(galaxies)):
+            sim = _cos(galaxies[a]["centroid"], galaxies[b]["centroid"])
+            if sim >= galaxy_cut:
+                galaxy_edges.append((a, b, round(sim, 3)))
 
     state["hierarchy"] = {
         "galaxies": galaxies, "constellations": constellations, "concepts": concepts
     }
     state["lateral_edges"] = lateral
+    state["galaxy_edges"] = galaxy_edges
 
     record(
         state,
@@ -181,6 +194,7 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
             "constellations": len(constellations),
             "concepts": len(concepts),
             "lateral_edges": len(lateral),
+            "galaxy_edges": len(galaxy_edges),
             "galaxy_sample": [
                 {
                     "n_constellations": len(g["constellation_idxs"]),

@@ -22,15 +22,23 @@ Galaxy        domain        "Data Engineering", "Philosophy"      far apart, NO 
       planets     entities/detail                                  the concept's material
 ```
 
-Edge semantics encode proximity (the user's spec):
-- **Within a solar system** → strong, short links to the sun (closely related).
-- **System → constellation → galaxy** → progressively *thinner* structural links.
-- **Across galaxies** → **no link** (unrelated domains must not be connected).
+The galaxy/constellation/system names are an **illustration of a direction, not a rigid
+taxonomy**. The single real mechanic is **semantic distance**, applied two ways:
 
-This falls out of a **single hierarchical-clustering dendrogram** cut at multiple heights.
-The merge *height* in the dendrogram IS the distance: galaxies merge only near the root
-(large distance → no lateral edge), solar systems merge low (small distance → strong
-edge). One tree → the levels nest consistently (a concept can't belong to two galaxies).
+1. **Clustering** — threshold cuts on the distance tree create groupings. How many levels,
+   what merges, what stays separate is **emergent from the imported data**, not imposed.
+2. **Relationships** — an edge exists between *any* two nodes/clusters with weight =
+   their similarity, kept only above a cutoff. So proximity, at every scale, drives links:
+   - **Within a solar system** → strong, short links (closely related).
+   - **Between related galaxies** (Data Engineering ↔ AI Engineering ↔ Data Science) →
+     **thin** links — different domains that genuinely share ground.
+   - **Between unrelated domains** (Data Engineering ↔ Philosophy) → no link (similarity
+     falls below the cutoff). *Not* a hard rule — just distance doing its job.
+
+This falls out of a **single hierarchical-clustering dendrogram** (merge *height* = distance)
+cut at a few heights for zoom tiers, plus **similarity-weighted edges computed at each tier**
+(concept↔concept, galaxy↔galaxy). One tree → tiers nest consistently; the edge cutoff,
+not a categorical wall, decides what relates.
 
 Implementation: `scipy.cluster.hierarchy.linkage(seeds, method='average', metric='cosine')`
 once, then `fcluster` at three thresholds (galaxy > constellation > concept). A leaf's
