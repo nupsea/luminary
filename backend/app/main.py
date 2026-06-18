@@ -134,24 +134,34 @@ async def lifespan(app: FastAPI):
     engine = get_engine()
     await create_all_tables(engine)
 
-    # One-time concept backfill: promote the existing entity graph into Concept rows
-    # so the two-lane model (Universe, launcher, mastery rollups) has something to route
-    # on. Guarded -- runs only when `concepts` is empty -- and best-effort (never blocks
-    # startup). Runs inside the server process, which owns the Kuzu lock (no contention).
-    try:
-        from sqlalchemy import func, select  # noqa: PLC0415
+    # One-time concept backfill: promote the existing entity graph into Concept rows so
+    # the two-lane model (Universe, launcher, rollups) has something to route on. Runs as
+    # a BACKGROUND task -- it must never block startup/readiness (the full-table scans can
+    # take a while on a large library). Guarded (skips once populated) + best-effort. Uses
+    # its own session (I-1) and the process's own Kuzu (no lock contention).
+    async def _run_startup_backfill() -> None:
+        try:
+            from sqlalchemy import func, select  # noqa: PLC0415
 
-        from app.models import ConceptModel  # noqa: PLC0415
-        from app.scripts.backfill_concepts import backfill as _backfill_concepts  # noqa: PLC0415
+            from app.models import ConceptModel  # noqa: PLC0415
+            from app.scripts.backfill_concepts import (  # noqa: PLC0415
+                backfill as _backfill_concepts,
+            )
 
-        async with get_session_factory()() as _bf_session:
-            _have = await _bf_session.scalar(select(func.count()).select_from(ConceptModel))
-            if not _have:
-                logger.info("No concepts yet -- running one-time concept backfill...")
+            async with get_session_factory()() as _bf_session:
+                _have = await _bf_session.scalar(
+                    select(func.count()).select_from(ConceptModel)
+                )
+                if _have:
+                    return
+                logger.info("No concepts yet -- running one-time concept backfill (background)...")
                 _stats = await _backfill_concepts(_bf_session)
                 logger.info("Concept backfill complete: %s", _stats)
-    except Exception:
-        logger.warning("Startup concept backfill failed (non-fatal)", exc_info=True)
+        except Exception:
+            logger.warning("Background concept backfill failed (non-fatal)", exc_info=True)
+
+    _bf_task = asyncio.create_task(_run_startup_backfill())
+    app.state.concept_backfill_task = _bf_task  # keep a strong ref so it isn't GC'd
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:
