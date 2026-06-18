@@ -88,6 +88,9 @@ class KuzuService:
     def get_entities_by_type_for_document(self, document_id: str) -> dict[str, list[str]]:
         return self._entity.get_entities_by_type_for_document(document_id)
 
+    def get_entities_detailed_for_document(self, document_id: str) -> list[dict]:
+        return self._entity.get_entities_detailed_for_document(document_id)
+
     def upsert_document(self, doc_id: str, title: str, content_type: str) -> None:
         return self._entity.upsert_document(doc_id, title, content_type)
 

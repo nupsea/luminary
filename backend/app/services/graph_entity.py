@@ -75,6 +75,26 @@ class KuzuEntityRepo:
                     {"id": entity_id, "name": name, "type": entity_type},
                 )
 
+    def get_entities_detailed_for_document(self, document_id: str) -> list[dict]:
+        """Return [{name, type, frequency}] for a document's entities (concept pipeline)."""
+        try:
+            result = self._conn.execute(
+                "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did})"
+                " RETURN e.name, e.type, e.frequency",
+                {"did": document_id},
+            )
+            out: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                if row[0] and row[1]:
+                    out.append(
+                        {"name": row[0], "type": row[1], "frequency": int(row[2] or 1)}
+                    )
+            return out
+        except Exception:
+            logger.debug("get_entities_detailed_for_document failed", exc_info=True)
+            return []
+
     def get_entities_by_type_for_document(self, document_id: str) -> dict[str, list[str]]:
         """Return existing canonical names grouped by entity type for *document_id*.
 
