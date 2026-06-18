@@ -215,3 +215,35 @@ class ReadingPositionResponse(BaseModel):
     last_section_heading: str | None
     last_pdf_page: int | None
     last_epub_chapter_index: int | None
+
+
+# Doc overview (docs/02-ingest-and-doc-overview.md) -- read aggregation
+
+
+class EvidenceQuote(BaseModel):
+    document_id: str
+    quote: str
+
+
+class OverviewConcept(BaseModel):
+    id: str
+    label: str
+    kind: str
+    status: str
+    mastery: float
+    evidence: list[EvidenceQuote]
+
+
+class DocumentOverviewResponse(BaseModel):
+    id: str
+    title: str
+    format: str
+    content_type: str
+    tags: list[str]
+    reading_progress_pct: float
+    collections: list[CollectionRef]
+    concepts: list[OverviewConcept]
+
+
+class AssignCollectionsRequest(BaseModel):
+    collection_ids: list[str]

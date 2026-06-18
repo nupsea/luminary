@@ -18,6 +18,7 @@ from app.models import (
     ChunkModel,
     CodeSnippetModel,
     CollectionMemberModel,
+    ConceptModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
@@ -32,6 +33,7 @@ from app.models import (
 from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
+    AssignCollectionsRequest,
     BulkDeleteRequest,
     ChapterProgressItem,
     ChunkItem,
@@ -40,6 +42,7 @@ from app.schemas.documents import (
     DocumentDiagnostics,
     DocumentListItem,
     DocumentListResponse,
+    DocumentOverviewResponse,
     DocumentProgressResponse,
     DocumentSectionSearchResult,
     EpubChapterResponse,
@@ -861,6 +864,92 @@ async def get_document(document_id: str):
         channel_name=doc.channel_name,
         youtube_url=doc.youtube_url,
     )
+
+
+@router.get("/{document_id}/overview", response_model=DocumentOverviewResponse)
+async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
+    """Read-aggregation for the Doc overview page (docs/02-ingest-and-doc-overview.md).
+
+    Header + extracted concepts (with evidence receipts, weakest first) + collection
+    memberships + tags. References are a separate frontend call to the references router.
+    """
+    from app.schemas.documents import EvidenceQuote, OverviewConcept  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        repo = DocumentRepo(session)
+        doc = await repo.get_or_404(document_id)
+        sections = list(await repo.sections_for_document(document_id))
+        read_count = await repo.read_section_count(document_id)
+        coll_map = await CollectionRepo(session).refs_for_members(
+            [document_id], member_type="document"
+        )
+
+        try:
+            concept_ids = _graph_module.get_graph_service().get_concept_ids_for_documents(
+                [document_id]
+            )
+        except Exception:
+            logger.warning("overview: concept lookup failed for %s", document_id, exc_info=True)
+            concept_ids = []
+
+        concepts: list[OverviewConcept] = []
+        if concept_ids:
+            rows = (
+                await session.execute(
+                    select(ConceptModel).where(ConceptModel.id.in_(concept_ids))
+                )
+            ).scalars().all()
+            for c in rows:
+                evidence = [
+                    EvidenceQuote(
+                        document_id=str(e.get("document_id", "")), quote=str(e.get("quote", ""))
+                    )
+                    for e in (c.evidence_json or [])
+                    if isinstance(e, dict)
+                ][:3]
+                concepts.append(
+                    OverviewConcept(
+                        id=c.id, label=c.label, kind=c.kind, status=c.status,
+                        mastery=c.mastery, evidence=evidence,
+                    )
+                )
+            concepts.sort(key=lambda x: x.mastery)  # weakest first
+
+    section_count = len(sections)
+    reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
+
+    return DocumentOverviewResponse(
+        id=doc.id,
+        title=doc.title,
+        format=doc.format,
+        content_type=doc.content_type,
+        tags=_safe_tags(doc.tags),
+        reading_progress_pct=reading_progress_pct,
+        collections=[
+            CollectionRef(id=cid, name=name, color=color)
+            for cid, name, color in coll_map.get(document_id, [])
+        ],
+        concepts=concepts,
+    )
+
+
+@router.post("/{document_id}/collections", response_model=list[CollectionRef], status_code=201)
+async def assign_document_collections(
+    document_id: str, req: AssignCollectionsRequest
+) -> list[CollectionRef]:
+    """Add a document to one or more collections (ingest + after) and return the
+    document's resulting collection set. Idempotent (INSERT OR IGNORE; no duplicates)."""
+    async with get_session_factory()() as session:
+        repo = DocumentRepo(session)
+        await repo.get_or_404(document_id)  # 404 if unknown
+        coll_repo = CollectionRepo(session)
+        for cid in dict.fromkeys(req.collection_ids):
+            await coll_repo.add_members(cid, [document_id], member_type="document")
+        refs = await coll_repo.refs_for_members([document_id], member_type="document")
+    return [
+        CollectionRef(id=cid, name=name, color=color)
+        for cid, name, color in refs.get(document_id, [])
+    ]
 
 
 @router.get("/{document_id}/chunks", response_model=list[ChunkItem])
