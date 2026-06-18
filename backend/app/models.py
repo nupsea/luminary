@@ -202,6 +202,26 @@ class ConceptModel(Base):
     )
 
 
+class OverrideModel(Base):
+    """A user correction over Lumen's guesses -- the permanent voice over auto-generation.
+
+    Keyed by STABLE identity (concept slug, edge key) so it survives re-parse: re-parse
+    produces fresh proposals, then apply_overrides re-applies every decision on top (I-22).
+    See docs/concepts.md (corrections) and docs/okf.md (file edits feed this same channel).
+    """
+
+    __tablename__ = "overrides"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # rename | reject_concept | reclassify | merge | confirm_concept
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    target_type: Mapped[str] = mapped_column(String, nullable=False)  # concept | edge | gap
+    # stable identity: concept slug (not id -- ids churn on re-parse), edge "src::tgt", gap label
+    target_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class StudySessionModel(Base):
     __tablename__ = "study_sessions"
 

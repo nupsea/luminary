@@ -29,6 +29,7 @@ from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
 from app.routers.collections import router as collections_router
+from app.routers.concepts import router as concepts_router
 from app.routers.documents import router as documents_router
 from app.routers.engagement import router as engagement_router
 from app.routers.evals import router as evals_router
@@ -306,6 +307,7 @@ ROUTER_REGISTRY = {
     "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,
+    "concepts": concepts_router,
     "chat_meta": chat_meta_router,
     "chat_sessions": chat_sessions_router,
     "documents": documents_router,

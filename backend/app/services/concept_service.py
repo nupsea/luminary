@@ -183,6 +183,164 @@ class ConceptService:
         except Exception:
             logger.debug("delete_concept: vector delete failed for %s", concept_id, exc_info=True)
 
+    # -------------------------------------------------------------------------
+    # Corrections -- the user's permanent voice over Lumen's guesses (docs/concepts.md).
+    # Each mutates the concept AND records an Override keyed by slug so it survives
+    # re-parse via apply_overrides (I-22). Callers commit.
+    # -------------------------------------------------------------------------
+
+    async def _record_override(
+        self,
+        session: AsyncSession,
+        *,
+        kind: str,
+        target_key: str,
+        payload: dict | None = None,
+        target_type: str = "concept",
+    ) -> None:
+        from app.models import OverrideModel  # noqa: PLC0415
+
+        session.add(
+            OverrideModel(
+                id=uuid.uuid4().hex,
+                kind=kind,
+                target_type=target_type,
+                target_key=target_key,
+                payload_json=payload or {},
+            )
+        )
+
+    async def rename_concept(
+        self, session: AsyncSession, concept_id: str, new_label: str
+    ) -> ConceptModel | None:
+        """Rename a concept. Slug (the stable identity) is preserved on purpose."""
+        row = await session.get(ConceptModel, concept_id)
+        if row is None:
+            return None
+        row.label = new_label
+        try:
+            get_graph_service().upsert_concept_node(
+                row.id, row.slug, new_label, row.kind, row.status
+            )
+        except Exception:
+            logger.debug("rename_concept: Kuzu update failed for %s", concept_id, exc_info=True)
+        await self._record_override(
+            session, kind="rename", target_key=row.slug, payload={"label": new_label}
+        )
+        return row
+
+    async def reclassify_concept(
+        self, session: AsyncSession, concept_id: str, kind: str
+    ) -> ConceptModel | None:
+        """Reclassify concept<->keyword."""
+        if kind not in VALID_KINDS:
+            raise ValueError(f"invalid kind: {kind}")
+        row = await session.get(ConceptModel, concept_id)
+        if row is None:
+            return None
+        row.kind = kind
+        try:
+            get_graph_service().upsert_concept_node(
+                row.id, row.slug, row.label, kind, row.status
+            )
+        except Exception:
+            logger.debug("reclassify: Kuzu update failed for %s", concept_id, exc_info=True)
+        await self._record_override(
+            session, kind="reclassify", target_key=row.slug, payload={"kind": kind}
+        )
+        return row
+
+    async def confirm_concept(self, session: AsyncSession, concept_id: str) -> None:
+        """Confirm a proposed/candidate concept (trust accrues)."""
+        row = await session.get(ConceptModel, concept_id)
+        if row is None:
+            return
+        await self.promote_status(session, concept_id)
+        await self._record_override(session, kind="confirm_concept", target_key=row.slug)
+
+    async def reject_concept(self, session: AsyncSession, concept_id: str) -> None:
+        """Reject 'not a concept'. Records the override BEFORE deleting (slug needed)."""
+        row = await session.get(ConceptModel, concept_id)
+        if row is None:
+            return
+        await self._record_override(session, kind="reject_concept", target_key=row.slug)
+        await self.delete_concept(session, concept_id)
+
+    async def merge_concepts(
+        self, session: AsyncSession, source_id: str, target_id: str
+    ) -> ConceptModel | None:
+        """Merge source into target: move cards + union evidence, delete source."""
+        from app.models import FlashcardModel  # noqa: PLC0415
+
+        if source_id == target_id:
+            return await session.get(ConceptModel, target_id)
+        source = await session.get(ConceptModel, source_id)
+        target = await session.get(ConceptModel, target_id)
+        if source is None or target is None:
+            return None
+        # reassign the source's mapped cards to the target
+        cards = (
+            await session.execute(
+                select(FlashcardModel).where(FlashcardModel.concept_id == source_id)
+            )
+        ).scalars().all()
+        for c in cards:
+            c.concept_id = target_id
+        # union evidence and refresh the target's centroid vector
+        merged_evidence = list(target.evidence_json or []) + list(source.evidence_json or [])
+        target.evidence_json = merged_evidence
+        await self._record_override(
+            session, kind="merge", target_key=source.slug, payload={"into": target.slug}
+        )
+        await self.delete_concept(session, source_id)
+        await self.refresh_vector(target_id, merged_evidence)
+        return target
+
+    async def apply_overrides(self, session: AsyncSession) -> int:
+        """Re-apply every stored override on top of the current concepts (I-22).
+
+        Idempotent: matches concepts by stable slug. Called after a re-parse produces
+        fresh proposals. Returns the number of overrides applied.
+        """
+        from app.models import OverrideModel  # noqa: PLC0415
+
+        overrides = (
+            await session.execute(select(OverrideModel).order_by(OverrideModel.created_at.asc()))
+        ).scalars().all()
+        applied = 0
+        for ov in overrides:
+            row = (
+                await session.execute(
+                    select(ConceptModel).where(ConceptModel.slug == ov.target_key)
+                )
+            ).scalars().first()
+            payload = ov.payload_json or {}
+            if ov.kind == "reject_concept":
+                if row is not None:
+                    await self.delete_concept(session, row.id)
+                    applied += 1
+            elif row is None:
+                continue
+            elif ov.kind == "rename":
+                row.label = payload.get("label", row.label)
+                applied += 1
+            elif ov.kind == "reclassify":
+                row.kind = payload.get("kind", row.kind)
+                applied += 1
+            elif ov.kind == "confirm_concept":
+                row.status = "confirmed"
+                applied += 1
+            elif ov.kind == "merge":
+                target = (
+                    await session.execute(
+                        select(ConceptModel).where(ConceptModel.slug == payload.get("into"))
+                    )
+                ).scalars().first()
+                if target is not None:
+                    await self.merge_concepts(session, row.id, target.id)
+                    applied += 1
+        return applied
+
 
 _concept_service: ConceptService | None = None
 

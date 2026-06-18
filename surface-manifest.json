@@ -14,7 +14,7 @@
       "tier": "public",
       "kind": "nav_tab",
       "frontend": { "route": "/library", "component": "pages/Learning" },
-      "backend": { "routers": ["documents", "sections", "reading"] },
+      "backend": { "routers": ["documents", "sections", "reading", "concepts"] },
       "labels": { "en": "Library" }
     },
     {
