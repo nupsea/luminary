@@ -36,12 +36,16 @@ from app.models import (
     NoteTagIndexModel,
     ReviewEventModel,
     SectionModel,
+    StudyEventModel,
     StudySessionModel,
     TeachbackResultModel,
 )
 from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.schemas.study import (
+    AssemblePreview,
+    AssembleRequest,
+    AssembleResponse,
     CalibrationStatsResponse,
     CalibrationWeekItem,
     CardStabilityItem,
@@ -85,8 +89,10 @@ from app.schemas.study import (
     TeachbackRubricResponse,
     TeachbackSubmitResponse,
 )
+from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -366,6 +372,64 @@ async def get_due_cards(
     )
 
     return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
+
+
+@router.post("/assemble", response_model=AssembleResponse, status_code=201)
+async def assemble_study(
+    req: AssembleRequest,
+    session: AsyncSession = Depends(get_db),
+) -> AssembleResponse:
+    """Study Launcher backend: resolve a scope -> a valid Study Event (docs/study-launcher.md).
+
+    Returns the assembled due-card set + an honest preview, and records a StudyEvent row.
+    Tier-aware: teachback_available reflects the feynman labs surface. Model-down still
+    yields due cards (generation is a separate seam).
+    """
+    result = await study_assembler.assemble(
+        session,
+        req.scope_type,
+        req.scope_ref,
+        length_min=req.length_min,
+        want_generated=req.want_generated,
+    )
+
+    event_id = uuid.uuid4().hex
+    session.add(
+        StudyEventModel(
+            id=event_id,
+            kind=req.mode,
+            scope_type=req.scope_type,
+            scope_ref=req.scope_ref,
+        )
+    )
+    await session.commit()
+
+    repo = StudyRepo(session)
+    chunk_to_section = await repo.chunk_section_id_map(
+        [c.chunk_id for c in result.cards if c.chunk_id]
+    )
+    cards = [
+        _to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in result.cards
+    ]
+    teachback_available = "feynman" in await get_labs_enabled(session)
+
+    return AssembleResponse(
+        event_id=event_id,
+        scope_type=req.scope_type,
+        scope_ref=req.scope_ref,
+        mode=req.mode,
+        concept_ids=result.concept_ids,
+        cards=cards,
+        preview=AssemblePreview(
+            due_count=result.preview.due_count,
+            generated_count=result.preview.generated_count,
+            mapped_count=result.preview.mapped_count,
+            unmapped_count=result.preview.unmapped_count,
+            topic_mix=result.preview.topic_mix,
+            thin_scope_warning=result.preview.thin_scope_warning,
+        ),
+        teachback_available=teachback_available,
+    )
 
 
 @router.get("/session-plan", response_model=SessionPlanResponse)
