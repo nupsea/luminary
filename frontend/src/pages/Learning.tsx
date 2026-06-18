@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams, useLocation } from "react-router-dom"
+import { useSearchParams, useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -84,6 +84,7 @@ export default function Learning() {
   const clearActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const queryClient = useQueryClient()
 
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const routeLocation = useLocation()
   const tagFilter = searchParams.get("tag")
@@ -180,7 +181,13 @@ export default function Learning() {
     onError: () => toast.error("Failed to delete document. Please try again."),
   })
 
+  // Card click now routes to the Doc overview (no surprise-session;
+  // docs/02-ingest-and-doc-overview.md). "Read" opens the reader via openReader.
   function handleDocumentClick(id: string) {
+    navigate(`/library/doc/${id}`, { state: { from: window.location.pathname } })
+  }
+
+  function openReader(id: string) {
     // Use the readiness-aware selector so lastReadyDocumentId stays in sync,
     // giving Study/Viz/Chat a sane fallback when active points at an
     // in-progress doc.
@@ -199,7 +206,7 @@ export default function Learning() {
   // Document action menu handler
   function handleDocAction(docId: string, action: DocAction) {
     if (action === "read") {
-      handleDocumentClick(docId)
+      openReader(docId)
       return
     }
     if (action === "chat") {
@@ -529,7 +536,7 @@ export default function Learning() {
               {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
                 <TodayHero
                   recentItem={recentItems?.[0]}
-                  onContinue={handleDocumentClick}
+                  onContinue={openReader}
                 />
               )}
 

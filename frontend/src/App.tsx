@@ -42,6 +42,7 @@ const Progress = lazy(() => import("@/pages/Progress"))
 const Admin = lazy(() => import("@/pages/Admin"))
 const Monitoring = lazy(() => import("@/pages/Monitoring"))
 const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
+const DocumentOverview = lazy(() => import("@/pages/DocumentOverview"))
 const Hub = lazy(() => import("@/pages/Hub"))
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
@@ -602,6 +603,10 @@ function AppShell() {
             )
           })}
           {SURFACE_TIER === "dev" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
+          <Route
+            path="/library/doc/:id"
+            element={<Suspense fallback={<PageSkeleton />}><DocumentOverview /></Suspense>}
+          />
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </main>
