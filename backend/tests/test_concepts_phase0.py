@@ -124,6 +124,31 @@ async def test_backfill_creates_concepts_maps_cards_and_preserves_mastery(test_d
     assert abs(c.mastery - 100.0) < 1e-6
 
 
+async def test_recompute_for_concepts_writes_grounded_mastery(test_db):
+    """The assessment pipeline writes by-concept_id mastery to the row (I-19)."""
+    from app.services.mastery_service import get_mastery_service
+
+    _engine, factory = test_db
+    async with factory() as s:
+        s.add(ConceptModel(id="c9", slug="caching", label="Caching", kind="concept",
+                           origin="document", status="confirmed", mastery=0.0))
+        for i in range(2):
+            s.add(FlashcardModel(id=f"fc{i}", document_id="d1", chunk_id=None, concept_id="c9",
+                                 mapping_status="mapped", source="document", question="Q",
+                                 answer="A", source_excerpt="e", fsrs_stability=21.0))
+        await s.commit()
+
+    async with factory() as s:
+        await get_mastery_service().recompute_for_concepts(s, ["c9"])
+        await s.commit()
+
+    async with factory() as s:
+        row = await s.get(ConceptModel, "c9")
+    # stability 21 -> capped weighted 1.0 -> 100.0; mean stability 21
+    assert abs(row.mastery - 100.0) < 1e-6
+    assert abs(row.stability - 21.0) < 1e-6
+
+
 async def test_backfill_is_idempotent(test_db):
     _engine, factory = test_db
     await _seed_doc_entity_chunk(factory)

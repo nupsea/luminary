@@ -92,6 +92,7 @@ from app.schemas.study import (
 from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.mastery_service import get_mastery_service
 from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
@@ -552,6 +553,27 @@ async def start_session(
     return SessionResponse.model_validate(sess)
 
 
+async def _write_back_concept_mastery(
+    session: AsyncSession, events: list[ReviewEventModel]
+) -> None:
+    """Recompute + store mastery for the concepts whose cards were reviewed this session."""
+    card_ids = list({e.flashcard_id for e in events})
+    if not card_ids:
+        return
+    rows = (
+        await session.execute(
+            select(FlashcardModel.concept_id).where(
+                FlashcardModel.id.in_(card_ids), FlashcardModel.concept_id.is_not(None)
+            )
+        )
+    ).scalars().all()
+    concept_ids = [c for c in rows if c]
+    if not concept_ids:
+        return
+    await get_mastery_service().recompute_for_concepts(session, concept_ids)
+    await session.commit()
+
+
 @router.post("/sessions/{session_id}/end", response_model=SessionSummary)
 async def end_session(
     session_id: str,
@@ -590,6 +612,13 @@ async def end_session(
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
     await repo.commit_session(sess)
+
+    # Write-back: the assessment pipeline writes the grounded mastery to the concepts
+    # touched this session (I-19). Best-effort -- a concepts hiccup never fails the end.
+    try:
+        await _write_back_concept_mastery(repo.session, events)
+    except Exception:
+        logger.warning("end_session: concept mastery write-back failed", exc_info=True)
 
     logger.info(
         "Study session ended",

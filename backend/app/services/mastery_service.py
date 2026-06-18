@@ -135,6 +135,41 @@ class MasteryService:
         )
         return result.scalar_one() or 0
 
+    async def recompute_for_concepts(
+        self, session: AsyncSession, concept_ids: list[str]
+    ) -> None:
+        """Write the grounded, by-concept_id mastery to concepts.mastery (I-19).
+
+        This is the assessment-pipeline writer: it reads a concept's MAPPED cards
+        (FlashcardModel.concept_id == cid) -- not a text match -- and stores the
+        weighted FSRS mastery, mean stability, and last review on the Concept row.
+        Mirrors the backfill formula so stored values stay consistent. Does not commit.
+        """
+        from app.models import ConceptModel  # noqa: PLC0415 -- avoid import cycle at load
+
+        for cid in dict.fromkeys(concept_ids):
+            row = await session.get(ConceptModel, cid)
+            if row is None:
+                continue
+            cards = list(
+                (
+                    await session.execute(
+                        select(FlashcardModel).where(FlashcardModel.concept_id == cid)
+                    )
+                ).scalars().all()
+            )
+            if not cards:
+                continue
+            weighted = self._compute_weighted_mastery(cards)
+            chunk_ids = [c.chunk_id for c in cards if c.chunk_id]
+            error_count = await self._get_prediction_error_count(chunk_ids, session)
+            penalty = min(error_count * _PREDICTION_PENALTY, _MAX_PENALTY)
+            row.mastery = max(0.0, weighted - penalty) * 100.0
+            row.stability = sum(c.fsrs_stability for c in cards) / len(cards)
+            last = [c.last_review for c in cards if c.last_review]
+            if last:
+                row.last_reviewed = max(last)
+
     async def compute_mastery(
         self,
         concept_name: str,
