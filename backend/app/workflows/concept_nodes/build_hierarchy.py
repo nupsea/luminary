@@ -2,10 +2,12 @@
 
 One hierarchical-clustering dendrogram over the concept seeds, cut at three heights:
     galaxy (domain)  >  constellation (theme)  >  concept (solar system)
-Because all three cuts come from the same tree, the levels nest consistently. Each
-concept has a "sun" (its highest-salience member entity); lateral links are drawn only
-between concepts in the same constellation (weight = cosine similarity), so unrelated
-galaxies are never connected.
+Galaxy/constellation cuts use the largest natural merge-height GAP within a bounded
+cluster-count range (emergent few, not the 89-galaxy fragmentation a percentile gives);
+concept uses a fine percentile cut. Same tree -> levels nest consistently. Each concept
+has a "sun" (medoid). Edges follow semantic distance with a cutoff (no categorical walls):
+concept<->concept across the graph + thin galaxy<->galaxy links between RELATED domains;
+unrelated domains simply fall below the cutoff.
 
 Replaces the flat cluster_subconcepts + rollup_themes path. Heavy compute (linkage) runs
 in a thread; everything is logged so the structure is judged on real data via --dry-run.
@@ -26,13 +28,33 @@ from app.workflows.concept_nodes._shared import (
 )
 
 
-def _cut_dendrogram(
-    vectors: list[list[float]], galaxy_pct: float, con_pct: float, concept_pct: float
-) -> tuple[list[int], list[int], list[int]]:
-    """Single average-linkage cosine tree, cut at PERCENTILES of its own merge-heights.
+def _gap_cut_height(z, lo_k: int, hi_k: int) -> float:
+    """Cut height for an EMERGENT cluster count: the largest merge-height gap whose cut
+    yields between lo_k and hi_k clusters. Finds where domains genuinely separate."""
 
-    Percentile cuts adapt to the embedding's distance scale (absolute thresholds collapse
-    to one cluster on bge-small's compressed cosine range). Galaxy = high percentile.
+    h = z[:, 2]
+    n = len(z) + 1  # leaves
+    lo_k = max(2, lo_k)
+    hi_k = min(hi_k, n - 1)
+    best_gap, best_height = -1.0, float(h[-1])
+    for k in range(lo_k, hi_k + 1):
+        j = n - 1 - k  # cut just above merge j -> k clusters
+        if j < 0 or j + 1 >= len(h):
+            continue
+        gap = float(h[j + 1] - h[j])
+        if gap > best_gap:
+            best_gap, best_height = gap, float((h[j] + h[j + 1]) / 2.0)
+    return best_height
+
+
+def _cut_dendrogram(
+    vectors: list[list[float]], galaxy_k: list[int], con_k: list[int], concept_pct: float
+) -> tuple[list[int], list[int], list[int]]:
+    """Single average-linkage cosine tree, cut at 3 heights -> nested labels per leaf.
+
+    Galaxy/constellation use gap cuts (emergent count in a bounded range, where domains
+    separate); concept uses a low percentile (fine splits). Heights are clamped to stay
+    ordered (galaxy >= constellation >= concept) so the levels nest.
     """
     import numpy as np  # noqa: PLC0415
     from scipy.cluster.hierarchy import fcluster, linkage  # noqa: PLC0415
@@ -40,13 +62,15 @@ def _cut_dendrogram(
 
     arr = np.array(vectors, dtype="float32")
     z = linkage(pdist(arr, metric="cosine"), method="average")
-    heights = z[:, 2]
 
-    def _cut(pct: float) -> list[int]:
-        h = float(np.percentile(heights, pct))
-        return [int(x) for x in fcluster(z, t=h, criterion="distance")]
+    h_gal = _gap_cut_height(z, galaxy_k[0], galaxy_k[1])
+    h_con = min(_gap_cut_height(z, con_k[0], con_k[1]), h_gal)
+    h_cpt = min(float(np.percentile(z[:, 2], concept_pct)), h_con)
 
-    return _cut(galaxy_pct), _cut(con_pct), _cut(concept_pct)
+    def _cut(height: float) -> list[int]:
+        return [int(x) for x in fcluster(z, t=height, criterion="distance")]
+
+    return _cut(h_gal), _cut(h_con), _cut(h_cpt)
 
 
 def _centroid(vectors: list[list[float]]) -> list[float]:
@@ -78,8 +102,8 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     cfg = PIPELINE_CONFIG
     vectors = [vec_of[n] for n in names]
     gal_l, con_l, cpt_l = await asyncio.to_thread(
-        _cut_dendrogram, vectors, cfg["galaxy_height_pct"],
-        cfg["constellation_height_pct"], cfg["concept_height_pct"],
+        _cut_dendrogram, vectors, cfg["galaxy_k_range"],
+        cfg["constellation_k_range"], cfg["concept_height_pct"],
     )
 
     # group entity indices by the finest (concept) label; roll up to con/gal (nested)

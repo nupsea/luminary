@@ -72,12 +72,19 @@ def test_nested_universe_with_no_cross_galaxy_edges(monkeypatch):
         assert h["concepts"][ci]["parent_idx"] is not None
         assert 0 <= galaxy_of_concept(ci) < len(h["galaxies"])
 
-    # the distance rule: no lateral edge crosses a galaxy boundary
-    cross = [
+    # edges follow SEMANTIC DISTANCE, not a categorical wall: related concepts may link
+    # even across galaxies (thin), but UNRELATED domains (data-eng vs philosophy) must not.
+    def domain_of(ci):
+        ents = set(h["concepts"][ci]["entities"])
+        if ents & set(_DOMAIN) and any(_DOMAIN[e][0] == "data" for e in ents if e in _DOMAIN):
+            return "data"
+        return "phil"
+
+    bad = [
         (a, b) for a, b, _w in state["lateral_edges"]
-        if galaxy_of_concept(a) != galaxy_of_concept(b)
+        if domain_of(a) != domain_of(b)
     ]
-    assert not cross, f"cross-galaxy lateral edges leaked: {cross}"
+    assert not bad, f"unrelated-domain edges leaked (data<->philosophy): {bad}"
 
     # distinct domains land in distinct galaxies
     def galaxy_of_entity(name):
