@@ -7,6 +7,7 @@ import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
 import { apiGet } from "@/lib/apiClient"
+import { launchStudy } from "@/lib/studyLauncher"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 import { relativeDate } from "@/components/library/utils"
@@ -91,7 +92,8 @@ export default function CollectionWorkspace() {
 
   function handleStartStudy() {
     setActiveCollectionId(collectionId)
-    navigate("/study", { state: { from: window.location.pathname } })
+    // route through the Study Launcher with collection scope (docs/study-launcher.md)
+    launchStudy({ type: "collection", ref: collectionId, label: meta?.name ?? "this collection" })
   }
 
   const accentColor = meta?.color
