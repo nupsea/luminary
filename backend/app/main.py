@@ -133,35 +133,11 @@ async def lifespan(app: FastAPI):
     # Initial DB setup
     engine = get_engine()
     await create_all_tables(engine)
-
-    # One-time concept backfill: promote the existing entity graph into Concept rows so
-    # the two-lane model (Universe, launcher, rollups) has something to route on. Runs as
-    # a BACKGROUND task -- it must never block startup/readiness (the full-table scans can
-    # take a while on a large library). Guarded (skips once populated) + best-effort. Uses
-    # its own session (I-1) and the process's own Kuzu (no lock contention).
-    async def _run_startup_backfill() -> None:
-        try:
-            from sqlalchemy import func, select  # noqa: PLC0415
-
-            from app.models import ConceptModel  # noqa: PLC0415
-            from app.scripts.backfill_concepts import (  # noqa: PLC0415
-                backfill as _backfill_concepts,
-            )
-
-            async with get_session_factory()() as _bf_session:
-                _have = await _bf_session.scalar(
-                    select(func.count()).select_from(ConceptModel)
-                )
-                if _have:
-                    return
-                logger.info("No concepts yet -- running one-time concept backfill (background)...")
-                _stats = await _backfill_concepts(_bf_session)
-                logger.info("Concept backfill complete: %s", _stats)
-        except Exception:
-            logger.warning("Background concept backfill failed (non-fatal)", exc_info=True)
-
-    _bf_task = asyncio.create_task(_run_startup_backfill())
-    app.state.concept_backfill_task = _bf_task  # keep a strong ref so it isn't GC'd
+    # NOTE: the one-time concept backfill is a manual offline step (with the server
+    # stopped so it can hold the Kuzu lock and not starve the event loop):
+    #   make backfill-concepts
+    # Running it inside the live server blocks the loop (sync Kuzu scans), so it is NOT
+    # auto-run here. See docs/concepts.md.
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:

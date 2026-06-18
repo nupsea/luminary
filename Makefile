@@ -109,6 +109,12 @@ eval:
 luminary:
 	bash scripts/luminary.sh
 
+# One-time: promote the existing entity graph into Concept rows (Universe/launcher/
+# rollups). Run with the server STOPPED (it needs the Kuzu lock). Idempotent.
+# DATA_DIR matches scripts/luminary.sh so it hits the real repo-root DB.
+backfill-concepts:
+	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.backfill_concepts
+
 logs:
 	bash scripts/dev-logs.sh
 
