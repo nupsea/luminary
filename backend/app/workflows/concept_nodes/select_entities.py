@@ -21,6 +21,7 @@ from app.workflows.concept_nodes._shared import (
     MIN_FREQUENCY,
     ConceptPipelineState,
     EntityRec,
+    clean_name,
     record,
 )
 
@@ -32,9 +33,11 @@ def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
     raw_per_doc: dict[str, list[dict]] = {}
     for doc_id in graph.get_all_document_ids():
         recs = graph.get_entities_detailed_for_document(doc_id)
+        for r in recs:
+            r["name"] = clean_name(r.get("name", ""))
         raw_per_doc[doc_id] = recs
         for r in recs:
-            name = (r.get("name") or "").strip()
+            name = r["name"]
             if not name:
                 continue
             rec = by_name.get(name)

@@ -17,6 +17,9 @@ import logging
 from langgraph.graph import END, START, StateGraph
 
 from app.workflows.concept_nodes._shared import ConceptPipelineState, new_state
+from app.workflows.concept_nodes.cluster_subconcepts import cluster_subconcepts
+from app.workflows.concept_nodes.embed_entities import embed_entities
+from app.workflows.concept_nodes.rollup_themes import rollup_themes
 from app.workflows.concept_nodes.select_entities import select_entities
 
 logger = logging.getLogger("concepts.pipeline")
@@ -25,9 +28,9 @@ logger = logging.getLogger("concepts.pipeline")
 # runs every node except persist.
 _NODES = [
     ("select_entities", select_entities),
-    # ("embed_entities", embed_entities),
-    # ("cluster_subconcepts", cluster_subconcepts),
-    # ("rollup_themes", rollup_themes),
+    ("embed_entities", embed_entities),
+    ("cluster_subconcepts", cluster_subconcepts),
+    ("rollup_themes", rollup_themes),
     # ("label", label_themes),
     # ("verify", verify_themes),
     # ("build_lineage", build_lineage),

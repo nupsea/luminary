@@ -9,9 +9,20 @@ be evaluated, replaced, or A/B'd in isolation -- the point is to explore Lumen's
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, TypedDict
 
 logger = logging.getLogger("concepts.pipeline")
+
+# zero-width + control chars that pollute GLiNER surface forms (e.g. ZWSP + "\nredis").
+# Escaped (not literal) so the source stays clean: ZWSP/ZWNJ/ZWJ/BOM + C0 controls.
+_ZERO_WIDTH = "".join(chr(c) for c in (0x200B, 0x200C, 0x200D, 0xFEFF))
+_JUNK_CHARS = re.compile(f"[{_ZERO_WIDTH}\x00-\x1f]+")
+
+
+def clean_name(raw: str) -> str:
+    """Normalize an entity surface form: strip zero-width/control chars, collapse space."""
+    return re.sub(r"\s+", " ", _JUNK_CHARS.sub(" ", raw or "")).strip()
 
 # --- entity-type policy (relevance lever 1; docs/concept-model-design.md §2) ---
 # Concept-bearing types we keep as concept seeds.
@@ -32,6 +43,7 @@ NOISE_TYPES: frozenset[str] = frozenset({"PERSON", "ORGANIZATION", "PLACE", "DAT
 
 MIN_FREQUENCY = 2          # drop hapax entities
 MIN_ENTITY_LEN = 3
+MIN_DOC_ENTITIES = 3       # below this a doc's entities form a single sub-concept
 
 
 PIPELINE_CONFIG = {
