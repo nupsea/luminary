@@ -17,20 +17,21 @@ import logging
 from app.workflows.concept_nodes._shared import ConceptPipelineState, new_state
 from app.workflows.concept_nodes.build_hierarchy import build_hierarchy
 from app.workflows.concept_nodes.embed_entities import embed_entities
+from app.workflows.concept_nodes.label_levels import label_levels
+from app.workflows.concept_nodes.persist import persist_concepts
 from app.workflows.concept_nodes.select_entities import select_entities
 
 logger = logging.getLogger("concepts.pipeline")
 
-# The ordered, swappable node sequence. Append nodes here as they land; the dry-run
-# runs every node except persist. build_hierarchy supersedes the flat
-# cluster_subconcepts + rollup_themes (docs/concept-model-design.md §0).
+# The ordered, swappable node sequence. persist_concepts no-ops on a dry run, so the
+# dry-run report shows everything up to (not including) the DB write
+# (docs/concept-model-design.md §11).
 _NODES = [
     ("select_entities", select_entities),
     ("embed_entities", embed_entities),
     ("build_hierarchy", build_hierarchy),
-    # ("label", label_levels),       # name concept -> constellation -> galaxy (model-routed)
-    # ("verify", verify_hierarchy),
-    # ("build_lineage", build_lineage),
+    ("label_levels", label_levels),
+    ("persist_concepts", persist_concepts),
 ]
 
 

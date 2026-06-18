@@ -50,12 +50,20 @@ class _FakeGraph:
         ]
 
 
+class _FakeLLM:
+    async def complete(self, messages, temperature=0.0):
+        return "Topic"
+
+
 async def _run(monkeypatch):
+    import app.workflows.concept_nodes.label_levels as lab
+
     monkeypatch.setattr(sel, "get_graph_service", lambda: _FakeGraph())
     monkeypatch.setattr(
         emb, "get_embedding_service",
         lambda: type("E", (), {"encode": staticmethod(_encode)})(),
     )
+    monkeypatch.setattr(lab, "get_llm_service", lambda: _FakeLLM())
     return await run_pipeline(dry_run=True)
 
 

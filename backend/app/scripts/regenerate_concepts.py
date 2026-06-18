@@ -23,9 +23,8 @@ import sys
 from pathlib import Path
 
 from app.config import get_settings
-from app.database import get_engine, get_session_factory
+from app.database import get_engine
 from app.db_init import create_all_tables
-from app.services.concept_extraction_service import regenerate
 
 logger = logging.getLogger(__name__)
 
@@ -47,18 +46,13 @@ async def _run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO)
     await create_all_tables(get_engine())
 
-    if args.dry_run:
-        # Run the node pipeline up to (not including) persist; dump what it found so the
-        # relevance can be judged on real data before anything touches the DB.
-        from app.workflows.concept_pipeline import run_pipeline  # noqa: PLC0415
+    # The node pipeline (select -> embed -> build_hierarchy -> label -> persist) is the
+    # one path. dry_run runs every node except persist and dumps the report; a real run
+    # persists the named galaxy/constellation/concept hierarchy.
+    from app.workflows.concept_pipeline import run_pipeline  # noqa: PLC0415
 
-        state = await run_pipeline(dry_run=True, target_themes=args.themes)
-        _dump_diagnostics(state.get("diagnostics", {}))
-        return 0
-
-    async with get_session_factory()() as session:
-        stats = await regenerate(session, target_themes=args.themes)
-    print(stats)
+    state = await run_pipeline(dry_run=args.dry_run)
+    _dump_diagnostics(state.get("diagnostics", {}))
     return 0
 
 
