@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -160,7 +161,11 @@ class FlashcardModel(Base):
     # mapping_status: mapped | unmapped | proposed. See docs/two-lane-model.md.
     concept_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     source_scope: Mapped[str | None] = mapped_column(String, nullable=True)
-    mapping_status: Mapped[str] = mapped_column(String, nullable=False, default="mapped")
+    # server_default so Base.metadata.create_all emits a SQL DEFAULT -- keeps raw-SQL
+    # inserts that omit this column valid (matches the db_init ALTER's DEFAULT 'mapped').
+    mapping_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="mapped", server_default=text("'mapped'")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
