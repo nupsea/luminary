@@ -50,6 +50,14 @@
       "labels": { "en": "Map" }
     },
     {
+      "id": "universe",
+      "tier": "public",
+      "kind": "nav_tab",
+      "frontend": { "route": "/universe", "component": "pages/Universe" },
+      "backend": { "routers": ["concepts"] },
+      "labels": { "en": "Universe" }
+    },
+    {
       "id": "progress",
       "tier": "public",
       "kind": "nav_tab",

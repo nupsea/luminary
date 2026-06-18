@@ -8,6 +8,7 @@ ConceptService.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import ConceptModel, FlashcardModel, NoteModel
 from app.services.concept_service import get_concept_service
+from app.services.graph import get_graph_service
 
 _LEXICAL_SCAN_CAP = 500
+_WARMTH_DECAY_DAYS = 18.0  # warmth 1 (fresh) -> 0 (cold) over this window
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,68 @@ def _out(row: ConceptModel) -> ConceptOut:
         id=row.id, slug=row.slug, label=row.label, kind=row.kind,
         status=row.status, mastery=row.mastery,
     )
+
+
+class UniverseStar(BaseModel):
+    id: str
+    label: str
+    kind: str
+    status: str
+    mastery: float
+    warmth: float  # 0 cold .. 1 fresh (mastery x recency drives the glow)
+
+
+class UniverseEdge(BaseModel):
+    source: str
+    target: str
+
+
+class UniverseResponse(BaseModel):
+    stars: list[UniverseStar]
+    edges: list[UniverseEdge]
+
+
+def _warmth(last_reviewed: datetime | None, now: datetime) -> float:
+    if last_reviewed is None:
+        return 0.0
+    if last_reviewed.tzinfo is None:
+        last_reviewed = last_reviewed.replace(tzinfo=UTC)
+    days = (now - last_reviewed).total_seconds() / 86400.0
+    return max(0.0, min(1.0, 1.0 - days / _WARMTH_DECAY_DAYS))
+
+
+@router.get("/universe", response_model=UniverseResponse)
+async def get_universe(session: AsyncSession = Depends(get_db)) -> UniverseResponse:
+    """The Knowledge Universe: concept stars (warmth = mastery x recency) + edges.
+
+    Baseline sky is always meaningful; edges appear only when the concept linker has
+    produced CONCEPT_RELATED_TO relations (degrades gracefully -- docs/universe.md).
+    """
+    now = datetime.now(UTC)
+    rows = (
+        await session.execute(
+            select(ConceptModel).where(ConceptModel.status != "candidate")
+        )
+    ).scalars().all()
+    stars = [
+        UniverseStar(
+            id=c.id, label=c.label, kind=c.kind, status=c.status,
+            mastery=c.mastery, warmth=_warmth(c.last_reviewed, now),
+        )
+        for c in rows
+    ]
+    star_ids = {c.id for c in rows}
+    try:
+        relations = get_graph_service().get_concept_relations()
+    except Exception:
+        logger.warning("universe: concept relations lookup failed", exc_info=True)
+        relations = []
+    edges = [
+        UniverseEdge(source=r["source"], target=r["target"])
+        for r in relations
+        if r["source"] in star_ids and r["target"] in star_ids
+    ]
+    return UniverseResponse(stars=stars, edges=edges)
 
 
 @router.get("/{concept_id}", response_model=ConceptOut)

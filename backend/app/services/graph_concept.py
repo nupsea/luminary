@@ -288,6 +288,21 @@ class KuzuConceptRepo:
         except Exception:
             logger.debug("delete_concept_node failed for %s", concept_id, exc_info=True)
 
+    def get_concept_relations(self) -> list[dict]:
+        """Return all CONCEPT_RELATED_TO edges as {source, target} (for the Universe lens)."""
+        try:
+            result = self._conn.execute(
+                "MATCH (a:Concept)-[:CONCEPT_RELATED_TO]->(b:Concept) RETURN a.id, b.id"
+            )
+            out: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                out.append({"source": row[0], "target": row[1]})
+            return out
+        except Exception:
+            logger.debug("get_concept_relations failed", exc_info=True)
+            return []
+
     def get_concept_ids_for_documents(self, document_ids: list[str]) -> list[str]:
         """Return ids of concepts EXTRACTED_FROM any of the given documents."""
         if not document_ids:
