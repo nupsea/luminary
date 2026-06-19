@@ -50,8 +50,8 @@ def _cut_dendrogram(
     def _clamp(v: float, lo: int, hi: int) -> int:
         return int(max(lo, min(hi, round(v))))
 
-    # ~1 galaxy / 200 entities, ~1 constellation / 45, ~1 concept / 4 -- clamped.
-    tg = _clamp(n / 200, galaxy_k[0], galaxy_k[1])
+    # ~1 galaxy / 150 entities, ~1 constellation / 45, ~1 concept / 4 -- clamped.
+    tg = _clamp(n / 150, galaxy_k[0], galaxy_k[1])
     tc = max(_clamp(n / 45, con_k[0], con_k[1]), tg + 1)
     tp = max(_clamp(n / 4, tc + 1, concept_cap), tc + 1)
 
@@ -190,6 +190,7 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     # one medical term -> "Hematology") into their nearest real domain by centroid, so the
     # top level shows actual domains. A galaxy is "real" if it holds >= min_galaxy_concepts.
     min_gc = cfg["min_galaxy_concepts"]
+    min_galaxies = cfg["min_galaxies"]
     gl_concepts: dict[int, int] = defaultdict(int)
     for con in constellations:
         gl_concepts[con["_gal"]] += len(con["concept_idxs"])
@@ -197,7 +198,11 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
         gl: _centroid([c["centroid"] for c in constellations if c["_gal"] == gl])
         for gl in gl_concepts
     }
-    big = [gl for gl, n in gl_concepts.items() if n >= min_gc] or list(gl_concepts)
+    # keep the largest min_galaxies domains no matter what, plus any above the size floor;
+    # only true outliers beyond that get absorbed into their nearest kept domain.
+    ranked = sorted(gl_concepts, key=lambda gl: gl_concepts[gl], reverse=True)
+    keep = set(ranked[:min_galaxies]) | {gl for gl, c in gl_concepts.items() if c >= min_gc}
+    big = [gl for gl in gl_concepts if gl in keep] or list(gl_concepts)
     for con in constellations:
         if con["_gal"] not in big:
             con["_gal"] = max(big, key=lambda b: _cos(gl_centroid[con["_gal"]], gl_centroid[b]))
