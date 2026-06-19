@@ -143,6 +143,30 @@ class ConceptService:
             row.stability = float(stability)
         if last_reviewed is not None:
             row.last_reviewed = last_reviewed
+        await self._rollup_ancestors(session, row.parent_id)
+
+    async def _rollup_ancestors(self, session: AsyncSession, node_id: str | None) -> None:
+        """Bottom-up: a container's mastery = salience-weighted mean of its children,
+        last_reviewed = max(children). Walks up galaxy<-constellation<-concept so studying
+        a leaf warms its parents on the Universe (docs/concept-model-design.md §7)."""
+        while node_id:
+            node = await session.get(ConceptModel, node_id)
+            if node is None:
+                return
+            children = (
+                await session.execute(
+                    select(
+                        ConceptModel.mastery, ConceptModel.salience, ConceptModel.last_reviewed
+                    ).where(ConceptModel.parent_id == node_id)
+                )
+            ).all()
+            if children:
+                wsum = sum((c[1] or 0.0) + 1e-6 for c in children)
+                node.mastery = sum(c[0] * ((c[1] or 0.0) + 1e-6) for c in children) / wsum
+                seen = [c[2] for c in children if c[2] is not None]
+                if seen:
+                    node.last_reviewed = max(seen)
+            node_id = node.parent_id
 
     async def promote_status(self, session: AsyncSession, concept_id: str) -> None:
         """A proposed/candidate concept becomes confirmed once used or confirmed (trust accrues)."""

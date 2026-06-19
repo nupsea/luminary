@@ -85,7 +85,11 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
                 chunk_ids = sorted(
                     {c for e in node.get("entities", []) for c in entity_chunks.get(e, [])}
                 )[:25]
-                evidence = [{"chunk_ids": chunk_ids, "members": node.get("entities", [])[:12]}]
+                evidence = [{
+                    "chunk_ids": chunk_ids,
+                    "document_ids": node.get("document_ids", []),
+                    "members": node.get("entities", [])[:12],
+                }]
             session.add(
                 ConceptModel(
                     id=cid, slug=slug, label=label, kind="concept", origin="document",

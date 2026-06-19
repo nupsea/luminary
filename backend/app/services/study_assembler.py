@@ -129,15 +129,22 @@ async def assemble(
         )
         cards = list((await session.execute(stmt)).scalars().all())
 
-    # Lane B generation. need = the gap to the budget; only doc/note scopes are wired.
+    # Lane B generation. need = the gap to the budget. doc/note generate from their source;
+    # a concept (or container that resolved to concepts) generates from concept evidence and
+    # maps the new cards to the concept, so a freshly-regenerated sky is immediately studyable.
     need = max(0, budget - len(cards)) if want_generated else 0
-    generatable = scope_type in ("doc", "note") and scope_ref is not None
+    gen_from_scope = scope_type in ("doc", "note") and scope_ref is not None
+    gen_from_concept = scope_type == "concept" and bool(concept_ids)
+    generatable = gen_from_scope or gen_from_concept
     generated: list[FlashcardModel] = []
     generated_estimate = min(need, _MAX_GENERATED) if (need and generatable) else 0
     if do_generate and generated_estimate > 0:
-        generated = await _generate_for_scope(
-            session, scope_type, scope_ref, generated_estimate
-        )
+        if gen_from_scope:
+            generated = await _generate_for_scope(
+                session, scope_type, scope_ref, generated_estimate
+            )
+        else:
+            generated = await _generate_for_concepts(session, concept_ids, generated_estimate)
         cards.extend(generated)
 
     mapped = sum(1 for c in cards if c.concept_id)
@@ -189,6 +196,44 @@ async def _generate_for_scope(
             c.mapping_status = "unmapped"
         c.source_scope = f"{scope_type}:{scope_ref}"
     return new
+
+
+async def _generate_for_concepts(
+    session: AsyncSession, concept_ids: list[str], count: int
+) -> list[FlashcardModel]:
+    """Generate cards for concept scope, grounded in each concept's source document and
+    MAPPED to the concept (so the concept builds a card set). Spreads `count` across the
+    weakest concepts; degrades to [] on failure so the event still starts."""
+    from app.services.flashcard import FlashcardService  # noqa: PLC0415
+
+    svc = FlashcardService()
+    out: list[FlashcardModel] = []
+    targets = concept_ids[: max(1, min(len(concept_ids), 3))]
+    per = max(1, count // len(targets))
+    for cid in targets:
+        if len(out) >= count:
+            break
+        concept = await session.get(ConceptModel, cid)
+        if concept is None:
+            continue
+        ev = (concept.evidence_json or [{}])[0]
+        doc_ids = ev.get("document_ids") or []
+        if not doc_ids:
+            continue
+        members = ", ".join(ev.get("members", [])[:8])
+        extra = f" ({members})." if members else "."
+        ctx = f"Focus only on the concept '{concept.label}'" + extra
+        try:
+            new = await svc.generate(doc_ids[0], "full", None, per, session, context=ctx)
+        except Exception:
+            logger.warning("assemble: concept generation failed for %s", cid, exc_info=True)
+            continue
+        for c in new:
+            c.concept_id = cid
+            c.mapping_status = "mapped"
+            c.source_scope = f"concept:{cid}"
+        out.extend(new)
+    return out[:count]
 
 
 async def _topic_mix(session: AsyncSession, concept_ids: list[str], limit: int = 4) -> list[str]:

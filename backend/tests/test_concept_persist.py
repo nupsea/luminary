@@ -101,6 +101,35 @@ async def test_universe_drilldown(test_db):
         assert all(c.level == 2 and c.child_count == 0 for c in inside_con.stars)
 
 
+async def test_container_study_and_mastery_rollup(test_db):
+    from datetime import UTC, datetime
+
+    from app.services.concept_service import get_concept_service
+    from app.services.scope_resolver import resolve_concept
+
+    factory = test_db
+    await persist_concepts(_state())
+    async with factory() as s:
+        rows = (await s.execute(select(ConceptModel))).scalars().all()
+        galaxy = next(r for r in rows if r.level == 0)
+        constellation = next(r for r in rows if r.level == 1)
+        leaves = [r for r in rows if r.level == 2]
+
+        # studying a container resolves to all descendant (leaf) concepts
+        resolved = await resolve_concept(s, galaxy.id)
+        assert set(resolved) == {leaf.id for leaf in leaves}
+
+        # studying one leaf rolls mastery up to its constellation and galaxy
+        await get_concept_service().set_learning_state(
+            s, leaves[0].id, mastery=80.0, last_reviewed=datetime.now(UTC)
+        )
+        await s.commit()
+        con = await s.get(ConceptModel, constellation.id)
+        gal = await s.get(ConceptModel, galaxy.id)
+        assert con.mastery > 0 and gal.mastery > 0
+        assert con.last_reviewed is not None and gal.last_reviewed is not None
+
+
 async def test_persist_dry_run_writes_nothing(test_db):
     factory = test_db
     st = _state()
