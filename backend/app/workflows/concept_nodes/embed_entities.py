@@ -22,22 +22,32 @@ from app.services.embedder import get_embedding_service
 from app.services.vector_store import get_lancedb_service
 from app.workflows.concept_nodes._shared import ConceptPipelineState, record
 
+_MAX_CHUNKS_PER_ENTITY = 60  # cap context chunks per entity (bounds the centroid)
+
 
 def _match_entities_to_chunks(
     entities: list[dict], chunk_rows: list[tuple[str, str, str]]
 ) -> dict[str, list[str]]:
-    """name -> chunk_ids it occurs in (substring match, scoped to its own docs). Pure CPU."""
+    """name -> chunk_ids it occurs in, scoped to its own docs. Pure CPU.
+
+    Matches against each chunk's `entities_text` (the short canonical entity tail), NOT the
+    full chunk text -- 10-50x cheaper, so this never blows up on a large library.
+    """
     by_doc: dict[str, list[tuple[str, str]]] = {}
-    for cid, did, txt in chunk_rows:
-        by_doc.setdefault(did, []).append((cid, txt))
+    for cid, did, etext in chunk_rows:
+        by_doc.setdefault(did, []).append((cid, etext))
     out: dict[str, list[str]] = {}
     for e in entities:
         nl = e["name"].lower()
         hits: list[str] = []
         for did in e.get("document_ids", []):
-            for cid, txt in by_doc.get(did, []):
-                if nl in txt:
+            for cid, etext in by_doc.get(did, []):
+                if nl in etext:
                     hits.append(cid)
+                    if len(hits) >= _MAX_CHUNKS_PER_ENTITY:
+                        break
+            if len(hits) >= _MAX_CHUNKS_PER_ENTITY:
+                break
         if hits:
             out[e["name"]] = list(dict.fromkeys(hits))
     return out
@@ -60,12 +70,14 @@ async def embed_entities(state: ConceptPipelineState) -> ConceptPipelineState:
             async with get_session_factory()() as session:
                 rows = (
                     await session.execute(
-                        select(ChunkModel.id, ChunkModel.document_id, ChunkModel.text).where(
-                            ChunkModel.document_id.in_(doc_ids)
-                        )
+                        select(
+                            ChunkModel.id, ChunkModel.document_id, ChunkModel.entities_text
+                        ).where(ChunkModel.document_id.in_(doc_ids))
                     )
                 ).all()
-            chunk_rows = [(cid, did, (txt or "").lower()) for cid, did, txt in rows]
+            # match against the short canonical entity tail; fall back to text only if a
+            # chunk has no entities_text (older rows).
+            chunk_rows = [(cid, did, (etext or "").lower()) for cid, did, etext in rows]
         except Exception:
             chunk_rows = []
     name_to_chunks = await asyncio.to_thread(_match_entities_to_chunks, entities, chunk_rows)
