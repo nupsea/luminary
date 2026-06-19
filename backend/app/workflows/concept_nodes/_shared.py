@@ -83,6 +83,7 @@ PIPELINE_CONFIG = {
     # ~n/45, concept ~n/4 entities.
     "galaxy_k_range": [4, 14],
     "constellation_k_range": [12, 55],
+    "min_galaxy_concepts": 8,           # smaller galaxies are merged into the nearest domain
     "max_concepts_cap": 400,            # cap on studyable (level-2) concepts
     # edges: each concept links to its top-K nearest neighbours above a cutoff (k-NN graph,
     # not all-pairs -- all-pairs exploded to ~75k edges, a hairball + slow persist).

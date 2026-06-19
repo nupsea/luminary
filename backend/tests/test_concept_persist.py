@@ -79,6 +79,28 @@ async def test_persist_writes_nested_hierarchy(test_db):
     assert {c.label for c in by_level[2]} == {"iceberg", "spark"}
 
 
+async def test_universe_drilldown(test_db):
+    from app.routers.concepts import get_universe
+
+    factory = test_db
+    await persist_concepts(_state())
+    async with factory() as s:
+        sky = await get_universe(parent=None, session=s)
+        assert len(sky.stars) == 1 and sky.parent is None
+        galaxy = sky.stars[0]
+        assert galaxy.level == 0 and galaxy.child_count == 1  # one constellation inside
+
+        inside_galaxy = await get_universe(parent=galaxy.id, session=s)
+        assert inside_galaxy.parent == galaxy.id
+        assert len(inside_galaxy.stars) == 1
+        constellation = inside_galaxy.stars[0]
+        assert constellation.level == 1 and constellation.child_count == 2
+
+        inside_con = await get_universe(parent=constellation.id, session=s)
+        assert len(inside_con.stars) == 2  # the two concepts
+        assert all(c.level == 2 and c.child_count == 0 for c in inside_con.stars)
+
+
 async def test_persist_dry_run_writes_nothing(test_db):
     factory = test_db
     st = _state()

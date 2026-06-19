@@ -1,10 +1,11 @@
-// Universe -- the Knowledge Universe lens (docs/universe.md). Concept stars lit by
-// warmth (mastery x recency); click a star to study it. Baseline sky is always
-// meaningful; edges appear only when the concept linker has produced relations.
+// Universe -- the Knowledge Universe lens (docs/universe.md). A nested sky: galaxies
+// (domains) -> constellations (themes) -> concepts (studyable). Stars are lit by warmth
+// (mastery x recency); click to open a galaxy/constellation or study a concept. Baseline
+// sky is always meaningful; edges appear only when the concept linker produced relations.
 
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Sparkles } from "lucide-react"
+import { ChevronRight, Sparkles } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
@@ -17,6 +18,8 @@ interface Star {
   status: string
   mastery: number
   warmth: number
+  level: number
+  child_count: number
 }
 interface Edge {
   source: string
@@ -25,10 +28,13 @@ interface Edge {
 interface UniverseData {
   stars: Star[]
   edges: Edge[]
+  parent: string | null
+  parent_label: string | null
 }
 
 const VW = 1000
 const VH = 620
+const LEVEL_NOUN = ["galaxies", "constellations", "concepts", "concepts"]
 
 // deterministic position from the concept id -> stable sky
 function starPos(id: string): { x: number; y: number } {
@@ -47,10 +53,15 @@ function starColor(warmth: number): string {
 }
 
 export default function Universe() {
+  // breadcrumb stack; empty = the galaxy sky
+  const [path, setPath] = useState<{ id: string; label: string }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const parent = path.length ? path[path.length - 1].id : null
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["universe"],
-    queryFn: () => apiGet<UniverseData>("/concepts/universe"),
+    queryKey: ["universe", parent],
+    queryFn: () =>
+      apiGet<UniverseData>(`/concepts/universe${parent ? `?parent=${parent}` : ""}`),
   })
 
   const positions = useMemo(() => {
@@ -59,7 +70,6 @@ export default function Universe() {
     return map
   }, [data])
 
-  // attention rail: coldest-but-weakest (lowest warmth, then lowest mastery)
   const attention = useMemo(
     () =>
       [...(data?.stars ?? [])]
@@ -69,6 +79,15 @@ export default function Universe() {
   )
 
   const selected = data?.stars.find((s) => s.id === selectedId) ?? null
+
+  function open(s: { id: string; label: string }) {
+    setPath((p) => [...p, { id: s.id, label: s.label }])
+    setSelectedId(null)
+  }
+  function crumbTo(i: number) {
+    setPath((p) => p.slice(0, i))
+    setSelectedId(null)
+  }
 
   if (isLoading) {
     return (
@@ -84,20 +103,49 @@ export default function Universe() {
     return (
       <div className="flex h-[70vh] flex-col items-center justify-center gap-2 p-6 text-center">
         <Sparkles className="text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Your Universe is empty.</p>
-        <p className="text-xs text-muted-foreground">
-          Add a document so Lumen can extract concepts (or run the concept backfill).
+        <p className="text-sm text-muted-foreground">
+          {path.length ? "Nothing inside this one yet." : "Your Universe is empty."}
         </p>
+        {path.length > 0 ? (
+          <button
+            onClick={() => crumbTo(path.length - 1)}
+            className="text-xs text-amber-500 hover:underline"
+          >
+            ← Back
+          </button>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Add a document so Lumen can extract concepts (or run the concept backfill).
+          </p>
+        )}
       </div>
     )
   }
 
+  const noun = LEVEL_NOUN[data.stars[0]?.level ?? 0] ?? "concepts"
+
   return (
     <div className="relative p-4">
       <div className="mb-2 flex items-baseline justify-between">
-        <h1 className="text-lg font-semibold text-foreground">Knowledge Universe</h1>
+        {/* breadcrumb */}
+        <div className="flex items-center gap-1 text-lg font-semibold text-foreground">
+          <button onClick={() => crumbTo(0)} className="hover:text-amber-500">
+            Knowledge Universe
+          </button>
+          {path.map((c, i) => (
+            <span key={c.id} className="flex items-center gap-1">
+              <ChevronRight size={16} className="text-muted-foreground" />
+              <button
+                onClick={() => crumbTo(i + 1)}
+                className="max-w-[200px] truncate hover:text-amber-500"
+              >
+                {c.label}
+              </button>
+            </span>
+          ))}
+        </div>
         <span className="text-xs text-muted-foreground">
-          {data.stars.length} concepts · warmth = mastery × recency
+          {data.stars.length} {noun} · warmth = mastery × recency
         </span>
       </div>
 
@@ -117,17 +165,29 @@ export default function Universe() {
           })}
           {data.stars.map((s) => {
             const p = positions.get(s.id)!
-            const r = 4 + (s.mastery / 100) * 8
+            const r = 5 + (s.mastery / 100) * 8 + Math.min(s.child_count, 12) * 0.4
             const color = starColor(s.warmth)
             const isSel = s.id === selectedId
+            const container = s.child_count > 0
             return (
-              <g key={s.id} className="cursor-pointer" onClick={() => setSelectedId(s.id)}>
+              <g
+                key={s.id}
+                className="cursor-pointer"
+                onClick={() => setSelectedId(s.id)}
+                onDoubleClick={() => container && open(s)}
+              >
                 <circle cx={p.x} cy={p.y} r={r + 6} fill={color} opacity={0.12} />
                 <circle
                   cx={p.x} cy={p.y} r={r} fill={color}
                   opacity={0.35 + s.warmth * 0.55}
                   stroke={isSel ? "white" : "none"} strokeWidth={isSel ? 2 : 0}
                 />
+                {container && (
+                  <circle
+                    cx={p.x} cy={p.y} r={r + 3} fill="none"
+                    stroke={color} strokeOpacity={0.4} strokeWidth={1}
+                  />
+                )}
               </g>
             )
           })}
@@ -167,11 +227,24 @@ export default function Universe() {
             <div className="mt-2 space-y-1 text-xs text-slate-300">
               <div>Mastery · {Math.round(selected.mastery)}%</div>
               <div>Warmth · {Math.round(selected.warmth * 100)}%</div>
+              {selected.child_count > 0 && (
+                <div>
+                  {selected.child_count} {LEVEL_NOUN[selected.level + 1] ?? "items"} inside
+                </div>
+              )}
               {selected.status !== "confirmed" && <div>Status · {selected.status}</div>}
             </div>
+            {selected.child_count > 0 && (
+              <button
+                onClick={() => open(selected)}
+                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20"
+              >
+                Open <ChevronRight size={14} />
+              </button>
+            )}
             <button
               onClick={() => launchStudy({ type: "concept", ref: selected.id, label: selected.label })}
-              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-amber-400"
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-amber-400"
             >
               <Sparkles size={14} /> Study this
             </button>

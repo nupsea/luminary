@@ -186,6 +186,22 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
         for ci in cidxs:
             concepts[ci]["parent_idx"] = len(constellations) - 1
 
+    # Merge tiny outlier galaxies (a stray entity or two that maxclust split off -- e.g.
+    # one medical term -> "Hematology") into their nearest real domain by centroid, so the
+    # top level shows actual domains. A galaxy is "real" if it holds >= min_galaxy_concepts.
+    min_gc = cfg["min_galaxy_concepts"]
+    gl_concepts: dict[int, int] = defaultdict(int)
+    for con in constellations:
+        gl_concepts[con["_gal"]] += len(con["concept_idxs"])
+    gl_centroid = {
+        gl: _centroid([c["centroid"] for c in constellations if c["_gal"] == gl])
+        for gl in gl_concepts
+    }
+    big = [gl for gl, n in gl_concepts.items() if n >= min_gc] or list(gl_concepts)
+    for con in constellations:
+        if con["_gal"] not in big:
+            con["_gal"] = max(big, key=lambda b: _cos(gl_centroid[con["_gal"]], gl_centroid[b]))
+
     # level 0: galaxies (group constellations by galaxy label)
     gal_groups: dict[int, list[int]] = defaultdict(list)
     for coni, con in enumerate(constellations):

@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -64,6 +64,8 @@ class UniverseStar(BaseModel):
     status: str
     mastery: float
     warmth: float  # 0 cold .. 1 fresh (mastery x recency drives the glow)
+    level: int     # 0 galaxy, 1 constellation, 2 concept
+    child_count: int  # drillable when > 0
 
 
 class UniverseEdge(BaseModel):
@@ -74,6 +76,8 @@ class UniverseEdge(BaseModel):
 class UniverseResponse(BaseModel):
     stars: list[UniverseStar]
     edges: list[UniverseEdge]
+    parent: str | None = None        # the node we drilled into (None at the galaxy sky)
+    parent_label: str | None = None
 
 
 def _warmth(last_reviewed: datetime | None, now: datetime) -> float:
@@ -86,30 +90,49 @@ def _warmth(last_reviewed: datetime | None, now: datetime) -> float:
 
 
 @router.get("/universe", response_model=UniverseResponse)
-async def get_universe(session: AsyncSession = Depends(get_db)) -> UniverseResponse:
+async def get_universe(
+    parent: str | None = None, session: AsyncSession = Depends(get_db)
+) -> UniverseResponse:
     """The Knowledge Universe: concept stars (warmth = mastery x recency) + edges.
 
-    Baseline sky is always meaningful; edges appear only when the concept linker has
+    Drill-down: no `parent` shows the galaxy sky (level 0); `parent=<id>` shows that
+    node's children (its constellations, then concepts). Each star carries `child_count`
+    so the UI knows what can be opened. Edges appear only when the concept linker has
     produced CONCEPT_RELATED_TO relations (degrades gracefully -- docs/universe.md).
     """
     now = datetime.now(UTC)
-    # The sky shows top-level themes (level 0); zoom/expand reveals sub-concepts.
-    rows = (
-        await session.execute(
-            select(ConceptModel).where(
-                ConceptModel.status != "candidate",
-                ConceptModel.level == 0,
+    parent_label: str | None = None
+    if parent:
+        parent_row = await session.get(ConceptModel, parent)
+        if parent_row is None:
+            raise HTTPException(status_code=404, detail="concept not found")
+        parent_label = parent_row.label
+        where = (ConceptModel.status != "candidate", ConceptModel.parent_id == parent)
+    else:
+        where = (ConceptModel.status != "candidate", ConceptModel.level == 0)
+
+    rows = (await session.execute(select(ConceptModel).where(*where))).scalars().all()
+    star_ids = {c.id for c in rows}
+
+    child_counts: dict[str, int] = {}
+    if star_ids:
+        for cid, n in (
+            await session.execute(
+                select(ConceptModel.parent_id, func.count())
+                .where(ConceptModel.parent_id.in_(star_ids))
+                .group_by(ConceptModel.parent_id)
             )
-        )
-    ).scalars().all()
+        ).all():
+            child_counts[cid] = n
+
     stars = [
         UniverseStar(
             id=c.id, label=c.label, kind=c.kind, status=c.status,
             mastery=c.mastery, warmth=_warmth(c.last_reviewed, now),
+            level=c.level, child_count=child_counts.get(c.id, 0),
         )
         for c in rows
     ]
-    star_ids = {c.id for c in rows}
     try:
         relations = get_graph_service().get_concept_relations()
     except Exception:
@@ -120,7 +143,9 @@ async def get_universe(session: AsyncSession = Depends(get_db)) -> UniverseRespo
         for r in relations
         if r["source"] in star_ids and r["target"] in star_ids
     ]
-    return UniverseResponse(stars=stars, edges=edges)
+    return UniverseResponse(
+        stars=stars, edges=edges, parent=parent, parent_label=parent_label
+    )
 
 
 @router.get("/{concept_id}", response_model=ConceptOut)
