@@ -74,6 +74,35 @@ def _cos(a: list[float], b: list[float]) -> float:
     return float(va @ vb / ((np.linalg.norm(va) * np.linalg.norm(vb)) + 1e-9))
 
 
+def _knn_edges(
+    centroids: list[list[float]], cutoff: float, top_k: int
+) -> list[tuple[int, int, float]]:
+    """Sparse similarity edges: each node -> its top-K neighbours above the cutoff.
+
+    One matrix multiply for all pairwise cosines (fast), then keep top-K per node and
+    dedupe to an undirected edge list. Avoids the all-pairs hairball + slow persist.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    n = len(centroids)
+    if n < 2:
+        return []
+    c = np.array(centroids, dtype="float32")
+    c = c / (np.linalg.norm(c, axis=1, keepdims=True) + 1e-9)
+    sims = c @ c.T
+    np.fill_diagonal(sims, -1.0)
+    k = max(1, min(top_k, n - 1))
+    edges: dict[tuple[int, int], float] = {}
+    for i in range(n):
+        for j in np.argsort(-sims[i])[:k]:
+            s = float(sims[i, j])
+            if s < cutoff:
+                break
+            a, b = (i, int(j)) if i < j else (int(j), i)
+            edges[(a, b)] = round(s, 3)
+    return [(a, b, w) for (a, b), w in edges.items()]
+
+
 async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     entities = state.get("entities", [])
     vec_of = state.get("vectors", {})
@@ -178,26 +207,18 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
         for coni in conidxs:
             constellations[coni]["parent_idx"] = len(galaxies) - 1
 
-    # edges are similarity-weighted at each tier with a cutoff (no categorical walls;
-    # docs/concept-model-design.md §0). Concept<->concept: strong/medium links across the
-    # whole graph -- close ones (same constellation) score high, related-but-distant ones
-    # thin, unrelated drop below the cutoff. Galaxy<->galaxy: thin links between *related*
-    # domains (Data Eng <-> AI Eng), at a lower bar; truly distinct domains stay apart.
-    concept_cut = cfg["concept_edge_cutoff"]
-    lateral: list[tuple[int, int, float]] = []
-    for a in range(len(concepts)):
-        for b in range(a + 1, len(concepts)):
-            sim = _cos(concepts[a]["centroid"], concepts[b]["centroid"])
-            if sim >= concept_cut:
-                lateral.append((a, b, round(sim, 3)))
-
-    galaxy_cut = cfg["galaxy_edge_cutoff"]
-    galaxy_edges: list[tuple[int, int, float]] = []
-    for a in range(len(galaxies)):
-        for b in range(a + 1, len(galaxies)):
-            sim = _cos(galaxies[a]["centroid"], galaxies[b]["centroid"])
-            if sim >= galaxy_cut:
-                galaxy_edges.append((a, b, round(sim, 3)))
+    # Edges follow semantic distance (docs/concept-model-design.md §0) but are SPARSIFIED
+    # to a k-NN graph: each concept links to its top-K nearest neighbours above the cutoff
+    # (close ones strong, related-distant thin, unrelated none). All-pairs-above-cutoff
+    # exploded to ~75k edges on bge-small (everything is somewhat similar) -- a hairball,
+    # and brutal to persist. galaxy<->galaxy stays all-pairs (only ~8 galaxies).
+    lateral = _knn_edges(
+        [c["centroid"] for c in concepts],
+        cfg["concept_edge_cutoff"], cfg["concept_edge_top_k"],
+    )
+    galaxy_edges = _knn_edges(
+        [g["centroid"] for g in galaxies], cfg["galaxy_edge_cutoff"], len(galaxies),
+    )
 
     state["hierarchy"] = {
         "galaxies": galaxies, "constellations": constellations, "concepts": concepts

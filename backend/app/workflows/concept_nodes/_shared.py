@@ -84,8 +84,10 @@ PIPELINE_CONFIG = {
     "galaxy_k_range": [4, 14],
     "constellation_k_range": [12, 55],
     "max_concepts_cap": 400,            # cap on studyable (level-2) concepts
-    # edges are similarity-weighted at each tier with a cutoff (no categorical walls):
-    "concept_edge_cutoff": 0.45,        # concept<->concept link if centroid cosine >= this
+    # edges: each concept links to its top-K nearest neighbours above a cutoff (k-NN graph,
+    # not all-pairs -- all-pairs exploded to ~75k edges, a hairball + slow persist).
+    "concept_edge_cutoff": 0.50,        # min centroid cosine for a concept<->concept link
+    "concept_edge_top_k": 6,            # nearest neighbours kept per concept
     "galaxy_edge_cutoff": 0.25,         # galaxy<->galaxy thin link if related (lower bar)
     # legacy 2-level knobs (superseded by the dendrogram; kept for the old path):
     "target_themes_cap": 30,
