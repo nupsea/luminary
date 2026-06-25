@@ -19,6 +19,7 @@ from typing import Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -34,6 +35,7 @@ from app.services.flashcard_parsers import (
     _parse_cloze_text,
     _parse_concept_extract,
     _parse_llm_response,
+    card_field,
 )
 from app.services.flashcard_prompts import (
     _BLOOM_L3_INSTRUCTION,
@@ -71,8 +73,6 @@ def _get_llm_service():
 
 
 def _generation_model() -> str | None:
-    from app.config import get_settings  # noqa: PLC0415
-
     m = get_settings().LITELLM_GENERATION_MODEL
     return m if m else None
 
@@ -449,6 +449,10 @@ async def generate(
         raw = await llm.generate(
             prompt, system=system_prompt,
             model=_generation_model(), stream=False,
+            # force valid JSON; the prompt + one-shot example steer it to {"flashcards": [...]}.
+            # num_ctx: at the default 2048 the section text is truncated and the model emits junk.
+            response_format={"type": "json_object"},
+            num_ctx=get_settings().OLLAMA_GENERATION_NUM_CTX,
         )
         cards_data = _parse_llm_response(raw, document_id)
         span.set_attribute("flashcard.generated_count", len(cards_data))
@@ -465,10 +469,25 @@ async def generate(
     for item in cards_data:
         if not isinstance(item, dict):
             continue
-        q = str(item.get("question", "")).strip()
-        a = str(item.get("answer", "")).strip()
+        q = card_field(item, "question", "front", "q", "term", "prompt")
+        a = card_field(item, "answer", "back", "a", "definition", "response")
         if q and a:
-            candidates.append(item)
+            candidates.append({
+                **item,
+                "question": q,
+                "answer": a,
+                "source_excerpt": card_field(item, "source_excerpt", "source", "excerpt"),
+            })
+
+    if not candidates:
+        logger.warning(
+            "flashcard.generate: %d parsed items but 0 usable Q/A (model=%s); first-item keys=%s; "
+            "raw=%r",
+            len(cards_data),
+            _generation_model() or "default",
+            list(cards_data[0].keys()) if cards_data and isinstance(cards_data[0], dict) else None,
+            raw[:300],
+        )
 
     if candidates and existing_vecs is not None:
         try:

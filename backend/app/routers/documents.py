@@ -18,7 +18,6 @@ from app.models import (
     ChunkModel,
     CodeSnippetModel,
     CollectionMemberModel,
-    ConceptModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
@@ -870,11 +869,9 @@ async def get_document(document_id: str):
 async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
     """Read-aggregation for the Doc overview page (docs/02-ingest-and-doc-overview.md).
 
-    Header + extracted concepts (with evidence receipts, weakest first) + collection
-    memberships + tags. References are a separate frontend call to the references router.
+    Header + collection memberships + tags + reading progress. Study TOPICS (chapters) and
+    References are separate frontend calls; the studyable list lives in the Study tab.
     """
-    from app.schemas.documents import EvidenceQuote, OverviewConcept  # noqa: PLC0415
-
     async with get_session_factory()() as session:
         repo = DocumentRepo(session)
         doc = await repo.get_or_404(document_id)
@@ -883,37 +880,6 @@ async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
         coll_map = await CollectionRepo(session).refs_for_members(
             [document_id], member_type="document"
         )
-
-        try:
-            concept_ids = _graph_module.get_graph_service().get_concept_ids_for_documents(
-                [document_id]
-            )
-        except Exception:
-            logger.warning("overview: concept lookup failed for %s", document_id, exc_info=True)
-            concept_ids = []
-
-        concepts: list[OverviewConcept] = []
-        if concept_ids:
-            rows = (
-                await session.execute(
-                    select(ConceptModel).where(ConceptModel.id.in_(concept_ids))
-                )
-            ).scalars().all()
-            for c in rows:
-                evidence = [
-                    EvidenceQuote(
-                        document_id=str(e.get("document_id", "")), quote=str(e.get("quote", ""))
-                    )
-                    for e in (c.evidence_json or [])
-                    if isinstance(e, dict)
-                ][:3]
-                concepts.append(
-                    OverviewConcept(
-                        id=c.id, label=c.label, kind=c.kind, status=c.status,
-                        mastery=c.mastery, evidence=evidence,
-                    )
-                )
-            concepts.sort(key=lambda x: x.mastery)  # weakest first
 
     section_count = len(sections)
     reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
@@ -929,7 +895,6 @@ async def get_document_overview(document_id: str) -> DocumentOverviewResponse:
             CollectionRef(id=cid, name=name, color=color)
             for cid, name, color in coll_map.get(document_id, [])
         ],
-        concepts=concepts,
     )
 
 

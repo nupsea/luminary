@@ -1,8 +1,7 @@
 """Regenerate the Concept layer from the entity graph (the real concept model).
 
-Wipes the existing concepts and rebuilds a small set of higher-level themes (with
-sub-concepts) via the multi-layer pipeline in concept_extraction_service -- NOT the old
-1:1 entity promotion. See docs/concepts.md.
+Wipes the existing concepts and rebuilds the flat concept layer via the node pipeline
+(concept_pipeline.run_pipeline) -- NOT the old 1:1 entity promotion. See docs/concepts.md.
 
 Run OFFLINE (server stopped) so it can hold the Kuzu lock and use the LLM without
 starving the live event loop. Self-migrates the schema. Idempotent (wipe + rebuild).
@@ -10,7 +9,7 @@ starving the live event loop. Self-migrates the schema. Idempotent (wipe + rebui
     make concepts
     # or:
     cd backend && DATA_DIR=<repo>/.luminary uv run python -m app.scripts.regenerate_concepts
-    #   --themes N   (target number of top-level themes; default 25)
+    #   --dry-run    (run every node except persist; dump diagnostics)
 """
 
 from __future__ import annotations
@@ -46,9 +45,9 @@ async def _run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO)
     await create_all_tables(get_engine())
 
-    # The node pipeline (select -> embed -> build_hierarchy -> label -> persist) is the
-    # one path. dry_run runs every node except persist and dumps the report; a real run
-    # persists the named galaxy/constellation/concept hierarchy.
+    # The node pipeline (select -> embed -> build_hierarchy -> label -> score -> persist)
+    # is the one path. dry_run runs every node except persist and dumps the report; a real
+    # run persists the flat concept layer.
     from app.workflows.concept_pipeline import run_pipeline  # noqa: PLC0415
 
     state = await run_pipeline(dry_run=args.dry_run)
@@ -57,8 +56,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Regenerate the Concept layer (themes).")
-    parser.add_argument("--themes", type=int, default=25, help="target top-level themes")
+    parser = argparse.ArgumentParser(description="Regenerate the Concept layer.")
     parser.add_argument(
         "--dry-run", action="store_true",
         help="run the node pipeline without persisting; dump diagnostics for inspection",

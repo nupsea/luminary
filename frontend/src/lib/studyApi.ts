@@ -146,6 +146,7 @@ export async function fetchDueCards(
     tag?: string
     document_ids?: string[]
     note_ids?: string[]
+    section_id?: string
     limit?: number
   } = {},
 ): Promise<Flashcard[]> {
@@ -154,6 +155,7 @@ export async function fetchDueCards(
   })
   if (documentId) params.set("document_id", documentId)
   if (collectionId) params.set("collection_id", collectionId)
+  if (filters.section_id) params.set("section_id", filters.section_id)
   if (filters.tag) params.set("tag", filters.tag)
   if (filters.document_ids?.length) {
     filters.document_ids.forEach((id: string) => params.append("document_ids", id))

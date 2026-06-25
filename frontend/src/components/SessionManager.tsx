@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Layers,
   Loader2,
   MessageSquare,
   PlayCircle,
@@ -46,7 +47,12 @@ function formatDate(iso: string): string {
 
 interface ActiveSessionCardProps {
   session: StudySessionItem
-  onContinue: (sessionId: string, documentId: string | null, collectionId: string | null) => void
+  onContinue: (
+    sessionId: string,
+    documentId: string | null,
+    collectionId: string | null,
+    mode: string,
+  ) => void
   onDelete: (sessionId: string) => void
   isDeleting: boolean
 }
@@ -59,13 +65,14 @@ function ActiveSessionCard({
 }: ActiveSessionCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const isTeachback = session.mode === "teachback"
 
   const { data: teachbackResults, isLoading: tbLoading } = useQuery<
     TeachbackResultItem[]
   >({
     queryKey: ["session-teachback-results", session.id],
     queryFn: () => fetchSessionTeachbackResults(session.id),
-    enabled: expanded,
+    enabled: expanded && isTeachback,
   })
 
   return (
@@ -76,10 +83,21 @@ function ActiveSessionCard({
       >
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <MessageSquare size={16} className="text-violet-500" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400">
-              Teach-back -- In Progress
-            </span>
+            {isTeachback ? (
+              <>
+                <MessageSquare size={16} className="text-violet-500" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                  Teach-back -- In Progress
+                </span>
+              </>
+            ) : (
+              <>
+                <Layers size={16} className="text-blue-500" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                  Flashcards -- In Progress
+                </span>
+              </>
+            )}
           </div>
           <span className="text-sm font-medium text-foreground">
             {sessionLabel(session)}
@@ -102,7 +120,7 @@ function ActiveSessionCard({
         )}
       </div>
 
-      {expanded && (
+      {expanded && isTeachback && (
         <div className="rounded-lg border border-border bg-background/50 p-3">
           {tbLoading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -132,7 +150,9 @@ function ActiveSessionCard({
 
       <div className="flex items-center gap-2 pt-1">
         <button
-          onClick={() => onContinue(session.id, session.document_id, session.collection_id)}
+          onClick={() =>
+            onContinue(session.id, session.document_id, session.collection_id, session.mode)
+          }
           className="flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700"
         >
           <PlayCircle size={16} />
@@ -170,10 +190,15 @@ function ActiveSessionCard({
 }
 
 interface SessionManagerProps {
-  onContinueTeachback: (sessionId: string, documentId: string | null, collectionId: string | null) => void
+  onContinue: (
+    sessionId: string,
+    documentId: string | null,
+    collectionId: string | null,
+    mode: string,
+  ) => void
 }
 
-export function SessionManager({ onContinueTeachback }: SessionManagerProps) {
+export function SessionManager({ onContinue }: SessionManagerProps) {
   const [tab, setTab] = useState<"active" | "completed">("active")
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [completedPage, setCompletedPage] = useState(1)
@@ -183,15 +208,13 @@ export function SessionManager({ onContinueTeachback }: SessionManagerProps) {
 
   const { data: activeSessions, isLoading: activeLoading } = useQuery({
     queryKey: ["study-sessions-active"],
-    queryFn: () =>
-      fetchSessions(1, 20, { mode: "teachback", status: "incomplete" }),
+    queryFn: () => fetchSessions(1, 20, { status: "incomplete" }),
     staleTime: 10_000,
   })
 
   const { data: completedSessions, isLoading: completedLoading } = useQuery({
     queryKey: ["study-sessions-completed", completedPage],
-    queryFn: () =>
-      fetchSessions(completedPage, 20, { mode: "teachback", status: "complete" }),
+    queryFn: () => fetchSessions(completedPage, 20, { status: "complete" }),
     enabled: tab === "completed",
     // Poll while any completed row still has evaluations in flight. This
     // catches the case where a user exited a session mid-evaluation and the
@@ -314,11 +337,10 @@ export function SessionManager({ onContinueTeachback }: SessionManagerProps) {
                 className="mx-auto mb-3 text-muted-foreground/30"
               />
               <p className="text-sm text-muted-foreground">
-                No active teach-back sessions.
+                No active study sessions.
               </p>
               <p className="mt-1 text-xs text-muted-foreground/70">
-                Start a new teach-back session to practice explaining concepts
-                in your own words.
+                Start a flashcard review or a teach-back to pick up where you left off later.
               </p>
             </div>
           ) : (
@@ -326,7 +348,7 @@ export function SessionManager({ onContinueTeachback }: SessionManagerProps) {
               <ActiveSessionCard
                 key={sess.id}
                 session={sess}
-                onContinue={onContinueTeachback}
+                onContinue={onContinue}
                 onDelete={(id) => deleteMutation.mutate(id)}
                 isDeleting={deleteMutation.isPending}
               />

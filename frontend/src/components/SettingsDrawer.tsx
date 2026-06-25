@@ -1,11 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cloud, GitMerge, Settings, Shield, X } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Cloud, GitMerge, Loader2, RefreshCw, Settings, Shield, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-import { apiGet, apiPatch } from "@/lib/apiClient"
+import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { SURFACE_TIER } from "@/lib/surfaceManifest"
 import { SettingsLabsPanel } from "@/components/SettingsLabsPanel"
@@ -58,6 +58,17 @@ const patchLLMSettings = (updates: {
 const fetchStorage = (): Promise<StorageInfo> =>
   apiGet<StorageInfo>("/settings/storage")
 
+interface RegenStatus {
+  status: "idle" | "running" | "done" | "error"
+  started_at: string | null
+  finished_at: string | null
+  concepts: number | null
+  error: string | null
+}
+
+const fetchRegenStatus = (): Promise<RegenStatus> =>
+  apiGet<RegenStatus>("/concepts/regenerate/status")
+
 async function fetchModels(provider: string): Promise<ModelOption[]> {
   try {
     return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
@@ -96,6 +107,24 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     queryKey: ["storage"],
     queryFn: fetchStorage,
     enabled: open,
+  })
+
+  // Manual concept-layer rebuild (the UI's "make concepts"): a background job we poll while it runs.
+  const [confirmingRegen, setConfirmingRegen] = useState(false)
+  const { data: regen } = useQuery({
+    queryKey: ["concept-regen-status"],
+    queryFn: fetchRegenStatus,
+    enabled: open,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 3000 : false,
+  })
+  const startRegen = useMutation({
+    mutationFn: () => apiPost("/concepts/regenerate"),
+    onSuccess: () => {
+      setConfirmingRegen(false)
+      void queryClient.invalidateQueries({ queryKey: ["concept-regen-status"] })
+    },
+    onError: () => toast.error("Couldn't start the rebuild — is the backend running?"),
   })
 
   const [localMode, setLocalMode] = useState<"private" | "cloud" | "hybrid">("private")
@@ -479,6 +508,57 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               </div>
             ) : (
               <div className="h-16 animate-pulse rounded-md bg-muted" />
+            )}
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Section 2.5: Knowledge concepts — manual rebuild (the UI's "make concepts") */}
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Knowledge concepts</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Re-analyze your whole library to refresh the concept layer behind grounded answers
+              and mastery. Takes a few minutes and needs Ollama running. Concept-level progress is
+              recomputed — your flashcard review schedule is unaffected.
+            </p>
+
+            {regen?.status === "running" ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={15} className="animate-spin" />
+                Rebuilding concepts… this can take a few minutes.
+              </div>
+            ) : confirmingRegen ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => startRegen.mutate()}
+                  disabled={startRegen.isPending}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Confirm rebuild
+                </button>
+                <button
+                  onClick={() => setConfirmingRegen(false)}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingRegen(true)}
+                className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
+              >
+                <RefreshCw size={14} /> Rebuild concepts
+              </button>
+            )}
+
+            {regen?.status === "done" && !confirmingRegen && (
+              <p className="mt-2 text-xs text-green-600">
+                Done — rebuilt {regen.concepts ?? 0} concepts.
+              </p>
+            )}
+            {regen?.status === "error" && !confirmingRegen && (
+              <p className="mt-2 text-xs text-red-600">Rebuild failed: {regen.error}</p>
             )}
           </section>
 

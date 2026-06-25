@@ -21,14 +21,19 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import zip_longest
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CollectionMemberModel, ConceptModel, FlashcardModel
+from app.models import ChunkModel, CollectionMemberModel, ConceptModel, FlashcardModel
 from app.services.scope_resolver import resolve_scope
 
 logger = logging.getLogger(__name__)
+
+# Char budget for a concept's cross-document evidence fed to generation (under the
+# generator's 10k context cap, leaving room for the focus hint).
+_CONCEPT_EVIDENCE_CHARS = 9000
 
 # rough cards-per-minute so a 5/15/25-min budget maps to a sane item count
 _ITEMS_PER_MIN = 1.2
@@ -198,12 +203,43 @@ async def _generate_for_scope(
     return new
 
 
+async def _concept_evidence_text(session: AsyncSession, chunk_ids: list[str]) -> str:
+    """The concept's evidence text drawn ACROSS all its source documents, interleaved so no
+    single document dominates the budget.
+
+    This is what makes a cross-document concept studyable as a unit: 'data modeling' extracted
+    from two database books grounds generation in excerpts from BOTH, not just whichever book
+    happened to be first. Round-robins one chunk per document per pass until the budget fills.
+    """
+    if not chunk_ids:
+        return ""
+    rows = (
+        await session.execute(
+            select(ChunkModel.document_id, ChunkModel.text).where(ChunkModel.id.in_(chunk_ids))
+        )
+    ).all()
+    by_doc: dict[str, list[str]] = {}
+    for doc_id, text in rows:
+        if text:
+            by_doc.setdefault(doc_id, []).append(text)
+    if not by_doc:
+        return ""
+    picked: list[str] = []
+    total = 0
+    for group in zip_longest(*by_doc.values()):  # one chunk from each doc per round
+        for text in group:
+            if text and total < _CONCEPT_EVIDENCE_CHARS:
+                picked.append(text)
+                total += len(text)
+    return "\n\n".join(picked)[:_CONCEPT_EVIDENCE_CHARS]
+
+
 async def _generate_for_concepts(
     session: AsyncSession, concept_ids: list[str], count: int
 ) -> list[FlashcardModel]:
-    """Generate cards for concept scope, grounded in each concept's source document and
-    MAPPED to the concept (so the concept builds a card set). Spreads `count` across the
-    weakest concepts; degrades to [] on failure so the event still starts."""
+    """Generate cards for concept scope, grounded in the concept's evidence ACROSS all its
+    source documents (so a cross-book concept yields unified questions) and MAPPED to the
+    concept. Spreads `count` across the weakest concepts; degrades to [] on failure."""
     from app.services.flashcard import FlashcardService  # noqa: PLC0415
 
     svc = FlashcardService()
@@ -221,15 +257,24 @@ async def _generate_for_concepts(
         if not doc_ids:
             continue
         members = ", ".join(ev.get("members", [])[:8])
-        extra = f" ({members})." if members else "."
-        ctx = f"Focus only on the concept '{concept.label}'" + extra
+        hint = f"Focus only on the concept '{concept.label}'" + (
+            f" ({members})." if members else "."
+        )
+        evidence = await _concept_evidence_text(session, ev.get("chunk_ids") or [])
         try:
-            new = await svc.generate(doc_ids[0], "full", None, per, session, context=ctx)
+            if evidence:
+                # ground in the concept's cross-document evidence, not just doc_ids[0]
+                ctx = f"{hint}\n\nSource excerpts:\n{evidence}"
+                new = await svc.generate(doc_ids[0], "full", None, per, session, context=ctx)
+            else:
+                # no captured evidence chunks -> fall back to whole-doc grounding
+                new = await svc.generate(doc_ids[0], "full", None, per, session)
         except Exception:
             logger.warning("assemble: concept generation failed for %s", cid, exc_info=True)
             continue
         for c in new:
             c.concept_id = cid
+            c.concept_slug = concept.slug  # durable binding survives a concept rebuild
             c.mapping_status = "mapped"
             c.source_scope = f"concept:{cid}"
         out.extend(new)

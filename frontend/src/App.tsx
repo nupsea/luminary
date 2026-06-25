@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck, Sparkles } from "lucide-react"
+import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
@@ -43,7 +43,6 @@ const Admin = lazy(() => import("@/pages/Admin"))
 const Monitoring = lazy(() => import("@/pages/Monitoring"))
 const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
 const DocumentOverview = lazy(() => import("@/pages/DocumentOverview"))
-const Universe = lazy(() => import("@/pages/Universe"))
 const Hub = lazy(() => import("@/pages/Hub"))
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
@@ -58,7 +57,6 @@ const COMPONENT_REGISTRY: Record<string, LazyPage> = {
   "pages/Progress": Progress,
   "pages/CollectionWorkspace": CollectionWorkspace,
   "pages/DocumentOverview": DocumentOverview,
-  "pages/Universe": Universe,
   "pages/Quality": Quality,
   "pages/Admin": Admin,
   "pages/Monitoring": Monitoring,
@@ -73,7 +71,6 @@ const ICONS: Record<string, IconComponent> = {
   study: BarChart2,
   ask: MessageSquare,
   map: Network,
-  universe: Sparkles,
   progress: TrendingUp,
   quality_dashboard: ClipboardCheck,
   admin: Wrench,

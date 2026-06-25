@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BookPlus, Plus, SlidersHorizontal, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams, useLocation, useNavigate } from "react-router-dom"
+import { useSearchParams, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -84,7 +84,6 @@ export default function Learning() {
   const clearActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const queryClient = useQueryClient()
 
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const routeLocation = useLocation()
   const tagFilter = searchParams.get("tag")
@@ -182,9 +181,10 @@ export default function Learning() {
   })
 
   // Card click now routes to the Doc overview (no surprise-session;
-  // docs/02-ingest-and-doc-overview.md). "Read" opens the reader via openReader.
+  // Clicking a document opens the reader directly (the study/generate/chat actions live in the
+  // reader header now, in the doc's context -- no intermediate overview page).
   function handleDocumentClick(id: string) {
-    navigate(`/library/doc/${id}`, { state: { from: window.location.pathname } })
+    openReader(id)
   }
 
   function openReader(id: string) {

@@ -160,6 +160,10 @@ class FlashcardModel(Base):
     # source_scope records the scope the card was generated from (e.g. 'note:<id>').
     # mapping_status: mapped | unmapped | proposed. See docs/two-lane-model.md.
     concept_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Durable card->concept binding by STABLE slug (concept_id churns on a concept rebuild).
+    # persist_concepts re-maps cards by this slug so a rebuild re-derives mastery instead of
+    # orphaning the learner's work (docs/concept-model-design.md).
+    concept_slug: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     source_scope: Mapped[str | None] = mapped_column(String, nullable=True)
     # server_default so Base.metadata.create_all emits a SQL DEFAULT -- keeps raw-SQL
     # inserts that omit this column valid (matches the db_init ALTER's DEFAULT 'mapped').

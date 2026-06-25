@@ -6,6 +6,7 @@ litellm.acompletion in services/routers bypass observability.
 """
 
 import logging
+import warnings
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -19,6 +20,17 @@ logger = logging.getLogger(__name__)
 litellm.suppress_debug_info = True
 litellm.telemetry = False
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+# LiteLLM serializes the assembled streaming ModelResponse in its internal logging path; its
+# `choices` field is typed for the streaming union (StreamingChoices) but holds the non-streaming
+# Choices/Message at that point, so Pydantic v2 emits a cosmetic "serializer warnings" UserWarning
+# on every streamed call. The JSON it produces is still correct -- silence just this one warning
+# (matched by its distinctive message) rather than all UserWarnings.
+warnings.filterwarnings(
+    "ignore",
+    message="Pydantic serializer warnings",
+    category=UserWarning,
+)
 
 LLMServiceUnavailableError = litellm.ServiceUnavailableError
 LLMAPIConnectionError = litellm.APIConnectionError
@@ -110,6 +122,7 @@ class LLMService:
         *,
         override_key: str | None = None,
         timeout: float | None = None,
+        num_ctx: int | None = None,
     ) -> dict:
         kwargs: dict = {"model": model, "messages": messages}
         if timeout is not None:
@@ -121,8 +134,9 @@ class LLMService:
             kwargs["api_base"] = settings.OLLAMA_URL
             # Keep the model resident across requests and set the context window
             # explicitly (Ollama defaults to 2048 and silently truncates beyond it).
+            # Heavy tasks (e.g. flashcard generation over a section) pass a larger num_ctx.
             kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
-            kwargs["num_ctx"] = settings.OLLAMA_NUM_CTX
+            kwargs["num_ctx"] = num_ctx or settings.OLLAMA_NUM_CTX
         elif model.startswith("openai/"):
             kwargs["api_key"] = settings.OPENAI_API_KEY
         elif model.startswith("anthropic/"):
@@ -159,6 +173,7 @@ class LLMService:
         response_format: dict | None = None,
         api_base: str | None = None,
         extra: dict[str, Any] | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """Run a non-streaming completion against the given message list.
 
@@ -169,7 +184,8 @@ class LLMService:
         effective_model, override_key = self._resolve_model(model, background=background)
 
         kwargs = self._build_kwargs(
-            effective_model, messages, settings, override_key=override_key, timeout=timeout
+            effective_model, messages, settings,
+            override_key=override_key, timeout=timeout, num_ctx=num_ctx,
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -224,6 +240,8 @@ class LLMService:
         stream: bool = False,
         timeout: float | None = None,
         background: bool = False,
+        response_format: dict | None = None,
+        num_ctx: int | None = None,
     ) -> str | AsyncGenerator[str]:
         messages: list[dict] = []
         if system:
@@ -234,7 +252,12 @@ class LLMService:
                 messages, model=model, background=background, timeout=timeout
             )
         return await self.complete(
-            messages, model=model, background=background, timeout=timeout
+            messages,
+            model=model,
+            background=background,
+            timeout=timeout,
+            response_format=response_format,
+            num_ctx=num_ctx,
         )
 
     async def _token_stream(self, kwargs: dict) -> AsyncGenerator[str]:

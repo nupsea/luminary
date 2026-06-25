@@ -1,260 +1,130 @@
 ---
-description: The Concept knowledge model -- how higher-level concepts are derived, stored with lineage, linked to material, and used for mastery + generation. Read before any concept-extraction work.
+description: Concept extraction PIPELINE -- implementation reference (entity selection, context embeddings, model-routed labelling, stable identity, observability). For the knowledge MODEL (goals, graph substrate, mastery, the Universe), read knowledge-model.md, which supersedes this doc's old model/plan sections.
 ---
 
-# Concept Knowledge Model -- design
+# Concept extraction pipeline -- implementation reference
 
-The concept layer is not a clustering trick that produces pretty labels; it is the
-**spine that connects abstract themes down to generatable material and up to mastery**.
-Every design choice below exists to serve a downstream use case. If a piece of data
-isn't needed by a use case, we don't store it; if a use case can't be served, the model
-is wrong.
+This documents **how concepts are extracted** from a library. The **what/why of the knowledge model**
+(goal layer, poly graph substrate, mastery, the goal-projection Universe) now lives in
+[knowledge-model.md](knowledge-model.md) -- read that first. The old strict-tree hierarchy,
+all-corpus Universe, forced clustering, and the LangGraph framing in earlier versions of this doc are
+**superseded**; what remains below is the still-true pipeline craft.
 
-## 0. The Universe is a nested hierarchy with distance-encoded edges (recalibrated)
+The concept layer is the spine that connects abstract material down to generatable text and up to
+mastery. If a piece of data isn't needed by a downstream use case, we don't store it.
 
-A flat "themes + sub-concepts" model renders as a hairball. A real **Universe** is nested,
-and the *distance* between things is the whole point:
+## Pipeline shape (built)
 
-```
-Galaxy        domain        "Data Engineering", "Philosophy"      far apart, NO edges between
-  Constellation  theme       "Storage Formats", "Dharma"          thin link up to its galaxy
-    Solar system  concept     a sun (central idea) + orbiting      strong links within, to the sun
-      planets     entities/detail                                  the concept's material
-```
-
-The galaxy/constellation/system names are an **illustration of a direction, not a rigid
-taxonomy**. The single real mechanic is **semantic distance**, applied two ways:
-
-1. **Clustering** — threshold cuts on the distance tree create groupings. How many levels,
-   what merges, what stays separate is **emergent from the imported data**, not imposed.
-2. **Relationships** — an edge exists between *any* two nodes/clusters with weight =
-   their similarity, kept only above a cutoff. So proximity, at every scale, drives links:
-   - **Within a solar system** → strong, short links (closely related).
-   - **Between related galaxies** (Data Engineering ↔ AI Engineering ↔ Data Science) →
-     **thin** links — different domains that genuinely share ground.
-   - **Between unrelated domains** (Data Engineering ↔ Philosophy) → no link (similarity
-     falls below the cutoff). *Not* a hard rule — just distance doing its job.
-
-This falls out of a **single hierarchical-clustering dendrogram** (merge *height* = distance)
-cut at a few heights for zoom tiers, plus **similarity-weighted edges computed at each tier**
-(concept↔concept, galaxy↔galaxy). One tree → tiers nest consistently; the edge cutoff,
-not a categorical wall, decides what relates.
-
-Implementation: `scipy.cluster.hierarchy.linkage(seeds, method='average', metric='cosine')`
-once, then `fcluster` at three thresholds (galaxy > constellation > concept). A leaf's
-(galaxy, constellation, concept) all come from the same tree → guaranteed nesting.
-Lateral edges are drawn only between nodes whose **lowest common ancestor is at/below the
-constellation** (so cross-galaxy pairs get none); edge weight = cosine similarity (link
-strength). The **sun** of a solar system = its highest-salience / most-central member.
-
-`ConceptModel.level`: **0 = galaxy, 1 = constellation, 2 = concept (studyable)**. Mastery
-lives on level-2 concepts (you study a solar system); galaxies/constellations are
-containers whose mastery is a rollup. Each level is named bottom-up by the LLM (concept →
-constellation → galaxy), the most abstract names using the strongest model.
-
-The rest of this doc (lineage, identity, mastery, generation) is unchanged -- it now
-hangs off level-2 concepts; galaxies/constellations are additional container rows with
-`parent_id` chains. §4's clustering is superseded by this dendrogram approach.
-
-## 1. The layered model -- and the lineage is STORED
+A **plain sequential runner** (`app/workflows/concept_pipeline.py`), not LangGraph -- a StateGraph
+dropped the `hierarchy` key, so the pipeline is explicit and ordered. Each stage is an independent,
+swappable node in `app/workflows/concept_nodes/`, inspectable via `make concepts-dryrun`:
 
 ```
-Document ─▶ Chunk ─▶ Entity (GLiNER, typed)         L0  raw mentions (Kuzu, exists)
-                         │ promote (cluster)
-                         ▼
-                     Sub-concept   (Concept, level 1)  L1  a tight, coherent idea in a doc
-                         │ abstract (roll up)
-                         ▼
-                     Theme         (Concept, level 0)  L2  a cross-document topic ("Data Systems")
+select_entities -> embed_entities -> build_hierarchy -> label_levels -> score_concepts -> persist_concepts
 ```
 
-**The abstraction lineage is persisted, not thrown away.** A theme stores its child
-sub-concepts; a sub-concept stores its member entities; an entity stores the chunks it
-occurs in. This Theme→Sub→Entity→Chunk→Document chain is the **single source** for:
-generation material, mastery rollup, evidence receipts, doc-overview membership, and
-incremental re-abstraction. Without it, a "concept" is just a label you can't study,
-score, or recompute. (This is precisely what the first implementation got wrong: it
-stored labels with no lineage.)
+Tunable knobs live in `concept_nodes/_shared.py::PIPELINE_CONFIG`.
 
-Stored edges (Kuzu) / refs (SQLite):
-- `(:Theme)-[:CONTAINS]->(:Sub)` — hierarchy (also `concepts.parent_id` in SQLite).
-- `(:Sub)-[:PROMOTED_FROM]->(:Entity)` — which entities make up this concept.
-- `(:Concept)-[:EXTRACTED_FROM]->(:Document)` — availability/provenance.
-- `(:Concept)-[:RELATED_TO]->(:Concept)` — lateral links (co-occurrence-derived).
-- `entity → chunk` occurrence index (from `chunks.entities_text` / NER offsets) — the
-  bridge to text. Computed/stored so a concept resolves to chunks in O(1)-ish.
+## 1. Entity selection -- relevance starts here
 
-## 2. Entity selection -- relevance starts here
+Not every NER entity is a concept seed. GLiNER emits PERSON, ORGANIZATION, LOCATION, DATE, etc.
+(`ner.py ENTITY_TYPES`) -- those produce noise.
 
-Not every NER entity is a concept seed. GLiNER emits PERSON, organization, location,
-date, etc. (`ner.py ENTITY_TYPES`). Those produce the "Iranian artists" noise.
+- **Keep** concept-bearing types (CONCEPT, METHOD, DATA_STRUCTURE, ALGORITHM, TECHNOLOGY, domain
+  nouns); **drop** PERSON / ORGANIZATION / LOCATION / DATE / misc by default (configurable per corpus
+  -- a history library may want PERSON).
+- **Frequency floor** + `is_junk_entity` (numbers / latex / formula / unicode-styled garbage /
+  CLI flags / snake_case code identifiers / source literals / generic-stopword filter).
+- This filter is deterministic and is the single biggest relevance lever (**lever 1**).
+- **Lever 2 -- studyability gate (`score_concepts`).** Format filtering cannot judge whether a
+  real word is worth studying. After labelling, an LLM flags low-quality level-2 concepts
+  (too generic, placeholder/example names, instructions) and `persist` writes them as
+  `status="candidate"` -- kept in the graph but excluded from grounding and the study view.
+  Fail-open: a model error leaves every concept `proposed`. Retroactive cleanup of format-junk
+  on an existing library: `POST /concepts/purge-junk` (`dry_run=true` previews; `dry_run=false`
+  deletes from all three stores).
 
-- **Keep** concept-bearing types: `_TECH_ENTITY_TYPES` (CONCEPT, METHOD, DATA_STRUCTURE,
-  ALGORITHM, TECHNOLOGY, …) + domain nouns; **drop** PERSON / ORGANIZATION / LOCATION /
-  DATE / misc by default (configurable per corpus — a history library may want PERSON).
-- **Frequency floor**: drop hapax/near-hapax entities (mentioned once) — low salience.
-- This filter is deterministic and is the single biggest relevance lever.
+## 2. Embeddings -- context, not bare names
 
-## 3. Embeddings -- context, not bare names
+Cluster on **context embeddings**, not the entity string. Each entity's vector = centroid of the
+**chunk** vectors where it occurs (bge-small, 384-dim; matched via `chunk.entities_text`, capped per
+entity; `vector_store.fetch_chunk_vectors` bulk load). "Transformer" in an ML book vs an electrical
+text then separate correctly. Name-embedding fallback; degrades if no DB. (This fixed the "bloom
+filter" clustering.)
 
-Cluster on **context embeddings**, not the entity string. Each entity's vector =
-centroid of the chunk vectors where it occurs (reuse the chunk LanceDB vectors + the
-centroid we already build). "Transformer" in an ML book and "transformer" in an
-electrical text then separate correctly; a bare-name embedding can't tell them apart.
+## 3. Clustering -- emergent, not a forced count
 
-## 4. Clustering -- coherence-gated, not a forced count
+One average-linkage cosine dendrogram (`scipy.cluster.hierarchy.linkage(method='average',
+metric='cosine')`); cut **once** into concepts via `fcluster maxclust` (gap/percentile cuts were
+pathological on bge-small). The **number of concepts is an outcome of the data, never a forced
+`n_clusters`**. Edges are k-NN (top-k above a cosine cutoff), **not** all-pairs (all-pairs exploded to
+a 75k-edge hairball). The sun/medoid of a cluster = its most-central member.
 
-Two passes, but **never force a fixed cluster count**:
-- **L1 (within document/section):** agglomerative with a cosine-distance *threshold* →
-  however many tight clusters genuinely cohere. Singletons stay singletons (or attach to
-  their nearest cluster only within the threshold).
-- **L2 (cross-document roll-up):** cluster L1 centroids with a *threshold* too; the
-  number of themes is an *outcome*, not an input. Then **cap by salience** for display
-  (Universe shows the top ~N), but keep all stored (zoom reveals the rest).
+> **Flat layer (2026-06-24).** The galaxy/constellation tiers (the Knowledge Universe "sky") were
+> removed: nothing read them once the Universe surface was retired. `build_hierarchy` now emits a
+> single concept level + RELATED_TO edges; `label_levels` labels concepts by their sun (no LLM);
+> `persist` writes level-2 concepts with no parent chain. A `verify`/dedup node (merge near-duplicates
+> by centroid; under-claim over mislabel) still lands before persist.
 
-A forced `n_clusters=25` is what merged comedy with architecture. Threshold + salience
-cap replaces it.
+## 4. Model-routed LLM labelling
 
-## 5. Multi-step LLM abstraction -- the right model per step
+The LLM works in stages, model matched to the job (LiteLLM routing), all **offline/idle and
+throttled** (semaphore + paced), never on the live loop:
 
-The LLM works in **stages**, with model choice matched to the job (via LiteLLM routing):
-
-| Step | Job | Tool / model | Cost |
-|---|---|---|---|
-| A. cluster | group entities | embeddings + co-occurrence (no LLM) | cheap, local |
-| B. label sub-concept | name a tight cluster | heuristic medoid, or a **small/fast** model | low |
-| C. abstract | group sub-concepts into themes + name them | a **stronger reasoning** model, given labels+entities+sample evidence | the expensive step, ~N calls |
-| D. verify | coherence check, merge near-dupes, reject incoherent ("under-claim over mislabel") | reasoning model, batched | bounded |
-
-Principles: only Step C/D need the capable model; A is free; B can be heuristic to cap
-cost. All steps run **offline/idle, throttled** (semaphore + paced), never on the live
-loop. The model proposes; nothing is asserted as fact (constitution 5) — low-confidence
-groupings become `proposed`/`candidate`, not `confirmed`.
-
-## 6. Stable identity -- so re-abstraction doesn't reset the user
-
-A concept's **slug (identity) derives from its lineage signature** (a hash of its sorted
-member-entity set), **not** from the volatile LLM label. Consequence:
-- The same cluster keeps the **same slug** across regenerations → user overrides
-  (rename/merge/reject) and mastery **persist** (re-applied/keyed by slug, I-22).
-- A label change ("Data Systems" → "Data Engineering") is just a relabel of the same
-  identity, not a new concept.
-
-This is what makes regeneration safe to run repeatedly (manual + idle/background).
-
-## 7. Mastery & conceptual knowledge -- computed bottom-up through the lineage
-
-```
-card ── mapped via its chunk/entity ──▶ sub-concept
-mastery(sub)   = fsrs_retrievability(sub.cards) blended with calibration       # I-19
-mastery(theme) = salience-weighted mean of child sub masteries
-warmth(concept)= clamp(1 - daysSince(last_reviewed)/18)
-coverage(concept) = fraction of its material (chunks) with >=1 card            # "how studied"
-gap(concept)   = on a goal route AND (no covering doc OR coverage ~ 0)
-```
-
-All of these are pure functions of the **stored lineage** + FSRS. They're written to the
-concept row by the assessment pipeline (never text-matched). A session updates the
-sub-concepts it touched; theme mastery and collection/goal rollups move automatically.
-
-## 8. Generation -- a concept becomes studyable via its material
-
-"Quiz me on this concept" / "Generate questions" resolves: concept → lineage → chunks →
-generate cards from that text. New cards map back to the sub-concept (mapped); cards that
-match no concept are unmapped (two-lane model). This is why the entity→chunk bridge (§1)
-must be stored — generation needs the actual passages, not the label.
-
-## 9. Use cases this model must serve (and where each touches the data)
-
-| Use case | Needs |
-|---|---|
-| Universe render | themes (L2) + warmth/mastery/salience + RELATED_TO edges + hierarchy |
-| Study/quiz from a concept | lineage → chunks (material) → generator |
-| Mastery rollup (concept/collection/goal) | card→sub→theme lineage + FSRS |
-| Doc overview membership | concept ↔ document via EXTRACTED_FROM |
-| Note → concept link | concept centroid + lexical, vs note content |
-| Goals / gaps / plan | target concepts; gap = route concept w/ no material |
-| Corrections survive re-parse | stable slug identity + overrides (§6) |
-| Incremental re-abstraction | re-cluster only changed docs; attach/spawn; keep state |
-| OKF projection | one file per concept: frontmatter + evidence + lineage links |
-
-## 10. Gap audit -- current implementation vs this design
-
-| Aspect | Design | Current `concept_extraction_service` | Gap |
-|---|---|---|---|
-| Entity type filter | keep concept types, drop PERSON/ORG/… | uses ALL entity types | **missing** |
-| Embeddings | context centroid | bare entity name | **wrong** |
-| Clustering | coherence threshold + salience cap | forced `n_clusters=25` | **wrong** |
-| Entity lineage stored | `PROMOTED_FROM` + entity→chunk | only `EXTRACTED_FROM` (doc); no entity link | **missing** |
-| Stable identity | slug = lineage signature | slug = LLM label (changes each run) | **wrong** (breaks overrides/mastery persistence) |
-| LLM steps | A→B→C→D, model-routed | single naming call | **partial** |
-| Mastery rollup | bottom-up via lineage | legacy text-match `compute_mastery` | **not wired to concepts** |
-| Generation from concept | via lineage → chunks | study_assembler generates from doc/note, not concept material | **missing** |
-| Incremental | re-cluster changed docs | full wipe+rebuild | **missing** |
-| Evidence | passages from lineage chunks | empty `[]` | **missing** |
-
-**Conclusion:** the current implementation is the right *shape* (layers, hierarchy,
-offline regenerate) but is missing the parts that make concepts *correct and useful* —
-type filtering, context embeddings, coherence clustering, stored entity lineage, stable
-identity, and bottom-up mastery. Those are the work, in roughly this dependency order:
-
-1. Entity selection (type filter + frequency floor) — biggest relevance win, deterministic.
-2. Context embeddings + coherence-gated clustering — coherent clusters.
-3. Stored entity lineage (`PROMOTED_FROM` + entity→chunk index) — unlocks generation + mastery.
-4. Stable lineage-signature identity — safe regeneration + override/mastery persistence.
-5. Multi-step LLM (label → abstract → verify), model-routed + throttled — theme quality.
-6. Bottom-up mastery rollup + concept-scoped generation — the loop closes.
-7. Incremental re-abstraction + idle/background trigger.
-8. Then the Universe UI (canvas, to `mind.jsx` fidelity) renders a model worth looking at.
-
-## 11. Architecture -- a pluggable node workflow (LangGraph)
-
-The pipeline is built as a **LangGraph `StateGraph`** (same pattern as the ingestion
-workflow: `workflows/concept_pipeline.py` + one node fn per file in
-`workflows/concept_nodes/`). Each stage is an **independent, swappable node** with a
-clear input/output contract on a shared `ConceptPipelineState`. This is deliberate:
-every reasoning stage can be evaluated, replaced, or A/B'd in isolation as we explore
-Lumen's reasoning — e.g. swap the clustering node (HDBSCAN ↔ community detection),
-swap the labeler (heuristic ↔ small model ↔ big model), insert a new verification node —
-without touching the rest.
-
-```
-select_entities → embed_entities → cluster_subconcepts → rollup_themes
-   → label (B/C) → verify (D) → build_lineage → persist
-```
-
-| Node | Contract (in → out) | Swappable alternatives |
+| Step | Job | Tool / model |
 |---|---|---|
-| `select_entities` | docs → typed, frequency-filtered entities/doc | type sets, frequency floor, salience priors |
-| `embed_entities` | entities → vectors | context-centroid ↔ name ↔ definition-augmented |
-| `cluster_subconcepts` | vectors → per-doc clusters | agglomerative ↔ HDBSCAN ↔ graph community |
-| `rollup_themes` | sub centroids → themes | threshold ↔ count ↔ LLM-grouping |
-| `label` | clusters → names | heuristic medoid ↔ fast model ↔ reasoning model |
-| `verify` | themes → merged/validated | rule-based ↔ LLM coherence/dedup |
-| `build_lineage` | clusters → Theme→Sub→Entity→Chunk refs + salience | — |
-| `persist` | lineage → SQLite+Kuzu+LanceDB, stable slug, overrides | — |
+| cluster | group entities | embeddings + co-occurrence (no LLM) |
+| label leaf | name a tight cluster | heuristic medoid, or a small/fast model |
+| abstract | name higher tiers + write summaries | a stronger reasoning model, given labels + sample evidence |
+| verify | coherence check, merge near-dupes, reject incoherent | reasoning model, batched |
 
-Each node is pure w.r.t. its inputs where possible (clustering/labeling), with side
-effects isolated to `persist`. A node can be disabled/replaced via the graph builder.
+The model proposes; nothing is asserted as fact. Low-confidence groupings become
+`proposed`/`candidate`, not `confirmed`. **Under-claim over mislabel** -- a missed concept is
+recoverable; a confidently wrong one erodes credibility.
 
-## 12. Observability -- every stage is inspectable
+## 5. Stable identity -- so re-extraction doesn't reset the user
 
-Verification must not require reading code. Each node:
-- **Logs** structured, human-readable progress: counts in/out, what was kept vs dropped
-  and *why* (e.g. "dropped 1,910 entities: PERSON 740, ORGANIZATION 520, freq<2 650"),
-  cluster sizes + cohesion scores, cluster→label with the model used, theme membership,
-  salience/mastery/warmth values, lineage fan-out (theme → N subs → M entities → K chunks),
-  and persisted slug + identity hash.
-- **Accumulates** a structured `diagnostics` block in the state (per node), so the whole
-  run is dumpable as one report.
+A concept's **slug derives from its lineage signature** (a hash over its sorted member-entity set),
+**not** from the volatile LLM label. Consequences:
+
+- The same cluster keeps the **same slug** across regenerations -> user overrides (rename/merge/reject),
+  mastery, and **goal bindings** persist (re-applied/keyed by slug, I-22).
+- A label change ("Data Systems" -> "Data Engineering") is a relabel of the same identity, not a new
+  concept.
+
+This is what makes `make concepts` safe to run repeatedly (manual + idle/background).
+
+## 6. Persisted lineage -- the bridge to material
+
+The abstraction lineage is persisted, not thrown away -- it is the single source for generation
+material, mastery, evidence receipts, and doc-overview membership:
+
+- `concepts.parent_id` (SQLite) is a **derived layout cache** only; membership truth is Kuzu edges
+  (knowledge-model.md, I-23).
+- `(:Concept)-[:PROMOTED_FROM]->(:Entity)` -- which entities make up a concept.
+- `(:Concept)-[:EXTRACTED_FROM]->(:Document)` -- availability/provenance.
+- entity->chunk occurrence index (from `chunk.entities_text`) -- resolves a concept to its passages
+  for generation and evidence; `evidence_json = {chunk_ids, document_ids, members}`.
+
+## 7. Observability -- every stage is inspectable
+
+Verification must not require reading code. Each node logs structured, human-readable progress (counts
+in/out, what was kept vs dropped and *why*, cluster sizes + cohesion, cluster->label with the model
+used, lineage fan-out, persisted slug + identity hash) and accumulates a `diagnostics` block.
 
 `make concepts` supports:
-- `--dry-run` — run every node *except* `persist`; dump the full diagnostics report
-  (entities kept/dropped, every cluster with its members + scores, proposed themes with
-  their member entities + chosen labels). This is the relevance-tuning loop: judge the
-  output on real data before touching the DB.
-- `--verbose` — per-node detail to stdout.
-- a written report at `.luminary/concepts/last_run.json` for after-the-fact inspection.
+- `--dry-run` -- run every node except `persist`; dump the full diagnostics report. The relevance-tuning
+  loop: judge the output on real data before touching the DB.
+- `--verbose` -- per-node detail to stdout.
+- a written report at `.luminary/concepts/last_run.json`.
 
-Principle: if a theme looks wrong, the logs must show *why* — which entities fed it,
-which step grouped them, and what score let it through.
+Principle: if a grouping looks wrong, the logs must show *why* -- which entities fed it, which step
+grouped them, what score let it through.
+
+## 8. Known perf gotchas
+
+- Full-text entity->chunk matching OOM-killed `make concepts` (exit 143) -> use the short
+  `entities_text`, not full chunk text.
+- All-pairs concept edges exploded persist + produced a hairball -> k-NN with a cutoff.
+- Never run heavy concept work in the live server lifespan -- sync Kuzu starves the event loop. Offline
+  `make concepts` (server stopped) is the path; an idle/background trigger is still TODO.

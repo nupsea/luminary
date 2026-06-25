@@ -231,6 +231,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
             # cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
+            # durable card->concept binding by stable slug (survives a concept rebuild)
+            "ALTER TABLE flashcards ADD COLUMN concept_slug TEXT",
             # structured rubric JSON for teachback results and feynman sessions
             "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
             "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
@@ -285,6 +287,19 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # column already exists
+
+        # One-time backfill of the card->concept slug binding for already-mapped cards, so the
+        # first rebuild after this migration can re-map them by slug. Idempotent (fills NULLs only).
+        try:
+            await conn.execute(
+                text(
+                    "UPDATE flashcards SET concept_slug = "
+                    "(SELECT slug FROM concepts WHERE concepts.id = flashcards.concept_id) "
+                    "WHERE flashcards.concept_id IS NOT NULL AND flashcards.concept_slug IS NULL"
+                )
+            )
+        except Exception:
+            pass
 
         # learning_goals.document_id was originally created NOT NULL.
         # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).

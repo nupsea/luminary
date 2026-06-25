@@ -9,9 +9,8 @@ ingestion, hybrid retrieval, FSRS, cited chat, a knowledge graph, tiered labs). 
 **orchestration** -- the product saying *"here is the one thing to do, and one door to do it
 from."* The two-lane model is that connective tissue.
 
-> Source of truth: `docs/handoff/implementation-plan/` (the build-ready bundle).
-> `docs/KNOWLEDGE_UNIVERSE.md` is the conceptual north star (reference, not law). See
-> [Spec reconciliation](#spec-reconciliation).
+> Source of truth: [knowledge-model.md](knowledge-model.md) (the goal-driven plan) +
+> `docs/handoff/implementation-plan/` (the build-ready bundle).
 
 ## The loop
 
@@ -121,8 +120,8 @@ concept-chips fall back to title/centroid-vector match.
 
 ## Spec reconciliation
 
-`docs/handoff/` is **authoritative**. `docs/KNOWLEDGE_UNIVERSE.md` is the earlier, purist spec
-kept for conceptual grounding. Where they differ:
+`docs/handoff/` is **authoritative**, reconciled under [knowledge-model.md](knowledge-model.md)
+(the goal-driven plan). Where they differ:
 
 - KU says concepts come from **documents only**; notes merely *link*. The handoff bundle keeps
   documents authoritative but adds **candidate concepts** (origin `note|quiz|chat|import`) that
@@ -137,6 +136,6 @@ proposed/evidenced/correctable**; **activity is never mastery**.
 
 - [concepts.md](concepts.md) -- the Concept primitive (the studyable atom).
 - [study-launcher.md](study-launcher.md) -- one sheet, many doors; `POST /study/assemble`.
-- [universe.md](universe.md) -- the Knowledge Universe lens.
+- [knowledge-model.md](knowledge-model.md) -- the goal-driven knowledge model (goal layer + graph substrate + the goal-projection Universe).
 - [okf.md](okf.md) -- portable knowledge projection.
 - [architecture.md](architecture.md), [invariants.md](invariants.md) -- the hard rules.

@@ -54,38 +54,11 @@ async def resolve_daily(session: AsyncSession, limit: int = _DAILY_LIMIT) -> lis
     return list(rows)
 
 
-async def _descendant_concept_ids(session: AsyncSession, node_id: str) -> list[str]:
-    """All studyable (level-2) concept ids under a galaxy/constellation node."""
-    children = (
-        await session.execute(
-            select(ConceptModel.id, ConceptModel.level).where(
-                ConceptModel.parent_id == node_id
-            )
-        )
-    ).all()
-    leaves: list[str] = []
-    for cid, level in children:
-        if level >= 2:
-            leaves.append(cid)
-        else:
-            leaves.extend(await _descendant_concept_ids(session, cid))
-    return leaves
-
-
 async def resolve_concept(session: AsyncSession, concept_id: str) -> list[str]:
-    """Resolve a star to studyable concepts.
-
-    A leaf concept (level 2) -> itself + its weakest related neighbours. A container
-    (galaxy/constellation, level 0/1) -> all its descendant concepts, weakest first, so
-    "Study this" on a domain assembles from everything inside it.
-    """
+    """Resolve a concept to studyable concepts: itself + its weakest related neighbours."""
     node = await session.get(ConceptModel, concept_id)
     if node is None:
         return []
-    if node.level < 2:
-        leaves = await _descendant_concept_ids(session, concept_id)
-        if leaves:  # a real container; flat/legacy concepts (no children) fall through
-            return await _weakest_first(session, leaves)
     neighbors = get_graph_service().get_concept_neighbors(concept_id, limit=8)
     ranked = await _weakest_first(session, [n for n in neighbors if n != concept_id])
     return [concept_id, *ranked[:2]]

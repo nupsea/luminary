@@ -7,21 +7,20 @@ ConceptService.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import ConceptModel, FlashcardModel, NoteModel
 from app.services.concept_service import get_concept_service
-from app.services.graph import get_graph_service
 
 _LEXICAL_SCAN_CAP = 500
-_WARMTH_DECAY_DAYS = 18.0  # warmth 1 (fresh) -> 0 (cold) over this window
 
 logger = logging.getLogger(__name__)
 
@@ -54,97 +53,6 @@ def _out(row: ConceptModel) -> ConceptOut:
     return ConceptOut(
         id=row.id, slug=row.slug, label=row.label, kind=row.kind,
         status=row.status, mastery=row.mastery,
-    )
-
-
-class UniverseStar(BaseModel):
-    id: str
-    label: str
-    kind: str
-    status: str
-    mastery: float
-    warmth: float  # 0 cold .. 1 fresh (mastery x recency drives the glow)
-    level: int     # 0 galaxy, 1 constellation, 2 concept
-    child_count: int  # drillable when > 0
-
-
-class UniverseEdge(BaseModel):
-    source: str
-    target: str
-
-
-class UniverseResponse(BaseModel):
-    stars: list[UniverseStar]
-    edges: list[UniverseEdge]
-    parent: str | None = None        # the node we drilled into (None at the galaxy sky)
-    parent_label: str | None = None
-
-
-def _warmth(last_reviewed: datetime | None, now: datetime) -> float:
-    if last_reviewed is None:
-        return 0.0
-    if last_reviewed.tzinfo is None:
-        last_reviewed = last_reviewed.replace(tzinfo=UTC)
-    days = (now - last_reviewed).total_seconds() / 86400.0
-    return max(0.0, min(1.0, 1.0 - days / _WARMTH_DECAY_DAYS))
-
-
-@router.get("/universe", response_model=UniverseResponse)
-async def get_universe(
-    parent: str | None = None, session: AsyncSession = Depends(get_db)
-) -> UniverseResponse:
-    """The Knowledge Universe: concept stars (warmth = mastery x recency) + edges.
-
-    Drill-down: no `parent` shows the galaxy sky (level 0); `parent=<id>` shows that
-    node's children (its constellations, then concepts). Each star carries `child_count`
-    so the UI knows what can be opened. Edges appear only when the concept linker has
-    produced CONCEPT_RELATED_TO relations (degrades gracefully -- docs/universe.md).
-    """
-    now = datetime.now(UTC)
-    parent_label: str | None = None
-    if parent:
-        parent_row = await session.get(ConceptModel, parent)
-        if parent_row is None:
-            raise HTTPException(status_code=404, detail="concept not found")
-        parent_label = parent_row.label
-        where = (ConceptModel.status != "candidate", ConceptModel.parent_id == parent)
-    else:
-        where = (ConceptModel.status != "candidate", ConceptModel.level == 0)
-
-    rows = (await session.execute(select(ConceptModel).where(*where))).scalars().all()
-    star_ids = {c.id for c in rows}
-
-    child_counts: dict[str, int] = {}
-    if star_ids:
-        for cid, n in (
-            await session.execute(
-                select(ConceptModel.parent_id, func.count())
-                .where(ConceptModel.parent_id.in_(star_ids))
-                .group_by(ConceptModel.parent_id)
-            )
-        ).all():
-            child_counts[cid] = n
-
-    stars = [
-        UniverseStar(
-            id=c.id, label=c.label, kind=c.kind, status=c.status,
-            mastery=c.mastery, warmth=_warmth(c.last_reviewed, now),
-            level=c.level, child_count=child_counts.get(c.id, 0),
-        )
-        for c in rows
-    ]
-    try:
-        relations = get_graph_service().get_concept_relations()
-    except Exception:
-        logger.warning("universe: concept relations lookup failed", exc_info=True)
-        relations = []
-    edges = [
-        UniverseEdge(source=r["source"], target=r["target"])
-        for r in relations
-        if r["source"] in star_ids and r["target"] in star_ids
-    ]
-    return UniverseResponse(
-        stars=stars, edges=edges, parent=parent, parent_label=parent_label
     )
 
 
@@ -217,6 +125,101 @@ async def apply_overrides(session: AsyncSession = Depends(get_db)) -> dict[str, 
     applied = await get_concept_service().apply_overrides(session)
     await session.commit()
     return {"applied": applied}
+
+
+class PurgeJunkResponse(BaseModel):
+    dry_run: bool
+    matched: int
+    deleted: int
+    labels: list[str]
+
+
+@router.post("/purge-junk", response_model=PurgeJunkResponse)
+async def purge_junk_concepts(
+    dry_run: bool = True, session: AsyncSession = Depends(get_db)
+) -> PurgeJunkResponse:
+    """Delete concepts whose label is format-junk (code tokens, CLI flags, unicode garbage).
+
+    Same predicate the extraction pipeline uses, applied retroactively so existing junk does
+    not linger in study/scope. ``dry_run=True`` (default) previews the matches without deleting;
+    pass ``dry_run=false`` to actually remove them from all three stores.
+    """
+    from app.workflows.concept_nodes._shared import is_junk_entity  # noqa: PLC0415
+
+    rows = (await session.execute(select(ConceptModel.id, ConceptModel.label))).all()
+    matches = [(cid, label) for cid, label in rows if is_junk_entity(label)]
+    labels = sorted(label for _cid, label in matches)
+    deleted = 0
+    if not dry_run:
+        svc = get_concept_service()
+        for cid, _label in matches:
+            await svc.delete_concept(session, cid)
+            deleted += 1
+        await session.commit()
+    return PurgeJunkResponse(
+        dry_run=dry_run, matched=len(matches), deleted=deleted, labels=labels
+    )
+
+
+# --- concept-layer rebuild (the UI's "make concepts") ---------------------------------
+# A global wipe-and-rebuild from the entity graph. Runs IN-PROCESS as a background task so it
+# shares the live Kuzu/SQLite/LanceDB connections (no offline lock fight). Single job at a time;
+# status is polled. Heavy: entity clustering + per-batch LLM scoring -- minutes on a big library,
+# needs Ollama. Resets the concept mastery rollup (card FSRS state survives); corrections re-apply.
+
+_regen_state: dict = {
+    "status": "idle",  # idle | running | done | error
+    "started_at": None,
+    "finished_at": None,
+    "concepts": None,
+    "error": None,
+}
+_regen_task: asyncio.Task | None = None
+
+
+class RegenStatus(BaseModel):
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    concepts: int | None = None
+    error: str | None = None
+
+
+async def _run_regen() -> None:
+    from app.workflows.concept_pipeline import run_pipeline  # noqa: PLC0415
+
+    try:
+        state = await run_pipeline(dry_run=False)
+        persisted = state.get("diagnostics", {}).get("persist_concepts", {}).get("concepts", 0)
+        _regen_state.update(
+            status="done", finished_at=datetime.now(UTC).isoformat(),
+            concepts=persisted, error=None,
+        )
+    except Exception as exc:  # noqa: BLE001 -- surface any failure to the poller
+        logger.warning("concept rebuild failed", exc_info=True)
+        _regen_state.update(
+            status="error", finished_at=datetime.now(UTC).isoformat(), error=str(exc)
+        )
+
+
+@router.post("/regenerate", response_model=RegenStatus)
+async def regenerate_concepts() -> RegenStatus:
+    """Kick off a full concept-layer rebuild in the background. 409 if one is already running."""
+    global _regen_task
+    if _regen_state["status"] == "running":
+        raise HTTPException(status_code=409, detail="a concept rebuild is already running")
+    _regen_state.update(
+        status="running", started_at=datetime.now(UTC).isoformat(),
+        finished_at=None, concepts=None, error=None,
+    )
+    _regen_task = asyncio.create_task(_run_regen())  # keep a ref so it isn't GC'd mid-flight
+    return RegenStatus(**_regen_state)
+
+
+@router.get("/regenerate/status", response_model=RegenStatus)
+async def regenerate_concepts_status() -> RegenStatus:
+    """Poll the current/last rebuild's status."""
+    return RegenStatus(**_regen_state)
 
 
 @router.get("/for-note/{note_id}", response_model=list[ConceptOut])

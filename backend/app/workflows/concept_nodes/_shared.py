@@ -28,6 +28,9 @@ def clean_name(raw: str) -> str:
 # formula / latex / fragment markers, and ultra-generic abstract words that aren't
 # studyable concepts (they blur to the embedding centre and vacuum up noise as "suns").
 _MATHY = re.compile(r"[()\\=]|script(script)?style|divided by|\bd[xy]\b|\blim\b")
+# Unicode Mathematical Alphanumeric Symbols (bold/italic/script): GLiNER sometimes lifts a
+# styled run as a label (e.g. "𝐆𝐚𝐭𝐞𝐰𝐚𝐲 𝐚𝐠𝐠𝐫𝐞𝐠𝐚𝐭𝐢𝐨𝐧 𝐥𝐚𝐲𝐞𝐫") -- never a real concept name.
+_MATH_ALNUM = re.compile(r"[\U0001D400-\U0001D7FF]")
 _GENERIC_STOP = frozenset(
     {
         "performance", "thought", "information", "intelligence", "approach",
@@ -36,16 +39,32 @@ _GENERIC_STOP = frozenset(
         "critical information", "status information", "index information",
     }
 )
+# Source-code literals/keywords that surface as standalone "concepts" from code blocks but
+# carry no studyable meaning on their own (boolean/null literals, type keywords).
+_CODE_LITERALS = frozenset(
+    {
+        "false", "true", "null", "none", "nil", "nan", "void", "undefined",
+        "dynamic", "static", "boolean", "int", "str", "char", "enum", "const",
+    }
+)
 
 
 def is_junk_entity(name: str) -> bool:
     """Heuristic noise filter for NER surface forms that slipped past the type filter.
 
-    Drops: pure numbers/symbols, digit-dominant strings, formula/latex fragments, and a
-    small stoplist of ultra-generic abstract words. Conservative -- format-driven.
+    Drops: pure numbers/symbols, digit-dominant strings, formula/latex fragments, unicode
+    styled-text garbage, CLI flags (``--acl-spec``), snake_case code identifiers
+    (``unique_files``), source-code literals (``false``), and a small stoplist of
+    ultra-generic abstract words. Conservative -- format-driven.
     """
     n = name.strip().lower()
-    if not n or n in _GENERIC_STOP:
+    if not n or n in _GENERIC_STOP or n in _CODE_LITERALS:
+        return True
+    if n.startswith("-"):            # CLI flag fragment, e.g. "--acl-spec"
+        return True
+    if "_" in n:                     # snake_case code identifier, e.g. "unique_files"
+        return True
+    if _MATH_ALNUM.search(name):     # unicode math-alphanumeric styled garbage
         return True
     letters = sum(c.isalpha() for c in n)
     digits = sum(c.isdigit() for c in n)
@@ -72,34 +91,21 @@ NOISE_TYPES: frozenset[str] = frozenset({"PERSON", "ORGANIZATION", "PLACE", "DAT
 
 MIN_FREQUENCY = 2          # drop hapax entities
 MIN_ENTITY_LEN = 3
-MIN_DOC_ENTITIES = 3       # below this a doc's entities form a single sub-concept
 
 
 PIPELINE_CONFIG = {
-    # Levels are cut to nested target COUNTS (maxclust), adaptive to library size and
-    # clamped to these ranges. Height/gap cuts are pathological on bge-small (outliers
-    # dominate the tree top; domains separate mid-tree) -> 89 or 2 galaxies. The groupings
-    # still emerge from the data; only the count is bounded. galaxy ~n/200, constellation
-    # ~n/45, concept ~n/4 entities.
-    "galaxy_k_range": [6, 16],
-    "constellation_k_range": [12, 55],
-    "min_galaxy_concepts": 6,           # smaller galaxies are merged into the nearest domain
-    "min_galaxies": 5,                  # ...but always keep at least this many real domains
-    "max_concepts_cap": 400,            # cap on studyable (level-2) concepts
+    # Concepts are cut to a target COUNT (maxclust ~n/4 entities), adaptive to library size
+    # and clamped to the cap. Height/gap cuts are pathological on bge-small (outliers dominate
+    # the tree top). The groupings still emerge from the data; only the count is bounded.
+    "concept_dedup_cutoff": 0.93,       # merge near-identical concepts (verify/dedup step)
+    "max_concepts_cap": 400,            # cap on studyable concepts
     # edges: each concept links to its top-K nearest neighbours above a cutoff (k-NN graph,
     # not all-pairs -- all-pairs exploded to ~75k edges, a hairball + slow persist).
     "concept_edge_cutoff": 0.50,        # min centroid cosine for a concept<->concept link
     "concept_edge_top_k": 6,            # nearest neighbours kept per concept
-    "galaxy_edge_cutoff": 0.25,         # galaxy<->galaxy thin link if related (lower bar)
-    # legacy 2-level knobs (superseded by the dendrogram; kept for the old path):
-    "target_themes_cap": 30,
-    "subconcept_cosine_threshold": 0.45,
-    "theme_cosine_threshold": 0.55,
 }
 
-# concept hierarchy levels
-LEVEL_GALAXY = 0
-LEVEL_CONSTELLATION = 1
+# concept level (flat layer; 0/1 were the retired galaxy/constellation tiers)
 LEVEL_CONCEPT = 2
 
 
@@ -114,25 +120,18 @@ class ConceptPipelineState(TypedDict, total=False):
     """Flows through the nodes. `total=False` -- each node fills its slice."""
 
     dry_run: bool
-    target_themes: int
     # select_entities -> :
     entities: list[EntityRec]            # kept, deduped across docs
     per_doc_entities: dict[str, list[str]]   # doc_id -> kept entity names
     # embed_entities -> :
     vectors: dict[str, list[float]]      # entity name -> embedding
-    # cluster_subconcepts -> :
-    subconcepts: list[dict]              # {label?, entities, document_ids, centroid, salience}
-    # rollup_themes -> :
-    themes: list[dict]                   # {label?, sub_idxs, entities, document_ids, centroid, ...}
-    theme_edges: list[tuple[int, int]]
+    # build_hierarchy -> : hierarchy {concepts}, lateral_edges
     # observability:
     diagnostics: dict[str, Any]
 
 
-def new_state(dry_run: bool, target_themes: int) -> ConceptPipelineState:
-    return ConceptPipelineState(
-        dry_run=dry_run, target_themes=target_themes, diagnostics={}
-    )
+def new_state(dry_run: bool) -> ConceptPipelineState:
+    return ConceptPipelineState(dry_run=dry_run, diagnostics={})
 
 
 def record(state: ConceptPipelineState, node: str, payload: dict[str, Any]) -> None:

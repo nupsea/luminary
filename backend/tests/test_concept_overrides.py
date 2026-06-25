@@ -109,38 +109,6 @@ async def test_concepts_for_note_unions_engagement_and_lexical(test_db):
     assert ids == {"c_cache", "c_snap"}  # lexical + engagement, not the unrelated one
 
 
-async def test_universe_stars_warmth_and_edges(test_db):
-    from datetime import UTC, datetime
-
-    factory = test_db
-    graph_module._graph_service = None
-    g = graph_module.get_graph_service()
-    async with factory() as s:
-        s.add(ConceptModel(id="warm", slug="warm", label="Warm", kind="concept",
-                           origin="document", status="confirmed", mastery=80.0,
-                           last_reviewed=datetime.now(UTC)))
-        s.add(ConceptModel(id="cold", slug="cold", label="Cold", kind="concept",
-                           origin="document", status="proposed", mastery=10.0,
-                           last_reviewed=None))
-        # candidates are excluded from the sky
-        s.add(ConceptModel(id="cand", slug="cand", label="Cand", kind="concept",
-                           origin="note", status="candidate", mastery=0.0))
-        await s.commit()
-    for cid, slug in (("warm", "warm"), ("cold", "cold")):
-        g.upsert_concept_node(cid, slug, slug.title(), "concept", "confirmed")
-    g.add_concept_relation("warm", "cold")
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://t") as client:
-        r = await client.get("/concepts/universe")
-    assert r.status_code == 200, r.text
-    body = r.json()
-    stars = {s["id"]: s for s in body["stars"]}
-    assert set(stars) == {"warm", "cold"}  # candidate excluded
-    assert stars["warm"]["warmth"] > 0.9 and stars["cold"]["warmth"] == 0.0
-    assert body["edges"] == [{"source": "warm", "target": "cold"}]
-
-
 async def test_apply_overrides_survives_reparse(test_db):
     """A rename + reject re-apply onto freshly re-created concepts with the same slug."""
     factory = test_db

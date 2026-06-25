@@ -51,14 +51,13 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 ## Knowledge layer (the Concept primitive)
 
 A **Concept** is the single studyable atom -- distinct from a Kuzu `Entity` (a lexical NER
-mention). Concepts carry mastery and are the routing unit for sessions, goals, gaps, and the
-Universe. Source of truth = SQLite (state) + Kuzu (topology); derived projections = LanceDB vector
-+ OKF Markdown files. Before any concept/mastery/graph/study work, read:
+mention). Concepts carry mastery and are the routing unit for sessions and study. Source of truth =
+SQLite (state) + Kuzu (topology); derived projections = LanceDB vector + OKF Markdown files. Before
+any concept/mastery/graph/study work, read:
 
 - `docs/concepts.md` -- the Concept primitive (the canonical "what is a concept").
 - `docs/two-lane-model.md` -- the orchestration spine (Lane A/B, Study Events, the 14-rule constitution).
 - `docs/study-launcher.md` -- one sheet, many doors; `POST /study/assemble` + scope resolver.
-- `docs/universe.md` -- the Knowledge Universe lens over the concept graph.
 - `docs/okf.md` -- the portable knowledge projection (export/grounding/import).
 
 ## Navigation Tabs

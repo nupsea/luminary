@@ -43,19 +43,23 @@ FLASHCARD_SYSTEM = (
 )
 
 FLASHCARD_USER_TMPL = (
-    "Generate {count} {difficulty}-level flashcard pairs from the text below.\n"
+    "Write {count} {difficulty}-level question/answer flashcards from the text below. "
+    "Each flashcard is a QUESTION a learner answers from memory, plus its ANSWER. "
+    "Do NOT summarise, outline, or analyse the text.\n"
     "Difficulty guidelines: {difficulty_guidelines}\n"
     "{extra_instructions}"
     "Each card must be answerable from the provided text only.\n"
-    "Format: "
-    '[{{"question": "...", "answer": "...", "source_excerpt": "...",'
-    ' "bloom_level": N}}]\n'
-    "bloom_level is an integer 1-6 "
-    "(1=remember, 2=understand, 3=apply, "
-    "4=analyze, 5=evaluate, 6=create).\n"
-    'The "answer" field may use Markdown (bold, lists) for clarity.\n\n'
+    "Output EXACTLY this JSON shape:\n"
+    '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...",'
+    ' "bloom_level": N}}]}}\n'
+    "bloom_level is an integer 1-6 (1=remember, 2=understand, 3=apply, "
+    "4=analyze, 5=evaluate, 6=create).\n\n"
+    "Example for a text about replication:\n"
+    '{{"flashcards": [{{"question": "Why does leader-based replication need a replication log?", '
+    '"answer": "So followers can apply the same writes in the same order and stay consistent '
+    'with the leader.", "source_excerpt": "", "bloom_level": 2}}]}}\n\n'
     "Text:\n{text}\n\n"
-    "JSON array:"
+    "JSON object:"
 )
 
 NOTES_CONCEPT_EXTRACT_SYSTEM = (
@@ -264,18 +268,24 @@ _TECH_TITLE_KEYWORDS = re.compile(
 
 
 def _infer_genre(doc: DocumentModel | None) -> str:
-    """Infer document genre for system prompt tuning."""
+    """Infer document genre for system prompt tuning.
+
+    Technical content types (tech_book, tech_article, code, paper) MUST map to technical/academic.
+    They previously fell through to 'narrative' (the story prompt), so the model summarised or
+    extracted tables instead of writing recall cards.
+    """
     if doc is None:
-        return "narrative"
+        return "non-fiction"
     content_type = (doc.content_type or "").lower()
     title = (doc.title or "").lower()
-    if content_type == "book":
-        if _TECH_TITLE_KEYWORDS.search(title):
-            return "technical"
-        return "non-fiction"
-    if content_type in ("pdf", "web"):
+    if content_type in ("tech_book", "tech_article", "code"):
+        return "technical"
+    if content_type in ("paper", "pdf", "web", "article"):
         return "academic"
-    return "narrative"
+    if content_type == "book":
+        return "technical" if _TECH_TITLE_KEYWORDS.search(title) else "non-fiction"
+    # transcripts / notes / unknown: non-fiction recall prompt is safer than narrative
+    return "non-fiction"
 
 
 def _build_genre_system_prompt(genre: str) -> str:
@@ -305,6 +315,8 @@ def _build_genre_system_prompt(genre: str) -> str:
         "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
         "'in this book', 'in this document', or any similar reference to the source material. "
         "A flashcard question must make complete sense on its own without seeing the original"
-        " text. " + quality_rules + "Output a JSON array starting with [ and ending with ]. "
-        "Write no explanation, preamble, or markdown fences."
+        " text. " + quality_rules + 'Output ONLY a JSON object of the form '
+        '{"flashcards": [{"question": "...", "answer": "..."}]}. '
+        "Each item MUST be a question/answer pair. Do NOT output a summary, outline, analysis, or "
+        "table. Write no explanation, preamble, or markdown fences."
     )

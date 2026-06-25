@@ -382,3 +382,17 @@ class AssembleResponse(BaseModel):
     cards: list[FlashcardResponse]
     preview: AssemblePreview
     teachback_available: bool
+
+
+class TopicItem(BaseModel):
+    title: str
+    level: int
+    section_id: str | None
+    page_start: int | None
+
+
+class DocumentTopicsResponse(BaseModel):
+    document_id: str
+    title: str
+    source: str  # "sections" | "outline"
+    topics: list[TopicItem]

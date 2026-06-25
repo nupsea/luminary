@@ -1,7 +1,7 @@
 """GET /documents/{id}/overview + POST /documents/{id}/collections (Phase 2).
 
-The Doc overview aggregates header + extracted concepts (with evidence) + collection
-memberships; assignment adds a doc to collections idempotently.
+The Doc overview aggregates header + collection memberships + tags; assignment adds a doc to
+collections idempotently. (Study topics live in the Study tab, not this aggregate.)
 """
 
 import pytest
@@ -14,7 +14,6 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import CollectionModel, DocumentModel
-from app.services.concept_service import get_concept_service
 
 
 @pytest.fixture
@@ -43,19 +42,10 @@ async def _seed_doc(factory):
         s.add(CollectionModel(id="col1", name="DATA-ENG", color="#6366F1"))
         await s.commit()
     graph_module._graph_service = None
-    g = graph_module.get_graph_service()
-    g.upsert_document("d1", "Iceberg Book", "book")
-    svc = get_concept_service()
-    async with factory() as s:
-        await svc.create_concept(
-            s, label="Manifests", origin="document", status="proposed",
-            evidence=[{"document_id": "d1", "chunk_id": "c1", "quote": "a manifest list"}],
-            document_ids=["d1"],
-        )
-        await s.commit()
+    graph_module.get_graph_service().upsert_document("d1", "Iceberg Book", "book")
 
 
-async def test_overview_aggregates_concepts_and_collections(test_db):
+async def test_overview_aggregates_header_and_collections(test_db):
     factory = test_db
     await _seed_doc(factory)
     transport = ASGITransport(app=app)
@@ -72,8 +62,7 @@ async def test_overview_aggregates_concepts_and_collections(test_db):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["title"] == "Iceberg Book" and body["tags"] == ["data"]
-    assert [c["label"] for c in body["concepts"]] == ["Manifests"]
-    assert body["concepts"][0]["evidence"][0]["quote"] == "a manifest list"
+    assert "concepts" not in body  # studyable list lives in the Study tab, not the overview
     assert [c["id"] for c in body["collections"]] == ["col1"]
 
 

@@ -1,7 +1,7 @@
-"""build_hierarchy node -- the nested Universe (docs/concept-model-design.md §0).
+"""build_hierarchy node -- the flat concept layer (docs/concept-model-design.md §0).
 
-Verifies the dendrogram cut produces consistently-nested galaxy/constellation/concept
-levels, with the distance-encoded edge rule: NO lateral links across galaxies.
+Verifies the dendrogram cut produces studyable concepts and that the distance-encoded
+RELATED_TO edges never link unrelated domains (data-eng vs philosophy).
 """
 
 import asyncio
@@ -50,38 +50,27 @@ class _FakeGraph:
         ]
 
 
-class _FakeLLM:
-    async def complete(self, messages, temperature=0.0):
-        return "Topic"
-
-
 async def _run(monkeypatch):
-    import app.workflows.concept_nodes.label_levels as lab
-
     monkeypatch.setattr(sel, "get_graph_service", lambda: _FakeGraph())
     monkeypatch.setattr(
         emb, "get_embedding_service",
         lambda: type("E", (), {"encode": staticmethod(_encode)})(),
     )
-    monkeypatch.setattr(lab, "get_llm_service", lambda: _FakeLLM())
     return await run_pipeline(dry_run=True)
 
 
-def test_nested_universe_with_no_cross_galaxy_edges(monkeypatch):
+def test_flat_concepts_with_no_cross_domain_edges(monkeypatch):
     state = asyncio.run(_run(monkeypatch))
     h = state["hierarchy"]
-    assert h["galaxies"] and h["constellations"] and h["concepts"]
+    # flat: a concept layer only -- no galaxy/constellation tiers
+    assert h["concepts"]
+    assert "galaxies" not in h and "constellations" not in h
+    for c in h["concepts"]:
+        assert c["level"] == 2 and c["label"] == c["sun"]
+        assert "parent_idx" not in c
 
-    def galaxy_of_concept(ci):
-        return h["constellations"][h["concepts"][ci]["parent_idx"]]["parent_idx"]
-
-    # nesting: every concept -> constellation -> galaxy chain resolves
-    for ci in range(len(h["concepts"])):
-        assert h["concepts"][ci]["parent_idx"] is not None
-        assert 0 <= galaxy_of_concept(ci) < len(h["galaxies"])
-
-    # edges follow SEMANTIC DISTANCE, not a categorical wall: related concepts may link
-    # even across galaxies (thin), but UNRELATED domains (data-eng vs philosophy) must not.
+    # edges follow SEMANTIC DISTANCE, not a categorical wall: related concepts may link,
+    # but UNRELATED domains (data-eng vs philosophy) must not.
     def domain_of(ci):
         ents = set(h["concepts"][ci]["entities"])
         if ents & set(_DOMAIN) and any(_DOMAIN[e][0] == "data" for e in ents if e in _DOMAIN):
@@ -94,11 +83,41 @@ def test_nested_universe_with_no_cross_galaxy_edges(monkeypatch):
     ]
     assert not bad, f"unrelated-domain edges leaked (data<->philosophy): {bad}"
 
-    # distinct domains land in distinct galaxies
-    def galaxy_of_entity(name):
-        for ci, c in enumerate(h["concepts"]):
-            if name in c["entities"]:
-                return galaxy_of_concept(ci)
-        return None
 
-    assert galaxy_of_entity("dharma") != galaxy_of_entity("iceberg")
+def _concept(centroid, entities, salience, con, gal, sun):
+    return {
+        "level": 2, "label": "", "sun": sun, "entities": entities, "centroid": centroid,
+        "salience": float(salience), "document_ids": ["d"], "_con": con, "_gal": gal,
+    }
+
+
+def test_dedup_merges_near_identical_keeps_distinct():
+    from app.workflows.concept_nodes.build_hierarchy import _dedup_concepts
+
+    base = [1.0, 0.0, 0.0, 0.0]
+    near = [0.99, 0.02, 0.0, 0.0]   # cosine ~1.0 with base -> merge
+    far = [0.0, 0.0, 1.0, 0.0]      # orthogonal -> stays distinct
+    concepts = [
+        _concept(base, ["a"], 10, 0, 0, "a"),
+        _concept(near, ["b"], 3, 1, 0, "b"),
+        _concept(far, ["z"], 5, 2, 1, "z"),
+    ]
+    merged, n = _dedup_concepts(concepts, 0.93)
+
+    assert n == 1 and len(merged) == 2
+    big = next(m for m in merged if "a" in m["entities"])
+    assert sorted(big["entities"]) == ["a", "b"]   # folded
+    assert big["sun"] == "a" and big["_con"] == 0  # most-salient member keeps identity
+    assert big["salience"] == 13.0                 # salience summed
+    assert any(m["entities"] == ["z"] for m in merged)  # distinct concept untouched
+
+
+def test_dedup_is_conservative_below_cutoff():
+    from app.workflows.concept_nodes.build_hierarchy import _dedup_concepts
+
+    concepts = [
+        _concept([1.0, 0.0, 0.0], ["a"], 1, 0, 0, "a"),
+        _concept([0.7, 0.7, 0.0], ["b"], 1, 1, 0, "b"),  # cosine ~0.7 < 0.93
+    ]
+    merged, n = _dedup_concepts(concepts, 0.93)
+    assert n == 0 and len(merged) == 2

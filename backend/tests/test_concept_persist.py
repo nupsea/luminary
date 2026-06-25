@@ -1,5 +1,5 @@
-"""persist_concepts node (NW5): writes the named galaxy/constellation/concept hierarchy
-to SQLite with parent_id chains + stable slug identity (docs/concept-model-design.md §6)."""
+"""persist_concepts node (NW5): writes the flat concept layer to SQLite with stable slug
+identity + RELATED_TO edges, status honoured from score_concepts (concept-model-design.md §6)."""
 
 import pytest
 from sqlalchemy import select
@@ -37,97 +37,33 @@ def _state():
         "dry_run": False,
         "entity_chunks": {"iceberg": ["ch1"], "parquet": ["ch2"]},
         "lateral_edges": [(0, 1, 0.6)],
-        "galaxy_edges": [],
         "hierarchy": {
-            "galaxies": [{
-                "label": "Data Engineering", "entities": ["iceberg", "parquet", "spark"],
-                "document_ids": ["d1"], "salience": 10.0, "constellation_idxs": [0],
-            }],
-            "constellations": [{
-                "label": "Storage Formats", "entities": ["iceberg", "parquet"],
-                "document_ids": ["d1"], "salience": 8.0, "concept_idxs": [0, 1], "parent_idx": 0,
-            }],
             "concepts": [
                 {"label": "iceberg", "sun": "iceberg", "entities": ["iceberg", "parquet"],
-                 "document_ids": ["d1"], "salience": 5.0, "parent_idx": 0, "centroid": cen},
+                 "document_ids": ["d1"], "salience": 5.0, "centroid": cen},
                 {"label": "spark", "sun": "spark", "entities": ["spark"],
-                 "document_ids": ["d1"], "salience": 3.0, "parent_idx": 0, "centroid": cen},
+                 "document_ids": ["d1"], "salience": 3.0, "centroid": cen,
+                 "status": "candidate"},
             ],
         },
     }
 
 
-async def test_persist_writes_nested_hierarchy(test_db):
+async def test_persist_writes_flat_concepts(test_db):
     factory = test_db
     async with factory() as s:
         await persist_concepts(_state())  # opens its own session via the factory
         rows = (await s.execute(select(ConceptModel))).scalars().all()
 
-    by_level = {0: [], 1: [], 2: []}
-    for r in rows:
-        by_level[r.level].append(r)
-    assert len(by_level[0]) == 1 and len(by_level[1]) == 1 and len(by_level[2]) == 2
-
-    galaxy = by_level[0][0]
-    constellation = by_level[1][0]
-    assert galaxy.label == "Data Engineering" and galaxy.parent_id is None
-    assert galaxy.slug.startswith("g-")
-    assert constellation.parent_id == galaxy.id and constellation.slug.startswith("k-")
-    for c in by_level[2]:
-        assert c.parent_id == constellation.id and c.slug.startswith("c-")
+    # flat: every persisted node is a level-2 concept with no parent
+    assert len(rows) == 2
+    assert all(r.level == 2 and r.parent_id is None and r.slug.startswith("c-") for r in rows)
     # stable identity: slug is a hash of the member signature, deterministic
-    assert {c.label for c in by_level[2]} == {"iceberg", "spark"}
-
-
-async def test_universe_drilldown(test_db):
-    from app.routers.concepts import get_universe
-
-    factory = test_db
-    await persist_concepts(_state())
-    async with factory() as s:
-        sky = await get_universe(parent=None, session=s)
-        assert len(sky.stars) == 1 and sky.parent is None
-        galaxy = sky.stars[0]
-        assert galaxy.level == 0 and galaxy.child_count == 1  # one constellation inside
-
-        inside_galaxy = await get_universe(parent=galaxy.id, session=s)
-        assert inside_galaxy.parent == galaxy.id
-        assert len(inside_galaxy.stars) == 1
-        constellation = inside_galaxy.stars[0]
-        assert constellation.level == 1 and constellation.child_count == 2
-
-        inside_con = await get_universe(parent=constellation.id, session=s)
-        assert len(inside_con.stars) == 2  # the two concepts
-        assert all(c.level == 2 and c.child_count == 0 for c in inside_con.stars)
-
-
-async def test_container_study_and_mastery_rollup(test_db):
-    from datetime import UTC, datetime
-
-    from app.services.concept_service import get_concept_service
-    from app.services.scope_resolver import resolve_concept
-
-    factory = test_db
-    await persist_concepts(_state())
-    async with factory() as s:
-        rows = (await s.execute(select(ConceptModel))).scalars().all()
-        galaxy = next(r for r in rows if r.level == 0)
-        constellation = next(r for r in rows if r.level == 1)
-        leaves = [r for r in rows if r.level == 2]
-
-        # studying a container resolves to all descendant (leaf) concepts
-        resolved = await resolve_concept(s, galaxy.id)
-        assert set(resolved) == {leaf.id for leaf in leaves}
-
-        # studying one leaf rolls mastery up to its constellation and galaxy
-        await get_concept_service().set_learning_state(
-            s, leaves[0].id, mastery=80.0, last_reviewed=datetime.now(UTC)
-        )
-        await s.commit()
-        con = await s.get(ConceptModel, constellation.id)
-        gal = await s.get(ConceptModel, galaxy.id)
-        assert con.mastery > 0 and gal.mastery > 0
-        assert con.last_reviewed is not None and gal.last_reviewed is not None
+    assert {r.label for r in rows} == {"iceberg", "spark"}
+    # score_concepts status is honoured (the second concept was flagged candidate)
+    status_by_label = {r.label: r.status for r in rows}
+    assert status_by_label["iceberg"] == "proposed"
+    assert status_by_label["spark"] == "candidate"
 
 
 async def test_persist_dry_run_writes_nothing(test_db):

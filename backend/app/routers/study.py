@@ -55,6 +55,7 @@ from app.schemas.study import (
     DailyHistoryItem,
     DecayDebtItem,
     DecayDebtResponse,
+    DocumentTopicsResponse,
     DueCountResponse,
     GapResult,
     RubricCompletenessResponse,
@@ -88,6 +89,7 @@ from app.schemas.study import (
     TeachbackResultsBatchResponse,
     TeachbackRubricResponse,
     TeachbackSubmitResponse,
+    TopicItem,
 )
 from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
@@ -104,6 +106,7 @@ from app.services.study_session_service import (
 from app.services.study_session_service import (
     compute_section_heatmap as _compute_section_heatmap,
 )
+from app.services.topic_service import get_topic_service
 
 logger = logging.getLogger(__name__)
 
@@ -292,12 +295,21 @@ async def get_due_cards(
     tag: str | None = Query(default=None),
     document_ids: list[str] | None = Query(default=None),
     note_ids: list[str] | None = Query(default=None),
+    section_id: str | None = Query(default=None),
     limit: int = 20,
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
     """Return flashcards whose due_date is now or in the past."""
     now = datetime.now(UTC)
     stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
+
+    # section scope: cards whose source chunk belongs to this section (study a coherent unit)
+    if section_id:
+        stmt = stmt.where(
+            FlashcardModel.chunk_id.in_(
+                select(ChunkModel.id).where(ChunkModel.section_id == section_id)
+            )
+        )
 
     # Apply filters
     used_document_ids = document_ids or ([document_id] if document_id else [])
@@ -2301,3 +2313,28 @@ async def session_review(
             cards_remaining=len(remaining),
         ),
     )
+
+
+@router.get("/topics/{document_id}", response_model=DocumentTopicsResponse)
+async def get_document_topics(
+    document_id: str, session: AsyncSession = Depends(get_db)
+) -> DocumentTopicsResponse:
+    """A document's study topics from its authored structure (top-level headings, front/back-matter
+    filtered out) -- or an LLM outline when heading detection is messy. Never an INDEX or publisher
+    boilerplate."""
+    data = await get_topic_service().document_topics(session, document_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return DocumentTopicsResponse(**data)
+
+
+@router.get("/sections/{document_id}", response_model=list[TopicItem])
+async def get_document_sections(
+    document_id: str,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: AsyncSession = Depends(get_db),
+) -> list[TopicItem]:
+    """All real sub-sections of a document (junk filtered, searchable) for drill-down."""
+    rows = await get_topic_service().document_sections(session, document_id, q=q, limit=limit)
+    return [TopicItem(**r) for r in rows]

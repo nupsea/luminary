@@ -24,6 +24,7 @@ export interface StudyFilters {
   tag?: string
   document_ids?: string[]
   note_ids?: string[]
+  section_id?: string
 }
 
 export interface PrepareStudySessionOptions {
@@ -137,6 +138,40 @@ export async function prepareStudySession(
       plannedTotal: cards.length,
       documentId,
       collectionId,
+    },
+  }
+}
+
+/**
+ * Study one coherent SECTION (a chapter or sub-section) from an EXPLICIT set of cards (its existing
+ * cards, or ones just generated for it) -- not a due round-trip, so freshly generated cards always
+ * appear and a not-yet-due section can still be studied. Always fresh: it does not adopt the
+ * document's open session (scoped by doc, not section), so two sections never cross-contaminate.
+ */
+export async function prepareSectionStudyFromCards(
+  documentId: string,
+  cards: Flashcard[],
+  mode: StudyMode = "flashcard",
+): Promise<PreparedStudySessionOutcome> {
+  if (cards.length === 0) return { kind: "empty" }
+  const shaped = shapeQueue(cards)
+  const id = await startSession(
+    documentId,
+    mode,
+    null,
+    shaped.map((c) => c.id),
+  )
+  return {
+    kind: "studying",
+    session: {
+      id,
+      mode,
+      queue: shaped,
+      prevResults: [],
+      answeredCount: 0,
+      plannedTotal: shaped.length,
+      documentId,
+      collectionId: null,
     },
   }
 }
