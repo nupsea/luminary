@@ -1,14 +1,13 @@
 ---
-description: Concept extraction PIPELINE -- implementation reference (entity selection, context embeddings, model-routed labelling, stable identity, observability). For the knowledge MODEL (goals, graph substrate, mastery, the Universe), read knowledge-model.md, which supersedes this doc's old model/plan sections.
+description: Concept extraction PIPELINE -- implementation reference (entity selection, context embeddings, model-routed labelling, stable identity, observability). For the Concept primitive (what a concept is, mastery, lifecycle), read concepts.md.
 ---
 
 # Concept extraction pipeline -- implementation reference
 
-This documents **how concepts are extracted** from a library. The **what/why of the knowledge model**
-(goal layer, poly graph substrate, mastery, the goal-projection Universe) now lives in
-[knowledge-model.md](knowledge-model.md) -- read that first. The old strict-tree hierarchy,
-all-corpus Universe, forced clustering, and the LangGraph framing in earlier versions of this doc are
-**superseded**; what remains below is the still-true pipeline craft.
+This documents **how concepts are extracted** from a library. For the **what/why of the Concept
+primitive** (mastery, lifecycle, the studyable atom) read [concepts.md](concepts.md) first. The old
+strict-tree hierarchy, forced clustering, and the LangGraph framing in earlier versions of this doc
+are **superseded**; what remains below is the still-true pipeline craft.
 
 The concept layer is the spine that connects abstract material down to generatable text and up to
 mastery. If a piece of data isn't needed by a downstream use case, we don't store it.
@@ -60,9 +59,9 @@ pathological on bge-small). The **number of concepts is an outcome of the data, 
 `n_clusters`**. Edges are k-NN (top-k above a cosine cutoff), **not** all-pairs (all-pairs exploded to
 a 75k-edge hairball). The sun/medoid of a cluster = its most-central member.
 
-> **Flat layer (2026-06-24).** The galaxy/constellation tiers (the Knowledge Universe "sky") were
-> removed: nothing read them once the Universe surface was retired. `build_hierarchy` now emits a
-> single concept level + RELATED_TO edges; `label_levels` labels concepts by their sun (no LLM);
+> **Flat layer (2026-06-24).** The upper hierarchy tiers were removed -- nothing read them.
+> `build_hierarchy` now emits a single concept level + RELATED_TO edges; `label_levels` labels
+> concepts by their sun (no LLM);
 > `persist` writes level-2 concepts with no parent chain. A `verify`/dedup node (merge near-duplicates
 > by centroid; under-claim over mislabel) still lands before persist.
 
@@ -87,8 +86,8 @@ recoverable; a confidently wrong one erodes credibility.
 A concept's **slug derives from its lineage signature** (a hash over its sorted member-entity set),
 **not** from the volatile LLM label. Consequences:
 
-- The same cluster keeps the **same slug** across regenerations -> user overrides (rename/merge/reject),
-  mastery, and **goal bindings** persist (re-applied/keyed by slug, I-22).
+- The same cluster keeps the **same slug** across regenerations -> user overrides (rename/merge/reject)
+  and mastery persist (re-applied/keyed by slug, I-22).
 - A label change ("Data Systems" -> "Data Engineering") is a relabel of the same identity, not a new
   concept.
 
@@ -99,8 +98,7 @@ This is what makes `make concepts` safe to run repeatedly (manual + idle/backgro
 The abstraction lineage is persisted, not thrown away -- it is the single source for generation
 material, mastery, evidence receipts, and doc-overview membership:
 
-- `concepts.parent_id` (SQLite) is a **derived layout cache** only; membership truth is Kuzu edges
-  (knowledge-model.md, I-23).
+- `concepts.parent_id` (SQLite) is unused in the flat layer; membership truth is Kuzu edges (I-23).
 - `(:Concept)-[:PROMOTED_FROM]->(:Entity)` -- which entities make up a concept.
 - `(:Concept)-[:EXTRACTED_FROM]->(:Document)` -- availability/provenance.
 - entity->chunk occurrence index (from `chunk.entities_text`) -- resolves a concept to its passages

@@ -19,14 +19,13 @@ identical regardless of scope -- only the pool differs.
 ```ts
 type Scope =
   | { type: 'daily' }                                  // Lumen's cross-collection pick (Lane A)
-  | { type: 'concept';    conceptId: ID }              // a star / Map node
+  | { type: 'concept';    conceptId: ID }              // a concept node
   | { type: 'collection'; collectionId: ID }
   | { type: 'doc';        documentId: ID }
   | { type: 'note';       noteId: ID }                 // + any linked concepts
   | { type: 'tag';        name: string }
   | { type: 'selection';  documentId: ID; range: [number, number] }
-  | { type: 'chat';       sessionId: ID }
-  | { type: 'planWeek';   goalId: ID; week: number };  // labs (Plan)
+  | { type: 'chat';       sessionId: ID };
 ```
 
 ## Entry points it unifies (most exist today -- route them here)
@@ -38,10 +37,9 @@ type Scope =
 | Doc overview | "Study this" / "Generate questions" | `doc:<id>` |
 | Note (reader/editor) | "Quiz me on this" | `note:<id>` |
 | Tag chip / Notes filter | "Quiz me on '<tag>'" | `tag:<name>` |
-| Map / Universe star | "Warm this up" / "Generate cards" | `concept:<id>` |
+| Concept node | "Warm this up" / "Generate cards" | `concept:<id>` |
 | Reader text selection | "Quiz me on this" | `selection:<range>` |
 | Ask thread | "Turn this thread into cards" | `chat:<sessionId>` |
-| Plan week (labs) | "Continue this week" | `planWeek:<id>` |
 
 ## The sheet (anatomy)
 

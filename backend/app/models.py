@@ -200,9 +200,8 @@ class ConceptModel(Base):
     last_reviewed: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # the trust receipt: [{document_id, chunk_id, quote}]
     evidence_json: Mapped[list] = mapped_column(JSON, default=list)
-    # hierarchy: a synthesized theme (level 0, parent_id=None) contains sub-concepts
-    # (level 1). The Universe renders level-0 themes; zoom reveals children. salience
-    # (coverage x frequency x centrality) ranks which themes surface. See docs/concepts.md.
+    # Flat concept layer: parent_id is unused (the multi-level tiers were dropped). salience
+    # (coverage x frequency x centrality) ranks which concepts surface. See docs/concepts.md.
     parent_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     salience: Mapped[float] = mapped_column(

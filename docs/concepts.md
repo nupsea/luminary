@@ -6,7 +6,7 @@ description: The Concept primitive -- the single studyable atom. The canonical a
 
 This is the canonical answer to **"what is a concept?"** A Concept is the one thing Luminary lets
 you *study* and the only thing that carries mastery. Everything else is either material that
-*produces* concepts (documents, notes) or scope that *selects* them (collections, tags, goals).
+*produces* concepts (documents, notes) or scope that *selects* them (collections, tags).
 
 ## Entity vs Concept (the fundamental distinction)
 
@@ -20,7 +20,7 @@ Today the Kuzu graph stores **`Entity`** nodes (GLiNER zero-shot NER). An Entity
 | Source | GLiNER over chunk text | promoted from a cluster of related Entities (or proposed from notes/quiz/chat/import) |
 | Learning state | none | mastery, stability, last_reviewed (FSRS-derived) |
 | Trust metadata | none | `origin`, `status`, `evidence[]` |
-| Role | raw co-occurrence material | the routing unit for sessions, goals, gaps, the Universe |
+| Role | raw co-occurrence material | the routing unit for sessions, gaps, and study |
 
 **Entities are raw material; Concepts are the curated, studyable layer above them.** A Concept is
 minted by *promoting* an Entity cluster (see [lifecycle](#lifecycle)) -- it is never just a renamed
@@ -138,18 +138,17 @@ IF Feynman (labs) enabled AND a teach-back exists:
    teach-back coverage RAISES the attainable ceiling            # generation certifies
 ELSE:
    no artificial cap -- FSRS + calibration stand on their own   # the old "cap at 80" is REMOVED
-warmth(concept)  = clamp(1 - daysSince(last_reviewed)/18, 0..1) # drives Universe glow
+warmth(concept)  = clamp(1 - daysSince(last_reviewed)/18, 0..1) # decay signal for warm-ups
 ```
 
 Rollups are **computed, never stored as truth**:
 
 ```
 collectionMastery(c) = aggregate(mastery for concepts lit by c's documents)
-readiness(goal)      = gate-weighted mean of target-concept mastery
 ```
 
-A collection's mastery and a goal's readiness move *automatically* after a session because the
-session wrote back to the concepts -- there is no separate "study a collection" engine.
+A collection's mastery moves *automatically* after a session because the session wrote back to the
+concepts -- there is no separate "study a collection" engine.
 
 ## Corrections survive re-parse (overrides)
 
@@ -170,7 +169,7 @@ voice over Lumen's guesses; OKF file edits feed this same channel.
 - [ ] Adding a document produces concept nodes with visible `evidence` passages.
 - [ ] Concepts extract from **documents**; notes/quiz/chat/import create **candidate** concepts;
       sessions only update mastery -- none silently mints a confirmed node.
-- [ ] Mastery exists only on concepts; collection/goal numbers are computed rollups.
+- [ ] Mastery exists only on concepts; collection numbers are computed rollups.
 - [ ] A concept shared by two collections appears once, belonging to both.
 - [ ] Rejecting a concept/edge or dismissing a gap never reappears after re-parse.
 - [ ] Every concept exposes `evidence` -- the trust receipt.

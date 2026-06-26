@@ -1,6 +1,6 @@
-"""okf_context -- the model-agnostic grounding assembler (docs/knowledge-model.md §9, okf.md).
+"""okf_context -- the model-agnostic grounding assembler (docs/okf.md).
 
-GraphRAG for Lumen: resolve a scope (a concept, a goal, or a free-text query) to concept ids,
+GraphRAG for Lumen: resolve a scope (a concept or a free-text query) to concept ids,
 EXPAND the concept graph (RELATED_TO neighbours), pull each concept's evidence passages, and project
 it all as one portable OKF text block. The same block grounds a local Ollama model and a cloud model
 identically -- OKF is the payload, LiteLLM is the wire (okf.md). Strictly local assembly.

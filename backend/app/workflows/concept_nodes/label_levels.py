@@ -1,8 +1,7 @@
 """label_levels node -- name each concept (docs/concept-model-design.md §5).
 
 A concept's label is its sun (medoid entity) -- cheap, no LLM, and already meaningful
-("spark sql", "iceberg catalog"). The old galaxy/constellation LLM naming was removed with
-the Knowledge Universe sky; only the flat concept layer remains, and it labels itself.
+("spark sql", "iceberg catalog"). The flat concept layer labels itself.
 """
 
 from __future__ import annotations

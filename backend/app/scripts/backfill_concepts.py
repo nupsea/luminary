@@ -1,8 +1,8 @@
 """Backfill Concepts from the existing Entity graph (one-time, idempotent).
 
-Phase 0 of the Knowledge Universe redesign. Today the graph holds Entity (NER) nodes
-and mastery is computed on the fly; this script promotes the graph's concepts into
-first-class Concept rows so the two-lane model has something to route on.
+Today the graph holds Entity (NER) nodes and mastery is computed on the fly; this script
+promotes the graph's concepts into first-class Concept rows so the two-lane model has
+something to route on.
 
 For each canonical concept the current system would surface, it:
   1. Creates a Concept (origin=document, status=confirmed) across SQLite + Kuzu + LanceDB,

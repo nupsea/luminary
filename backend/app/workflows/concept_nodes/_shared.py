@@ -105,7 +105,7 @@ PIPELINE_CONFIG = {
     "concept_edge_top_k": 6,            # nearest neighbours kept per concept
 }
 
-# concept level (flat layer; 0/1 were the retired galaxy/constellation tiers)
+# concept level (flat layer; levels 0/1 were retired upper tiers)
 LEVEL_CONCEPT = 2
 
 

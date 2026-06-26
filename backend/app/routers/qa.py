@@ -106,7 +106,7 @@ class GroundedResponse(BaseModel):
 async def ask_grounded(
     req: GroundedRequest, session: AsyncSession = Depends(get_db)
 ) -> GroundedResponse:
-    """GraphRAG answer over the concept graph (docs/knowledge-model.md §9).
+    """GraphRAG answer over the concept graph (docs/okf.md).
 
     Resolve scope -> concepts -> expand the graph + evidence -> one OKF grounding block -> LiteLLM.
     Self-contained (does not touch the streaming chat graph). Degrades: no concepts -> an honest

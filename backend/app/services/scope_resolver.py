@@ -120,6 +120,6 @@ async def resolve_scope(
         return await resolve_collection(session, scope_ref)
     if scope_type == "note":
         return await resolve_note(session, scope_ref)
-    # tag / selection / chat / planWeek: resolved by later-phase generation work.
+    # tag / selection / chat: resolved by later-phase generation work.
     logger.debug("resolve_scope: scope_type %r not yet wired (returning [])", scope_type)
     return []

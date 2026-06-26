@@ -6,10 +6,9 @@ neighbours (k-NN, semantic distance with a cutoff) -- these RELATED_TO edges dri
 and "related concepts". A verify/dedup pass collapses near-identical concepts so one idea is
 one node.
 
-This produces a FLAT concept layer -- the old galaxy/constellation tiers (the Knowledge
-Universe sky) were removed; nothing read them once the Universe surface was retired. Heavy
-compute (linkage) runs in a thread; everything is logged so the result is judged on real
-data via --dry-run.
+This produces a FLAT concept layer (the multi-level tiers were dropped; nothing read them).
+Heavy compute (linkage) runs in a thread; everything is logged so the result is judged on
+real data via --dry-run.
 """
 
 from __future__ import annotations
@@ -86,7 +85,7 @@ def _knn_edges(
 
 
 def _dedup_concepts(concepts: list[dict], cutoff: float) -> tuple[list[dict], int]:
-    """The verify/dedup step (knowledge-model.md §7): collapse near-identical level-2 concepts.
+    """The verify/dedup step: collapse near-identical level-2 concepts.
 
     Two solar systems whose centroids are essentially the same idea become one node, so an idea
     is one concept (and clicking it anywhere lands on the same node). Conservative by design --
@@ -131,7 +130,7 @@ def _dedup_concepts(concepts: list[dict], cutoff: float) -> tuple[list[dict], in
         if len(idxs) == 1:
             merged.append(concepts[idxs[0]])
             continue
-        # the most-salient member keeps identity (sun, constellation/galaxy); the rest fold in
+        # the most-salient member keeps identity (the sun/medoid); the rest fold in
         head = max(idxs, key=lambda i: concepts[i]["salience"])
         merged.append(
             {
