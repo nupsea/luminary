@@ -59,6 +59,16 @@ function isKindleClippings(filename: string): boolean {
   return /clippings/i.test(filename)
 }
 
+// A best-effort default content type from the file so the type choice is never a
+// hard gate -- the radio stays visible for the user to correct.
+function detectContentType(filename: string): ContentTypeValue {
+  const f = filename.toLowerCase()
+  if (f.endsWith(".epub")) return "epub"
+  if (/\.(mp3|m4a|wav)$/.test(f)) return "audio"
+  if (f.endsWith(".mp4")) return "video"
+  return "book"
+}
+
 export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -70,8 +80,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
-  const [pasteType, setPasteType] = useState<ContentTypeValue | null>(null)
-  const [typeError, setTypeError] = useState(false)
+  const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
   const [url, setUrl] = useState("")
   const [urlError, setUrlError] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -139,8 +148,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setUploadType(null)
     setPasteLabel("")
     setPasteText("")
-    setPasteType(null)
-    setTypeError(false)
+    setPasteType("notes")
     setUrl("")
     setUrlError("")
     setTab("upload")
@@ -172,7 +180,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.dataTransfer.files[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+      setUploadType(detectContentType(file.name))
     }
   }
 
@@ -180,7 +188,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.target.files?.[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      if (file.name.toLowerCase().endsWith(".epub")) setUploadType("epub")
+      setUploadType(detectContentType(file.name))
     }
   }
 
@@ -238,13 +246,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       await doSubmitKindle(selectedFile)
       return
     }
-    if (!uploadType) {
-      setTypeError(true)
-      return
-    }
-    setTypeError(false)
+    const contentType = uploadType ?? detectContentType(selectedFile.name)
     const title = selectedFile.name.replace(/\.[^/.]+$/, "")
-    await doSubmit(selectedFile, title, uploadType)
+    await doSubmit(selectedFile, title, contentType)
   }
 
   async function doSubmitKindle(file: File) {
@@ -277,11 +281,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handlePasteSubmit() {
     if (!pasteLabel.trim() || !pasteText.trim()) return
-    if (!pasteType) {
-      setTypeError(true)
-      return
-    }
-    setTypeError(false)
     const filename = pasteLabel.trim().replace(/[^a-z0-9_-]/gi, "_").toLowerCase() + ".txt"
     const file = new File([pasteText], filename, { type: "text/plain" })
     await doSubmit(file, pasteLabel.trim(), pasteType)
@@ -345,7 +344,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     return (
       <div className="space-y-2">
         <label className="block text-sm font-medium text-foreground">
-          Document type <span className="text-red-500">*</span>
+          Document type{" "}
+          <span className="font-normal text-muted-foreground">— auto-detected, change if needed</span>
         </label>
         <div className="space-y-1.5">
           {CONTENT_TYPE_OPTIONS.map((opt) => (
@@ -363,10 +363,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                 name="content_type"
                 value={opt.value}
                 checked={value === opt.value}
-                onChange={() => {
-                  onChange(opt.value)
-                  setTypeError(false)
-                }}
+                onChange={() => onChange(opt.value)}
                 className="mt-0.5 accent-primary"
               />
               <div>
@@ -376,9 +373,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
             </label>
           ))}
         </div>
-        {typeError && (
-          <p className="text-xs text-red-600">Please select a document type</p>
-        )}
       </div>
     )
   }
@@ -601,7 +595,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handleUploadSubmit()}
-                  disabled={!selectedFile || (!uploadType && !(selectedFile && isKindleClippings(selectedFile.name)))}
+                  disabled={!selectedFile}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Add
@@ -639,7 +633,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
                 <button
                   onClick={() => void handlePasteSubmit()}
-                  disabled={!pasteLabel.trim() || !pasteText.trim() || !pasteType}
+                  disabled={!pasteLabel.trim() || !pasteText.trim()}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   Add
