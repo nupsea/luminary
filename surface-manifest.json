@@ -44,7 +44,7 @@
     {
       "id": "map",
       "tier": "public",
-      "kind": "nav_tab",
+      "kind": "feature",
       "frontend": { "route": "/viz", "component": "pages/Viz" },
       "backend": { "routers": ["graph"] },
       "labels": { "en": "Map" }

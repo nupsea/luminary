@@ -12,7 +12,8 @@
  */
 
 import { AnimatePresence, motion } from "framer-motion"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import {
   ChevronDown,
   ChevronUp,
@@ -271,9 +272,21 @@ interface FlashCardProps {
 function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
   return (
     <div
-      className="relative min-h-64 w-full max-w-2xl cursor-pointer"
+      className="relative min-h-64 w-full max-w-2xl cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       style={{ perspective: "1000px", position: "relative" }}
       onClick={onFlip}
+      role="button"
+      tabIndex={0}
+      aria-label={showAnswer ? "Flashcard answer, press Enter to show question" : "Flashcard question, press Enter to reveal answer"}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          // Handle the flip here and stop the event before it reaches the
+          // session-level window listener, which would otherwise also fire.
+          e.stopPropagation()
+          onFlip?.()
+        }
+      }}
     >
       <motion.div
         className="absolute flex min-h-64 w-full flex-col items-center justify-center overflow-auto rounded-xl border border-border bg-card p-8 text-center shadow-md"
@@ -304,12 +317,14 @@ function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
 interface SessionCompleteProps {
   reviewed: number
   correct: number
+  predictionsMade: number
+  predictionsCalibrated: number
   nextReviewDate: string | null
   onBack: () => void
   onStartNext: () => void
 }
 
-function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNext }: SessionCompleteProps) {
+function SessionComplete({ reviewed, correct, predictionsMade, predictionsCalibrated, nextReviewDate, onBack, onStartNext }: SessionCompleteProps) {
   const pct = reviewed === 0 ? 0 : Math.round((correct / reviewed) * 100)
 
   return (
@@ -331,6 +346,16 @@ function SessionComplete({ reviewed, correct, nextReviewDate, onBack, onStartNex
           <span className="text-sm text-muted-foreground">Accuracy</span>
         </div>
       </div>
+
+      {predictionsMade > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Calibration:{" "}
+          <span className="font-medium text-foreground">
+            {predictionsCalibrated} of {predictionsMade}
+          </span>{" "}
+          prediction{predictionsMade === 1 ? "" : "s"} matched
+        </p>
+      )}
 
       {nextReviewDate && (
         <p className="text-sm text-muted-foreground">
@@ -367,6 +392,39 @@ function getSessionPhase(index: number, total: number): { label: string; style: 
   return { label: "Reflect", style: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" }
 }
 
+// Calibration feedback -- compares the learner's pre-reveal prediction (3-point:
+// Know it / Unsure / Blank, encoded as good / hard / again) against the grade they
+// actually gave after seeing the answer (4-point FSRS). "calibrated" means the two
+// land in the same confidence bucket; the copy nudges over/under-confidence.
+type CalibrationTone = "positive" | "warn" | "info" | "neutral"
+
+function ratingBucket(r: Rating): "knew" | "unsure" | "blank" {
+  if (r === "good" || r === "easy") return "knew"
+  if (r === "hard") return "unsure"
+  return "blank"
+}
+
+function calibrationMessage(
+  predicted: Rating,
+  actual: Rating,
+): { text: string; tone: CalibrationTone; calibrated: boolean } {
+  const p = ratingBucket(predicted)
+  const a = ratingBucket(actual)
+  if (p === a) return { text: "Well calibrated.", tone: "positive", calibrated: true }
+  const order = { blank: 0, unsure: 1, knew: 2 } as const
+  if (order[p] > order[a]) {
+    return { text: "Overconfident — you predicted you knew it.", tone: "warn", calibrated: false }
+  }
+  return { text: "You knew more than you thought.", tone: "info", calibrated: false }
+}
+
+const CALIBRATION_TEXT_CLASS: Record<CalibrationTone, string> = {
+  positive: "text-emerald-600 dark:text-emerald-400",
+  warn: "text-amber-600 dark:text-amber-400",
+  info: "text-blue-600 dark:text-blue-400",
+  neutral: "text-muted-foreground",
+}
+
 // StudySession -- main component (flashcard-only)
 
 interface StudySessionProps {
@@ -401,6 +459,11 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
   const [sourceContext, setSourceContext] = useState<SourceContext | null>(null)
   const [sourceContextLoading, setSourceContextLoading] = useState(false)
   const dismissedSourceContextIds = useRef(new Set<string>())
+  // Calibration: feedback shown inline on the cards that already pause (again/hard),
+  // plus per-session tallies surfaced on the completion screen.
+  const [calibrationInline, setCalibrationInline] = useState<{ text: string; tone: CalibrationTone } | null>(null)
+  const [predictionsMade, setPredictionsMade] = useState(0)
+  const [predictionsCalibrated, setPredictionsCalibrated] = useState(0)
 
   async function handleRate(rating: Rating) {
     if (!sessionId || isRating) return
@@ -420,6 +483,22 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
       }
 
       setLastRating(rating)
+
+      // Calibration: only when the learner made a prediction this card. Surface it
+      // inline on the again/hard cards (which already pause for a source panel) and
+      // as a non-blocking toast on the good/easy fast path so the loop stays quick.
+      if (predictedRating !== null) {
+        const cal = calibrationMessage(predictedRating, rating)
+        setPredictionsMade((n) => n + 1)
+        if (cal.calibrated) setPredictionsCalibrated((n) => n + 1)
+        if (rating === "again" || rating === "hard") {
+          setCalibrationInline({ text: cal.text, tone: cal.tone })
+        } else {
+          const notify =
+            cal.tone === "positive" ? toast.success : cal.tone === "warn" ? toast.warning : toast.info
+          notify(cal.text)
+        }
+      }
 
       // A session answers each planned card exactly once. "again" means FSRS
       // reschedules the card for a future session -- not that we re-queue it
@@ -472,6 +551,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
   async function advanceCard() {
     setSourceContext(null)
     setSourceContextLoading(false)
+    setCalibrationInline(null)
     const nextIdx = currentIndex + 1
     if (nextIdx >= queue.length) {
       await completeSession()
@@ -492,6 +572,63 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
   function handleBackToStudy() {
     void exit(onExit)
   }
+
+  // Keyboard control for the standard flashcard flow: Space/Enter flips (skipping
+  // the prediction), 1-4 grade once the answer is shown, Enter/Space continues past
+  // a source panel, and Esc ends. Cloze cards own their own keys, so we no-op there.
+  useEffect(() => {
+    function isTypingTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false
+      if (t.isContentEditable) return true
+      const tag = t.tagName
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return
+      if (e.key === "Escape") {
+        e.preventDefault()
+        void exit(onExit)
+        return
+      }
+      const card = queue[currentIndex]
+      if (!card) return
+      // A source/continue panel is open: Enter or Space advances.
+      if (sourceContext !== null) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          void advanceCard()
+        }
+        return
+      }
+      if (isRating) return
+      const isClozeCard =
+        card.flashcard_type === "cloze" &&
+        card.cloze_text !== null &&
+        /\{\{.+?\}\}/.test(card.cloze_text)
+      if (isClozeCard) return
+      if (!showAnswer) {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault()
+          setShowAnswer(true)
+        }
+        return
+      }
+      if (lastRating === null) {
+        const grade: Record<string, Rating> = { "1": "again", "2": "hard", "3": "good", "4": "easy" }
+        const rating = grade[e.key]
+        if (rating) {
+          e.preventDefault()
+          void handleRate(rating)
+        } else if (e.key === " ") {
+          // prevent the page from scrolling while the answer is shown
+          e.preventDefault()
+        }
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, currentIndex, showAnswer, lastRating, isRating, sourceContext, onExit])
 
   if (sessionState === "loading") {
     return (
@@ -523,6 +660,8 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           reviewed={reviewed}
           correct={correct}
           nextReviewDate={nextReviewDate}
+          predictionsMade={predictionsMade}
+          predictionsCalibrated={predictionsCalibrated}
           onBack={() => void exit(onExit)}
           onStartNext={() => {
             setCorrect(0)
@@ -531,6 +670,9 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             setShowAnswer(false)
             setNextReviewDate(null)
             setSourceContext(null)
+            setCalibrationInline(null)
+            setPredictionsMade(0)
+            setPredictionsCalibrated(0)
             dismissedSourceContextIds.current.clear()
             void beginNew()
           }}
@@ -634,19 +776,29 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               </button>
             </div>
           ) : lastRating === null ? (
-            <div className="flex gap-3">
-              {RATINGS.map(({ label, value, className }) => (
-                <button
-                  key={value}
-                  onClick={() => void handleRate(value)}
-                  disabled={isRating}
-                  className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex gap-3">
+                {RATINGS.map(({ label, value, className }, i) => (
+                  <button
+                    key={value}
+                    onClick={() => void handleRate(value)}
+                    disabled={isRating}
+                    className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+                  >
+                    <span className="mr-1.5 opacity-50">{i + 1}</span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Space to flip · 1–4 to rate · Esc to end</p>
             </div>
           ) : null}
+
+          {calibrationInline && (
+            <p className={`text-sm font-medium ${CALIBRATION_TEXT_CLASS[calibrationInline.tone]}`}>
+              {calibrationInline.text}
+            </p>
+          )}
 
           {/* Source context panel */}
           {(lastRating === "again" || lastRating === "hard") && sourceContextLoading && (

@@ -53,7 +53,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <BookPlus size={48} className="mb-4 text-muted-foreground/50" />
       <h2 className="mb-1 text-lg font-semibold text-foreground">No books yet</h2>
       <p className="mb-6 text-sm text-muted-foreground">
-        Ingest a PDF or YouTube video to get started.
+        Add a PDF or YouTube video to get started.
       </p>
       <button
         onClick={onAdd}

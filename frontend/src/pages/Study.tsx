@@ -404,17 +404,17 @@ export default function Study() {
               }}
             />
 
-            {/* Focused Enclaves heading */}
+            {/* Collections heading */}
             <div className="flex flex-col gap-2 max-w-2xl">
               <motion.h1
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="text-3xl font-bold tracking-tight text-foreground"
               >
-                Focused Enclaves
+                Collections
               </motion.h1>
               <p className="text-muted-foreground text-lg">
-                Grouped knowledge silos for topic-centric learning.
+                Group documents and notes by topic to study them together.
               </p>
             </div>
 
@@ -463,7 +463,7 @@ export default function Study() {
                       <div className="mt-6 flex flex-col gap-2">
                         <h3 className="text-lg font-semibold text-foreground">{coll.name}</h3>
                         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
-                          {coll.description || "Synthesize knowledge across documents and notes."}
+                          {coll.description || "Group documents and notes to study them together."}
                         </p>
                       </div>
                       <div className="mt-4 flex items-center gap-3">
@@ -494,7 +494,7 @@ export default function Study() {
                       </div>
                       <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
                         <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                          Enter Context
+                          Open
                         </div>
                         <ChevronRight size={16} className="text-primary translate-x-4 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
                       </div>
@@ -508,7 +508,7 @@ export default function Study() {
                 >
                   <Plus size={24} className="group-hover:scale-110 transition-transform" />
                   <div className="text-center">
-                    <p className="text-sm font-semibold uppercase">New Enclave</p>
+                    <p className="text-sm font-semibold uppercase">New collection</p>
                   </div>
                 </motion.button>
               </div>

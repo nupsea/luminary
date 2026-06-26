@@ -119,7 +119,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       }, 3000)
     } else if (trackedJob.status === "error" && mode === "tracking") {
       setMode("error")
-      setErrorMessage(trackedJob.errorMessage ?? "Ingestion failed")
+      setErrorMessage(trackedJob.errorMessage ?? "Couldn't add the document")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackedJob?.status])
@@ -307,7 +307,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       reset()
       onClose()
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Ingestion failed."
+      const errMsg = err instanceof Error ? err.message : "Couldn't add the document."
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
       setMode("error")
       setErrorMessage(errMsg)
@@ -433,7 +433,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
             <p className="text-center text-xs text-muted-foreground">
               {mode === "uploading"
                 ? "Uploading file — please wait"
-                : "Ingestion runs in the background. You can close this dialog and keep working."}
+                : "Processing runs in the background. You can close this dialog and keep working."}
             </p>
           </div>
         )}
@@ -513,7 +513,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   disabled={!url.trim()}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  Ingest
+                  Add
                 </button>
               </div>
             ) : tab === "upload" ? (
@@ -604,7 +604,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   disabled={!selectedFile || (!uploadType && !(selectedFile && isKindleClippings(selectedFile.name)))}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  Ingest
+                  Add
                 </button>
               </div>
             ) : (
@@ -642,7 +642,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   disabled={!pasteLabel.trim() || !pasteText.trim() || !pasteType}
                   className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
-                  Ingest
+                  Add
                 </button>
               </div>
             )}

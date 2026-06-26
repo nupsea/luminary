@@ -38,7 +38,7 @@ interface CollectionSource {
   type: "document" | "note"
 }
 
-interface SubEnclave {
+interface SubCollection {
   id: string
   name: string
   card_count: number
@@ -52,7 +52,7 @@ interface DashboardData {
   mastery_pct: number
   topics: CollectionTopic[]
   sources: CollectionSource[]
-  sub_collections: SubEnclave[]
+  sub_collections: SubCollection[]
 }
 
 interface CollectionStudyDashboardProps {
@@ -274,15 +274,15 @@ export function CollectionStudyDashboard({
             <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-[100px]" />
           </Card>
 
-          {/* Sub-Enclaves Grid */}
+          {/* Sub-collections Grid */}
           {data.sub_collections.length > 0 && (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between">
                 <h3 className="flex items-center gap-2 font-semibold text-foreground">
                   <Layers size={18} className="text-primary" />
-                  Nested Contexts
+                  Sub-collections
                 </h3>
-                <span className="text-xs text-muted-foreground">{data.sub_collections.length} Sub-Enclaves</span>
+                <span className="text-xs text-muted-foreground">{data.sub_collections.length} sub-collections</span>
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {data.sub_collections.map((sub) => (
