@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Layers,
   Loader2,
   MessageSquare,
   PlayCircle,
@@ -73,6 +74,7 @@ export function SessionHistoryRow({
 }: SessionHistoryRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isComplete = session.ended_at !== null
+  const isTeachback = session.mode === "teachback"
   const label = sessionLabel(session)
 
   const { data: teachbackResults, isLoading: tbLoading } = useQuery<
@@ -80,7 +82,7 @@ export function SessionHistoryRow({
   >({
     queryKey: ["session-teachback-results", session.id],
     queryFn: () => fetchSessionTeachbackResults(session.id),
-    enabled: isExpanded,
+    enabled: isExpanded && isTeachback,
     // Keep the expanded view live while evaluations land. Polls at 2s,
     // stops when no rows are pending.
     refetchInterval: (query) => {
@@ -106,9 +108,15 @@ export function SessionHistoryRow({
           title="Select for bulk action"
         />
 
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
-          <MessageSquare size={14} />
-        </div>
+        {isTeachback ? (
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+            <MessageSquare size={14} />
+          </div>
+        ) : (
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+            <Layers size={14} />
+          </div>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-sm font-medium text-foreground">
@@ -127,7 +135,7 @@ export function SessionHistoryRow({
           </span>
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock size={10} />
-            Teach-back -- {formatStarted(session.started_at)}
+            {isTeachback ? "Teach-back" : "Flashcards"} -- {formatStarted(session.started_at)}
           </span>
         </div>
 
@@ -206,7 +214,12 @@ export function SessionHistoryRow({
 
       {isExpanded && (
         <div className="border-t border-border bg-muted/20 px-4 py-3">
-          {tbLoading ? (
+          {!isTeachback ? (
+            <p className="py-1 text-sm text-muted-foreground">
+              {session.cards_reviewed} card{session.cards_reviewed === 1 ? "" : "s"} reviewed
+              {session.accuracy_pct != null && ` -- ${session.accuracy_pct}% correct`}
+            </p>
+          ) : tbLoading ? (
             <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
               <Loader2 size={12} className="animate-spin" />
               Loading results...

@@ -14,7 +14,7 @@
       "tier": "public",
       "kind": "nav_tab",
       "frontend": { "route": "/library", "component": "pages/Learning" },
-      "backend": { "routers": ["documents", "sections", "reading"] },
+      "backend": { "routers": ["documents", "sections", "reading", "concepts"] },
       "labels": { "en": "Library" }
     },
     {
@@ -64,6 +64,14 @@
       "frontend": { "route": "/collections/:id", "component": "pages/CollectionWorkspace" },
       "backend": { "routers": ["collections"] },
       "labels": { "en": "Collections" }
+    },
+    {
+      "id": "doc_overview",
+      "tier": "public",
+      "kind": "feature",
+      "frontend": { "route": "/library/doc/:id", "component": "pages/DocumentOverview" },
+      "backend": { "routers": ["references"] },
+      "labels": { "en": "Document overview" }
     },
     {
       "id": "tags",

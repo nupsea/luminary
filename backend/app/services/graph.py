@@ -88,6 +88,9 @@ class KuzuService:
     def get_entities_by_type_for_document(self, document_id: str) -> dict[str, list[str]]:
         return self._entity.get_entities_by_type_for_document(document_id)
 
+    def get_entities_detailed_for_document(self, document_id: str) -> list[dict]:
+        return self._entity.get_entities_detailed_for_document(document_id)
+
     def upsert_document(self, doc_id: str, title: str, content_type: str) -> None:
         return self._entity.upsert_document(doc_id, title, content_type)
 
@@ -185,6 +188,38 @@ class KuzuService:
 
     def get_concept_clusters(self) -> list[dict]:
         return self._concept.get_concept_clusters()
+
+    # -------------------------------------------------------------------------
+    # Concept nodes (studyable atom; see docs/concepts.md)
+    # -------------------------------------------------------------------------
+
+    def upsert_concept_node(
+        self, concept_id: str, slug: str, label: str, kind: str, status: str
+    ) -> None:
+        return self._concept.upsert_concept_node(concept_id, slug, label, kind, status)
+
+    def add_extracted_from(self, concept_id: str, document_id: str) -> None:
+        return self._concept.add_extracted_from(concept_id, document_id)
+
+    def add_promoted_from(self, concept_id: str, entity_id: str, confidence: float = 1.0) -> None:
+        return self._concept.add_promoted_from(concept_id, entity_id, confidence)
+
+    def add_concept_relation(
+        self, source_id: str, target_id: str, weight: float = 0.5, status: str = "proposed"
+    ) -> None:
+        return self._concept.add_concept_relation(source_id, target_id, weight, status)
+
+    def get_concept_neighbors(self, concept_id: str, limit: int = 10) -> list[str]:
+        return self._concept.get_concept_neighbors(concept_id, limit)
+
+    def get_concept_ids_for_documents(self, document_ids: list[str]) -> list[str]:
+        return self._concept.get_concept_ids_for_documents(document_ids)
+
+    def delete_all_concepts(self) -> None:
+        return self._concept.delete_all_concepts()
+
+    def delete_concept_node(self, concept_id: str) -> None:
+        return self._concept.delete_concept_node(concept_id)
 
     # -------------------------------------------------------------------------
     # Delete

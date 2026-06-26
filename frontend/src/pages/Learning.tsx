@@ -180,7 +180,14 @@ export default function Learning() {
     onError: () => toast.error("Failed to delete document. Please try again."),
   })
 
+  // Card click now routes to the Doc overview (no surprise-session;
+  // Clicking a document opens the reader directly (the study/generate/chat actions live in the
+  // reader header now, in the doc's context -- no intermediate overview page).
   function handleDocumentClick(id: string) {
+    openReader(id)
+  }
+
+  function openReader(id: string) {
     // Use the readiness-aware selector so lastReadyDocumentId stays in sync,
     // giving Study/Viz/Chat a sane fallback when active points at an
     // in-progress doc.
@@ -199,7 +206,7 @@ export default function Learning() {
   // Document action menu handler
   function handleDocAction(docId: string, action: DocAction) {
     if (action === "read") {
-      handleDocumentClick(docId)
+      openReader(docId)
       return
     }
     if (action === "chat") {
@@ -529,7 +536,7 @@ export default function Learning() {
               {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
                 <TodayHero
                   recentItem={recentItems?.[0]}
-                  onContinue={handleDocumentClick}
+                  onContinue={openReader}
                 />
               )}
 

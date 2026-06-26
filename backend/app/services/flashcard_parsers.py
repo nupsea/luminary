@@ -64,14 +64,14 @@ def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
     raw = re.sub(r"\n?```$", "", raw)
     raw = raw.strip()
 
-    # If it already looks like a clean array, try parsing directly
-    if raw.startswith("["):
-        try:
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
+    # Try the whole thing as JSON: an array, or (json-mode models) an object wrapping the array
+    # like {"flashcards": [...]}, or even a single card object.
+    try:
+        coerced = _coerce_cards(json.loads(raw))
+        if coerced is not None:
+            return coerced
+    except (json.JSONDecodeError, ValueError):
+        pass
 
     # Fall back: find the first '[' and last ']' and parse that slice
     start = raw.find("[")
@@ -86,6 +86,32 @@ def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
 
     logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
+
+
+def _coerce_cards(data: object) -> list | None:
+    """A flashcard array from either a bare list, an object wrapping it, or a single card object."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("flashcards", "cards", "questions", "items", "data"):
+            if isinstance(data.get(key), list):
+                return data[key]
+        for v in data.values():
+            if isinstance(v, list):
+                return v
+        if data.get("question") or data.get("front"):
+            return [data]
+    return None
+
+
+def card_field(item: dict, *names: str) -> str:
+    """First non-empty string among the given keys -- tolerates local models that use alternate
+    field names (front/back, q/a, term/definition) instead of question/answer."""
+    for n in names:
+        v = item.get(n)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
 
 
 def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:

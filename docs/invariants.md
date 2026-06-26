@@ -77,3 +77,17 @@ Arize Phoenix and Langfuse must be configured for local use only. Telemetry is f
 
 **I-18. Explicitly disable telemetry in third-party libraries (e.g., LiteLLM, LangChain).**
 Check and disable any "phone home" features in libraries that handle user prompts.
+
+## Concepts & Knowledge Layer
+
+**I-19. Mastery is a stored scalar on the concept row -- never recomputed by text match, never on documents or collections.**
+The legacy `chunk.text ILIKE '%name%'` mastery computation is removed. Mastery is written by the assessment pipeline (Study Events) to `concepts.mastery`. Collection/goal numbers are computed rollups, never stored as truth. See `docs/concepts.md`.
+
+**I-20. The concept vector is derived and never a retrieval primary.**
+A concept's LanceDB vector (`concept_vectors_v1`) is the 384-dim centroid of its evidence-chunk embeddings, in **chunk space** (bge-small-en-v1.5 -- chunks are 384-dim, NOT 1024; notes are the 1024-dim bge-m3 space). Recomputed when evidence changes. Use it only for concept-to-concept and material-to-concept similarity (linking, dedup, candidate seeding, scope resolution). Chunk vectors + FTS5 + graph (RRF) remain the RAG backbone.
+
+**I-21. OKF is a projection, never a transport and never a source of truth.**
+LiteLLM carries bytes; OKF carries portable knowledge -- never couple them. OKF files are regenerated from SQLite + Kuzu. A user edit to an OKF file re-enters the system only as an `override` (re-applied after re-parse), exactly like a graph rename/merge. See `docs/okf.md`.
+
+**I-22. A rejected or edited graph element must not reappear after re-parse.**
+Re-parse produces fresh proposals, then `applyOverrides()` re-applies every user decision on top. Rejected concepts/edges and dismissed gaps stay gone (hidden, not deleted). Overrides survive re-parsing -- they are the user's permanent voice over Lumen's guesses.

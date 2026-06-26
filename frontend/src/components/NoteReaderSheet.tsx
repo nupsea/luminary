@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { NoteConceptChips } from "@/components/NoteConceptChips"
 import { NoteEditor } from "@/components/notes/NoteEditor"
 import {
   Sheet,
@@ -590,6 +591,9 @@ export function NoteReaderSheet({
                       )}
                     </div>
                   </div>
+                  {note?.id && !isNew && (
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="flex flex-col gap-2">
                       <div className="flex items-center gap-2 text-muted-foreground">

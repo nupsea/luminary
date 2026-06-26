@@ -108,6 +108,21 @@ class KuzuConnection:
             "CREATE REL TABLE IF NOT EXISTS DERIVED_FROM(FROM Note TO Document)",
             # Zettelkasten links -- explicit typed note-to-note connections
             "CREATE REL TABLE IF NOT EXISTS LINKS_TO(FROM Note TO Note, link_type STRING)",
+            # --- Concept layer (the studyable atom; see docs/concepts.md) ---
+            # A Concept is promoted from a cluster of Entities; it is NOT an Entity.
+            # SQLite owns the hot learning state; this node owns the topology.
+            "CREATE NODE TABLE IF NOT EXISTS Concept("
+            "id STRING PRIMARY KEY, slug STRING, label STRING, kind STRING, status STRING)",
+            # concept<->concept edges. Distinct names from the Entity-level RELATED_TO /
+            # PREREQUISITE_OF (Kuzu rel tables are typed by endpoint pair).
+            "CREATE REL TABLE IF NOT EXISTS CONCEPT_RELATED_TO("
+            "FROM Concept TO Concept, weight FLOAT, status STRING)",
+            "CREATE REL TABLE IF NOT EXISTS CONCEPT_PREREQUISITE_OF("
+            "FROM Concept TO Concept, confidence FLOAT)",
+            # provenance: availability (which docs extracted it) + the Entity bridge
+            "CREATE REL TABLE IF NOT EXISTS EXTRACTED_FROM(FROM Concept TO Document)",
+            "CREATE REL TABLE IF NOT EXISTS PROMOTED_FROM("
+            "FROM Concept TO Entity, confidence FLOAT)",
         ]
         for stmt in stmts:
             self.conn.execute(stmt)

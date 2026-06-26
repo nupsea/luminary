@@ -343,3 +343,56 @@ class StartConceptItemResponse(BaseModel):
 class StartConceptsAPIResponse(BaseModel):
     document_id: str
     concepts: list[StartConceptItemResponse]
+
+
+# Study Launcher / assemble (docs/study-launcher.md)
+
+ScopeType = Literal[
+    "daily", "concept", "collection", "doc", "note", "tag", "selection", "chat", "planWeek"
+]
+StudyMode = Literal["quick_quiz", "full_session", "drill", "checkpoint"]
+
+
+class AssembleRequest(BaseModel):
+    scope_type: ScopeType
+    scope_ref: str | None = None
+    mode: StudyMode = "quick_quiz"
+    length_min: int = 5
+    want_generated: bool = True
+    keep: Literal["test", "save"] = "test"
+    # False = live preview (no StudyEvent written); True = Start (records the event).
+    commit: bool = True
+
+
+class AssemblePreview(BaseModel):
+    due_count: int
+    generated_count: int
+    mapped_count: int
+    unmapped_count: int
+    topic_mix: list[str]
+    thin_scope_warning: str | None = None
+
+
+class AssembleResponse(BaseModel):
+    event_id: str
+    scope_type: ScopeType
+    scope_ref: str | None
+    mode: StudyMode
+    concept_ids: list[str]
+    cards: list[FlashcardResponse]
+    preview: AssemblePreview
+    teachback_available: bool
+
+
+class TopicItem(BaseModel):
+    title: str
+    level: int
+    section_id: str | None
+    page_start: int | None
+
+
+class DocumentTopicsResponse(BaseModel):
+    document_id: str
+    title: str
+    source: str  # "sections" | "outline"
+    topics: list[TopicItem]

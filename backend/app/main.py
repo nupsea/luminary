@@ -29,6 +29,7 @@ from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
 from app.routers.code_executor import router as code_executor_router
 from app.routers.collections import router as collections_router
+from app.routers.concepts import router as concepts_router
 from app.routers.documents import router as documents_router
 from app.routers.engagement import router as engagement_router
 from app.routers.evals import router as evals_router
@@ -132,6 +133,11 @@ async def lifespan(app: FastAPI):
     # Initial DB setup
     engine = get_engine()
     await create_all_tables(engine)
+    # NOTE: the one-time concept backfill is a manual offline step (with the server
+    # stopped so it can hold the Kuzu lock and not starve the event loop):
+    #   make backfill-concepts
+    # Running it inside the live server blocks the loop (sync Kuzu scans), so it is NOT
+    # auto-run here. See docs/concepts.md.
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:
@@ -306,6 +312,7 @@ ROUTER_REGISTRY = {
     "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,
+    "concepts": concepts_router,
     "chat_meta": chat_meta_router,
     "chat_sessions": chat_sessions_router,
     "documents": documents_router,

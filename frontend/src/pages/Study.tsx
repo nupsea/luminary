@@ -39,21 +39,24 @@ import {
 import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
 import { GoalsList } from "@/components/goals/GoalsList"
+import type { Flashcard } from "@/lib/studyApi"
 import {
   type PrepareStudySessionOptions,
   type PreparedStudySessionOutcome,
   type StudyMode,
+  prepareSectionStudyFromCards,
   prepareStudySession,
 } from "@/lib/studySessionService"
 
 
 // Document list for the in-tab picker
 
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
 import { DocPicker } from "./Study/DocPicker"
+import { DocumentTopics } from "@/components/DocumentTopics"
 import { FlashcardManager } from "./Study/FlashcardManager"
 
 
@@ -157,8 +160,8 @@ export default function Study() {
     }
   }
 
-  const handleStartFlashcard = (filters?: StudyFiltersLike) => {
-    void startStudy("flashcard", filters ?? null, null)
+  const handleStartFlashcard = (filters?: StudyFiltersLike, resumeId?: string) => {
+    void startStudy("flashcard", filters ?? null, resumeId ?? null)
   }
 
   const handleStartTeachback = (
@@ -167,6 +170,58 @@ export default function Study() {
   ) => {
     void startStudy("teachback", filters ?? null, resumeId ?? null)
   }
+
+  // Study one coherent SECTION in either mode: use its existing cards (or generate them from its own
+  // text), then run a flashcard review or teach-back scoped to that section. Reuses the existing
+  // generator + StudySession/TeachbackSession + FSRS.
+  const runSectionStudy = async (
+    sectionId: string,
+    sectionHeading: string,
+    mode: StudyMode,
+  ) => {
+    if (studyPhase.phase !== "idle" || !studyDocumentId) return
+    setStudyPhase({ phase: "preparing", mode })
+    try {
+      const existing = await apiGet<{ items: Flashcard[] }>("/flashcards/search", {
+        document_id: studyDocumentId,
+        section_id: sectionId,
+        page_size: FLASHCARD_CARD_LIMIT,
+      })
+      let cards = existing.items ?? []
+      if (cards.length === 0) {
+        cards = await apiPost<Flashcard[]>("/flashcards/generate", {
+          document_id: studyDocumentId,
+          scope: "section",
+          section_heading: sectionHeading,
+          count: 8,
+        })
+      }
+      if (!cards || cards.length === 0) {
+        setStudyPhase({ phase: "idle" })
+        toast.error("Couldn't generate cards for this section — is the model (Ollama) running?")
+        return
+      }
+      const outcome = await prepareSectionStudyFromCards(studyDocumentId, cards, mode)
+      const scope: PrepareStudySessionOptions = {
+        mode,
+        documentId: studyDocumentId,
+        collectionId: null,
+        filters: { section_id: sectionId },
+        cardLimit: FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      setStudyPhase({ phase: "ready", mode, outcome, scopeForBeginNew: scope })
+    } catch (err) {
+      console.warn("Failed to study section", err)
+      setStudyPhase({ phase: "idle" })
+      toast.error("Couldn't start studying this section.")
+    }
+  }
+
+  const handleStudySection = (sectionId: string, sectionHeading: string) =>
+    void runSectionStudy(sectionId, sectionHeading, "flashcard")
+  const handleTeachbackSection = (sectionId: string, sectionHeading: string) =>
+    void runSectionStudy(sectionId, sectionHeading, "teachback")
 
   // Auto-resume a session interrupted by "Open in reader" navigation.
   // SourceContextPanel saves session info to the store before navigating away;
@@ -324,6 +379,11 @@ export default function Study() {
                 </div>
               )
             })()}
+            <DocumentTopics
+              documentId={studyDocumentId}
+              onStudySection={handleStudySection}
+              onTeachbackSection={handleTeachbackSection}
+            />
             <FlashcardManager
               documentId={studyDocumentId}
               onStartStudy={handleStartFlashcard}
@@ -337,10 +397,10 @@ export default function Study() {
             <GoalsList />
 
             <SessionManager
-              onContinueTeachback={(sessionId, documentId, collectionId) => {
+              onContinue={(sessionId, documentId, collectionId, mode) => {
                 if (documentId) setActiveDocument(documentId)
                 if (collectionId) setActiveCollectionId(collectionId)
-                handleStartTeachback(undefined, sessionId)
+                void startStudy(mode === "flashcard" ? "flashcard" : "teachback", null, sessionId)
               }}
             />
 

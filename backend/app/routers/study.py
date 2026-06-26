@@ -36,12 +36,16 @@ from app.models import (
     NoteTagIndexModel,
     ReviewEventModel,
     SectionModel,
+    StudyEventModel,
     StudySessionModel,
     TeachbackResultModel,
 )
 from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.schemas.study import (
+    AssemblePreview,
+    AssembleRequest,
+    AssembleResponse,
     CalibrationStatsResponse,
     CalibrationWeekItem,
     CardStabilityItem,
@@ -51,6 +55,7 @@ from app.schemas.study import (
     DailyHistoryItem,
     DecayDebtItem,
     DecayDebtResponse,
+    DocumentTopicsResponse,
     DueCountResponse,
     GapResult,
     RubricCompletenessResponse,
@@ -84,9 +89,13 @@ from app.schemas.study import (
     TeachbackResultsBatchResponse,
     TeachbackRubricResponse,
     TeachbackSubmitResponse,
+    TopicItem,
 )
+from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.mastery_service import get_mastery_service
+from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -97,6 +106,7 @@ from app.services.study_session_service import (
 from app.services.study_session_service import (
     compute_section_heatmap as _compute_section_heatmap,
 )
+from app.services.topic_service import get_topic_service
 
 logger = logging.getLogger(__name__)
 
@@ -285,12 +295,21 @@ async def get_due_cards(
     tag: str | None = Query(default=None),
     document_ids: list[str] | None = Query(default=None),
     note_ids: list[str] | None = Query(default=None),
+    section_id: str | None = Query(default=None),
     limit: int = 20,
     session: AsyncSession = Depends(get_db),
 ) -> list[FlashcardResponse]:
     """Return flashcards whose due_date is now or in the past."""
     now = datetime.now(UTC)
     stmt = select(FlashcardModel).where(FlashcardModel.due_date <= now)
+
+    # section scope: cards whose source chunk belongs to this section (study a coherent unit)
+    if section_id:
+        stmt = stmt.where(
+            FlashcardModel.chunk_id.in_(
+                select(ChunkModel.id).where(ChunkModel.section_id == section_id)
+            )
+        )
 
     # Apply filters
     used_document_ids = document_ids or ([document_id] if document_id else [])
@@ -366,6 +385,68 @@ async def get_due_cards(
     )
 
     return [_to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in cards]
+
+
+@router.post("/assemble", response_model=AssembleResponse, status_code=201)
+async def assemble_study(
+    req: AssembleRequest,
+    session: AsyncSession = Depends(get_db),
+) -> AssembleResponse:
+    """Study Launcher backend: resolve a scope -> a valid Study Event (docs/study-launcher.md).
+
+    Returns the assembled due-card set + an honest preview, and records a StudyEvent row.
+    Tier-aware: teachback_available reflects the feynman labs surface. Model-down still
+    yields due cards (generation is a separate seam).
+    """
+    result = await study_assembler.assemble(
+        session,
+        req.scope_type,
+        req.scope_ref,
+        length_min=req.length_min,
+        want_generated=req.want_generated,
+        # actually generate only on Start (commit), not on live preview
+        do_generate=req.commit and req.want_generated,
+    )
+
+    event_id = ""
+    if req.commit:
+        event_id = uuid.uuid4().hex
+        session.add(
+            StudyEventModel(
+                id=event_id,
+                kind=req.mode,
+                scope_type=req.scope_type,
+                scope_ref=req.scope_ref,
+            )
+        )
+        await session.commit()
+
+    repo = StudyRepo(session)
+    chunk_to_section = await repo.chunk_section_id_map(
+        [c.chunk_id for c in result.cards if c.chunk_id]
+    )
+    cards = [
+        _to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in result.cards
+    ]
+    teachback_available = "feynman" in await get_labs_enabled(session)
+
+    return AssembleResponse(
+        event_id=event_id,
+        scope_type=req.scope_type,
+        scope_ref=req.scope_ref,
+        mode=req.mode,
+        concept_ids=result.concept_ids,
+        cards=cards,
+        preview=AssemblePreview(
+            due_count=result.preview.due_count,
+            generated_count=result.preview.generated_count,
+            mapped_count=result.preview.mapped_count,
+            unmapped_count=result.preview.unmapped_count,
+            topic_mix=result.preview.topic_mix,
+            thin_scope_warning=result.preview.thin_scope_warning,
+        ),
+        teachback_available=teachback_available,
+    )
 
 
 @router.get("/session-plan", response_model=SessionPlanResponse)
@@ -486,6 +567,27 @@ async def start_session(
     return SessionResponse.model_validate(sess)
 
 
+async def _write_back_concept_mastery(
+    session: AsyncSession, events: list[ReviewEventModel]
+) -> None:
+    """Recompute + store mastery for the concepts whose cards were reviewed this session."""
+    card_ids = list({e.flashcard_id for e in events})
+    if not card_ids:
+        return
+    rows = (
+        await session.execute(
+            select(FlashcardModel.concept_id).where(
+                FlashcardModel.id.in_(card_ids), FlashcardModel.concept_id.is_not(None)
+            )
+        )
+    ).scalars().all()
+    concept_ids = [c for c in rows if c]
+    if not concept_ids:
+        return
+    await get_mastery_service().recompute_for_concepts(session, concept_ids)
+    await session.commit()
+
+
 @router.post("/sessions/{session_id}/end", response_model=SessionSummary)
 async def end_session(
     session_id: str,
@@ -524,6 +626,13 @@ async def end_session(
     sess.cards_correct = cards_correct
     sess.accuracy_pct = accuracy_pct
     await repo.commit_session(sess)
+
+    # Write-back: the assessment pipeline writes the grounded mastery to the concepts
+    # touched this session (I-19). Best-effort -- a concepts hiccup never fails the end.
+    try:
+        await _write_back_concept_mastery(repo.session, events)
+    except Exception:
+        logger.warning("end_session: concept mastery write-back failed", exc_info=True)
 
     logger.info(
         "Study session ended",
@@ -2204,3 +2313,28 @@ async def session_review(
             cards_remaining=len(remaining),
         ),
     )
+
+
+@router.get("/topics/{document_id}", response_model=DocumentTopicsResponse)
+async def get_document_topics(
+    document_id: str, session: AsyncSession = Depends(get_db)
+) -> DocumentTopicsResponse:
+    """A document's study topics from its authored structure (top-level headings, front/back-matter
+    filtered out) -- or an LLM outline when heading detection is messy. Never an INDEX or publisher
+    boilerplate."""
+    data = await get_topic_service().document_topics(session, document_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return DocumentTopicsResponse(**data)
+
+
+@router.get("/sections/{document_id}", response_model=list[TopicItem])
+async def get_document_sections(
+    document_id: str,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: AsyncSession = Depends(get_db),
+) -> list[TopicItem]:
+    """All real sub-sections of a document (junk filtered, searchable) for drill-down."""
+    rows = await get_topic_service().document_sections(session, document_id, q=q, limit=limit)
+    return [TopicItem(**r) for r in rows]

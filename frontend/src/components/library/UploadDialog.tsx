@@ -1,9 +1,11 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, Upload, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { apiGet, apiPost } from "@/lib/apiClient"
+import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { logger } from "@/lib/logger"
 import { Progress } from "@/components/ui/progress"
 
@@ -79,10 +81,32 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [docTitle, setDocTitle] = useState("")
   const [fileSizeMB, setFileSizeMB] = useState(0)
   const [trackedDocId, setTrackedDocId] = useState<string | null>(null)
+  // Collections to assign the new doc to at ingest (docs/02-ingest-and-doc-overview.md).
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([])
+  const assignedRef = useRef(false)
   const uploadStartRef = useRef<number>(0)
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const trackedJob = useIngestionJob(trackedDocId)
+
+  const { data: collectionTree } = useQuery({
+    queryKey: ["collections-tree"],
+    queryFn: () => apiGet<CollectionTreeItem[]>("/collections/tree"),
+    enabled: open,
+  })
+
+  // Once the doc is accepted (trackedDocId set), assign it to the chosen collections
+  // via the tested POST /documents/{id}/collections. Fires once per upload.
+  useEffect(() => {
+    if (!trackedDocId || selectedCollectionIds.length === 0 || assignedRef.current) return
+    assignedRef.current = true
+    apiPost(`/documents/${trackedDocId}/collections`, { collection_ids: selectedCollectionIds })
+      .then(() => queryClient.invalidateQueries({ queryKey: ["documents"] }))
+      .catch((err) => {
+        assignedRef.current = false
+        logger.warn("[upload] collection assignment failed", { err })
+      })
+  }, [trackedDocId, selectedCollectionIds, queryClient])
 
   // Surface tracker errors / completions for the doc this dialog launched.
   useEffect(() => {
@@ -125,6 +149,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setDocTitle("")
     setFileSizeMB(0)
     setTrackedDocId(null)
+    setSelectedCollectionIds([])
+    assignedRef.current = false
   }
 
   function handleClose() {
@@ -501,6 +527,38 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   </div>
                 ) : (
                   <ContentTypeRadioGroup value={uploadType} onChange={setUploadType} />
+                )}
+
+                {collectionTree && collectionTree.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Add to collection (optional)
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {collectionTree.map((c) => {
+                        const on = selectedCollectionIds.includes(c.id)
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() =>
+                              setSelectedCollectionIds((prev) =>
+                                on ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                              )
+                            }
+                            className={cn(
+                              "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                              on
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:bg-accent",
+                            )}
+                          >
+                            {c.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                 )}
 
                 <div

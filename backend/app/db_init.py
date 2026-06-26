@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     CodeSnippetModel,
     CollectionMemberModel,
     CollectionModel,
+    ConceptModel,
     DocumentModel,
     EnrichmentJobModel,
     EvalRunModel,
@@ -32,6 +33,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     NoteModel,
     NoteSourceModel,
     NoteTagIndexModel,
+    OverrideModel,
     PomodoroSessionModel,
     PredictionEventModel,
     QAHistoryModel,
@@ -40,6 +42,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     SectionModel,
     SectionSummaryModel,
     SettingsModel,
+    StudyEventModel,
     StudySessionModel,
     SummaryModel,
     TagAliasModel,
@@ -228,6 +231,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
             # cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
+            # durable card->concept binding by stable slug (survives a concept rebuild)
+            "ALTER TABLE flashcards ADD COLUMN concept_slug TEXT",
             # structured rubric JSON for teachback results and feynman sessions
             "ALTER TABLE teachback_results ADD COLUMN rubric_json JSON",
             "ALTER TABLE feynman_sessions ADD COLUMN rubric_json JSON",
@@ -282,6 +287,19 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # column already exists
+
+        # One-time backfill of the card->concept slug binding for already-mapped cards, so the
+        # first rebuild after this migration can re-map them by slug. Idempotent (fills NULLs only).
+        try:
+            await conn.execute(
+                text(
+                    "UPDATE flashcards SET concept_slug = "
+                    "(SELECT slug FROM concepts WHERE concepts.id = flashcards.concept_id) "
+                    "WHERE flashcards.concept_id IS NOT NULL AND flashcards.concept_slug IS NULL"
+                )
+            )
+        except Exception:
+            pass
 
         # learning_goals.document_id was originally created NOT NULL.
         # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).
@@ -638,6 +656,36 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             )
             await conn.execute(text("DROP TABLE flashcards"))
             await conn.execute(text("ALTER TABLE flashcards_rebuild RENAME TO flashcards"))
+
+        # Concept-linkage columns (two-lane model). Added AFTER the rebuild block so a
+        # legacy table-rebuild can never drop them. Idempotent via try/except. The
+        # backfill (P0e) maps existing cards to concept_id and sets mapping_status.
+        for ddl in [
+            "ALTER TABLE flashcards ADD COLUMN concept_id TEXT",
+            "ALTER TABLE flashcards ADD COLUMN source_scope TEXT",
+            "ALTER TABLE flashcards ADD COLUMN mapping_status TEXT NOT NULL DEFAULT 'mapped'",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # Column already exists (idempotent)
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_flashcards_concept_id ON flashcards(concept_id)")
+        )
+
+        # Concept hierarchy columns (theme -> sub-concept). Idempotent.
+        for ddl in [
+            "ALTER TABLE concepts ADD COLUMN parent_id TEXT",
+            "ALTER TABLE concepts ADD COLUMN level INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE concepts ADD COLUMN salience REAL NOT NULL DEFAULT 0",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # Column already exists (idempotent)
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_concepts_parent_id ON concepts(parent_id)")
+        )
 
         # backfill flashcards_fts from existing flashcards (idempotent).
         # Uses LEFT JOIN on shadow content table to skip cards already indexed.

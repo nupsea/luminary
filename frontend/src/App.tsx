@@ -22,6 +22,7 @@ import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
+import { StudyLauncher } from "./components/StudyLauncher"
 import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
@@ -41,6 +42,7 @@ const Progress = lazy(() => import("@/pages/Progress"))
 const Admin = lazy(() => import("@/pages/Admin"))
 const Monitoring = lazy(() => import("@/pages/Monitoring"))
 const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
+const DocumentOverview = lazy(() => import("@/pages/DocumentOverview"))
 const Hub = lazy(() => import("@/pages/Hub"))
 
 type LazyPage = React.LazyExoticComponent<React.ComponentType<unknown>>
@@ -54,6 +56,7 @@ const COMPONENT_REGISTRY: Record<string, LazyPage> = {
   "pages/Viz": Viz,
   "pages/Progress": Progress,
   "pages/CollectionWorkspace": CollectionWorkspace,
+  "pages/DocumentOverview": DocumentOverview,
   "pages/Quality": Quality,
   "pages/Admin": Admin,
   "pages/Monitoring": Monitoring,
@@ -630,6 +633,7 @@ function AppShell() {
       </div>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <StudyLauncher />
     </div>
   )
 }

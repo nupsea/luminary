@@ -43,10 +43,22 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 
 ## Data Stores
 
-- **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history
-- **LanceDB**: dense embeddings for chunks (1024-dim) and notes (1024-dim)
+- **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs)
+- **LanceDB**: dense embeddings for chunks (bge-small, 384-dim), notes (bge-m3, 1024-dim), and **concepts** (384-dim centroid of evidence chunks, in chunk space -- derived, for similarity/linking/dedup, never retrieval-primary)
 - **SQLite FTS5**: `chunks_fts` and `notes_fts` virtual tables for BM25 keyword search
-- **Kuzu**: knowledge graph -- Entity, Document, Note nodes + 20+ relationship types
+- **Kuzu**: knowledge graph -- Entity, Document, Note, **Concept** nodes + 20+ relationship types. `Concept` is the studyable atom (topology: edges/routes/prereqs, `PROMOTED_FROM` an Entity cluster); `Entity` remains the raw NER layer beneath it.
+
+## Knowledge layer (the Concept primitive)
+
+A **Concept** is the single studyable atom -- distinct from a Kuzu `Entity` (a lexical NER
+mention). Concepts carry mastery and are the routing unit for sessions and study. Source of truth =
+SQLite (state) + Kuzu (topology); derived projections = LanceDB vector + OKF Markdown files. Before
+any concept/mastery/graph/study work, read:
+
+- `docs/concepts.md` -- the Concept primitive (the canonical "what is a concept").
+- `docs/two-lane-model.md` -- the orchestration spine (Lane A/B, Study Events, the 14-rule constitution).
+- `docs/study-launcher.md` -- one sheet, many doors; `POST /study/assemble` + scope resolver.
+- `docs/okf.md` -- the portable knowledge projection (export/grounding/import).
 
 ## Navigation Tabs
 

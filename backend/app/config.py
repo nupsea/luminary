@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # longer prompts, so an unset value quietly drops retrieval context. Sized to
     # fit the synthesis prompt budget without waste (prefill time scales with it).
     OLLAMA_NUM_CTX: int = 2048
+    # Larger context for heavy one-shot tasks (flashcard generation feeds a whole section, up to
+    # _CHUNK_CHAR_LIMIT chars ~= 2.5k tokens, plus system + output). At 2048 these were silently
+    # truncated and the model emitted junk; generation passes this instead.
+    OLLAMA_GENERATION_NUM_CTX: int = 8192
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept

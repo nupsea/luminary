@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, RefreshCw, StickyNote, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, RefreshCw, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -14,6 +14,8 @@ import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
+
+import { launchStudy } from "@/lib/studyLauncher"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
@@ -184,6 +186,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
+  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
+  const setChatScope = useAppStore((s) => s.setChatScope)
 
   // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -916,6 +920,48 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {/* In-context actions for this document: study, generate questions, chat */}
+          <button
+            onClick={() =>
+              launchStudy({ type: "doc", ref: documentId, label: doc?.title ?? "this document" })
+            }
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            title="Study this document"
+          >
+            <Target size={14} />
+            Study
+          </button>
+          <button
+            onClick={() => {
+              setActiveDocument(documentId)
+              window.dispatchEvent(
+                new CustomEvent("luminary:navigate", {
+                  detail: { tab: "study", documentId },
+                }),
+              )
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            title="Generate questions from this document"
+          >
+            <Sparkles size={14} />
+            Generate questions
+          </button>
+          <button
+            onClick={() => {
+              setChatSelectedDocId(documentId)
+              setChatScope("single")
+              window.dispatchEvent(
+                new CustomEvent("luminary:navigate", {
+                  detail: { tab: "chat", documentId },
+                }),
+              )
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            title="Chat about this document"
+          >
+            <MessageSquare size={14} />
+            Chat
+          </button>
           {(docNotes?.length ?? 0) > 0 && (
             <button
               onClick={() => {
