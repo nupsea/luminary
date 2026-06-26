@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState, useEffect } from "react"
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   ChevronRight,
   CornerDownRight,
@@ -20,6 +21,7 @@ import {
   Loader2,
   Plus,
   StickyNote,
+  Zap,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -38,7 +40,6 @@ import {
 } from "@/components/TeachbackSession"
 import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
-import { GoalsList } from "@/components/goals/GoalsList"
 import type { Flashcard } from "@/lib/studyApi"
 import {
   type PrepareStudySessionOptions,
@@ -66,6 +67,61 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 // SessionHistoryTab replaced by SessionManager component
 
 // DocPicker now lives in pages/Study/DocPicker.tsx.
+
+const _SESSION_SIZE = 15
+
+// Study landing's lead action: the due-review CTA. Surfacing today's recall load
+// here (rather than only on the Hub) means opening Study always answers "what
+// should I do now?" before the collection grid.
+function StartReviewDueCard({ onStart }: { onStart: () => void }) {
+  const { data } = useQuery<{ due_today: number }>({
+    queryKey: ["study-due-count"],
+    queryFn: () => apiGet<{ due_today: number }>("/study/due-count"),
+    staleTime: 30_000,
+  })
+  const due = data?.due_today ?? 0
+  const sessionSize = Math.min(_SESSION_SIZE, due)
+  const estMin = Math.max(1, Math.round(sessionSize * 0.9))
+
+  if (due === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/50 px-5 py-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <Zap size={18} />
+        </span>
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold text-foreground">You're all caught up</span>
+          <span className="text-xs text-muted-foreground">
+            No cards due right now. Pick a collection below to study ahead.
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={onStart}
+      className="group flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 text-left text-primary-foreground shadow-md shadow-primary/15 transition-all hover:shadow-lg hover:shadow-primary/20"
+    >
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
+        <Zap size={20} />
+      </span>
+      <div className="flex flex-1 flex-col gap-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+          Start your due review
+        </span>
+        <span className="text-lg font-semibold sm:text-xl">
+          {due} card{due !== 1 ? "s" : ""} due
+        </span>
+        <span className="text-xs text-primary-foreground/75">
+          {sessionSize}-card session · ~{estMin} min
+        </span>
+      </div>
+      <ArrowRight size={20} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
+    </button>
+  )
+}
 
 export default function Study() {
   const navigate = useNavigate()
@@ -391,10 +447,10 @@ export default function Study() {
             />
           </>
         ) : (
-          /* Landing page: goals + session manager + collection grid */
+          /* Landing page: due-review CTA + session manager + collection grid.
+             Goals now live solely on Progress to remove the Study/Progress overlap. */
           <div className="flex flex-col gap-10">
-            {/* Goals sub-section -- typed learning goals + progress */}
-            <GoalsList />
+            <StartReviewDueCard onStart={() => handleStartFlashcard()} />
 
             <SessionManager
               onContinue={(sessionId, documentId, collectionId, mode) => {
