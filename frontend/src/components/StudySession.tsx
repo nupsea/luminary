@@ -610,6 +610,15 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault()
           setShowAnswer(true)
+          return
+        }
+        // 1-3 record the confidence prediction (Know it / Unsure / Blank), then reveal.
+        const predict: Record<string, Rating> = { "1": "good", "2": "hard", "3": "again" }
+        const predicted = predict[e.key]
+        if (predicted) {
+          e.preventDefault()
+          setPredictedRating(predicted)
+          setShowAnswer(true)
         }
         return
       }
@@ -751,7 +760,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                     { label: "Unsure", value: "hard" as Rating },
                     { label: "Blank", value: "again" as Rating },
                   ] as const
-                ).map(({ label, value }) => (
+                ).map(({ label, value }, i) => (
                   <button
                     key={value}
                     onClick={() => {
@@ -764,6 +773,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                         : "border-border bg-background text-muted-foreground hover:bg-accent"
                     }`}
                   >
+                    <span className="mr-1.5 opacity-50">{i + 1}</span>
                     {label}
                   </button>
                 ))}
@@ -774,6 +784,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               >
                 Skip prediction → Show Answer
               </button>
+              <p className="text-[11px] text-muted-foreground">1–3 to predict · Space to skip</p>
             </div>
           ) : lastRating === null ? (
             <div className="flex flex-col items-center gap-2">
