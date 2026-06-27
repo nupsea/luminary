@@ -24,6 +24,7 @@ import {
 import { Link, useNavigate } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
+import { FirstRunGuide } from "@/components/FirstRunGuide"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
@@ -823,30 +824,7 @@ function HubError({ onRetry }: { onRetry: () => void }) {
 function HubEmpty() {
   return (
     <PageSurface>
-      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 rounded-2xl border border-border bg-card/60 px-6 py-12 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
-          <LuminaryGlyph size={28} className="text-primary" />
-        </span>
-        <h2 className="text-xl font-semibold text-foreground">Welcome to Luminary</h2>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Open a document or write a note to start. Your active projects,
-          in-progress reads, and study cadence will surface here.
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Link
-            to="/library"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Go to Library
-          </Link>
-          <Link
-            to="/notes"
-            className="rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
-          >
-            Open Notes
-          </Link>
-        </div>
-      </div>
+      <FirstRunGuide />
     </PageSurface>
   )
 }
