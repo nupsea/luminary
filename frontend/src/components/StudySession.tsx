@@ -612,8 +612,9 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           setShowAnswer(true)
           return
         }
-        // 1-3 record the confidence prediction (Know it / Unsure / Blank), then reveal.
-        const predict: Record<string, Rating> = { "1": "good", "2": "hard", "3": "again" }
+        // 1-3 record the confidence prediction (Blank / Unsure / Know it), then reveal.
+        // Ordered worst->best to match the 1-4 grade keys shown after the reveal.
+        const predict: Record<string, Rating> = { "1": "again", "2": "hard", "3": "good" }
         const predicted = predict[e.key]
         if (predicted) {
           e.preventDefault()
@@ -756,9 +757,9 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               <div className="flex gap-2">
                 {(
                   [
-                    { label: "Know it", value: "good" as Rating },
-                    { label: "Unsure", value: "hard" as Rating },
                     { label: "Blank", value: "again" as Rating },
+                    { label: "Unsure", value: "hard" as Rating },
+                    { label: "Know it", value: "good" as Rating },
                   ] as const
                 ).map(({ label, value }, i) => (
                   <button
