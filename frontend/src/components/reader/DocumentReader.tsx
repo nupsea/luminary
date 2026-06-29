@@ -186,8 +186,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
-  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
-  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
+
+  // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
+  const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
 
   // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -932,14 +934,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Study
           </button>
           <button
-            onClick={() => {
-              setActiveDocument(documentId)
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", {
-                  detail: { tab: "study", documentId },
-                }),
-              )
-            }}
+            onClick={() => setGenQuestionsOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Generate questions from this document"
           >
@@ -948,13 +943,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
           <button
             onClick={() => {
-              setChatSelectedDocId(documentId)
-              setChatScope("single")
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", {
-                  detail: { tab: "chat", documentId },
-                }),
-              )
+              // Open the docked chat scoped to THIS document. Route through
+              // chatPreload (empty prompt, no auto-submit) so the chat starts a
+              // fresh, document-scoped conversation and the mount-time session
+              // hydration can't clobber the scope back to the last thread.
+              setChatPreload({ text: "", documentId, autoSubmit: false })
+              setChatPanelOpen(true)
             }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Chat about this document"
@@ -1359,6 +1353,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         sectionHeading={selection.flashcardHeading}
         context={selection.flashcardText}
         onClose={selection.closeFlashcard}
+      />
+
+      {/* Header "Generate questions" — same dialog scoped to the whole document */}
+      <DocumentFlashcardDialog
+        open={genQuestionsOpen}
+        documentId={documentId}
+        sectionId={undefined}
+        sectionHeading={undefined}
+        context=""
+        onClose={() => setGenQuestionsOpen(false)}
       />
 
       {/* Explanation sheet */}
