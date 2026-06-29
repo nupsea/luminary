@@ -15,8 +15,6 @@ import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-import { launchStudy } from "@/lib/studyLauncher"
-
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { SURFACE_TIER } from "@/lib/surfaceManifest"
@@ -186,7 +184,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
-  const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
 
   // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
   const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
@@ -924,9 +923,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         <div className="flex items-center gap-2">
           {/* In-context actions for this document: study, generate questions, chat */}
           <button
-            onClick={() =>
-              launchStudy({ type: "doc", ref: documentId, label: doc?.title ?? "this document" })
-            }
+            onClick={() => {
+              // Land directly in a session scoped to this document -- skip the
+              // launcher popup. Study.tsx auto-starts from pendingStudyStart once
+              // the doc scope resolves.
+              setActiveCollectionId(null)
+              setActiveDocument(documentId)
+              setPendingStudyStart({ documentId, mode: "flashcard" })
+              navigate("/study", { state: { from: "/library" } })
+            }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Study this document"
           >
@@ -943,12 +948,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
           <button
             onClick={() => {
-              // Open the docked chat scoped to THIS document. Route through
-              // chatPreload (empty prompt, no auto-submit) so the chat starts a
-              // fresh, document-scoped conversation and the mount-time session
-              // hydration can't clobber the scope back to the last thread.
+              // Open the full Chat page scoped to THIS document. Route through
+              // chatPreload (empty prompt, no auto-submit) so it starts a fresh,
+              // document-scoped conversation and the mount-time session hydration
+              // can't clobber the scope back to the last thread.
               setChatPreload({ text: "", documentId, autoSubmit: false })
-              setChatPanelOpen(true)
+              window.dispatchEvent(
+                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }),
+              )
             }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Chat about this document"

@@ -132,6 +132,8 @@ export default function Study() {
     setActiveCollectionId,
     pendingStudyResume,
     setPendingStudyResume,
+    pendingStudyStart,
+    setPendingStudyStart,
   } = useAppStore()
 
   // Effective doc: ready-only fallback so we never feed an in-progress doc
@@ -291,6 +293,18 @@ export default function Study() {
   // startStudy is re-created each render; only trigger when pendingStudyResume changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStudyResume])
+
+  // Auto-start a fresh session when arriving from a direct "Study this document"
+  // action (the reader header). Waits until the intended document scope has
+  // resolved so we never fall back to an unscoped daily review.
+  useEffect(() => {
+    if (!pendingStudyStart || studyPhase.phase !== "idle") return
+    if (pendingStudyStart.documentId && studyDocumentId !== pendingStudyStart.documentId) return
+    const { mode } = pendingStudyStart
+    setPendingStudyStart(null)
+    void startStudy(mode, null, null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStudyStart, studyDocumentId])
 
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
