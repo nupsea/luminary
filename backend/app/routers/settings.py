@@ -38,6 +38,11 @@ class LLMSettingsResponse(BaseModel):
     active_model: str = ""
     available_local_models: list[str] = []
     cloud_providers: list[Any] = []
+    # Whether the Ollama server answered at all. Lets first-run tell "Ollama is
+    # down" apart from "Ollama is up but no model is pulled" — both otherwise
+    # collapse to processing_mode="unavailable". Defaults True so non-private
+    # modes and legacy consumers are unaffected.
+    ollama_reachable: bool = True
 
 
 class LLMSettingsPatch(BaseModel):
@@ -51,21 +56,23 @@ class LLMSettingsPatch(BaseModel):
     google_api_key: str | None = None
 
 
-async def _fetch_ollama_models(ollama_url: str) -> list[str]:
+async def _fetch_ollama_models(ollama_url: str) -> tuple[bool, list[str]]:
+    """Return (server_reachable, available_models). Reachable is True when the
+    server answers 200, regardless of whether any model is pulled."""
     try:
         async with httpx.AsyncClient(timeout=_OLLAMA_TIMEOUT) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code == 200:
                 data = resp.json()
-                return [f"ollama/{m['name']}" for m in data.get("models", [])]
+                return True, [f"ollama/{m['name']}" for m in data.get("models", [])]
     except Exception:
         pass
-    return []
+    return False, []
 
 
 async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
     """Merge new DB fields with backward-compat Ollama-derived fields."""
-    available_local_models = await _fetch_ollama_models(ollama_url)
+    ollama_reachable, available_local_models = await _fetch_ollama_models(ollama_url)
 
     if data["mode"] == "private":
         processing_mode = "local" if available_local_models else "unavailable"
@@ -104,6 +111,7 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
         active_model=active_model,
         available_local_models=available_local_models,
         cloud_providers=cloud_providers,
+        ollama_reachable=ollama_reachable,
     )
 
 

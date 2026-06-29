@@ -148,8 +148,8 @@ function HubHeader() {
   return (
     <header className="flex items-end justify-between gap-4">
       <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/15">
-          <LuminaryGlyph size={22} className="text-primary" />
+        <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
+          <LuminaryGlyph size={48} className="text-primary" />
         </span>
         <div className="flex flex-col">
           <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">

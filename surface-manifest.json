@@ -43,11 +43,13 @@
     },
     {
       "id": "map",
-      "tier": "public",
+      "tier": "labs",
       "kind": "feature",
       "frontend": { "route": "/viz", "component": "pages/Viz" },
       "backend": { "routers": ["graph"] },
-      "labels": { "en": "Map" }
+      "labels": { "en": "Map" },
+      "description": "Explore your library as a tag/concept graph. Experimental.",
+      "default_off": true
     },
     {
       "id": "progress",

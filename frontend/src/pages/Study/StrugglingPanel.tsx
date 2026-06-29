@@ -51,7 +51,7 @@ export function StrugglingPanel({ documentId }: StrugglingPanelProps) {
           ))}
         </div>
       ) : isError ? (
-        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           <AlertCircle size={14} />
           Failed to load struggling cards. Please try refreshing.
         </div>
@@ -68,7 +68,7 @@ export function StrugglingPanel({ documentId }: StrugglingPanelProps) {
             >
               <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <p className="truncate text-sm text-foreground">{card.question}</p>
-                <span className="inline-flex w-fit items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                <span className="inline-flex w-fit items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
                   {card.again_count}x Again
                 </span>
               </div>

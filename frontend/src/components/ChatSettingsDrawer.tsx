@@ -82,7 +82,7 @@ export function ChatSettingsDrawer({
                 onClick={onWebToggle}
                 className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors ${
                   webEnabled
-                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
                     : "border-border text-muted-foreground hover:bg-accent"
                 } disabled:cursor-not-allowed disabled:opacity-50`}
               >

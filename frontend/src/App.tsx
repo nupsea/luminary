@@ -14,6 +14,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNaviga
 import { Toaster, toast } from "sonner"
 import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
+import { toggleTheme } from "./lib/theme"
 import { useAppStore } from "./store"
 import { useSurfaceStore } from "./store/surface"
 import { SURFACE_TIER, navTabs, routedSurfaces, visibleSurfaces, findLabsSurfaceByRoute } from "./lib/surfaceManifest"
@@ -270,11 +271,9 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
             )
           })}
           <LLMModeBadge onClick={() => setSettingsOpen(true)} />
-          {/* Dark mode toggle */}
+          {/* Dark mode toggle — persists via lib/theme so it survives reloads. */}
           <button
-            onClick={() => {
-              document.documentElement.classList.toggle("dark")
-            }}
+            onClick={() => toggleTheme()}
             className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/40 transition-colors hover:bg-accent hover:text-sidebar-foreground"
             title="Toggle dark mode"
           >
@@ -361,6 +360,10 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
             Local-first knowledge and learning assistant. Your documents, notes, and review history
             stay on your machine.
           </p>
+          <p className="text-xs text-muted-foreground">
+            Everything lives in a local <code className="font-mono">.luminary</code> folder — copy it
+            to back up or move to a new machine.
+          </p>
         </div>
       </DialogContent>
     </Dialog>
@@ -390,7 +393,9 @@ function NotFoundRedirect() {
 
   useEffect(() => {
     const labs = findLabsSurfaceByRoute(pathname)
-    if (labs && SURFACE_TIER !== "dev" && !labsEnabled.has(labs.id)) {
+    // Only nudge toward the Labs panel on a `labs` build, where that panel exists.
+    // On `public` there's no way to enable it, so redirect home silently.
+    if (labs && SURFACE_TIER === "labs" && !labsEnabled.has(labs.id)) {
       toast.info(`${labs.labels.en} is a Labs feature — enable it in Settings → Labs to use it.`)
     }
     navigate("/", { replace: true })
@@ -429,12 +434,19 @@ function AppShell() {
   const { data: llmData } = useQuery<{
     processing_mode: string
     mode: string
+    ollama_reachable?: boolean
   }>({
     queryKey: ["llm-settings"],
-    queryFn: prefetchLLMSettings as () => Promise<{ processing_mode: string; mode: string }>,
+    queryFn: prefetchLLMSettings as () => Promise<{
+      processing_mode: string
+      mode: string
+      ollama_reachable?: boolean
+    }>,
     staleTime: 30_000,
   })
   const ollamaUnavailable = llmData?.mode === "private" && llmData?.processing_mode === "unavailable"
+  // Up-but-no-model reads as "unavailable" too; tell them apart so the banner's fix is right.
+  const ollamaModelMissing = ollamaUnavailable && llmData?.ollama_reachable !== false
   // Reset dismissed state when Ollama comes back online
   useEffect(() => {
     if (!ollamaUnavailable) setOllamaWarningDismissed(false)
@@ -573,7 +585,11 @@ function AppShell() {
           <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle size={14} className="shrink-0" />
             <span className="flex-1">
-              Ollama is not running. LLM features (chat, teach-back, flashcard generation) are unavailable. Start it with: <code className="font-mono font-semibold">ollama serve</code>
+              {ollamaModelMissing ? (
+                <>Ollama is running but no model is pulled. LLM features (chat, teach-back, flashcard generation) need one — pull it with: <code className="font-mono font-semibold">ollama pull llama3.2</code></>
+              ) : (
+                <>Ollama is not running. LLM features (chat, teach-back, flashcard generation) are unavailable. Start it with: <code className="font-mono font-semibold">ollama serve</code></>
+              )}
             </span>
             <button onClick={() => setOllamaWarningDismissed(true)} className="shrink-0 hover:text-amber-900 dark:hover:text-amber-100" aria-label="Dismiss">
               <X size={14} />

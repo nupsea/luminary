@@ -21,6 +21,8 @@
     --accent-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --sidebar: 0 0% 98%;
@@ -106,6 +108,8 @@
     --accent-foreground: 210 40% 98%;
     --popover: 222 35% 6%;
     --popover-foreground: 210 40% 98%;
+    --card: 222 35% 7%;
+    --card-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --sidebar: 222 35% 6%;

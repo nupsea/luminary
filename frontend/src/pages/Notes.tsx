@@ -395,11 +395,11 @@ function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navi
 
   if (isError) {
     return (
-      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
         <span className="flex-1">Could not load clips</span>
         <button
           onClick={() => void refetch()}
-          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
         >
           Retry
         </button>
@@ -536,7 +536,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   })
 
   return (
-    <div className="mb-4 flex break-inside-avoid flex-col gap-2 rounded-lg border border-border bg-card p-3">
+    <div className="mb-6 flex break-inside-avoid flex-col gap-4 rounded-xl border border-border bg-card p-6">
       {/* Header row */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {note.document_id && <FileText size={12} />}
@@ -616,12 +616,12 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         return (
           <div className="cursor-pointer" onClick={onEdit}>
             {cardTitle && (
-              <h3 className="mb-1 text-sm font-semibold leading-snug text-foreground">
+              <h3 className="mb-2 text-lg font-semibold leading-snug text-foreground">
                 {cardTitle}
               </h3>
             )}
             {bodyText && (
-              <p className="line-clamp-3 text-sm text-muted-foreground">{bodyText}</p>
+              <p className="line-clamp-4 text-base leading-relaxed text-muted-foreground">{bodyText}</p>
             )}
           </div>
         )
@@ -961,11 +961,11 @@ export default function NotesPage() {
       )
     } else if (searchError) {
       panelContent = (
-        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
           <span className="flex-1">Search failed</span>
           <button
             onClick={() => void refetchSearch()}
-            className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+            className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
           >
             Retry
           </button>
@@ -978,50 +978,32 @@ export default function NotesPage() {
         </div>
       )
     } else {
-      panelContent = (
-        <div className="flex flex-col gap-3">
-          {searchData.results.map((result) => {
-            const matchedNote = noteList.find((n) => n.id === result.note_id)
-            return (
-              <div
-                key={result.note_id}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 cursor-pointer hover:bg-accent/50"
-                onClick={() => {
-                  if (matchedNote) setEditingNote(matchedNote)
-                }}
-              >
-                <div className="text-sm text-foreground line-clamp-3">
-                  {stripMarkdown(result.content).slice(0, 150)}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {result.tags.map((t) => {
-                    const parts = t.split("/")
-                    return (
-                      <button
-                        key={t}
-                        onClick={(e) => { e.stopPropagation(); dispatchTagNavigate(t) }}
-                        className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
-                        title={`Filter by tag: ${t}`}
-                      >
-                        <Tag size={9} className="text-muted-foreground" />
-                        <span className="text-primary">{parts[0]}</span>
-                        {parts.length > 1 && (
-                          <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {result.source === "both" ? "FTS + Semantic" : result.source === "vector" ? "Semantic" : "FTS"}
-                    {" · "}
-                    {result.score.toFixed(4)}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )
+      // Render matches in the SAME masonry card grid (in FTS/semantic relevance
+      // order) rather than a separate list, so search just filters the view.
+      // Notes not present in the loaded list (e.g. outside an active filter) are
+      // skipped since the card needs the full note object.
+      const searchedNotes = searchData.results
+        .map((result) => noteList.find((n) => n.id === result.note_id))
+        .filter((n): n is (typeof noteList)[number] => Boolean(n))
+      panelContent =
+        searchedNotes.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-20 text-center">
+            <p className="text-sm text-muted-foreground">
+              No notes matching &ldquo;{debouncedQuery}&rdquo;
+            </p>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-6xl columns-1 gap-6 md:columns-2">
+            {searchedNotes.map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                onEdit={() => setEditingNote(note)}
+                onDeleted={handleRefetch}
+              />
+            ))}
+          </div>
+        )
     }
   } else if (notesLoading) {
     panelContent =
@@ -1058,11 +1040,11 @@ export default function NotesPage() {
       )
   } else if (notesError) {
     panelContent = (
-      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
         <span className="flex-1">Could not load notes</span>
         <button
           onClick={() => void refetch()}
-          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+          className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
         >
           Retry
         </button>
@@ -1170,7 +1152,7 @@ export default function NotesPage() {
     )
   } else {
     panelContent = (
-      <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
+      <div className="mx-auto max-w-6xl columns-1 gap-6 md:columns-2">
         {noteList.map((note) => (
           <NoteCard
             key={note.id}

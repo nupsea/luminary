@@ -572,11 +572,11 @@ export default function Learning() {
                     onRetry={() => void refetch()}
                   />
                 ) : isError ? (
-                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                     <span className="flex-1">Could not load library. Check that the backend is running.</span>
                     <button
                       onClick={() => void refetch()}
-                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
                     >
                       Retry
                     </button>

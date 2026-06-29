@@ -99,7 +99,9 @@ async def test_default_mode_is_private(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         import unittest.mock
 
-        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
             resp = await client.get("/settings/llm")
 
     assert resp.status_code == 200
@@ -115,7 +117,9 @@ async def test_patch_llm_settings_persists_mode(test_db):
     import unittest.mock
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
             resp = await client.patch(
                 "/settings/llm",
                 json={"mode": "cloud", "provider": "anthropic"},
@@ -228,7 +232,9 @@ async def test_has_key_boolean_true_after_save(test_db):
         await update_llm_settings(session, openai_api_key="sk-test-key-12345")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with unittest.mock.patch("app.routers.settings._fetch_ollama_models", return_value=[]):
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
             resp = await client.get("/settings/llm")
 
     assert resp.status_code == 200

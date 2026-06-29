@@ -15,13 +15,18 @@ import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
+  Check,
   ChevronDown,
+  ChevronsUp,
   ChevronUp,
   ExternalLink,
   Loader2,
+  Minus,
+  RotateCcw,
   X as XIcon,
   Zap,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -145,12 +150,12 @@ const QUALITY_LABEL: Record<SourceQuality, string> = {
 }
 
 const QUALITY_CLASS: Record<SourceQuality, string> = {
-  official_docs: "bg-green-100 text-green-800",
-  spec: "bg-blue-100 text-blue-800",
-  wiki: "bg-gray-100 text-gray-800",
-  tutorial: "bg-gray-100 text-gray-700",
-  blog: "bg-gray-100 text-gray-600",
-  unknown: "bg-gray-100 text-gray-500",
+  official_docs: "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300",
+  spec: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300",
+  wiki: "bg-gray-100 text-gray-800 dark:bg-gray-800/60 dark:text-gray-300",
+  tutorial: "bg-gray-100 text-gray-700 dark:bg-gray-800/60 dark:text-gray-300",
+  blog: "bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400",
+  unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800/60 dark:text-gray-400",
 }
 
 function SourcePanel({ card }: { card: Flashcard }) {
@@ -218,7 +223,7 @@ function SourcePanel({ card }: { card: Flashcard }) {
                     {QUALITY_LABEL[ref.source_quality]}
                   </span>
                   {ref.is_llm_suggested && (
-                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700">
+                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                       ~
                     </span>
                   )}
@@ -234,11 +239,13 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
 // Rating buttons
 
-const RATINGS: { label: string; value: Rating; className: string }[] = [
-  { label: "Again", value: "again", className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200" },
-  { label: "Hard", value: "hard", className: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200" },
-  { label: "Good", value: "good", className: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" },
-  { label: "Easy", value: "easy", className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" },
+// Each grade also carries a distinct icon so Again/Good aren't told apart by hue
+// alone (red-green color-vision deficiency is the most common case).
+const RATINGS: { label: string; value: Rating; className: string; icon: LucideIcon }[] = [
+  { label: "Again", value: "again", icon: RotateCcw, className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900 dark:hover:bg-red-900/50" },
+  { label: "Hard", value: "hard", icon: Minus, className: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900 dark:hover:bg-orange-900/50" },
+  { label: "Good", value: "good", icon: Check, className: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50" },
+  { label: "Easy", value: "easy", icon: ChevronsUp, className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-900/50" },
 ]
 
 // Progress bar
@@ -349,7 +356,7 @@ function SessionComplete({ reviewed, correct, predictionsMade, predictionsCalibr
 
       {predictionsMade > 0 && (
         <p className="text-sm text-muted-foreground">
-          Calibration:{" "}
+          Calibration this session:{" "}
           <span className="font-medium text-foreground">
             {predictionsCalibrated} of {predictionsMade}
           </span>{" "}
@@ -681,8 +688,8 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             setNextReviewDate(null)
             setSourceContext(null)
             setCalibrationInline(null)
-            setPredictionsMade(0)
-            setPredictionsCalibrated(0)
+            // Calibration is the moat metric — carry it across sets so it never
+            // silently resets to zero when the learner continues into a new set.
             dismissedSourceContextIds.current.clear()
             void beginNew()
           }}
@@ -790,14 +797,16 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           ) : lastRating === null ? (
             <div className="flex flex-col items-center gap-2">
               <div className="flex gap-3">
-                {RATINGS.map(({ label, value, className }, i) => (
+                {RATINGS.map(({ label, value, className, icon: Icon }, i) => (
                   <button
                     key={value}
                     onClick={() => void handleRate(value)}
                     disabled={isRating}
-                    className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+                    aria-label={`${label} (press ${i + 1})`}
+                    className={`flex items-center gap-1.5 rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
                   >
-                    <span className="mr-1.5 opacity-50">{i + 1}</span>
+                    <span className="opacity-50">{i + 1}</span>
+                    <Icon size={14} aria-hidden />
                     {label}
                   </button>
                 ))}

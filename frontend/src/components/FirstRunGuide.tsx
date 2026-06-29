@@ -56,14 +56,22 @@ export function FirstRunGuide() {
 
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
-    queryFn: () => apiGet<{ processing_mode: string; mode: string }>("/settings/llm"),
+    queryFn: () =>
+      apiGet<{ processing_mode: string; mode: string; ollama_reachable?: boolean }>(
+        "/settings/llm",
+      ),
     staleTime: 30_000,
   })
-  const ollamaDown = llm?.mode === "private" && llm?.processing_mode === "unavailable"
+  // Generation can't run when private mode has no usable local model. Within that,
+  // distinguish "Ollama isn't running" from "Ollama is up but no model is pulled"
+  // so the guidance points at the right command.
+  const llmUnready = llm?.mode === "private" && llm?.processing_mode === "unavailable"
+  const ollamaDown = llmUnready && llm?.ollama_reachable === false
+  const modelMissing = llmUnready && llm?.ollama_reachable !== false
 
   // Auto-generate a starter deck once a ready doc appears and the LLM is up.
   useEffect(() => {
-    if (!firstDoc || !docReady || ollamaDown || genState !== "idle") return
+    if (!firstDoc || !docReady || llmUnready || genState !== "idle") return
     // Intentional: flip to the loading state as we kick off the one-shot generation
     // (guarded by `genState !== "idle"` above so it fires once).
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -80,7 +88,7 @@ export function FirstRunGuide() {
         setGenState(cards.length > 0 ? "done" : "error")
       })
       .catch(() => setGenState("error"))
-  }, [firstDoc, docReady, ollamaDown, genState])
+  }, [firstDoc, docReady, llmUnready, genState])
 
   const step1Done = hasDoc
   const step2Done = genState === "done"
@@ -142,6 +150,16 @@ export function FirstRunGuide() {
                   <AlertTriangle size={12} className="shrink-0" />
                   Start Ollama (<code className="font-mono font-semibold">ollama serve</code>) to
                   generate cards, or{" "}
+                  <Link to="/study" className="underline underline-offset-2">
+                    do it in Study
+                  </Link>
+                  .
+                </span>
+              ) : modelMissing ? (
+                <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle size={12} className="shrink-0" />
+                  Ollama is running but no model is pulled. Run{" "}
+                  <code className="font-mono font-semibold">ollama pull llama3.2</code>, or{" "}
                   <Link to="/study" className="underline underline-offset-2">
                     do it in Study
                   </Link>

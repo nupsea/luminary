@@ -33,9 +33,9 @@ interface RubricCardProps {
 }
 
 function scoreBadgeClass(score: number): string {
-  if (score >= 80) return "bg-green-100 text-green-700"
-  if (score >= 50) return "bg-yellow-100 text-yellow-700"
-  return "bg-red-100 text-red-700"
+  if (score >= 80) return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300"
+  if (score >= 50) return "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300"
+  return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300"
 }
 
 interface MissedPointRowProps {

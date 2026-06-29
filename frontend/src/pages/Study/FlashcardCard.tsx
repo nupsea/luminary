@@ -112,7 +112,7 @@ export function FlashcardCard({
                         e.stopPropagation()
                         setConfirmDelete(true)
                       }}
-                      className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                      className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                       title="Delete"
                     >
                       <Trash2 size={14} />
@@ -197,7 +197,7 @@ export function FlashcardCard({
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+        <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           <span className="flex-1">Delete this flashcard?</span>
           <button
             onClick={() => {
@@ -212,7 +212,7 @@ export function FlashcardCard({
           </button>
           <button
             onClick={() => setConfirmDelete(false)}
-            className="rounded border border-red-300 px-2 py-1 hover:bg-red-100"
+            className="rounded border border-red-300 px-2 py-1 hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/50"
           >
             Cancel
           </button>
@@ -225,12 +225,12 @@ export function FlashcardCard({
           {card.fsrs_state}
         </span>
         {card.flashcard_type && (
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 capitalize">
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 capitalize dark:bg-blue-950/40 dark:text-blue-300">
             {card.flashcard_type.replace(/_/g, " ")}
           </span>
         )}
         {card.bloom_level != null && (
-          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
+          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-950/40 dark:text-purple-300">
             L{card.bloom_level}
           </span>
         )}

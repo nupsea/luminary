@@ -467,7 +467,7 @@ export default function Study() {
               const ingestingTitle = docList.find(d => d.id === rawActiveId)?.title ?? "A recently selected document"
               const fallbackTitle = effectiveDoc?.title ?? "this document"
               return (
-                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                   <span>
                     <span className="font-medium">{ingestingTitle}</span> is still processing.
                     {" "}Showing <span className="font-medium">{fallbackTitle}</span> in the meantime.

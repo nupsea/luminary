@@ -27,6 +27,8 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
+import { isSurfaceVisible } from "@/lib/surfaceManifest"
+import { useSurfaceStore } from "@/store/surface"
 import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
 import { retagDocument } from "@/pages/Learning/api"
 import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
@@ -68,20 +70,20 @@ function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
 }
 
 const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string; icon: typeof Book }> = {
-  book: { label: "Book", className: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100", icon: Book },
-  conversation: { label: "Chat Log", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100", icon: MessageSquare },
-  notes: { label: "Note", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100", icon: StickyNote },
-  paper: { label: "Paper", className: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100", icon: FileText },
-  code: { label: "Code", className: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100", icon: Code },
-  audio: { label: "Audio", className: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100", icon: Mic },
-  epub: { label: "E-Book", className: "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100", icon: BookOpen },
-  kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100", icon: Bookmark },
-  tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100", icon: Cpu },
-  tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100", icon: Newspaper },
+  book: { label: "Book", className: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-900/50", icon: Book },
+  conversation: { label: "Chat Log", className: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50", icon: MessageSquare },
+  notes: { label: "Note", className: "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800", icon: StickyNote },
+  paper: { label: "Paper", className: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-900 dark:hover:bg-purple-900/50", icon: FileText },
+  code: { label: "Code", className: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900 dark:hover:bg-orange-900/50", icon: Code },
+  audio: { label: "Audio", className: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 dark:bg-yellow-950/40 dark:text-yellow-300 dark:border-yellow-900 dark:hover:bg-yellow-900/50", icon: Mic },
+  epub: { label: "E-Book", className: "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900 dark:hover:bg-indigo-900/50", icon: BookOpen },
+  kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 dark:hover:bg-amber-900/50", icon: Bookmark },
+  tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
+  tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-900 dark:hover:bg-teal-900/50", icon: Newspaper },
 }
 
-const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200" }
-const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200" }
+const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50" }
+const KINDLE_SOURCE_BADGE = { label: "Kindle", className: "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50" }
 
 // Accent band colors per content type (top-border gradient effect)
 const ACCENT_COLORS: Record<string, string> = {
@@ -136,6 +138,12 @@ export function DocumentCard({
   const isErrored = isDocumentErrored(doc)
   const badge = isYouTube ? { ...YOUTUBE_BADGE, icon: Youtube } : (isKindleSource ? { ...KINDLE_SOURCE_BADGE, icon: Bookmark } : CONTENT_TYPE_BADGE[doc.content_type])
   const navigate = useNavigate()
+  // "View in graph" only makes sense when the Map surface ships in this build;
+  // it's trimmed from public bundles, so drop the action there.
+  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
+  const visibleActions = DOC_ACTIONS.filter(
+    ({ action }) => action !== "viz" || isSurfaceVisible("map", labsEnabled),
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [typePopoverOpen, setTypePopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -268,11 +276,11 @@ export function DocumentCard({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {isProcessing ? (
-            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
               Processing…
             </span>
           ) : isErrored ? (
-            <span className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+            <span className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
               Failed
             </span>
           ) : (
@@ -300,7 +308,7 @@ export function DocumentCard({
                 >
                   {!collectionPickerOpen && (
                     <>
-                      {DOC_ACTIONS.map(({ action, label }) => {
+                      {visibleActions.map(({ action, label }) => {
                         const ActionIcon = ACTION_ICONS[action]
                         return (
                           <button
@@ -467,9 +475,9 @@ export function DocumentCard({
       {doc.enrichment_status && (
         <span className={cn(
           "mt-1.5 inline-block rounded-full px-2 py-0.5 text-xs",
-          (doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "animate-pulse bg-blue-100 text-blue-600",
-          doc.enrichment_status === "done" && "bg-green-100 text-green-700",
-          doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700",
+          (doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "animate-pulse bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300",
+          doc.enrichment_status === "done" && "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
+          doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
         )}>
           {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
           {doc.enrichment_status === "done" && (

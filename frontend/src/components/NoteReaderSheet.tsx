@@ -540,7 +540,7 @@ export function NoteReaderSheet({
                       <Skeleton className="h-4 w-2/3" />
                     </div>
                   ) : note.content.trim() ? (
-                    <MarkdownRenderer>{note.content}</MarkdownRenderer>
+                    <MarkdownRenderer serif>{note.content}</MarkdownRenderer>
                   ) : (
                     <p className="text-muted-foreground italic text-sm">Start writing...</p>
                   )}

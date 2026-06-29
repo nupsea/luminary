@@ -61,11 +61,11 @@ function formatRelativeTime(iso: string): string {
 }
 
 const ADMONITION_STYLES: Record<string, string> = {
-  note:      "border-l-4 border-l-blue-500 bg-blue-50/40",
-  warning:   "border-l-4 border-l-red-500 bg-red-50/40",
-  tip:       "border-l-4 border-l-green-500 bg-green-50/40",
-  caution:   "border-l-4 border-l-orange-500 bg-orange-50/40",
-  important: "border-l-4 border-l-purple-500 bg-purple-50/40",
+  note:      "border-l-4 border-l-blue-500 bg-blue-50/40 dark:bg-blue-950/20",
+  warning:   "border-l-4 border-l-red-500 bg-red-50/40 dark:bg-red-950/20",
+  tip:       "border-l-4 border-l-green-500 bg-green-50/40 dark:bg-green-950/20",
+  caution:   "border-l-4 border-l-orange-500 bg-orange-50/40 dark:bg-orange-950/20",
+  important: "border-l-4 border-l-purple-500 bg-purple-50/40 dark:bg-purple-950/20",
 }
 
 const ADMONITION_LABEL_COLORS: Record<string, string> = {

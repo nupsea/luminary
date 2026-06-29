@@ -232,7 +232,7 @@ async def test_gemini_prefix_sets_api_key(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_llm_settings_unavailable_when_ollama_down(settings_db):
-    with patch("app.routers.settings._fetch_ollama_models", return_value=[]):
+    with patch("app.routers.settings._fetch_ollama_models", return_value=(False, [])):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
 
@@ -240,13 +240,28 @@ async def test_llm_settings_unavailable_when_ollama_down(settings_db):
     data = resp.json()
     assert data["processing_mode"] == "unavailable"
     assert data["available_local_models"] == []
+    assert data["ollama_reachable"] is False
+
+
+@pytest.mark.asyncio
+async def test_llm_settings_unavailable_but_reachable_when_no_model_pulled(settings_db):
+    """Ollama up with zero models pulled is still 'unavailable', but reachable —
+    so first-run can guide 'pull a model' instead of 'start Ollama'."""
+    with patch("app.routers.settings._fetch_ollama_models", return_value=(True, [])):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get("/settings/llm")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["processing_mode"] == "unavailable"
+    assert data["ollama_reachable"] is True
 
 
 @pytest.mark.asyncio
 async def test_llm_settings_local_when_ollama_up(settings_db):
     with patch(
         "app.routers.settings._fetch_ollama_models",
-        return_value=["ollama/llama3:latest", "ollama/mistral:latest"],
+        return_value=(True, ["ollama/llama3:latest", "ollama/mistral:latest"]),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
@@ -272,7 +287,7 @@ async def test_llm_settings_cloud_when_no_ollama_but_api_key(settings_db):
             session, mode="cloud", provider="openai", openai_api_key="sk-real-key"
         )
 
-    with patch("app.routers.settings._fetch_ollama_models", return_value=[]):
+    with patch("app.routers.settings._fetch_ollama_models", return_value=(False, [])):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/settings/llm")
 

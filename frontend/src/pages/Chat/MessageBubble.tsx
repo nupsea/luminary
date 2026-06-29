@@ -40,8 +40,8 @@ export function MessageBubble({ msg, effectiveDocId, onQuizSubmit, navigateToCit
     <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-[80%] rounded-lg px-4 py-3 ${msg.role === "user"
-            ? "bg-slate-100 text-slate-900"
-            : "border border-border bg-white text-foreground shadow-sm"
+            ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+            : "border border-border bg-card text-card-foreground shadow-sm"
           }`}
       >
         {msg.type === "card" && msg.cardData !== undefined ? (
@@ -99,7 +99,7 @@ export function MessageBubble({ msg, effectiveDocId, onQuizSubmit, navigateToCit
                     ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
                     : `p.${c.page}`}
                   {c.version_mismatch && (
-                    <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                    <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                       Version mismatch
                     </span>
                   )}

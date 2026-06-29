@@ -104,11 +104,15 @@ export function useEffectiveActiveDocument(
       ? eligibleDocs.find((d) => d.id === lastReadyDocumentId) ?? null
       : null
     if (fallback) {
+      // Only a *fallback* (worth a banner) when the user actually had an
+      // in-progress doc selected. With no selection `active` is null here (the
+      // null-active-with-id case returned in the optimistic branch above), so
+      // surfacing the last-ready doc is just the default — not "still processing."
       return {
         doc: fallback,
         effectiveDocumentId: fallback.id,
         rawActiveId: activeDocumentId,
-        isFallingBack: true,
+        isFallingBack: active !== null,
         isLoading,
       }
     }

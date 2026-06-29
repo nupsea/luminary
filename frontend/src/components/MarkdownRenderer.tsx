@@ -21,6 +21,9 @@ interface MarkdownRendererProps {
   validNoteIds?: Set<string>
   /** Cap width applied to rendered <img>. Defaults to "medium" so large pasted images don't blow up the page. */
   imageSize?: ImageSize
+  /** Reading variant: serif body + roomier spacing (notes/long-form). Default is
+   * the compact sans body used in chat answers so they match the UI chrome. */
+  serif?: boolean
   onEditExcalidrawDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }
 
@@ -158,13 +161,18 @@ function ExcalidrawDiagramPreview({
   )
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium" }: MarkdownRendererProps) {
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
 
   return (
     <div className={cn(
-      "prose prose-base dark:prose-invert max-w-none font-serif leading-relaxed text-foreground/90",
-      "prose-headings:font-sans prose-headings:font-bold prose-headings:tracking-tight",
+      // Two body modes: a compact sans body for chat answers (matches the UI
+      // chrome), and a roomy serif reading body for notes/long-form. The serif
+      // mode keeps prose's generous default spacing so it doesn't read crowded.
+      "prose prose-base dark:prose-invert max-w-none leading-relaxed text-foreground/90",
+      serif ? "font-serif" : "font-sans",
+      "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
+      serif ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
       "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
       IMAGE_SIZE_CLASS[imageSize],
@@ -241,13 +249,14 @@ export function MarkdownRenderer({
   className,
   validNoteIds,
   imageSize = "medium",
+  serif = false,
   onEditExcalidrawDiagram,
 }: MarkdownRendererProps) {
   const diagrams = findExcalidrawDiagrams(children)
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
         {children}
       </MarkdownBody>
     )
@@ -261,7 +270,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
                 {before}
               </MarkdownBody>
             )}
@@ -274,7 +283,7 @@ export function MarkdownRenderer({
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}
