@@ -15,8 +15,6 @@ import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
-import { launchStudy } from "@/lib/studyLauncher"
-
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
 import { SURFACE_TIER } from "@/lib/surfaceManifest"
@@ -186,8 +184,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
-  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
-  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
+
+  // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
+  const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
 
   // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -922,9 +923,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         <div className="flex items-center gap-2">
           {/* In-context actions for this document: study, generate questions, chat */}
           <button
-            onClick={() =>
-              launchStudy({ type: "doc", ref: documentId, label: doc?.title ?? "this document" })
-            }
+            onClick={() => {
+              // Land directly in a session scoped to this document -- skip the
+              // launcher popup. Study.tsx auto-starts from pendingStudyStart once
+              // the doc scope resolves.
+              setActiveCollectionId(null)
+              setActiveDocument(documentId)
+              setPendingStudyStart({ documentId, mode: "flashcard" })
+              navigate("/study", { state: { from: "/library" } })
+            }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Study this document"
           >
@@ -932,14 +939,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Study
           </button>
           <button
-            onClick={() => {
-              setActiveDocument(documentId)
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", {
-                  detail: { tab: "study", documentId },
-                }),
-              )
-            }}
+            onClick={() => setGenQuestionsOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Generate questions from this document"
           >
@@ -948,12 +948,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
           <button
             onClick={() => {
-              setChatSelectedDocId(documentId)
-              setChatScope("single")
+              // Open the full Chat page scoped to THIS document. Route through
+              // chatPreload (empty prompt, no auto-submit) so it starts a fresh,
+              // document-scoped conversation and the mount-time session hydration
+              // can't clobber the scope back to the last thread.
+              setChatPreload({ text: "", documentId, autoSubmit: false })
               window.dispatchEvent(
-                new CustomEvent("luminary:navigate", {
-                  detail: { tab: "chat", documentId },
-                }),
+                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }),
               )
             }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
@@ -1359,6 +1360,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         sectionHeading={selection.flashcardHeading}
         context={selection.flashcardText}
         onClose={selection.closeFlashcard}
+      />
+
+      {/* Header "Generate questions" — same dialog scoped to the whole document */}
+      <DocumentFlashcardDialog
+        open={genQuestionsOpen}
+        documentId={documentId}
+        sectionId={undefined}
+        sectionHeading={undefined}
+        context=""
+        onClose={() => setGenQuestionsOpen(false)}
       />
 
       {/* Explanation sheet */}

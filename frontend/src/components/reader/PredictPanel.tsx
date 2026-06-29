@@ -197,16 +197,16 @@ export function PredictPanel({ sectionId: _sectionId, documentId, preview }: Pre
           {runResult.prediction_correct !== null && (
             <>
               {runResult.prediction_correct ? (
-                <div className="flex items-center gap-1.5 rounded border border-green-400/40 bg-green-50 px-2 py-1 text-xs text-green-700">
+                <div className="flex items-center gap-1.5 rounded border border-green-400/40 bg-green-50 px-2 py-1 text-xs text-green-700 dark:bg-green-950/40 dark:text-green-300">
                   <Check size={12} />
                   Your prediction was correct!
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
-                  <div className="rounded border border-amber-400/40 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  <div className="rounded border border-amber-400/40 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                     Your prediction was wrong.
                     {runResult.prediction_diff && (
-                      <pre className="mt-1 overflow-auto font-mono text-xs text-amber-900">
+                      <pre className="mt-1 overflow-auto font-mono text-xs text-amber-900 dark:text-amber-200">
                         {runResult.prediction_diff}
                       </pre>
                     )}

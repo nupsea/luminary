@@ -476,4 +476,12 @@ if _mode == "prod":
         asset = resolve_spa_asset(_DIST, full_path)
         if asset is not None:
             return FileResponse(asset)
-        return FileResponse(_DIST / "index.html")
+        index = _DIST / "index.html"
+        if not index.is_file():
+            # The SPA isn't built (or is mid-rebuild). Return a clean 503 rather
+            # than letting FileResponse raise a 500 stack trace at the user.
+            raise HTTPException(
+                status_code=503,
+                detail="Frontend not built. Run `make build` (dist/ is missing or rebuilding).",
+            )
+        return FileResponse(index)

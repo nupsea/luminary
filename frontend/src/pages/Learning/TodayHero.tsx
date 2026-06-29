@@ -1,14 +1,12 @@
-// Single highest-leverage learning action at the top of Library.
-// Priority: due flashcards (recall) > continue reading (reception).
-// Renders nothing when neither applies.
+// Continue-reading affordance at the top of Library. The Hub owns the single
+// "Today" recall CTA (due cards / start review); Library is the reception
+// surface, so here we only nudge picking the last doc back up. Due-card
+// visibility on Library lives in the stats bar, not a second competing hero.
+// Renders nothing when there's nothing in progress.
 
-import { useQuery } from "@tanstack/react-query"
-import { useNavigate } from "react-router-dom"
-import { BookOpen, Zap } from "lucide-react"
+import { BookOpen } from "lucide-react"
 
 import type { DocumentListItem } from "@/components/library/types"
-
-import { fetchDueCount } from "./api"
 
 interface TodayHeroProps {
   recentItem: DocumentListItem | undefined
@@ -16,49 +14,6 @@ interface TodayHeroProps {
 }
 
 export function TodayHero({ recentItem, onContinue }: TodayHeroProps) {
-  const navigate = useNavigate()
-  const { data } = useQuery({
-    queryKey: ["stats-due-count"],
-    queryFn: fetchDueCount,
-    staleTime: 60_000,
-  })
-  const dueCount = data?.due_today ?? 0
-
-  if (dueCount === 0 && !recentItem) return null
-
-  if (dueCount > 0) {
-    return (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-        <button
-          onClick={() => navigate("/study", { state: { from: "/library" } })}
-          className="group flex flex-1 cursor-pointer select-none items-center gap-3 rounded-lg bg-primary px-4 py-3 text-left text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-md"
-        >
-          <Zap size={16} className="shrink-0" />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="lum-eyebrow text-primary-foreground/70">Today</span>
-            <span className="truncate text-sm font-semibold">
-              {dueCount} card{dueCount !== 1 ? "s" : ""} due · Start review
-            </span>
-          </div>
-          <span className="hidden shrink-0 text-xs text-primary-foreground/70 sm:inline">→</span>
-        </button>
-        {recentItem && (
-          <button
-            onClick={() => onContinue(recentItem.id)}
-            className="flex cursor-pointer select-none items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:bg-accent sm:w-[42%]"
-          >
-            <BookOpen size={14} className="shrink-0 text-muted-foreground" />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="lum-eyebrow">Or continue reading</span>
-              <span className="truncate text-sm text-foreground">{recentItem.title}</span>
-            </div>
-          </button>
-        )}
-      </div>
-    )
-  }
-
-  // No cards due -- fall back to the existing continue-reading affordance.
   if (!recentItem) return null
   return (
     <div

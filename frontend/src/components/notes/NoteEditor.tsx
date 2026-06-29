@@ -193,7 +193,7 @@ export function NoteEditor({
         textareaClassName={textareaClassName}
         preview={
           content.trim() ? (
-            <MarkdownRenderer onEditExcalidrawDiagram={openDiagramEditor}>
+            <MarkdownRenderer serif onEditExcalidrawDiagram={openDiagramEditor}>
               {content}
             </MarkdownRenderer>
           ) : (

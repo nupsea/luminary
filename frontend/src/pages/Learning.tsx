@@ -5,6 +5,14 @@ import { useSearchParams, useLocation } from "react-router-dom"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { DocumentCard } from "@/components/library/DocumentCard"
 import { FilterBar } from "@/components/library/FilterBar"
 import { LibraryCollectionsRail } from "@/components/library/LibraryCollectionsRail"
@@ -53,7 +61,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <BookPlus size={48} className="mb-4 text-muted-foreground/50" />
       <h2 className="mb-1 text-lg font-semibold text-foreground">No books yet</h2>
       <p className="mb-6 text-sm text-muted-foreground">
-        Ingest a PDF or YouTube video to get started.
+        Add a PDF or YouTube video to get started.
       </p>
       <button
         onClick={onAdd}
@@ -564,11 +572,11 @@ export default function Learning() {
                     onRetry={() => void refetch()}
                   />
                 ) : isError ? (
-                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <div className="flex items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                     <span className="flex-1">Could not load library. Check that the backend is running.</span>
                     <button
                       onClick={() => void refetch()}
-                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                      className="rounded border border-amber-300 bg-white px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
                     >
                       Retry
                     </button>
@@ -648,33 +656,35 @@ export default function Learning() {
         </div>
       )}
 
-      {/* Bulk delete confirmation */}
-      {bulkConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-80 rounded-xl border border-border bg-card p-6 shadow-xl">
-            <h3 className="mb-2 text-base font-semibold">Delete {selectedIds.size} document{selectedIds.size !== 1 ? "s" : ""}?</h3>
-            <p className="mb-5 text-sm text-muted-foreground">
+      {/* Bulk delete confirmation -- shadcn Dialog for focus-trap + Esc-to-close */}
+      <Dialog open={bulkConfirm} onOpenChange={(v) => { if (!v) setBulkConfirm(false) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Delete {selectedIds.size} document{selectedIds.size !== 1 ? "s" : ""}?
+            </DialogTitle>
+            <DialogDescription>
               This action cannot be undone. All related data (chunks, flashcards, summaries) will
               be permanently deleted.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setBulkConfirm(false)}
-                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmBulkDelete}
-                disabled={bulkDeleteMutation.isPending}
-                className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
-              >
-                {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              onClick={() => setBulkConfirm(false)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmBulkDelete}
+              disabled={bulkDeleteMutation.isPending}
+              className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
+            >
+              {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>

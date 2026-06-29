@@ -78,6 +78,11 @@ interface AppState {
   // flashcard session so Study.tsx can auto-resume on return.
   pendingStudyResume: { sessionId: string; mode: "flashcard" | "teachback" } | null
   setPendingStudyResume: (r: { sessionId: string; mode: "flashcard" | "teachback" } | null) => void
+  // Transient: set before navigating to /study to auto-start a fresh session
+  // scoped to the given document (e.g. the reader's "Study" action), so the
+  // user lands directly in the session instead of the launcher/dashboard.
+  pendingStudyStart: { documentId: string | null; mode: "flashcard" | "teachback" } | null
+  setPendingStudyStart: (r: { documentId: string | null; mode: "flashcard" | "teachback" } | null) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -134,6 +139,8 @@ export const useAppStore = create<AppState>()(
       setActiveTag: (tag) => set({ activeTag: tag }),
       pendingStudyResume: null,
       setPendingStudyResume: (r) => set({ pendingStudyResume: r }),
+      pendingStudyStart: null,
+      setPendingStudyStart: (r) => set({ pendingStudyStart: r }),
     }),
     {
       name: "luminary-app-store",

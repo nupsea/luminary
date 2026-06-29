@@ -477,14 +477,14 @@ export function GenerateFlashcardsDialog({
 
             {/* Error */}
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-4">
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/40">
                 <p className="text-sm font-medium text-red-800">{error}</p>
               </div>
             )}
 
             {/* Success Results -- collection mode */}
             {success && collectionResult && (
-              <div className="flex flex-col gap-2 rounded-md border border-green-200 bg-green-50 p-4 animate-in fade-in slide-in-from-top-2">
+              <div className="flex flex-col gap-2 rounded-md border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40 p-4 animate-in fade-in slide-in-from-top-2">
                 <p className="text-sm font-semibold text-green-800">
                   Deck &quot;{collectionResult.deck}&quot; updated
                 </p>
@@ -499,7 +499,7 @@ export function GenerateFlashcardsDialog({
               <div className="flex flex-col gap-4 border-t border-border pt-6 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-foreground">Generated Flashcards</h3>
-                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700 dark:bg-green-950/40 dark:text-green-300">
                     {generatedCards.length} Cards
                   </span>
                 </div>
@@ -519,7 +519,7 @@ export function GenerateFlashcardsDialog({
             )}
 
             {success && !collectionResult && generatedCards.length === 0 && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-center">
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-center dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="text-sm text-amber-800 italic">No flashcards were generated. Try broadening your selection.</p>
               </div>
             )}

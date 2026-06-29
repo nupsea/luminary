@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cloud, GitMerge, Loader2, RefreshCw, Settings, Shield, X } from "lucide-react"
+import { Cloud, GitMerge, Loader2, Monitor, Moon, RefreshCw, Settings, Shield, Sun, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -9,6 +9,7 @@ import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { SURFACE_TIER } from "@/lib/surfaceManifest"
 import { SettingsLabsPanel } from "@/components/SettingsLabsPanel"
+import { getTheme, setTheme, type Theme } from "@/lib/theme"
 
 // Types
 
@@ -84,6 +85,44 @@ function formatModelOption(m: ModelOption): string {
   }
   if (m.cost_note) label += ` (${m.cost_note})`
   return label
+}
+
+// Appearance: light / dark / follow-OS. Persists via lib/theme; the pre-paint
+// script in index.html applies the choice before React mounts.
+const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+]
+
+function ThemeControl() {
+  const [theme, setThemeState] = useState<Theme>(() => getTheme())
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+        const active = theme === value
+        return (
+          <button
+            key={value}
+            onClick={() => {
+              setTheme(value)
+              setThemeState(value)
+            }}
+            aria-pressed={active}
+            className={cn(
+              "flex flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs font-medium transition-colors",
+              active
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <Icon size={16} />
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 // SettingsDrawer
@@ -261,6 +300,12 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
         </div>
 
         <div className="flex-1 overflow-auto space-y-6 px-5 py-4">
+          {/* Section 0: Appearance */}
+          <section>
+            <h3 className="mb-3 text-sm font-semibold text-foreground">Appearance</h3>
+            <ThemeControl />
+          </section>
+
           {/* Section 1: LLM Mode */}
           <section>
             <h3 className="mb-3 text-sm font-semibold text-foreground">LLM Mode</h3>

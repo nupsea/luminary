@@ -49,7 +49,7 @@ export function WeakAreasPanel({ documentId, onSelectSection }: WeakAreasPanelPr
             >
               <div className="flex items-center gap-2">
                 <span className="flex-1 text-sm font-medium text-foreground">{heading}</span>
-                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
                   {gap.weak_card_count} weak
                 </span>
               </div>

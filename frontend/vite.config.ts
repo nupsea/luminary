@@ -5,18 +5,24 @@ import surfaceManifest from "../surface-manifest.json"
 
 type Tier = "public" | "labs" | "dev"
 
-// dev-tier surfaces are build-stripped on public/labs bundles (per the labs-drawer
-// spec: dev = build-time strip, labs = runtime toggle that still ships the code).
-// Their component paths alias to a no-op so Quality/Admin/Monitoring never land in
-// a non-dev dist.
+// Surfaces above the build tier are build-stripped so their code never lands in a
+// lower-tier dist (per the labs-drawer spec: dev = build-time strip; labs = runtime
+// toggle that still ships the code). A `public` build strips both dev (Quality/
+// Admin/Monitoring) and labs (e.g. Map/Viz) routed components; a `labs` build strips
+// only dev. `dev` ships everything.
+const TIER_ORDER: Record<Tier, number> = { public: 0, labs: 1, dev: 2 }
+
 function strippedAliases(tier: Tier): Record<string, string> {
-  if (tier === "dev") return {}
   const stripped = path.resolve(__dirname, "./src/lib/strippedSurface.tsx")
   const out: Record<string, string> = {}
   for (const s of surfaceManifest.surfaces as Array<{ tier: Tier; frontend?: { component?: string; components?: string[] } }>) {
-    if (s.tier !== "dev") continue
-    const paths = [s.frontend?.component, ...(s.frontend?.components ?? [])].filter(Boolean) as string[]
-    for (const p of paths) out[`@/${p}`] = stripped
+    if (TIER_ORDER[s.tier] <= TIER_ORDER[tier]) continue
+    // Always strip the routed page entry (pages/* are self-contained route roots).
+    // Shared `components` are only stripped for dev-tier tools; labs surfaces list
+    // shared building blocks there that always-on code may import, so leave them.
+    const paths = [s.frontend?.component]
+    if (s.tier === "dev") paths.push(...(s.frontend?.components ?? []))
+    for (const p of paths.filter(Boolean) as string[]) out[`@/${p}`] = stripped
   }
   return out
 }

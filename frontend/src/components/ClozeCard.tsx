@@ -46,22 +46,22 @@ const RATINGS: { label: string; value: Rating; className: string }[] = [
   {
     label: "Again",
     value: "again",
-    className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200",
+    className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900 dark:hover:bg-red-900/50",
   },
   {
     label: "Hard",
     value: "hard",
-    className: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200",
+    className: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900 dark:hover:bg-orange-900/50",
   },
   {
     label: "Good",
     value: "good",
-    className: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200",
+    className: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50",
   },
   {
     label: "Easy",
     value: "easy",
-    className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200",
+    className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-900/50",
   },
 ]
 

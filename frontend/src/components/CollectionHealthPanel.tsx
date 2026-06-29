@@ -68,9 +68,9 @@ function CohesionPill({ score }: { score: number | null }) {
     )
   }
   const pct = Math.round(score * 100)
-  let colorClass = "bg-red-100 text-red-700"
-  if (score >= 0.7) colorClass = "bg-green-100 text-green-700"
-  else if (score >= 0.5) colorClass = "bg-yellow-100 text-yellow-700"
+  let colorClass = "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+  if (score >= 0.7) colorClass = "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300"
+  else if (score >= 0.5) colorClass = "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300"
 
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${colorClass}`}>
@@ -153,7 +153,7 @@ export function CollectionHealthPanel({
           )}
 
           {isError && (
-            <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
               Failed to load health report. Please try again.
             </div>
           )}
@@ -234,7 +234,7 @@ export function CollectionHealthPanel({
                     <button
                       onClick={() => archiveMut.mutate()}
                       disabled={archiveMut.isPending}
-                      className="flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                      className="flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50 disabled:opacity-50"
                     >
                       {archiveMut.isPending ? (
                         <Loader2 size={11} className="animate-spin" />

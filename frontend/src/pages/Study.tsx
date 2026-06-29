@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState, useEffect } from "react"
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   ChevronRight,
   CornerDownRight,
@@ -20,6 +21,7 @@ import {
   Loader2,
   Plus,
   StickyNote,
+  Zap,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -38,7 +40,6 @@ import {
 } from "@/components/TeachbackSession"
 import { SessionManager } from "@/components/SessionManager"
 import { CollectionStudyDashboard } from "@/components/study/CollectionStudyDashboard"
-import { GoalsList } from "@/components/goals/GoalsList"
 import type { Flashcard } from "@/lib/studyApi"
 import {
   type PrepareStudySessionOptions,
@@ -67,6 +68,61 @@ export type { DocListItem } from "./Study/types"  // re-exported for Progress.ts
 
 // DocPicker now lives in pages/Study/DocPicker.tsx.
 
+const _SESSION_SIZE = 15
+
+// Study landing's lead action: the due-review CTA. Surfacing today's recall load
+// here (rather than only on the Hub) means opening Study always answers "what
+// should I do now?" before the collection grid.
+function StartReviewDueCard({ onStart }: { onStart: () => void }) {
+  const { data } = useQuery<{ due_today: number }>({
+    queryKey: ["study-due-count"],
+    queryFn: () => apiGet<{ due_today: number }>("/study/due-count"),
+    staleTime: 30_000,
+  })
+  const due = data?.due_today ?? 0
+  const sessionSize = Math.min(_SESSION_SIZE, due)
+  const estMin = Math.max(1, Math.round(sessionSize * 0.9))
+
+  if (due === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/50 px-5 py-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <Zap size={18} />
+        </span>
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold text-foreground">You're all caught up</span>
+          <span className="text-xs text-muted-foreground">
+            No cards due right now. Pick a collection below to study ahead.
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={onStart}
+      className="group flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 text-left text-primary-foreground shadow-md shadow-primary/15 transition-all hover:shadow-lg hover:shadow-primary/20"
+    >
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
+        <Zap size={20} />
+      </span>
+      <div className="flex flex-1 flex-col gap-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+          Start your due review
+        </span>
+        <span className="text-lg font-semibold sm:text-xl">
+          {due} card{due !== 1 ? "s" : ""} due
+        </span>
+        <span className="text-xs text-primary-foreground/75">
+          {sessionSize}-card session · ~{estMin} min
+        </span>
+      </div>
+      <ArrowRight size={20} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
+    </button>
+  )
+}
+
 export default function Study() {
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
@@ -76,6 +132,8 @@ export default function Study() {
     setActiveCollectionId,
     pendingStudyResume,
     setPendingStudyResume,
+    pendingStudyStart,
+    setPendingStudyStart,
   } = useAppStore()
 
   // Effective doc: ready-only fallback so we never feed an in-progress doc
@@ -236,6 +294,50 @@ export default function Study() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingStudyResume])
 
+  // Auto-start a fresh session when arriving from a direct "Study this document"
+  // action (the reader header). We prepare against the EXPLICIT documentId rather
+  // than the effective-active-doc fallback, so the scope is deterministic. If the
+  // document has no cards yet, we land on its Study dashboard (where "Generate"
+  // lives) instead of a dead-end empty-session screen.
+  useEffect(() => {
+    if (!pendingStudyStart || studyPhase.phase !== "idle") return
+    const { mode, documentId } = pendingStudyStart
+    setPendingStudyStart(null)
+    if (documentId) {
+      setActiveCollectionId(null)
+      setActiveDocument(documentId)
+    }
+    void (async () => {
+      setStudyPhase({ phase: "preparing", mode })
+      const options: PrepareStudySessionOptions = {
+        mode,
+        documentId,
+        collectionId: null,
+        cardLimit: mode === "teachback" ? TEACHBACK_CARD_LIMIT : FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      try {
+        const outcome = await prepareStudySession(options)
+        if (outcome.kind === "empty") {
+          setStudyPhase({ phase: "idle" })
+          toast("No cards yet for this document — generate some below to start.")
+          return
+        }
+        setStudyPhase({
+          phase: "ready",
+          mode,
+          outcome,
+          scopeForBeginNew: { ...options, resumeSessionId: null },
+        })
+      } catch (err) {
+        console.warn("Failed to auto-start study", err)
+        setStudyPhase({ phase: "idle" })
+        toast.error("Could not start study session. Please try again.")
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStudyStart])
+
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
     items: any[],
@@ -365,7 +467,7 @@ export default function Study() {
               const ingestingTitle = docList.find(d => d.id === rawActiveId)?.title ?? "A recently selected document"
               const fallbackTitle = effectiveDoc?.title ?? "this document"
               return (
-                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                   <span>
                     <span className="font-medium">{ingestingTitle}</span> is still processing.
                     {" "}Showing <span className="font-medium">{fallbackTitle}</span> in the meantime.
@@ -391,10 +493,10 @@ export default function Study() {
             />
           </>
         ) : (
-          /* Landing page: goals + session manager + collection grid */
+          /* Landing page: due-review CTA + session manager + collection grid.
+             Goals now live solely on Progress to remove the Study/Progress overlap. */
           <div className="flex flex-col gap-10">
-            {/* Goals sub-section -- typed learning goals + progress */}
-            <GoalsList />
+            <StartReviewDueCard onStart={() => handleStartFlashcard()} />
 
             <SessionManager
               onContinue={(sessionId, documentId, collectionId, mode) => {
@@ -404,17 +506,17 @@ export default function Study() {
               }}
             />
 
-            {/* Focused Enclaves heading */}
+            {/* Collections heading */}
             <div className="flex flex-col gap-2 max-w-2xl">
               <motion.h1
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="text-3xl font-bold tracking-tight text-foreground"
               >
-                Focused Enclaves
+                Collections
               </motion.h1>
               <p className="text-muted-foreground text-lg">
-                Grouped knowledge silos for topic-centric learning.
+                Group documents and notes by topic to study them together.
               </p>
             </div>
 
@@ -463,7 +565,7 @@ export default function Study() {
                       <div className="mt-6 flex flex-col gap-2">
                         <h3 className="text-lg font-semibold text-foreground">{coll.name}</h3>
                         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
-                          {coll.description || "Synthesize knowledge across documents and notes."}
+                          {coll.description || "Group documents and notes to study them together."}
                         </p>
                       </div>
                       <div className="mt-4 flex items-center gap-3">
@@ -494,7 +596,7 @@ export default function Study() {
                       </div>
                       <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
                         <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                          Enter Context
+                          Open
                         </div>
                         <ChevronRight size={16} className="text-primary translate-x-4 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
                       </div>
@@ -508,7 +610,7 @@ export default function Study() {
                 >
                   <Plus size={24} className="group-hover:scale-110 transition-transform" />
                   <div className="text-center">
-                    <p className="text-sm font-semibold uppercase">New Enclave</p>
+                    <p className="text-sm font-semibold uppercase">New collection</p>
                   </div>
                 </motion.button>
               </div>

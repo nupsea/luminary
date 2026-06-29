@@ -6,6 +6,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-30
+
+### Changed
+- **Public surface trimmed to the learning wedge** — the Map/graph view (`/viz`)
+  moves from `public` to the `labs` tier. It no longer ships in the public bundle
+  (the page chunk is build-stripped), the "View in graph" document action is hidden
+  when Map isn't available, and a stale `/viz` deep-link on a public build redirects
+  home silently. Map remains available on `labs`/`dev` builds.
+- **Honest first-run for the local model** — `/settings/llm` now reports
+  `ollama_reachable`, letting the first-run guide and the global banner tell
+  "Ollama isn't running" apart from "Ollama is up but no model is pulled," each with
+  the right command. `scripts/start.sh` prints a non-fatal pre-flight hint when the
+  model is missing.
+- **Calibration is now session-level** — the predict-vs-grade match tally carries
+  across "Start Next Set" instead of resetting to zero, so the moat metric never
+  silently disappears mid-session.
+- **Notes view roomier** — the note grid drops from three dense columns to two
+  larger, well-spaced cards (bigger padding, larger title/body), so the most recent
+  notes fill the first screen and the rest are a scroll away.
+- **Notes search filters in place** — searching notes now renders the matches as the
+  same cards in the same grid (FTS/semantic relevance order) instead of switching to
+  a separate scored-list view.
+- **Chat sessions can group by document** — a Recent / By document toggle in the chat
+  list; "By document" buckets each conversation under its source document's title
+  (with Library-wide and Unknown-document buckets).
+
+### Added
+- **Theme persistence** — dark/light/system preference persists across reloads
+  (`lib/theme.ts` + a pre-paint script in `index.html`, no flash) and is settable
+  from Settings → Appearance, in addition to the nav-rail shortcut.
+- **New brand mark** — the Luminary lantern artwork (background removed, light/dark
+  frame variants so it stays visible on either theme) replaces the old glyph in the
+  nav rail, hub header, About dialog, and first-run, and ships as the browser favicon
+  (replacing the default Vite mark).
+
+### Fixed
+- **Spurious "document still processing" banner** — Study/learning surfaces showed
+  a "a recently selected document is still processing — showing X in the meantime"
+  fallback notice even when nothing was selected (`activeDocumentId` isn't persisted;
+  only `lastReadyDocumentId` is). `useEffectiveActiveDocument` now flags a fallback
+  only when an in-progress doc was actually active, so defaulting to the last-ready
+  doc is silent.
+- **Rendered-markdown typography** — the shared markdown renderer now has two modes:
+  a compact sans body for chat answers (matches the UI chrome) and a roomy serif
+  reading body for notes/long-form. Fixes chat answers reading in a mismatched serif
+  while keeping notes in the serif reading font.
+- **Prod SPA fallback no longer 500s** — `serve_spa` returns a clean 503 when
+  `dist/index.html` is missing (unbuilt or mid-rebuild) instead of raising a
+  FileResponse stack trace at the user.
+- **`bg-card` surface token defined** — `--card`/`--card-foreground` were never
+  declared and `card` was never mapped in the Tailwind config, so `bg-card` was a
+  silent no-op app-wide. Defining it (light + dark) gives every card surface its
+  intended background; in particular the chat answer bubble no longer renders light
+  text on a white card in dark mode.
+- **Dark-mode legibility across public surfaces** — hardcoded light-only tints
+  (grade buttons, quality/status badges, content-type chips, error/empty cards,
+  chat bubbles) gained dark variants, so no surface renders pale chips or white
+  cards in dark mode.
+- **Grade-button accessibility** — Again/Hard/Good/Easy now carry distinct icons
+  and `aria-label`s, so they're no longer distinguished by color alone.
+- **Duplicate "Today" hero** — the Library hero is now a quiet continue-reading
+  affordance; the Hub owns the single recall CTA (due-card count stays in the
+  Library stats bar).
+
 ## [0.1.17] - 2026-06-02
 
 ### Added
@@ -125,5 +189,6 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nupsea/luminary/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nupsea/luminary/releases/tag/v0.1.0

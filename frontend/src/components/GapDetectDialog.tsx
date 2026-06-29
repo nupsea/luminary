@@ -406,7 +406,7 @@ export function GapDetectDialog({ open, onClose }: GapDetectDialogProps) {
 
             {/* Error */}
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-4">
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/40">
                 <p className="text-sm font-medium text-red-800">{error}</p>
               </div>
             )}
@@ -420,11 +420,11 @@ export function GapDetectDialog({ open, onClose }: GapDetectDialogProps) {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-bold text-amber-700 uppercase tracking-tight">Knowledge Gaps</p>
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                         {result.gaps.length}
                       </span>
                     </div>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
                       {result.gaps.length > 0 ? (
                         <ul className="list-disc pl-4 flex flex-col gap-2">
                           {result.gaps.map((g, i) => (
@@ -442,11 +442,11 @@ export function GapDetectDialog({ open, onClose }: GapDetectDialogProps) {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-bold text-green-700 uppercase tracking-tight">Well Covered</p>
-                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">
+                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700 dark:bg-green-950/40 dark:text-green-300">
                         {result.covered.length}
                       </span>
                     </div>
-                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
+                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/30">
                       {result.covered.length > 0 ? (
                         <ul className="list-disc pl-4 flex flex-col gap-2">
                           {result.covered.map((c, i) => (

@@ -2,9 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" href="/luminary.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luminary</title>
+    <!-- Apply the persisted theme before first paint so dark mode never flashes.
+         Mirrors the resolution in src/lib/theme.ts: an explicit "light"/"dark"
+         choice wins; otherwise follow the OS preference. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("luminary-theme");
+          var dark =
+            stored === "dark" ||
+            ((stored === null || stored === "system") &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

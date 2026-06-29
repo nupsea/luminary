@@ -9,6 +9,7 @@ PORT="${LUMINARY_PORT:-7820}"
 DIST="$REPO_ROOT/frontend/dist/index.html"
 
 _info() { echo -e "\033[0;36m$*\033[0m"; }
+_warn() { echo -e "\033[0;33m$*\033[0m" >&2; }
 
 if [ ! -f "$DIST" ]; then
     echo "No frontend build found at $DIST" >&2
@@ -42,5 +43,17 @@ until curl -sf --max-time 2 "http://localhost:${PORT}/health" > /dev/null 2>&1; 
 done
 
 echo -e "\033[1;32m  Luminary is ready\033[0m  --  http://localhost:${PORT}"
+
+# Non-fatal LLM pre-flight: the moat loop (card generation, chat, teach-back) needs
+# a local model. Warn — never block — so the app's own first-run guide stays the
+# primary path. Uses the Ollama HTTP API so it doesn't depend on the CLI being on PATH.
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
+    _warn "  Ollama isn't running — card generation, chat, and teach-back are unavailable."
+    _warn "  Start it with:  ollama serve   (or re-run:  make install)"
+elif ! curl -sf --max-time 2 http://localhost:11434/api/tags 2>/dev/null | grep -q "\"${CHAT_MODEL}"; then
+    _warn "  Ollama is up but the default model isn't pulled."
+    _warn "  Pull it with:  ollama pull ${CHAT_MODEL}"
+fi
 
 wait "$SERVER_PID"

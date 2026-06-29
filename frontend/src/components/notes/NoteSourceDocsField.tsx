@@ -20,7 +20,7 @@ export function NoteSourceDocsField({
   selectedIds,
   onChange,
   loading,
-  emptyMessage = "Ingest a book to link notes to it",
+  emptyMessage = "Add a document to link notes to it",
   className,
   maxHeightClass = "max-h-32",
 }: NoteSourceDocsFieldProps) {

@@ -28,7 +28,7 @@ export function GapResultCard({ data, documentId }: GapResultCardProps) {
 
   if (data.error) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
         {data.error}
       </div>
     )
@@ -89,7 +89,7 @@ export function GapResultCard({ data, documentId }: GapResultCardProps) {
       </p>
 
       {!hasGaps && (
-        <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+        <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
           No significant gaps detected -- your notes cover this material well.
         </div>
       )}

@@ -58,14 +58,14 @@ const QUALITY_LABEL: Record<SourceQuality, string> = {
 }
 
 const QUALITY_CLASS: Record<SourceQuality, string> = {
-  official_docs: "bg-green-100 text-green-800",
-  spec: "bg-blue-100 text-blue-800",
-  academic: "bg-purple-100 text-purple-800",
-  encyclopedia: "bg-indigo-100 text-indigo-800",
-  wiki: "bg-gray-100 text-gray-800",
-  tutorial: "bg-gray-100 text-gray-700",
-  blog: "bg-gray-100 text-gray-600",
-  unknown: "bg-gray-100 text-gray-500",
+  official_docs: "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300",
+  spec: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300",
+  academic: "bg-purple-100 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300",
+  encyclopedia: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300",
+  wiki: "bg-gray-100 text-gray-800 dark:bg-gray-800/60 dark:text-gray-300",
+  tutorial: "bg-gray-100 text-gray-700 dark:bg-gray-800/60 dark:text-gray-300",
+  blog: "bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400",
+  unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800/60 dark:text-gray-400",
 }
 
 function QualityBadge({ quality }: { quality: SourceQuality }) {
@@ -83,7 +83,7 @@ function QualityBadge({ quality }: { quality: SourceQuality }) {
 function ValidationBadge({ isValid, isValidating }: { isValid: boolean | null; isValidating: boolean }) {
   if (isValid === true) {
     return (
-      <span className="flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
+      <span className="flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-950/40 dark:text-green-300">
         <CheckCircle2 size={9} />
         Verified
       </span>
@@ -91,7 +91,7 @@ function ValidationBadge({ isValid, isValidating }: { isValid: boolean | null; i
   }
   if (isValid === null) {
     return (
-      <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+      <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
         {isValidating ? <Loader2 size={9} className="animate-spin" /> : <AlertCircle size={9} />}
         {isValidating ? "Checking..." : "Unverified"}
       </span>
@@ -154,7 +154,7 @@ function ReferenceRow({
             <button
               onClick={() => void handleRefresh()}
               title="Re-run extraction for this section"
-              className="flex items-center gap-0.5 rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 hover:bg-orange-200"
+              className="flex items-center gap-0.5 rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 hover:bg-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:hover:bg-orange-900/50"
             >
               <RefreshCw size={9} />
               Outdated?
@@ -259,7 +259,7 @@ export function ReferencesPanel({ documentId }: ReferencesPanelProps) {
   // Error state
   if (isError) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
         References unavailable. Please try again later.
       </div>
     )

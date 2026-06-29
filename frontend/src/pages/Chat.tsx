@@ -245,9 +245,9 @@ const CONFIDENCE_BADGE: Record<Confidence, "green" | "blue" | "gray"> = {
 
 // S158: transparency badge uses green/yellow/red per AC (not the shadcn Badge variant system)
 const TRANSPARENCY_BADGE_CLASS: Record<string, string> = {
-  high: "bg-green-100 text-green-800 border border-green-200",
-  medium: "bg-yellow-100 text-yellow-800 border border-yellow-200",
-  low: "bg-red-100 text-red-800 border border-red-200",
+  high: "bg-green-100 text-green-800 border border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900",
+  medium: "bg-yellow-100 text-yellow-800 border border-yellow-200 dark:bg-yellow-950/40 dark:text-yellow-300 dark:border-yellow-900",
+  low: "bg-red-100 text-red-800 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
 }
 
 const STRATEGY_LABEL: Record<string, string> = {
@@ -1031,14 +1031,14 @@ export default function Chat() {
 
       {/* LLM settings unavailable warning */}
       {llmError && (
-        <div className="mx-6 mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <div className="mx-6 mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
           LLM settings unavailable — using defaults
         </div>
       )}
 
       {/* QA error banner — inline amber alert */}
       {qaError && (
-        <div className="mx-6 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="mx-6 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           <span className="flex-1">{qaError}</span>
           <button onClick={() => setQaError(null)} className="hover:text-amber-900" aria-label="Dismiss">
             <X size={14} />
@@ -1086,8 +1086,8 @@ export default function Chat() {
                 >
                   <div
                     className={`max-w-[80%] rounded-lg px-4 py-3 ${msg.role === "user"
-                        ? "bg-slate-100 text-slate-900"
-                        : "border border-border bg-white text-foreground shadow-sm"
+                        ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+                        : "border border-border bg-card text-card-foreground shadow-sm"
                       }`}
                   >
                     {msg.type === "card" && msg.cardData !== undefined ? (
@@ -1148,7 +1148,7 @@ export default function Chat() {
                                 ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
                                 : `p.${c.page}`}
                               {c.version_mismatch && (
-                                <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                                <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                                   Version mismatch
                                 </span>
                               )}

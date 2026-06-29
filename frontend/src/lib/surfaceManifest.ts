@@ -40,6 +40,13 @@ export function navTabs(labsEnabled: Set<string>): Surface[] {
   return visibleSurfaces(labsEnabled).filter((s) => s.kind === "nav_tab")
 }
 
+// Is a single surface reachable in this build, given the current labs toggles?
+// Used to gate cross-surface entry points (e.g. the "View in graph" doc action)
+// so they disappear when their target surface is trimmed from the bundle.
+export function isSurfaceVisible(id: string, labsEnabled: Set<string>): boolean {
+  return visibleSurfaces(labsEnabled).some((s) => s.id === id)
+}
+
 export function routedSurfaces(labsEnabled: Set<string>): Surface[] {
   return visibleSurfaces(labsEnabled).filter((s) => s.frontend?.route)
 }

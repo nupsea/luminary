@@ -9,6 +9,8 @@ import {
   listChatSessions,
   renameChatSession,
 } from "@/lib/chatSessionsApi"
+import { apiGet } from "@/lib/apiClient"
+import { cn } from "@/lib/utils"
 
 interface ChatSessionListProps {
   activeSessionId: string | null
@@ -64,8 +66,59 @@ export function ChatSessionList({
     setRenameValue(s.title)
   }
 
+  const [groupBy, setGroupBy] = useState<"recent" | "doc">("recent")
+
+  // Grouping by document needs each session's source document title. Fetch a
+  // generous page of documents once, only when that mode is active, map id -> title.
+  const { data: docsPage } = useQuery({
+    queryKey: ["chat-group-docs"],
+    queryFn: () =>
+      apiGet<{ items: Array<{ id: string; title: string }> }>("/documents", {
+        page: 1,
+        page_size: 100, // endpoint max; covers typical libraries
+        sort: "newest",
+      }),
+    enabled: groupBy === "doc",
+    staleTime: 60_000,
+  })
+  const docTitle = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const d of docsPage?.items ?? []) m.set(d.id, d.title)
+    return m
+  }, [docsPage])
+
   const grouped = useMemo(() => {
     if (!sessions) return [] as Array<{ label: string; items: ChatSessionListItem[] }>
+
+    if (groupBy === "doc") {
+      // One bucket per source document (its title); library-wide chats and chats
+      // whose document is unknown/deleted get their own buckets.
+      const buckets = new Map<string, ChatSessionListItem[]>()
+      for (const s of sessions) {
+        let label: string
+        if (s.scope === "all") {
+          label = "Library-wide"
+        } else {
+          const id = s.document_ids[0]
+          label = (id && docTitle.get(id)) || "Unknown document"
+        }
+        const arr = buckets.get(label) ?? []
+        if (!buckets.has(label)) buckets.set(label, arr)
+        arr.push(s)
+      }
+      return [...buckets.entries()]
+        .map(([label, items]) => ({
+          label,
+          items: items
+            .slice()
+            .sort((a, b) => +new Date(b.last_message_at) - +new Date(a.last_message_at)),
+        }))
+        .sort(
+          (a, b) =>
+            +new Date(b.items[0].last_message_at) - +new Date(a.items[0].last_message_at),
+        )
+    }
+
     const buckets: Record<string, ChatSessionListItem[]> = {
       Today: [],
       Yesterday: [],
@@ -86,7 +139,7 @@ export function ChatSessionList({
     return Object.entries(buckets)
       .filter(([, items]) => items.length > 0)
       .map(([label, items]) => ({ label, items }))
-  }, [sessions])
+  }, [sessions, groupBy, docTitle])
 
   return (
     <div className="flex h-full flex-col bg-muted/20 border-r border-border">
@@ -124,6 +177,24 @@ export function ChatSessionList({
             </button>
           )}
         </div>
+      </div>
+
+      <div className="px-3 pb-2 flex items-center gap-1 text-[11px]">
+        <span className="mr-1 text-muted-foreground">Group</span>
+        {(["recent", "doc"] as const).map((g) => (
+          <button
+            key={g}
+            onClick={() => setGroupBy(g)}
+            className={cn(
+              "rounded px-2 py-0.5 transition-colors",
+              groupBy === g
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground hover:bg-accent/60",
+            )}
+          >
+            {g === "recent" ? "Recent" : "By document"}
+          </button>
+        ))}
       </div>
 
       <div className="flex-1 overflow-y-auto px-1.5 pb-3">
