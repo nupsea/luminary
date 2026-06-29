@@ -295,16 +295,48 @@ export default function Study() {
   }, [pendingStudyResume])
 
   // Auto-start a fresh session when arriving from a direct "Study this document"
-  // action (the reader header). Waits until the intended document scope has
-  // resolved so we never fall back to an unscoped daily review.
+  // action (the reader header). We prepare against the EXPLICIT documentId rather
+  // than the effective-active-doc fallback, so the scope is deterministic. If the
+  // document has no cards yet, we land on its Study dashboard (where "Generate"
+  // lives) instead of a dead-end empty-session screen.
   useEffect(() => {
     if (!pendingStudyStart || studyPhase.phase !== "idle") return
-    if (pendingStudyStart.documentId && studyDocumentId !== pendingStudyStart.documentId) return
-    const { mode } = pendingStudyStart
+    const { mode, documentId } = pendingStudyStart
     setPendingStudyStart(null)
-    void startStudy(mode, null, null)
+    if (documentId) {
+      setActiveCollectionId(null)
+      setActiveDocument(documentId)
+    }
+    void (async () => {
+      setStudyPhase({ phase: "preparing", mode })
+      const options: PrepareStudySessionOptions = {
+        mode,
+        documentId,
+        collectionId: null,
+        cardLimit: mode === "teachback" ? TEACHBACK_CARD_LIMIT : FLASHCARD_CARD_LIMIT,
+        resumeSessionId: null,
+      }
+      try {
+        const outcome = await prepareStudySession(options)
+        if (outcome.kind === "empty") {
+          setStudyPhase({ phase: "idle" })
+          toast("No cards yet for this document — generate some below to start.")
+          return
+        }
+        setStudyPhase({
+          phase: "ready",
+          mode,
+          outcome,
+          scopeForBeginNew: { ...options, resumeSessionId: null },
+        })
+      } catch (err) {
+        console.warn("Failed to auto-start study", err)
+        setStudyPhase({ phase: "idle" })
+        toast.error("Could not start study session. Please try again.")
+      }
+    })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingStudyStart, studyDocumentId])
+  }, [pendingStudyStart])
 
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
