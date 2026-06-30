@@ -10,13 +10,23 @@ No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any A
 
 ## Install and run
 
-### macOS, Linux & WSL
+### macOS (Apple Silicon), Linux & WSL
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary
 make install   # Installs uv, Node, Ollama; pulls models; builds the app
 make start     # Starts the production server on http://localhost:7820
 ```
+
+### macOS (Intel / x86_64) — via Docker
+Intel Macs have no native `lancedb` wheel, so the native `make install` can't run there.
+Use Docker instead:
+```bash
+git clone https://github.com/nupsea/luminary.git
+cd luminary
+docker compose --profile ai up   # or: make docker-run
+```
+Then open http://localhost:7820. (Apple Silicon Macs use the native path above.)
 
 ### Windows (Zero-Hassle via Docker)
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and ensure it is running.

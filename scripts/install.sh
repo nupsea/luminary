@@ -31,6 +31,15 @@ case "$OS" in
     *) _err "Unsupported OS: $OS. Use Docker (see docs)."; exit 1 ;;
 esac
 
+# Intel Macs have no native lancedb wheel (only macOS arm64 is published), so the
+# backend dep sync can't succeed here. Fail fast with Docker guidance instead of
+# dying later on a cryptic uv resolver error.
+if [ "$OS" = "Darwin" ] && [ "$ARCH" = "x86_64" ]; then
+    _err "Native install isn't supported on Intel Macs (x86_64) — lancedb has no macOS x86_64 wheel."
+    _err "Run via Docker instead:  docker compose --profile ai up   (or: make docker-run)"
+    exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # uv — Python package + project manager
 # ---------------------------------------------------------------------------

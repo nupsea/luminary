@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Intel Mac install guidance** — `scripts/install.sh` now fails fast on macOS
+  x86_64 (no native `lancedb` wheel) with a clear pointer to Docker, instead of
+  dying on a cryptic uv resolver error. README split the macOS quick-start into
+  Apple Silicon (native) and Intel (Docker).
+
 ## [0.2.0] - 2026-06-30
 
 ### Changed
