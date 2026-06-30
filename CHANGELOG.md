@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-30
+
 ### Fixed
 - **Docker served a blank "Frontend not built" page** — the image built the SPA but
   copied it to `/app/frontend/dist`, while the prod server resolves
@@ -199,6 +201,7 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nupsea/luminary/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nupsea/luminary/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nupsea/luminary/releases/tag/v0.1.0
