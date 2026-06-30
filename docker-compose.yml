@@ -11,8 +11,9 @@ services:
       - LUMINARY_MODE=prod
       - LUMINARY_SURFACE_TIER=public
       - DATA_DIR=/data
-      # Override Ollama host when running alongside the ollama service below
-      - OLLAMA_HOST=http://ollama:11434
+      # Point the backend at the ollama service. The backend reads OLLAMA_URL
+      # (NOT OLLAMA_HOST); its default 127.0.0.1 would resolve to this container.
+      - OLLAMA_URL=http://ollama:11434
     depends_on:
       ollama:
         condition: service_started
@@ -28,6 +29,24 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     restart: unless-stopped
+    profiles:
+      - ai
+
+  # One-shot: pull the default chat model into the ollama volume on first run,
+  # then exit. Without this the sidecar starts empty and chat/generation fail.
+  # OLLAMA_HOST here is the ollama CLI's own variable (where the server lives).
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint:
+      - sh
+      - -c
+      - 'until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; ollama pull llama3.2'
+    restart: "no"
     profiles:
       - ai
 

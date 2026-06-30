@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Docker: Ollama unreachable + no model** — `docker-compose.yml` set `OLLAMA_HOST`
+  but the backend reads `OLLAMA_URL` (default `127.0.0.1`, i.e. the app container),
+  so the app never reached the `ollama` sidecar. Now sets `OLLAMA_URL=http://ollama:11434`.
+  Added a one-shot `ollama-pull` service that fetches `llama3.2` into the sidecar on
+  first `--profile ai` start (it previously started empty). README documents recovery
+  when Ollama isn't running (native and Docker).
+
 ## [0.2.1] - 2026-06-30
 
 ### Fixed

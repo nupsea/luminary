@@ -103,6 +103,27 @@ The home screen surfaces the day's highest-leverage action (review due cards, co
 
 ---
 
+## If Ollama isn't running
+
+If the app shows "Ollama is not running" / "no model is pulled," LLM features
+(chat, teach-back, flashcard generation) are unavailable. Everything else still works.
+
+- **Native (`make install`)**: start the server and pull the model on the host:
+  ```bash
+  ollama serve &        # or: brew services start ollama
+  ollama pull llama3.2
+  ```
+- **Docker (`docker compose --profile ai up`)**: the `ollama` sidecar runs the
+  server and a one-shot `ollama-pull` service downloads `llama3.2` (~2 GB) on first
+  start — give it a few minutes; the banner clears when it's ready. To check or pull
+  manually:
+  ```bash
+  docker compose exec ollama ollama list
+  docker compose exec ollama ollama pull llama3.2
+  docker compose logs ollama        # if it's not coming up
+  ```
+  (Make sure you used `--profile ai`, which starts the Ollama sidecar.)
+
 ## Models
 
 Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
