@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Docker served a blank "Frontend not built" page** — the image built the SPA but
+  copied it to `/app/frontend/dist`, while the prod server resolves
+  `/frontend/dist` (`__file__`=/app/app/main.py → parents[2]=/). The Dockerfile now
+  copies dist to `/frontend/dist`, so `docker compose --profile ai up` serves the app.
 - **Intel Mac install guidance** — `scripts/install.sh` now fails fast on macOS
   x86_64 (no native `lancedb` wheel) with a clear pointer to Docker, instead of
   dying on a cryptic uv resolver error. README split the macOS quick-start into

@@ -35,8 +35,11 @@ RUN uv sync --frozen --no-default-groups --no-install-project
 COPY backend/ .
 COPY surface-manifest.json /surface-manifest.json
 
-# Copy frontend build artefacts into the expected dist path
-COPY --from=frontend-build /frontend/dist ./frontend/dist
+# Copy frontend build artefacts into the path the server resolves.
+# serve_spa uses Path(__file__).parents[2]/"frontend"/"dist"; here
+# __file__=/app/app/main.py so parents[2]=/ -> dist must live at /frontend/dist
+# (same reason surface-manifest.json is placed at / above).
+COPY --from=frontend-build /frontend/dist /frontend/dist
 
 ENV LUMINARY_MODE=prod \
     LUMINARY_SURFACE_TIER=public \
