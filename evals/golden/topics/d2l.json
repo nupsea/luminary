@@ -1,0 +1,12 @@
+{
+  "source_file": "DATA/books/d2l_dive_into_deep_learning.md",
+  "expected_topics": [
+    "Introduction",
+    "Linear Neural Networks for Regression",
+    "Multilayer Perceptrons",
+    "Convolutional Neural Networks",
+    "Recurrent Neural Networks",
+    "Attention Mechanisms and Transformers",
+    "Optimization Algorithms"
+  ]
+}

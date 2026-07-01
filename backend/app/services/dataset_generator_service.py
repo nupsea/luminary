@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services.golden_quality import (
+    build_generation_prompt,
+    extract_json_object,
+    is_structural_chunk,
+    quality_filter,
+)
 from app.services.llm import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -44,219 +47,18 @@ def _fire_and_forget(coro) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
-def _normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value.casefold()).strip()
-
-
-def _extract_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped)
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("LLM response did not contain a JSON object")
-    return json.loads(stripped[start : end + 1])
-
-
-_FRONT_BACK_MATTER = frozenset(
-    "foreword preface acknowledgments acknowledgement dedication copyright isbn"
-    " publisher colophon bibliography index glossary".split()
-)
-
-
-def _is_structural_chunk(text: str) -> bool:
-    """Return True for chunks unlikely to yield good content-focused eval questions.
-
-    Skips page headers, TOC entries, front/back matter, and chunks with low
-    alphabetic density (tables, code listings, figure captions).
-    """
-    stripped = text.strip()
-    if len(stripped) < 200:
-        return True
-    words = stripped.split()
-    if len(words) < 40:
-        return True
-    alpha_ratio = sum(1 for c in stripped if c.isalpha()) / len(stripped)
-    if alpha_ratio < 0.55:
-        return True
-    # Skip front/back matter sections (foreword, preface, acknowledgments, etc.)
-    lower_words = set(w.strip(".,;:\"'").lower() for w in words[:30])
-    if lower_words & _FRONT_BACK_MATTER:
-        return True
-    # Section-header prefix scan: chunks are emitted as
-    # "[doc_title > Section Name — subsection] body...". Reject if the section
-    # path itself names front-matter (Part III. Apache Iceberg in Practice
-    # preface, "Praise for...", endorsements, etc.).
-    header_match = re.match(r"\s*\[([^\]]+)\]", stripped)
-    if header_match:
-        header = header_match.group(1).lower()
-        if any(
-            tag in header
-            for tag in (
-                "foreword", "preface", "acknowledgment", "acknowledgement",
-                "dedication", "praise for", "about the author", "introduction",
-                "part i.", "part ii.", "part iii.", "part iv.",
-            )
-        ):
-            return True
-    return False
-
-
-def _dedupe_by_embedding(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
-    questions = [c["question"] for c in candidates]
-    if len(questions) < 2:
-        return candidates
-    try:
-        import numpy as np  # noqa: PLC0415
-
-        from app.services.embedder import get_embedding_service  # noqa: PLC0415
-
-        vectors = np.array(get_embedding_service().encode(questions), dtype=np.float32)
-        norms = vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-10)
-        kept: list[int] = []
-        for idx, vector in enumerate(norms):
-            if not kept:
-                kept.append(idx)
-                continue
-            sims = norms[kept] @ vector
-            if not bool(np.any(sims > 0.95)):
-                kept.append(idx)
-        return [candidates[i] for i in kept]
-    except Exception:
-        logger.debug("embedding dedupe unavailable; falling back to exact-question dedupe")
-        seen: set[str] = set()
-        unique: list[dict[str, str]] = []
-        for candidate in candidates:
-            key = _normalize_text(candidate["question"])
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
-
-
-_STOPWORDS = frozenset(
-    "a an the is are was were be been being have has had do does did will would could should "
-    "may might shall can of in on at to for with by from as into through during about above "
-    "between but and or nor not if then that this these those it its we our they their i my "
-    "what which who when where how".split()
-)
-
-
-def _hint_grounded(hint_norm: str, source_norm: str) -> bool:
-    """True when ≥75% of the non-stopword words in the hint appear in the source."""
-    hint_words = [w for w in hint_norm.split() if w not in _STOPWORDS and len(w) > 2]
-    if not hint_words:
-        return False
-    source_words = set(source_norm.split())
-    overlap = sum(1 for w in hint_words if w in source_words)
-    return overlap / len(hint_words) >= 0.75
-
-
-def _quality_filter(
-    questions: list[dict[str, Any]],
-    source_chunk: ChunkModel,
-) -> list[dict[str, str]]:
-    source_norm = _normalize_text(source_chunk.text)
-    filtered: list[dict[str, str]] = []
-    for raw in questions:
-        question = str(raw.get("question", "")).strip()
-        answer = str(raw.get("answer") or raw.get("ground_truth_answer") or "").strip()
-        context_hint = str(raw.get("context_hint", "")).strip()
-        if not question or len(answer) < 10 or not context_hint:
-            continue
-        # Reject questions that reference the document instead of the subject matter.
-        # Good: "What does Apache Iceberg use to track file-level statistics?"
-        # Bad:  "According to the text, what does Iceberg use...?"
-        q_lower = question.lower()
-        if any(
-            phrase in q_lower
-            for phrase in (
-                # explicit document references
-                "according to the text", "according to the guide",
-                "according to the source", "according to the passage",
-                "according to the author", "according to the document",
-                "the text states", "the text says", "the text describes",
-                "the text explains", "the text mentions", "the text notes",
-                "the text suggests", "the guide states", "the guide describes",
-                "the guide mentions", "the source states", "the passage states",
-                "the author states", "the author describes", "the author explains",
-                "the author mentions", "the author suggests",
-                "as stated in", "as described in", "as mentioned in",
-                "as noted in", "as explained in",
-                # implicit document references
-                "according to this", "this text", "this guide", "this source",
-                "this passage", "this document", "this section", "this chapter",
-                "the text", "the guide", "the source", "the passage",
-                "the document", "the section", "the chapter", "the excerpt",
-                # passive "is mentioned / listed / highlighted / described"
-                "is mentioned", "is listed", "is highlighted", "is described",
-                "is stated", "is noted", "is referenced", "is discussed",
-                "are mentioned", "are listed", "are highlighted", "are described",
-                "are stated", "are noted",
-                # generic templates from fallback / bad LLM output
-                "what does the source", "what is the main point", "in point ",
-                # book metadata / authorship / publication
-                "who wrote", "who is the author", "who authored", "who edited",
-                "foreword", "preface", "acknowledgment", "dedication",
-                "who dedicated", "copyright", "isbn", "publisher", "published by",
-                "edition of", "this book", "the book",
-                # document structure references
-                "page number", "chapter number", "section number",
-                "table of contents", "appendix",
-            )
-        ):
-            continue
-        # Require the hint to be grounded in the source chunk
-        if not _hint_grounded(_normalize_text(context_hint), source_norm):
-            continue
-        filtered.append(
-            {
-                "question": question,
-                "ground_truth_answer": answer,
-                "context_hint": context_hint,
-            }
-        )
-    return _dedupe_by_embedding(filtered)
-
-
 async def _generate_questions_for_chunk(
     chunk_text: str, count: int, model: str
 ) -> list[dict[str, str]]:
-    rules = (
-        f"Generate {count} self-contained knowledge questions from the source text below.\n\n"
-        "CRITICAL RULE: Write questions as if testing whether someone has learned this"
-        " subject — NOT as reading comprehension about a document.\n\n"
-        "GOOD example: 'What file format does Apache Iceberg use to store table metadata?'\n"
-        "BAD examples (never do these):\n"
-        "  - 'According to the text, what does Iceberg use...?'\n"
-        "  - 'What does the guide say about...?'\n"
-        "  - 'What is mentioned in this passage about...?'\n"
-        "  - 'What is highlighted/listed/described in the source?'\n\n"
-        "Rules:\n"
-        "- The question must make complete sense to someone who has never seen this"
-        " document. No references to 'the text', 'the guide', 'the source',"
-        " 'this section', 'the passage', 'the author', or any document.\n"
-        "- Ask about concrete facts, definitions, mechanisms, trade-offs, or examples.\n"
-        "- The answer must be specific and complete — not 'see the text'.\n"
-        "- context_hint must be a verbatim phrase (5-20 words) from the source text.\n"
-        "- Do NOT ask about authorship, foreword, preface, dedication, copyright,"
-        " ISBN, publisher, or any publication metadata.\n\n"
-        "Return ONLY valid JSON:\n"
-        '{"questions":[{"question":"...","answer":"...","context_hint":"verbatim"}]}\n\n'
-        f"SOURCE:\n{chunk_text[:6000]}"
-    )
     settings = get_settings()
     api_base = settings.OLLAMA_URL if model.startswith("ollama/") else None
     content = await get_llm_service().complete(
-        messages=[{"role": "user", "content": rules}],
+        messages=[{"role": "user", "content": build_generation_prompt(chunk_text, count)}],
         model=model,
         timeout=300,
         api_base=api_base,
     )
-    parsed = _extract_json_object(content)
+    parsed = extract_json_object(content)
     items = parsed.get("questions", [])
     if not isinstance(items, list):
         raise ValueError("LLM JSON did not include a questions array")
@@ -341,7 +143,7 @@ async def _generate_dataset(dataset_id: str) -> None:
                 for chunk in chunks:
                     if dataset.generated_count >= dataset.target_count:
                         break
-                    if _is_structural_chunk(chunk.text):
+                    if is_structural_chunk(chunk.text):
                         logger.debug("skipping structural chunk %s", chunk.id)
                         continue
                     remaining = dataset.target_count - dataset.generated_count
@@ -355,7 +157,7 @@ async def _generate_dataset(dataset_id: str) -> None:
                     except Exception as exc:
                         logger.warning("skipping chunk %s — LLM error: %s", chunk.id, exc)
                         continue
-                    accepted = _quality_filter(raw_questions, chunk)[:count]
+                    accepted = quality_filter(raw_questions, chunk.text)[:count]
                     for item in accepted:
                         session.add(
                             GoldenQuestionModel(

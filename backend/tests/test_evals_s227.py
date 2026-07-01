@@ -265,7 +265,9 @@ async def test_post_eval_run_extended_body_flags(golden_dir):
 
         return _Result()
 
-    with patch("app.routers.evals.asyncio.to_thread") as mock_thread:
+    with patch("app.routers.evals.asyncio.to_thread") as mock_thread, patch(
+        "app.routers.evals._validate_model_available", return_value=None
+    ):
         mock_thread.side_effect = AsyncMock(side_effect=lambda fn, *a, **kw: fn(*a, **kw))
 
         with patch("subprocess.run", side_effect=fake_subprocess_run):

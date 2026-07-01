@@ -90,7 +90,7 @@ async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
     assert rows[0].chunk_id == "graph-1"
 
 
-def test_run_eval_ablation_produces_four_metric_sets(monkeypatch):
+def test_run_eval_ablation_produces_five_metric_sets(monkeypatch):
     strategies_seen: list[str] = []
     history_rows: list[tuple[str, dict]] = []
     store_rows: list[tuple[str, dict]] = []
@@ -137,7 +137,11 @@ def test_run_eval_ablation_produces_four_metric_sets(monkeypatch):
 
     run_eval.main()
 
-    assert strategies_seen == ["vector", "fts", "graph", "rrf"]
+    # rrf+rerank issues an extra search with strategy="rrf" (rerank=True), so
+    # "rrf" is searched twice; the metric set carries all five strategy labels.
+    assert strategies_seen == ["vector", "fts", "graph", "rrf", "rrf"]
     assert history_rows[0][0] == "ablation"
-    assert set(history_rows[0][1]["ablation_metrics"]) == {"vector", "fts", "graph", "rrf"}
+    assert set(history_rows[0][1]["ablation_metrics"]) == {
+        "vector", "fts", "graph", "rrf", "rrf+rerank",
+    }
     assert store_rows[0][0] == "ablation"
