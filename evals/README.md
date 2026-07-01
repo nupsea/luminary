@@ -102,11 +102,11 @@ Luminary's CI uses per-dataset thresholds (defined in `evals/lib/`):
 
 | Metric | Default threshold |
 |--------|-----------------|
-| HR@5 | ≥ 0.60 |
-| MRR | ≥ 0.45 |
+| HR@5 | ≥ 0.50 |
+| MRR | ≥ 0.35 |
 | Faithfulness | ≥ 0.65 |
 | Answer Relevance | ≥ 0.50 |
-| Citation Support Rate | ≥ 0.70 |
+| Citation Support Rate | ≥ 0.80 |
 
 ---
 
@@ -120,7 +120,7 @@ The `--ablation` flag benchmarks each strategy independently:
 uv run python run_eval.py --dataset book --ablation
 ```
 
-Output shows HR@5 and MRR for `vector`, `fts`, `graph`, and `rrf` side by side.
+Output shows HR@5 and MRR for `vector`, `fts`, `graph`, `rrf`, and `rrf+rerank` side by side.
 
 ---
 
@@ -138,7 +138,7 @@ Output shows HR@5 and MRR for `vector`, `fts`, `graph`, and `rrf` side by side.
 | `--check-citations` | false | Judge whether inline citations support their claims |
 | `--hyde` | false | Enable HyDE-style query expansion |
 | `--rerank` | false | Enable cross-encoder reranking |
-| `--ablation` | false | Compare vector / fts / graph / rrf strategies |
+| `--ablation` | false | Compare vector / fts / graph / rrf / rrf+rerank strategies |
 
 ---
 

@@ -53,7 +53,7 @@ library or let `make eval-d2l` ingest it on first run.
 | Retrieval + reranker (A/B) | `make eval-d2l-rerank` | HR@5, MRR with cross-encoder |
 | Topic generation | `make eval-topics` | topic precision/recall/**F1**, **junk_rate** |
 | Generation (RAGAS) | `… run_eval.py --dataset d2l --judge-model ollama/qwen2.5:14b-instruct` | faithfulness, answer-relevance |
-| Retrieval ablation | `… run_eval.py --dataset d2l --ablation` | HR@5/MRR per strategy (vector/fts/graph/rrf) |
+| Retrieval ablation | `… run_eval.py --dataset d2l --ablation` | HR@5/MRR per strategy (vector/fts/graph/rrf/rrf+rerank) |
 
 Direct invocations (what the Make targets wrap):
 
@@ -62,7 +62,10 @@ Direct invocations (what the Make targets wrap):
 cd evals && uv run --no-sync python run_eval.py --dataset d2l \
   --backend-url http://localhost:7820 --assert-thresholds
 
-# Cross-encoder reranker A/B — run both and compare
+# Cross-encoder reranker A/B — run both and compare.
+# NOTE: the reranker fail-softs (returns RRF order) in a long-running
+# `uvicorn --reload` dev backend; run this against a fresh/restarted dev or a
+# production (`make start`) backend, or the A/B will read as a no-op.
 cd evals && uv run --no-sync python run_eval.py --dataset d2l --rerank
 cd evals && uv run --no-sync python run_eval.py --dataset d2l --ablation
 

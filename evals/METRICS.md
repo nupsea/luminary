@@ -45,7 +45,7 @@ where quality comes from. Reported as HR@5 + MRR per strategy.
 | Strategy | What it is |
 |----------|-----------|
 | `vector` | Dense bi-encoder (BAAI/bge-m3) cosine similarity. Semantic; robust to paraphrase. |
-| `fts` | BM25 keyword search (SQLite FTS5). Lexical; strong on exact terms, **weak on casual/paraphrased questions**. |
+| `fts` | BM25 keyword search (SQLite FTS5), AND-first with OR backfill. Lexical; strong on exact terms, weaker on pure paraphrase than the dense arm. |
 | `graph` | Vector search on a graph-expanded query (adds related entities). |
 | `rrf` | **Reciprocal Rank Fusion** of vector + keyword — the shipped default. |
 | `rrf+rerank` | RRF's top-50 re-scored by a cross-encoder (ms-marco-MiniLM), top-k kept — the shipped reranker path. |
@@ -53,12 +53,26 @@ where quality comes from. Reported as HR@5 + MRR per strategy.
 **How to read it:** `rrf` should dominate `vector`/`fts` alone (fusion wins).
 Compare `rrf` vs `rrf+rerank` to decide if the cross-encoder is worth ~250 ms/query.
 
-**Known gotcha (fixed 2026-07-01):** FTS relevance scores are raw BM25, which are
-**negative (more-negative = more-relevant)**. The eval used to re-sort results
-descending, silently inverting FTS's ranking and reporting ~0. It now preserves
-the backend's ranking. Standalone `fts` is still low (~0.06 on d2l) — that's
-**honest**: BM25 on casual/persona questions is genuinely weak, which is precisely
-why hybrid RRF exists.
+> **Reranker in dev:** the cross-encoder fail-softs (returns RRF order unchanged)
+> in a long-running `uvicorn --reload` backend after repeated reloads — a
+> torch/tokenizers + reloader quirk, not a code bug. Measure the rerank A/B
+> against a **restarted / fresh dev or production (`make start`) backend**, where
+> it reorders correctly.
+
+**FTS fixes (2026-07-01).** Two bugs had made standalone `fts` read ~0:
+1. *Score polarity* — BM25 scores are **negative** (more-negative = more-relevant);
+   the eval re-sorted results descending, inverting the ranking. Fixed: the eval
+   now **preserves the backend's ranking** instead of re-sorting.
+2. *Implicit AND* — FTS5 treats space-separated terms as an AND (every term must
+   be in one chunk), so a full-sentence question matched nothing. Fixed:
+   `keyword_search` runs the **precise AND first** and **backfills with an OR pass**
+   (any term, BM25-ranked) when it under-fills k, keeping the exact AND hits on top.
+
+After both fixes, `fts` recovers to **0.6–1.0 across every doc** (was 0 on several)
+and sometimes beats `vector` (time_machine, paper) — a real contributor, not a dead
+arm. It also resolves an apparent `graph == rrf` tie: with `graph_expand` on, RRF's
+dense arm uses the graph-expanded query (= the `graph` strategy), and when `fts`
+returned nothing RRF collapsed onto it; now that `fts` contributes, they diverge.
 
 ---
 
