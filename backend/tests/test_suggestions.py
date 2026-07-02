@@ -439,3 +439,22 @@ def test_jaccard_filter():
     filtered = svc.filter_near_duplicates(candidates, history, threshold=0.7)
     assert len(filtered) == 1
     assert filtered[0]["question"] == "explain the economic system"
+
+
+def test_book_is_technical_routing():
+    """A technical book must not get narrative ('throughout the story') templates."""
+    from app.routers.chat_meta import _book_is_technical
+
+    # technical by title (underscores normalised)
+    assert _book_is_technical("d2l_dive_into_deep_learning", {})
+    # narrative book with people/places -> not technical
+    assert not _book_is_technical(
+        "The Odyssey", {"PERSON": ["Ulysses", "Telemachus"], "PLACE": ["Ithaca"]}
+    )
+    # technical by entity mix even when the title is uninformative
+    assert _book_is_technical(
+        "Field Notes",
+        {"CONCEPT": ["gradient descent", "dropout", "attention"], "PERSON": ["users"]},
+    )
+    # sparse/ambiguous -> default to narrative (not technical)
+    assert not _book_is_technical("Field Notes", {"PERSON": ["Alice"]})
