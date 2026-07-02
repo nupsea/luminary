@@ -53,6 +53,7 @@ from evals.lib.manifest import (  # noqa: E402
     is_document_alive,
     load_manifest,
     lookup_document_by_filename,
+    resolve_backend_base,
     save_manifest,
 )
 from evals.lib.retrieval_metrics import (  # noqa: E402
@@ -76,6 +77,8 @@ VALID_DATASETS = [
     "book_alice",
     "book_odyssey",
     "book_frankenstein",
+    "d2l",
+    "odyssey",
     "paper",
     "conversation",
     "notes",
@@ -176,14 +179,16 @@ def search_chunks(
         resp.raise_for_status()
         body = resp.json()
 
+        # Preserve the backend's ranking. Do NOT re-sort by relevance_score:
+        # its polarity is strategy-dependent (FTS returns raw BM25 scores where
+        # MORE NEGATIVE = MORE relevant), so a reverse=True sort silently inverts
+        # the FTS ranking and tanks HR@5. /search already returns matches ranked
+        # per document, so keep that order.
         all_matches = []
         for group in body.get("results", []):
             if document_id and group.get("document_id") != document_id:
                 continue
-            for match in group.get("matches", []):
-                all_matches.append(match)
-
-        all_matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+            all_matches.extend(group.get("matches", []))
         return [m.get("text", "") for m in all_matches[:5]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
@@ -428,6 +433,9 @@ def main() -> None:
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-detect /api prefix so the harness works against prod backends too.
+    args.backend_url = resolve_backend_base(args.backend_url)
+
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
         rows = load_golden_by_id(args.backend_url, args.dataset_id)
@@ -449,9 +457,17 @@ def main() -> None:
         source_to_doc_id[src] = doc_id
 
     if args.ablation:
-        strategies = ("vector", "fts", "graph", "rrf")
+        # (label, search-strategy, rerank). "rrf+rerank" is the full pipeline the
+        # user actually ships, so it belongs in the strategy breakdown.
+        strategy_specs = [
+            ("vector", "vector", False),
+            ("fts", "fts", False),
+            ("graph", "graph", False),
+            ("rrf", "rrf", False),
+            ("rrf+rerank", "rrf", True),
+        ]
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for strategy in strategies:
+        for label, search_strategy, do_rerank in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -461,15 +477,15 @@ def main() -> None:
                 doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
 
                 print(
-                    f"  [{strategy} {i}/{len(rows)}] Searching: {question[:60]}..."
+                    f"  [{label} {i}/{len(rows)}] Searching: {question[:60]}..."
                 )
                 chunks = search_chunks(
                     args.backend_url,
                     question,
                     doc_id,
                     hyde=args.hyde,
-                    rerank=args.rerank,
-                    strategy=strategy,
+                    rerank=do_rerank or args.rerank,
+                    strategy=search_strategy,
                 )
                 samples.append(
                     {
@@ -480,7 +496,7 @@ def main() -> None:
                         "context_hint": context_hint,
                     }
                 )
-            ablation_metrics[strategy] = {
+            ablation_metrics[label] = {
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
             }
@@ -578,6 +594,7 @@ def main() -> None:
         "mrr": mrr,
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
+        "rerank": args.rerank,
     }
 
     threshold_violations: list[str] = []

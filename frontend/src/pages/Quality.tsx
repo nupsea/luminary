@@ -2,12 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Plus, RefreshCw } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AblationsTab } from "@/components/evals/AblationsTab"
-import { ResultsTab } from "@/components/evals/ResultsTab"
+import { ResultsDashboard } from "@/components/evals/ResultsDashboard"
 import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
-import { RegressionsTab } from "@/components/evals/RegressionsTab"
-import { RoutingTab } from "@/components/evals/RoutingTab"
+import { RunConsole } from "@/components/evals/RunConsole"
 import { RunEvalDialog } from "@/components/evals/RunEvalDialog"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
@@ -81,14 +79,11 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "runs" | "routing" | "ablations" | "regressions"
+type TabId = "datasets" | "results" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
   { id: "runs", label: "Runs" },
-  { id: "routing", label: "Routing" },
-  { id: "ablations", label: "Ablations" },
-  { id: "regressions", label: "Regressions" },
 ]
 
 function pct(v: number): string {
@@ -120,15 +115,22 @@ export default function Quality() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // file-backed selection
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
+  // shared dataset selection for the run console + results dashboard
+  const [consoleDataset, setConsoleDataset] = useState("")
   // eval in-flight tracking
   const [evalRunning, setEvalRunning] = useState(false)
+  const [runningLabel, setRunningLabel] = useState<string | null>(null)
   const evalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function markEvalRunning() {
+  function markEvalRunning(label?: string) {
     setEvalRunning(true)
+    if (label) setRunningLabel(label)
     if (evalTimerRef.current) clearTimeout(evalTimerRef.current)
     // auto-clear after 15 minutes in case the run silently fails
-    evalTimerRef.current = setTimeout(() => setEvalRunning(false), 15 * 60 * 1000)
+    evalTimerRef.current = setTimeout(() => {
+      setEvalRunning(false)
+      setRunningLabel(null)
+    }, 15 * 60 * 1000)
   }
 
   // Re-attach to in-flight runs on page mount (survives browser refresh) and
@@ -318,6 +320,14 @@ export default function Quality() {
     })
   }, [datasetsQuery.data])
 
+  // default the console/dashboard to the first evaluable dataset
+  useEffect(() => {
+    if (!consoleDataset) {
+      const first = (datasetsQuery.data ?? []).find((d) => d.source === "file")?.name
+      if (first) setConsoleDataset(first)
+    }
+  }, [datasetsQuery.data, consoleDataset])
+
   const isDetailOpen = Boolean(selectedId) || Boolean(selectedFileName)
   const detailSource = selectedFileName ? "file" : "db"
 
@@ -386,8 +396,23 @@ export default function Quality() {
         </div>
       </header>
 
+      {/* Run console — the primary action */}
+      <div className="shrink-0 px-6 pt-4">
+        <RunConsole
+          datasets={datasetsQuery.data ?? []}
+          value={consoleDataset}
+          onChange={setConsoleDataset}
+          running={evalRunning}
+          runningLabel={runningLabel}
+          onStarted={(label) => {
+            markEvalRunning(label)
+            setActiveTab("results")
+          }}
+        />
+      </div>
+
       {/* Tab navigation */}
-      <div className="flex shrink-0 items-center gap-1 border-b px-6">
+      <div className="flex shrink-0 items-center gap-1 border-b px-6 pt-4">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -514,13 +539,8 @@ export default function Quality() {
           </>
         )}
 
-        {activeTab === "results" && (
-          <ResultsTab onRunStarted={markEvalRunning} />
-        )}
+        {activeTab === "results" && <ResultsDashboard dataset={consoleDataset} />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
-        {activeTab === "routing" && <RoutingTab />}
-        {activeTab === "ablations" && <AblationsTab />}
-        {activeTab === "regressions" && <RegressionsTab />}
       </main>
 
       <GenerateDatasetDialog

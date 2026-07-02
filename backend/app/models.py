@@ -419,6 +419,9 @@ class EvalRunModel(Base):
     routing_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
     per_route: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ablation_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Generic bucket for metric families added without a schema change
+    # (topic_precision/recall/f1, junk_rate, future label-quality metrics).
+    extra_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class GoldenDatasetModel(Base):

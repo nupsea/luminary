@@ -75,6 +75,7 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
         >
           <option value="">All kinds</option>
           <option value="retrieval">retrieval</option>
+          <option value="topic">topic</option>
           <option value="routing">routing</option>
           <option value="ablation">ablation</option>
           <option value="faithfulness">faithfulness</option>
@@ -120,12 +121,15 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Dataset</th>
                 <th className="py-2 pr-3 font-medium">Kind</th>
+                <th className="py-2 pr-3 font-medium">Rerank</th>
                 <th className="py-2 pr-3 font-medium">Judge Model</th>
                 <th className="py-2 pr-3 font-medium">Run At</th>
                 <th className="py-2 pr-3 font-medium">HR@5</th>
                 <th className="py-2 pr-3 font-medium">MRR</th>
                 <th className="py-2 pr-3 font-medium">Faith</th>
                 <th className="py-2 pr-3 font-medium">Routing</th>
+                <th className="py-2 pr-3 font-medium">Topic F1</th>
+                <th className="py-2 pr-3 font-medium">Junk</th>
               </tr>
             </thead>
             <tbody>
@@ -133,12 +137,21 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                 <tr key={run.id} className="border-b last:border-0">
                   <td className="py-2 pr-3">{stripMarkdown(run.dataset_name)}</td>
                   <td className="py-2 pr-3 text-muted-foreground">{run.eval_kind ?? "—"}</td>
+                  <td className="py-2 pr-3 text-muted-foreground">
+                    {run.extra_metrics?.rerank == null
+                      ? "—"
+                      : run.extra_metrics.rerank
+                        ? "on"
+                        : "off"}
+                  </td>
                   <td className="py-2 pr-3 text-muted-foreground">{run.model_used}</td>
                   <td className="py-2 pr-3 text-muted-foreground">{fmtDate(run.run_at)}</td>
                   <td className="py-2 pr-3">{pct(run.hit_rate_5)}</td>
                   <td className="py-2 pr-3">{pct(run.mrr)}</td>
                   <td className="py-2 pr-3">{pct(run.faithfulness)}</td>
                   <td className="py-2 pr-3">{pct(run.routing_accuracy)}</td>
+                  <td className="py-2 pr-3">{pct(run.extra_metrics?.topic_f1 as number | undefined)}</td>
+                  <td className="py-2 pr-3">{pct(run.extra_metrics?.junk_rate as number | undefined)}</td>
                 </tr>
               ))}
             </tbody>

@@ -84,6 +84,7 @@ class EvalRunCreate(BaseModel):
     routing_accuracy: float | None = None
     per_route: dict | None = None
     ablation_metrics: dict | None = None
+    extra_metrics: dict | None = None
 
 
 class EvalRunResponse(BaseModel):
@@ -108,6 +109,7 @@ class EvalRunResponse(BaseModel):
     routing_accuracy: float | None = None
     per_route: dict | None = None
     ablation_metrics: dict | None = None
+    extra_metrics: dict | None = None
 
 
 class EvalRegressionResponse(BaseModel):
@@ -286,6 +288,7 @@ async def store_eval_run(
         routing_accuracy=payload.routing_accuracy,
         per_route=payload.per_route,
         ablation_metrics=payload.ablation_metrics,
+        extra_metrics=payload.extra_metrics,
     )
     db.add(run)
     await db.commit()
@@ -316,6 +319,7 @@ async def store_eval_run(
         routing_accuracy=run.routing_accuracy,
         per_route=run.per_route,
         ablation_metrics=run.ablation_metrics,
+        extra_metrics=run.extra_metrics,
     )
 
 

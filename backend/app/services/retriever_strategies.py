@@ -174,7 +174,8 @@ def _sanitize_fts_query(query: str) -> str:
     cleaned = re.sub(r"[^\w\s]", " ", query)
     # Remove bare AND / OR / NOT (FTS5 boolean operators, case-insensitive)
     cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
-    # Collapse runs of whitespace
+    # Space-joined = FTS5 implicit AND (all terms required). keyword_search runs
+    # this precise form first and backfills with an OR pass when it's too strict.
     return " ".join(cleaned.split())
 
 

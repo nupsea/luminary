@@ -69,6 +69,7 @@ export interface EvalRunFull {
   eval_kind: string | null
   model_used: string
   citation_support_rate: number | null
+  extra_metrics: Record<string, number | boolean> | null
 }
 
 export interface FileQuestion {

@@ -13,6 +13,15 @@ def store_results(
     eval_kind: str = "retrieval",
 ) -> None:
     """POST eval results to backend for storage."""
+    known = {
+        "hit_rate_5", "mrr", "faithfulness", "answer_relevance", "context_precision",
+        "context_recall", "citation_support_rate", "theme_coverage", "no_hallucination",
+        "conciseness_pct", "factuality", "atomicity", "clarity_avg", "routing_accuracy",
+        "per_route", "ablation_metrics",
+    }
+    # Anything outside the fixed columns (topic_*, junk_rate, n_*, future families)
+    # rides along in extra_metrics so new metrics surface in the UI without a schema change.
+    extra = {k: v for k, v in metrics.items() if k not in known}
     payload = {
         "dataset_name": dataset,
         "model_used": model,
@@ -33,6 +42,7 @@ def store_results(
         "routing_accuracy": metrics.get("routing_accuracy"),
         "per_route": metrics.get("per_route"),
         "ablation_metrics": metrics.get("ablation_metrics"),
+        "extra_metrics": extra or None,
     }
     try:
         resp = httpx.post(

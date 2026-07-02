@@ -45,5 +45,10 @@ def append_history(
         "ablation_metrics": metrics.get("ablation_metrics"),
         "passed": passed,
     }
+    # Record any additional metric keys (topic_*, concept_*, junk_rate, …) that
+    # aren't in the fixed schema above, so new eval kinds persist their scores.
+    for key, value in metrics.items():
+        if key not in entry:
+            entry[key] = value
     with target.open("a") as f:
         f.write(json.dumps(entry) + "\n")

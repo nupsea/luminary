@@ -22,6 +22,7 @@ Patterns discovered through completed stories. Read before implementing new feat
 ## Search and Retrieval
 
 - **Asymmetric query expansion for hybrid search**: SQLite FTS5 MATCH uses implicit AND across tokens, so appending tokens absent from the corpus collapses BM25 recall to zero. Route different expansions to different tiers: feed expansion (e.g., graph-augmented entity tokens) to dense vector search (which rewards semantic similarity regardless of exact token match), and keep keyword (FTS5) search on the original query. Exception: HyDE-style hypothetical-answer expansion is generated to look like source text and can flow into both because it shares vocabulary with the corpus.
+- **FTS5 AND-first with OR backfill for NL queries**: the same implicit-AND behavior also makes a *plain natural-language question* (which no single chunk contains verbatim) return nothing. `HybridRetriever.keyword_search` therefore runs the precise AND MATCH first (best precision), and only if it under-fills `k` does it run a second OR MATCH (`term1 OR term2 …`, BM25-ranked) to backfill the remaining slots — keeping the exact AND hits ranked on top. `_sanitize_fts_query` stays a pure sanitizer (strip operator chars, no join); the AND/OR strategy lives in the executor. Do NOT re-sort FTS results by `relevance_score` downstream: BM25 scores are negative (more-negative = more-relevant), so a descending sort silently inverts the ranking — preserve the query's returned order.
 
 ## FastAPI Routing
 

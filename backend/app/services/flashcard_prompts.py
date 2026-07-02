@@ -261,8 +261,10 @@ CLOZE_USER_TMPL = (
 
 _TECH_TITLE_KEYWORDS = re.compile(
     r"\b(programming|systems|distributed|database|algorithm|machine learning"
+    r"|deep learning|neural|artificial intelligence|reinforcement learning"
+    r"|data science|data structures|statistics|mathematics"
     r"|software|engineering|computer|kubernetes|docker|linux|network|security"
-    r"|data structures|operating system)\b",
+    r"|operating system)\b",
     re.IGNORECASE,
 )
 
@@ -277,7 +279,8 @@ def _infer_genre(doc: DocumentModel | None) -> str:
     if doc is None:
         return "non-fiction"
     content_type = (doc.content_type or "").lower()
-    title = (doc.title or "").lower()
+    # normalise underscores so slugged titles ("d2l_dive_into_deep_learning") match
+    title = (doc.title or "").lower().replace("_", " ")
     if content_type in ("tech_book", "tech_article", "code"):
         return "technical"
     if content_type in ("paper", "pdf", "web", "article"):

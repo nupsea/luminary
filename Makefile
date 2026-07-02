@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval logs smoke luminary clean regen-api-types install docker-build docker-run
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types install docker-build docker-run
 
 LUMINARY_PORT ?= 7820
 
@@ -105,6 +105,38 @@ eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --assert-thresholds
+
+# D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
+# Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
+eval-d2l:
+	@echo "Retrieval eval on the d2l technical corpus (HR@5/MRR, no judge)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url http://localhost:7820 --judge-model "" --assert-thresholds
+
+# Same dataset WITH the cross-encoder reranker — compare HR@5/MRR against `eval-d2l`.
+eval-d2l-rerank:
+	@echo "Retrieval eval on d2l WITH cross-encoder reranking (A/B vs eval-d2l)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url http://localhost:7820 --judge-model "" --rerank
+
+# Generation quality (faithfulness, answer-relevance) via a LOCAL Ollama judge.
+# Slow (one judge call per question); separate from the fast HR/MRR target above.
+eval-d2l-gen:
+	@echo "Generation eval on d2l (RAGAS, local judge — slow)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url http://localhost:7820 --judge-model ollama/qwen2.5:14b-instruct
+
+# Topic-generation eval (precision/recall/F1 + junk-rate). Uses the backend venv.
+eval-topics:
+	@echo "Topic-generation eval on d2l..."
+	uv run --project $(CURDIR)/backend python evals/run_topic_eval.py --dataset d2l --backend-url http://localhost:7820 --assert-thresholds
+
+# Regenerate the d2l golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites d2l.jsonl.
+golden-d2l:
+	@echo "Regenerating d2l golden (GPT-5.4 generate + cross-model verify)..."
+	uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/books/d2l_dive_into_deep_learning.md \
+		--out evals/golden/d2l.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 50
 
 luminary:
 	bash scripts/luminary.sh
