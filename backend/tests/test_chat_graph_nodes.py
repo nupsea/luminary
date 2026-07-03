@@ -347,6 +347,61 @@ async def test_synthesize_node_prepares_llm_prompt(test_db):
     assert not result.get("not_found")
 
 
+@pytest.mark.asyncio
+async def test_synthesize_node_caps_and_gates_citations(test_db):
+    """Citations are ranked by score, gated on relevance, and capped at 5 so the
+    reference list stays precise and uncluttered."""
+    doc_id = str(uuid.uuid4())
+    _engine, factory, _tmp = test_db
+    await _insert_doc(factory, doc_id)
+
+    scores = [0.033, 0.030, 0.028, 0.025, 0.020, 0.015, 0.005, 0.001]
+    chunks = [
+        {
+            "chunk_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "text": f"Passage {i} scoring {s}.",
+            "section_heading": f"Section {i}",
+            "page": i,
+            "score": s,
+            "source": "vector",
+        }
+        for i, s in enumerate(scores)
+    ]
+    result = await synthesize_node(_make_state(question="Q?", chunks=chunks, intent="factual"))
+
+    cites = result["source_citations"]
+    # cap of 5, ranked by score desc, and the weakest (below floor 0.0165) dropped
+    assert len(cites) == 5
+    score_by_id = {c["chunk_id"]: c["score"] for c in chunks}
+    kept_scores = [score_by_id[cite["chunk_id"]] for cite in cites]
+    assert kept_scores == sorted(kept_scores, reverse=True)
+    assert min(kept_scores) >= 0.0165
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_keeps_single_best_below_floor(test_db):
+    """A grounded answer never shows zero citations: the best source is kept even
+    if its score is below the absolute floor."""
+    doc_id = str(uuid.uuid4())
+    _engine, factory, _tmp = test_db
+    await _insert_doc(factory, doc_id)
+
+    chunks = [
+        {
+            "chunk_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "text": "Only, weak, source.",
+            "section_heading": "S",
+            "page": 1,
+            "score": 0.004,  # below _CITATION_MIN_SCORE
+            "source": "vector",
+        }
+    ]
+    result = await synthesize_node(_make_state(question="Q?", chunks=chunks, intent="factual"))
+    assert len(result["source_citations"]) == 1
+
+
 # test_summary_intent_end_to_end — S78 AC
 
 

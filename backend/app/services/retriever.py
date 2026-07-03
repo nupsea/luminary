@@ -462,11 +462,19 @@ class HybridRetriever:
         try:
 
             chunks = await self.retrieve(query, document_ids, k)
+            # An image reference must come from a document that actually
+            # contributed to the answer. For a library-wide query (document_ids
+            # is None) an unscoped image search matches the whole corpus and can
+            # attach an unrelated document's image — e.g. a tech diagram on an
+            # Odyssey answer. Scope image search to the retrieved chunks' docs.
+            answer_doc_ids = list({c.document_id for c in chunks if c.document_id})
+            if not answer_doc_ids:
+                return chunks, []
             query_vector = _embedder_module.get_embedding_service().encode([query])[0]
             image_ids_vec = self._image_vector_search(
-                query_vector, document_ids, k=5, threshold=0.5
+                query_vector, answer_doc_ids, k=5, threshold=0.5
             )
-            image_ids_fts = await self._image_keyword_search(query, document_ids, k=5)
+            image_ids_fts = await self._image_keyword_search(query, answer_doc_ids, k=5)
 
             seen: set[str] = set()
             image_ids: list[str] = []
