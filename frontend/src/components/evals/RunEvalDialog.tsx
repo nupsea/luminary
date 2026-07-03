@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, Play } from "lucide-react"
 import {
   Dialog,
@@ -8,8 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiGet } from "@/lib/apiClient"
 
-const JUDGE_MODELS = ["ollama/llama3.2", "ollama/mistral", "ollama/gemma4", "openai/gpt-4o-mini", ""]
+// "" = no judge (retrieval-only). Live models are fetched so the dropdown only
+// offers judges that are actually pulled/configured — a hardcoded list drifts
+// from what Ollama has and produces "model not pulled" failures on Run.
+const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")
 
 interface RunEvalDialogProps {
   open: boolean
@@ -19,7 +24,18 @@ interface RunEvalDialogProps {
 }
 
 export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunEvalDialogProps) {
-  const [judgeModel, setJudgeModel] = useState("ollama/llama3.2")
+  const modelsQuery = useQuery({
+    queryKey: ["eval-models"],
+    queryFn: fetchModels,
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const judgeOptions = [
+    { value: "", label: "None — fast HR@5/MRR (no judge)" },
+    ...(modelsQuery.data?.local ?? []).map((m) => ({ value: m, label: `Local: ${m}` })),
+    ...(modelsQuery.data?.frontier ?? []).map((m) => ({ value: m, label: `Frontier: ${m}` })),
+  ]
+  const [judgeModel, setJudgeModel] = useState("")
   const [checkCitations, setCheckCitations] = useState(false)
   const [maxQuestions, setMaxQuestions] = useState(20)
   const external = /^(openai|anthropic|gemini)\//.test(judgeModel)
@@ -40,12 +56,15 @@ export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunE
               value={judgeModel}
               onChange={(event) => setJudgeModel(event.target.value)}
             >
-              {JUDGE_MODELS.map((model) => (
-                <option key={model || "disabled"} value={model}>
-                  {model || "Disabled"}
+              {judgeOptions.map((opt) => (
+                <option key={opt.value || "disabled"} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
+            {modelsQuery.isLoading && (
+              <span className="text-xs text-muted-foreground">Loading available models…</span>
+            )}
           </label>
 
           {external && (

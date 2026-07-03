@@ -1040,7 +1040,11 @@ def _validate_model_available(model: str, settings) -> str | None:
         names, err = _ollama_models(settings)
         if err:
             return f"{err} — cannot use {model}. Start Ollama or pick a frontier model."
-        if model not in names:
+        # Ollama treats a tagless name as ":latest" (llama3.2 == llama3.2:latest),
+        # so accept a bare id whenever its :latest tag is pulled — /api/tags lists
+        # the fully-qualified "llama3.2:latest".
+        candidates = {model} if ":" in model.split("/", 1)[1] else {model, f"{model}:latest"}
+        if candidates.isdisjoint(names):
             tag = model.split("/", 1)[1]
             return (
                 f"Model {model} is not pulled in Ollama. Available: "

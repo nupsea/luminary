@@ -361,6 +361,25 @@ def test_validate_model_rejects_argv_flag_injection():
         assert _validate_model_available(bad, settings) is not None, bad
 
 
+def test_validate_model_accepts_ollama_implicit_latest(monkeypatch):
+    """Ollama treats a tagless name as :latest — a bare 'ollama/llama3.2' must
+    validate when 'llama3.2:latest' is pulled (regression: exact-match rejected
+    it, blocking Run Eval with the dialog's default judge)."""
+    from app.config import get_settings
+    from app.routers import evals as evals_mod
+
+    monkeypatch.setattr(
+        evals_mod, "_ollama_models",
+        lambda _s: ({"ollama/llama3.2:latest", "ollama/mistral:latest"}, None),
+    )
+    settings = get_settings()
+    assert evals_mod._validate_model_available("ollama/llama3.2", settings) is None
+    assert evals_mod._validate_model_available("ollama/llama3.2:latest", settings) is None
+    assert evals_mod._validate_model_available("ollama/mistral", settings) is None
+    # a genuinely-absent tag still errors
+    assert evals_mod._validate_model_available("ollama/llama3.2:70b", settings) is not None
+
+
 @pytest.mark.anyio
 async def test_golden_generate_rejects_injected_verify_model(golden_dir, tmp_path, monkeypatch):
     """A verify_models entry shaped like a CLI flag must be 422'd, not spread
