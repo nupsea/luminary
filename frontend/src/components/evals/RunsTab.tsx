@@ -78,9 +78,21 @@ function rowView(run: EvalRunFull) {
   if (run.eval_kind === "generation" || run.eval_kind === "citation") {
     const answerModel = typeof x.answer_model === "string" ? x.answer_model : null
     if (answerModel) details.push(`answers: ${answerModel}`)
-    const qaFailed = num(x.qa_failed_calls)
+    // Split the QA outcome: answered / declined (not_found, a real product
+    // "I don't know") / failed (timeout or error). Never lump a decline in
+    // with a failure — they mean opposite things about the pipeline.
     const qaTotal = num(x.qa_total_calls)
-    if (qaFailed != null && qaFailed > 0) details.push(`qa failed ${qaFailed}/${qaTotal ?? "?"}`)
+    const qaAnswered = num(x.qa_answered_calls)
+    const qaDeclined = num(x.qa_not_found_calls)
+    const qaFailed = num(x.qa_failed_calls)
+    if (qaTotal != null && qaAnswered != null) {
+      const parts = [`answered ${qaAnswered}/${qaTotal}`]
+      if (qaDeclined) parts.push(`declined ${qaDeclined}`)
+      if (qaFailed) parts.push(`failed ${qaFailed}`)
+      details.push(parts.join(", "))
+    } else if (qaFailed != null && qaFailed > 0) {
+      details.push(`qa failed ${qaFailed}/${qaTotal ?? "?"}`)
+    }
     const jFailed = num(x.judge_failed_calls)
     const jTotal = num(x.judge_total_calls)
     if (jFailed != null && jTotal != null && jFailed > 0) {

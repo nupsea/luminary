@@ -84,6 +84,12 @@ VALID_DATASETS = [
     "code",
 ]
 
+# Per-/qa timeout for generation runs. A local answering model (Ollama, CPU)
+# legitimately takes 30-60s per answer and longer on a cold start; the eval is
+# a background batch job, so this is generous by design. A too-tight value
+# silently drops answers and understates generation metrics.
+QA_REQUEST_TIMEOUT = 300.0
+
 # Quality gate thresholds
 THRESHOLDS = {
     "hit_rate_5": 0.50,
@@ -205,7 +211,7 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
         resp = httpx.post(
             f"{backend_url}/qa",
             json=payload,
-            timeout=60.0,
+            timeout=QA_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         if "text/event-stream" in resp.headers.get("content-type", ""):
@@ -561,6 +567,11 @@ def main() -> None:
                 if c and c not in seen:
                     ragas_contexts.append(c)
                     seen.add(c)
+        # Distinguish the pipeline DECLINING (not_found: a real product answer,
+        # "I don't know") from the harness failing to get any response at all
+        # (timeout / error / no done event). Both yield an empty answer and are
+        # excluded from generation metrics, but they mean opposite things.
+        not_found = bool(qa_resp.get("not_found")) if needs_qa else False
         return {
             "question": question,
             "answer": answer,
@@ -569,21 +580,34 @@ def main() -> None:
             "ground_truths": [ground_truth],
             "context_hint": context_hint,
             "qa_response": qa_resp,
+            "qa_not_found": not_found,
         }
 
-    # /search alone: keep concurrency higher; /qa adds LLM load: cap at 2.
-    max_workers = 2 if needs_qa else 6
+    # /search alone parallelises fine. /qa does NOT: a local Ollama serves one
+    # generation at a time, so concurrent /qa requests queue and the waiting one
+    # blows past its timeout (empty answer). Concurrency here buys no throughput,
+    # only dropped answers — run generation rows sequentially. (A hosted
+    # answering model could parallelise, but the app default is local; correctness
+    # over speed for a background batch job.)
+    max_workers = 1 if needs_qa else 6
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         samples = list(pool.map(_process_row, enumerate(rows, start=1)))
 
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
 
-    qa_failed = sum(1 for s in samples if not s["answer"].strip()) if needs_qa else 0
-    if needs_qa and qa_failed:
+    # An empty answer is either a decline (not_found — a real product outcome)
+    # or a genuine failure (timeout/error). Count them apart so the UI never
+    # reports an honest "I don't know" as harness breakage.
+    qa_empty = [s for s in samples if not s["answer"].strip()] if needs_qa else []
+    qa_not_found = sum(1 for s in qa_empty if s.get("qa_not_found"))
+    qa_failed = len(qa_empty) - qa_not_found
+    if needs_qa and (qa_failed or qa_not_found):
         print(
-            f"WARNING: /qa produced no answer for {qa_failed}/{len(samples)} "
-            "questions; those are excluded from generation metrics.",
+            f"NOTE: of {len(samples)} questions, the QA pipeline answered "
+            f"{len(samples) - len(qa_empty)}, declined (not_found) {qa_not_found}, "
+            f"and failed (timeout/error) {qa_failed}. Only answered questions are "
+            "judged.",
             file=sys.stderr,
         )
 
@@ -649,6 +673,8 @@ def main() -> None:
         # means the product's own /qa pipeline default -- the shipped path.
         metrics["answer_model"] = args.model or "app-default"
         metrics["qa_failed_calls"] = qa_failed
+        metrics["qa_not_found_calls"] = qa_not_found
+        metrics["qa_answered_calls"] = len(samples) - len(qa_empty)
         metrics["qa_total_calls"] = len(samples)
 
     threshold_violations: list[str] = []

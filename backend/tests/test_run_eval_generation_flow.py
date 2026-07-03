@@ -161,3 +161,45 @@ def test_judge_skipped_when_qa_returns_nothing(monkeypatch):
     assert eval_kind == "retrieval"
     assert metrics["faithfulness"] is None
     assert metrics["qa_failed_calls"] == 2
+
+
+def test_not_found_counts_as_declined_not_failed(monkeypatch):
+    """A /qa not_found response is a real product decline, not a harness failure:
+    it must land in qa_not_found_calls, not qa_failed_calls."""
+    history: list[tuple] = []
+    judged_batches: list[list[dict]] = []
+    _wire_common(monkeypatch, history)
+
+    # Q1 answers, Q2 declines (not_found), so 1 answered + 1 declined + 0 failed.
+    def _qa(url, question, model, doc_id):
+        if question == "Q1":
+            return {"answer": "a real answer here", "citations": []}
+        return {"not_found": True}
+
+    monkeypatch.setattr(run_eval, "post_qa", _qa)
+
+    class _CaptureGenerationEval:
+        def run(self, samples, judge_model):
+            judged_batches.append(samples)
+            return {
+                "faithfulness": 0.8, "answer_relevance": 0.7,
+                "context_precision": None, "context_recall": None,
+                "judge_failed_calls": 0, "judge_total_calls": 2,
+            }
+
+    monkeypatch.setattr(run_eval, "GenerationEval", _CaptureGenerationEval)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["run_eval.py", "--dataset", "book", "--backend-url", "http://test",
+         "--judge-model", "ollama/fake-judge"],
+    )
+
+    run_eval.main()
+
+    _, _, metrics, _ = history[0]
+    assert metrics["qa_answered_calls"] == 1
+    assert metrics["qa_not_found_calls"] == 1
+    assert metrics["qa_failed_calls"] == 0
+    # only the answered question is judged
+    assert len(judged_batches[0]) == 1
+    assert judged_batches[0][0]["question"] == "Q1"
