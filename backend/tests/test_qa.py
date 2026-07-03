@@ -173,6 +173,52 @@ def test_split_response_strips_json_label_line():
     assert answer == "The cell is the basic unit of life."
 
 
+# Truncated-generation salvage: local models sometimes embed the whole answer
+# in a JSON block and then hit the token limit mid-block (done_reason=length).
+# The answer must be recovered, not discarded.
+
+
+def test_split_response_salvages_truncated_style_b_answer():
+    embedded = (
+        "Machine learning learns feature transformations from data, while deep learning "
+        "stacks many neural layers to learn hierarchical representations end to end."
+    )
+    full_text = '{"answer": "' + embedded + '", "citations": [{"document_ti'
+    answer, citations, confidence = _split_response(full_text)
+    assert answer == embedded
+    assert citations == []
+    assert confidence == "medium"
+
+
+def test_split_response_salvage_beats_stray_heading_prose():
+    embedded = (
+        "Use classical machine learning for small tabular datasets where interpretability "
+        "matters; choose deep learning for perception tasks with large datasets."
+    )
+    full_text = "**Machine Learning:**\n" + '{"answer": "' + embedded + "  "
+    answer, _, confidence = _split_response(full_text)
+    assert answer == embedded
+    assert confidence == "medium"
+
+
+def test_split_response_salvage_unescapes_json_string():
+    full_text = '{"answer": "Line one.\\nHe said \\"deep\\" learning.'
+    answer, _, _ = _split_response(full_text)
+    assert answer == 'Line one.\nHe said "deep" learning.'
+
+
+def test_split_response_truncated_style_a_keeps_prose_with_medium_confidence():
+    prose = (
+        "Machine learning covers the broad family of data-driven algorithms, whereas deep "
+        "learning is the neural-network subset suited to perception-scale data."
+    )
+    full_text = prose + '\n{"citations": [{"document_title": "d2l", "section_head'
+    answer, citations, confidence = _split_response(full_text)
+    assert answer == prose
+    assert citations == []
+    assert confidence == "medium"
+
+
 def test_split_response_strips_instruction_echo():
     citations: list = []
     full_text = "ONLY JSON (no prose inside the JSON, do not repeat the answer):\n" + json.dumps(

@@ -33,9 +33,15 @@ class Settings(BaseSettings):
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept
-    # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
+    # under QA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
+    # Context window for the QA/chat streaming call. num_ctx bounds prompt AND
+    # generation combined: the QA prompt alone can reach ~1900 tokens (1500
+    # chunk budget + up to 1000-token section_context + system + history), and
+    # the answer carries a trailing citations JSON with excerpts. At 2048 the
+    # generation hit done_reason=length mid-JSON, losing answers entirely.
+    QA_NUM_CTX: int = 4096
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).
