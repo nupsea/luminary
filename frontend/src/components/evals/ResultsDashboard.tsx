@@ -15,9 +15,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
+import { isStale, shippedAblationArm, THRESHOLDS, timeAgo } from "./thresholds"
 import type { EvalRunFull } from "./types"
 
-const THRESHOLDS = { hit_rate_5: 0.5, mrr: 0.35, faithfulness: 0.65 }
 const RETRIEVAL_KINDS = new Set(["retrieval", "generation", "citation", null])
 
 interface GoldenInfo {
@@ -81,6 +81,21 @@ function GoldenCard({ dataset }: { dataset: string }) {
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Golden dataset</h3>
         <div className="flex items-center gap-2">
+          {p?.verify_models?.length ? (
+            <span
+              className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700"
+              title={`Every pair passed independent verification by ${p.verify_models.join(", ")}`}
+            >
+              cross-verified
+            </span>
+          ) : (
+            <span
+              className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              title="No provenance record — this golden was authored before the verified-generation pipeline. Regenerate to get persona-diverse, cross-verified questions."
+            >
+              legacy · unverified
+            </span>
+          )}
           {q?.quality_score != null && (
             <span
               className={cn(
@@ -146,6 +161,17 @@ function GoldenCard({ dataset }: { dataset: string }) {
               <span className="tabular-nums">{(q.self_contained_rate * 100).toFixed(0)}%</span>
             </div>
           )}
+          {q?.answer_ok_rate != null && (
+            <div
+              className={cn(
+                "flex justify-between",
+                q.answer_ok_rate < 1 ? "text-amber-600" : "",
+              )}
+            >
+              <span>non-trivial answers (≥10 chars)</span>
+              <span className="tabular-nums">{(q.answer_ok_rate * 100).toFixed(0)}%</span>
+            </div>
+          )}
           {q?.question_len_mean != null && (
             <div className="flex justify-between">
               <span>question length (words)</span>
@@ -154,12 +180,25 @@ function GoldenCard({ dataset }: { dataset: string }) {
               </span>
             </div>
           )}
+          {q?.distinct_personas != null && q.distinct_personas > 0 && (
+            <div className="flex justify-between">
+              <span>reader personas</span>
+              <span className="tabular-nums">{q.distinct_personas}</span>
+            </div>
+          )}
         </div>
       </div>
       {verbatim != null && verbatim < 1 && (
         <p className="mt-2 text-[11px] text-amber-600">
           {((1 - verbatim) * 100).toFixed(0)}% of hints are not verbatim in the source — those
           questions are unretrievable and unfairly lower HR@5/MRR.
+        </p>
+      )}
+      {q?.answer_ok_rate != null && q.answer_ok_rate < 1 && (
+        <p className="mt-2 text-[11px] text-amber-600">
+          {((1 - q.answer_ok_rate) * 100).toFixed(0)}% of golden answers are under 10 characters —
+          short factoids weaken generation judging. This is the component holding the quality
+          score down.
         </p>
       )}
     </div>
@@ -179,11 +218,13 @@ function MetricCard({
   value,
   threshold,
   hint,
+  sub,
 }: {
   label: string
   value: number | null | undefined
   threshold: number
   hint: string
+  sub?: string | null
 }) {
   const pass = value != null && value >= threshold
   const near = value != null && value >= threshold * 0.75
@@ -217,8 +258,43 @@ function MetricCard({
       <div className="mt-1 text-[11px] text-muted-foreground">
         {hint} · gate ≥ {Math.round(threshold * 100)}%
       </div>
+      {sub && <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div>}
     </div>
   )
+}
+
+// The freshest measurement of the shipped pipeline: single retrieval-family
+// runs and the shipped arm of ablation runs compete on recency, so the
+// headline can never silently lag a newer ablation shown on the same page.
+function latestShippedMeasurement(allRuns: EvalRunFull[]) {
+  const candidates: {
+    run_at: string
+    hit_rate_5: number | null
+    mrr: number | null
+    config: string
+  }[] = []
+  for (const r of allRuns) {
+    if (RETRIEVAL_KINDS.has(r.eval_kind) && r.hit_rate_5 != null) {
+      candidates.push({
+        run_at: r.run_at,
+        hit_rate_5: r.hit_rate_5,
+        mrr: r.mrr,
+        config: isRerank(r) ? "rerank on" : "rerank off",
+      })
+    } else if (r.eval_kind === "ablation") {
+      const shipped = shippedAblationArm(r)
+      if (shipped) {
+        candidates.push({
+          run_at: r.run_at,
+          hit_rate_5: shipped.arm.hit_rate_5,
+          mrr: shipped.arm.mrr,
+          config: `ablation · ${shipped.label}`,
+        })
+      }
+    }
+  }
+  candidates.sort((a, b) => b.run_at.localeCompare(a.run_at))
+  return candidates[0] ?? null
 }
 
 function Delta({ base, next }: { base: number | null; next: number | null }) {
@@ -239,7 +315,7 @@ function Delta({ base, next }: { base: number | null; next: number | null }) {
 const ABLATION_ORDER = ["vector", "fts", "graph", "rrf", "rrf+rerank"]
 
 function AblationSection({ run }: { run: EvalRunFull }) {
-  const m = run.ablation_metrics as Record<string, { hit_rate_5: number; mrr: number }> | null
+  const m = run.ablation_metrics
   if (!m) return null
   const rrf = m["rrf"]
   const rrfrr = m["rrf+rerank"]
@@ -316,7 +392,9 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
     )
   }
   const allRuns = query.data ?? []
-  const runs = allRuns.filter((r) => RETRIEVAL_KINDS.has(r.eval_kind))
+  const runs = allRuns.filter(
+    (r) => RETRIEVAL_KINDS.has(r.eval_kind) && r.status !== "failed",
+  )
   const ablation = allRuns.find((r) => r.eval_kind === "ablation" && r.ablation_metrics)
   if (runs.length === 0 && !ablation) {
     return (
@@ -330,10 +408,14 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
     )
   }
 
-  const latest = runs[0] ?? null
+  const headline = latestShippedMeasurement(allRuns)
   const baseline = runs.find((r) => !isRerank(r))
   const reranked = runs.find((r) => isRerank(r))
-  const faith = runs.find((r) => r.faithfulness != null)
+  // Faithfulness is only real when the run generated answers via /qa
+  // (answer_model provenance). Legacy runs judged golden answers — ignore them.
+  const faith = runs.find(
+    (r) => r.faithfulness != null && typeof r.extra_metrics?.answer_model === "string",
+  )
   const trend = [...runs]
     .reverse()
     .map((r, i) => ({ run: i + 1, "HR@5": r.hit_rate_5, MRR: r.mrr }))
@@ -343,13 +425,15 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
       {/* Header */}
       <div>
         <h2 className="text-lg font-semibold">{dataset}</h2>
-        {latest && (
+        {headline && (
           <p className="text-xs text-muted-foreground">
-            Latest run {new Date(latest.run_at).toLocaleString()} · {runs.length} runs ·{" "}
-            {isRerank(latest) ? "rerank on" : "rerank off"}
-            {latest.model_used && latest.model_used !== "no-llm"
-              ? ` · judge ${latest.model_used.split("/").pop()}`
-              : " · no judge"}
+            Latest measurement {new Date(headline.run_at).toLocaleString()} ({timeAgo(headline.run_at)})
+            {" · "}{headline.config} · {allRuns.length} runs
+            {isStale(headline.run_at) && (
+              <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700">
+                stale — over 14 days old, re-run to refresh
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -359,15 +443,34 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
       {ablation && <AblationSection run={ablation} />}
 
       {/* Metric cards */}
-      {latest && (
+      {headline && (
         <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard label="HR@5" value={latest.hit_rate_5} threshold={THRESHOLDS.hit_rate_5} hint="answer in top-5" />
-          <MetricCard label="MRR" value={latest.mrr} threshold={THRESHOLDS.mrr} hint="rank of first hit" />
+          <MetricCard
+            label="HR@5"
+            value={headline.hit_rate_5}
+            threshold={THRESHOLDS.hit_rate_5}
+            hint="answer in top-5 · within-document"
+            sub={`${headline.config} · ${timeAgo(headline.run_at)}`}
+          />
+          <MetricCard
+            label="MRR@5"
+            value={headline.mrr}
+            threshold={THRESHOLDS.mrr}
+            hint="rank of first hit"
+            sub={`${headline.config} · ${timeAgo(headline.run_at)}`}
+          />
           <MetricCard
             label="Faithfulness"
             value={faith?.faithfulness}
             threshold={THRESHOLDS.faithfulness}
-            hint={faith ? "grounded in context" : "run with a judge"}
+            hint={faith ? "generated answers grounded in context" : "run with a judge — answers come from live /qa"}
+            sub={
+              faith
+                ? `judge ${faith.model_used.split("/").pop()} · answers ${String(
+                    faith.extra_metrics?.answer_model,
+                  )} · ${timeAgo(faith.run_at)}`
+                : null
+            }
           />
         </div>
       )}

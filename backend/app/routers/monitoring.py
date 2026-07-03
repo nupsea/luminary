@@ -302,7 +302,8 @@ async def store_eval_run(
         dataset_name=run.dataset_name,
         model_used=run.model_used,
         eval_kind=run.eval_kind,
-        run_at=run.run_at,
+        # aiosqlite reads back tz-naive; attach UTC so clients don't parse as local
+        run_at=run.run_at.replace(tzinfo=UTC) if run.run_at.tzinfo is None else run.run_at,
         hit_rate_5=run.hit_rate_5,
         mrr=run.mrr,
         faithfulness=run.faithfulness,
@@ -350,7 +351,7 @@ async def get_eval_runs(
             dataset_name=r.dataset_name,
             model_used=r.model_used,
             eval_kind=r.eval_kind,
-            run_at=r.run_at,
+            run_at=r.run_at.replace(tzinfo=UTC) if r.run_at.tzinfo is None else r.run_at,
             hit_rate_5=r.hit_rate_5,
             mrr=r.mrr,
             faithfulness=r.faithfulness,

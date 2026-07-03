@@ -22,6 +22,7 @@ type AnyRun = EvalRunSummary | EvalRunFull
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { API_BASE } from "@/lib/config"
+import { metricColor, THRESHOLDS } from "@/components/evals/thresholds"
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -90,13 +91,6 @@ function pct(v: number): string {
   return `${Math.round(v * 100)}%`
 }
 
-function metricColor(v: number | null | undefined, threshold: number): string {
-  if (v == null) return ""
-  if (v >= threshold) return "font-semibold text-green-700 dark:text-green-400"
-  if (v >= threshold * 0.75) return "font-semibold text-amber-600 dark:text-amber-400"
-  return "text-muted-foreground"
-}
-
 function getInitialTab(): TabId {
   const hash = window.location.hash.replace("#", "") as TabId
   return TABS.some((t) => t.id === hash) ? hash : "datasets"
@@ -157,11 +151,18 @@ export default function Quality() {
           if (row.status === "failed" && !seenFailuresRef.current.has(row.run_id)) {
             seenFailuresRef.current.add(row.run_id)
             toast.error(`Eval failed for ${row.key}: ${row.error ?? "unknown error"}`)
+            // failed runs are persisted as rows now — refresh the Runs table
+            void qc.invalidateQueries({ queryKey: ["eval-runs"] })
           }
           if (row.status === "done" && row.finished_at) {
-            // refresh the runs queries when something just completed
+            // refresh EVERY surface that shows run results — a completed run
+            // must appear in the Datasets list, Runs table, and dashboard
+            // without a manual refresh
             void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", row.key] })
             void qc.invalidateQueries({ queryKey: ["eval-file-runs", row.key] })
+            void qc.invalidateQueries({ queryKey: ["eval-datasets"] })
+            void qc.invalidateQueries({ queryKey: ["eval-runs"] })
+            void qc.invalidateQueries({ queryKey: ["eval-dashboard-runs"] })
           }
         }
       } catch {
@@ -262,13 +263,14 @@ export default function Quality() {
       max_questions: number
     }) => {
       if (selectedFileName) {
-        // File-backed: POST /evals/run
+        // File-backed: POST /evals/run. judge_model "" must stay "" — null
+        // would let the CLI fall back to a default judge the user disabled.
         const res = await fetch(`${API_BASE}/evals/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             dataset: selectedFileName,
-            judge_model: payload.judge_model || null,
+            judge_model: payload.judge_model,
             check_citations: payload.check_citations,
             max_questions: payload.max_questions,
           }),
@@ -380,7 +382,14 @@ export default function Quality() {
           <button
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent"
-            onClick={() => void datasetsQuery.refetch()}
+            onClick={() => {
+              void qc.invalidateQueries({ queryKey: ["eval-datasets"] })
+              void qc.invalidateQueries({ queryKey: ["eval-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-dashboard-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-dataset-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-file-runs"] })
+              void qc.invalidateQueries({ queryKey: ["golden-info"] })
+            }}
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -467,9 +476,9 @@ export default function Quality() {
                       <th className="py-2 pr-3 font-medium">Questions</th>
                       <th className="py-2 pr-3 font-medium">Generated</th>
                       <th className="py-2 pr-3 font-medium">Last Run</th>
-                      <th className="py-2 pr-3 text-right font-medium">HR@5</th>
-                      <th className="py-2 pr-3 text-right font-medium">MRR</th>
-                      <th className="py-2 pr-3 text-right font-medium" title="Requires judge model">Faith</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Hit rate in top-5, within the source document">HR@5</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Mean reciprocal rank over the top-5 retrieved chunks">MRR@5</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Requires a judge model; scores live /qa answers">Faith</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -518,13 +527,13 @@ export default function Quality() {
                           <td className="py-2.5 pr-3 text-muted-foreground">
                             {lr?.run_at ? new Date(lr.run_at).toLocaleString() : "never"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.hit_rate_5, 0.6))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.hit_rate_5, THRESHOLDS.hit_rate_5))}>
                             {lr?.hit_rate_5 != null ? pct(lr.hit_rate_5) : "—"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.mrr, 0.45))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.mrr, THRESHOLDS.mrr))}>
                             {lr?.mrr != null ? pct(lr.mrr) : "—"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, 0.65))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, THRESHOLDS.faithfulness))}>
                             {lr?.faithfulness != null ? pct(lr.faithfulness) : (
                               <span className="text-muted-foreground/50" title="Run with a judge model to compute faithfulness">—</span>
                             )}

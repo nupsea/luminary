@@ -187,9 +187,11 @@ def test_generation_eval_skips_without_judge_model():
 def test_generation_eval_live_judge():
     """Live test against local Ollama. Requires Ollama running."""
     out = GenerationEval().run(_SAMPLES, judge_model="ollama/gemma4")
-    assert set(out.keys()) == {
+    assert set(out.keys()) >= {
         "faithfulness",
         "answer_relevance",
         "context_precision",
         "context_recall",
     }
+    if out["faithfulness"] is not None:
+        assert out["judge_total_calls"] > 0

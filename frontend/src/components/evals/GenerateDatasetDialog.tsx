@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, Plus } from "lucide-react"
 import {
   Dialog,
@@ -8,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiGet } from "@/lib/apiClient"
 import type { DatasetSize, DocumentOption } from "./types"
 
 // Preset buttons map to a question_count, not a size tier.
@@ -18,7 +20,18 @@ const PRESETS = [
   { label: "100", count: 100 },
 ]
 
-const MODEL_OPTIONS = ["openai/gpt-4.1", "openai/gpt-4o", "openai/o4-mini", "openai/gpt-4o-mini", "ollama/llama3.2", "ollama/mistral", "anthropic/claude-3-5-haiku"]
+// Static fallback when GET /evals/models is unavailable. The live list is
+// preferred — it reflects the configured API keys and pulled Ollama models.
+const FALLBACK_MODEL_OPTIONS = [
+  "openai/gpt-5.4",
+  "openai/gpt-5.1",
+  "openai/gpt-4.1",
+  "openai/gpt-4o-mini",
+  "ollama/llama3.2",
+  "ollama/mistral",
+]
+
+const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")
 
 interface GenerateDatasetDialogProps {
   open: boolean
@@ -46,15 +59,27 @@ export function GenerateDatasetDialog({
   const [name, setName] = useState("")
   const [questionCount, setQuestionCount] = useState<number>(30)
   const [documentIds, setDocumentIds] = useState<string[]>([])
-  const [model, setModel] = useState(MODEL_OPTIONS[0])
-  const external = /^(openai|anthropic|gemini)\//.test(model)
+  const modelsQuery = useQuery({
+    queryKey: ["eval-models"],
+    queryFn: fetchModels,
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const fetched = modelsQuery.data
+  const modelOptions =
+    fetched && fetched.frontier.length + fetched.local.length > 0
+      ? [...fetched.frontier, ...fetched.local]
+      : FALLBACK_MODEL_OPTIONS
+  const [model, setModel] = useState("")
+  const effectiveModel = model || modelOptions[0]
+  const external = /^(openai|anthropic|gemini)\//.test(effectiveModel)
 
   function handleSubmit() {
     onSubmit({
       name: name.trim(),
       size: "small",
       document_ids: documentIds,
-      generator_model: model,
+      generator_model: effectiveModel,
       question_count: questionCount,
     })
   }
@@ -122,10 +147,10 @@ export function GenerateDatasetDialog({
             <span className="font-medium">Generator Model</span>
             <select
               className="h-9 rounded-md border bg-background px-3 text-sm"
-              value={model}
+              value={effectiveModel}
               onChange={(event) => setModel(event.target.value)}
             >
-              {MODEL_OPTIONS.map((option) => (
+              {modelOptions.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>

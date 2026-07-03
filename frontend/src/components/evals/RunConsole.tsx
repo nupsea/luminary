@@ -6,7 +6,8 @@ import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import type { GoldenDataset } from "./types"
 
-// "" = no judge (fast, retrieval-only). Frontier options are opt-in and warned.
+// "" = no judge (fast, retrieval-only). A judge generates real answers via the
+// app's /qa pipeline and scores those. Frontier options are opt-in and warned.
 const JUDGE_MODELS: { value: string; label: string }[] = [
   { value: "", label: "None — fast HR@5/MRR" },
   { value: "ollama/qwen2.5:14b-instruct", label: "Local: qwen2.5:14b" },
@@ -134,7 +135,10 @@ export function RunConsole({
         </label>
 
         <label className="grid gap-1 text-xs">
-          <span className="font-medium text-muted-foreground">
+          <span
+            className="font-medium text-muted-foreground"
+            title="When set, answers are generated live by the app QA pipeline and scored by this judge"
+          >
             Judge (generation){mode === "ablation" ? " — not used" : ""}
           </span>
           <select
@@ -165,6 +169,20 @@ export function RunConsole({
         </label>
       </div>
 
+      {mode === "ablation" && judgeModel && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Ablation is retrieval-only — your judge selection ({judgeModel.split("/").pop()}) will
+          NOT be used and the run records no Faithfulness. Switch Mode to Single run to judge
+          generated answers.
+        </div>
+      )}
+      {mode === "single" && judgeModel && (
+        <div className="mt-2 rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Judged run: every question gets a live /qa answer, then the judge scores it. With
+          local models expect roughly a minute per question — lower Max questions for a quick
+          read.
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-4">
         {mode === "single" && (
           <label className="flex items-center gap-2 text-sm">

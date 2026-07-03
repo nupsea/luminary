@@ -2,7 +2,8 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
-import { stripMarkdown } from "@/lib/utils"
+import { cn } from "@/lib/utils"
+import { metricColor, shippedAblationArm, THRESHOLDS } from "./thresholds"
 import type { EvalRunFull } from "./types"
 
 async function fetchEvalRuns(params: {
@@ -21,7 +22,7 @@ async function fetchEvalRuns(params: {
 }
 
 function pct(v: number | null | undefined): string {
-  if (v == null) return "n/a"
+  if (v == null) return "—"
   return `${Math.round(v * 100)}%`
 }
 
@@ -31,6 +32,75 @@ function fmtDate(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function num(v: unknown): number | null {
+  return typeof v === "number" ? v : null
+}
+
+// One row model per eval kind: which numbers go in the metric columns, what
+// the config was, and the kind-specific detail text. Kills the n/a wall —
+// every cell either carries a real value or explains itself in Details.
+function rowView(run: EvalRunFull) {
+  const x = run.extra_metrics ?? {}
+  const rerank = x.rerank == null ? null : Boolean(x.rerank)
+  let hr5 = run.hit_rate_5
+  let mrr = run.mrr
+  let config = rerank == null ? "—" : rerank ? "rerank on" : "rerank off"
+  const details: string[] = []
+
+  if (run.status === "failed") {
+    return {
+      hr5: null,
+      mrr: null,
+      config,
+      details: run.error_message || "run failed — check backend logs",
+    }
+  }
+
+  if (run.eval_kind === "ablation") {
+    const shipped = shippedAblationArm(run)
+    hr5 = shipped?.arm.hit_rate_5 ?? null
+    mrr = shipped?.arm.mrr ?? null
+    config = shipped ? `ablation · ${shipped.label}` : "ablation"
+    const arms = run.ablation_metrics ?? {}
+    const others = ["vector", "fts", "graph", "rrf"]
+      .filter((s) => arms[s] && shipped?.label !== s)
+      .map((s) => `${s} ${pct(arms[s].hit_rate_5)}/${pct(arms[s].mrr)}`)
+    if (others.length) details.push(others.join(" · "))
+  }
+  if (run.eval_kind === "routing") {
+    details.push(`routing ${pct(run.routing_accuracy)}`)
+  }
+  if (run.eval_kind === "topic") {
+    details.push(`F1 ${pct(num(x.topic_f1))} · junk ${pct(num(x.junk_rate))}`)
+  }
+  if (run.eval_kind === "generation" || run.eval_kind === "citation") {
+    const answerModel = typeof x.answer_model === "string" ? x.answer_model : null
+    if (answerModel) details.push(`answers: ${answerModel}`)
+    const qaFailed = num(x.qa_failed_calls)
+    const qaTotal = num(x.qa_total_calls)
+    if (qaFailed != null && qaFailed > 0) details.push(`qa failed ${qaFailed}/${qaTotal ?? "?"}`)
+    const jFailed = num(x.judge_failed_calls)
+    const jTotal = num(x.judge_total_calls)
+    if (jFailed != null && jTotal != null && jFailed > 0) {
+      details.push(`judge failed ${jFailed}/${jTotal}`)
+    }
+    if (run.citation_support_rate != null) {
+      details.push(`citation support ${pct(run.citation_support_rate)}`)
+    }
+    if (!answerModel && run.faithfulness != null) {
+      details.push("legacy run — judged golden answers, not generated ones")
+    }
+  }
+  if (
+    run.eval_kind === "retrieval" &&
+    run.model_used !== "no-llm" &&
+    run.faithfulness == null
+  ) {
+    details.push("judge produced no scores")
+  }
+  return { hr5, mrr, config, details: details.join(" · ") || "—" }
 }
 
 export function RunsTab({ polling = false }: { polling?: boolean }) {
@@ -121,39 +191,61 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Dataset</th>
                 <th className="py-2 pr-3 font-medium">Kind</th>
-                <th className="py-2 pr-3 font-medium">Rerank</th>
-                <th className="py-2 pr-3 font-medium">Judge Model</th>
+                <th className="py-2 pr-3 font-medium">Config</th>
+                <th className="py-2 pr-3 font-medium">Model</th>
                 <th className="py-2 pr-3 font-medium">Run At</th>
-                <th className="py-2 pr-3 font-medium">HR@5</th>
-                <th className="py-2 pr-3 font-medium">MRR</th>
-                <th className="py-2 pr-3 font-medium">Faith</th>
-                <th className="py-2 pr-3 font-medium">Routing</th>
-                <th className="py-2 pr-3 font-medium">Topic F1</th>
-                <th className="py-2 pr-3 font-medium">Junk</th>
+                <th className="py-2 pr-3 font-medium" title="Hit rate in top-5, within the source document">HR@5</th>
+                <th className="py-2 pr-3 font-medium" title="Mean reciprocal rank over the top-5 retrieved chunks">MRR@5</th>
+                <th className="py-2 pr-3 font-medium" title="Judge score over live /qa answers">Faith</th>
+                <th className="py-2 pr-3 font-medium">Details</th>
               </tr>
             </thead>
             <tbody>
-              {query.data.map((run) => (
-                <tr key={run.id} className="border-b last:border-0">
-                  <td className="py-2 pr-3">{stripMarkdown(run.dataset_name)}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{run.eval_kind ?? "—"}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">
-                    {run.extra_metrics?.rerank == null
-                      ? "—"
-                      : run.extra_metrics.rerank
-                        ? "on"
-                        : "off"}
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">{run.model_used}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{fmtDate(run.run_at)}</td>
-                  <td className="py-2 pr-3">{pct(run.hit_rate_5)}</td>
-                  <td className="py-2 pr-3">{pct(run.mrr)}</td>
-                  <td className="py-2 pr-3">{pct(run.faithfulness)}</td>
-                  <td className="py-2 pr-3">{pct(run.routing_accuracy)}</td>
-                  <td className="py-2 pr-3">{pct(run.extra_metrics?.topic_f1 as number | undefined)}</td>
-                  <td className="py-2 pr-3">{pct(run.extra_metrics?.junk_rate as number | undefined)}</td>
-                </tr>
-              ))}
+              {query.data.map((run) => {
+                const view = rowView(run)
+                return (
+                  <tr key={run.id} className="border-b last:border-0">
+                    {/* dataset names are plain slugs — stripMarkdown would eat their underscores */}
+                    <td className="py-2 pr-3">{run.dataset_name}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">
+                      {run.status === "failed" ? (
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
+                          failed
+                        </span>
+                      ) : (
+                        (run.eval_kind ?? "—")
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-muted-foreground">{view.config}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">{run.model_used}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">{fmtDate(run.run_at)}</td>
+                    <td className={cn("py-2 pr-3", metricColor(view.hr5, THRESHOLDS.hit_rate_5))}>
+                      {pct(view.hr5)}
+                    </td>
+                    <td className={cn("py-2 pr-3", metricColor(view.mrr, THRESHOLDS.mrr))}>
+                      {pct(view.mrr)}
+                    </td>
+                    <td
+                      className={cn(
+                        "py-2 pr-3",
+                        metricColor(run.faithfulness, THRESHOLDS.faithfulness),
+                      )}
+                    >
+                      {pct(run.faithfulness)}
+                    </td>
+                    <td
+                      className={cn(
+                        "max-w-72 py-2 pr-3",
+                        run.status === "failed"
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {view.details}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

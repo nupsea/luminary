@@ -283,6 +283,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE eval_runs ADD COLUMN ablation_metrics JSON",
             # generic bucket for new metric families (topic_*, junk_rate, ...)
             "ALTER TABLE eval_runs ADD COLUMN extra_metrics JSON",
+            # failed-run persistence: failures used to vanish with the in-flight tracker
+            "ALTER TABLE eval_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
+            "ALTER TABLE eval_runs ADD COLUMN error_message TEXT",
             "ALTER TABLE review_events ADD COLUMN predicted_rating TEXT",
         ]:
             try:

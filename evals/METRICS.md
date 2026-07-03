@@ -16,6 +16,14 @@ the retriever returns for that question. Matching is normalized: lowercase,
 collapsed whitespace, straightened smart-quotes, hint truncated to its first 80
 chars; a golden may carry several alternate hints and *any* one counts.
 
+**Scope caveats (read before comparing to external benchmarks):**
+- Retrieval is **within-document**: the eval passes the golden's `document_id`
+  to `/search`, so these numbers measure "find the right chunk given the right
+  document". Cross-corpus document routing is not exercised.
+- Both metrics are computed over the **top-5 `/search` results only** — chunks
+  cited by `/qa` never leak into HR@5/MRR, so retrieval numbers are comparable
+  across retrieval, generation, and citation runs. MRR is therefore MRR@5.
+
 ### HR@5 — Hit Rate at 5
 - **Computed:** fraction of questions where at least one hint appears in the text
   of **any of the top-5** retrieved chunks. `hits / total`.
@@ -53,6 +61,11 @@ where quality comes from. Reported as HR@5 + MRR per strategy.
 **How to read it:** `rrf` should dominate `vector`/`fts` alone (fusion wins).
 Compare `rrf` vs `rrf+rerank` to decide if the cross-encoder is worth ~250 ms/query.
 
+An ablation run's pass/fail gate applies to the **shipped arm** (`rrf+rerank`,
+falling back to `rrf`) — the same HR@5/MRR thresholds as a single run. The
+shipped arm also feeds the dataset list and the headline cards, so a fresh
+ablation updates the numbers you see everywhere.
+
 > **Reranker in dev:** the cross-encoder fail-softs (returns RRF order unchanged)
 > in a long-running `uvicorn --reload` backend after repeated reloads — a
 > torch/tokenizers + reloader quirk, not a code bug. Measure the rerank A/B
@@ -78,10 +91,22 @@ returned nothing RRF collapsed onto it; now that `fts` contributes, they diverge
 
 ## 3. Generation metrics (RAGAS — local judge)
 
-Only computed when you pick a Judge model (defaults to *None — fast*). The judge
-is a **local Ollama model** (I-16); a frontier model is never used to score.
+Only computed when you pick a Judge model (defaults to *None — fast*, and the
+CLI `--judge-model` default is empty — judging is always opt-in). The judge is a
+**local Ollama model** (I-16); a frontier model is never used to score.
+
+**A judge always implies real generated answers.** Selecting a judge makes the
+eval call `POST /qa` per question (the app's default QA pipeline, or `--model`
+to override) and score *those* answers. The golden ground-truth answer is never
+fed to the judge — judging the golden against retrieved context would self-grade
+the dataset and trend to 100% by construction. Every generation run records
+`answer_model` ("app-default" or the override) so the UI can distinguish real
+generation scores from legacy self-graded ones.
+
 Small local judges are noisy — rows that fail JSON decoding are dropped and the
-score is the mean of successful rows (a WARNING prints the failure %).
+score is the mean of successful rows. The run records `judge_failed_calls` /
+`judge_total_calls` (and `qa_failed_calls` / `qa_total_calls` for unanswered
+questions), and the Runs tab surfaces them instead of a silent n/a.
 
 ### Faithfulness
 - **Computed:** the judge decomposes the generated answer into atomic claims and
@@ -117,6 +142,12 @@ model. Shown on the "Golden dataset" card.
 | **question_len_mean ± std** | word-count mean and spread | Realism proxy: low std = homogeneous, "system-generated" questions; healthy goldens vary (e.g. d2l ≈ 12.6 ± 6.6). |
 | **distinct_personas** | count of reader-intent personas present | Coverage of how real users ask (newcomer / practitioner / decision-maker / deep-diver / skeptic). |
 | **quality_score** | `0.5·verbatim + 0.25·self_contained + 0.25·answer_ok` | Composite, weighted toward retrievability (the fairness axis). ≥90% green, ≥75% amber. |
+
+The Golden card shows **every composite component** (verbatim, self-contained,
+answer_ok) so a high score can't hide a weak axis, plus a provenance badge:
+**cross-verified** (has a `.meta.json` sidecar with verify models) vs
+**legacy · unverified** (hand-authored before the verified pipeline — regenerate
+to upgrade).
 
 ---
 

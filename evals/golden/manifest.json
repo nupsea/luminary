@@ -1,10 +1,10 @@
 {
-  "DATA/books/frankenstein.txt": "b8f30914-44bd-478e-b38c-5abdb9aa3603",
   "DATA/books/time_machine.txt": "40d844f2-dd14-450a-9b1d-06f7992ad5f6",
   "DATA/books/alice_in_wonderland.txt": "fd13649e-37ef-4994-b438-4c3152e164fd",
   "DATA/books/the_odyssey.txt": "b42ddf64-b039-447e-9d1d-ecc7891ed3e3",
   "DATA/books/d2l_dive_into_deep_learning.md": "f2176ac9-56a3-4087-ac94-98487412a49e",
   "DATA/papers/art_of_unix.txt": "d209fa1f-95aa-44ab-b30d-0b006ed549bc",
   "DATA/notes/ml_notes.txt": "0f173f27-453d-4602-9e3e-b4aae2b7c39f",
-  "DATA/conversations/engineering_sync.txt": "439c327c-bfb0-4dc7-b824-85242fbc55e2"
+  "DATA/conversations/engineering_sync.txt": "439c327c-bfb0-4dc7-b824-85242fbc55e2",
+  "DATA/books/frankenstein.txt": "ac2b1e63-1224-4d3e-8212-903ba77f3386"
 }

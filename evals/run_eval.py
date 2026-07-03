@@ -36,7 +36,6 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.config import get_settings  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
@@ -235,10 +234,12 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"  RAGAS evaluation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
     for key, val in metrics.items():
-        if val is not None:
+        if val is None:
+            print(f"  {key:<22}  n/a")
+        elif isinstance(val, float):
             print(f"  {key:<22}  {val:.4f}")
         else:
-            print(f"  {key:<22}  n/a")
+            print(f"  {key:<22}  {val}")
     print(f"{'=' * 56}\n")
 
 
@@ -311,7 +312,8 @@ def _export_html_report(
     for k, v in metrics.items():
         if v is None:
             continue
-        metric_rows += f"<tr><td>{_html.escape(k)}</td><td>{v:.4f}</td></tr>"
+        shown = f"{v:.4f}" if isinstance(v, float) else str(v)
+        metric_rows += f"<tr><td>{_html.escape(k)}</td><td>{_html.escape(shown)}</td></tr>"
 
     violation_html = ""
     if violations:
@@ -388,12 +390,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--judge-model",
-        default=get_settings().LITELLM_DEFAULT_MODEL,
+        default="",
         dest="judge_model",
         help=(
-            "LiteLLM model string for the RAGAS judge LLM. "
-            "Default: get_settings().LITELLM_DEFAULT_MODEL (Ollama-local per I-16). "
-            "Pass empty string to disable judge scoring entirely."
+            "LiteLLM model string for the RAGAS judge LLM (Ollama-local per I-16). "
+            "Opt-in: empty (default) skips generation metrics. When set, answers are "
+            "generated live via POST /qa (the app's default model unless --model is "
+            "given) and the judge scores those generated answers -- never the golden "
+            "ground-truth answers."
         ),
     )
     parser.add_argument(
@@ -502,8 +506,16 @@ def main() -> None:
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
+        # Gate the shipped arm (rrf+rerank, falling back to rrf) -- an ablation
+        # run is a measurement of the live pipeline too, not automatically green.
+        shipped = ablation_metrics.get("rrf+rerank") or ablation_metrics.get("rrf") or {}
+        gate = thresholds_for_dataset(dataset_label)
+        passed = (
+            shipped.get("hit_rate_5", 0.0) >= gate["hit_rate_5"]
+            and shipped.get("mrr", 0.0) >= gate["mrr"]
+        )
         history_model = args.model or args.judge_model or "no-llm"
-        _lib_append_history(dataset_label, history_model, metrics, True, eval_kind="ablation")
+        _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind="ablation")
         print_ablation_table(dataset_label, history_model, ablation_metrics)
         _lib_store_results(
             args.backend_url,
@@ -516,7 +528,9 @@ def main() -> None:
 
     # Parallel /search (+ optional /qa) per row. Backend FastAPI handlers are
     # async-safe; cap concurrency so we don't overwhelm a local Ollama judge.
-    needs_qa = bool(args.model or args.check_citations)
+    # A judge always implies real /qa answers: judging the golden ground truth
+    # against retrieved context would self-grade the dataset, not the product.
+    needs_qa = bool(args.model or args.check_citations or args.judge_model)
 
     def _process_row(idx_row: tuple[int, dict]) -> dict:
         i, row = idx_row
@@ -533,20 +547,25 @@ def main() -> None:
 
         answer = ""
         qa_resp: dict = {}
+        # Judged contexts include the chunks /qa actually cited; retrieval
+        # metrics stay on the raw top-5 search result so HR@5 and MRR measure
+        # the same thing in every eval kind.
+        ragas_contexts = list(chunks)
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
             citations = qa_resp.get("citations", [])
             qa_chunks = [c.get("text", "") for c in citations if isinstance(c, dict)]
-            seen = set(chunks)
+            seen = set(ragas_contexts)
             for c in qa_chunks:
-                if c not in seen:
-                    chunks.append(c)
+                if c and c not in seen:
+                    ragas_contexts.append(c)
                     seen.add(c)
         return {
             "question": question,
-            "answer": answer or ground_truth,
+            "answer": answer,
             "contexts": chunks or [""],
+            "ragas_contexts": ragas_contexts or [""],
             "ground_truths": [ground_truth],
             "context_hint": context_hint,
             "qa_response": qa_resp,
@@ -560,17 +579,46 @@ def main() -> None:
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
 
+    qa_failed = sum(1 for s in samples if not s["answer"].strip()) if needs_qa else 0
+    if needs_qa and qa_failed:
+        print(
+            f"WARNING: /qa produced no answer for {qa_failed}/{len(samples)} "
+            "questions; those are excluded from generation metrics.",
+            file=sys.stderr,
+        )
+
     ragas_scores: dict[str, float | None] = {
         "faithfulness": None,
         "answer_relevance": None,
         "context_precision": None,
         "context_recall": None,
     }
+    judge_attempted = False
     if args.judge_model:
-        print(f"Running RAGAS judge with model={args.judge_model}...")
-        ragas_scores = GenerationEval().run(samples, judge_model=args.judge_model)
+        judged = [
+            {**s, "contexts": s["ragas_contexts"]} for s in samples if s["answer"].strip()
+        ]
+        if not judged:
+            print(
+                "WARNING: judge skipped -- /qa returned no answers to score.",
+                file=sys.stderr,
+            )
+        else:
+            judge_attempted = True
+            print(
+                f"Running RAGAS judge with model={args.judge_model} "
+                f"over {len(judged)} generated answers..."
+            )
+            ragas_scores = GenerationEval().run(judged, judge_model=args.judge_model)
 
     citation_support_rate: float | None = None
+    if args.check_citations and not args.judge_model:
+        print(
+            "WARNING: --check-citations requires --judge-model; skipping "
+            "citation_support_rate.",
+            file=sys.stderr,
+        )
+        args.check_citations = False
     if args.check_citations:
         citation_pairs: list[tuple[str, str]] = []
         for sample in samples:
@@ -596,6 +644,12 @@ def main() -> None:
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
     }
+    if needs_qa:
+        # Provenance: which model authored the judged answers. "app-default"
+        # means the product's own /qa pipeline default -- the shipped path.
+        metrics["answer_model"] = args.model or "app-default"
+        metrics["qa_failed_calls"] = qa_failed
+        metrics["qa_total_calls"] = len(samples)
 
     threshold_violations: list[str] = []
     thresholds = thresholds_for_dataset(dataset_label)
@@ -623,8 +677,9 @@ def main() -> None:
     passed = len(threshold_violations) == 0
     violations = threshold_violations if args.assert_thresholds else []
 
-    judge_ran = args.judge_model and any(v is not None for v in ragas_scores.values())
-    eval_kind = "citation" if args.check_citations else "generation" if judge_ran else "retrieval"
+    eval_kind = (
+        "citation" if args.check_citations else "generation" if judge_attempted else "retrieval"
+    )
     history_model = args.model or args.judge_model or "no-llm"
 
     _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)

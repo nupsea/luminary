@@ -422,6 +422,12 @@ class EvalRunModel(Base):
     # Generic bucket for metric families added without a schema change
     # (topic_precision/recall/f1, junk_rate, future label-quality metrics).
     extra_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 'complete' | 'failed' — failed subprocesses persist here so they stay
+    # visible after the process-local in-flight tracker forgets them.
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="complete", server_default="complete"
+    )
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class GoldenDatasetModel(Base):

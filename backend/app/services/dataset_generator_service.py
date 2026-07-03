@@ -212,9 +212,14 @@ async def count_questions(session: AsyncSession, dataset_id: str) -> int:
 
 
 async def latest_run_for_dataset(session: AsyncSession, dataset_name: str) -> EvalRunModel | None:
+    """Latest successful run — failed rows exist for visibility in the Runs tab
+    but must not blank out a dataset's last-known metrics."""
     result = await session.execute(
         select(EvalRunModel)
-        .where(EvalRunModel.dataset_name == dataset_name)
+        .where(
+            EvalRunModel.dataset_name == dataset_name,
+            EvalRunModel.status != "failed",
+        )
         .order_by(EvalRunModel.run_at.desc())
         .limit(1)
     )

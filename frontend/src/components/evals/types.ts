@@ -12,6 +12,8 @@ export interface EvalRunSummary {
   context_precision?: number | null
   context_recall?: number | null
   eval_kind?: string | null
+  status?: "complete" | "failed"
+  error_message?: string | null
 }
 
 export interface GoldenDataset {
@@ -55,6 +57,11 @@ export interface DocumentOption {
   stage: string
 }
 
+export interface AblationArm {
+  hit_rate_5: number | null
+  mrr: number | null
+}
+
 export interface EvalRunFull {
   id: string
   dataset_name: string
@@ -65,11 +72,13 @@ export interface EvalRunFull {
   answer_relevance: number | null
   routing_accuracy: number | null
   per_route: Record<string, unknown> | null
-  ablation_metrics: Record<string, unknown> | null
+  ablation_metrics: Record<string, AblationArm> | null
   eval_kind: string | null
   model_used: string
   citation_support_rate: number | null
-  extra_metrics: Record<string, number | boolean> | null
+  extra_metrics: Record<string, number | boolean | string> | null
+  status?: "complete" | "failed"
+  error_message?: string | null
 }
 
 export interface FileQuestion {

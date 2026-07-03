@@ -74,6 +74,54 @@ def _make_run(
 
 
 @pytest.mark.anyio
+async def test_get_eval_runs_run_at_is_utc_aware(test_db):
+    """run_at must carry a UTC offset — aiosqlite reads back tz-naive, and a
+    bare isoformat() makes browsers parse UTC wall-clock as local time."""
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(_make_run(dataset_name="tzds"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/evals/runs?dataset_name=tzds")
+    run_at = resp.json()[0]["run_at"]
+    assert run_at.endswith("+00:00") or run_at.endswith("Z")
+
+
+@pytest.mark.anyio
+async def test_persist_failed_run_appears_in_runs_list(test_db):
+    """A failed subprocess must leave a visible eval_runs row (status=failed),
+    and latest_run_for_dataset must skip it so metrics aren't blanked."""
+    from app.routers.evals import _persist_failed_run
+    from app.services.dataset_generator_service import latest_run_for_dataset
+
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(_make_run(dataset_name="failds", hit_rate_5=0.7))
+        await session.commit()
+
+    await _persist_failed_run(
+        "failds", model_used="ollama/qwen2.5:14b-instruct",
+        eval_kind="generation", error="boom: judge exploded",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/evals/runs?dataset_name=failds")
+    rows = resp.json()
+    assert len(rows) == 2
+    failed = [r for r in rows if r["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_message"] == "boom: judge exploded"
+    assert failed[0]["model_used"] == "ollama/qwen2.5:14b-instruct"
+
+    async with factory() as session:
+        last = await latest_run_for_dataset(session, "failds")
+    assert last is not None
+    assert last.status != "failed"
+    assert last.hit_rate_5 == 0.7
+
+
+@pytest.mark.anyio
 async def test_get_eval_runs_returns_all(test_db):
     _, factory, _ = test_db
     async with factory() as session:
@@ -297,3 +345,38 @@ async def test_post_eval_run_missing_dataset(golden_dir):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/evals/run", json={"dataset": "nonexistent_dataset_xyz"})
     assert resp.status_code == 404
+
+
+# Argument-injection guard: model ids flow into subprocess argv; a value that
+# argparse would read as a flag (leading '-') must be rejected before it can
+# override --source/--out in generate_golden.py.
+
+
+def test_validate_model_rejects_argv_flag_injection():
+    from app.config import get_settings
+    from app.routers.evals import _validate_model_available
+
+    settings = get_settings()
+    for bad in ["--source", "--out=/etc/passwd", "-rf", "ollama/x; rm -rf /", "notaprovider/x"]:
+        assert _validate_model_available(bad, settings) is not None, bad
+
+
+@pytest.mark.anyio
+async def test_golden_generate_rejects_injected_verify_model(golden_dir, tmp_path, monkeypatch):
+    """A verify_models entry shaped like a CLI flag must be 422'd, not spread
+    into the generate_golden argv."""
+    monkeypatch.setattr(
+        "app.routers.evals._fire_and_forget",
+        lambda coro: coro.close(),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/evals/golden/generate",
+            json={
+                "name": "inj",
+                "source_file": "README.md",
+                "generator_model": "openai/gpt-4o-mini",
+                "verify_models": ["ollama/mistral", "--source"],
+            },
+        )
+    assert resp.status_code == 422
