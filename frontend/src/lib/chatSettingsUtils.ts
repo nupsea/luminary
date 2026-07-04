@@ -5,6 +5,26 @@ export interface LLMSettingsForUtils {
   processing_mode: string
   active_model: string
   available_local_models: string[]
+  mode?: string
+  provider?: string
+  model?: string
+}
+
+/**
+ * The model the chat will actually use when no per-request override is chosen.
+ * In cloud/hybrid mode that's the configured provider/model; otherwise the
+ * active (or first available) local model.
+ */
+export function effectiveDefaultModel(s: LLMSettingsForUtils | undefined): string {
+  if (!s) return ""
+  const cloudMode = s.processing_mode === "cloud" || s.processing_mode === "hybrid"
+  if (cloudMode && s.provider && s.model) return `${s.provider}/${s.model}`
+  return s.active_model || s.available_local_models[0] || "local model"
+}
+
+/** Strip a provider prefix for display: "openai/gpt-5.1" -> "gpt-5.1". */
+export function shortModelLabel(m: string): string {
+  return m.includes("/") ? m.split("/").slice(1).join("/") : m
 }
 
 /**

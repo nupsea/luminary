@@ -4,8 +4,56 @@ import {
   buildTransparencyIconLabel,
   buildScopeComboboxLabel,
   DRAWER_SECTIONS,
+  effectiveDefaultModel,
+  shortModelLabel,
   TRANSPARENCY_DEFAULT_OPEN,
 } from "./chatSettingsUtils"
+
+describe("effectiveDefaultModel", () => {
+  it("uses provider/model in cloud and hybrid mode", () => {
+    const base = { active_model: "", available_local_models: [] }
+    expect(
+      effectiveDefaultModel({ ...base, processing_mode: "hybrid", provider: "openai", model: "gpt-5.1" }),
+    ).toBe("openai/gpt-5.1")
+    expect(
+      effectiveDefaultModel({ ...base, processing_mode: "cloud", provider: "anthropic", model: "claude-sonnet-4-6" }),
+    ).toBe("anthropic/claude-sonnet-4-6")
+  })
+
+  it("uses the local model in private/local mode", () => {
+    expect(
+      effectiveDefaultModel({
+        processing_mode: "local",
+        active_model: "ollama/gemma4:latest",
+        available_local_models: ["ollama/gemma4:latest"],
+      }),
+    ).toBe("ollama/gemma4:latest")
+  })
+
+  it("falls back to the first local model when active_model is empty", () => {
+    expect(
+      effectiveDefaultModel({
+        processing_mode: "local",
+        active_model: "",
+        available_local_models: ["ollama/mistral:latest"],
+      }),
+    ).toBe("ollama/mistral:latest")
+  })
+
+  it("returns empty string when settings are undefined", () => {
+    expect(effectiveDefaultModel(undefined)).toBe("")
+  })
+})
+
+describe("shortModelLabel", () => {
+  it("strips the provider prefix", () => {
+    expect(shortModelLabel("openai/gpt-5.1")).toBe("gpt-5.1")
+    expect(shortModelLabel("ollama/qwen2.5:14b-instruct")).toBe("qwen2.5:14b-instruct")
+  })
+  it("leaves an unprefixed id unchanged", () => {
+    expect(shortModelLabel("gemma4")).toBe("gemma4")
+  })
+})
 
 describe("buildModelOptions", () => {
   it("returns empty array when settings is undefined", () => {
