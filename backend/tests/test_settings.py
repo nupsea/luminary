@@ -143,6 +143,39 @@ async def test_patch_llm_settings_rejects_unknown_fields(test_db):
     assert resp.status_code == 422
 
 
+async def test_openai_model_list_includes_gpt5_family(test_db):
+    """The OpenAI model dropdown offers the latest GPT-5 models; cost-less entries
+    are returned cleanly (name-only in the UI)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+    assert resp.status_code == 200
+    ids = [m["id"] for m in resp.json()]
+    assert "gpt-5.4" in ids
+    assert "gpt-5.1" in ids
+    # gpt-4o-mini still present with its price metadata intact
+    mini = next(m for m in resp.json() if m["id"] == "gpt-4o-mini")
+    assert mini["cost_input"] == 0.15
+    # a GPT-5 entry returns with no fabricated price
+    g5 = next(m for m in resp.json() if m["id"] == "gpt-5.4")
+    assert g5["cost_input"] is None
+
+
+async def test_switch_to_gpt5_persists(test_db):
+    """Selecting a GPT-5 model saves and is what the pipeline will resolve."""
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            resp = await client.patch(
+                "/settings/llm",
+                json={"mode": "cloud", "provider": "openai", "model": "gpt-5.1"},
+            )
+    assert resp.status_code == 200
+    assert svc_module._cache["cloud_model"] == "gpt-5.1"
+
+
 async def test_api_key_stored_as_keychain_sentinel(test_db, in_memory_keyring):
     """set() writes '__keychain__' sentinel to SQLite; get() returns original value."""
     engine, factory = test_db
