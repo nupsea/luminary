@@ -36,7 +36,6 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.config import get_settings  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
@@ -53,6 +52,7 @@ from evals.lib.manifest import (  # noqa: E402
     is_document_alive,
     load_manifest,
     lookup_document_by_filename,
+    resolve_backend_base,
     save_manifest,
 )
 from evals.lib.retrieval_metrics import (  # noqa: E402
@@ -76,11 +76,19 @@ VALID_DATASETS = [
     "book_alice",
     "book_odyssey",
     "book_frankenstein",
+    "d2l",
+    "odyssey",
     "paper",
     "conversation",
     "notes",
     "code",
 ]
+
+# Per-/qa timeout for generation runs. A local answering model (Ollama, CPU)
+# legitimately takes 30-60s per answer and longer on a cold start; the eval is
+# a background batch job, so this is generous by design. A too-tight value
+# silently drops answers and understates generation metrics.
+QA_REQUEST_TIMEOUT = 300.0
 
 # Quality gate thresholds
 THRESHOLDS = {
@@ -176,14 +184,16 @@ def search_chunks(
         resp.raise_for_status()
         body = resp.json()
 
+        # Preserve the backend's ranking. Do NOT re-sort by relevance_score:
+        # its polarity is strategy-dependent (FTS returns raw BM25 scores where
+        # MORE NEGATIVE = MORE relevant), so a reverse=True sort silently inverts
+        # the FTS ranking and tanks HR@5. /search already returns matches ranked
+        # per document, so keep that order.
         all_matches = []
         for group in body.get("results", []):
             if document_id and group.get("document_id") != document_id:
                 continue
-            for match in group.get("matches", []):
-                all_matches.append(match)
-
-        all_matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+            all_matches.extend(group.get("matches", []))
         return [m.get("text", "") for m in all_matches[:5]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
@@ -201,7 +211,7 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
         resp = httpx.post(
             f"{backend_url}/qa",
             json=payload,
-            timeout=60.0,
+            timeout=QA_REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         if "text/event-stream" in resp.headers.get("content-type", ""):
@@ -230,10 +240,12 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"  RAGAS evaluation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
     for key, val in metrics.items():
-        if val is not None:
+        if val is None:
+            print(f"  {key:<22}  n/a")
+        elif isinstance(val, float):
             print(f"  {key:<22}  {val:.4f}")
         else:
-            print(f"  {key:<22}  n/a")
+            print(f"  {key:<22}  {val}")
     print(f"{'=' * 56}\n")
 
 
@@ -306,7 +318,8 @@ def _export_html_report(
     for k, v in metrics.items():
         if v is None:
             continue
-        metric_rows += f"<tr><td>{_html.escape(k)}</td><td>{v:.4f}</td></tr>"
+        shown = f"{v:.4f}" if isinstance(v, float) else str(v)
+        metric_rows += f"<tr><td>{_html.escape(k)}</td><td>{_html.escape(shown)}</td></tr>"
 
     violation_html = ""
     if violations:
@@ -383,12 +396,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--judge-model",
-        default=get_settings().LITELLM_DEFAULT_MODEL,
+        default="",
         dest="judge_model",
         help=(
-            "LiteLLM model string for the RAGAS judge LLM. "
-            "Default: get_settings().LITELLM_DEFAULT_MODEL (Ollama-local per I-16). "
-            "Pass empty string to disable judge scoring entirely."
+            "LiteLLM model string for the RAGAS judge LLM (Ollama-local per I-16). "
+            "Opt-in: empty (default) skips generation metrics. When set, answers are "
+            "generated live via POST /qa (the app's default model unless --model is "
+            "given) and the judge scores those generated answers -- never the golden "
+            "ground-truth answers."
         ),
     )
     parser.add_argument(
@@ -428,6 +443,9 @@ def main() -> None:
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
         sys.exit(1)
 
+    # Auto-detect /api prefix so the harness works against prod backends too.
+    args.backend_url = resolve_backend_base(args.backend_url)
+
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
         rows = load_golden_by_id(args.backend_url, args.dataset_id)
@@ -449,9 +467,17 @@ def main() -> None:
         source_to_doc_id[src] = doc_id
 
     if args.ablation:
-        strategies = ("vector", "fts", "graph", "rrf")
+        # (label, search-strategy, rerank). "rrf+rerank" is the full pipeline the
+        # user actually ships, so it belongs in the strategy breakdown.
+        strategy_specs = [
+            ("vector", "vector", False),
+            ("fts", "fts", False),
+            ("graph", "graph", False),
+            ("rrf", "rrf", False),
+            ("rrf+rerank", "rrf", True),
+        ]
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for strategy in strategies:
+        for label, search_strategy, do_rerank in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -461,15 +487,15 @@ def main() -> None:
                 doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
 
                 print(
-                    f"  [{strategy} {i}/{len(rows)}] Searching: {question[:60]}..."
+                    f"  [{label} {i}/{len(rows)}] Searching: {question[:60]}..."
                 )
                 chunks = search_chunks(
                     args.backend_url,
                     question,
                     doc_id,
                     hyde=args.hyde,
-                    rerank=args.rerank,
-                    strategy=strategy,
+                    rerank=do_rerank or args.rerank,
+                    strategy=search_strategy,
                 )
                 samples.append(
                     {
@@ -480,14 +506,22 @@ def main() -> None:
                         "context_hint": context_hint,
                     }
                 )
-            ablation_metrics[strategy] = {
+            ablation_metrics[label] = {
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
+        # Gate the shipped arm (rrf+rerank, falling back to rrf) -- an ablation
+        # run is a measurement of the live pipeline too, not automatically green.
+        shipped = ablation_metrics.get("rrf+rerank") or ablation_metrics.get("rrf") or {}
+        gate = thresholds_for_dataset(dataset_label)
+        passed = (
+            shipped.get("hit_rate_5", 0.0) >= gate["hit_rate_5"]
+            and shipped.get("mrr", 0.0) >= gate["mrr"]
+        )
         history_model = args.model or args.judge_model or "no-llm"
-        _lib_append_history(dataset_label, history_model, metrics, True, eval_kind="ablation")
+        _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind="ablation")
         print_ablation_table(dataset_label, history_model, ablation_metrics)
         _lib_store_results(
             args.backend_url,
@@ -500,7 +534,9 @@ def main() -> None:
 
     # Parallel /search (+ optional /qa) per row. Backend FastAPI handlers are
     # async-safe; cap concurrency so we don't overwhelm a local Ollama judge.
-    needs_qa = bool(args.model or args.check_citations)
+    # A judge always implies real /qa answers: judging the golden ground truth
+    # against retrieved context would self-grade the dataset, not the product.
+    needs_qa = bool(args.model or args.check_citations or args.judge_model)
 
     def _process_row(idx_row: tuple[int, dict]) -> dict:
         i, row = idx_row
@@ -517,32 +553,63 @@ def main() -> None:
 
         answer = ""
         qa_resp: dict = {}
+        # Judged contexts include the chunks /qa actually cited; retrieval
+        # metrics stay on the raw top-5 search result so HR@5 and MRR measure
+        # the same thing in every eval kind.
+        ragas_contexts = list(chunks)
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
             citations = qa_resp.get("citations", [])
             qa_chunks = [c.get("text", "") for c in citations if isinstance(c, dict)]
-            seen = set(chunks)
+            seen = set(ragas_contexts)
             for c in qa_chunks:
-                if c not in seen:
-                    chunks.append(c)
+                if c and c not in seen:
+                    ragas_contexts.append(c)
                     seen.add(c)
+        # Distinguish the pipeline DECLINING (not_found: a real product answer,
+        # "I don't know") from the harness failing to get any response at all
+        # (timeout / error / no done event). Both yield an empty answer and are
+        # excluded from generation metrics, but they mean opposite things.
+        not_found = bool(qa_resp.get("not_found")) if needs_qa else False
         return {
             "question": question,
-            "answer": answer or ground_truth,
+            "answer": answer,
             "contexts": chunks or [""],
+            "ragas_contexts": ragas_contexts or [""],
             "ground_truths": [ground_truth],
             "context_hint": context_hint,
             "qa_response": qa_resp,
+            "qa_not_found": not_found,
         }
 
-    # /search alone: keep concurrency higher; /qa adds LLM load: cap at 2.
-    max_workers = 2 if needs_qa else 6
+    # /search alone parallelises fine. /qa does NOT: a local Ollama serves one
+    # generation at a time, so concurrent /qa requests queue and the waiting one
+    # blows past its timeout (empty answer). Concurrency here buys no throughput,
+    # only dropped answers — run generation rows sequentially. (A hosted
+    # answering model could parallelise, but the app default is local; correctness
+    # over speed for a background batch job.)
+    max_workers = 1 if needs_qa else 6
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         samples = list(pool.map(_process_row, enumerate(rows, start=1)))
 
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
+
+    # An empty answer is either a decline (not_found — a real product outcome)
+    # or a genuine failure (timeout/error). Count them apart so the UI never
+    # reports an honest "I don't know" as harness breakage.
+    qa_empty = [s for s in samples if not s["answer"].strip()] if needs_qa else []
+    qa_not_found = sum(1 for s in qa_empty if s.get("qa_not_found"))
+    qa_failed = len(qa_empty) - qa_not_found
+    if needs_qa and (qa_failed or qa_not_found):
+        print(
+            f"NOTE: of {len(samples)} questions, the QA pipeline answered "
+            f"{len(samples) - len(qa_empty)}, declined (not_found) {qa_not_found}, "
+            f"and failed (timeout/error) {qa_failed}. Only answered questions are "
+            "judged.",
+            file=sys.stderr,
+        )
 
     ragas_scores: dict[str, float | None] = {
         "faithfulness": None,
@@ -550,11 +617,32 @@ def main() -> None:
         "context_precision": None,
         "context_recall": None,
     }
+    judge_attempted = False
     if args.judge_model:
-        print(f"Running RAGAS judge with model={args.judge_model}...")
-        ragas_scores = GenerationEval().run(samples, judge_model=args.judge_model)
+        judged = [
+            {**s, "contexts": s["ragas_contexts"]} for s in samples if s["answer"].strip()
+        ]
+        if not judged:
+            print(
+                "WARNING: judge skipped -- /qa returned no answers to score.",
+                file=sys.stderr,
+            )
+        else:
+            judge_attempted = True
+            print(
+                f"Running RAGAS judge with model={args.judge_model} "
+                f"over {len(judged)} generated answers..."
+            )
+            ragas_scores = GenerationEval().run(judged, judge_model=args.judge_model)
 
     citation_support_rate: float | None = None
+    if args.check_citations and not args.judge_model:
+        print(
+            "WARNING: --check-citations requires --judge-model; skipping "
+            "citation_support_rate.",
+            file=sys.stderr,
+        )
+        args.check_citations = False
     if args.check_citations:
         citation_pairs: list[tuple[str, str]] = []
         for sample in samples:
@@ -578,7 +666,16 @@ def main() -> None:
         "mrr": mrr,
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
+        "rerank": args.rerank,
     }
+    if needs_qa:
+        # Provenance: which model authored the judged answers. "app-default"
+        # means the product's own /qa pipeline default -- the shipped path.
+        metrics["answer_model"] = args.model or "app-default"
+        metrics["qa_failed_calls"] = qa_failed
+        metrics["qa_not_found_calls"] = qa_not_found
+        metrics["qa_answered_calls"] = len(samples) - len(qa_empty)
+        metrics["qa_total_calls"] = len(samples)
 
     threshold_violations: list[str] = []
     thresholds = thresholds_for_dataset(dataset_label)
@@ -606,8 +703,9 @@ def main() -> None:
     passed = len(threshold_violations) == 0
     violations = threshold_violations if args.assert_thresholds else []
 
-    judge_ran = args.judge_model and any(v is not None for v in ragas_scores.values())
-    eval_kind = "citation" if args.check_citations else "generation" if judge_ran else "retrieval"
+    eval_kind = (
+        "citation" if args.check_citations else "generation" if judge_attempted else "retrieval"
+    )
     history_model = args.model or args.judge_model or "no-llm"
 
     _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)

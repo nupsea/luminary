@@ -27,6 +27,15 @@ from app.types import ChatState, TransparencyInfo
 
 logger = logging.getLogger(__name__)
 
+# Citation gating. A cited source should actually contain the text the user is
+# sent to — a weakly-related chunk only pollutes the reference list. Cap the list
+# and drop low-relevance sources, but always keep the single best source so a
+# grounded answer never shows zero citations. RRF fusion scores top out ~0.033;
+# a chunk far below the best (or below a small absolute floor) is noise.
+_MAX_CITATIONS = 5
+_CITATION_REL_RATIO = 0.5
+_CITATION_MIN_SCORE = 0.01
+
 
 async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, str]:
     doc_ids = list({c["document_id"] for c in chunks_dicts if c.get("document_id")})
@@ -260,12 +269,24 @@ async def synthesize_node(state: ChatState) -> dict:
     chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page); populated below if chunks present
     source_citations_out: list[dict] = []
     if chunks_dicts:
-        chunk_ids = [c["chunk_id"] for c in chunks_dicts if c.get("chunk_id")]
+        # Rank by retrieval score so the best sources lead and the cap keeps the
+        # strongest. Gate out weakly-related chunks (relative to the best, with a
+        # small absolute floor) but always keep the single best source.
+        ranked = sorted(chunks_dicts, key=lambda c: c.get("score", 0.0), reverse=True)
+        top_score = ranked[0].get("score", 0.0)
+        floor = max(_CITATION_MIN_SCORE, top_score * _CITATION_REL_RATIO)
+
+        chunk_ids = [c["chunk_id"] for c in ranked if c.get("chunk_id")]
         chunk_meta = await _fetch_section_ids_and_pages_for_chunks(chunk_ids)
-        doc_titles_map = await _fetch_doc_titles_for_chunks(chunks_dicts)
+        doc_titles_map = await _fetch_doc_titles_for_chunks(ranked)
 
         seen_dedup_keys: set[str] = set()
-        for c in chunks_dicts:
+        for c in ranked:
+            if len(source_citations_out) >= _MAX_CITATIONS:
+                break
+            # Always keep the best source; gate the rest on relevance.
+            if source_citations_out and c.get("score", 0.0) < floor:
+                continue
             cid = c.get("chunk_id", "")
             meta = chunk_meta.get(cid, (None, None))
             section_id, pdf_page = meta

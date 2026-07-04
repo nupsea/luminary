@@ -229,10 +229,14 @@ class GenerationEval(_BaseEval):
 
             out = dict(_EMPTY_GENERATION_METRICS)
             total = len(scores_df)
+            failed_calls = 0
+            total_calls = 0
             for col in ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]:
                 if col in scores_df.columns:
                     series = scores_df[col]
                     nan_count = int(series.isna().sum())
+                    failed_calls += nan_count
+                    total_calls += total
                     if total > 0 and nan_count > 0:
                         pct = nan_count / total
                         marker = "WARNING" if pct >= 0.5 else "NOTE"
@@ -245,6 +249,10 @@ class GenerationEval(_BaseEval):
                     val = float(series.mean())
                     key = "answer_relevance" if col == "answer_relevancy" else col
                     out[key] = None if math.isnan(val) else val
+            # Failure accounting rides along so scores dropped to NaN are
+            # visible in the UI instead of silently shrinking the mean's basis.
+            out["judge_failed_calls"] = failed_calls
+            out["judge_total_calls"] = total_calls
             return out
         except Exception as exc:
             print(

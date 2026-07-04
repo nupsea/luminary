@@ -2,12 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { BarChart3, Plus, RefreshCw } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { AblationsTab } from "@/components/evals/AblationsTab"
-import { ResultsTab } from "@/components/evals/ResultsTab"
+import { ResultsDashboard } from "@/components/evals/ResultsDashboard"
 import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
-import { RegressionsTab } from "@/components/evals/RegressionsTab"
-import { RoutingTab } from "@/components/evals/RoutingTab"
+import { RunConsole } from "@/components/evals/RunConsole"
 import { RunEvalDialog } from "@/components/evals/RunEvalDialog"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
@@ -24,6 +22,7 @@ type AnyRun = EvalRunSummary | EvalRunFull
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { API_BASE } from "@/lib/config"
+import { metricColor, THRESHOLDS } from "@/components/evals/thresholds"
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -81,25 +80,15 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "runs" | "routing" | "ablations" | "regressions"
+type TabId = "datasets" | "results" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
   { id: "runs", label: "Runs" },
-  { id: "routing", label: "Routing" },
-  { id: "ablations", label: "Ablations" },
-  { id: "regressions", label: "Regressions" },
 ]
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`
-}
-
-function metricColor(v: number | null | undefined, threshold: number): string {
-  if (v == null) return ""
-  if (v >= threshold) return "font-semibold text-green-700 dark:text-green-400"
-  if (v >= threshold * 0.75) return "font-semibold text-amber-600 dark:text-amber-400"
-  return "text-muted-foreground"
 }
 
 function getInitialTab(): TabId {
@@ -120,15 +109,22 @@ export default function Quality() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // file-backed selection
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
+  // shared dataset selection for the run console + results dashboard
+  const [consoleDataset, setConsoleDataset] = useState("")
   // eval in-flight tracking
   const [evalRunning, setEvalRunning] = useState(false)
+  const [runningLabel, setRunningLabel] = useState<string | null>(null)
   const evalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function markEvalRunning() {
+  function markEvalRunning(label?: string) {
     setEvalRunning(true)
+    if (label) setRunningLabel(label)
     if (evalTimerRef.current) clearTimeout(evalTimerRef.current)
     // auto-clear after 15 minutes in case the run silently fails
-    evalTimerRef.current = setTimeout(() => setEvalRunning(false), 15 * 60 * 1000)
+    evalTimerRef.current = setTimeout(() => {
+      setEvalRunning(false)
+      setRunningLabel(null)
+    }, 15 * 60 * 1000)
   }
 
   // Re-attach to in-flight runs on page mount (survives browser refresh) and
@@ -155,11 +151,18 @@ export default function Quality() {
           if (row.status === "failed" && !seenFailuresRef.current.has(row.run_id)) {
             seenFailuresRef.current.add(row.run_id)
             toast.error(`Eval failed for ${row.key}: ${row.error ?? "unknown error"}`)
+            // failed runs are persisted as rows now — refresh the Runs table
+            void qc.invalidateQueries({ queryKey: ["eval-runs"] })
           }
           if (row.status === "done" && row.finished_at) {
-            // refresh the runs queries when something just completed
+            // refresh EVERY surface that shows run results — a completed run
+            // must appear in the Datasets list, Runs table, and dashboard
+            // without a manual refresh
             void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", row.key] })
             void qc.invalidateQueries({ queryKey: ["eval-file-runs", row.key] })
+            void qc.invalidateQueries({ queryKey: ["eval-datasets"] })
+            void qc.invalidateQueries({ queryKey: ["eval-runs"] })
+            void qc.invalidateQueries({ queryKey: ["eval-dashboard-runs"] })
           }
         }
       } catch {
@@ -260,13 +263,14 @@ export default function Quality() {
       max_questions: number
     }) => {
       if (selectedFileName) {
-        // File-backed: POST /evals/run
+        // File-backed: POST /evals/run. judge_model "" must stay "" — null
+        // would let the CLI fall back to a default judge the user disabled.
         const res = await fetch(`${API_BASE}/evals/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             dataset: selectedFileName,
-            judge_model: payload.judge_model || null,
+            judge_model: payload.judge_model,
             check_citations: payload.check_citations,
             max_questions: payload.max_questions,
           }),
@@ -317,6 +321,14 @@ export default function Quality() {
       return bKey.localeCompare(aKey)
     })
   }, [datasetsQuery.data])
+
+  // default the console/dashboard to the first evaluable dataset
+  useEffect(() => {
+    if (!consoleDataset) {
+      const first = (datasetsQuery.data ?? []).find((d) => d.source === "file")?.name
+      if (first) setConsoleDataset(first)
+    }
+  }, [datasetsQuery.data, consoleDataset])
 
   const isDetailOpen = Boolean(selectedId) || Boolean(selectedFileName)
   const detailSource = selectedFileName ? "file" : "db"
@@ -370,7 +382,14 @@ export default function Quality() {
           <button
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent"
-            onClick={() => void datasetsQuery.refetch()}
+            onClick={() => {
+              void qc.invalidateQueries({ queryKey: ["eval-datasets"] })
+              void qc.invalidateQueries({ queryKey: ["eval-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-dashboard-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-dataset-runs"] })
+              void qc.invalidateQueries({ queryKey: ["eval-file-runs"] })
+              void qc.invalidateQueries({ queryKey: ["golden-info"] })
+            }}
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -386,8 +405,23 @@ export default function Quality() {
         </div>
       </header>
 
+      {/* Run console — the primary action */}
+      <div className="shrink-0 px-6 pt-4">
+        <RunConsole
+          datasets={datasetsQuery.data ?? []}
+          value={consoleDataset}
+          onChange={setConsoleDataset}
+          running={evalRunning}
+          runningLabel={runningLabel}
+          onStarted={(label) => {
+            markEvalRunning(label)
+            setActiveTab("results")
+          }}
+        />
+      </div>
+
       {/* Tab navigation */}
-      <div className="flex shrink-0 items-center gap-1 border-b px-6">
+      <div className="flex shrink-0 items-center gap-1 border-b px-6 pt-4">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -442,9 +476,9 @@ export default function Quality() {
                       <th className="py-2 pr-3 font-medium">Questions</th>
                       <th className="py-2 pr-3 font-medium">Generated</th>
                       <th className="py-2 pr-3 font-medium">Last Run</th>
-                      <th className="py-2 pr-3 text-right font-medium">HR@5</th>
-                      <th className="py-2 pr-3 text-right font-medium">MRR</th>
-                      <th className="py-2 pr-3 text-right font-medium" title="Requires judge model">Faith</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Hit rate in top-5, within the source document">HR@5</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Mean reciprocal rank over the top-5 retrieved chunks">MRR@5</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Requires a judge model; scores live /qa answers">Faith</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -493,13 +527,13 @@ export default function Quality() {
                           <td className="py-2.5 pr-3 text-muted-foreground">
                             {lr?.run_at ? new Date(lr.run_at).toLocaleString() : "never"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.hit_rate_5, 0.6))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.hit_rate_5, THRESHOLDS.hit_rate_5))}>
                             {lr?.hit_rate_5 != null ? pct(lr.hit_rate_5) : "—"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.mrr, 0.45))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.mrr, THRESHOLDS.mrr))}>
                             {lr?.mrr != null ? pct(lr.mrr) : "—"}
                           </td>
-                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, 0.65))}>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, THRESHOLDS.faithfulness))}>
                             {lr?.faithfulness != null ? pct(lr.faithfulness) : (
                               <span className="text-muted-foreground/50" title="Run with a judge model to compute faithfulness">—</span>
                             )}
@@ -514,13 +548,8 @@ export default function Quality() {
           </>
         )}
 
-        {activeTab === "results" && (
-          <ResultsTab onRunStarted={markEvalRunning} />
-        )}
+        {activeTab === "results" && <ResultsDashboard dataset={consoleDataset} />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
-        {activeTab === "routing" && <RoutingTab />}
-        {activeTab === "ablations" && <AblationsTab />}
-        {activeTab === "regressions" && <RegressionsTab />}
       </main>
 
       <GenerateDatasetDialog

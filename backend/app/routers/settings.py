@@ -155,7 +155,12 @@ _MODEL_COSTS: dict[str, dict] = {
     "gemini-1.5-flash-8b-001": {"input": 0.0375, "output": 0.15, "note": ""},
     "gemini-1.5-pro-001": {"input": 1.25, "output": 5.00, "note": ""},
     "gemini-1.5-pro-002": {"input": 1.25, "output": 5.00, "note": ""},
-    # OpenAI
+    # OpenAI. GPT-5 family list prices are omitted here (not confirmed) so the
+    # dropdown shows the name without a fabricated price — formatModelOption
+    # renders name-only when cost is absent.
+    "gpt-5.4": {"note": "frontier"},
+    "gpt-5.1": {"note": "frontier"},
+    "gpt-5-mini": {"note": "frontier"},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60, "note": ""},
     "gpt-4o": {"input": 2.50, "output": 10.00, "note": ""},
     "gpt-4.1-nano": {"input": 0.10, "output": 0.40, "note": ""},
@@ -180,11 +185,15 @@ _ANTHROPIC_MODELS = [
 ]
 
 _OPENAI_MODELS = [
-    {"id": "gpt-4o-mini", "name": "GPT-4o mini"},
-    {"id": "gpt-4o", "name": "GPT-4o"},
-    {"id": "gpt-4.1-nano", "name": "GPT-4.1 nano"},
-    {"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"},
+    # Latest / most capable first.
+    {"id": "gpt-5.4", "name": "GPT-5.4"},
+    {"id": "gpt-5.1", "name": "GPT-5.1"},
+    {"id": "gpt-5-mini", "name": "GPT-5 mini"},
     {"id": "gpt-4.1", "name": "GPT-4.1"},
+    {"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"},
+    {"id": "gpt-4.1-nano", "name": "GPT-4.1 nano"},
+    {"id": "gpt-4o", "name": "GPT-4o"},
+    {"id": "gpt-4o-mini", "name": "GPT-4o mini"},
     {"id": "o4-mini", "name": "o4-mini"},
     {"id": "o3-mini", "name": "o3-mini"},
 ]

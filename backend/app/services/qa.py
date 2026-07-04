@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
@@ -197,6 +198,51 @@ def _build_context(chunks: list[ScoredChunk], doc_titles: dict[str, str]) -> str
     return "\n\n---\n\n".join(parts)
 
 
+def _salvage_truncated_answer(json_text: str) -> str:
+    """Recover the "answer" string from a truncated/malformed JSON block.
+
+    Local models sometimes embed the whole answer in JSON (Style B) and then hit
+    the generation token limit mid-block, so json.loads fails on every repair.
+    The answer text itself is still intact up to the truncation point — walk the
+    JSON string manually (honouring escapes) instead of throwing it away.
+    """
+    m = re.search(r'"answer"\s*:\s*"', json_text)
+    if not m:
+        return ""
+    body = json_text[m.end():]
+    out: list[str] = []
+    escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            out.append(escapes.get(body[i + 1], body[i + 1]))
+            i += 2
+            continue
+        if ch == '"':
+            break
+        out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
+# A bare heading the model sometimes writes just before its citation JSON
+# (optionally markdown-bold/italic): "**Citations:**", "Sources:", "References".
+_CITATION_HEADING_RE = re.compile(
+    r"^[*_\s>#-]*(citations?|sources?|references?)\s*:?\s*[*_\s]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_citation(c: dict) -> bool:
+    """True when a citation is just the prompt's format example echoed back
+    (empty or "..." title AND excerpt) — no real reference content."""
+    def _blank(v: object) -> bool:
+        return not str(v or "").strip().strip(".").strip()
+
+    return _blank(c.get("document_title")) and _blank(c.get("excerpt"))
+
+
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the LLM response.
 
@@ -205,6 +251,8 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
       Style A: [prose]\\n{"citations": [...], "confidence": "..."}
       Style B: {"answer": "...", "citations": [...], "confidence": "..."}
                (some models embed the answer inside the JSON)
+    Truncated generations (the block never closes) are salvaged rather than
+    dropped: the embedded answer is recovered character-wise.
     """
     # Find the last JSON block containing our citations payload.
     json_start = -1
@@ -223,37 +271,60 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
 
     # Parse the JSON block, tolerating truncation.
     parsed: dict = {}
+    parse_failed = False
     json_text = full_text[json_start:]
     try:
         parsed = json.loads(json_text)
     except json.JSONDecodeError:
+        parse_failed = True
         end = json_text.rfind("}")
         if end != -1:
             try:
                 parsed = json.loads(json_text[: end + 1])
+                parse_failed = False
             except json.JSONDecodeError:
                 pass
 
     citations: list[dict] = [c for c in parsed.get("citations", []) if isinstance(c, dict)]
-    confidence: str = parsed.get("confidence", "low")
+    # Drop placeholder citations: small models often echo the prompt's format
+    # example verbatim ({"document_title":"...","excerpt":"...","page":0}) instead
+    # of filling it in. Such a citation carries no information and would render as
+    # a useless "... · p.0" chip. The grounded source_citations (from retrieved
+    # chunks) are the trustworthy reference list.
+    citations = [c for c in citations if not _is_placeholder_citation(c)]
 
     def _strip_json_preamble(text: str) -> str:
-        """Remove trailing lines that are JSON label preambles, not answer content."""
+        """Remove trailing lines that are label preambles, not answer content:
+        a JSON hint ("JSON:", "Here is the JSON:") or a heading the model wrote
+        before its citation block ("**Citations:**", "Sources:", "References:")."""
         lines = text.split("\n")
-        while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
+        while lines and (
+            re.search(r"\bjson\b", lines[-1], re.IGNORECASE)
+            or _CITATION_HEADING_RE.match(lines[-1])
+        ):
             lines.pop()
         return "\n".join(lines).strip()
 
     # Style B: answer is embedded in the JSON.
     if "answer" in parsed and isinstance(parsed["answer"], str):
-        return _strip_json_preamble(parsed["answer"].strip()), citations, confidence
+        answer = _strip_json_preamble(parsed["answer"].strip())
+    else:
+        # Style A: prose precedes the JSON block.
+        # Strip any trailing lines that are format labels, not answer content.
+        # LLMs sometimes echo instruction fragments (e.g. "JSON:", "Here is the
+        # JSON:", "ONLY JSON (no prose ...):") — these always contain "json".
+        answer = _strip_json_preamble(full_text[:json_start].strip())
+        if parse_failed:
+            salvaged = _salvage_truncated_answer(json_text)
+            if len(salvaged) > len(answer):
+                answer = salvaged
 
-    # Style A: prose precedes the JSON block.
-    prose = full_text[:json_start].strip()
-    # Strip any trailing lines that are format labels, not answer content.
-    # LLMs sometimes echo instruction fragments (e.g. "JSON:", "Here is the JSON:",
-    # "ONLY JSON (no prose ...):") — these always contain the word "json".
-    return _strip_json_preamble(prose), citations, confidence
+    confidence = parsed.get("confidence")
+    if not isinstance(confidence, str) or not confidence:
+        # No parseable confidence (usually a truncated block): fall back to the
+        # same length heuristic as the no-JSON path instead of a blanket "low".
+        confidence = "medium" if len(answer) > 80 else "low"
+    return answer, citations, confidence
 
 
 class QAService:
@@ -502,8 +573,15 @@ class QAService:
                 collected: list[str] = []
                 try:
                     t_llm = time.perf_counter()
+                    # num_ctx must cover prompt AND generation: at the Ollama
+                    # default (2048) long answers hit done_reason=length mid-way
+                    # through the trailing citations JSON and were discarded.
                     token_gen = await llm.generate(
-                        llm_prompt, system=system_prompt, model=model, stream=True
+                        llm_prompt,
+                        system=system_prompt,
+                        model=model,
+                        stream=True,
+                        num_ctx=get_settings().QA_NUM_CTX,
                     )
                     ttft_logged = False
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
@@ -41,8 +42,31 @@ _ONBOARDING_SUGGESTIONS = [
 ]
 
 
+# A content_type='book' can be narrative fiction (Odyssey) OR a technical textbook
+# (Dive into Deep Learning, SQL Cookbook). Narrative templates ("what motivates X
+# throughout the story?") are nonsense for a textbook — route those to technical
+# suggestions instead.
+_TECH_BOOK_TITLE = re.compile(
+    r"\b(deep learning|machine learning|neural|artificial intelligence|data science"
+    r"|algorithm|programming|software|engineering|database|systems|kubernetes|docker"
+    r"|linux|network|security|statistics|mathematics|computer|data)\b",
+    re.IGNORECASE,
+)
+
+
+def _book_is_technical(title: str, entities: dict[str, list[str]]) -> bool:
+    """True when a book looks technical rather than narrative — by title keyword
+    (underscores normalised) or by an entity mix dominated by concepts/technology
+    rather than people/places."""
+    if _TECH_BOOK_TITLE.search((title or "").replace("_", " ")):
+        return True
+    tech = len(entities.get("CONCEPT", [])) + len(entities.get("TECHNOLOGY", []))
+    narrative = len(entities.get("PERSON", [])) + len(entities.get("PLACE", []))
+    return tech >= 3 and tech > narrative
+
+
 def _book_suggestions(entities: dict[str, list[str]], headings: list[str]) -> list[str]:
-    """Generate suggestions for book-type documents."""
+    """Generate suggestions for narrative book-type documents."""
     suggestions: list[str] = []
     persons = entities.get("PERSON", [])
     concepts = entities.get("CONCEPT", [])
@@ -305,7 +329,10 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
 
     # Fallback to template logic
     if content_type == "book":
-        suggestions = _book_suggestions(entities, headings)
+        if _book_is_technical(doc.title or "", entities):
+            suggestions = _technical_suggestions(entities, headings)
+        else:
+            suggestions = _book_suggestions(entities, headings)
     elif content_type in ("tech_book", "tech_article", "code"):
         suggestions = _technical_suggestions(entities, headings)
     elif content_type in ("video", "audio"):

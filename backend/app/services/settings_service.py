@@ -340,13 +340,24 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     provider = _cache["cloud_provider"]
     cloud_model = _cache["cloud_model"]
 
-    _provider_map: dict[str, tuple[str, str]] = {
-        "openai": ("openai", "openai_api_key"),
-        "anthropic": ("anthropic", "anthropic_api_key"),
-        "gemini": ("gemini", "google_api_key"),
+    _provider_map: dict[str, tuple[str, str, str]] = {
+        "openai": ("openai", "openai_api_key", "OPENAI_API_KEY"),
+        "anthropic": ("anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
+        "gemini": ("gemini", "google_api_key", "GOOGLE_API_KEY"),
     }
-    prefix, key_field = _provider_map.get(provider, ("openai", "openai_api_key"))
+    prefix, key_field, env_field = _provider_map.get(
+        provider, ("openai", "openai_api_key", "OPENAI_API_KEY")
+    )
     api_key = _cache[key_field]
+
+    if not api_key:
+        # Fall back to a key supplied via environment (.env), mirroring how an
+        # explicit model override resolves its key in llm._build_kwargs. Without
+        # this, mode-based routing and per-request overrides disagree: a .env key
+        # works for evals/explicit models but not for plain "Auto" chat.
+        from app.config import get_settings  # noqa: PLC0415
+
+        api_key = getattr(get_settings(), env_field, "") or ""
 
     if not api_key:
         raise ValueError(

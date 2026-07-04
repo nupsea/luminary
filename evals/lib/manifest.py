@@ -20,6 +20,28 @@ MANIFEST_PATH = GOLDEN_DIR / "manifest.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def resolve_backend_base(backend_url: str) -> str:
+    """Return the base URL where the JSON API actually lives.
+
+    Prod builds serve the SPA at the root and mount the API under ``/api``;
+    dev/test serve the API at the root. Probe a cheap core GET and fall back to
+    ``/api`` so the harness works against either without flags. If neither looks
+    like JSON (e.g. a public build without these routers), return the root and
+    let individual calls surface their own errors.
+    """
+    base = backend_url.rstrip("/")
+    for candidate in (base, f"{base}/api"):
+        try:
+            resp = httpx.get(f"{candidate}/documents", params={"page_size": 1}, timeout=10.0)
+        except Exception:
+            continue
+        if resp.status_code < 500 and "application/json" in resp.headers.get("content-type", ""):
+            if candidate != base:
+                print(f"  Resolved API base to {candidate} (backend is in prod mode)")
+            return candidate
+    return base
+
+
 def load_manifest() -> dict[str, str]:
     if MANIFEST_PATH.exists():
         with MANIFEST_PATH.open() as f:
@@ -86,24 +108,46 @@ def ingest_document(backend_url: str, source_file: str) -> str | None:
         print(f"  ERROR: /ingest failed for {source_file}: {exc}", file=sys.stderr)
         return None
 
+    # Wait for "complete", NOT the first usable stage. Retrieval needs the
+    # keyword + vector indexes built, which happen AFTER "embedding"; returning
+    # early makes /search run against a half-indexed doc and silently scores 0.
+    # Fallback: some doc types legitimately terminate before "complete", so
+    # accept a usable stage that hasn't advanced for NO_PROGRESS seconds.
     print(f"  Waiting for ingestion to complete (document_id={doc_id})...")
-    deadline = time.time() + 600
+    deadline = time.time() + 1200
+    no_progress = 120
+    last_stage: str | None = None
+    last_change = time.time()
     while time.time() < deadline:
         time.sleep(5)
         try:
             status_resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
             status_resp.raise_for_status()
             stage = status_resp.json().get("stage", "")
-            if stage in _USABLE_STAGES:
-                print(f"  Ingestion finished enough: {source_file} -> {doc_id} (stage={stage})")
-                return doc_id
-            if stage == "error":
-                print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)
-                return None
-            print(f"    stage={stage}...")
         except Exception as exc:
             print(f"  WARNING: status check failed: {exc}", file=sys.stderr)
+            continue
+        if stage != last_stage:
+            last_stage, last_change = stage, time.time()
+        if stage == "complete":
+            print(f"  Ingestion complete: {source_file} -> {doc_id}")
+            return doc_id
+        if stage == "error":
+            print(f"  ERROR: ingestion failed for {source_file}", file=sys.stderr)
+            return None
+        print(f"    stage={stage}...")
+        if stage in _USABLE_STAGES and time.time() - last_change >= no_progress:
+            print(
+                f"  Ingestion settled at stage={stage} (no progress {no_progress}s); proceeding"
+            )
+            return doc_id
 
+    if last_stage in _USABLE_STAGES:
+        print(
+            f"  NOTE: ingestion did not reach 'complete' in budget; using stage={last_stage}",
+            file=sys.stderr,
+        )
+        return doc_id
     print(f"  ERROR: ingestion timed out for {source_file}", file=sys.stderr)
     return None
 

@@ -10,15 +10,19 @@ import json
 import logging
 import re
 import subprocess
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.config import get_settings
+from app.database import get_db, get_session_factory
 from app.models import EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
 from app.services.dataset_generator_service import (
     count_questions,
@@ -26,6 +30,7 @@ from app.services.dataset_generator_service import (
     delete_dataset,
     latest_run_for_dataset,
 )
+from app.services.golden_quality import golden_dataset_quality
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,41 @@ def _prune_in_flight() -> None:
     for k in stale:
         _in_flight_runs.pop(k, None)
 
+
+def _utc_iso(dt: datetime | None) -> str | None:
+    """Serialize a stored datetime as UTC-aware ISO. aiosqlite returns tz-naive
+    datetimes even when stored tz-aware; bare isoformat() makes browsers parse
+    UTC wall-clock as local time, shifting every timestamp by the UTC offset."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.isoformat()
+
+
+async def _persist_failed_run(
+    dataset_name: str, *, model_used: str, eval_kind: str, error: str
+) -> None:
+    """Record a failed eval as an eval_runs row. The in-flight tracker is
+    process-local and prunes after 30 min (and dies on --reload), so without
+    this a failed run leaves no trace anywhere in the UI."""
+    try:
+        async with get_session_factory()() as session:
+            session.add(
+                EvalRunModel(
+                    id=str(uuid.uuid4()),
+                    dataset_name=dataset_name,
+                    run_at=datetime.now(UTC),
+                    model_used=model_used,
+                    eval_kind=eval_kind,
+                    status="failed",
+                    error_message=error[:500],
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("could not persist failed eval run for %s", dataset_name)
+
 # Luminary backend always runs on port 7820; eval subprocess needs this to call /search etc.
 _BACKEND_URL = "http://localhost:7820"
 
@@ -105,9 +145,14 @@ class EvalResultItem(BaseModel):
 class EvalRunRequest(BaseModel):
     dataset: str
     assert_thresholds: bool = False
+    # Answering model override for /qa. None/"" = the app's default QA pipeline
+    # (the shipped path); generation metrics always score real generated answers.
+    model: str | None = None
     judge_model: str | None = None
     check_citations: bool = False
     max_questions: int | None = None
+    rerank: bool = False
+    ablation: bool = False
 
 
 class EvalRunListItem(BaseModel):
@@ -124,6 +169,9 @@ class EvalRunListItem(BaseModel):
     eval_kind: str | None
     model_used: str
     citation_support_rate: float | None
+    extra_metrics: dict | None = None
+    status: str = "complete"
+    error_message: str | None = None
 
 
 class GoldenFileQuestion(BaseModel):
@@ -227,6 +275,9 @@ async def _run_eval_subprocess(
     judge_model: str | None = None,
     check_citations: bool = False,
     max_questions: int | None = None,
+    rerank: bool = False,
+    ablation: bool = False,
+    model: str | None = None,
 ) -> None:
     cmd = [
         "uv", "run", "python", "run_eval.py",
@@ -235,12 +286,18 @@ async def _run_eval_subprocess(
     ]
     if assert_thresholds:
         cmd.append("--assert-thresholds")
+    if model:
+        cmd.extend(["--model", model])
     if judge_model is not None:
         cmd.extend(["--judge-model", judge_model])
     if check_citations:
         cmd.append("--check-citations")
     if max_questions is not None:
         cmd.extend(["--max-questions", str(max_questions)])
+    if rerank:
+        cmd.append("--rerank")
+    if ablation:
+        cmd.append("--ablation")
     logger.info("eval subprocess starting: dataset=%s cmd=%s", dataset, cmd)
     error: str | None = None
     try:
@@ -272,6 +329,13 @@ async def _run_eval_subprocess(
         error = f"{type(exc).__name__}: {exc}"[:500]
     finally:
         _record_run_finish(dataset, error=error)
+        if error:
+            await _persist_failed_run(
+                dataset,
+                model_used=judge_model or "no-llm",
+                eval_kind="ablation" if ablation else "generation" if judge_model else "retrieval",
+                error=error,
+            )
 
 
 async def _run_generated_eval_subprocess(
@@ -316,16 +380,52 @@ async def _run_generated_eval_subprocess(
             logger.info(
                 "eval subprocess finished OK: dataset_id=%s\n%s", dataset_id, stdout_tail
             )
+            if stderr_tail.strip():
+                logger.warning(
+                    "eval subprocess (rc=0) STDERR for dataset_id=%s:\n%s",
+                    dataset_id, stderr_tail,
+                )
     except Exception as exc:
         logger.exception("eval subprocess raised: dataset_id=%s", dataset_id)
         error = f"{type(exc).__name__}: {exc}"[:500]
     finally:
         _record_run_finish(dataset_id, error=error)
-        if stderr_tail.strip():
-            logger.warning(
-                "eval subprocess (rc=0) STDERR for dataset_id=%s:\n%s",
-                dataset_id, stderr_tail,
+        if error:
+            await _persist_failed_run(
+                dataset_id,
+                model_used=model or judge_model or "no-llm",
+                eval_kind="generation" if (model or judge_model) else "retrieval",
+                error=error,
             )
+
+
+def _last_run_payload(run: EvalRunModel | None) -> dict[str, Any] | None:
+    """Serialize a run for dataset lists. Ablation runs carry their scores in
+    ablation_metrics only; surface the shipped arm (rrf+rerank, else rrf) so
+    the freshest measurement isn't rendered as a dash."""
+    if run is None:
+        return None
+    hit_rate_5 = run.hit_rate_5
+    mrr = run.mrr
+    if run.eval_kind == "ablation" and isinstance(run.ablation_metrics, dict):
+        shipped = run.ablation_metrics.get("rrf+rerank") or run.ablation_metrics.get("rrf")
+        if isinstance(shipped, dict):
+            hit_rate_5 = hit_rate_5 if hit_rate_5 is not None else shipped.get("hit_rate_5")
+            mrr = mrr if mrr is not None else shipped.get("mrr")
+    # Faithfulness only counts when the run judged real generated answers
+    # (answer_model provenance) — legacy runs self-graded the golden answers.
+    faithfulness = run.faithfulness
+    extra = run.extra_metrics if isinstance(run.extra_metrics, dict) else {}
+    if faithfulness is not None and not isinstance(extra.get("answer_model"), str):
+        faithfulness = None
+    return {
+        "run_at": _utc_iso(run.run_at),
+        "model_used": run.model_used,
+        "hit_rate_5": hit_rate_5,
+        "mrr": mrr,
+        "faithfulness": faithfulness,
+        "eval_kind": run.eval_kind,
+    }
 
 
 def _dataset_to_item(
@@ -333,16 +433,6 @@ def _dataset_to_item(
     question_count: int,
     last_run: EvalRunModel | None,
 ) -> GoldenDatasetListItem:
-    last_run_payload = None
-    if last_run is not None:
-        last_run_payload = {
-            "run_at": last_run.run_at.isoformat(),
-            "model_used": last_run.model_used,
-            "hit_rate_5": last_run.hit_rate_5,
-            "mrr": last_run.mrr,
-            "faithfulness": last_run.faithfulness,
-            "eval_kind": last_run.eval_kind,
-        }
     return GoldenDatasetListItem(
         id=dataset.id,
         name=dataset.name,
@@ -353,14 +443,45 @@ def _dataset_to_item(
         status=dataset.status,
         generated_count=question_count,
         target_count=dataset.target_count,
-        created_at=dataset.created_at.isoformat() if dataset.created_at else None,
-        completed_at=dataset.completed_at.isoformat() if dataset.completed_at else None,
+        created_at=_utc_iso(dataset.created_at),
+        completed_at=_utc_iso(dataset.completed_at),
         error_message=dataset.error_message,
-        last_run=last_run_payload,
+        last_run=_last_run_payload(last_run),
     )
 
 
 _GOLDEN_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _file_golden_question_count(path: Path) -> int | None:
+    """Retrieval-evaluable question count for a golden file, or None when it is
+    not a retrieval golden (missing question/context_hint/source_file) or empty.
+
+    Used to hide non-evaluable files (flashcards/intents/summaries goldens,
+    `.flagged` sidecars, empty files) from the dataset picker.
+    """
+    first: dict | None = None
+    count = 0
+    try:
+        with path.open() as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if first is None:
+                    first = row
+                count += 1
+    except OSError:
+        return None
+    if not first:
+        return None
+    if not (first.get("question") and first.get("context_hint") and first.get("source_file")):
+        return None
+    return count
 
 
 @router.get("/runs", response_model=list[EvalRunListItem])
@@ -387,7 +508,7 @@ async def get_eval_runs(
         EvalRunListItem(
             id=r.id,
             dataset_name=r.dataset_name,
-            run_at=r.run_at.isoformat(),
+            run_at=_utc_iso(r.run_at) or "",
             hit_rate_5=r.hit_rate_5,
             mrr=r.mrr,
             faithfulness=r.faithfulness,
@@ -398,9 +519,77 @@ async def get_eval_runs(
             eval_kind=r.eval_kind,
             model_used=r.model_used,
             citation_support_rate=r.citation_support_rate,
+            extra_metrics=r.extra_metrics,
+            status=getattr(r, "status", None) or "complete",
+            error_message=r.error_message,
         )
         for r in runs
     ]
+
+
+class GoldenInfoResponse(BaseModel):
+    name: str
+    question_count: int
+    source_file: str | None = None
+    provenance: dict[str, Any] | None = None
+    quality: dict[str, Any] | None = None
+
+
+@router.get("/golden/{name}/info", response_model=GoldenInfoResponse)
+async def get_golden_info(name: str) -> GoldenInfoResponse:
+    """Provenance (how the golden was generated) + deterministic quality metrics.
+
+    Quality is computed structurally (no LLM judge) so it is unbiased and
+    reproducible — see golden_dataset_quality.
+    """
+    if not _GOLDEN_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid dataset name")
+    golden_dir = _EVALS_DIR / "golden"
+    path = golden_dir / f"{name}.jsonl"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    rows: list[dict] = []
+    try:
+        with path.open() as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Could not read golden file") from exc
+
+    provenance: dict | None = None
+    meta_path = golden_dir / f"{name}.meta.json"
+    if meta_path.exists():
+        try:
+            provenance = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            provenance = None
+
+    quality: dict | None = None
+    source_file = rows[0].get("source_file") if rows else None
+    if source_file:
+        src_path = REPO_ROOT / source_file
+        if src_path.exists():
+            try:
+                quality = golden_dataset_quality(
+                    rows, src_path.read_text(encoding="utf-8", errors="replace")
+                )
+            except OSError:
+                quality = None
+
+    return GoldenInfoResponse(
+        name=name,
+        question_count=len(rows),
+        source_file=source_file,
+        provenance=provenance,
+        quality=quality,
+    )
 
 
 @router.get("/golden/{name}", response_model=GoldenFileResponse)
@@ -474,28 +663,21 @@ async def get_datasets(
     golden_dir = _EVALS_DIR / "golden"
     if not golden_dir.exists():
         return items
-    files = list(golden_dir.glob("*.jsonl"))
+    files = [f for f in golden_dir.glob("*.jsonl") if not f.name.endswith(".flagged.jsonl")]
     if status is None:
         for f in sorted(files):
+            count = _file_golden_question_count(f)
+            if count is None:
+                continue  # not a retrieval golden / empty — don't surface as evaluable
             last_run = await latest_run_for_dataset(db, f.stem)
-            last_run_payload = None
-            if last_run is not None:
-                last_run_payload = {
-                    "run_at": last_run.run_at.isoformat(),
-                    "model_used": last_run.model_used,
-                    "hit_rate_5": last_run.hit_rate_5,
-                    "mrr": last_run.mrr,
-                    "faithfulness": last_run.faithfulness,
-                    "eval_kind": last_run.eval_kind,
-                }
             items.append(
                 GoldenDatasetListItem(
                     name=f.stem,
                     status="complete",
-                    generated_count=0,
-                    target_count=0,
+                    generated_count=count,
+                    target_count=count,
                     source="file",
-                    last_run=last_run_payload,
+                    last_run=_last_run_payload(last_run),
                 ).model_dump()
             )
     return items
@@ -629,6 +811,12 @@ async def run_generated_dataset_eval(
         raise HTTPException(status_code=404, detail="Dataset not found")
     if dataset.status != "complete":
         raise HTTPException(status_code=409, detail="Dataset is not complete")
+    settings = get_settings()
+    for candidate in (req.model, req.judge_model):
+        if candidate:
+            err = _validate_model_available(candidate, settings)
+            if err:
+                raise HTTPException(status_code=422, detail=err)
     run_id = f"generated-{dataset_id}-{len(_background_tasks) + 1}"
     _record_run_start(
         dataset_id,
@@ -666,7 +854,7 @@ async def get_generated_dataset_runs(
     return [
         {
             "id": run.id,
-            "run_at": run.run_at.isoformat(),
+            "run_at": _utc_iso(run.run_at),
             "hit_rate_5": run.hit_rate_5,
             "mrr": run.mrr,
             "faithfulness": run.faithfulness,
@@ -675,6 +863,8 @@ async def get_generated_dataset_runs(
             "context_recall": run.context_recall,
             "model_used": run.model_used,
             "eval_kind": run.eval_kind,
+            "status": getattr(run, "status", None) or "complete",
+            "error_message": run.error_message,
         }
         for run in result.scalars().all()
     ]
@@ -744,6 +934,16 @@ async def run_eval(req: EvalRunRequest) -> dict:
             status_code=404,
             detail=f"Dataset '{req.dataset}' not found (missing {golden_file.name})",
         )
+    # Ablation is retrieval-only — it never calls a judge, so ignore any judge model.
+    if req.ablation:
+        req.judge_model = ""
+        req.model = None
+    settings = get_settings()
+    for candidate in (req.judge_model, req.model):
+        if candidate:
+            err = _validate_model_available(candidate, settings)
+            if err:
+                raise HTTPException(status_code=422, detail=err)
 
     _record_run_start(
         req.dataset,
@@ -758,12 +958,143 @@ async def run_eval(req: EvalRunRequest) -> dict:
             req.judge_model,
             req.check_citations,
             req.max_questions,
+            req.rerank,
+            req.ablation,
+            req.model,
         )
     )
     logger.info(
-        "eval run started: dataset=%s assert_thresholds=%s", req.dataset, req.assert_thresholds
+        "eval run started: dataset=%s assert_thresholds=%s rerank=%s ablation=%s",
+        req.dataset, req.assert_thresholds, req.rerank, req.ablation,
     )
     return {"status": "started", "dataset": req.dataset}
+
+
+class GoldenGenerateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    source_file: str
+    generator_model: str = "openai/gpt-5.4"
+    verify_models: list[str] = Field(
+        default_factory=lambda: ["openai/gpt-5.1", "ollama/qwen2.5:14b-instruct"]
+    )
+    target: int = Field(default=50, ge=5, le=200)
+
+
+async def _run_golden_generation_subprocess(req: GoldenGenerateRequest) -> None:
+    out = _EVALS_DIR / "golden" / f"{req.name}.jsonl"
+    cmd = [
+        "uv", "run", "--project", str(REPO_ROOT / "backend"), "python",
+        str(_EVALS_DIR / "generate_golden.py"),
+        "--source", str(REPO_ROOT / req.source_file),
+        "--out", str(out),
+        "--generator-model", req.generator_model,
+        "--target", str(req.target),
+        "--source-file-label", req.source_file,
+        "--verify-models", *req.verify_models,
+    ]
+    logger.info("golden generation starting: name=%s cmd=%s", req.name, cmd)
+    error: str | None = None
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, cwd=str(REPO_ROOT), capture_output=True
+        )
+        if result.returncode != 0:
+            tail = (result.stderr or b"")[-800:].decode(errors="replace")
+            error = (tail.strip().splitlines() or ["golden generation failed"])[-1][:500]
+            logger.warning("golden generation FAILED name=%s: %s", req.name, tail)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"[:500]
+        logger.exception("golden generation raised: name=%s", req.name)
+    finally:
+        _record_run_finish(f"golden-{req.name}", error=error)
+
+
+def _ollama_models(settings) -> tuple[set[str], str | None]:
+    """Return (available ollama model ids, error). error is set when Ollama is unreachable."""
+    try:
+        resp = httpx.get(f"{settings.OLLAMA_URL}/api/tags", timeout=5.0)
+        resp.raise_for_status()
+        return {f"ollama/{m['name']}" for m in resp.json().get("models", [])}, None
+    except Exception as exc:
+        return set(), f"Ollama unreachable at {settings.OLLAMA_URL} ({type(exc).__name__})"
+
+
+# Model ids flow into subprocess argv (run_eval.py / generate_golden.py). A
+# value like "--source" or "--out" would be parsed by the harness's argparse as
+# an injected flag (verify_models is spread after a nargs="*" option), giving an
+# arbitrary-file read/write primitive. Enforce a strict provider/name shape so
+# no argv token can begin with "-" or carry separators.
+_MODEL_ID_RE = re.compile(r"^(ollama|openai|anthropic|gemini)/[A-Za-z0-9._:-]+$")
+
+
+def _validate_model_available(model: str, settings) -> str | None:
+    """Actionable error message if *model* can't be used, else None. '' means no model."""
+    if not model:
+        return None
+    if not _MODEL_ID_RE.match(model):
+        return (
+            f"Invalid model id {model!r}. Expected '<provider>/<name>' "
+            "(provider: ollama, openai, anthropic, gemini)."
+        )
+    if model.startswith("ollama/"):
+        names, err = _ollama_models(settings)
+        if err:
+            return f"{err} — cannot use {model}. Start Ollama or pick a frontier model."
+        # Ollama treats a tagless name as ":latest" (llama3.2 == llama3.2:latest),
+        # so accept a bare id whenever its :latest tag is pulled — /api/tags lists
+        # the fully-qualified "llama3.2:latest".
+        candidates = {model} if ":" in model.split("/", 1)[1] else {model, f"{model}:latest"}
+        if candidates.isdisjoint(names):
+            tag = model.split("/", 1)[1]
+            return (
+                f"Model {model} is not pulled in Ollama. Available: "
+                f"{sorted(names) or 'none'}. Run `ollama pull {tag}` or pick another."
+            )
+        return None
+    if model.startswith("openai/") and not settings.OPENAI_API_KEY:
+        return f"{model} requires OPENAI_API_KEY in backend/.env."
+    if model.startswith("anthropic/") and not getattr(settings, "ANTHROPIC_API_KEY", None):
+        return f"{model} requires ANTHROPIC_API_KEY in backend/.env."
+    return None
+
+
+@router.get("/models")
+async def get_eval_models() -> dict[str, list[str]]:
+    """Models for the generate/run dropdowns: local Ollama + frontier (if keys set)."""
+    settings = get_settings()
+    local, _ = _ollama_models(settings)
+    frontier: list[str] = []
+    if settings.OPENAI_API_KEY:
+        frontier += ["openai/gpt-5.4", "openai/gpt-5.1", "openai/gpt-4.1", "openai/gpt-4o-mini"]
+    return {"local": sorted(local), "frontier": frontier}
+
+
+@router.post("/golden/generate", status_code=202)
+async def generate_golden_file(req: GoldenGenerateRequest) -> dict[str, str]:
+    """Generate or REPLACE a file-backed golden with the good pipeline (personas +
+    cross-model verification), chosen models, and a provenance sidecar."""
+    if not _GOLDEN_NAME_RE.match(req.name):
+        raise HTTPException(status_code=400, detail="Invalid dataset name")
+    src = (REPO_ROOT / req.source_file).resolve()
+    # is_relative_to avoids the sibling-prefix hole in a raw startswith check
+    # (e.g. "<repo>-evil" starts with "<repo>" but is outside it).
+    if not src.is_relative_to(REPO_ROOT.resolve()):
+        raise HTTPException(status_code=400, detail="source_file must be within the repo")
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Source not found: {req.source_file}")
+    settings = get_settings()
+    for model in [req.generator_model, *req.verify_models]:
+        err = _validate_model_available(model, settings)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+    _record_run_start(
+        f"golden-{req.name}",
+        run_id=f"golden-{req.name}",
+        judge_model=req.generator_model,
+        is_generated=True,
+    )
+    _fire_and_forget(_run_golden_generation_subprocess(req))
+    return {"status": "started", "name": req.name}
 
 
 @router.get("/in-flight")

@@ -196,11 +196,13 @@
     },
     {
       "id": "quality_dashboard",
-      "tier": "dev",
+      "tier": "labs",
       "kind": "nav_tab",
       "frontend": { "route": "/quality", "component": "pages/Quality" },
       "backend": { "routers": ["evals"] },
-      "labels": { "en": "Quality" }
+      "labels": { "en": "Quality" },
+      "description": "Eval harness UI: retrieval (HR@5/MRR), topic, and generation metrics.",
+      "default_off": true
     },
     {
       "id": "admin",

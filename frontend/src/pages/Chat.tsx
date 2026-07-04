@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -26,9 +26,10 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
-import { buildModelOptions, buildScopeComboboxLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, shortModelLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
+import { apiGet } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
@@ -213,6 +214,11 @@ interface LLMSettings {
   active_model: string
   available_local_models: string[]
   cloud_providers: CloudProvider[]
+  // Raw saved config (present in the response) — used to show/resolve the
+  // effective chat model and to offer the right cloud models.
+  mode?: string
+  provider?: string
+  model?: string
 }
 
 async function fetchLLMSettings(): Promise<LLMSettings> {
@@ -299,6 +305,63 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ChatModelSelector -- header dropdown showing/overriding the model for this chat
+// ---------------------------------------------------------------------------
+
+interface ChatModelSelectorProps {
+  value: string // per-request override; "" = use the app default
+  onChange: (model: string) => void
+  localModels: string[]
+  cloudModels: string[]
+  effectiveDefault: string
+}
+
+function ChatModelSelector({
+  value,
+  onChange,
+  localModels,
+  cloudModels,
+  effectiveDefault,
+}: ChatModelSelectorProps) {
+  const current = value ? shortModelLabel(value) : shortModelLabel(effectiveDefault)
+  return (
+    <label
+      className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
+      title="Model answering this chat. 'Auto' follows your Settings; pick another to override just this conversation."
+    >
+      <Cpu size={13} className="shrink-0 text-muted-foreground" />
+      <span className="text-muted-foreground">Model:</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="max-w-[160px] cursor-pointer truncate bg-transparent font-medium text-foreground focus:outline-none"
+      >
+        <option value="">Auto · {shortModelLabel(effectiveDefault)}</option>
+        {localModels.length > 0 && (
+          <optgroup label="Local (Ollama)">
+            {localModels.map((m) => (
+              <option key={m} value={m}>
+                {shortModelLabel(m)}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {cloudModels.length > 0 && (
+          <optgroup label="Cloud">
+            {cloudModels.map((m) => (
+              <option key={m} value={m}>
+                {shortModelLabel(m)}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+      {value && <span className="sr-only">{current}</span>}
+    </label>
   )
 }
 
@@ -539,6 +602,21 @@ export default function Chat() {
   })
 
   const modelOptions = buildModelOptions(llmSettings)
+
+  // Cloud models for the configured provider, so the header selector can offer
+  // a frontier model per-conversation (the /qa model override routes to it
+  // directly). Curated list — returned regardless of key presence.
+  const chatProvider = llmSettings?.provider
+  const { data: cloudModelList } = useQuery({
+    queryKey: ["chat-cloud-models", chatProvider],
+    queryFn: () =>
+      apiGet<{ id: string }[]>("/settings/llm/models", { provider: chatProvider as string }),
+    enabled: Boolean(chatProvider),
+    staleTime: 300_000,
+  })
+  const localModelChoices = llmSettings?.available_local_models ?? []
+  const cloudModelChoices = (cloudModelList ?? []).map((m) => `${chatProvider}/${m.id}`)
+  const effectiveModel = effectiveDefaultModel(llmSettings)
 
   // Check if any documents have been ingested (use prefetched cache if available)
   const cachedDocs = qc.getQueryData<{ items?: unknown[] } | unknown[]>(
@@ -988,6 +1066,17 @@ export default function Chat() {
             }
           }}
         />
+
+        {/* Inline model indicator + per-conversation override */}
+        {!llmLoading && llmSettings && (
+          <ChatModelSelector
+            value={model}
+            onChange={setModel}
+            localModels={localModelChoices}
+            cloudModels={cloudModelChoices}
+            effectiveDefault={effectiveModel}
+          />
+        )}
 
         {/* Web call counter -- shown when web is enabled and conversation is active */}
         {webEnabled && messages.length > 0 && (

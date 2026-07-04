@@ -6,11 +6,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
+import { metricColor, shippedAblationArm, THRESHOLDS } from "./thresholds"
 import type { EvalRunFull, EvalRunSummary } from "./types"
 
 function fmt(value: number | null | undefined): string {
-  if (value == null) return "n/a"
+  if (value == null) return "—"
   return value.toFixed(3)
+}
+
+// Ablation runs keep their scores per strategy arm; show the shipped arm so
+// the row carries real numbers instead of dashes.
+function rowScores(run: EvalRunSummary | EvalRunFull) {
+  if (run.status === "failed") {
+    return { hr5: null, mrr: null, kind: "failed" }
+  }
+  if ("ablation_metrics" in run && run.eval_kind === "ablation") {
+    const shipped = shippedAblationArm(run as EvalRunFull)
+    if (shipped) {
+      return {
+        hr5: shipped.arm.hit_rate_5,
+        mrr: shipped.arm.mrr,
+        kind: `ablation · ${shipped.label}`,
+      }
+    }
+  }
+  return { hr5: run.hit_rate_5, mrr: run.mrr, kind: run.eval_kind ?? "—" }
 }
 
 export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull> }) {
@@ -24,24 +45,37 @@ export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull
         <TableHeader>
           <TableRow>
             <TableHead>Date</TableHead>
+            <TableHead>Kind</TableHead>
             <TableHead>Model</TableHead>
             <TableHead>HR@5</TableHead>
-            <TableHead>MRR</TableHead>
+            <TableHead>MRR@5</TableHead>
             <TableHead>Faith</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {runs.map((run) => (
-            <TableRow key={run.id || `${run.run_at}-${run.model_used}`}>
-              <TableCell className="whitespace-nowrap text-xs">
-                {new Date(run.run_at).toLocaleString()}
-              </TableCell>
-              <TableCell className="max-w-36 truncate text-xs">{run.model_used}</TableCell>
-              <TableCell>{fmt(run.hit_rate_5)}</TableCell>
-              <TableCell>{fmt(run.mrr)}</TableCell>
-              <TableCell>{fmt(run.faithfulness)}</TableCell>
-            </TableRow>
-          ))}
+          {runs.map((run) => {
+            const s = rowScores(run)
+            return (
+              <TableRow key={run.id || `${run.run_at}-${run.model_used}`}>
+                <TableCell className="whitespace-nowrap text-xs">
+                  {new Date(run.run_at).toLocaleString()}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                  {s.kind}
+                </TableCell>
+                <TableCell className="max-w-36 truncate text-xs">{run.model_used}</TableCell>
+                <TableCell className={cn(metricColor(s.hr5, THRESHOLDS.hit_rate_5))}>
+                  {fmt(s.hr5)}
+                </TableCell>
+                <TableCell className={cn(metricColor(s.mrr, THRESHOLDS.mrr))}>
+                  {fmt(s.mrr)}
+                </TableCell>
+                <TableCell className={cn(metricColor(run.faithfulness, THRESHOLDS.faithfulness))}>
+                  {fmt(run.faithfulness)}
+                </TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
     </div>

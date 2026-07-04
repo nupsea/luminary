@@ -130,19 +130,14 @@ class HybridRetriever:
             logger.warning("vector_search failed, returning []", exc_info=exc)
             return []
 
-    async def keyword_search(
+    async def _fts_match(
         self,
-        query: str,
+        session,
+        fts_query: str,
         document_ids: list[str] | None,
         k: int,
     ) -> list[ScoredChunk]:
-        """BM25 search via SQLite FTS5; optionally filter by document_ids."""
-        safe_query = _sanitize_fts_query(query)
-        if not safe_query:
-            # Query was entirely punctuation/operators — skip FTS and return empty
-            logger.debug("keyword_search: query sanitized to empty string, skipping FTS")
-            return []
-
+        """Run one FTS5 MATCH and hydrate ScoredChunks (BM25 order preserved)."""
         if document_ids:
             id_list = ", ".join(f"'{did}'" for did in document_ids)
             sql = text(
@@ -158,27 +153,21 @@ class HybridRetriever:
                 "WHERE chunks_fts MATCH :query "
                 "ORDER BY score LIMIT :k"
             )
-
-        async with get_session_factory()() as session:
-            result = await session.execute(sql, {"query": safe_query, "k": k})
-            fts_rows = result.fetchall()
-
-            # Batch-fetch speaker and chunk_index from chunks table
-            if fts_rows:
-                fts_ids = [row.chunk_id for row in fts_rows]
-                meta_result = await session.execute(
-                    text(
-                        "SELECT id, speaker, chunk_index FROM chunks WHERE id IN ("
-                        + ", ".join(f"'{cid}'" for cid in fts_ids)
-                        + ")"
-                    )
-                )
-                meta_map: dict[str, tuple[str | None, int]] = {
-                    row[0]: (row[1] or None, row[2] or 0) for row in meta_result.fetchall()
-                }
-            else:
-                meta_map = {}
-
+        result = await session.execute(sql, {"query": fts_query, "k": k})
+        fts_rows = result.fetchall()
+        if not fts_rows:
+            return []
+        fts_ids = [row.chunk_id for row in fts_rows]
+        meta_result = await session.execute(
+            text(
+                "SELECT id, speaker, chunk_index FROM chunks WHERE id IN ("
+                + ", ".join(f"'{cid}'" for cid in fts_ids)
+                + ")"
+            )
+        )
+        meta_map: dict[str, tuple[str | None, int]] = {
+            row[0]: (row[1] or None, row[2] or 0) for row in meta_result.fetchall()
+        }
         return [
             ScoredChunk(
                 chunk_id=row.chunk_id,
@@ -193,6 +182,40 @@ class HybridRetriever:
             )
             for row in fts_rows
         ]
+
+    async def keyword_search(
+        self,
+        query: str,
+        document_ids: list[str] | None,
+        k: int,
+    ) -> list[ScoredChunk]:
+        """BM25 search via SQLite FTS5, precision-first with OR backfill.
+
+        FTS5 treats space-separated terms as an implicit AND (every term must be
+        in one chunk), which is precise but returns nothing for a full-sentence
+        query. So we run the AND form first for precision; if it under-fills k, an
+        OR pass (match any term, BM25-ranked) backfills the remaining slots while
+        keeping the exact AND hits ranked on top.
+        """
+        safe_query = _sanitize_fts_query(query)
+        if not safe_query:
+            logger.debug("keyword_search: query sanitized to empty string, skipping FTS")
+            return []
+        terms = safe_query.split()
+        async with get_session_factory()() as session:
+            rows = await self._fts_match(session, safe_query, document_ids, k)
+            if len(rows) < k and len(terms) > 1:
+                or_rows = await self._fts_match(
+                    session, " OR ".join(terms), document_ids, k
+                )
+                seen = {r.chunk_id for r in rows}
+                for r in or_rows:
+                    if r.chunk_id not in seen:
+                        rows.append(r)
+                        seen.add(r.chunk_id)
+                        if len(rows) >= k:
+                            break
+        return rows[:k]
 
     def rrf_merge(
         self,
@@ -439,11 +462,19 @@ class HybridRetriever:
         try:
 
             chunks = await self.retrieve(query, document_ids, k)
+            # An image reference must come from a document that actually
+            # contributed to the answer. For a library-wide query (document_ids
+            # is None) an unscoped image search matches the whole corpus and can
+            # attach an unrelated document's image — e.g. a tech diagram on an
+            # Odyssey answer. Scope image search to the retrieved chunks' docs.
+            answer_doc_ids = list({c.document_id for c in chunks if c.document_id})
+            if not answer_doc_ids:
+                return chunks, []
             query_vector = _embedder_module.get_embedding_service().encode([query])[0]
             image_ids_vec = self._image_vector_search(
-                query_vector, document_ids, k=5, threshold=0.5
+                query_vector, answer_doc_ids, k=5, threshold=0.5
             )
-            image_ids_fts = await self._image_keyword_search(query, document_ids, k=5)
+            image_ids_fts = await self._image_keyword_search(query, answer_doc_ids, k=5)
 
             seen: set[str] = set()
             image_ids: list[str] = []

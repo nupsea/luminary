@@ -221,12 +221,14 @@ class LLMService:
         background: bool = False,
         temperature: float | None = None,
         timeout: float | None = None,
+        num_ctx: int | None = None,
     ) -> AsyncGenerator[str]:
         """Stream content deltas for the given message list."""
         settings = get_settings()
         effective_model, override_key = self._resolve_model(model, background=background)
         kwargs = self._build_kwargs(
-            effective_model, messages, settings, override_key=override_key, timeout=timeout
+            effective_model, messages, settings,
+            override_key=override_key, timeout=timeout, num_ctx=num_ctx,
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -249,7 +251,7 @@ class LLMService:
         messages.append({"role": "user", "content": prompt})
         if stream:
             return await self.stream_messages(
-                messages, model=model, background=background, timeout=timeout
+                messages, model=model, background=background, timeout=timeout, num_ctx=num_ctx
             )
         return await self.complete(
             messages,

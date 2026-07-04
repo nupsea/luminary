@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.models import ChunkModel
-from app.services.dataset_generator_service import _quality_filter, target_count_for
+from app.services.dataset_generator_service import target_count_for
+from app.services.golden_quality import quality_filter
 
 
 def test_target_count_size_mapping_and_cap():
@@ -16,19 +16,14 @@ def test_target_count_size_mapping_and_cap():
 
 
 def test_quality_filter_requires_supported_hint_and_nontrivial_answer(monkeypatch):
-    chunk = ChunkModel(
-        id="chunk-1",
-        document_id="doc-1",
-        text="Photosynthesis converts light energy into chemical energy in plants.",
-        chunk_index=0,
-    )
+    source_text = "Photosynthesis converts light energy into chemical energy in plants."
 
     monkeypatch.setattr(
-        "app.services.dataset_generator_service._dedupe_by_embedding",
+        "app.services.golden_quality.dedupe_by_embedding",
         lambda candidates: candidates,
     )
 
-    accepted = _quality_filter(
+    accepted = quality_filter(
         [
             {
                 "question": "What does photosynthesis convert?",
@@ -46,7 +41,7 @@ def test_quality_filter_requires_supported_hint_and_nontrivial_answer(monkeypatc
                 "context_hint": "light energy",
             },
         ],
-        chunk,
+        source_text,
     )
 
     assert accepted == [
