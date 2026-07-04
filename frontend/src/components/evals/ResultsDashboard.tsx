@@ -213,6 +213,12 @@ function isRerank(r: EvalRunFull): boolean {
   return r.extra_metrics?.rerank === true
 }
 
+// ndcg_10 rides in extra_metrics (no dedicated DB column).
+function ndcgOf(r: EvalRunFull): number | null {
+  const v = r.extra_metrics?.ndcg_10
+  return typeof v === "number" ? v : null
+}
+
 function MetricCard({
   label,
   value,
@@ -271,6 +277,7 @@ function latestShippedMeasurement(allRuns: EvalRunFull[]) {
     run_at: string
     hit_rate_5: number | null
     mrr: number | null
+    ndcg_10: number | null
     config: string
   }[] = []
   for (const r of allRuns) {
@@ -279,6 +286,7 @@ function latestShippedMeasurement(allRuns: EvalRunFull[]) {
         run_at: r.run_at,
         hit_rate_5: r.hit_rate_5,
         mrr: r.mrr,
+        ndcg_10: ndcgOf(r),
         config: isRerank(r) ? "rerank on" : "rerank off",
       })
     } else if (r.eval_kind === "ablation") {
@@ -288,6 +296,7 @@ function latestShippedMeasurement(allRuns: EvalRunFull[]) {
           run_at: r.run_at,
           hit_rate_5: shipped.arm.hit_rate_5,
           mrr: shipped.arm.mrr,
+          ndcg_10: shipped.arm.ndcg_10 ?? null,
           config: `ablation · ${shipped.label}`,
         })
       }
@@ -333,6 +342,7 @@ function AblationSection({ run }: { run: EvalRunFull }) {
             <th className="py-1.5 font-medium">Strategy</th>
             <th className="py-1.5 text-right font-medium">HR@5</th>
             <th className="py-1.5 text-right font-medium">MRR</th>
+            <th className="py-1.5 text-right font-medium">nDCG@10</th>
           </tr>
         </thead>
         <tbody>
@@ -347,6 +357,7 @@ function AblationSection({ run }: { run: EvalRunFull }) {
               <td className="py-2">{s === "rrf+rerank" ? "rrf + rerank (shipped)" : s}</td>
               <td className="py-2 text-right tabular-nums">{pct(m[s].hit_rate_5)}</td>
               <td className="py-2 text-right tabular-nums">{pct(m[s].mrr)}</td>
+              <td className="py-2 text-right tabular-nums">{pct(m[s].ndcg_10)}</td>
             </tr>
           ))}
         </tbody>
@@ -359,6 +370,9 @@ function AblationSection({ run }: { run: EvalRunFull }) {
           </span>
           <span className="inline-flex items-center gap-1">
             MRR <Delta base={rrf.mrr} next={rrfrr.mrr} />
+          </span>
+          <span className="inline-flex items-center gap-1">
+            nDCG@10 <Delta base={rrf.ndcg_10 ?? null} next={rrfrr.ndcg_10 ?? null} />
           </span>
         </div>
       )}
@@ -444,7 +458,7 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
 
       {/* Metric cards */}
       {headline && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="HR@5"
             value={headline.hit_rate_5}
@@ -457,6 +471,13 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
             value={headline.mrr}
             threshold={THRESHOLDS.mrr}
             hint="rank of first hit"
+            sub={`${headline.config} · ${timeAgo(headline.run_at)}`}
+          />
+          <MetricCard
+            label="nDCG@10"
+            value={headline.ndcg_10}
+            threshold={THRESHOLDS.ndcg_10}
+            hint="graded ranking · report-only bar"
             sub={`${headline.config} · ${timeAgo(headline.run_at)}`}
           />
           <MetricCard
@@ -497,12 +518,20 @@ export function ResultsDashboard({ dataset }: { dataset: string }) {
                   <Delta base={baseline.hit_rate_5} next={reranked.hit_rate_5} />
                 </td>
               </tr>
-              <tr>
+              <tr className="border-b last:border-0">
                 <td className="py-2">MRR</td>
                 <td className="py-2 text-right tabular-nums">{pct(baseline.mrr)}</td>
                 <td className="py-2 text-right tabular-nums">{pct(reranked.mrr)}</td>
                 <td className="py-2 text-right">
                   <Delta base={baseline.mrr} next={reranked.mrr} />
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2">nDCG@10</td>
+                <td className="py-2 text-right tabular-nums">{pct(ndcgOf(baseline))}</td>
+                <td className="py-2 text-right tabular-nums">{pct(ndcgOf(reranked))}</td>
+                <td className="py-2 text-right">
+                  <Delta base={ndcgOf(baseline)} next={ndcgOf(reranked)} />
                 </td>
               </tr>
             </tbody>

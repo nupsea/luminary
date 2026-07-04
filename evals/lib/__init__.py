@@ -21,11 +21,13 @@ from evals.lib.intent_metrics import (
     compute_routing_accuracy,
     normalize_route,
 )
-from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr
+from evals.lib.golden_relevance import find_graded_relevance
+from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr, compute_ndcg_10
 from evals.lib.runners import ClassifierEval, GenerationEval, RetrievalEval
 from evals.lib.schemas import (
     FlashcardGoldenEntry,
     GoldenEntry,
+    GradedHint,
     IntentGoldenEntry,
     RetrievalGoldenEntry,
     SummaryGoldenEntry,
@@ -44,6 +46,7 @@ __all__ = [
     "FlashcardGoldenEntry",
     "GenerationEval",
     "GoldenEntry",
+    "GradedHint",
     "IntentGoldenEntry",
     "RetrievalEval",
     "RetrievalGoldenEntry",
@@ -57,7 +60,9 @@ __all__ = [
     "compute_routing_accuracy",
     "compute_hit_rate_5",
     "compute_mrr",
+    "compute_ndcg_10",
     "compute_conciseness_pct",
+    "find_graded_relevance",
     "compute_no_hallucination",
     "compute_theme_coverage",
     "judge_citation",

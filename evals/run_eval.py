@@ -60,6 +60,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     _norm,
     compute_hit_rate_5,
     compute_mrr,
+    compute_ndcg_10,
 )
 from evals.lib.runners import GenerationEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -90,10 +91,15 @@ VALID_DATASETS = [
 # silently drops answers and understates generation metrics.
 QA_REQUEST_TIMEOUT = 300.0
 
-# Quality gate thresholds
+# Quality gate thresholds. ndcg_10 is provisional / report-only: it is shown
+# against this bar in the UI but never asserted, because most goldens still
+# carry single-passage relevance (nDCG degrades to a log-discounted single-hit
+# metric there). Promote it to an asserted gate once graded goldens exist and
+# baselines are recorded.
 THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
+    "ndcg_10": 0.40,
     "faithfulness": 0.65,
     "answer_relevance": 0.50,
     "citation_support_rate": 0.80,
@@ -167,7 +173,11 @@ def search_chunks(
     rerank: bool = False,
     strategy: str = "rrf",
 ) -> list[str]:
-    """Run GET /search and return up to top-5 chunk texts."""
+    """Run GET /search and return up to top-10 chunk texts.
+
+    HR@5 and MRR@5 cap their own depth at 5; the extra tail exists for
+    nDCG@10.
+    """
     params: dict[str, str] = {"q": question}
     if document_id:
         params["document_id"] = document_id
@@ -194,7 +204,7 @@ def search_chunks(
             if document_id and group.get("document_id") != document_id:
                 continue
             all_matches.extend(group.get("matches", []))
-        return [m.get("text", "") for m in all_matches[:5]]
+        return [m.get("text", "") for m in all_matches[:10]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
@@ -253,12 +263,13 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     print(f"\n{'=' * 56}")
     print(f"  Retrieval ablation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
-    print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10}")
+    print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10} {'NDCG@10':>10}")
     for strategy, metrics in ablation_metrics.items():
         print(
             f"  {strategy:<12} "
             f"{metrics.get('hit_rate_5', 0.0):>10.4f} "
-            f"{metrics.get('mrr', 0.0):>10.4f}"
+            f"{metrics.get('mrr', 0.0):>10.4f} "
+            f"{metrics.get('ndcg_10', 0.0):>10.4f}"
         )
     print(f"{'=' * 56}\n")
 
@@ -277,6 +288,7 @@ __all__ = [
     "append_history",
     "compute_hit_rate_5",
     "compute_mrr",
+    "compute_ndcg_10",
     "ensure_ingested",
     "ingest_document",
     "is_document_alive",
@@ -504,11 +516,13 @@ def main() -> None:
                         "contexts": chunks or [""],
                         "ground_truths": [ground_truth],
                         "context_hint": context_hint,
+                        "relevance": row.get("relevance") or [],
                     }
                 )
             ablation_metrics[label] = {
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
+                "ndcg_10": compute_ndcg_10(samples),
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
@@ -554,9 +568,11 @@ def main() -> None:
         answer = ""
         qa_resp: dict = {}
         # Judged contexts include the chunks /qa actually cited; retrieval
-        # metrics stay on the raw top-5 search result so HR@5 and MRR measure
-        # the same thing in every eval kind.
-        ragas_contexts = list(chunks)
+        # metrics stay on the raw search result so HR@5 and MRR measure the
+        # same thing in every eval kind. The judge keeps seeing top-5 — the
+        # 6-10 tail exists only for nDCG@10, and doubling judge input would
+        # change generation scores and cost for no judging benefit.
+        ragas_contexts = list(chunks[:5])
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
@@ -579,6 +595,7 @@ def main() -> None:
             "ragas_contexts": ragas_contexts or [""],
             "ground_truths": [ground_truth],
             "context_hint": context_hint,
+            "relevance": row.get("relevance") or [],
             "qa_response": qa_resp,
             "qa_not_found": not_found,
         }
@@ -595,6 +612,7 @@ def main() -> None:
 
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
+    ndcg10 = compute_ndcg_10(samples)
 
     # An empty answer is either a decline (not_found — a real product outcome)
     # or a genuine failure (timeout/error). Count them apart so the UI never
@@ -664,6 +682,7 @@ def main() -> None:
     metrics = {
         "hit_rate_5": hr5,
         "mrr": mrr,
+        "ndcg_10": ndcg10,
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,

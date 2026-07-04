@@ -24,10 +24,16 @@ from pathlib import Path
 import pytest
 
 # Import from evals/run_eval.py -- it lives outside the backend package tree,
-# so we resolve the path at import time.
+# so we resolve the path at import time. The repo root makes the evals.lib
+# package importable before run_eval (which would otherwise add it) loads.
 _EVALS_DIR = Path(__file__).resolve().parent.parent.parent / "evals"
 sys.path.insert(0, str(_EVALS_DIR))
+_REPO_ROOT = _EVALS_DIR.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
+from evals.lib.golden_relevance import find_graded_relevance  # noqa: E402
+from evals.lib.schemas import GradedHint, RetrievalGoldenEntry  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from run_eval import (  # noqa: E402
     DATASET_THRESHOLDS,
@@ -36,6 +42,7 @@ from run_eval import (  # noqa: E402
     GoldenEntry,
     compute_hit_rate_5,
     compute_mrr,
+    compute_ndcg_10,
     thresholds_for_dataset,
 )
 
@@ -349,3 +356,195 @@ def test_existing_string_hints_remain_compatible_after_load():
     assert compute_hit_rate_5(samples_list) == pytest.approx(1.0)
     assert compute_mrr(samples_str) == pytest.approx(1.0)
     assert compute_mrr(samples_list) == pytest.approx(1.0)
+
+
+# nDCG@10 metric
+
+
+def _graded_sample(relevance: list[dict], chunks: list[str]) -> dict:
+    return {
+        "question": "q1",
+        "context_hint": "",
+        "relevance": relevance,
+        "contexts": chunks,
+        "ground_truths": ["GT"],
+    }
+
+
+def test_ndcg_threshold_is_configured_but_report_only():
+    assert THRESHOLDS["ndcg_10"] == pytest.approx(0.40)
+
+
+def test_ndcg_single_hint_rank1_is_perfect():
+    samples = [_sample("q", "the needle", ["chunk with the needle", "other"])]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_ndcg_single_hint_rank2_is_log_discounted():
+    samples = [_sample("q", "the needle", ["other", "chunk with the needle"])]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0 / 1.5849625, rel=1e-6)
+
+
+def test_ndcg_sees_ranks_6_to_10_that_mrr_and_hr5_do_not():
+    chunks = ["miss"] * 6 + ["chunk with the needle"]
+    samples = [_sample("q", "the needle", chunks)]
+    assert compute_hit_rate_5(samples) == pytest.approx(0.0)
+    assert compute_mrr(samples) == pytest.approx(0.0)
+    assert compute_ndcg_10(samples) == pytest.approx(1.0 / 3.0, rel=1e-6)
+
+
+def test_ndcg_graded_perfect_order():
+    relevance = [
+        {"hint": ["primary passage"], "grade": 2},
+        {"hint": ["secondary passage"], "grade": 1},
+    ]
+    samples = [
+        _graded_sample(relevance, ["has primary passage", "has secondary passage", "junk"])
+    ]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_ndcg_graded_inverted_order_penalised():
+    relevance = [
+        {"hint": ["primary passage"], "grade": 2},
+        {"hint": ["secondary passage"], "grade": 1},
+    ]
+    samples = [
+        _graded_sample(relevance, ["has secondary passage", "has primary passage", "junk"])
+    ]
+    dcg = 1.0 / 1.0 + 2.0 / 1.5849625
+    idcg = 2.0 / 1.0 + 1.0 / 1.5849625
+    assert compute_ndcg_10(samples) == pytest.approx(dcg / idcg, rel=1e-6)
+
+
+def test_ndcg_passage_credited_only_once():
+    """The same golden passage appearing in two retrieved chunks scores once."""
+    samples = [
+        _graded_sample(
+            [{"hint": ["the needle"], "grade": 1}],
+            ["chunk with the needle", "another chunk with the needle"],
+        )
+    ]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_ndcg_chunk_matching_two_passages_claims_highest_grade():
+    """A chunk containing both passages claims the grade-2 one; the grade-1
+    passage stays claimable by a later chunk."""
+    relevance = [
+        {"hint": ["alpha passage"], "grade": 1},
+        {"hint": ["beta passage"], "grade": 2},
+    ]
+    samples = [
+        _graded_sample(
+            relevance,
+            ["has alpha passage and beta passage", "has alpha passage again"],
+        )
+    ]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_ndcg_hint_alternates_within_item():
+    samples = [
+        _graded_sample(
+            [{"hint": ["missing form", "present form"], "grade": 1}],
+            ["chunk with present form"],
+        )
+    ]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_ndcg_no_hints_scores_zero():
+    samples = [{"question": "q", "contexts": ["chunk"], "ground_truths": [""]}]
+    assert compute_ndcg_10(samples) == pytest.approx(0.0)
+
+
+def test_ndcg_empty_samples():
+    assert compute_ndcg_10([]) == pytest.approx(0.0)
+
+
+def test_ndcg_malformed_relevance_falls_back_to_context_hint():
+    samples = [
+        {
+            "question": "q",
+            "context_hint": "the needle",
+            "relevance": ["not-a-dict", {"grade": 2}, {"hint": 42, "grade": 1}],
+            "contexts": ["chunk with the needle"],
+            "ground_truths": ["GT"],
+        }
+    ]
+    assert compute_ndcg_10(samples) == pytest.approx(1.0)
+
+
+def test_mrr_depth_pinned_at_5():
+    """MRR@5 ignores hits at rank 6+ even though contexts now carry 10 chunks."""
+    chunks = ["miss"] * 5 + ["chunk with the needle"]
+    samples = [_sample("q", "the needle", chunks)]
+    assert compute_mrr(samples) == pytest.approx(0.0)
+
+
+# Graded relevance schema
+
+
+def test_graded_hint_coerces_string():
+    gh = GradedHint(hint="a passage")
+    assert gh.hint == ["a passage"]
+    assert gh.grade == 1
+
+
+def test_graded_hint_rejects_blank_and_bad_grade():
+    with pytest.raises(ValidationError):
+        GradedHint(hint="  ")
+    with pytest.raises(ValidationError):
+        GradedHint(hint="ok", grade=0)
+    with pytest.raises(ValidationError):
+        GradedHint(hint="ok", grade=4)
+
+
+def test_retrieval_golden_entry_relevance_roundtrip():
+    entry = RetrievalGoldenEntry(
+        question="q",
+        ground_truth_answer="a",
+        context_hint="primary",
+        relevance=[{"hint": "primary", "grade": 2}, {"hint": ["alt a", "alt b"]}],
+    )
+    dumped = entry.model_dump()
+    assert dumped["relevance"] == [
+        {"hint": ["primary"], "grade": 2},
+        {"hint": ["alt a", "alt b"], "grade": 1},
+    ]
+
+
+def test_retrieval_golden_entry_relevance_optional():
+    entry = RetrievalGoldenEntry(question="q", ground_truth_answer="a", context_hint="h")
+    assert entry.relevance == []
+
+
+# find_graded_relevance (golden generation)
+
+
+def test_find_graded_relevance_primary_only_for_short_answer():
+    items = find_graded_relevance("the hint", "Weena", "own chunk", ["Weena appears here"])
+    assert items == [{"hint": ["the hint"], "grade": 2}]
+
+
+def test_find_graded_relevance_discovers_secondary_passages():
+    answer = "the sphinx guards the white door"
+    own = "own chunk where the sphinx guards the white door originally"
+    other = "elsewhere it is said that The Sphinx   guards the white door of the palace"
+    items = find_graded_relevance("the hint", answer, own, [own, other, "irrelevant"])
+    assert items[0] == {"hint": ["the hint"], "grade": 2}
+    assert len(items) == 2
+    assert items[1]["grade"] == 1
+    assert "guards the white door" in items[1]["hint"][0].lower()
+    assert items[1]["hint"][0] in other
+
+
+def test_find_graded_relevance_caps_and_dedupes_secondary():
+    answer = "the sphinx guards the white door"
+    passage = f"repeated text where {answer} appears"
+    chunks = [passage, passage, f"variant one {answer} tail", f"variant two {answer} tail"]
+    items = find_graded_relevance("the hint", answer, "own chunk", chunks, max_secondary=2)
+    assert len(items) == 3
+    secondary = [i["hint"][0] for i in items[1:]]
+    assert len(set(secondary)) == 2

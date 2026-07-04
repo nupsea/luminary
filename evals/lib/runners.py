@@ -84,16 +84,21 @@ class _BaseEval(ABC):
 
 
 class RetrievalEval(_BaseEval):
-    """Retrieval quality eval: HR@5 and MRR over /search results."""
+    """Retrieval quality eval: HR@5, MRR@5 and nDCG@10 over /search results."""
 
     eval_kind = "retrieval"
 
     def run(self, samples: list[dict], **kwargs) -> dict:
-        from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr  # noqa: PLC0415
+        from evals.lib.retrieval_metrics import (  # noqa: PLC0415
+            compute_hit_rate_5,
+            compute_mrr,
+            compute_ndcg_10,
+        )
 
         return {
             "hit_rate_5": compute_hit_rate_5(samples),
             "mrr": compute_mrr(samples),
+            "ndcg_10": compute_ndcg_10(samples),
         }
 
 

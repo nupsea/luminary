@@ -60,6 +60,7 @@ export interface DocumentOption {
 export interface AblationArm {
   hit_rate_5: number | null
   mrr: number | null
+  ndcg_10?: number | null
 }
 
 export interface EvalRunFull {

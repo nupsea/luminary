@@ -47,6 +47,7 @@ from app.services.golden_quality import (  # noqa: E402
     is_structural_chunk,
     quality_filter,
 )
+from evals.lib.golden_relevance import find_graded_relevance  # noqa: E402
 from evals.lib.golden_verify import (  # noqa: E402
     build_verify_prompt,
     cross_verify,
@@ -244,6 +245,12 @@ def main() -> None:
                 "question": item["question"],
                 "ground_truth_answer": item["ground_truth_answer"],
                 "context_hint": item["context_hint"],
+                "relevance": find_graded_relevance(
+                    item["context_hint"],
+                    item["ground_truth_answer"],
+                    item["_chunk"],
+                    chunks,
+                ),
                 "persona": item.get("_persona"),
                 "source_file": source_label,
                 "document_id": "TBD",

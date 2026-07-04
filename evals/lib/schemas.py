@@ -3,7 +3,33 @@
 GoldenEntry is the base; family subclasses add eval-kind-specific required fields.
 """
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+
+class GradedHint(BaseModel):
+    """One distinct relevant passage: hint alternates + a relevance grade.
+
+    Grades are small positive ints (convention: 2 = the passage the answer was
+    authored from, 1 = another passage that also states the answer). nDCG@10
+    normalises per-question, so the scale only needs to be ordinal.
+    """
+
+    hint: list[str] = Field(min_length=1)
+    grade: int = Field(default=1, ge=1, le=3)
+
+    @field_validator("hint", mode="before")
+    @classmethod
+    def _coerce_hint(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            if not v.strip():
+                raise ValueError("hint must not be blank")
+            return [v]
+        if isinstance(v, list):
+            for item in v:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError("hint list elements must be non-blank str")
+            return v
+        raise ValueError(f"hint must be str or list[str], got {type(v).__name__}")
 
 
 class GoldenEntry(BaseModel):
@@ -18,9 +44,14 @@ class GoldenEntry(BaseModel):
 
 
 class RetrievalGoldenEntry(GoldenEntry):
-    """Retrieval golden -- context_hint accepts str or list[str] (S226)."""
+    """Retrieval golden -- context_hint accepts str or list[str] (S226).
+
+    ``relevance`` (optional) lists distinct graded passages for nDCG@10;
+    ``context_hint`` stays the single-passage field HR@5/MRR match against.
+    """
 
     context_hint: list[str] = []
+    relevance: list[GradedHint] = []
 
     @field_validator("context_hint", mode="before")
     @classmethod
