@@ -336,14 +336,78 @@ async def test_unknown_format_key_loaded_with_warning(test_db, caplog):
     assert any("unexpected DB format" in r.message for r in caplog.records)
 
 
-async def test_cloud_mode_raises_when_no_key(test_db):
-    """get_effective_routing raises ValueError when cloud mode + missing key."""
+async def test_cloud_mode_raises_when_no_key(test_db, monkeypatch):
+    """get_effective_routing raises ValueError only when neither the keychain nor
+    the .env key is present."""
+    from types import SimpleNamespace
+
+    import app.config as config_module
+
+    monkeypatch.setattr(
+        config_module,
+        "get_settings",
+        lambda: SimpleNamespace(OPENAI_API_KEY="", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""),
+    )
     svc_module._cache.update(
         {"llm_mode": "cloud", "cloud_provider": "openai", "openai_api_key": ""}
     )
 
     with pytest.raises(ValueError, match="key not configured"):
         get_effective_routing()
+
+
+async def test_cloud_mode_falls_back_to_env_key(test_db, monkeypatch):
+    """When the app keychain has no key, the .env key is used — so mode-based
+    'Auto' chat behaves consistently with explicit overrides and evals."""
+    from types import SimpleNamespace
+
+    import app.config as config_module
+
+    monkeypatch.setattr(
+        config_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            OPENAI_API_KEY="sk-env-fallback", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""
+        ),
+    )
+    svc_module._cache.update(
+        {
+            "llm_mode": "cloud",
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-5.1",
+            "openai_api_key": "",  # keychain empty
+        }
+    )
+
+    model_str, api_key = get_effective_routing()
+    assert model_str == "openai/gpt-5.1"
+    assert api_key == "sk-env-fallback"
+
+
+async def test_keychain_key_preferred_over_env(test_db, monkeypatch):
+    """A key set in the app (keychain) takes precedence over the .env key."""
+    from types import SimpleNamespace
+
+    import app.config as config_module
+
+    monkeypatch.setattr(
+        config_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            OPENAI_API_KEY="sk-env", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""
+        ),
+    )
+    svc_module._cache.update(
+        {
+            "llm_mode": "cloud",
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-4o",
+            "openai_api_key": "sk-keychain",
+        }
+    )
+
+    _model_str, api_key = get_effective_routing()
+    assert api_key == "sk-keychain"
 
 
 async def test_cloud_mode_returns_raw_key(test_db):
