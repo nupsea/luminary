@@ -226,6 +226,23 @@ def _salvage_truncated_answer(json_text: str) -> str:
     return "".join(out).strip()
 
 
+# A bare heading the model sometimes writes just before its citation JSON
+# (optionally markdown-bold/italic): "**Citations:**", "Sources:", "References".
+_CITATION_HEADING_RE = re.compile(
+    r"^[*_\s>#-]*(citations?|sources?|references?)\s*:?\s*[*_\s]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_citation(c: dict) -> bool:
+    """True when a citation is just the prompt's format example echoed back
+    (empty or "..." title AND excerpt) — no real reference content."""
+    def _blank(v: object) -> bool:
+        return not str(v or "").strip().strip(".").strip()
+
+    return _blank(c.get("document_title")) and _blank(c.get("excerpt"))
+
+
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the LLM response.
 
@@ -269,11 +286,22 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
                 pass
 
     citations: list[dict] = [c for c in parsed.get("citations", []) if isinstance(c, dict)]
+    # Drop placeholder citations: small models often echo the prompt's format
+    # example verbatim ({"document_title":"...","excerpt":"...","page":0}) instead
+    # of filling it in. Such a citation carries no information and would render as
+    # a useless "... · p.0" chip. The grounded source_citations (from retrieved
+    # chunks) are the trustworthy reference list.
+    citations = [c for c in citations if not _is_placeholder_citation(c)]
 
     def _strip_json_preamble(text: str) -> str:
-        """Remove trailing lines that are JSON label preambles, not answer content."""
+        """Remove trailing lines that are label preambles, not answer content:
+        a JSON hint ("JSON:", "Here is the JSON:") or a heading the model wrote
+        before its citation block ("**Citations:**", "Sources:", "References:")."""
         lines = text.split("\n")
-        while lines and re.search(r"\bjson\b", lines[-1], re.IGNORECASE):
+        while lines and (
+            re.search(r"\bjson\b", lines[-1], re.IGNORECASE)
+            or _CITATION_HEADING_RE.match(lines[-1])
+        ):
             lines.pop()
         return "\n".join(lines).strip()
 

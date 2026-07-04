@@ -207,6 +207,37 @@ def test_split_response_salvage_unescapes_json_string():
     assert answer == 'Line one.\nHe said "deep" learning.'
 
 
+def test_split_response_strips_leaked_citations_heading():
+    """A markdown 'Citations:' heading the model writes before its JSON must not
+    leak into the answer body."""
+    prose = "Odysseus is inferred to hold authority in Ithaca."
+    full_text = (
+        prose + "\n\n**Citations:**\n"
+        + json.dumps({"citations": [], "confidence": "low"})
+    )
+    answer, _, _ = _split_response(full_text)
+    assert answer == prose
+    assert "Citations" not in answer
+
+
+def test_split_response_drops_placeholder_citations():
+    """Placeholder citations (prompt format example echoed verbatim) are dropped
+    so they never render as a '... · p.0' chip; real ones survive."""
+    full_text = "An answer." + json.dumps(
+        {
+            "citations": [
+                {"document_title": "...", "section_heading": "...", "page": 0, "excerpt": "..."},
+                {"document_title": "the_odyssey", "page": 4, "excerpt": "Ithaca is fertile."},
+            ],
+            "confidence": "medium",
+        }
+    )
+    answer, citations, _ = _split_response(full_text)
+    assert answer == "An answer."
+    assert len(citations) == 1
+    assert citations[0]["document_title"] == "the_odyssey"
+
+
 def test_split_response_truncated_style_a_keeps_prose_with_medium_confidence():
     prose = (
         "Machine learning covers the broad family of data-driven algorithms, whereas deep "
