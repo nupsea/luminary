@@ -25,7 +25,7 @@ def _chunk(doc_id: str) -> ScoredChunk:
 async def test_image_search_scoped_to_answer_documents(monkeypatch):
     r = HybridRetriever()
 
-    async def fake_retrieve(query, document_ids, k):
+    async def fake_retrieve(query, document_ids, k, *, rerank=False):
         # A corpus-wide query (document_ids=None) whose chunks all come from odyssey.
         return [_chunk("odyssey"), _chunk("odyssey")]
 
@@ -63,7 +63,7 @@ async def test_no_images_when_no_chunks(monkeypatch):
     back to a corpus-wide search)."""
     r = HybridRetriever()
 
-    async def fake_retrieve(query, document_ids, k):
+    async def fake_retrieve(query, document_ids, k, *, rerank=False):
         return []
 
     called = {"vec": False, "fts": False}

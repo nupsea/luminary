@@ -452,6 +452,8 @@ class HybridRetriever:
         query: str,
         document_ids: list[str] | None,
         k: int,
+        *,
+        rerank: bool = False,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -461,7 +463,7 @@ class HybridRetriever:
         """
         try:
 
-            chunks = await self.retrieve(query, document_ids, k)
+            chunks = await self.retrieve(query, document_ids, k, rerank=rerank)
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
             # is None) an unscoped image search matches the whole corpus and can
@@ -486,7 +488,7 @@ class HybridRetriever:
             return chunks, image_ids
         except Exception as exc:
             logger.warning("retrieve_with_images: falling back to retrieve() only: %s", exc)
-            chunks = await self.retrieve(query, document_ids, k)
+            chunks = await self.retrieve(query, document_ids, k, rerank=rerank)
             return chunks, []
 
 

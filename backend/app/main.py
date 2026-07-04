@@ -228,6 +228,23 @@ async def lifespan(app: FastAPI):
                 except Exception as exc:
                     logger.warning("Warmup: failed to pre-load GLiNER model: %s", exc)
 
+            async def load_reranker():
+                # Pre-load the cross-encoder so the first chat question doesn't
+                # pay the model-load stall now that L3 rerank runs in the chat
+                # path. Skipped when the user has toggled reranking off.
+                try:
+                    from app.database import get_session_factory
+                    from app.services.settings_service import get_rerank_enabled
+                    async with get_session_factory()() as session:
+                        if not await get_rerank_enabled(session):
+                            return
+                    logger.info("Warmup: pre-loading cross-encoder reranker in the background...")
+                    from app.services.retriever_strategies import _get_reranker
+                    await loop.run_in_executor(None, _get_reranker()._load)
+                    logger.info("Warmup: cross-encoder reranker pre-loaded.")
+                except Exception as exc:
+                    logger.warning("Warmup: failed to pre-load reranker: %s", exc)
+
             async def load_llm():
                 # Fire a tiny generation so the first user query doesn't pay the
                 # cold-start cost: for Ollama this loads the model into memory,
@@ -262,7 +279,7 @@ async def lifespan(app: FastAPI):
                 if bg and bg != fg:
                     await _warm_one(bg, "background")
 
-            await asyncio.gather(load_embedder(), load_ner(), load_llm())
+            await asyncio.gather(load_embedder(), load_ner(), load_reranker(), load_llm())
 
         asyncio.create_task(warmup_models())
 

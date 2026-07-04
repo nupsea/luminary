@@ -257,6 +257,33 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db):
     assert mock_chunk.text in augmented_text
 
 
+# (d2) search_node honours the DB-backed L3 rerank toggle
+
+
+@pytest.mark.asyncio
+async def test_search_node_passes_rerank_toggle(test_db):
+    """rerank defaults ON (no settings row) and follows the toggle when set."""
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
+
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
+        await search_node(_make_state(doc_ids=[doc_id], scope="single"))
+        assert mock_retriever.retrieve_with_images.call_args.kwargs["rerank"] is True
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        await search_node(_make_state(doc_ids=[doc_id], scope="single"))
+        assert mock_retriever.retrieve_with_images.call_args.kwargs["rerank"] is False
+
+
 # (e) test_comparative_node_interleaves_results
 
 

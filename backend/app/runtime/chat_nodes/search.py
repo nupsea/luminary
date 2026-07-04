@@ -15,6 +15,7 @@ from app.database import get_session_factory
 from app.models import ChunkModel, SectionSummaryModel
 from app.services.context_packer import _cap_per_document
 from app.services.retriever import get_retriever
+from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -122,13 +123,25 @@ async def search_node(state: ChatState) -> dict:
     # For library-wide queries use a tighter k to avoid scattered context
     k = 6 if scope == "all" else 10
 
+    # L3 of the retrieval funnel: cross-encoder rerank of the RRF pool.
+    # DB-backed toggle so users on slow CPUs can opt out; the reranker itself
+    # fails soft to plain RRF order, and so does this read.
+    try:
+        async with get_session_factory()() as session:
+            rerank = await get_rerank_enabled(session)
+    except Exception as exc:
+        logger.warning("search_node: could not read rerank setting, defaulting off: %s", exc)
+        rerank = False
+
     chunks_dicts: list[dict] = []
     image_ids: list[str] = []
     try:
         t_ret = time.perf_counter()
         retriever = get_retriever()
         chunks: list[ScoredChunk]
-        chunks, image_ids = await retriever.retrieve_with_images(q, effective_doc_ids, k=k)
+        chunks, image_ids = await retriever.retrieve_with_images(
+            q, effective_doc_ids, k=k, rerank=rerank
+        )
         logger.info(
             "[perf] search_node retrieve_with_images took %.2fs (%d chunks)",
             time.perf_counter() - t_ret,
