@@ -146,6 +146,41 @@ async def test_relink_repairs_dataset(test_db):
     assert all(q.source_chunk_id == "" for q in rows)
 
 
+async def test_run_forwards_ablation_and_rerank(test_db, monkeypatch):
+    """The generated-dataset run endpoint supports the same options as the
+    file-golden console path (regression: ablation/rerank were file-only)."""
+    from unittest.mock import AsyncMock
+
+    import app.routers.evals as evals_router
+
+    dataset_id, live_doc_id = await _seed(test_db)
+    async with test_db() as session:
+        from sqlalchemy import update
+
+        await session.execute(
+            update(GoldenQuestionModel)
+            .where(GoldenQuestionModel.dataset_id == dataset_id)
+            .values(source_document_id=live_doc_id)
+        )
+        await session.commit()
+
+    launched = AsyncMock()
+    monkeypatch.setattr(evals_router, "_run_generated_eval_subprocess", launched)
+    async with _client() as client:
+        resp = await client.post(
+            f"/evals/datasets/{dataset_id}/run",
+            json={
+                "judge_model": "",
+                "max_questions": 10,
+                "rerank": True,
+                "ablation": True,
+            },
+        )
+    assert resp.status_code == 202
+    assert launched.call_args.kwargs["rerank"] is True
+    assert launched.call_args.kwargs["ablation"] is True
+
+
 async def test_relink_rejects_dead_target(test_db):
     dataset_id, _live = await _seed(test_db)
     async with _client() as client:

@@ -250,6 +250,8 @@ class GeneratedRunRequest(BaseModel):
     assert_thresholds: bool = False
     check_citations: bool = False
     max_questions: int | None = None
+    rerank: bool = False
+    ablation: bool = False
 
 
 class GeneratedRunResponse(BaseModel):
@@ -350,6 +352,8 @@ async def _run_generated_eval_subprocess(
     assert_thresholds: bool,
     check_citations: bool,
     max_questions: int | None,
+    rerank: bool = False,
+    ablation: bool = False,
 ) -> None:
     cmd = [
         "uv", "run", "python", "run_eval.py",
@@ -366,6 +370,10 @@ async def _run_generated_eval_subprocess(
         cmd.append("--check-citations")
     if max_questions is not None:
         cmd.extend(["--max-questions", str(max_questions)])
+    if rerank:
+        cmd.append("--rerank")
+    if ablation:
+        cmd.append("--ablation")
     logger.info("eval subprocess starting: dataset_id=%s cmd=%s", dataset_id, cmd)
     error: str | None = None
     try:
@@ -398,7 +406,13 @@ async def _run_generated_eval_subprocess(
             await _persist_failed_run(
                 dataset_id,
                 model_used=model or judge_model or "no-llm",
-                eval_kind="generation" if (model or judge_model) else "retrieval",
+                eval_kind=(
+                    "ablation"
+                    if ablation
+                    else "generation"
+                    if (model or judge_model)
+                    else "retrieval"
+                ),
                 error=error,
             )
 
@@ -961,6 +975,8 @@ async def run_generated_dataset_eval(
             req.assert_thresholds,
             req.check_citations,
             req.max_questions,
+            rerank=req.rerank,
+            ablation=req.ablation,
         )
     )
     return GeneratedRunResponse(status="started", run_id=run_id, dataset_id=dataset_id)

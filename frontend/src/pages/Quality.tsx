@@ -23,6 +23,7 @@ type AnyRun = EvalRunSummary | EvalRunFull
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { API_BASE } from "@/lib/config"
+import { errorFromResponse, toSelection, type DatasetSelection } from "@/components/evals/api"
 import { metricColor, THRESHOLDS } from "@/components/evals/thresholds"
 
 // ---------------------------------------------------------------------------
@@ -33,18 +34,6 @@ async function fetchDatasets(): Promise<GoldenDataset[]> {
   const res = await fetch(`${API_BASE}/evals/datasets`)
   if (!res.ok) throw new Error("Failed to fetch datasets")
   return res.json() as Promise<GoldenDataset[]>
-}
-
-// Surface the backend's `detail` (e.g. the dead-source-document 409 with its
-// re-link guidance) instead of a generic failure string.
-async function errorFromResponse(res: Response, fallback: string): Promise<Error> {
-  try {
-    const body = (await res.json()) as { detail?: unknown }
-    if (typeof body.detail === "string" && body.detail) return new Error(body.detail)
-  } catch {
-    // non-JSON body — fall through
-  }
-  return new Error(fallback)
 }
 
 async function fetchDataset(id: string): Promise<GoldenDatasetDetail> {
@@ -124,8 +113,9 @@ export default function Quality() {
   const [relinkTarget, setRelinkTarget] = useState<GoldenDataset | null>(null)
   // file-backed selection
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
-  // shared dataset selection for the run console + results dashboard
-  const [consoleDataset, setConsoleDataset] = useState("")
+  // shared dataset selection for the run console + results dashboard —
+  // covers generated (by id) and file (by name) datasets alike
+  const [consoleSel, setConsoleSel] = useState<DatasetSelection | null>(null)
   // eval in-flight tracking
   const [evalRunning, setEvalRunning] = useState(false)
   const [runningLabel, setRunningLabel] = useState<string | null>(null)
@@ -276,6 +266,8 @@ export default function Quality() {
       judge_model: string
       check_citations: boolean
       max_questions: number
+      rerank: boolean
+      ablation: boolean
     }) => {
       if (selectedFileName) {
         // File-backed: POST /evals/run. judge_model "" must stay "" — null
@@ -288,6 +280,8 @@ export default function Quality() {
             judge_model: payload.judge_model,
             check_citations: payload.check_citations,
             max_questions: payload.max_questions,
+            rerank: payload.rerank,
+            ablation: payload.ablation,
           }),
         })
         if (!res.ok) throw await errorFromResponse(res, "Failed to start eval run")
@@ -356,13 +350,15 @@ export default function Quality() {
     })
   }, [datasetsQuery.data])
 
-  // default the console/dashboard to the first evaluable dataset
+  // default the console/dashboard to the most recently active dataset
   useEffect(() => {
-    if (!consoleDataset) {
-      const first = (datasetsQuery.data ?? []).find((d) => d.source === "file")?.name
-      if (first) setConsoleDataset(first)
+    if (!consoleSel && allDatasets.length > 0) {
+      const first = allDatasets
+        .map((d) => toSelection(d))
+        .find((s): s is DatasetSelection => s !== null)
+      if (first) setConsoleSel(first)
     }
-  }, [datasetsQuery.data, consoleDataset])
+  }, [allDatasets, consoleSel])
 
   const isDetailOpen = Boolean(selectedId) || Boolean(selectedFileName)
   const detailSource = selectedFileName ? "file" : "db"
@@ -443,8 +439,8 @@ export default function Quality() {
       <div className="shrink-0 px-6 pt-4">
         <RunConsole
           datasets={datasetsQuery.data ?? []}
-          value={consoleDataset}
-          onChange={setConsoleDataset}
+          value={consoleSel}
+          onChange={setConsoleSel}
           running={evalRunning}
           runningLabel={runningLabel}
           onStarted={(label) => {
@@ -526,6 +522,9 @@ export default function Quality() {
                         <tr
                           key={dataset.id ?? dataset.name}
                           onClick={() => {
+                            // A row click drives everything: the detail sheet,
+                            // the run console, and the Results dashboard.
+                            setConsoleSel(toSelection(dataset))
                             if (dataset.source === "db") {
                               setSelectedFileName(null)
                               setSelectedId(dataset.id)
@@ -602,7 +601,7 @@ export default function Quality() {
           </>
         )}
 
-        {activeTab === "results" && <ResultsDashboard dataset={consoleDataset} />}
+        {activeTab === "results" && <ResultsDashboard selection={consoleSel} />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
       </main>
 
