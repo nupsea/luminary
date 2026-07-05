@@ -158,6 +158,9 @@ class EvalRunRequest(BaseModel):
 class EvalRunListItem(BaseModel):
     id: str
     dataset_name: str
+    # Human-readable name: generated-dataset runs store the dataset ID in
+    # dataset_name (it is the eval key); the label resolves it for display.
+    dataset_label: str | None = None
     run_at: str
     hit_rate_5: float | None
     mrr: float | None
@@ -469,7 +472,19 @@ async def _missing_document_ids(db: AsyncSession, doc_ids: set[str]) -> set[str]
 
 
 async def _dataset_missing_document_ids(db: AsyncSession, dataset_id: str) -> set[str]:
-    return await _missing_document_ids(db, await _question_document_ids(db, dataset_id))
+    # Single LEFT JOIN instead of two round-trips — this runs per dataset on
+    # the list endpoint, which the UI polls while a generation is in flight.
+    result = await db.execute(
+        select(GoldenQuestionModel.source_document_id)
+        .outerjoin(DocumentModel, DocumentModel.id == GoldenQuestionModel.source_document_id)
+        .where(
+            GoldenQuestionModel.dataset_id == dataset_id,
+            GoldenQuestionModel.included.is_(True),
+            DocumentModel.id.is_(None),
+        )
+        .distinct()
+    )
+    return {row[0] for row in result.fetchall() if row[0]}
 
 
 def _dataset_to_item(
@@ -550,10 +565,19 @@ async def get_eval_runs(
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     runs = result.scalars().all()
+    id_to_name: dict[str, str] = {}
+    if runs:
+        id_names_result = await db.execute(
+            select(GoldenDatasetModel.id, GoldenDatasetModel.name).where(
+                GoldenDatasetModel.id.in_({r.dataset_name for r in runs})
+            )
+        )
+        id_to_name = {row[0]: row[1] for row in id_names_result.fetchall()}
     return [
         EvalRunListItem(
             id=r.id,
             dataset_name=r.dataset_name,
+            dataset_label=id_to_name.get(r.dataset_name, r.dataset_name),
             run_at=_utc_iso(r.run_at) or "",
             hit_rate_5=r.hit_rate_5,
             mrr=r.mrr,

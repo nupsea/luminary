@@ -8,7 +8,7 @@ is reproducible and document-agnostic.
 
 import re
 
-from evals.lib.retrieval_metrics import _norm
+from evals.lib.retrieval_metrics import _hint_key, _norm
 
 # Answers shorter than this (normalised) are too generic to locate secondary
 # passages by text match — a one-word answer like "hedgehog" would mark every
@@ -45,7 +45,7 @@ def find_graded_relevance(
     if pattern is None:
         return items
     own_norm = _norm(own_chunk)
-    seen_norms = {_norm(context_hint)[:80]}
+    seen_norms = {_hint_key(context_hint)}
     for chunk in chunks:
         if len(items) - 1 >= max_secondary:
             break
@@ -55,7 +55,7 @@ def find_graded_relevance(
         if not m:
             continue
         snippet = chunk[m.start() : m.start() + _SNIPPET_CHARS].strip()
-        snippet_key = _norm(snippet)[:80]
+        snippet_key = _hint_key(snippet)
         if not snippet_key or snippet_key in seen_norms:
             continue
         seen_norms.add(snippet_key)

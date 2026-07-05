@@ -67,6 +67,7 @@ export interface AblationArm {
 export interface EvalRunFull {
   id: string
   dataset_name: string
+  dataset_label?: string | null
   run_at: string
   hit_rate_5: number | null
   mrr: number | null

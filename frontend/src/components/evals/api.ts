@@ -1,4 +1,28 @@
+import { apiGet } from "@/lib/apiClient"
 import type { GoldenDataset } from "./types"
+
+// Judge-model helpers shared by RunConsole and RunEvalDialog so the two run
+// surfaces can never disagree on which judges exist or count as external.
+export interface EvalModels {
+  local: string[]
+  frontier: string[]
+}
+
+export const fetchEvalModels = () => apiGet<EvalModels>("/evals/models")
+
+export function judgeOptionsFrom(
+  models: EvalModels | undefined,
+  noneLabel: string,
+): { value: string; label: string }[] {
+  return [
+    { value: "", label: noneLabel },
+    ...(models?.local ?? []).map((m) => ({ value: m, label: `Local: ${m}` })),
+    ...(models?.frontier ?? []).map((m) => ({ value: m, label: `Frontier: ${m}` })),
+  ]
+}
+
+export const isExternalJudge = (model: string): boolean =>
+  /^(openai|anthropic|gemini)\//.test(model)
 
 // One selection shape for the run console + results dashboard: file goldens
 // are keyed by name (run_eval --dataset), generated datasets by id

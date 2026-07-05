@@ -9,12 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { apiGet } from "@/lib/apiClient"
-
-// "" = no judge (retrieval-only). Live models are fetched so the dropdown only
-// offers judges that are actually pulled/configured — a hardcoded list drifts
-// from what Ollama has and produces "model not pulled" failures on Run.
-const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")
+import { fetchEvalModels, isExternalJudge, judgeOptionsFrom } from "./api"
 
 interface RunEvalDialogProps {
   open: boolean
@@ -32,21 +27,17 @@ interface RunEvalDialogProps {
 export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunEvalDialogProps) {
   const modelsQuery = useQuery({
     queryKey: ["eval-models"],
-    queryFn: fetchModels,
+    queryFn: fetchEvalModels,
     enabled: open,
     staleTime: 60_000,
   })
-  const judgeOptions = [
-    { value: "", label: "None — fast HR@5/MRR (no judge)" },
-    ...(modelsQuery.data?.local ?? []).map((m) => ({ value: m, label: `Local: ${m}` })),
-    ...(modelsQuery.data?.frontier ?? []).map((m) => ({ value: m, label: `Frontier: ${m}` })),
-  ]
+  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — fast HR@5/MRR (no judge)")
   const [mode, setMode] = useState<"single" | "ablation">("single")
   const [rerank, setRerank] = useState(false)
   const [judgeModel, setJudgeModel] = useState("")
   const [checkCitations, setCheckCitations] = useState(false)
   const [maxQuestions, setMaxQuestions] = useState(20)
-  const external = /^(openai|anthropic|gemini)\//.test(judgeModel)
+  const external = isExternalJudge(judgeModel)
   const ablation = mode === "ablation"
 
   return (

@@ -217,8 +217,10 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                 const view = rowView(run)
                 return (
                   <tr key={run.id} className="border-b last:border-0">
-                    {/* dataset names are plain slugs — stripMarkdown would eat their underscores */}
-                    <td className="py-2 pr-3">{run.dataset_name}</td>
+                    {/* dataset names are plain slugs — stripMarkdown would eat their underscores.
+                        Generated-dataset runs store the dataset id in dataset_name; the
+                        backend-resolved label keeps the table human-readable. */}
+                    <td className="py-2 pr-3">{run.dataset_label ?? run.dataset_name}</td>
                     <td className="py-2 pr-3 text-muted-foreground">
                       {run.status === "failed" ? (
                         <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">

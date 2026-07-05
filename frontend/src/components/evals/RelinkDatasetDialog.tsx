@@ -1,5 +1,13 @@
 import { useState } from "react"
 import { AlertTriangle } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import type { DocumentOption, GoldenDataset } from "./types"
 
 interface RelinkDatasetDialogProps {
@@ -22,35 +30,47 @@ export function RelinkDatasetDialog({
   onSubmit,
 }: RelinkDatasetDialogProps) {
   const [documentId, setDocumentId] = useState("")
-  if (!open || !dataset) return null
+  if (!dataset) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
-        <div className="mb-2 flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          <h3 className="text-sm font-semibold">Re-link {dataset.name}</h3>
-        </div>
-        <p className="mb-3 text-xs text-muted-foreground">
-          The document this dataset was generated from was deleted from the library, so every
-          eval run scores 0%. Pick the re-ingested document to point the questions at. Scores
-          will only be meaningful if the new document has the same content.
-        </p>
-        <label className="grid gap-1 text-xs">
-          <span className="font-medium text-muted-foreground">Live document</span>
-          <select
-            className="h-9 rounded-md border bg-background px-2 text-sm"
-            value={documentId}
-            onChange={(e) => setDocumentId(e.target.value)}
-          >
-            <option value="">Select a document…</option>
-            {documents.map((doc) => (
-              <option key={doc.id} value={doc.id}>
-                {doc.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="mt-4 flex justify-end gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            <span className="inline-flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Re-link {dataset.name}
+            </span>
+          </DialogTitle>
+          <DialogDescription>
+            The document this dataset was generated from was deleted from the library, so every
+            eval run scores 0%. Pick the re-ingested document to point the questions at. Scores
+            will only be meaningful if the new document has the same content.
+          </DialogDescription>
+        </DialogHeader>
+
+        {documents.length === 0 ? (
+          <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+            No completed documents in the library — ingest the document again, then re-link.
+          </div>
+        ) : (
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Live document</span>
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+              value={documentId}
+              onChange={(e) => setDocumentId(e.target.value)}
+            >
+              <option value="">Select a document…</option>
+              {documents.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <DialogFooter>
           <button
             type="button"
             className="h-9 rounded-md border px-3 text-sm hover:bg-accent"
@@ -66,8 +86,8 @@ export function RelinkDatasetDialog({
           >
             Re-link
           </button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

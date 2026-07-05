@@ -23,6 +23,17 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+# Hints are matched on this normalised prefix length. It defines what counts
+# as a hit for EVERY retrieval metric AND for generation-time verbatim/dedup
+# checks — always compare hints through _hint_key so the definitions can't
+# drift apart.
+HINT_NORM_LEN = 80
+
+
+def _hint_key(s: str) -> str:
+    return _norm(s)[:HINT_NORM_LEN]
+
+
 def _extract_hint_norms(sample: dict) -> list[str]:
     """Return the list of normalised, length-80 hint prefixes for a sample."""
     raw = sample.get("context_hint", "")
@@ -34,7 +45,7 @@ def _extract_hint_norms(sample: dict) -> list[str]:
         gt = sample.get("ground_truths", [""])
         if gt and isinstance(gt[0], str) and gt[0].strip():
             candidates = [gt[0][:50]]
-    return [_norm(h)[:80] for h in candidates if h.strip()]
+    return [_hint_key(h) for h in candidates if h.strip()]
 
 
 def compute_hit_rate_5(samples: list[dict]) -> float:
@@ -92,7 +103,7 @@ def _extract_graded_items(sample: dict) -> list[tuple[list[str], int]]:
                 hints = [hints]
             if not isinstance(hints, list):
                 continue
-            norms = [_norm(h)[:80] for h in hints if isinstance(h, str) and h.strip()]
+            norms = [_hint_key(h) for h in hints if isinstance(h, str) and h.strip()]
             grade = entry.get("grade", 1)
             if norms and isinstance(grade, int) and grade > 0:
                 items.append((norms, grade))

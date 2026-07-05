@@ -3,14 +3,16 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { Play } from "lucide-react"
 import { toast } from "sonner"
 import { API_BASE } from "@/lib/config"
-import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
-import { errorFromResponse, toSelection, type DatasetSelection } from "./api"
+import {
+  errorFromResponse,
+  fetchEvalModels,
+  isExternalJudge,
+  judgeOptionsFrom,
+  toSelection,
+  type DatasetSelection,
+} from "./api"
 import type { GoldenDataset } from "./types"
-
-// Live model list so the judge dropdown only offers judges that are actually
-// pulled/configured — a hardcoded list drifts from Ollama and fails on Run.
-const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")
 
 type Mode = "single" | "ablation"
 
@@ -31,17 +33,19 @@ export function RunConsole({
   runningLabel,
   onStarted,
 }: RunConsoleProps) {
-  // Every runnable dataset, generated and file-backed alike — one console
-  // runs them all with the same options.
+  // Every dataset, generated and file-backed alike — one console runs them
+  // all with the same options. Datasets still generating stay visible but
+  // disabled so a selected-but-unrunnable row reads as "not ready" instead
+  // of a blank select.
   const options = useMemo(() => {
     const generated = datasets
-      .filter((d) => d.source === "db" && d.status === "complete" && d.id)
-      .map((d) => toSelection(d))
-      .filter((s): s is DatasetSelection => s !== null)
+      .filter((d) => d.source === "db" && d.id)
+      .map((d) => ({ sel: toSelection(d), runnable: d.status === "complete" }))
+      .filter((o): o is { sel: DatasetSelection; runnable: boolean } => o.sel !== null)
     const files = datasets
       .filter((d) => d.source === "file")
-      .map((d) => toSelection(d))
-      .filter((s): s is DatasetSelection => s !== null)
+      .map((d) => ({ sel: toSelection(d), runnable: true }))
+      .filter((o): o is { sel: DatasetSelection; runnable: boolean } => o.sel !== null)
     return { generated, files, all: [...generated, ...files] }
   }, [datasets])
 
@@ -52,17 +56,21 @@ export function RunConsole({
 
   const modelsQuery = useQuery({
     queryKey: ["eval-models"],
-    queryFn: fetchModels,
+    queryFn: fetchEvalModels,
     staleTime: 60_000,
   })
-  const judgeOptions = [
-    { value: "", label: "None — fast retrieval metrics" },
-    ...(modelsQuery.data?.local ?? []).map((m) => ({ value: m, label: `Local: ${m}` })),
-    ...(modelsQuery.data?.frontier ?? []).map((m) => ({ value: m, label: `Frontier: ${m}` })),
-  ]
+  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — fast retrieval metrics")
 
-  const selection = value ?? options.all[0] ?? null
-  const external = /^(openai|anthropic|gemini)\//.test(judgeModel)
+  const fallback = options.all.find((o) => o.runnable) ?? options.all[0] ?? null
+  const selected = value
+    ? (options.all.find((o) => o.sel.source === value.source && o.sel.key === value.key) ?? {
+        sel: value,
+        runnable: false,
+      })
+    : fallback
+  const selection = selected?.sel ?? null
+  const runnable = selected?.runnable ?? false
+  const external = isExternalJudge(judgeModel)
 
   const runMutation = useMutation({
     mutationFn: async () => {
@@ -122,26 +130,31 @@ export function RunConsole({
             value={selection ? `${selection.source}:${selection.key}` : ""}
             onChange={(e) => {
               const next = options.all.find(
-                (s) => `${s.source}:${s.key}` === e.target.value,
+                (o) => `${o.sel.source}:${o.sel.key}` === e.target.value,
               )
-              onChange(next ?? null)
+              onChange(next?.sel ?? null)
             }}
           >
             {options.all.length === 0 && <option value="">No datasets</option>}
             {options.generated.length > 0 && (
               <optgroup label="Generated datasets">
-                {options.generated.map((s) => (
-                  <option key={`${s.source}:${s.key}`} value={`${s.source}:${s.key}`}>
-                    {s.name}
+                {options.generated.map(({ sel, runnable: ok }) => (
+                  <option
+                    key={`${sel.source}:${sel.key}`}
+                    value={`${sel.source}:${sel.key}`}
+                    disabled={!ok}
+                  >
+                    {sel.name}
+                    {ok ? "" : " (generating…)"}
                   </option>
                 ))}
               </optgroup>
             )}
             {options.files.length > 0 && (
               <optgroup label="File goldens">
-                {options.files.map((s) => (
-                  <option key={`${s.source}:${s.key}`} value={`${s.source}:${s.key}`}>
-                    {s.name}
+                {options.files.map(({ sel }) => (
+                  <option key={`${sel.source}:${sel.key}`} value={`${sel.source}:${sel.key}`}>
+                    {sel.name}
                   </option>
                 ))}
               </optgroup>
@@ -220,9 +233,14 @@ export function RunConsole({
         {external && (
           <span className="text-xs text-amber-600">Sends chunks to an external API.</span>
         )}
+        {selection && !runnable && (
+          <span className="text-xs text-muted-foreground">
+            {selection.name} is still generating — pick another dataset or wait.
+          </span>
+        )}
         <button
           type="button"
-          disabled={runMutation.isPending || !selection}
+          disabled={runMutation.isPending || !selection || !runnable}
           onClick={() => runMutation.mutate()}
           className={cn(
             "ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground",
