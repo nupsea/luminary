@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { ResultsDashboard } from "@/components/evals/ResultsDashboard"
 import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
+import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
 import { RunEvalDialog } from "@/components/evals/RunEvalDialog"
 import { RunsTab } from "@/components/evals/RunsTab"
@@ -32,6 +33,18 @@ async function fetchDatasets(): Promise<GoldenDataset[]> {
   const res = await fetch(`${API_BASE}/evals/datasets`)
   if (!res.ok) throw new Error("Failed to fetch datasets")
   return res.json() as Promise<GoldenDataset[]>
+}
+
+// Surface the backend's `detail` (e.g. the dead-source-document 409 with its
+// re-link guidance) instead of a generic failure string.
+async function errorFromResponse(res: Response, fallback: string): Promise<Error> {
+  try {
+    const body = (await res.json()) as { detail?: unknown }
+    if (typeof body.detail === "string" && body.detail) return new Error(body.detail)
+  } catch {
+    // non-JSON body — fall through
+  }
+  return new Error(fallback)
 }
 
 async function fetchDataset(id: string): Promise<GoldenDatasetDetail> {
@@ -107,6 +120,8 @@ export default function Quality() {
   const [runOpen, setRunOpen] = useState(false)
   // db-backed selection
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // dataset being re-linked to a live document (source document deleted)
+  const [relinkTarget, setRelinkTarget] = useState<GoldenDataset | null>(null)
   // file-backed selection
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
   // shared dataset selection for the run console + results dashboard
@@ -275,7 +290,7 @@ export default function Quality() {
             max_questions: payload.max_questions,
           }),
         })
-        if (!res.ok) throw new Error("Failed to start eval run")
+        if (!res.ok) throw await errorFromResponse(res, "Failed to start eval run")
         return res.json()
       }
       // DB-backed: POST /evals/datasets/{id}/run
@@ -284,7 +299,7 @@ export default function Quality() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error("Failed to start eval run")
+      if (!res.ok) throw await errorFromResponse(res, "Failed to start eval run")
       return res.json()
     },
     onSuccess: () => {
@@ -297,6 +312,25 @@ export default function Quality() {
       toast.success("Eval started — switching to Runs tab")
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Run failed"),
+  })
+
+  const relinkMutation = useMutation({
+    mutationFn: async (payload: { dataset_id: string; document_id: string }) => {
+      const res = await fetch(`${API_BASE}/evals/datasets/${payload.dataset_id}/relink`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_id: payload.document_id }),
+      })
+      if (!res.ok) throw await errorFromResponse(res, "Failed to re-link dataset")
+      return res.json() as Promise<{ relinked_questions: number }>
+    },
+    onSuccess: (data) => {
+      setRelinkTarget(null)
+      void qc.invalidateQueries({ queryKey: ["eval-datasets"] })
+      void qc.invalidateQueries({ queryKey: ["eval-dataset"] })
+      toast.success(`Re-linked ${data.relinked_questions} questions — re-run the eval`)
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Re-link failed"),
   })
 
   const deleteMutation = useMutation({
@@ -512,6 +546,26 @@ export default function Quality() {
                                 {dataset.generated_count}/{dataset.target_count}
                               </span>
                             ) : null}
+                            {dataset.missing_document_ids?.length ? (
+                              <>
+                                <span
+                                  className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700"
+                                  title="The document this dataset was generated from was deleted — runs score 0% until it is re-linked"
+                                >
+                                  source deleted
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ml-1.5 rounded border px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setRelinkTarget(dataset)
+                                  }}
+                                >
+                                  Re-link
+                                </button>
+                              </>
+                            ) : null}
                           </td>
                           <td className="py-2.5 pr-3 text-muted-foreground">
                             {dataset.source === "file" ? "file" : "generated"}
@@ -591,6 +645,21 @@ export default function Quality() {
         onOpenChange={setRunOpen}
         submitting={runMutation.isPending}
         onSubmit={(payload) => runMutation.mutate(payload)}
+      />
+
+      <RelinkDatasetDialog
+        open={Boolean(relinkTarget)}
+        dataset={relinkTarget}
+        documents={documentsQuery.data || []}
+        submitting={relinkMutation.isPending}
+        onOpenChange={(open) => {
+          if (!open) setRelinkTarget(null)
+        }}
+        onSubmit={(payload) => {
+          if (relinkTarget?.id) {
+            relinkMutation.mutate({ dataset_id: relinkTarget.id, document_id: payload.document_id })
+          }
+        }}
       />
     </div>
   )

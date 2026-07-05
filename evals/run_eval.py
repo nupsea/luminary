@@ -149,6 +149,24 @@ def load_golden_by_id(backend_url: str, dataset_id: str) -> list[dict]:
     return rows
 
 
+def split_rows_by_document_liveness(
+    rows: list[dict],
+    is_alive: "callable[[str], bool]",
+) -> tuple[list[dict], set[str]]:
+    """Partition golden rows into (rows whose pinned document is alive, dead doc ids).
+
+    Rows without a source_document_id pin are kept — they run unscoped. A row
+    pinned to a deleted document CANNOT retrieve anything, so keeping it would
+    score a guaranteed 0 that reads as a retrieval regression.
+    """
+    doc_ids = {r.get("source_document_id") for r in rows if r.get("source_document_id")}
+    dead = {d for d in doc_ids if not is_alive(d)}
+    if not dead:
+        return rows, set()
+    alive_rows = [r for r in rows if r.get("source_document_id") not in dead]
+    return alive_rows, dead
+
+
 def append_history(dataset: str, model: str, metrics: dict, passed: bool) -> None:
     """Backwards-compat wrapper -- always logs eval_kind='retrieval'."""
     _lib_append_history(dataset, model, metrics, passed, eval_kind="retrieval")
@@ -461,6 +479,29 @@ def main() -> None:
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
         rows = load_golden_by_id(args.backend_url, args.dataset_id)
+        # File goldens re-resolve documents via the manifest (ensure_ingested);
+        # DB goldens pin source_document_id per question, which goes stale when
+        # the document is deleted and re-ingested under a new id. Scoring those
+        # rows would produce silent all-zero metrics.
+        rows, dead_docs = split_rows_by_document_liveness(
+            rows, lambda d: is_document_alive(args.backend_url, d)
+        )
+        if dead_docs and not rows:
+            print(
+                f"ERROR: every question in dataset {args.dataset_id} points at a "
+                f"deleted document ({', '.join(sorted(dead_docs))}). Re-link the "
+                "dataset to the re-ingested document (Quality > dataset row > "
+                "Re-link) or regenerate it.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if dead_docs:
+            print(
+                f"NOTE: skipping questions pinned to deleted documents "
+                f"({', '.join(sorted(dead_docs))}); {len(rows)} of the dataset's "
+                "questions remain evaluable. Re-link the dataset to restore the rest.",
+                file=sys.stderr,
+            )
     else:
         rows = load_golden(args.dataset)
     if args.max_questions is not None and args.max_questions < len(rows):

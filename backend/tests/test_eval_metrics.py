@@ -43,6 +43,7 @@ from run_eval import (  # noqa: E402
     compute_hit_rate_5,
     compute_mrr,
     compute_ndcg_10,
+    split_rows_by_document_liveness,
     thresholds_for_dataset,
 )
 
@@ -538,6 +539,41 @@ def test_find_graded_relevance_discovers_secondary_passages():
     assert items[1]["grade"] == 1
     assert "guards the white door" in items[1]["hint"][0].lower()
     assert items[1]["hint"][0] in other
+
+
+# Dead-document row filtering (silent-zero regression)
+
+
+def test_split_rows_all_alive_passthrough():
+    rows = [{"source_document_id": "a"}, {"source_document_id": "b"}]
+    kept, dead = split_rows_by_document_liveness(rows, lambda d: True)
+    assert kept == rows
+    assert dead == set()
+
+
+def test_split_rows_drops_dead_document_rows():
+    rows = [
+        {"question": "q1", "source_document_id": "alive"},
+        {"question": "q2", "source_document_id": "deleted"},
+        {"question": "q3", "source_document_id": "alive"},
+    ]
+    kept, dead = split_rows_by_document_liveness(rows, lambda d: d == "alive")
+    assert [r["question"] for r in kept] == ["q1", "q3"]
+    assert dead == {"deleted"}
+
+
+def test_split_rows_all_dead_returns_empty():
+    rows = [{"source_document_id": "deleted"}]
+    kept, dead = split_rows_by_document_liveness(rows, lambda d: False)
+    assert kept == []
+    assert dead == {"deleted"}
+
+
+def test_split_rows_unpinned_rows_always_kept():
+    rows = [{"question": "q1"}, {"question": "q2", "source_document_id": "deleted"}]
+    kept, dead = split_rows_by_document_liveness(rows, lambda d: False)
+    assert [r["question"] for r in kept] == ["q1"]
+    assert dead == {"deleted"}
 
 
 def test_find_graded_relevance_caps_and_dedupes_secondary():

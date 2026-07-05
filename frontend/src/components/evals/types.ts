@@ -23,6 +23,7 @@ export interface GoldenDataset {
   size: DatasetSize | null
   generator_model: string | null
   source_document_ids: string[]
+  missing_document_ids?: string[]
   status: DatasetStatus | "complete"
   generated_count: number
   target_count: number
