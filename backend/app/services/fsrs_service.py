@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChunkModel, FlashcardModel, ReviewEventModel
+from app.services.misconceptions import resolve_on_review
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,10 @@ class FSRSService:
         db_card.reps = (db_card.reps or 0) + 1
         if rating == "again":
             db_card.lapses = (db_card.lapses or 0) + 1
+
+        # successful recall closes any open misconceptions recorded for this card
+        # (docs/recommender-spec.md); rides the same commit as the review itself
+        await resolve_on_review(session, card_id, rating)
 
         await session.commit()
         await session.refresh(db_card)

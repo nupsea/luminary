@@ -575,6 +575,236 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/concepts/{concept_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Concept */
+        get: operations["get_concept_concepts__concept_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/{concept_id}/rename": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename Concept */
+        post: operations["rename_concept_concepts__concept_id__rename_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/{concept_id}/reclassify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reclassify Concept */
+        post: operations["reclassify_concept_concepts__concept_id__reclassify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/{concept_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Concept */
+        post: operations["confirm_concept_concepts__concept_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/{concept_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Concept */
+        post: operations["reject_concept_concepts__concept_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Merge Concepts */
+        post: operations["merge_concepts_concepts_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/apply-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Overrides
+         * @description Re-apply all stored overrides onto the current concepts (re-parse hook, I-22).
+         */
+        post: operations["apply_overrides_concepts_apply_overrides_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/purge-junk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Junk Concepts
+         * @description Delete concepts whose label is format-junk (code tokens, CLI flags, unicode garbage).
+         *
+         *     Same predicate the extraction pipeline uses, applied retroactively so existing junk does
+         *     not linger in study/scope. ``dry_run=True`` (default) previews the matches without deleting;
+         *     pass ``dry_run=false`` to actually remove them from all three stores.
+         */
+        post: operations["purge_junk_concepts_concepts_purge_junk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Concepts
+         * @description Kick off a full concept-layer rebuild in the background. 409 if one is already running.
+         */
+        post: operations["regenerate_concepts_concepts_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/regenerate/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Regenerate Concepts Status
+         * @description Poll the current/last rebuild's status.
+         */
+        get: operations["regenerate_concepts_status_concepts_regenerate_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts/for-note/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Concepts For Note
+         * @description Concepts a note touches (docs/03-notes-generation.md).
+         *
+         *     Two signals, unioned: (1) engagement -- concepts the note's mapped cards point at;
+         *     (2) lexical recall -- concepts whose label appears in the note's title/content. This
+         *     is the always-on degraded path; the concept_linker labs feature enriches it later.
+         */
+        get: operations["concepts_for_note_concepts_for_note__note_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/concepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Concepts
+         * @description List concepts, optionally filtered by status (e.g. ?status=proposed for review).
+         */
+        get: operations["list_concepts_concepts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/suggestions/{suggestion_id}/asked": {
         parameters: {
             query?: never;
@@ -831,6 +1061,50 @@ export interface paths {
         head?: never;
         /** Patch Document */
         patch: operations["patch_document_documents__document_id__patch"];
+        trace?: never;
+    };
+    "/documents/{document_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Overview
+         * @description Read-aggregation for the Doc overview page (docs/02-ingest-and-doc-overview.md).
+         *
+         *     Header + collection memberships + tags + reading progress. Study TOPICS (chapters) and
+         *     References are separate frontend calls; the studyable list lives in the Study tab.
+         */
+        get: operations["get_document_overview_documents__document_id__overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/{document_id}/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Document Collections
+         * @description Add a document to one or more collections (ingest + after) and return the
+         *     document's resulting collection set. Idempotent (INSERT OR IGNORE; no duplicates).
+         */
+        post: operations["assign_document_collections_documents__document_id__collections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/documents/{document_id}/chunks": {
@@ -1562,6 +1836,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/golden/{name}/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Golden Info
+         * @description Provenance (how the golden was generated) + deterministic quality metrics.
+         *
+         *     Quality is computed structurally (no LLM judge) so it is unbiased and
+         *     reproducible — see golden_dataset_quality.
+         */
+        get: operations["get_golden_info_evals_golden__name__info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/golden/{name}": {
         parameters: {
             query?: never;
@@ -1639,6 +1936,32 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/evals/datasets/{dataset_id}/relink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Relink Golden Dataset
+         * @description Repoint a dataset's questions at a live document.
+         *
+         *     Generated goldens pin source_document_id per question; when that document
+         *     is deleted and re-ingested it gets a new id, and every eval run scores an
+         *     honest-looking 0% because scoped retrieval finds nothing. Re-linking
+         *     updates the pins in place. The stale source_chunk_id is cleared — it
+         *     pointed into the dead document and nothing at eval time depends on it.
+         */
+        patch: operations["relink_golden_dataset_evals_datasets__dataset_id__relink_patch"];
         trace?: never;
     };
     "/evals/datasets/{dataset_id}/golden": {
@@ -1733,6 +2056,47 @@ export interface paths {
          *     via asyncio.to_thread so it never blocks the event loop.
          */
         post: operations["run_eval_evals_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Models
+         * @description Models for the generate/run dropdowns: local Ollama + frontier (if keys set).
+         */
+        get: operations["get_eval_models_evals_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/golden/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Golden File
+         * @description Generate or REPLACE a file-backed golden with the good pipeline (personas +
+         *     cross-model verification), chosen models, and a provenance sidecar.
+         */
+        post: operations["generate_golden_file_evals_golden_generate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2601,6 +2965,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/home/recommendations/{feedback_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Recommendation */
+        post: operations["dismiss_recommendation_home_recommendations__feedback_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/home/recommendations/{feedback_id}/acted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Act On Recommendation */
+        post: operations["act_on_recommendation_home_recommendations__feedback_id__acted_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images/notes": {
         parameters: {
             query?: never;
@@ -3333,6 +3731,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/descriptions/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill Descriptions
+         * @description Manually (re)generate card summaries. Default fills only notes missing
+         *     one; force=True refreshes every eligible note. Runs in the background; the
+         *     response reports how many notes were queued.
+         */
+        post: operations["backfill_descriptions_notes_descriptions_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pomodoro/active": {
         parameters: {
             query?: never;
@@ -3483,6 +3903,30 @@ export interface paths {
          * @description Classify the chat route without executing retrieval/LLM graph nodes.
          */
         post: operations["classify_only_qa_classify_only_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/qa/grounded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Grounded
+         * @description GraphRAG answer over the concept graph (docs/okf.md).
+         *
+         *     Resolve scope -> concepts -> expand the graph + evidence -> one OKF grounding block -> LiteLLM.
+         *     Self-contained (does not touch the streaming chat graph). Degrades: no concepts -> an honest
+         *     "not in your library yet"; model down -> the grounding context is returned as the answer.
+         */
+        post: operations["ask_grounded_qa_grounded_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3792,6 +4236,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/retrieval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Retrieval Settings */
+        get: operations["get_retrieval_settings_settings_retrieval_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Retrieval Settings */
+        patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
+        trace?: never;
+    };
     "/settings/surface": {
         parameters: {
             query?: never;
@@ -3900,6 +4362,30 @@ export interface paths {
         get: operations["get_due_cards_study_due_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/assemble": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assemble Study
+         * @description Study Launcher backend: resolve a scope -> a valid Study Event (docs/study-launcher.md).
+         *
+         *     Returns the assembled due-card set + an honest preview, and records a StudyEvent row.
+         *     Tier-aware: teachback_available reflects the feynman labs surface. Model-down still
+         *     yields due cards (generation is a separate seam).
+         */
+        post: operations["assemble_study_study_assemble_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4309,6 +4795,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/study/misconception-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Misconception Stats */
+        get: operations["misconception_stats_study_misconception_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/study/calibration-stats": {
         parameters: {
             query?: never;
@@ -4432,6 +4935,48 @@ export interface paths {
          * @description Apply FSRS rating to a card, then return the next due card or done=true.
          */
         post: operations["session_review_study_session__document_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/topics/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Topics
+         * @description A document's study topics from its authored structure (top-level headings, front/back-matter
+         *     filtered out) -- or an LLM outline when heading detection is messy. Never an INDEX or publisher
+         *     boilerplate.
+         */
+        get: operations["get_document_topics_study_topics__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/study/sections/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document Sections
+         * @description All real sub-sections of a document (junk filtered, searchable) for drill-down.
+         */
+        get: operations["get_document_sections_study_sections__document_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5036,6 +5581,87 @@ export interface components {
         ArchiveMasteredResponse: {
             /** Archived */
             archived: number;
+        };
+        /** AssemblePreview */
+        AssemblePreview: {
+            /** Due Count */
+            due_count: number;
+            /** Generated Count */
+            generated_count: number;
+            /** Mapped Count */
+            mapped_count: number;
+            /** Unmapped Count */
+            unmapped_count: number;
+            /** Topic Mix */
+            topic_mix: string[];
+            /** Thin Scope Warning */
+            thin_scope_warning?: string | null;
+        };
+        /** AssembleRequest */
+        AssembleRequest: {
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "daily" | "concept" | "collection" | "doc" | "note" | "tag" | "selection" | "chat" | "planWeek";
+            /** Scope Ref */
+            scope_ref?: string | null;
+            /**
+             * Mode
+             * @default quick_quiz
+             * @enum {string}
+             */
+            mode: "quick_quiz" | "full_session" | "drill" | "checkpoint";
+            /**
+             * Length Min
+             * @default 5
+             */
+            length_min: number;
+            /**
+             * Want Generated
+             * @default true
+             */
+            want_generated: boolean;
+            /**
+             * Keep
+             * @default test
+             * @enum {string}
+             */
+            keep: "test" | "save";
+            /**
+             * Commit
+             * @default true
+             */
+            commit: boolean;
+        };
+        /** AssembleResponse */
+        AssembleResponse: {
+            /** Event Id */
+            event_id: string;
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "daily" | "concept" | "collection" | "doc" | "note" | "tag" | "selection" | "chat" | "planWeek";
+            /** Scope Ref */
+            scope_ref: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "quick_quiz" | "full_session" | "drill" | "checkpoint";
+            /** Concept Ids */
+            concept_ids: string[];
+            /** Cards */
+            cards: components["schemas"]["FlashcardResponse"][];
+            preview: components["schemas"]["AssemblePreview"];
+            /** Teachback Available */
+            teachback_available: boolean;
+        };
+        /** AssignCollectionsRequest */
+        AssignCollectionsRequest: {
+            /** Collection Ids */
+            collection_ids: string[];
         };
         /** BatchAcceptItem */
         BatchAcceptItem: {
@@ -5688,6 +6314,21 @@ export interface components {
             /** Document Ids */
             document_ids: string[];
         };
+        /** ConceptOut */
+        ConceptOut: {
+            /** Id */
+            id: string;
+            /** Slug */
+            slug: string;
+            /** Label */
+            label: string;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Mastery */
+            mastery: number;
+        };
         /**
          * ContinueReadingItem
          * @description A doc the user has momentum on -- started, not finished, recently touched.
@@ -5770,6 +6411,13 @@ export interface components {
             /** Study Time Minutes */
             study_time_minutes: number;
         };
+        /** DatasetRelinkRequest */
+        DatasetRelinkRequest: {
+            /** Document Id */
+            document_id: string;
+            /** From Document Id */
+            from_document_id?: string | null;
+        };
         /** DecayDebtItem */
         DecayDebtItem: {
             /** Document Id */
@@ -5828,6 +6476,11 @@ export interface components {
             document_id: string | null;
             /** Collection Id */
             collection_id: string | null;
+        };
+        /** DescriptionBackfillResponse */
+        DescriptionBackfillResponse: {
+            /** Queued */
+            queued: number;
         };
         /** DocumentDetail */
         DocumentDetail: {
@@ -5972,6 +6625,23 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** DocumentOverviewResponse */
+        DocumentOverviewResponse: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Format */
+            format: string;
+            /** Content Type */
+            content_type: string;
+            /** Tags */
+            tags: string[];
+            /** Reading Progress Pct */
+            reading_progress_pct: number;
+            /** Collections */
+            collections: components["schemas"]["CollectionRef"][];
+        };
         /** DocumentProgressResponse */
         DocumentProgressResponse: {
             /** Document Id */
@@ -6002,6 +6672,17 @@ export interface components {
             match_count: number;
             /** Snippet */
             snippet: string;
+        };
+        /** DocumentTopicsResponse */
+        DocumentTopicsResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Title */
+            title: string;
+            /** Source */
+            source: string;
+            /** Topics */
+            topics: components["schemas"]["TopicItem"][];
         };
         /** DueCountResponse */
         DueCountResponse: {
@@ -6188,6 +6869,10 @@ export interface components {
             ablation_metrics?: {
                 [key: string]: unknown;
             } | null;
+            /** Extra Metrics */
+            extra_metrics?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** EvalRunListItem */
         EvalRunListItem: {
@@ -6195,6 +6880,8 @@ export interface components {
             id: string;
             /** Dataset Name */
             dataset_name: string;
+            /** Dataset Label */
+            dataset_label?: string | null;
             /** Run At */
             run_at: string;
             /** Hit Rate 5 */
@@ -6221,6 +6908,17 @@ export interface components {
             model_used: string;
             /** Citation Support Rate */
             citation_support_rate: number | null;
+            /** Extra Metrics */
+            extra_metrics?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Status
+             * @default complete
+             */
+            status: string;
+            /** Error Message */
+            error_message?: string | null;
         };
         /** EvalRunRequest */
         EvalRunRequest: {
@@ -6231,6 +6929,8 @@ export interface components {
              * @default false
              */
             assert_thresholds: boolean;
+            /** Model */
+            model?: string | null;
             /** Judge Model */
             judge_model?: string | null;
             /**
@@ -6240,6 +6940,16 @@ export interface components {
             check_citations: boolean;
             /** Max Questions */
             max_questions?: number | null;
+            /**
+             * Rerank
+             * @default false
+             */
+            rerank: boolean;
+            /**
+             * Ablation
+             * @default false
+             */
+            ablation: boolean;
         };
         /** EvalRunResponse */
         EvalRunResponse: {
@@ -6290,6 +7000,10 @@ export interface components {
             } | null;
             /** Ablation Metrics */
             ablation_metrics?: {
+                [key: string]: unknown;
+            } | null;
+            /** Extra Metrics */
+            extra_metrics?: {
                 [key: string]: unknown;
             } | null;
         };
@@ -6634,6 +7348,16 @@ export interface components {
             check_citations: boolean;
             /** Max Questions */
             max_questions?: number | null;
+            /**
+             * Rerank
+             * @default false
+             */
+            rerank: boolean;
+            /**
+             * Ablation
+             * @default false
+             */
+            ablation: boolean;
         };
         /** GeneratedRunResponse */
         GeneratedRunResponse: {
@@ -6706,6 +7430,11 @@ export interface components {
              * @default []
              */
             source_document_ids: string[];
+            /**
+             * Missing Document Ids
+             * @default []
+             */
+            missing_document_ids: string[];
             /** Status */
             status: string;
             /** Generated Count */
@@ -6771,6 +7500,42 @@ export interface components {
             /** Limit */
             limit: number;
         };
+        /** GoldenGenerateRequest */
+        GoldenGenerateRequest: {
+            /** Name */
+            name: string;
+            /** Source File */
+            source_file: string;
+            /**
+             * Generator Model
+             * @default openai/gpt-5.4
+             */
+            generator_model: string;
+            /** Verify Models */
+            verify_models?: string[];
+            /**
+             * Target
+             * @default 50
+             */
+            target: number;
+        };
+        /** GoldenInfoResponse */
+        GoldenInfoResponse: {
+            /** Name */
+            name: string;
+            /** Question Count */
+            question_count: number;
+            /** Source File */
+            source_file?: string | null;
+            /** Provenance */
+            provenance?: {
+                [key: string]: unknown;
+            } | null;
+            /** Quality */
+            quality?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** GoldenQuestionResponse */
         GoldenQuestionResponse: {
             /** Id */
@@ -6789,6 +7554,31 @@ export interface components {
             quality_score: number;
             /** Included */
             included: boolean;
+        };
+        /** GroundedConcept */
+        GroundedConcept: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
+        /** GroundedRequest */
+        GroundedRequest: {
+            /** Question */
+            question: string;
+            /** Concept Id */
+            concept_id?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /** GroundedResponse */
+        GroundedResponse: {
+            /** Answer */
+            answer: string;
+            /** Grounded */
+            grounded: boolean;
+            /** Concepts */
+            concepts: components["schemas"]["GroundedConcept"][];
         };
         /** GroupInfo */
         GroupInfo: {
@@ -6842,6 +7632,11 @@ export interface components {
              */
             fading_items: components["schemas"]["FadingItem"][];
             weekly_stats?: components["schemas"]["WeeklyStats"] | null;
+            /**
+             * Recommendations
+             * @default []
+             */
+            recommendations: components["schemas"]["Recommendation"][];
         };
         /** ImageItem */
         ImageItem: {
@@ -6935,6 +7730,11 @@ export interface components {
              * @default []
              */
             cloud_providers: unknown[];
+            /**
+             * Ollama Reachable
+             * @default true
+             */
+            ollama_reachable: boolean;
         };
         /** LabsPatch */
         LabsPatch: {
@@ -7054,6 +7854,13 @@ export interface components {
             /** Cells */
             cells: components["schemas"]["HeatmapCellOut"][];
         };
+        /** MergeRequest */
+        MergeRequest: {
+            /** Source Id */
+            source_id: string;
+            /** Target Id */
+            target_id: string;
+        };
         /** MessageAppendRequest */
         MessageAppendRequest: {
             /**
@@ -7087,6 +7894,15 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** MisconceptionStatsResponse */
+        MisconceptionStatsResponse: {
+            /** Open Count */
+            open_count: number;
+            /** Resolved Count */
+            resolved_count: number;
+            /** Resolved Last 30D */
+            resolved_last_30d: number;
         };
         /** ModelUsageItem */
         ModelUsageItem: {
@@ -7433,6 +8249,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** PurgeJunkResponse */
+        PurgeJunkResponse: {
+            /** Dry Run */
+            dry_run: boolean;
+            /** Matched */
+            matched: number;
+            /** Deleted */
+            deleted: number;
+            /** Labels */
+            labels: string[];
+        };
         /** QARequest */
         QARequest: {
             /** Question */
@@ -7531,6 +8358,79 @@ export interface components {
             document_count: number;
             /** Note Count */
             note_count: number;
+        };
+        /** ReclassifyRequest */
+        ReclassifyRequest: {
+            /** Kind */
+            kind: string;
+        };
+        /** Recommendation */
+        Recommendation: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "overdue_reviews" | "weak_concept" | "open_misconception" | "calibration_blind_spot" | "stalled_reading";
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "study" | "concept" | "flashcard" | "document";
+            /** Target Ref */
+            target_ref: string;
+            /** Label */
+            label: string;
+            /** Score */
+            score: number;
+            /** Reasons */
+            reasons: components["schemas"]["RecommendationReason"][];
+            /** Count */
+            count?: number | null;
+            /** Document Id */
+            document_id?: string | null;
+            /** Concept Slug */
+            concept_slug?: string | null;
+        };
+        /**
+         * RecommendationReason
+         * @description One evidence line behind a recommendation -- never asserted without one
+         *     (docs/recommender-spec.md).
+         */
+        RecommendationReason: {
+            /** Signal */
+            signal: string;
+            /** Detail */
+            detail: string;
+        };
+        /** RegenStatus */
+        RegenStatus: {
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Concepts */
+            concepts?: number | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** RenameRequest */
+        RenameRequest: {
+            /** Label */
+            label: string;
+        };
+        /** RetrievalSettingsPatch */
+        RetrievalSettingsPatch: {
+            /** Rerank Enabled */
+            rerank_enabled: boolean;
+        };
+        /** RetrievalSettingsResponse */
+        RetrievalSettingsResponse: {
+            /** Rerank Enabled */
+            rerank_enabled: boolean;
         };
         /** ReviewRequest */
         ReviewRequest: {
@@ -7810,6 +8710,8 @@ export interface components {
             title?: string | null;
             /** Auto From Message */
             auto_from_message?: string | null;
+            /** Model */
+            model?: string | null;
         };
         /** SessionReviewRequest */
         SessionReviewRequest: {
@@ -8261,7 +9163,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "review_cards" | "continue_reading" | "resume_note";
+            kind: "review_cards" | "continue_reading" | "resume_note" | "drill_concept" | "fix_misconception" | "confidence_check";
             /** Target Id */
             target_id?: string | null;
             /** Label */
@@ -8276,6 +9178,26 @@ export interface components {
             collection_color?: string | null;
             /** Scoped Count */
             scoped_count?: number | null;
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: components["schemas"]["RecommendationReason"][];
+            /** Recommendation Id */
+            recommendation_id?: string | null;
+            /** Document Id */
+            document_id?: string | null;
+        };
+        /** TopicItem */
+        TopicItem: {
+            /** Title */
+            title: string;
+            /** Level */
+            level: number;
+            /** Section Id */
+            section_id: string | null;
+            /** Page Start */
+            page_start: number | null;
         };
         /** TraceFlashcardRequest */
         TraceFlashcardRequest: {
@@ -9737,6 +10659,353 @@ export interface operations {
             };
         };
     };
+    get_concept_concepts__concept_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_concept_concepts__concept_id__rename_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reclassify_concept_concepts__concept_id__reclassify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReclassifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_concept_concepts__concept_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_concept_concepts__concept_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_concepts_concepts_merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_overrides_concepts_apply_overrides_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    purge_junk_concepts_concepts_purge_junk_post: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeJunkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_concepts_concepts_regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegenStatus"];
+                };
+            };
+        };
+    };
+    regenerate_concepts_status_concepts_regenerate_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegenStatus"];
+                };
+            };
+        };
+    };
+    concepts_for_note_concepts_for_note__note_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_concepts_concepts_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     mark_suggestion_asked_chat_suggestions__suggestion_id__asked_post: {
         parameters: {
             query?: never;
@@ -10316,6 +11585,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_overview_documents__document_id__overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_document_collections_documents__document_id__collections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignCollectionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionRef"][];
                 };
             };
             /** @description Validation Error */
@@ -11430,6 +12765,37 @@ export interface operations {
             };
         };
     };
+    get_golden_info_evals_golden__name__info_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoldenInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_golden_file_evals_golden__name__get: {
         parameters: {
             query?: {
@@ -11626,6 +12992,43 @@ export interface operations {
             };
         };
     };
+    relink_golden_dataset_evals_datasets__dataset_id__relink_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetRelinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_golden_dataset_rows_evals_datasets__dataset_id__golden_get: {
         parameters: {
             query?: never;
@@ -11768,6 +13171,63 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eval_models_evals_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string[];
+                    };
+                };
+            };
+        };
+    };
+    generate_golden_file_evals_golden_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoldenGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
                     };
                 };
             };
@@ -13249,6 +14709,64 @@ export interface operations {
             };
         };
     };
+    dismiss_recommendation_home_recommendations__feedback_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    act_on_recommendation_home_recommendations__feedback_id__acted_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_note_image_images_notes_post: {
         parameters: {
             query?: never;
@@ -14385,6 +15903,37 @@ export interface operations {
             };
         };
     };
+    backfill_descriptions_notes_descriptions_backfill_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DescriptionBackfillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_active_pomodoro_active_get: {
         parameters: {
             query?: never;
@@ -14635,6 +16184,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassifyOnlyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_grounded_qa_grounded_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroundedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroundedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15085,6 +16667,59 @@ export interface operations {
             };
         };
     };
+    get_retrieval_settings_settings_retrieval_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalSettingsResponse"];
+                };
+            };
+        };
+    };
+    patch_retrieval_settings_settings_retrieval_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_surface_settings_surface_get: {
         parameters: {
             query?: never;
@@ -15242,6 +16877,7 @@ export interface operations {
                 tag?: string | null;
                 document_ids?: string[] | null;
                 note_ids?: string[] | null;
+                section_id?: string | null;
                 limit?: number;
             };
             header?: never;
@@ -15257,6 +16893,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlashcardResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assemble_study_study_assemble_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssembleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssembleResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15877,6 +17546,26 @@ export interface operations {
             };
         };
     };
+    misconception_stats_study_misconception_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MisconceptionStatsResponse"];
+                };
+            };
+        };
+    };
     get_calibration_stats_study_calibration_stats_get: {
         parameters: {
             query?: {
@@ -16055,6 +17744,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionReviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_topics_study_topics__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTopicsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_sections_study_sections__document_id__get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicItem"][];
                 };
             };
             /** @description Validation Error */

@@ -232,6 +232,12 @@ class CalibrationStatsResponse(BaseModel):
     weeks: list[CalibrationWeekItem]
 
 
+class MisconceptionStatsResponse(BaseModel):
+    open_count: int
+    resolved_count: int
+    resolved_last_30d: int
+
+
 # Collection dashboard
 
 

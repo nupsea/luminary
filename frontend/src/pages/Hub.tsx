@@ -1,16 +1,19 @@
-// Luminary home hub -- coach shape (post-2E.7 redesign, polished pass).
+// Luminary home hub -- dashboard shape.
 //
-// One fetch against /home/overview drives everything. Visual language:
-// soft gradient page surface, a single filled hero, two lanes with
-// distinct personalities (Continue = warm, Fading = muted), a backdropped
-// tag cloud, color-anchored project cards, and a slim weekly-stats strip
-// at the foot.
+// One fetch against /home/overview drives everything. A full-width hero anchors
+// the page; below it a two-column magazine layout splits "act now" (primary
+// column: recommendations, continue reading, decay debt) from ambient context
+// (rail: this-week stats, active projects, fading items, tags).
 
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ArrowRight,
   BookOpen,
   Clock,
+  Compass,
+  Crosshair,
+  Dumbbell,
   FileText,
   FolderPlus,
   Hourglass,
@@ -19,14 +22,16 @@ import {
   Sparkles,
   StickyNote,
   Tag,
+  X,
   Zap,
 } from "lucide-react"
+import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { FirstRunGuide } from "@/components/FirstRunGuide"
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
@@ -46,9 +51,15 @@ type TodayAction = components["schemas"]["TodayAction"] & {
   scoped_count?: number | null
 }
 type WeeklyStats = components["schemas"]["WeeklyStats"]
+type Recommendation = components["schemas"]["Recommendation"]
 
 const fetchHomeOverview = (): Promise<HomeOverview> =>
   apiGet<HomeOverview>("/home/overview")
+
+const markRecommendationActed = (id: string | null | undefined) => {
+  if (!id) return
+  void apiPost<void>(`/home/recommendations/${id}/acted`).catch(() => {})
+}
 
 export default function Hub() {
   const { data, isLoading, isError, refetch } = useQuery({
@@ -70,55 +81,49 @@ export default function Hub() {
 
   if (isEmpty) return <HubEmpty />
 
+  const hasRecommendations = (data.recommendations?.length ?? 0) > 0
+  const hasContinue = (data.continue_reading?.length ?? 0) > 0
+  const hasFading = (data.fading_items?.length ?? 0) > 0
+
   return (
     <PageSurface>
       <HubHeader />
 
       {data.today_action && <TodayHero action={data.today_action} />}
 
-      {((data.continue_reading?.length ?? 0) > 0 || (data.fading_items?.length ?? 0) > 0) && (
-        <div
-          className={cn(
-            "grid grid-cols-1 gap-4",
-            (data.fading_items?.length ?? 0) > 0 && "md:grid-cols-2",
-          )}
-        >
-          <ContinueReadingCard items={data.continue_reading ?? []} />
-          {(data.fading_items?.length ?? 0) > 0 && (
-            <FadingCard items={data.fading_items ?? []} />
-          )}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Primary column: things to act on now */}
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
+          {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
+          <DecayDebtWidget />
         </div>
-      )}
 
-      <DecayDebtWidget />
+        {/* Rail: ambient context */}
+        <aside className="flex flex-col gap-6">
+          {data.weekly_stats && <WeekStatsCard stats={data.weekly_stats} />}
 
-      {data.recent_tags.length > 0 && (
-        <Section
-          icon={Tag}
-          title="What you've been into"
-          subtitle="Threaded through your recent activity"
-        >
-          <TagCloud tags={data.recent_tags} />
-        </Section>
-      )}
+          <Section icon={Sparkles} title="Active projects">
+            {data.active_collections.length === 0 ? (
+              <OrganizeCallout />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {data.active_collections.slice(0, 5).map((c) => (
+                  <ActiveCollectionCard key={c.id} collection={c} />
+                ))}
+              </div>
+            )}
+          </Section>
 
-      <Section
-        icon={Sparkles}
-        title="Your active projects"
-        subtitle="Collections you've touched lately"
-      >
-        {data.active_collections.length === 0 ? (
-          <OrganizeCallout />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {data.active_collections.slice(0, 4).map((c) => (
-              <ActiveCollectionCard key={c.id} collection={c} />
-            ))}
-          </div>
-        )}
-      </Section>
+          {hasFading && <FadingCard items={data.fading_items ?? []} />}
 
-      {data.weekly_stats && <WeeklyStatsStrip stats={data.weekly_stats} />}
+          {data.recent_tags.length > 0 && (
+            <Section icon={Tag} title="What you've been into">
+              <TagCloud tags={data.recent_tags} />
+            </Section>
+          )}
+        </aside>
+      </div>
     </PageSurface>
   )
 }
@@ -126,12 +131,15 @@ export default function Hub() {
 // -- Layout primitives -------------------------------------------------------
 
 function PageSurface({ children }: { children: React.ReactNode }) {
-  // A soft top-to-bottom wash gives the page a sense of depth without
-  // committing to a heavy gradient. Picked very low alphas so it reads
-  // identically in light and dark modes.
+  // A single soft glow anchored to the top gives depth without a heavy wash;
+  // low alphas read identically in light and dark.
   return (
-    <div className="min-h-full bg-gradient-to-b from-primary/[0.04] via-background to-background">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8 md:px-6">
+    <div className="relative min-h-full overflow-hidden bg-background">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-primary/[0.07] via-primary/[0.02] to-transparent"
+      />
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 md:px-6 lg:py-10">
         {children}
       </div>
     </div>
@@ -139,28 +147,22 @@ function PageSurface({ children }: { children: React.ReactNode }) {
 }
 
 function HubHeader() {
-  const today = new Date()
-  const dateLabel = today.toLocaleDateString(undefined, {
+  const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
   })
   return (
-    <header className="flex items-end justify-between gap-4">
-      <div className="flex items-center gap-3">
-        <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
-          <LuminaryGlyph size={48} className="text-primary" />
-        </span>
-        <div className="flex flex-col">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            {greeting()}
-          </span>
-          <h1 className="text-2xl font-semibold leading-tight text-foreground">
-            Luminary
-          </h1>
-        </div>
+    <header className="flex items-center gap-4">
+      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
+        <LuminaryGlyph size={40} className="text-primary" />
+      </span>
+      <div className="flex flex-col">
+        <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
+          {greetingHeadline()}
+        </h1>
+        <span className="text-sm text-muted-foreground">{dateLabel}</span>
       </div>
-      <span className="hidden text-xs text-muted-foreground sm:inline">{dateLabel}</span>
     </header>
   )
 }
@@ -192,15 +194,31 @@ function Section({
   )
 }
 
-function greeting() {
+function greetingHeadline() {
   const h = new Date().getHours()
-  if (h < 5) return "still up — be kind to yourself"
-  if (h < 12) return "good morning"
-  if (h < 17) return "afternoon"
-  return "evening"
+  if (h < 5) return "Still up?"
+  if (h < 12) return "Good morning"
+  if (h < 17) return "Good afternoon"
+  return "Good evening"
 }
 
 // -- Today hero --------------------------------------------------------------
+
+const _HERO_FALLBACK_REASON: Record<string, string> = {
+  continue_reading: "Pick up while the context is still warm — cold restarts cost more.",
+  resume_note: "A quick note while it's fresh tends to stick.",
+  drill_concept: "A focused drill now beats relearning it later.",
+  fix_misconception: "Correcting a wrong model pays more than new material.",
+  confidence_check: "You felt sure and missed — worth a recalibration pass.",
+}
+
+const _HERO_ICON: Record<string, typeof BookOpen> = {
+  continue_reading: BookOpen,
+  resume_note: Pencil,
+  drill_concept: Dumbbell,
+  fix_misconception: AlertTriangle,
+  confidence_check: Crosshair,
+}
 
 function TodayHero({ action }: { action: TodayAction }) {
   const navigate = useNavigate()
@@ -209,25 +227,46 @@ function TodayHero({ action }: { action: TodayAction }) {
     return <ReviewFocusHero action={action} />
   }
 
+  // the recommender's evidence line wins over generic copy (docs/recommender-spec.md)
   const reason =
-    action.kind === "continue_reading"
-      ? "Pick up while the context is still warm — cold restarts cost more."
-      : "A quick note while it's fresh tends to stick."
-  const Icon = action.kind === "continue_reading" ? BookOpen : Pencil
+    action.reasons?.[0]?.detail ?? _HERO_FALLBACK_REASON[action.kind] ?? ""
+  const Icon = _HERO_ICON[action.kind] ?? BookOpen
   const onClick = () => {
-    if (action.kind === "continue_reading" && action.target_id) {
-      navigate(`/library?doc=${encodeURIComponent(action.target_id)}`, { state: { from: "/" } })
-    } else {
-      navigate("/notes", { state: { from: "/" } })
+    markRecommendationActed(action.recommendation_id)
+    switch (action.kind) {
+      case "continue_reading":
+        if (action.target_id) {
+          navigate(`/library?doc=${encodeURIComponent(action.target_id)}`, {
+            state: { from: "/" },
+          })
+        } else {
+          navigate("/library", { state: { from: "/" } })
+        }
+        break
+      case "drill_concept":
+      case "confidence_check":
+        launchStudy({ type: "concept", ref: action.target_id ?? "", label: action.label })
+        break
+      case "fix_misconception":
+        if (action.target_id) {
+          launchStudy({ type: "concept", ref: action.target_id, label: action.label })
+        } else if (action.document_id) {
+          launchStudy({ type: "doc", ref: action.document_id, label: action.label })
+        } else {
+          launchStudy({ type: "daily", label: "Today's pick" })
+        }
+        break
+      default:
+        navigate("/notes", { state: { from: "/" } })
     }
   }
   return (
     <button
       onClick={onClick}
-      className="group relative flex w-full cursor-pointer select-none flex-col gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 text-left text-primary-foreground shadow-md shadow-primary/15 transition-all hover:shadow-lg hover:shadow-primary/20"
+      className="group relative flex w-full cursor-pointer select-none flex-col gap-2.5 overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-6 text-left text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/25"
     >
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-32 w-32 rounded-full bg-white/10 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
       <div className="relative z-10 flex items-center gap-2.5">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
           <Icon size={14} />
@@ -237,10 +276,10 @@ function TodayHero({ action }: { action: TodayAction }) {
         </span>
       </div>
       <div className="relative z-10 flex items-center justify-between gap-3 pt-0.5">
-        <span className="truncate text-lg font-semibold sm:text-xl">{action.label}</span>
-        <ArrowRight size={20} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
+        <span className="truncate text-xl font-semibold sm:text-2xl">{action.label}</span>
+        <ArrowRight size={22} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
       </div>
-      <p className="relative z-10 max-w-xl text-xs text-primary-foreground/75">{reason}</p>
+      <p className="relative z-10 max-w-2xl text-sm text-primary-foreground/75">{reason}</p>
     </button>
   )
 }
@@ -259,9 +298,9 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
   const overflow = total - focusCount
 
   return (
-    <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 px-6 py-5 shadow-md shadow-primary/15">
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-32 w-32 rounded-full bg-white/10 blur-3xl" />
+    <div className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-6 shadow-lg shadow-primary/20">
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
 
       <div className="relative z-10 flex flex-col gap-3">
         {/* label row */}
@@ -311,6 +350,7 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             onClick={() => {
+              markRecommendationActed(action.recommendation_id)
               setActiveDocument(null)
               setActiveCollectionId(action.collection_id ?? null)
               // route the daily call through the Study Launcher (docs/study-launcher.md)
@@ -334,6 +374,10 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
           </span>
         </div>
 
+        {action.reasons?.[0]?.detail && (
+          <p className="text-xs text-primary-foreground/60">{action.reasons[0].detail}</p>
+        )}
+
         {/* overflow footnote */}
         {overflow > 0 && (
           <button
@@ -349,6 +393,117 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
         )}
       </div>
     </div>
+  )
+}
+
+// -- Recommended next stack ---------------------------------------------------
+
+const _REC_ICON: Record<Recommendation["kind"], typeof Zap> = {
+  overdue_reviews: Zap,
+  weak_concept: Dumbbell,
+  open_misconception: AlertTriangle,
+  calibration_blind_spot: Crosshair,
+  stalled_reading: BookOpen,
+}
+
+function RecommendedNext({ items }: { items: Recommendation[] }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set())
+
+  const dismiss = (rec: Recommendation) => {
+    // optimistic hide; restore on failure
+    setHidden((prev) => new Set(prev).add(rec.id))
+    void apiPost<void>(`/home/recommendations/${rec.id}/dismiss`)
+      .then(() => queryClient.invalidateQueries({ queryKey: ["home-overview"] }))
+      .catch(() => {
+        setHidden((prev) => {
+          const next = new Set(prev)
+          next.delete(rec.id)
+          return next
+        })
+      })
+  }
+
+  const open = (rec: Recommendation) => {
+    markRecommendationActed(rec.id)
+    switch (rec.kind) {
+      case "overdue_reviews":
+        launchStudy({ type: "daily", label: "Today's pick" })
+        break
+      case "weak_concept":
+      case "calibration_blind_spot":
+        launchStudy({ type: "concept", ref: rec.concept_slug ?? rec.target_ref, label: rec.label })
+        break
+      case "open_misconception":
+        if (rec.concept_slug) {
+          launchStudy({ type: "concept", ref: rec.concept_slug, label: rec.label })
+        } else if (rec.document_id) {
+          launchStudy({ type: "doc", ref: rec.document_id, label: rec.label })
+        } else {
+          launchStudy({ type: "daily", label: "Today's pick" })
+        }
+        break
+      case "stalled_reading":
+        navigate(`/library?doc=${encodeURIComponent(rec.document_id ?? rec.target_ref)}`, {
+          state: { from: "/" },
+        })
+        break
+    }
+  }
+
+  const visible = items.filter((r) => !hidden.has(r.id)).slice(0, 3)
+  if (visible.length === 0) return null
+
+  return (
+    <Section
+      icon={Compass}
+      title="Recommended next"
+      subtitle="Backed by your own review record"
+    >
+      <div className="flex flex-col gap-2.5">
+        {visible.map((rec) => {
+          const Icon = _REC_ICON[rec.kind]
+          return (
+            <div
+              key={rec.id}
+              className="group relative flex items-center gap-3.5 overflow-hidden rounded-2xl border border-border/60 bg-card px-4 py-3.5 transition-all hover:border-primary/30 hover:shadow-sm"
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-1 bg-primary/40 opacity-0 transition-opacity group-hover:opacity-100"
+              />
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+                <Icon size={15} />
+              </span>
+              <button
+                onClick={() => open(rec)}
+                className="flex min-w-0 flex-1 cursor-pointer flex-col text-left"
+              >
+                <span className="truncate text-sm font-medium text-foreground">{rec.label}</span>
+                {rec.reasons[0]?.detail && (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {rec.reasons[0].detail}
+                  </span>
+                )}
+              </button>
+              <ArrowRight
+                size={14}
+                className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60"
+              />
+              <button
+                onClick={() => dismiss(rec)}
+                aria-label="Dismiss recommendation"
+                title="Dismiss"
+                className="shrink-0 rounded-full p-1.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </Section>
   )
 }
 
@@ -508,7 +663,7 @@ function TagCloud({ tags }: { tags: RecentTag[] }) {
   )
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-border/60 bg-card/40 px-5 py-4 backdrop-blur-sm">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-2xl border border-border/60 bg-card/40 px-4 py-4 backdrop-blur-sm">
       {tags.map((t) => {
         const total = t.document_count + t.note_count
         const weight = total / maxTotal
@@ -544,15 +699,13 @@ function TagCloud({ tags }: { tags: RecentTag[] }) {
 // -- Active collection card --------------------------------------------------
 
 function ActiveCollectionCard({ collection }: { collection: ActiveCollection }) {
-  // Use the collection's own color as the visual anchor so the click
-  // through to /collections/:id feels like a thematic continuation, not a
-  // surface break. A vertical color stripe + a faint tinted backdrop using
-  // the same color keeps it consistent across both surfaces.
+  // The collection's own color anchors the card so the click through to
+  // /collections/:id feels like a thematic continuation, not a surface break.
   return (
     <Link
       to={`/collections/${collection.id}`}
       state={{ from: "/" }}
-      className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
+      className="group relative flex items-center gap-3 overflow-hidden rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
     >
       <span
         aria-hidden
@@ -564,16 +717,14 @@ function ActiveCollectionCard({ collection }: { collection: ActiveCollection }) 
         className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-[0.07] blur-2xl transition-opacity group-hover:opacity-15"
         style={{ backgroundColor: collection.color }}
       />
-      <div className="relative z-10 flex items-start gap-2">
-        <span
-          className="mt-1 h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: collection.color }}
-        />
-        <h3 className="line-clamp-2 text-sm font-semibold text-foreground">
-          {collection.name}
-        </h3>
-      </div>
-      <div className="relative z-10 mt-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span
+        className="relative z-10 mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
+        style={{ backgroundColor: collection.color }}
+      />
+      <h3 className="relative z-10 line-clamp-1 flex-1 text-sm font-semibold text-foreground">
+        {collection.name}
+      </h3>
+      <div className="relative z-10 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <StatPill label="d" value={collection.document_count} />
         <StatPill label="n" value={collection.note_count} />
         <StatPill label="c" value={collection.flashcard_count} />
@@ -593,28 +744,32 @@ function StatPill({ label, value }: { label: string; value: number }) {
 
 // -- Weekly stats ------------------------------------------------------------
 
-function WeeklyStatsStrip({ stats }: { stats: WeeklyStats }) {
+function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-border/60 bg-card/40 px-5 py-3 text-sm backdrop-blur-sm">
-      <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        <Clock size={11} />
-        This week
-      </span>
-      <Stat label="studied" value={`${stats.minutes_studied}m`} accent="primary" />
-      <Stat label="cards" value={stats.cards_reviewed} accent="amber" />
-      <Stat label="notes" value={stats.notes_written} accent="emerald" />
-      <Stat label="docs" value={stats.docs_touched} accent="blue" />
+    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/50 p-5 backdrop-blur-sm">
+      <div className="flex items-center gap-2">
+        <Clock size={13} className="text-muted-foreground" />
+        <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          This week
+        </h2>
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        <BigStat value={`${stats.minutes_studied}m`} label="studied" accent="primary" />
+        <BigStat value={stats.cards_reviewed} label="cards" accent="amber" />
+        <BigStat value={stats.notes_written} label="notes" accent="emerald" />
+        <BigStat value={stats.docs_touched} label="docs" accent="blue" />
+      </div>
     </div>
   )
 }
 
-function Stat({
-  label,
+function BigStat({
   value,
+  label,
   accent,
 }: {
-  label: string
   value: number | string
+  label: string
   accent: "primary" | "amber" | "emerald" | "blue"
 }) {
   const dot = {
@@ -624,11 +779,13 @@ function Stat({
     blue: "bg-blue-500",
   }[accent]
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
-      <span className="text-base font-semibold text-foreground">{value}</span>
+    <div className="flex flex-col gap-0.5 rounded-xl bg-muted/40 px-3 py-2.5">
+      <div className="flex items-center gap-1.5">
+        <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+        <span className="text-xl font-semibold text-foreground">{value}</span>
+      </div>
       <span className="text-xs text-muted-foreground">{label}</span>
-    </span>
+    </div>
   )
 }
 
@@ -684,7 +841,7 @@ function OrganizeCallout() {
       <FolderPlus size={16} className="shrink-0 text-primary" />
       <span className="flex-1">No active projects yet.</span>
       <span className="flex items-center gap-1 text-primary">
-        Organize your library
+        Organize
         <ArrowRight size={12} />
       </span>
     </Link>
@@ -694,20 +851,23 @@ function OrganizeCallout() {
 function HubLoading() {
   return (
     <PageSurface>
-      <div className="flex items-center gap-3">
-        <Skeleton className="h-10 w-10 rounded-xl" />
-        <Skeleton className="h-7 w-40" />
+      <div className="flex items-center gap-4">
+        <Skeleton className="h-14 w-14 rounded-2xl" />
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-7 w-44" />
+          <Skeleton className="h-4 w-32" />
+        </div>
       </div>
-      <Skeleton className="h-28 w-full rounded-2xl" />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Skeleton className="h-44 rounded-2xl" />
-        <Skeleton className="h-44 rounded-2xl" />
-      </div>
-      <Skeleton className="h-20 w-full rounded-2xl" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-28 rounded-2xl" />
-        ))}
+      <Skeleton className="h-32 w-full rounded-3xl" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          <Skeleton className="h-40 rounded-2xl" />
+          <Skeleton className="h-40 rounded-2xl" />
+        </div>
+        <div className="flex flex-col gap-6">
+          <Skeleton className="h-44 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+        </div>
       </div>
     </PageSurface>
   )

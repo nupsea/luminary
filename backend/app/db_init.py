@@ -287,6 +287,9 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE eval_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
             "ALTER TABLE eval_runs ADD COLUMN error_message TEXT",
             "ALTER TABLE review_events ADD COLUMN predicted_rating TEXT",
+            # misconception lifecycle: open -> resolved (docs/recommender-spec.md)
+            "ALTER TABLE misconceptions ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+            "ALTER TABLE misconceptions ADD COLUMN resolved_at DATETIME",
         ]:
             try:
                 await conn.execute(text(ddl))

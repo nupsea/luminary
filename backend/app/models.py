@@ -318,6 +318,10 @@ class MisconceptionModel(Base):
     error_type: Mapped[str] = mapped_column(String, nullable=False)
     correction_note: Mapped[str] = mapped_column(Text, nullable=False)
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    # open|resolved -- resolved deterministically by a later good review / passing
+    # teach-back on the same flashcard, never by an LLM (docs/recommender-spec.md)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class NoteModel(Base):
@@ -1048,6 +1052,22 @@ class ChatSuggestionHistoryModel(Base):
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
     session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class RecommendationFeedbackModel(Base):
+    __tablename__ = "recommendation_feedback"
+    __table_args__ = (
+        UniqueConstraint("kind", "target_type", "target_ref", name="uq_reco_kind_target"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    target_type: Mapped[str] = mapped_column(String, nullable=False)
+    target_ref: Mapped[str] = mapped_column(String, nullable=False)
+    shown_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_shown_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 

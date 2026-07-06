@@ -58,6 +58,7 @@ from app.schemas.study import (
     DocumentTopicsResponse,
     DueCountResponse,
     GapResult,
+    MisconceptionStatsResponse,
     RubricCompletenessResponse,
     RubricDimensionResponse,
     SectionHeatmapItem,
@@ -95,6 +96,13 @@ from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.mastery_service import get_mastery_service
+from app.services.misconceptions import (
+    PASSING_TEACHBACK_SCORE,
+    resolve_for_flashcard,
+)
+from app.services.misconceptions import (
+    get_stats as get_misconception_stats,
+)
 from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
@@ -1311,6 +1319,11 @@ async def teachback(
             session=session,
         )
 
+    # this legacy path skips FSRS scheduling, so the resolve-on-good-review hook
+    # in fsrs_service never fires here -- resolve passing scores explicitly
+    if score >= PASSING_TEACHBACK_SCORE:
+        await resolve_for_flashcard(session, card.id)
+
     await session.commit()
     logger.info(
         "Teachback evaluated",
@@ -1999,6 +2012,13 @@ async def get_decay_debt(
     items.sort(key=lambda x: x.avg_retention)
     total_at_risk = sum(i.card_count for i in items)
     return DecayDebtResponse(items=items[:limit], total_at_risk=total_at_risk)
+
+
+@router.get("/misconception-stats", response_model=MisconceptionStatsResponse)
+async def misconception_stats(
+    session: AsyncSession = Depends(get_db),
+) -> MisconceptionStatsResponse:
+    return MisconceptionStatsResponse(**await get_misconception_stats(session))
 
 
 @router.get("/calibration-stats", response_model=CalibrationStatsResponse)
