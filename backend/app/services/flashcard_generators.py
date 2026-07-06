@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -36,6 +37,7 @@ from app.services.flashcard_parsers import (
     _parse_concept_extract,
     _parse_llm_response,
     card_field,
+    card_rejection_reason,
 )
 from app.services.flashcard_prompts import (
     _BLOOM_L3_INSTRUCTION,
@@ -120,13 +122,19 @@ async def generate_technical(
     if not combined_text:
         return []
 
-    prompt = TECH_FLASHCARD_USER_TMPL.format(
-        count=count,
-        section_heading=section_heading or "(none)",
-        has_code=str(has_code),
-        admonition_type=admonition_type or "(none)",
-        text=combined_text,
-    )
+    async def _batch(want: int, avoid: list[str]) -> list[dict]:
+        prompt = TECH_FLASHCARD_USER_TMPL.format(
+            count=want,
+            section_heading=section_heading or "(none)",
+            has_code=str(has_code),
+            admonition_type=admonition_type or "(none)",
+            text=combined_text,
+        ) + _avoid_suffix(avoid)
+        raw = await llm.generate(
+            prompt, system=TECH_FLASHCARD_SYSTEM,
+            model=_generation_model(), stream=False,
+        )
+        return _gate_cards(_parse_llm_response(raw, document_id))
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -139,18 +147,12 @@ async def generate_technical(
         span.set_attribute("flashcard.requested_count", count)
         span.set_attribute("flashcard.mode", "technical")
 
-        raw = await llm.generate(
-            prompt, system=TECH_FLASHCARD_SYSTEM,
-            model=_generation_model(), stream=False,
-        )
-        cards_data = _parse_llm_response(raw, document_id)
+        cards_data = await _collect_with_backfill(count, _batch)
         span.set_attribute("flashcard.generated_count", len(cards_data))
 
     now = datetime.now(UTC)
     flashcards: list[FlashcardModel] = []
     for item in cards_data:
-        if not isinstance(item, dict):
-            continue
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
@@ -163,8 +165,6 @@ async def generate_technical(
             bloom_level = int(raw_bloom)
         else:
             bloom_level = None
-        if not question or not answer:
-            continue
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
@@ -306,6 +306,106 @@ async def generate_cloze(
     return flashcards
 
 
+# Extra LLM passes to backfill cards lost to the quality gate / parse failures,
+# so a request for N cards returns N rather than silently fewer.
+_MAX_GENERATION_RETRIES = 2
+
+
+def _avoid_suffix(avoid: list[str]) -> str:
+    """Prompt fragment steering a retry pass away from questions already kept."""
+    if not avoid:
+        return ""
+    listed = "; ".join(q[:120] for q in avoid[:20])
+    return f"\nDo NOT repeat or paraphrase these already-written questions: {listed}\n"
+
+
+def _gate_cards(parsed: list) -> list[dict]:
+    """Normalize parsed LLM items to {question, answer, source_excerpt, ...} and
+    drop any that fail the quality gate. Extra fields (bloom_level,
+    flashcard_type) pass through untouched for the caller to persist."""
+    kept: list[dict] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        q = card_field(item, "question", "front", "q", "term", "prompt")
+        a = card_field(item, "answer", "back", "a", "definition", "response")
+        reason = card_rejection_reason(q, a)
+        if reason:
+            logger.info("flashcard: dropped low-quality card (%s): %r", reason, q[:80])
+            continue
+        kept.append({
+            **item,
+            "question": q,
+            "answer": a,
+            "source_excerpt": card_field(item, "source_excerpt", "source", "excerpt"),
+        })
+    return kept
+
+
+async def _collect_with_backfill(
+    count: int,
+    generate_batch: Callable[[int, list[str]], Awaitable[list[dict]]],
+) -> list[dict]:
+    """Run `generate_batch(want, avoid)` until `count` gate-passing cards are
+    collected or a pass stops making progress. Each retry is told which
+    questions are already accepted so it adds new cards instead of repeats.
+    Returns at most `count` cards."""
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    attempts = 0
+    while len(candidates) < count and attempts <= _MAX_GENERATION_RETRIES:
+        batch = await generate_batch(count - len(candidates), [c["question"] for c in candidates])
+        attempts += 1
+        added = 0
+        for c in batch:
+            key = c["question"].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(c)
+            added += 1
+        if added == 0:
+            break
+    if len(candidates) < count:
+        logger.info(
+            "flashcard: %d/%d usable cards after %d attempt(s) (model=%s)",
+            len(candidates), count, attempts, _generation_model() or "default",
+        )
+    return candidates[:count]
+
+
+async def _generate_concept_cards(
+    llm,
+    domain: str,
+    concepts: list,
+    combined_text: str,
+    difficulty: str,
+    parse_ctx: str,
+    count: int,
+) -> list[dict]:
+    """Concept-grounded card generation with quality-gate backfill. Shared by
+    the note-tag and collection-per-note paths. Parameters (not loop variables)
+    are captured by the inner batch closure, so it is safe to call in a loop."""
+
+    async def _batch(_want: int, avoid: list[str]) -> list[dict]:
+        prompt = NOTES_CARD_FROM_CONCEPTS_TMPL.format(
+            domain=domain,
+            difficulty=difficulty,
+            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+            concepts_json=json.dumps(concepts, ensure_ascii=False),
+            text=combined_text,
+        ) + _avoid_suffix(avoid)
+        raw = await llm.generate(
+            prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
+            model=_generation_model(), stream=False,
+        )
+        return _gate_cards(_parse_llm_response(raw, parse_ctx))
+
+    # cards are grounded one-per-concept, so the achievable count is bounded by
+    # how many concepts were extracted -- never retry past that
+    return await _collect_with_backfill(min(count, len(concepts)), _batch)
+
+
 async def generate(
     document_id: str,
     scope: Literal["full", "section"],
@@ -425,13 +525,22 @@ async def generate(
                 "Include code examples in questions where appropriate.\n"
             )
 
-    prompt = FLASHCARD_USER_TMPL.format(
-        count=count,
-        difficulty=difficulty,
-        difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-        extra_instructions=extra_instructions,
-        text=combined_text,
-    )
+    async def _batch(want: int, avoid: list[str]) -> list[dict]:
+        batch_prompt = FLASHCARD_USER_TMPL.format(
+            count=want,
+            difficulty=difficulty,
+            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
+            extra_instructions=extra_instructions,
+            text=combined_text,
+        ) + _avoid_suffix(avoid)
+        raw = await llm.generate(
+            batch_prompt, system=system_prompt,
+            model=_generation_model(), stream=False,
+            # force valid JSON; num_ctx: 2048 truncates the section text into junk
+            response_format={"type": "json_object"},
+            num_ctx=get_settings().OLLAMA_GENERATION_NUM_CTX,
+        )
+        return _gate_cards(_parse_llm_response(raw, document_id))
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -446,16 +555,8 @@ async def generate(
         if section_heading:
             span.set_attribute("flashcard.section_heading", section_heading)
 
-        raw = await llm.generate(
-            prompt, system=system_prompt,
-            model=_generation_model(), stream=False,
-            # force valid JSON; the prompt + one-shot example steer it to {"flashcards": [...]}.
-            # num_ctx: at the default 2048 the section text is truncated and the model emits junk.
-            response_format={"type": "json_object"},
-            num_ctx=get_settings().OLLAMA_GENERATION_NUM_CTX,
-        )
-        cards_data = _parse_llm_response(raw, document_id)
-        span.set_attribute("flashcard.generated_count", len(cards_data))
+        candidates = await _collect_with_backfill(count, _batch)
+        span.set_attribute("flashcard.generated_count", len(candidates))
 
     now = datetime.now(UTC)
 
@@ -465,28 +566,9 @@ async def generate(
 
     _existing_qs, existing_vecs = await _fetch_existing_embeddings("default", session)
 
-    candidates: list[dict] = []
-    for item in cards_data:
-        if not isinstance(item, dict):
-            continue
-        q = card_field(item, "question", "front", "q", "term", "prompt")
-        a = card_field(item, "answer", "back", "a", "definition", "response")
-        if q and a:
-            candidates.append({
-                **item,
-                "question": q,
-                "answer": a,
-                "source_excerpt": card_field(item, "source_excerpt", "source", "excerpt"),
-            })
-
     if not candidates:
         logger.warning(
-            "flashcard.generate: %d parsed items but 0 usable Q/A (model=%s); first-item keys=%s; "
-            "raw=%r",
-            len(cards_data),
-            _generation_model() or "default",
-            list(cards_data[0].keys()) if cards_data and isinstance(cards_data[0], dict) else None,
-            raw[:300],
+            "flashcard.generate: 0 usable cards (model=%s)", _generation_model() or "default"
         )
 
     if candidates and existing_vecs is not None:
@@ -615,31 +697,17 @@ async def generate_from_notes(
         if not concepts:
             return []
 
-        card_prompt = NOTES_CARD_FROM_CONCEPTS_TMPL.format(
-            domain=domain,
-            difficulty=difficulty,
-            difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-            concepts_json=json.dumps(concepts, ensure_ascii=False),
-            text=combined_text,
+        cards_data = await _generate_concept_cards(
+            llm, domain, concepts, combined_text, difficulty, "notes", count
         )
-        raw = await llm.generate(
-            card_prompt,
-            system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
-            model=_generation_model(), stream=False,
-        )
-        cards_data = _parse_llm_response(raw, "notes")
         span.set_attribute("flashcard.generated_count", len(cards_data))
 
     now = datetime.now(UTC)
     flashcards: list[FlashcardModel] = []
     for item in cards_data:
-        if not isinstance(item, dict):
-            continue
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
-        if not question or not answer:
-            continue
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=None,
@@ -746,29 +814,15 @@ async def generate_from_collection(
         if not concepts:
             continue
 
-        raw = await llm.generate(
-            NOTES_CARD_FROM_CONCEPTS_TMPL.format(
-                domain=domain,
-                difficulty=difficulty,
-                difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
-                concepts_json=json.dumps(concepts, ensure_ascii=False),
-                text=combined_text,
-            ),
-            system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
-            model=_generation_model(),
-            stream=False,
+        cards_data = await _generate_concept_cards(
+            llm, domain, concepts, combined_text, difficulty, note_id, count_per_note
         )
-        cards_data = _parse_llm_response(raw, note_id)
 
         now = datetime.now(UTC)
         for item in cards_data:
-            if not isinstance(item, dict):
-                continue
             question = str(item.get("question", "")).strip()
             answer = str(item.get("answer", "")).strip()
             source_excerpt = str(item.get("source_excerpt", "")).strip()
-            if not question or not answer:
-                continue
             card = FlashcardModel(
                 id=str(uuid.uuid4()),
                 document_id=None,
@@ -867,7 +921,11 @@ async def generate_from_graph(
                 question = str(item.get("question", "")).strip()
                 answer = str(item.get("answer", "")).strip()
                 source_excerpt = str(item.get("source_excerpt", "")).strip()
-                if not question or not answer:
+                reason = card_rejection_reason(question, answer)
+                if reason:
+                    logger.info(
+                        "flashcard: dropped low-quality card (%s): %r", reason, question[:80]
+                    )
                     continue
                 cards.append(
                     FlashcardModel(
