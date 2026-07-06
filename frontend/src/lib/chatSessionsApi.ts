@@ -59,6 +59,12 @@ export const renameChatSession = (
 ): Promise<ChatSessionListItem> =>
   apiPatch<ChatSessionListItem>(`${PATH}/${id}`, body)
 
+export const updateChatSessionModel = (
+  id: string,
+  model: string | null,
+): Promise<ChatSessionListItem> =>
+  apiPatch<ChatSessionListItem>(`${PATH}/${id}`, { model })
+
 export const deleteChatSession = (id: string): Promise<void> =>
   apiDelete(`${PATH}/${id}`)
 
