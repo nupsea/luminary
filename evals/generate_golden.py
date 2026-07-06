@@ -47,13 +47,14 @@ from app.services.golden_quality import (  # noqa: E402
     is_structural_chunk,
     quality_filter,
 )
+from evals.lib.golden_relevance import find_graded_relevance  # noqa: E402
 from evals.lib.golden_verify import (  # noqa: E402
     build_verify_prompt,
     cross_verify,
     failed_axes,
     parse_verdict,
 )
-from evals.lib.retrieval_metrics import _norm  # noqa: E402
+from evals.lib.retrieval_metrics import _hint_key, _norm  # noqa: E402
 
 _HEADING_RE = re.compile(r"^#{1,3}\s+\S", re.MULTILINE)
 
@@ -116,7 +117,7 @@ def chunk_source(text: str, *, min_chars: int = 700, max_chars: int = 3000) -> l
 
 
 def hint_is_verbatim(hint: str, chunk_text: str) -> bool:
-    return _norm(hint)[:80] in _norm(chunk_text)
+    return _hint_key(hint) in _norm(chunk_text)
 
 
 def generate_for_chunk(chunk: str, *, model: str, ask: int, persona: str | None) -> list[dict]:
@@ -244,6 +245,12 @@ def main() -> None:
                 "question": item["question"],
                 "ground_truth_answer": item["ground_truth_answer"],
                 "context_hint": item["context_hint"],
+                "relevance": find_graded_relevance(
+                    item["context_hint"],
+                    item["ground_truth_answer"],
+                    item["_chunk"],
+                    chunks,
+                ),
                 "persona": item.get("_persona"),
                 "source_file": source_label,
                 "document_id": "TBD",

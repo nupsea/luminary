@@ -13,7 +13,9 @@ from app.database import get_db
 from app.services.settings_service import (
     get_labs_enabled,
     get_llm_settings,
+    get_rerank_enabled,
     set_labs_enabled,
+    set_rerank_enabled,
     update_llm_settings,
 )
 from app.surface_manifest import labs_surfaces
@@ -316,6 +318,32 @@ async def get_web_search_settings() -> WebSearchSettingsResponse:
         provider=provider,
         enabled=(provider != "none"),
     )
+
+
+# Retrieval settings
+
+
+class RetrievalSettingsResponse(BaseModel):
+    rerank_enabled: bool
+
+
+class RetrievalSettingsPatch(BaseModel):
+    rerank_enabled: bool
+
+
+@router.get("/retrieval", response_model=RetrievalSettingsResponse)
+async def get_retrieval_settings(
+    db: AsyncSession = Depends(get_db),
+) -> RetrievalSettingsResponse:
+    return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
+
+
+@router.patch("/retrieval", response_model=RetrievalSettingsResponse)
+async def patch_retrieval_settings(
+    body: RetrievalSettingsPatch, db: AsyncSession = Depends(get_db)
+) -> RetrievalSettingsResponse:
+    await set_rerank_enabled(db, body.rerank_enabled)
+    return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
 
 
 # Surface tier + labs toggles

@@ -70,6 +70,51 @@ interface RegenStatus {
 const fetchRegenStatus = (): Promise<RegenStatus> =>
   apiGet<RegenStatus>("/concepts/regenerate/status")
 
+interface RetrievalSettings {
+  rerank_enabled: boolean
+}
+
+const fetchRetrievalSettings = (): Promise<RetrievalSettings> =>
+  apiGet<RetrievalSettings>("/settings/retrieval")
+
+const patchRetrievalSettings = (updates: RetrievalSettings): Promise<RetrievalSettings> =>
+  apiPatch("/settings/retrieval", updates)
+
+function RetrievalControl() {
+  const queryClient = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ["retrieval-settings"],
+    queryFn: fetchRetrievalSettings,
+    staleTime: 60_000,
+  })
+  const mutation = useMutation({
+    mutationFn: patchRetrievalSettings,
+    onSuccess: (fresh) => queryClient.setQueryData(["retrieval-settings"], fresh),
+    onError: () => toast.error("Could not update retrieval settings"),
+  })
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-semibold text-foreground">Retrieval</h3>
+      <label className="flex cursor-pointer items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">Answer reranking</p>
+          <p className="text-xs text-muted-foreground">
+            Re-score search results with a local cross-encoder before answering. Better
+            answers on paraphrased questions; adds a fraction of a second per question on CPU.
+          </p>
+        </div>
+        <input
+          type="checkbox"
+          checked={data?.rerank_enabled ?? true}
+          disabled={!data || mutation.isPending}
+          onChange={(e) => mutation.mutate({ rerank_enabled: e.target.checked })}
+          className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-border accent-primary"
+        />
+      </label>
+    </section>
+  )
+}
+
 async function fetchModels(provider: string): Promise<ModelOption[]> {
   try {
     return await apiGet<ModelOption[]>("/settings/llm/models", { provider })
@@ -606,6 +651,11 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
               <p className="mt-2 text-xs text-red-600">Rebuild failed: {regen.error}</p>
             )}
           </section>
+
+          <div className="border-t border-border" />
+
+          {/* Section 2.7: Retrieval — L3 reranker toggle */}
+          <RetrievalControl />
 
           <div className="border-t border-border" />
 

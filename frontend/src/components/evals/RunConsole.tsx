@@ -4,32 +4,25 @@ import { Play } from "lucide-react"
 import { toast } from "sonner"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
+import {
+  errorFromResponse,
+  fetchEvalModels,
+  isExternalJudge,
+  judgeOptionsFrom,
+  toSelection,
+  type DatasetSelection,
+} from "./api"
 import type { GoldenDataset } from "./types"
-
-// "" = no judge (fast, retrieval-only). A judge generates real answers via the
-// app's /qa pipeline and scores those. Frontier options are opt-in and warned.
-const JUDGE_MODELS: { value: string; label: string }[] = [
-  { value: "", label: "None — fast HR@5/MRR" },
-  { value: "ollama/qwen2.5:14b-instruct", label: "Local: qwen2.5:14b" },
-  { value: "ollama/mistral", label: "Local: mistral" },
-  { value: "openai/gpt-4o-mini", label: "Frontier: gpt-4o-mini" },
-]
 
 type Mode = "single" | "ablation"
 
 interface RunConsoleProps {
   datasets: GoldenDataset[]
-  value: string
-  onChange: (dataset: string) => void
+  value: DatasetSelection | null
+  onChange: (selection: DatasetSelection | null) => void
   running: boolean
   runningLabel: string | null
   onStarted: (label: string) => void
-}
-
-async function fetchDatasets(): Promise<GoldenDataset[]> {
-  const res = await fetch(`${API_BASE}/evals/datasets`)
-  if (!res.ok) throw new Error("Failed to fetch datasets")
-  return res.json() as Promise<GoldenDataset[]>
 }
 
 export function RunConsole({
@@ -40,43 +33,67 @@ export function RunConsole({
   runningLabel,
   onStarted,
 }: RunConsoleProps) {
-  // file-backed datasets are the ones run_eval consumes via --dataset
-  const fileDatasets = useMemo(
-    () => datasets.filter((d) => d.source === "file").map((d) => d.name),
-    [datasets],
-  )
-  const fallback = useQuery({
-    queryKey: ["eval-datasets-console"],
-    queryFn: fetchDatasets,
-    enabled: datasets.length === 0,
-  })
-  const options = fileDatasets.length
-    ? fileDatasets
-    : (fallback.data ?? []).filter((d) => d.source === "file").map((d) => d.name)
+  // Every dataset, generated and file-backed alike — one console runs them
+  // all with the same options. Datasets still generating stay visible but
+  // disabled so a selected-but-unrunnable row reads as "not ready" instead
+  // of a blank select.
+  const options = useMemo(() => {
+    const generated = datasets
+      .filter((d) => d.source === "db" && d.id)
+      .map((d) => ({ sel: toSelection(d), runnable: d.status === "complete" }))
+      .filter((o): o is { sel: DatasetSelection; runnable: boolean } => o.sel !== null)
+    const files = datasets
+      .filter((d) => d.source === "file")
+      .map((d) => ({ sel: toSelection(d), runnable: true }))
+      .filter((o): o is { sel: DatasetSelection; runnable: boolean } => o.sel !== null)
+    return { generated, files, all: [...generated, ...files] }
+  }, [datasets])
 
   const [mode, setMode] = useState<Mode>("single")
   const [rerank, setRerank] = useState(false)
   const [judgeModel, setJudgeModel] = useState("")
   const [maxQuestions, setMaxQuestions] = useState(50)
 
-  const effectiveDataset = value || options[0] || ""
-  const external = /^(openai|anthropic|gemini)\//.test(judgeModel)
+  const modelsQuery = useQuery({
+    queryKey: ["eval-models"],
+    queryFn: fetchEvalModels,
+    staleTime: 60_000,
+  })
+  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — fast retrieval metrics")
+
+  const fallback = options.all.find((o) => o.runnable) ?? options.all[0] ?? null
+  const selected = value
+    ? (options.all.find((o) => o.sel.source === value.source && o.sel.key === value.key) ?? {
+        sel: value,
+        runnable: false,
+      })
+    : fallback
+  const selection = selected?.sel ?? null
+  const runnable = selected?.runnable ?? false
+  const external = isExternalJudge(judgeModel)
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${API_BASE}/evals/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dataset: effectiveDataset,
-          // ablation is retrieval-only — no judge; "" => no judge for single too
-          judge_model: mode === "ablation" ? "" : judgeModel,
-          rerank: mode === "single" ? rerank : false,
-          ablation: mode === "ablation",
-          max_questions: maxQuestions,
-        }),
-      })
-      if (!res.ok) throw new Error("Failed to start eval")
+      if (!selection) throw new Error("Pick a dataset first")
+      const payload = {
+        judge_model: mode === "ablation" ? "" : judgeModel,
+        rerank: mode === "single" ? rerank : false,
+        ablation: mode === "ablation",
+        max_questions: maxQuestions,
+      }
+      const res =
+        selection.source === "db"
+          ? await fetch(`${API_BASE}/evals/datasets/${selection.key}/run`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, check_citations: false }),
+            })
+          : await fetch(`${API_BASE}/evals/run`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...payload, dataset: selection.key }),
+            })
+      if (!res.ok) throw await errorFromResponse(res, "Failed to start eval")
       return res.json()
     },
     onSuccess: () => {
@@ -86,8 +103,8 @@ export function RunConsole({
           : rerank
             ? "rerank on"
             : "rerank off"
-      const judge = judgeModel ? ` · judge ${judgeModel.split("/").pop()}` : " · no judge"
-      onStarted(`${effectiveDataset} · ${cfg}${judge}`)
+      const judge = judgeModel && mode === "single" ? ` · judge ${judgeModel.split("/").pop()}` : " · no judge"
+      onStarted(`${selection?.name ?? ""} · ${cfg}${judge}`)
       toast.success("Eval started")
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Run failed"),
@@ -110,15 +127,38 @@ export function RunConsole({
           <span className="font-medium text-muted-foreground">Dataset</span>
           <select
             className="h-9 rounded-md border bg-background px-2 text-sm"
-            value={effectiveDataset}
-            onChange={(e) => onChange(e.target.value)}
+            value={selection ? `${selection.source}:${selection.key}` : ""}
+            onChange={(e) => {
+              const next = options.all.find(
+                (o) => `${o.sel.source}:${o.sel.key}` === e.target.value,
+              )
+              onChange(next?.sel ?? null)
+            }}
           >
-            {options.length === 0 && <option value="">No datasets</option>}
-            {options.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
+            {options.all.length === 0 && <option value="">No datasets</option>}
+            {options.generated.length > 0 && (
+              <optgroup label="Generated datasets">
+                {options.generated.map(({ sel, runnable: ok }) => (
+                  <option
+                    key={`${sel.source}:${sel.key}`}
+                    value={`${sel.source}:${sel.key}`}
+                    disabled={!ok}
+                  >
+                    {sel.name}
+                    {ok ? "" : " (generating…)"}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {options.files.length > 0 && (
+              <optgroup label="File goldens">
+                {options.files.map(({ sel }) => (
+                  <option key={`${sel.source}:${sel.key}`} value={`${sel.source}:${sel.key}`}>
+                    {sel.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
 
@@ -147,7 +187,7 @@ export function RunConsole({
             disabled={mode === "ablation"}
             onChange={(e) => setJudgeModel(e.target.value)}
           >
-            {JUDGE_MODELS.map((m) => (
+            {judgeOptions.map((m) => (
               <option key={m.value || "none"} value={m.value}>
                 {m.label}
               </option>
@@ -193,9 +233,14 @@ export function RunConsole({
         {external && (
           <span className="text-xs text-amber-600">Sends chunks to an external API.</span>
         )}
+        {selection && !runnable && (
+          <span className="text-xs text-muted-foreground">
+            {selection.name} is still generating — pick another dataset or wait.
+          </span>
+        )}
         <button
           type="button"
-          disabled={runMutation.isPending || !effectiveDataset}
+          disabled={runMutation.isPending || !selection || !runnable}
           onClick={() => runMutation.mutate()}
           className={cn(
             "ml-auto inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground",

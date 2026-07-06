@@ -9,36 +9,36 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { apiGet } from "@/lib/apiClient"
-
-// "" = no judge (retrieval-only). Live models are fetched so the dropdown only
-// offers judges that are actually pulled/configured — a hardcoded list drifts
-// from what Ollama has and produces "model not pulled" failures on Run.
-const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")
+import { fetchEvalModels, isExternalJudge, judgeOptionsFrom } from "./api"
 
 interface RunEvalDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (payload: { judge_model: string; check_citations: boolean; max_questions: number }) => void
+  onSubmit: (payload: {
+    judge_model: string
+    check_citations: boolean
+    max_questions: number
+    rerank: boolean
+    ablation: boolean
+  }) => void
   submitting: boolean
 }
 
 export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunEvalDialogProps) {
   const modelsQuery = useQuery({
     queryKey: ["eval-models"],
-    queryFn: fetchModels,
+    queryFn: fetchEvalModels,
     enabled: open,
     staleTime: 60_000,
   })
-  const judgeOptions = [
-    { value: "", label: "None — fast HR@5/MRR (no judge)" },
-    ...(modelsQuery.data?.local ?? []).map((m) => ({ value: m, label: `Local: ${m}` })),
-    ...(modelsQuery.data?.frontier ?? []).map((m) => ({ value: m, label: `Frontier: ${m}` })),
-  ]
+  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — fast HR@5/MRR (no judge)")
+  const [mode, setMode] = useState<"single" | "ablation">("single")
+  const [rerank, setRerank] = useState(false)
   const [judgeModel, setJudgeModel] = useState("")
   const [checkCitations, setCheckCitations] = useState(false)
   const [maxQuestions, setMaxQuestions] = useState(20)
-  const external = /^(openai|anthropic|gemini)\//.test(judgeModel)
+  const external = isExternalJudge(judgeModel)
+  const ablation = mode === "ablation"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -50,10 +50,34 @@ export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunE
 
         <div className="grid gap-4">
           <label className="grid gap-1 text-sm">
-            <span className="font-medium">Judge Model</span>
+            <span className="font-medium">Mode</span>
             <select
               className="h-9 rounded-md border bg-background px-3 text-sm"
-              value={judgeModel}
+              value={mode}
+              onChange={(event) => setMode(event.target.value as "single" | "ablation")}
+            >
+              <option value="single">Single run</option>
+              <option value="ablation">Strategy ablation (vector/fts/graph/rrf/+rerank)</option>
+            </select>
+          </label>
+
+          {!ablation && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={rerank}
+                onChange={(event) => setRerank(event.target.checked)}
+              />
+              Cross-encoder reranker
+            </label>
+          )}
+
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Judge Model{ablation ? " — not used in ablation" : ""}</span>
+            <select
+              className="h-9 rounded-md border bg-background px-3 text-sm disabled:opacity-50"
+              value={ablation ? "" : judgeModel}
+              disabled={ablation}
               onChange={(event) => setJudgeModel(event.target.value)}
             >
               {judgeOptions.map((opt) => (
@@ -86,14 +110,16 @@ export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunE
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={checkCitations}
-              onChange={(event) => setCheckCitations(event.target.checked)}
-            />
-            Check citations
-          </label>
+          {!ablation && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checkCitations}
+                onChange={(event) => setCheckCitations(event.target.checked)}
+              />
+              Check citations
+            </label>
+          )}
 
           <label className="grid gap-1 text-sm">
             <span className="font-medium">Max Questions: {maxQuestions}</span>
@@ -113,7 +139,15 @@ export function RunEvalDialog({ open, onOpenChange, onSubmit, submitting }: RunE
             type="button"
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
             disabled={submitting}
-            onClick={() => onSubmit({ judge_model: judgeModel, check_citations: checkCitations, max_questions: maxQuestions })}
+            onClick={() =>
+              onSubmit({
+                judge_model: ablation ? "" : judgeModel,
+                check_citations: ablation ? false : checkCitations,
+                max_questions: maxQuestions,
+                rerank: ablation ? false : rerank,
+                ablation,
+              })
+            }
           >
             <Play className="h-4 w-4" />
             Run

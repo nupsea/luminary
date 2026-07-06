@@ -11,6 +11,7 @@ import {
   deleteChatSession,
   getChatSession,
   renameChatSession,
+  updateChatSessionModel,
   type PersistedMessage,
 } from "@/lib/chatSessionsApi"
 import { Badge } from "@/components/ui/badge"
@@ -643,6 +644,11 @@ export default function Chat() {
       setMessagesRaw(hydrated)
       setScope(sess.scope)
       setSelectedDocId(sess.document_ids[0] ?? null)
+      // The hydrated session owns the doc context now. Without this, restoring
+      // an all-scope session (selectedDocId -> null) re-arms the Learning-tab
+      // pre-populate effect, which stamps activeDocumentId back on as "single".
+      docSelectorTouched.current = true
+      setModel(sess.model ?? llmSettings?.active_model ?? "")
       setQaError(null)
     } catch {
       // Session disappeared (deleted in another tab) -- start fresh.
@@ -1071,7 +1077,11 @@ export default function Chat() {
         {!llmLoading && llmSettings && (
           <ChatModelSelector
             value={model}
-            onChange={setModel}
+            onChange={(m) => {
+              setModel(m)
+              const sid = useAppStore.getState().activeChatSessionId
+              if (sid) void updateChatSessionModel(sid, m || null).catch(() => {})
+            }}
             localModels={localModelChoices}
             cloudModels={cloudModelChoices}
             effectiveDefault={effectiveModel}

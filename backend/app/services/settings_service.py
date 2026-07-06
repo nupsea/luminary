@@ -263,6 +263,27 @@ async def set_labs_enabled(db: AsyncSession, features: set[str]) -> None:
     await db.commit()
 
 
+_RERANK_KEY = "rerank_enabled"
+
+# Default ON: the ablation harness already treats rrf+rerank as the shipped
+# arm, and the reranker fails soft to plain RRF order on any load/inference
+# error, so the toggle exists to opt OUT (e.g. on very slow CPUs).
+_RERANK_DEFAULT = True
+
+
+async def get_rerank_enabled(db: AsyncSession) -> bool:
+    result = await db.execute(select(SettingsModel).where(SettingsModel.key == _RERANK_KEY))
+    row = result.scalar_one_or_none()
+    if row is None or not isinstance(row.value, bool):
+        return _RERANK_DEFAULT
+    return row.value
+
+
+async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
+    await db.merge(SettingsModel(key=_RERANK_KEY, value=bool(enabled)))
+    await db.commit()
+
+
 def read_labs_enabled_sync() -> set[str]:
     # Router registration runs at module import, before the async engine exists,
     # so labs gating reads the setting via a throwaway read-only sqlite connection.

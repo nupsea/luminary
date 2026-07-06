@@ -16,10 +16,11 @@ function fmt(value: number | null | undefined): string {
 }
 
 // Ablation runs keep their scores per strategy arm; show the shipped arm so
-// the row carries real numbers instead of dashes.
+// the row carries real numbers instead of dashes. ndcg_10 lives in
+// extra_metrics on single runs (no dedicated DB column).
 function rowScores(run: EvalRunSummary | EvalRunFull) {
   if (run.status === "failed") {
-    return { hr5: null, mrr: null, kind: "failed" }
+    return { hr5: null, mrr: null, ndcg: null, kind: "failed" }
   }
   if ("ablation_metrics" in run && run.eval_kind === "ablation") {
     const shipped = shippedAblationArm(run as EvalRunFull)
@@ -27,11 +28,18 @@ function rowScores(run: EvalRunSummary | EvalRunFull) {
       return {
         hr5: shipped.arm.hit_rate_5,
         mrr: shipped.arm.mrr,
+        ndcg: shipped.arm.ndcg_10 ?? null,
         kind: `ablation · ${shipped.label}`,
       }
     }
   }
-  return { hr5: run.hit_rate_5, mrr: run.mrr, kind: run.eval_kind ?? "—" }
+  const rawNdcg = "extra_metrics" in run ? run.extra_metrics?.ndcg_10 : null
+  return {
+    hr5: run.hit_rate_5,
+    mrr: run.mrr,
+    ndcg: typeof rawNdcg === "number" ? rawNdcg : null,
+    kind: run.eval_kind ?? "—",
+  }
 }
 
 export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull> }) {
@@ -49,6 +57,7 @@ export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull
             <TableHead>Model</TableHead>
             <TableHead>HR@5</TableHead>
             <TableHead>MRR@5</TableHead>
+            <TableHead>nDCG@10</TableHead>
             <TableHead>Faith</TableHead>
           </TableRow>
         </TableHeader>
@@ -69,6 +78,9 @@ export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull
                 </TableCell>
                 <TableCell className={cn(metricColor(s.mrr, THRESHOLDS.mrr))}>
                   {fmt(s.mrr)}
+                </TableCell>
+                <TableCell className={cn(metricColor(s.ndcg, THRESHOLDS.ndcg_10))}>
+                  {fmt(s.ndcg)}
                 </TableCell>
                 <TableCell className={cn(metricColor(run.faithfulness, THRESHOLDS.faithfulness))}>
                   {fmt(run.faithfulness)}

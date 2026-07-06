@@ -109,6 +109,8 @@ export default function Evals() {
       judge_model: string
       check_citations: boolean
       max_questions: number
+      rerank: boolean
+      ablation: boolean
     }) => {
       const res = await fetch(`${API_BASE}/evals/datasets/${selectedId}/run`, {
         method: "POST",

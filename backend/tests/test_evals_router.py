@@ -202,7 +202,25 @@ async def test_create_generated_dataset_returns_status(test_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_generated_dataset_detail_golden_and_runs(test_db, monkeypatch):
     """Generated dataset endpoints expose status, questions, JSONL-shaped rows, and runs."""
+    from app.models import DocumentModel
+
     async with db_module.get_session_factory()() as session:
+        # The pinned source document must exist — a dataset whose documents
+        # were all deleted is refused by the run endpoint (409, dead-document
+        # guard) rather than silently scoring 0%.
+        session.add(
+            DocumentModel(
+                id="doc-1",
+                title="Doc 1",
+                format="pdf",
+                content_type="book",
+                word_count=100,
+                file_path="doc1.pdf",
+                file_hash="h1",
+                stage="complete",
+                page_count=1,
+            )
+        )
         dataset = GoldenDatasetModel(
             id="ds-1",
             name="Generated",

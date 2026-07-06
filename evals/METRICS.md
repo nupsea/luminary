@@ -41,14 +41,30 @@ chars; a golden may carry several alternate hints and *any* one counts.
   metric that matters for a "show the best chunk first" experience.
 - **Interpret:** 0–1, higher is better. **Gate ≥ 0.35.** Protect this: a change
   can lift HR@5 (recall) while lowering MRR (demoting a correct rank-1) — always
-  read them together.
+  read them together. Depth is pinned at 5 (MRR@5) even though samples now carry
+  10 contexts for nDCG.
+
+### nDCG@10 — normalized Discounted Cumulative Gain at 10
+- **Computed:** each golden lists distinct relevant passages with grades
+  (`relevance: [{hint, grade}]`; grade 2 = the passage the answer was authored
+  from, grade 1 = another passage stating the same answer). Walking the top-10
+  retrieved chunks, each passage is credited once at the first chunk containing
+  it, discounted by `1/log2(rank+1)`; the sum is divided by the ideal ordering's
+  score. Goldens without `relevance` fall back to `context_hint` as a single
+  grade-1 passage — nDCG then behaves like a log-discounted MRR.
+- **Signifies:** *whole-window quality* — how much relevant material reaches the
+  k~6–10 chunk context handed to the LLM, and how high it sits. This is the
+  A/B metric for the cross-encoder reranker: HR@5/MRR often miss it lifting the
+  2nd and 3rd relevant passages into the window.
+- **Interpret:** 0–1, higher is better. **Provisional bar ≥ 0.40, report-only**
+  (not asserted) until graded goldens exist and baselines are recorded.
 
 ---
 
 ## 2. Strategy ablation
 
 The ablation runs the same golden through each retrieval strategy so you can see
-where quality comes from. Reported as HR@5 + MRR per strategy.
+where quality comes from. Reported as HR@5 + MRR + nDCG@10 per strategy.
 
 | Strategy | What it is |
 |----------|-----------|

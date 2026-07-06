@@ -2,9 +2,12 @@ import type { AblationArm, EvalRunFull } from "./types"
 
 // Single source of truth for eval quality gates. Must match the backend gates
 // in evals/run_eval.py THRESHOLDS — do not fork per-view copies.
+// ndcg_10 is provisional / report-only there too: shown against this bar but
+// never asserted until graded goldens exist and baselines are recorded.
 export const THRESHOLDS = {
   hit_rate_5: 0.5,
   mrr: 0.35,
+  ndcg_10: 0.4,
   faithfulness: 0.65,
 } as const
 

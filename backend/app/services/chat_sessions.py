@@ -177,6 +177,22 @@ async def rename_session(
     return sess
 
 
+async def update_session_model(
+    db: AsyncSession,
+    session_id: str,
+    *,
+    model: str | None,
+) -> ChatSessionModel | None:
+    sess = await get_session(db, session_id)
+    if sess is None:
+        return None
+    sess.model = model
+    sess.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(sess)
+    return sess
+
+
 async def delete_session(db: AsyncSession, session_id: str) -> bool:
     sess = await get_session(db, session_id)
     if sess is None:

@@ -4,7 +4,7 @@ Routes:
     POST   /chat/sessions               -- create a new session
     GET    /chat/sessions                -- list sessions, optional ?q= search
     GET    /chat/sessions/{id}           -- session metadata + full message history
-    PATCH  /chat/sessions/{id}           -- rename session (or trigger LLM auto-title)
+    PATCH  /chat/sessions/{id}           -- rename session (or LLM auto-title) and/or set model
     DELETE /chat/sessions/{id}           -- hard-delete session and its messages
     POST   /chat/sessions/{id}/messages  -- append a single message turn
 """
@@ -37,6 +37,7 @@ class SessionCreateRequest(BaseModel):
 class SessionRenameRequest(BaseModel):
     title: str | None = None  # explicit user title
     auto_from_message: str | None = None  # if set, infer title via LLM from this text
+    model: str | None = None  # explicit null resets to the app-default model
 
 
 class MessageAppendRequest(BaseModel):
@@ -153,13 +154,19 @@ async def rename_session(
     req: SessionRenameRequest,
     db: AsyncSession = Depends(get_db),
 ) -> SessionListItem:
+    model_touched = "model" in req.model_fields_set
+    sess = None
     if req.auto_from_message is not None:
         new_title = await svc.infer_title(req.auto_from_message)
         sess = await svc.rename_session(db, session_id, title=new_title, auto=True)
     elif req.title is not None:
         sess = await svc.rename_session(db, session_id, title=req.title, auto=False)
-    else:
-        raise HTTPException(status_code=400, detail="Provide either title or auto_from_message")
+    elif not model_touched:
+        raise HTTPException(
+            status_code=400, detail="Provide title, auto_from_message, or model"
+        )
+    if model_touched:
+        sess = await svc.update_session_model(db, session_id, model=req.model)
     if sess is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return SessionListItem(

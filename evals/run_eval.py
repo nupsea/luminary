@@ -60,6 +60,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     _norm,
     compute_hit_rate_5,
     compute_mrr,
+    compute_ndcg_10,
 )
 from evals.lib.runners import GenerationEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -90,10 +91,15 @@ VALID_DATASETS = [
 # silently drops answers and understates generation metrics.
 QA_REQUEST_TIMEOUT = 300.0
 
-# Quality gate thresholds
+# Quality gate thresholds. ndcg_10 is provisional / report-only: it is shown
+# against this bar in the UI but never asserted, because most goldens still
+# carry single-passage relevance (nDCG degrades to a log-discounted single-hit
+# metric there). Promote it to an asserted gate once graded goldens exist and
+# baselines are recorded.
 THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
+    "ndcg_10": 0.40,
     "faithfulness": 0.65,
     "answer_relevance": 0.50,
     "citation_support_rate": 0.80,
@@ -143,6 +149,24 @@ def load_golden_by_id(backend_url: str, dataset_id: str) -> list[dict]:
     return rows
 
 
+def split_rows_by_document_liveness(
+    rows: list[dict],
+    is_alive: "callable[[str], bool]",
+) -> tuple[list[dict], set[str]]:
+    """Partition golden rows into (rows whose pinned document is alive, dead doc ids).
+
+    Rows without a source_document_id pin are kept — they run unscoped. A row
+    pinned to a deleted document CANNOT retrieve anything, so keeping it would
+    score a guaranteed 0 that reads as a retrieval regression.
+    """
+    doc_ids = {r.get("source_document_id") for r in rows if r.get("source_document_id")}
+    dead = {d for d in doc_ids if not is_alive(d)}
+    if not dead:
+        return rows, set()
+    alive_rows = [r for r in rows if r.get("source_document_id") not in dead]
+    return alive_rows, dead
+
+
 def append_history(dataset: str, model: str, metrics: dict, passed: bool) -> None:
     """Backwards-compat wrapper -- always logs eval_kind='retrieval'."""
     _lib_append_history(dataset, model, metrics, passed, eval_kind="retrieval")
@@ -167,7 +191,11 @@ def search_chunks(
     rerank: bool = False,
     strategy: str = "rrf",
 ) -> list[str]:
-    """Run GET /search and return up to top-5 chunk texts."""
+    """Run GET /search and return up to top-10 chunk texts.
+
+    HR@5 and MRR@5 cap their own depth at 5; the extra tail exists for
+    nDCG@10.
+    """
     params: dict[str, str] = {"q": question}
     if document_id:
         params["document_id"] = document_id
@@ -194,7 +222,7 @@ def search_chunks(
             if document_id and group.get("document_id") != document_id:
                 continue
             all_matches.extend(group.get("matches", []))
-        return [m.get("text", "") for m in all_matches[:5]]
+        return [m.get("text", "") for m in all_matches[:10]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
@@ -253,12 +281,13 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     print(f"\n{'=' * 56}")
     print(f"  Retrieval ablation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
-    print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10}")
+    print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10} {'NDCG@10':>10}")
     for strategy, metrics in ablation_metrics.items():
         print(
             f"  {strategy:<12} "
             f"{metrics.get('hit_rate_5', 0.0):>10.4f} "
-            f"{metrics.get('mrr', 0.0):>10.4f}"
+            f"{metrics.get('mrr', 0.0):>10.4f} "
+            f"{metrics.get('ndcg_10', 0.0):>10.4f}"
         )
     print(f"{'=' * 56}\n")
 
@@ -277,6 +306,7 @@ __all__ = [
     "append_history",
     "compute_hit_rate_5",
     "compute_mrr",
+    "compute_ndcg_10",
     "ensure_ingested",
     "ingest_document",
     "is_document_alive",
@@ -449,6 +479,29 @@ def main() -> None:
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
         rows = load_golden_by_id(args.backend_url, args.dataset_id)
+        # File goldens re-resolve documents via the manifest (ensure_ingested);
+        # DB goldens pin source_document_id per question, which goes stale when
+        # the document is deleted and re-ingested under a new id. Scoring those
+        # rows would produce silent all-zero metrics.
+        rows, dead_docs = split_rows_by_document_liveness(
+            rows, lambda d: is_document_alive(args.backend_url, d)
+        )
+        if dead_docs and not rows:
+            print(
+                f"ERROR: every question in dataset {args.dataset_id} points at a "
+                f"deleted document ({', '.join(sorted(dead_docs))}). Re-link the "
+                "dataset to the re-ingested document (Quality > dataset row > "
+                "Re-link) or regenerate it.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if dead_docs:
+            print(
+                f"NOTE: skipping questions pinned to deleted documents "
+                f"({', '.join(sorted(dead_docs))}); {len(rows)} of the dataset's "
+                "questions remain evaluable. Re-link the dataset to restore the rest.",
+                file=sys.stderr,
+            )
     else:
         rows = load_golden(args.dataset)
     if args.max_questions is not None and args.max_questions < len(rows):
@@ -504,11 +557,13 @@ def main() -> None:
                         "contexts": chunks or [""],
                         "ground_truths": [ground_truth],
                         "context_hint": context_hint,
+                        "relevance": row.get("relevance") or [],
                     }
                 )
             ablation_metrics[label] = {
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
+                "ndcg_10": compute_ndcg_10(samples),
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
@@ -554,9 +609,11 @@ def main() -> None:
         answer = ""
         qa_resp: dict = {}
         # Judged contexts include the chunks /qa actually cited; retrieval
-        # metrics stay on the raw top-5 search result so HR@5 and MRR measure
-        # the same thing in every eval kind.
-        ragas_contexts = list(chunks)
+        # metrics stay on the raw search result so HR@5 and MRR measure the
+        # same thing in every eval kind. The judge keeps seeing top-5 — the
+        # 6-10 tail exists only for nDCG@10, and doubling judge input would
+        # change generation scores and cost for no judging benefit.
+        ragas_contexts = list(chunks[:5])
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
@@ -579,6 +636,7 @@ def main() -> None:
             "ragas_contexts": ragas_contexts or [""],
             "ground_truths": [ground_truth],
             "context_hint": context_hint,
+            "relevance": row.get("relevance") or [],
             "qa_response": qa_resp,
             "qa_not_found": not_found,
         }
@@ -595,6 +653,7 @@ def main() -> None:
 
     hr5 = compute_hit_rate_5(samples)
     mrr = compute_mrr(samples)
+    ndcg10 = compute_ndcg_10(samples)
 
     # An empty answer is either a decline (not_found — a real product outcome)
     # or a genuine failure (timeout/error). Count them apart so the UI never
@@ -664,6 +723,7 @@ def main() -> None:
     metrics = {
         "hit_rate_5": hr5,
         "mrr": mrr,
+        "ndcg_10": ndcg10,
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
