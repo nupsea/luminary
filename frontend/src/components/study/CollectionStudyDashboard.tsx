@@ -8,6 +8,7 @@ import {
   Loader2,
   MessageSquare,
   Play,
+  RefreshCw,
   Search,
   Sparkles,
   Tag as TagIcon,
@@ -24,7 +25,10 @@ import {
   generateCollectionFlashcards,
   generateDocumentFlashcards,
 } from "@/lib/studyApi"
+import { deleteAllFlashcardsForCollection } from "@/pages/Study/api"
+import { endOpenSessionsForScope } from "@/lib/studySessionService"
 import { SessionHistory } from "@/components/study/SessionHistory"
+import { CollectionCardManager } from "@/components/study/CollectionCardManager"
 
 interface CollectionTopic {
   tag: string
@@ -36,6 +40,7 @@ interface CollectionSource {
   id: string
   title: string
   type: "document" | "note"
+  weight?: number
 }
 
 interface SubCollection {
@@ -81,28 +86,25 @@ export function CollectionStudyDashboard({
 
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
-  const [genCount, setGenCount] = useState<number>(10)
+  const [genCount, setGenCount] = useState<number>(20)
   const [genDifficulty, setGenDifficulty] = useState<Difficulty>("medium")
   const [generatingDocId, setGeneratingDocId] = useState<string | null>(null)
+  const [confirmReplace, setConfirmReplace] = useState(false)
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["collection-dashboard", collectionId] })
+    queryClient.invalidateQueries({ queryKey: ["collection-cards", collectionId] })
     queryClient.invalidateQueries({ queryKey: ["flashcards"] })
     queryClient.invalidateQueries({ queryKey: ["deck-list"] })
   }
 
   const collectionGenMutation = useMutation({
     mutationFn: () =>
-      generateCollectionFlashcards(
-        collectionId,
-        data?.sources ?? [],
-        genCount,
-        genDifficulty,
-      ),
+      generateCollectionFlashcards(data?.sources ?? [], genCount, genDifficulty),
     onSuccess: (result) => {
       if (result.totalCreated > 0) {
         toast.success(
-          `Generated ${result.totalCreated} card${result.totalCreated === 1 ? "" : "s"} for this enclave`,
+          `Generated ${result.totalCreated} card${result.totalCreated === 1 ? "" : "s"} for this collection`,
         )
       } else if (result.noteSkipped > 0) {
         toast.info(
@@ -118,6 +120,33 @@ export function CollectionStudyDashboard({
     },
     onError: (e) => {
       toast.error(e instanceof Error ? e.message : "Generation failed")
+    },
+  })
+
+  // Regenerate (replace): wipe this collection's cards, then generate a fresh
+  // set across all its sources. Fresh slate -- old cards + review history go.
+  const collectionReplaceMutation = useMutation({
+    mutationFn: async () => {
+      await deleteAllFlashcardsForCollection(collectionId)
+      // Fresh cards -> fresh review: drop the stale in-progress session.
+      await endOpenSessionsForScope(null, collectionId)
+      return generateCollectionFlashcards(data?.sources ?? [], genCount, genDifficulty)
+    },
+    onSuccess: (result) => {
+      setConfirmReplace(false)
+      toast.success(
+        result.totalCreated > 0
+          ? `Replaced with ${result.totalCreated} fresh card${result.totalCreated === 1 ? "" : "s"}`
+          : "Cleared -- no new cards were generated",
+      )
+      if (result.errors.length > 0) {
+        toast.error(`${result.errors.length} source${result.errors.length === 1 ? "" : "s"} failed`)
+      }
+      invalidateAll()
+    },
+    onError: (e) => {
+      setConfirmReplace(false)
+      toast.error(e instanceof Error ? e.message : "Regenerate failed")
     },
   })
 
@@ -360,7 +389,7 @@ export function CollectionStudyDashboard({
                     <Grid size={24} />
                   </div>
                   <h4 className="text-sm font-semibold text-foreground">No studies available yet</h4>
-                  <p className="mt-1 text-xs text-muted-foreground">Use the synthesis engine to generate flashcards for this enclave.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Use the generator to create flashcards for this collection.</p>
                 </div>
               )}
 
@@ -477,9 +506,10 @@ export function CollectionStudyDashboard({
               )}
             </div>
             <div>
-              <p className="font-bold text-base text-foreground">Synthesis Engine</p>
+              <p className="font-bold text-base text-foreground">Generate cards</p>
               <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                Generate fresh questions across every document and note in this enclave.
+                A total for the whole collection, split across its sources by size — a
+                book earns more questions than a short note.
               </p>
             </div>
 
@@ -494,9 +524,10 @@ export function CollectionStudyDashboard({
                   disabled={collectionGenMutation.isPending || docGenMutation.isPending}
                   className="rounded-md border border-border bg-background px-2 py-1 text-xs font-medium disabled:opacity-50"
                 >
-                  <option value={5}>5 per source</option>
-                  <option value={10}>10 per source</option>
-                  <option value={20}>20 per source</option>
+                  <option value={10}>10 questions</option>
+                  <option value={20}>20 questions</option>
+                  <option value={30}>30 questions</option>
+                  <option value={50}>50 questions</option>
                 </select>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -520,7 +551,7 @@ export function CollectionStudyDashboard({
               onClick={() => {
                 if (collectionGenMutation.isPending || docGenMutation.isPending) return
                 if (data.sources.length === 0) {
-                  toast.info("Add at least one source to this enclave first")
+                  toast.info("Add at least one source to this collection first")
                   return
                 }
                 collectionGenMutation.mutate()
@@ -528,6 +559,7 @@ export function CollectionStudyDashboard({
               disabled={
                 collectionGenMutation.isPending ||
                 docGenMutation.isPending ||
+                collectionReplaceMutation.isPending ||
                 data.sources.length === 0
               }
               className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-md transition-all hover:bg-primary/90 disabled:opacity-50"
@@ -540,7 +572,7 @@ export function CollectionStudyDashboard({
               ) : (
                 <>
                   <Sparkles size={14} />
-                  Generate for enclave
+                  Generate for collection
                 </>
               )}
             </button>
@@ -549,11 +581,68 @@ export function CollectionStudyDashboard({
                 LLM calls run sequentially per source -- this may take a minute or two.
               </p>
             )}
+
+            {/* Regenerate (replace): fresh set, discards existing cards + history */}
+            {!confirmReplace ? (
+              <button
+                onClick={() => {
+                  if (data.sources.length === 0) {
+                    toast.info("Add at least one source to this collection first")
+                    return
+                  }
+                  setConfirmReplace(true)
+                }}
+                disabled={
+                  collectionGenMutation.isPending ||
+                  docGenMutation.isPending ||
+                  collectionReplaceMutation.isPending ||
+                  data.sources.length === 0
+                }
+                className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background/60 py-2 text-xs font-semibold text-foreground transition-all hover:bg-accent disabled:opacity-50"
+              >
+                {collectionReplaceMutation.isPending ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={12} />
+                )}
+                Regenerate (replace)
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                <p className="text-xs text-foreground">
+                  Delete all existing cards in this collection and generate a fresh set?
+                  Their review history is lost.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => collectionReplaceMutation.mutate()}
+                    disabled={collectionReplaceMutation.isPending}
+                    className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {collectionReplaceMutation.isPending && (
+                      <Loader2 size={12} className="animate-spin" />
+                    )}
+                    Replace
+                  </button>
+                  <button
+                    onClick={() => setConfirmReplace(false)}
+                    disabled={collectionReplaceMutation.isPending}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       </div>
 
-      {/* Session history (teach-back + flashcard) scoped to this enclave */}
+      {/* Card management: view + delete this collection's cards, like documents.
+          Keyed by collection so switching collections resets its local state. */}
+      <CollectionCardManager key={collectionId} collectionId={collectionId} />
+
+      {/* Session history (teach-back + flashcard) scoped to this collection */}
       <SessionHistory
         scope={{ kind: "collection", id: collectionId }}
         onResumeTeachback={(sid) => onStartTeachback(undefined, sid)}

@@ -176,6 +176,22 @@ export async function prepareSectionStudyFromCards(
   }
 }
 
+// Close any open flashcard/teach-back session for a scope. Call after deleting
+// or regenerating a scope's cards so the next study run starts fresh instead of
+// resuming a session whose planned cards no longer exist.
+export async function endOpenSessionsForScope(
+  documentId: string | null,
+  collectionId: string | null,
+): Promise<void> {
+  const modes: StudyMode[] = ["flashcard", "teachback"]
+  await Promise.all(
+    modes.map(async (mode) => {
+      const open = await fetchOpenSession({ mode, documentId, collectionId }).catch(() => null)
+      if (open) await endSession(open.id).catch(() => {})
+    }),
+  )
+}
+
 async function reattach(
   sid: string,
   ctx: {
@@ -192,15 +208,28 @@ async function reattach(
 
   const hasPrior = prevResults.length > 0 || remaining.answered_count > 0
   const hasRemaining = remaining.cards.length > 0
-  if (!hasPrior && !hasRemaining && !ctx.allowEmpty) {
+  const answeredCount = Math.max(prevResults.length, remaining.answered_count)
+  // A session is STALE when its planned cards were deleted/regenerated: there's
+  // no live remaining work, yet it never reviewed its whole plan (planned_count
+  // still exceeds what was answered). Such a session must NOT resurface as a
+  // stuck "complete" screen whose "Start Next Set" just re-resumes the same dead
+  // session -- return null so the caller closes it and starts fresh. A genuinely
+  // finished session (everything reviewed) is still adopted so re-entry shows its
+  // results, and the explicit-resume path (allowEmpty) always reattaches.
+  const isStale = !hasRemaining && remaining.planned_count > answeredCount
+  if (!ctx.allowEmpty && ((!hasPrior && !hasRemaining) || isStale)) {
     return null
   }
 
+  // Reconcile the planned total against what's actually live: if cards from the
+  // original plan were later deleted/regenerated, planned_count is stale and
+  // would make the progress bar read e.g. "12 of 22" while only 2 cards remain.
+  // Never exceed answered + live-remaining.
+  const liveTotal = answeredCount + remaining.cards.length
   const plannedTotal =
     remaining.planned_count > 0
-      ? remaining.planned_count
-      : prevResults.length + remaining.cards.length
-  const answeredCount = Math.max(prevResults.length, remaining.answered_count)
+      ? Math.min(remaining.planned_count, liveTotal)
+      : liveTotal
 
   if (hasRemaining) {
     await reopenSession(sid).catch(() => {})

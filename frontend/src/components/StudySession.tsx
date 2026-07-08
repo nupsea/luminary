@@ -277,10 +277,13 @@ interface FlashCardProps {
 }
 
 function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
+  // Card grows to fit its content -- long answers used to overflow a fixed-height
+  // 3D-flip container and overlap the rating buttons below. We reveal the answer
+  // beneath the question (Anki-style) and left-align it so multi-point answers
+  // and markdown bullets read cleanly.
   return (
     <div
-      className="relative min-h-64 w-full max-w-2xl cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      style={{ perspective: "1000px", position: "relative" }}
+      className="w-full max-w-2xl cursor-pointer rounded-xl border border-border bg-card p-8 shadow-md transition-shadow hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onFlip}
       role="button"
       tabIndex={0}
@@ -288,33 +291,35 @@ function FlashCard({ card, showAnswer, onFlip }: FlashCardProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
-          // Handle the flip here and stop the event before it reaches the
-          // session-level window listener, which would otherwise also fire.
+          // Stop the event before it reaches the session-level window listener,
+          // which would otherwise also fire.
           e.stopPropagation()
           onFlip?.()
         }
       }}
     >
-      <motion.div
-        className="absolute flex min-h-64 w-full flex-col items-center justify-center overflow-auto rounded-xl border border-border bg-card p-8 text-center shadow-md"
-        animate={{ rotateY: showAnswer ? -180 : 0 }}
-        transition={{ duration: 0.4, ease: "easeInOut" }}
-        style={{ backfaceVisibility: "hidden" }}
-      >
-        <MarkdownRenderer className="text-xl font-semibold text-foreground">{card.question}</MarkdownRenderer>
-      </motion.div>
-
-      <motion.div
-        className="absolute flex min-h-64 w-full flex-col items-center justify-center gap-4 overflow-auto rounded-xl border border-border bg-card p-8 text-center shadow-md"
-        initial={{ rotateY: 180 }}
-        animate={{ rotateY: showAnswer ? 0 : 180 }}
-        transition={{ duration: 0.4, ease: "easeInOut" }}
-        style={{ backfaceVisibility: "hidden" }}
-      >
-        <MarkdownRenderer className="text-sm text-muted-foreground">{card.question}</MarkdownRenderer>
-        <hr className="w-3/4 border-border" />
-        <MarkdownRenderer className="text-lg font-medium text-foreground">{card.answer}</MarkdownRenderer>
-      </motion.div>
+      {!showAnswer ? (
+        <div className="flex min-h-48 items-center justify-center">
+          <MarkdownRenderer className="text-center text-xl font-semibold text-foreground">
+            {card.question}
+          </MarkdownRenderer>
+        </div>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="flex flex-col gap-4"
+        >
+          <MarkdownRenderer className="text-center text-sm text-muted-foreground">
+            {card.question}
+          </MarkdownRenderer>
+          <hr className="border-border" />
+          <MarkdownRenderer className="text-left text-base leading-relaxed text-foreground prose-p:my-2 prose-ul:my-2 prose-li:my-0.5">
+            {card.answer}
+          </MarkdownRenderer>
+        </motion.div>
+      )}
     </div>
   )
 }
@@ -457,7 +462,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
     beginNew,
   } = useStudySession({ initial, scopeForBeginNew })
 
+  // `showAnswer` = which card face is displayed (the flip). `revealed` = a
+  // one-way latch, set once the learner commits to seeing the answer (predict or
+  // skip). Controls key off `revealed` so flipping the card back to the question
+  // no longer regresses to the confidence picker -- the rating buttons stay put.
   const [showAnswer, setShowAnswer] = useState(false)
+  const [revealed, setRevealed] = useState(false)
   const [correct, setCorrect] = useState(0)
   const [isRating, setIsRating] = useState(false)
   const [lastRating, setLastRating] = useState<Rating | null>(null)
@@ -533,6 +543,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           } else {
             setCurrentIndex(nextIdx)
             setShowAnswer(false)
+            setRevealed(false)
             setLastRating(null)
             setPredictedRating(null)
           }
@@ -547,6 +558,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
       } else {
         setCurrentIndex(nextIdx)
         setShowAnswer(false)
+        setRevealed(false)
         setLastRating(null)
         setPredictedRating(null)
       }
@@ -565,6 +577,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
     } else {
       setCurrentIndex(nextIdx)
       setShowAnswer(false)
+      setRevealed(false)
       setLastRating(null)
       setPredictedRating(null)
     }
@@ -613,9 +626,10 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         card.cloze_text !== null &&
         /\{\{.+?\}\}/.test(card.cloze_text)
       if (isClozeCard) return
-      if (!showAnswer) {
+      if (!revealed) {
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault()
+          setRevealed(true)
           setShowAnswer(true)
           return
         }
@@ -626,6 +640,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         if (predicted) {
           e.preventDefault()
           setPredictedRating(predicted)
+          setRevealed(true)
           setShowAnswer(true)
         }
         return
@@ -636,16 +651,17 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         if (rating) {
           e.preventDefault()
           void handleRate(rating)
-        } else if (e.key === " ") {
-          // prevent the page from scrolling while the answer is shown
+        } else if (e.key === " " || e.key === "Enter") {
+          // after the reveal, Space/Enter flips the face to peek at the question
           e.preventDefault()
+          setShowAnswer((prev) => !prev)
         }
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue, currentIndex, showAnswer, lastRating, isRating, sourceContext, onExit])
+  }, [queue, currentIndex, showAnswer, revealed, lastRating, isRating, sourceContext, onExit])
 
   if (sessionState === "loading") {
     return (
@@ -685,6 +701,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
             setLastRating(null)
             setPredictedRating(null)
             setShowAnswer(false)
+            setRevealed(false)
             setNextReviewDate(null)
             setSourceContext(null)
             setCalibrationInline(null)
@@ -753,12 +770,21 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               <FlashCard
                 card={currentCard}
                 showAnswer={showAnswer}
-                onFlip={() => setShowAnswer((prev) => !prev)}
+                onFlip={() => {
+                  // First interaction reveals the answer (and commits to grading);
+                  // afterwards a click just flips the face to peek at the question.
+                  if (!revealed) {
+                    setRevealed(true)
+                    setShowAnswer(true)
+                  } else {
+                    setShowAnswer((prev) => !prev)
+                  }
+                }}
               />
             </motion.div>
           </AnimatePresence>
 
-          {!showAnswer ? (
+          {!revealed ? (
             <div className="flex flex-col items-center gap-3">
               <p className="text-xs text-muted-foreground">How confident are you?</p>
               <div className="flex gap-2">
@@ -773,6 +799,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                     key={value}
                     onClick={() => {
                       setPredictedRating(value)
+                      setRevealed(true)
                       setShowAnswer(true)
                     }}
                     className={`rounded border px-4 py-1.5 text-xs font-medium transition-colors ${
@@ -787,7 +814,10 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                 ))}
               </div>
               <button
-                onClick={() => setShowAnswer(true)}
+                onClick={() => {
+                  setRevealed(true)
+                  setShowAnswer(true)
+                }}
                 className="text-xs text-muted-foreground underline-offset-2 hover:underline"
               >
                 Skip prediction → Show Answer

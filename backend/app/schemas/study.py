@@ -251,9 +251,12 @@ class CollectionSource(BaseModel):
     id: str
     title: str
     type: str  # "document" | "note"
+    # approximate content size in words -- used to split a collection-wide
+    # generation total across sources proportionally (a book outweighs a note).
+    weight: int = 0
 
 
-class CollectionSubEnclave(BaseModel):
+class CollectionSubCollection(BaseModel):
     id: str
     name: str
     card_count: int
@@ -267,7 +270,7 @@ class StudyCollectionDashboardResponse(BaseModel):
     mastery_pct: float
     topics: list[CollectionTopic]
     sources: list[CollectionSource]
-    sub_collections: list[CollectionSubEnclave] = []
+    sub_collections: list[CollectionSubCollection] = []
 
 
 # Per-document session API (start/review)

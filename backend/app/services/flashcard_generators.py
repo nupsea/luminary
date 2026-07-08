@@ -38,9 +38,9 @@ from app.services.flashcard_parsers import (
     _parse_llm_response,
     card_field,
     card_rejection_reason,
+    strip_source_ref,
 )
 from app.services.flashcard_prompts import (
-    _BLOOM_L3_INSTRUCTION,
     _BOOK_CONTENT_GUIDELINE,
     _DIFFICULTY_GUIDELINES,
     CLOZE_SYSTEM,
@@ -328,7 +328,7 @@ def _gate_cards(parsed: list) -> list[dict]:
         if not isinstance(item, dict):
             continue
         q = card_field(item, "question", "front", "q", "term", "prompt")
-        a = card_field(item, "answer", "back", "a", "definition", "response")
+        a = strip_source_ref(card_field(item, "answer", "back", "a", "definition", "response"))
         reason = card_rejection_reason(q, a)
         if reason:
             logger.info("flashcard: dropped low-quality card (%s): %r", reason, q[:80])
@@ -498,8 +498,6 @@ async def generate(
         first_sec = eligible_chunks[0].section_id if eligible_chunks else None
         if first_sec and first_sec in section_ctx:
             resolved_section_heading = _resolve_section_heading(eligible_chunks[0], section_ctx)
-
-    system_prompt += _BLOOM_L3_INSTRUCTION
 
     extra_instructions = ""
     if content_type == "book":

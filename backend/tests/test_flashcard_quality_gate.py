@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.flashcard_parsers import card_rejection_reason
+from app.services.flashcard_parsers import card_rejection_reason, strip_source_ref
 
 
 def test_good_card_passes() -> None:
@@ -79,3 +79,32 @@ def test_reasoned_answer_to_polar_question_passes() -> None:
         )
         is None
     )
+
+
+def test_strip_source_ref_removes_trailing_citation() -> None:
+    a = (
+        "Random hardware faults are independent while software errors are correlated, "
+        "so they need different defences. In Part I. Foundations of Data Systems."
+    )
+    out = strip_source_ref(a)
+    assert "In Part I" not in out
+    assert "Foundations of Data Systems" not in out
+    assert out.endswith("different defences.")
+
+
+def test_strip_source_ref_handles_chapter_forms() -> None:
+    assert strip_source_ref("The log keeps replicas in sync. In Chapter 3.").endswith(
+        "in sync."
+    )
+    out = strip_source_ref("Quorums overlap reads and writes. See Section 5.2")
+    assert "See Section" not in out
+
+
+def test_strip_source_ref_leaves_clean_answers_untouched() -> None:
+    a = "A write-ahead log records changes before applying them, enabling crash recovery."
+    assert strip_source_ref(a) == a
+
+
+def test_strip_source_ref_never_empties_a_short_answer() -> None:
+    # if stripping would leave nothing meaningful, keep the original
+    assert strip_source_ref("In Chapter 1.") == "In Chapter 1."

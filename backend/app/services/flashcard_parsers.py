@@ -114,6 +114,27 @@ def card_field(item: dict, *names: str) -> str:
     return ""
 
 
+# A trailing source pointer the model sometimes appends despite instructions,
+# e.g. "... rather than assuming independence. In Part I. Foundations of Data
+# Systems." The source is tracked separately, so strip it from the answer.
+_TRAILING_SOURCE_REF = re.compile(
+    r"[\s.]*(?:In|See)\s+(?:Part|Chapter|Section|Ch\.?|Sec\.?)\b.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_source_ref(answer: str) -> str:
+    """Remove a trailing 'In Part/Chapter/Section ...' citation from an answer.
+
+    Conservative: only fires when such a pointer starts a clause at the very end,
+    and only when a real answer remains before it (never strips the whole thing).
+    """
+    stripped = _TRAILING_SOURCE_REF.sub("", answer).strip()
+    if len(stripped.split()) >= _MIN_ANSWER_WORDS:
+        return stripped if stripped[-1:] in ".!?" or not stripped else stripped + "."
+    return answer.strip()
+
+
 # Quality gate for generated Q/A cards. FLASHCARD_SYSTEM already forbids these
 # shapes, but small local models still emit them; this is the deterministic
 # backstop so a weak card never reaches the deck regardless of model.

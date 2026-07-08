@@ -14,50 +14,36 @@ if TYPE_CHECKING:
 
 
 FLASHCARD_SYSTEM = (
-    "You are a learning assistant creating flashcards for active recall. "
-    "Generate questions that test understanding, not surface recall. "
-    "Match the question structure to the type of knowledge being tested: "
-    "causal knowledge -> ask why or what causes; "
-    "comparative knowledge -> ask how two things differ or what distinguishes them; "
-    "process or role knowledge -> ask what role X plays in Y or how X enables Y; "
-    "definitional knowledge -> ask what X is or what characterises X; "
-    "speculative or argued knowledge -> ask what the argument or evidence for X is. "
-    "AVOID: list-regurgitation questions whose answer is just an enumeration of items; "
-    "trivia about exact wording; yes/no questions; "
-    "questions whose answer is not derivable from the provided text. "
-    "CRITICAL -- NEVER use deictic or source-referencing words in a question: "
-    "'in this passage', 'in this text', 'in this excerpt', 'in this book', "
-    "'in this document', 'according to the text', 'as described', 'as stated', "
-    "'this scenario', 'the scenario', 'this situation', 'this case', 'this context', "
-    "'this example', 'the author', 'the writer'. "
-    "These make no sense on a flashcard viewed without the source. "
-    "Instead, name the specific concept, entity, technology, or idea directly in the question. "
-    "CRITICAL -- question framing must match the answer exactly: "
-    "if the answer explains a cause, the question must ask for that cause; "
-    "if the answer describes a role, the question must ask for that role. "
-    "The answer must be a concise explanation in 1-3 sentences -- never a bare list of items. "
-    "Before writing each question, verify: does someone without the source text understand "
-    "exactly what is being asked, and does the answer directly satisfy the question? "
-    "Output a JSON array starting with [ and ending with ]. "
-    "Write no explanation, preamble, or markdown fences."
+    "You are a learning assistant that writes flashcards for active recall. Each card is a "
+    "self-contained question testing understanding of one idea, plus a concise, complete "
+    "answer -- both grounded only in the provided text.\n"
+    "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
+    "comparison asks how two things differ; a role/process asks what X enables in Y; a "
+    "definition asks what X is. Name the concept directly and prefer why/how/apply over recall. "
+    "AVOID trivia about wording, yes/no questions, answers that are a bare list, and asking "
+    "which specific example or analogy the text used. The question must stand alone -- never "
+    "say 'in this passage', 'according to the text', or 'the author'; it must make sense "
+    "without the source.\n"
+    "ANSWER: lead with one sentence that directly answers the question, then add a short "
+    "markdown bullet list ('- ...') only when it has several distinct points. Keep it tight -- "
+    "no filler, and no chapter/section reference.\n"
+    'Include a "bloom_level" integer 1-6 (1=remember ... 6=create); aim for level 3+ '
+    "(apply/analyze/evaluate) where the material allows."
 )
 
 FLASHCARD_USER_TMPL = (
-    "Write {count} {difficulty}-level question/answer flashcards from the text below. "
-    "Each flashcard is a QUESTION a learner answers from memory, plus its ANSWER. "
-    "Do NOT summarise, outline, or analyse the text.\n"
-    "Difficulty guidelines: {difficulty_guidelines}\n"
+    "Write {count} {difficulty}-level flashcards from the text below.\n"
+    "Difficulty: {difficulty_guidelines}\n"
     "{extra_instructions}"
-    "Each card must be answerable from the provided text only.\n"
-    "Output EXACTLY this JSON shape:\n"
-    '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...",'
-    ' "bloom_level": N}}]}}\n'
-    "bloom_level is an integer 1-6 (1=remember, 2=understand, 3=apply, "
-    "4=analyze, 5=evaluate, 6=create).\n\n"
-    "Example for a text about replication:\n"
-    '{{"flashcards": [{{"question": "Why does leader-based replication need a replication log?", '
-    '"answer": "So followers can apply the same writes in the same order and stay consistent '
-    'with the leader.", "source_excerpt": "", "bloom_level": 2}}]}}\n\n'
+    "Return a JSON object, using '\\n' for line breaks inside a string:\n"
+    '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
+    '"bloom_level": N}}]}}\n'
+    "Example card with a multi-point answer:\n"
+    '{{"flashcards": [{{"question": "How do random hardware faults and systematic software '
+    'errors differ for fault tolerance?", "answer": "They fail differently, so they need '
+    'different defences.\\n- Hardware faults are largely independent -- redundancy masks '
+    'them.\\n- Software errors are correlated and can fail many nodes at once -- they need '
+    'testing and isolation.", "source_excerpt": "", "bloom_level": 4}}]}}\n\n'
     "Text:\n{text}\n\n"
     "JSON object:"
 )
@@ -109,7 +95,8 @@ NOTES_CARD_FROM_CONCEPTS_SYSTEM = (
     "'this case', 'this context', 'this example', 'the author', 'the text', 'these notes', "
     "'the man', 'the person', 'the writer'. "
     "The question must stand alone -- understandable without the notes. "
-    "The answer must be derived from the notes in 1-3 sentences. "
+    "Answer from the notes: lead with one direct sentence, then add short markdown bullets "
+    "('- ...') only for several distinct points. Never a bare list; never filler. "
     "For process-role: explain what the collective activity achieves or why it matters -- "
     "never enumerate the individual components as the answer. "
     'Output ONLY a JSON array: [{{"question": "...", "answer": "...", "source_excerpt": ""}}]. '
@@ -150,17 +137,6 @@ _BOOK_CONTENT_GUIDELINE = (
     "If the provided text starts with publisher boilerplate or editorial notes, "
     "skip past them entirely and generate questions only from the actual narrative or subject.\n"
 )
-
-# Bloom L3+ instruction appended to the genre system prompt
-_BLOOM_L3_INSTRUCTION = (
-    "\nBLOOM LEVEL TARGETING: Generate questions at Bloom's Taxonomy Level 3 or higher "
-    "(application, analysis, synthesis, evaluation). At least 50% of questions must require "
-    "the learner to apply, analyze, or evaluate -- not merely recall or describe. "
-    'For each card, include a "bloom_level" integer (1-6) indicating the cognitive level. '
-    "ANSWER CITATION: Each answer must reference the section or chapter where the concept "
-    "appears (e.g., 'In Chapter XII...', 'In the section on X...'). "
-)
-
 
 TECH_FLASHCARD_SYSTEM = (
     "You are a technical learning assistant creating flashcards based on Bloom's Taxonomy. "
@@ -292,34 +268,10 @@ def _infer_genre(doc: DocumentModel | None) -> str:
 
 
 def _build_genre_system_prompt(genre: str) -> str:
-    """Build a genre-aware flashcard generation system prompt."""
-    genre_hint = f"This is a {genre} document. " if genre != "narrative" else ""
-    quality_rules = (
-        "QUALITY RULES for concept-focused questions:\n"
-        "- Do NOT write questions whose answer is a proper noun drawn from an analogy or "
-        "illustrative story used to explain a concept (e.g., do not ask 'What animal did the "
-        "author compare X to?').\n"
-        "- Questions must be answerable by someone who understands the underlying concept but "
-        "has NOT read the specific analogy or illustration.\n"
-        "- Prefer 'Explain X in your own words' and 'What is the practical implication of Y' "
-        "over 'According to the text, what does Z do'.\n"
-        "- Frame questions in terms of WHY or HOW, not WHAT was mentioned in an example.\n"
-    )
-    return (
-        genre_hint + "You are a learning assistant creating flashcards for active recall. "
-        "Generate questions that test understanding of core concepts and principles. "
-        "Prefer questions that: (1) ask the learner to explain a concept in their own words, "
-        "(2) apply a concept to a new situation, "
-        "(3) distinguish between similar concepts, "
-        "or (4) evaluate a claim or argument. "
-        "AVOID: trivia questions about exact wording, hypothetical questions not grounded "
-        "in the content, questions whose answer is not in the text, yes/no questions. "
-        "CRITICAL -- questions must be fully self-contained. "
-        "NEVER use phrases like 'in this passage', 'according to this text', 'in this excerpt', "
-        "'in this book', 'in this document', or any similar reference to the source material. "
-        "A flashcard question must make complete sense on its own without seeing the original"
-        " text. " + quality_rules + 'Output ONLY a JSON object of the form '
-        '{"flashcards": [{"question": "...", "answer": "..."}]}. '
-        "Each item MUST be a question/answer pair. Do NOT output a summary, outline, analysis, or "
-        "table. Write no explanation, preamble, or markdown fences."
-    )
+    """The single flashcard system prompt, prefixed with a one-line genre hint.
+
+    One source of truth (FLASHCARD_SYSTEM) drives generation; the hint just nudges
+    tone for technical/academic/non-fiction material.
+    """
+    hint = f"This is a {genre} document. " if genre != "narrative" else ""
+    return hint + FLASHCARD_SYSTEM

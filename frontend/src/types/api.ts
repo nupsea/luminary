@@ -2775,6 +2775,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flashcards/collection/{collection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete All Collection Flashcards
+         * @description Delete every flashcard sourced from a collection's documents and notes.
+         *
+         *     Returns the deleted count so the UI can confirm. Keeps FTS in sync per I-4.
+         */
+        delete: operations["delete_all_collection_flashcards_flashcards_collection__collection_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flashcards/{card_id}/review": {
         parameters: {
             query?: never;
@@ -6218,9 +6240,14 @@ export interface components {
             title: string;
             /** Type */
             type: string;
+            /**
+             * Weight
+             * @default 0
+             */
+            weight: number;
         };
-        /** CollectionSubEnclave */
-        CollectionSubEnclave: {
+        /** CollectionSubCollection */
+        CollectionSubCollection: {
             /** Id */
             id: string;
             /** Name */
@@ -8835,7 +8862,7 @@ export interface components {
              * Sub Collections
              * @default []
              */
-            sub_collections: components["schemas"]["CollectionSubEnclave"][];
+            sub_collections: components["schemas"]["CollectionSubCollection"][];
         };
         /** StudyPathAPIResponse */
         StudyPathAPIResponse: {
@@ -14441,6 +14468,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_all_collection_flashcards_flashcards_collection__collection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

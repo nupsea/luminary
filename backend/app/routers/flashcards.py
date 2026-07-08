@@ -682,6 +682,27 @@ async def delete_all_document_flashcards(
     )
 
 
+@router.delete("/collection/{collection_id}", response_model=BulkDeleteResponse)
+async def delete_all_collection_flashcards(
+    collection_id: str,
+    session: AsyncSession = Depends(get_db),
+    repo: FlashcardRepo = Depends(get_flashcard_repo),
+) -> BulkDeleteResponse:
+    """Delete every flashcard sourced from a collection's documents and notes.
+
+    Returns the deleted count so the UI can confirm. Keeps FTS in sync per I-4.
+    """
+    ids = await repo.list_ids_for_collection(collection_id)
+    for card_id in ids:
+        await _delete_flashcard_fts(card_id, session)
+    await repo.delete_by_ids(ids)
+    logger.info(
+        "Deleted all flashcards for collection",
+        extra={"collection_id": collection_id, "count": len(ids)},
+    )
+    return BulkDeleteResponse(deleted=len(ids))
+
+
 @router.post("/{card_id}/review", response_model=FlashcardResponse)
 async def review_flashcard(
     card_id: str,
