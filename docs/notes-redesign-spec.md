@@ -360,6 +360,18 @@ compat).
   Also (user feedback, same session): properties rail now uses full height --
   tags capped at 30% with scroll, Collections and Source Documents split the
   remaining space (flex-1 lists) instead of max-h-40/32 boxes.
+  Post-WP5 polish (user feedback): (a) completion popup rethemed to the app's
+  popover tokens (--popover/--accent/--font-sans, styled sections/details/
+  info panel) replacing CM's stark blue default; (b) popup latency cut --
+  `activateOnTypingDelay: 25` and `interactionDelay: 30` (the 75ms default
+  interaction guard was rejecting prompt ArrowDown/Enter, which fell through
+  to cursor motion and killed the popup -- root cause of the WP4 Enter
+  flake); (c) single editable title: the sheet header IS the title input
+  (SheetTitle kept sr-only for a11y), body title input removed; (d) Escape
+  layering fixed -- Radix grabs Escape at document capture before CM, so
+  MarkdownCodeEditor now closes an open completion via a window-capture
+  keydown handler (preventDefault+stopPropagation) and the sheet keeps a
+  backup onEscapeKeyDown guard; Esc with popup open closes only the popup.
 - [ ] WP6 /notes/:id route + capture unification
 - [ ] WP7 cleanup + consistency + full CI
 

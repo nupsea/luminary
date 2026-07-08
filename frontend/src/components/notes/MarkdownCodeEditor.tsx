@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react"
-import { autocompletion } from "@codemirror/autocomplete"
+import { autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
 import { EditorState } from "@codemirror/state"
 import {
   EditorView,
@@ -69,6 +69,57 @@ const editorTheme = EditorView.theme({
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
     backgroundColor: "hsl(var(--primary) / 0.18)",
   },
+  // Completion popup restyled to the app's popover look (the CM default is a
+  // stark blue box that clashes with the rest of the UI).
+  ".cm-tooltip": {
+    backgroundColor: "hsl(var(--popover))",
+    color: "hsl(var(--popover-foreground))",
+    border: "1px solid hsl(var(--border))",
+    borderRadius: "8px",
+    boxShadow: "0 8px 24px rgb(0 0 0 / 0.12)",
+    overflow: "hidden",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": {
+    fontFamily: "var(--font-sans)",
+    maxHeight: "280px",
+    minWidth: "220px",
+  },
+  ".cm-tooltip-autocomplete > ul > li": {
+    padding: "5px 10px",
+    lineHeight: "1.4",
+    color: "hsl(var(--popover-foreground))",
+  },
+  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "hsl(var(--accent))",
+    color: "hsl(var(--accent-foreground))",
+  },
+  ".cm-completionLabel": { fontSize: "12.5px" },
+  ".cm-completionMatchedText": {
+    textDecoration: "none",
+    color: "hsl(var(--primary))",
+    fontWeight: "600",
+  },
+  ".cm-completionDetail": {
+    marginLeft: "10px",
+    fontSize: "10.5px",
+    fontStyle: "normal",
+    color: "hsl(var(--muted-foreground))",
+  },
+  ".cm-completionSection": {
+    padding: "7px 10px 3px",
+    fontSize: "9.5px",
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    color: "hsl(var(--muted-foreground))",
+  },
+  ".cm-tooltip.cm-completionInfo": {
+    padding: "8px 10px",
+    maxWidth: "340px",
+    fontFamily: "var(--font-mono)",
+    fontSize: "10.5px",
+    whiteSpace: "pre-wrap",
+  },
 })
 
 const mdHighlight = HighlightStyle.define([
@@ -117,6 +168,13 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
                 noteLinkCompletionSource(() => latest.current.linkCompletion),
               ],
               icons: false,
+              // Default 100ms feels laggy; the sources are local/near-local.
+              activateOnTypingDelay: 25,
+              // Our filter:false sources re-open the result per keystroke,
+              // which resets the interaction guard; at the default 75ms a
+              // prompt ArrowDown/Enter gets rejected and falls through to
+              // cursor motion, killing the popup.
+              interactionDelay: 30,
             }),
             keymap.of([
               { key: "Enter", run: insertNewlineContinueMarkup },
@@ -170,7 +228,20 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       })
       viewRef.current = view
       if (autoFocus) view.focus()
+      // Radix dialogs grab Escape at document capture -- before CM's own
+      // handler -- so an open completion popup would either not close or take
+      // the whole sheet with it. Window capture runs first; consume the key
+      // and close just the popup.
+      function onEscapeCapture(e: KeyboardEvent) {
+        if (e.key !== "Escape") return
+        if (completionStatus(view.state) === null) return
+        e.preventDefault()
+        e.stopPropagation()
+        closeCompletion(view)
+      }
+      window.addEventListener("keydown", onEscapeCapture, { capture: true })
       return () => {
+        window.removeEventListener("keydown", onEscapeCapture, { capture: true })
         view.destroy()
         viewRef.current = null
       }

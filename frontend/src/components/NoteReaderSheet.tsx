@@ -527,6 +527,11 @@ export function NoteReaderSheet({
       <SheetContent
         side="right"
         className="flex w-[90vw] max-w-none flex-col overflow-hidden p-0 sm:max-w-none"
+        onEscapeKeyDown={(e) => {
+          // Backup guard: the editor's window-capture handler normally
+          // consumes popup-escapes before Radix sees them.
+          if (document.querySelector(".cm-tooltip-autocomplete")) e.preventDefault()
+        }}
       >
         <SheetHeader className="shrink-0 border-b border-border px-6 pt-6 pb-4">
           <div className="absolute left-3 top-3 flex items-center gap-1">
@@ -565,9 +570,21 @@ export function NoteReaderSheet({
               </>
             )}
           </div>
-          <SheetTitle className="text-xl font-semibold leading-tight pl-16 pr-8 truncate">
-            {displayTitle}
-          </SheetTitle>
+          {/* Single editable title location; SheetTitle stays for a11y only. */}
+          <SheetTitle className="sr-only">{displayTitle}</SheetTitle>
+          {appendTarget ? (
+            <p className="pl-16 pr-8 text-xl font-semibold leading-tight truncate">
+              {displayTitle}
+            </p>
+          ) : (
+            <input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="Untitled note"
+              readOnly={readingView}
+              className="w-full bg-transparent pl-16 pr-8 text-xl font-semibold leading-tight text-foreground placeholder:font-normal placeholder:text-muted-foreground/60 focus:outline-none"
+            />
+          )}
           {sourceDoc && !appendTarget && (
             <SheetDescription asChild>
               <button
@@ -712,14 +729,6 @@ export function NoteReaderSheet({
           ) : (
             <>
               <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-5">
-                {!appendTarget && (
-                  <input
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Note title (optional)"
-                    className="w-full shrink-0 bg-transparent text-lg font-semibold leading-tight text-foreground placeholder:text-muted-foreground/60 placeholder:font-normal focus:outline-none"
-                  />
-                )}
                 <NoteEditor
                   layout={splitPreview ? "splitter" : "editor"}
                   content={editContent}
