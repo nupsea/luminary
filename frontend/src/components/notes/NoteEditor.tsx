@@ -1,5 +1,4 @@
-import { useRef, useState } from "react"
-import { ChevronUp, Wrench } from "lucide-react"
+import { useMemo, useRef, useState } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
@@ -7,9 +6,10 @@ import {
   MarkdownSplitEditor,
   type MarkdownSplitLayout,
 } from "@/components/notes/MarkdownSplitEditor"
+import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
-import { MermaidCheatSheet } from "@/components/notes/MermaidCheatSheet"
-import { MermaidQuickInsert } from "@/components/notes/MermaidQuickInsert"
+import { type SlashCommandConfig } from "@/components/notes/slashCommands"
+import { API_BASE } from "@/lib/config"
 import { uploadNoteAsset } from "@/lib/noteAssets"
 import {
   replaceExcalidrawDiagram,
@@ -22,22 +22,16 @@ export interface NoteEditorProps {
   content: string
   onContentChange: (next: string) => void
   layout?: NoteEditorLayout
-  showToolbar?: boolean
-  showImageSize?: boolean
   autoFocus?: boolean
   imageVariant?: (path: string) => string
   editorClassName?: string
   linkCompletion?: NoteLinkCompletionConfig
 }
 
-const IMAGE_SIZES = ["small", "medium", "large"] as const
-
 export function NoteEditor({
   content,
   onContentChange,
   layout = "splitter",
-  showToolbar = true,
-  showImageSize = true,
   autoFocus,
   imageVariant = (path) => `![Pasted Image|medium](${path})`,
   editorClassName,
@@ -47,7 +41,6 @@ export function NoteEditor({
 
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
-  const [toolbarOpen, setToolbarOpen] = useState(true)
 
   function handleDiagramSaved(markdown: string) {
     if (editingDiagramRef) {
@@ -58,66 +51,20 @@ export function NoteEditor({
     editorRef.current?.insertBlock(markdown)
   }
 
-  function insertImageSizeMarkdown(size: (typeof IMAGE_SIZES)[number]) {
-    editorRef.current?.replaceSelection((selectedText) => {
-      const match = selectedText.match(/!\[([^\]]*?)\]\((.*?)\)/)
-      if (match) {
-        const altClean = match[1].split("|")[0].trim() || "Image"
-        return `![${altClean}|${size}](${match[2]})`
-      }
-      return `![Image|${size}](url)`
-    })
-  }
-
   function openDiagramEditor(ref: ExcalidrawNoteDiagramRef) {
     setEditingDiagramRef(ref)
     setDiagramOpen(true)
   }
 
-  const editorToolbar = showToolbar ? (
-    <>
-      <div className="flex items-center justify-between gap-2">
-        {toolbarOpen ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {showImageSize && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-muted-foreground">Image spec:</span>
-                {IMAGE_SIZES.map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => insertImageSizeMarkdown(size)}
-                    className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent text-foreground capitalize"
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            )}
-            <MermaidQuickInsert
-              onInsert={(markdown) => editorRef.current?.insertBlock(markdown)}
-              onDraw={() => {
-                setEditingDiagramRef(null)
-                setDiagramOpen(true)
-              }}
-            />
-          </div>
-        ) : (
-          <span />
-        )}
-        <button
-          type="button"
-          onClick={() => setToolbarOpen((v) => !v)}
-          className="shrink-0 rounded border border-border bg-background p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
-          aria-label={toolbarOpen ? "Hide formatting tools" : "Show formatting tools"}
-        >
-          {toolbarOpen ? <ChevronUp size={12} /> : <Wrench size={12} />}
-        </button>
-      </div>
-      {toolbarOpen && <MermaidCheatSheet />}
-    </>
-  ) : null
+  const slashCommands = useMemo<SlashCommandConfig>(
+    () => ({
+      onDrawDiagram: () => {
+        setEditingDiagramRef(null)
+        setDiagramOpen(true)
+      },
+    }),
+    [],
+  )
 
   return (
     <>
@@ -127,8 +74,7 @@ export function NoteEditor({
           content={content}
           onContentChange={onContentChange}
           editorRef={editorRef}
-          editorToolbar={editorToolbar}
-          placeholder="Write your note in Markdown..."
+          placeholder="Write your note in Markdown... Type / for blocks, [[ to link notes"
           autoFocus={autoFocus}
           onPasteImage={async (file) => {
             const data = await uploadNoteAsset(file)
@@ -136,9 +82,16 @@ export function NoteEditor({
           }}
           editorClassName={editorClassName}
           linkCompletion={linkCompletion}
+          slashCommands={slashCommands}
           preview={
             content.trim() ? (
-              <MarkdownRenderer serif onEditExcalidrawDiagram={openDiagramEditor}>
+              <MarkdownRenderer
+                serif
+                onEditExcalidrawDiagram={openDiagramEditor}
+                onSetImageSize={(src, size) =>
+                  onContentChange(setImageSizeInMarkdown(content, src, size, API_BASE))
+                }
+              >
                 {content}
               </MarkdownRenderer>
             ) : (

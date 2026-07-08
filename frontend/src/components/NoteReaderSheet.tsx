@@ -27,6 +27,7 @@ import { NoteConceptChips } from "@/components/NoteConceptChips"
 import { TagAutocomplete } from "@/components/TagAutocomplete"
 import { NoteBacklinks } from "@/components/notes/NoteBacklinks"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/sheet"
 import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
+import { API_BASE } from "@/lib/config"
 import {
   EMPTY_DRAFT,
   NEW_NOTE_KEY,
@@ -678,6 +680,9 @@ export function NoteReaderSheet({
                   <MarkdownRenderer
                     serif
                     onNoteLinkClick={onOpenNote ? (id) => void handleOpenLinkedNote(id) : undefined}
+                    onSetImageSize={(src, size) =>
+                      setEditContent(setImageSizeInMarkdown(editContent, src, size, API_BASE))
+                    }
                   >
                     {editContent}
                   </MarkdownRenderer>
@@ -730,8 +735,8 @@ export function NoteReaderSheet({
               </div>
 
               {propsRailOpen && (
-                <aside className="flex w-[320px] shrink-0 flex-col gap-6 overflow-y-auto border-l border-border px-4 py-5">
-                  <div className="flex flex-col gap-2">
+                <aside className="flex w-[320px] shrink-0 flex-col gap-5 overflow-hidden border-l border-border px-4 py-5">
+                  <div className="flex max-h-[30%] shrink-0 flex-col gap-2 overflow-y-auto">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Tag size={12} />
@@ -779,13 +784,17 @@ export function NoteReaderSheet({
                   </div>
 
                   {note?.id && !isNew && (
-                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                    <div className="shrink-0">
+                      <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                    </div>
                   )}
 
                   {!appendTarget && (
                     <>
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2 text-muted-foreground">
+                      {/* Collections and source docs split the remaining rail
+                          height instead of capping at tiny scroll boxes. */}
+                      <div className="flex min-h-0 flex-1 flex-col gap-2">
+                        <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
                           <LayoutGrid size={12} />
                           <span className="text-[10px] font-bold uppercase tracking-wider">
                             Collections
@@ -797,10 +806,11 @@ export function NoteReaderSheet({
                           onToggle={handleCollectionToggle}
                           loading={collectionsLoading}
                           lockedCollectionId={lockedCollectionId ?? null}
+                          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
                         />
                       </div>
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2 text-muted-foreground">
+                      <div className="flex min-h-0 flex-1 flex-col gap-2">
+                        <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
                           <FileText size={12} />
                           <span className="text-[10px] font-bold uppercase tracking-wider">
                             Source Documents
@@ -811,6 +821,7 @@ export function NoteReaderSheet({
                           selectedIds={selectedDocIds}
                           onChange={setSelectedDocIds}
                           emptyMessage="No source documents available"
+                          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
                         />
                       </div>
                     </>

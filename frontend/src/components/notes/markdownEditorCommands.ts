@@ -38,6 +38,32 @@ export function replaceSelectionSpec(
   }
 }
 
+// Rewrite the |size pipe of the image whose URL matches the rendered src.
+// Mirrored images render as <apiBase>/images/local/... but are authored as
+// __LUMINARY_IMG__/..., so both spellings are tried.
+export function setImageSizeInMarkdown(
+  content: string,
+  src: string,
+  size: string,
+  apiBase?: string,
+): string {
+  const candidates = [src]
+  if (apiBase && src.startsWith(`${apiBase}/images/local/`)) {
+    candidates.push(src.replace(`${apiBase}/images/local/`, "__LUMINARY_IMG__/"))
+  }
+  for (const url of candidates) {
+    const closeIdx = content.indexOf(`](${url})`)
+    if (closeIdx === -1) continue
+    const openIdx = content.lastIndexOf("![", closeIdx)
+    if (openIdx === -1) continue
+    const alt = content.slice(openIdx + 2, closeIdx)
+    const base = alt.split("|")[0].trim() || "Image"
+    const end = closeIdx + 2 + url.length + 1
+    return `${content.slice(0, openIdx)}![${base}|${size}](${url})${content.slice(end)}`
+  }
+  return content
+}
+
 // Toggle **strong** / *emphasis* markers around the selection. An empty
 // selection gets an open pair with the cursor inside.
 export function toggleInlineMarkSpec(state: EditorState, marker: string): TransactionSpec {

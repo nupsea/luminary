@@ -27,6 +27,9 @@ interface MarkdownRendererProps {
   onEditExcalidrawDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
   /** When set, [[id|text]] note links become navigable buttons. */
   onNoteLinkClick?: (noteId: string) => void
+  /** When set, clicking an image opens a small size picker that writes the
+   * |small/medium/large alt pipe back into the source markdown. */
+  onSetImageSize?: (src: string, size: ImageSize) => void
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -163,8 +166,9 @@ function ExcalidrawDiagramPreview({
   )
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick }: MarkdownRendererProps) {
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick, onSetImageSize }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
+  const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
 
   return (
     <div className={cn(
@@ -207,8 +211,15 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
               <img
                 src={src}
                 alt={parsed.alt}
+                onClick={
+                  onSetImageSize && src
+                    ? (e) => setSizeMenu({ src, x: e.clientX, y: e.clientY })
+                    : undefined
+                }
+                title={onSetImageSize ? "Click to set display size" : undefined}
                 className={cn(
                   "rounded-lg shadow-md mx-auto my-4 block",
+                  onSetImageSize && "cursor-pointer",
                   size === "small" && "max-w-[240px] max-h-[200px] object-contain",
                   size === "medium" && "max-w-[480px] max-h-[360px] object-contain",
                   size === "large" && "max-w-[800px] max-h-[600px] object-contain"
@@ -254,6 +265,29 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
       >
         {processed}
       </ReactMarkdown>
+      {sizeMenu && onSetImageSize && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setSizeMenu(null)} />
+          <div
+            className="fixed z-50 flex gap-1 rounded-md border border-border bg-popover p-1 shadow-md not-prose"
+            style={{ left: sizeMenu.x, top: sizeMenu.y }}
+          >
+            {(["small", "medium", "large"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  onSetImageSize(sizeMenu.src, s)
+                  setSizeMenu(null)
+                }}
+                className="rounded px-2 py-0.5 text-xs capitalize text-foreground hover:bg-accent"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -266,12 +300,13 @@ export function MarkdownRenderer({
   serif = false,
   onEditExcalidrawDiagram,
   onNoteLinkClick,
+  onSetImageSize,
 }: MarkdownRendererProps) {
   const diagrams = findExcalidrawDiagrams(children)
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
         {children}
       </MarkdownBody>
     )
@@ -285,7 +320,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
                 {before}
               </MarkdownBody>
             )}
@@ -298,7 +333,7 @@ export function MarkdownRenderer({
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}

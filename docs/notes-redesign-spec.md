@@ -341,7 +341,25 @@ compat).
   backlink row and A shows incoming from B. Note: Enter-accept needs the
   async fetch to settle; sub-100ms scripted keystrokes can outrun it (humans
   won't).
-- [ ] WP5 slash menu + insert UX
+- [x] WP5 slash menu + insert UX — done 2026-07-08. `slashCommands.ts`: `/` at
+  line start (mid-word never triggers) opens a CM completion menu with
+  sections Blocks/Lists/Insert/Diagrams -- H1-3, bullet/numbered/task list,
+  quote, divider, table, code block (cursor inside fence), math block, image,
+  "Link to note" (inserts [[ and chains into the note autocomplete), 4
+  mermaid templates (template source shown in the completion info panel --
+  this replaces the cheat sheet), and Draw diagram (Excalidraw). NoteEditor
+  toolbar fully retired: image-spec buttons, MermaidQuickInsert +
+  MermaidCheatSheet components and MERMAID_CHEAT_SHEET constant deleted;
+  image sizing is now a click-popover on rendered images
+  (MarkdownRenderer.onSetImageSize + pure `setImageSizeInMarkdown` that maps
+  mirrored /images/local/ URLs back to __LUMINARY_IMG__) wired in the split
+  preview and reading view. 12 new headless tests (trigger position,
+  filtering, apply outputs via state-backed view stub, image-size rewrite
+  incl. URL mapping). Live-drive verified: menu on /, /tab -> table inserted,
+  /mer -> mermaid inserted and SVG renders in preview, old toolbar gone.
+  Also (user feedback, same session): properties rail now uses full height --
+  tags capped at 30% with scroll, Collections and Source Documents split the
+  remaining space (flex-1 lists) instead of max-h-40/32 boxes.
 - [ ] WP6 /notes/:id route + capture unification
 - [ ] WP7 cleanup + consistency + full CI
 

@@ -28,6 +28,7 @@ import {
   noteLinkCompletionSource,
   type NoteLinkCompletionConfig,
 } from "./noteLinkCompletion"
+import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 
 export interface MarkdownEditorHandle {
   insertBlock: (markdown: string) => void
@@ -49,6 +50,8 @@ export interface MarkdownCodeEditorProps {
   onPasteImage?: (file: File) => Promise<string>
   /** Enables the [[ note-link autocomplete. */
   linkCompletion?: NoteLinkCompletionConfig
+  /** Enables the / block-insert menu at line start. */
+  slashCommands?: SlashCommandConfig
 }
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
@@ -87,13 +90,13 @@ const mdHighlight = HighlightStyle.define([
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands }
 
     useEffect(() => {
       const view = new EditorView({
@@ -109,7 +112,10 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             editorTheme,
             cmPlaceholder(placeholder ?? ""),
             autocompletion({
-              override: [noteLinkCompletionSource(() => latest.current.linkCompletion)],
+              override: [
+                slashCommandSource(() => latest.current.slashCommands),
+                noteLinkCompletionSource(() => latest.current.linkCompletion),
+              ],
               icons: false,
             }),
             keymap.of([

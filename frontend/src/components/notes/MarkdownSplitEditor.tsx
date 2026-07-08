@@ -4,6 +4,7 @@ import {
   type MarkdownEditorHandle,
 } from "@/components/notes/MarkdownCodeEditor"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
+import { type SlashCommandConfig } from "@/components/notes/slashCommands"
 
 export type MarkdownSplitLayout = "splitter" | "tabs" | "editor"
 
@@ -15,7 +16,7 @@ export interface MarkdownSplitEditorProps {
   editorRef?: RefObject<MarkdownEditorHandle | null>
   onPasteImage?: (file: File) => Promise<string>
   linkCompletion?: NoteLinkCompletionConfig
-  editorToolbar?: ReactNode
+  slashCommands?: SlashCommandConfig
   placeholder?: string
   autoFocus?: boolean
   editorLabel?: string
@@ -37,7 +38,7 @@ export function MarkdownSplitEditor({
   editorRef: externalEditorRef,
   onPasteImage,
   linkCompletion,
-  editorToolbar,
+  slashCommands,
   placeholder = "Write your note in Markdown...",
   autoFocus,
   editorLabel = "Editor",
@@ -94,7 +95,6 @@ export function MarkdownSplitEditor({
 
   const writePane = (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {editorToolbar}
       <MarkdownCodeEditor
         ref={editorRef}
         value={content}
@@ -102,6 +102,7 @@ export function MarkdownSplitEditor({
         onScroll={layout === "splitter" ? () => syncScroll("write") : undefined}
         onPasteImage={onPasteImage}
         linkCompletion={linkCompletion}
+        slashCommands={slashCommands}
         placeholder={placeholder}
         autoFocus={autoFocus}
         className={editorClassName ?? DEFAULT_EDITOR_CLASS}

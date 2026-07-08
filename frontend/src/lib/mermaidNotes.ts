@@ -16,19 +16,3 @@ export const MERMAID_TEMPLATES = [
     markdown: "```mermaid\nstateDiagram-v2\n  [*] --> Draft\n  Draft --> Saved\n  Saved --> Edited\n  Edited --> Saved\n```",
   },
 ] as const
-
-export const MERMAID_CHEAT_SHEET = [
-  "flowchart TD/LR: graph direction",
-  "A --> B: arrow",
-  "A[Label]: process node",
-  "A{Choice}: decision node",
-  "DB[(Database)]: database node",
-  "subgraph Name ... end: group nodes",
-  "sequenceDiagram: sequence chart",
-  "participant API: sequence actor",
-  "A->>B: Message: sequence call",
-  "stateDiagram-v2: state machine",
-  "classDiagram: class model",
-  "erDiagram: entity relationships",
-] as const
-
