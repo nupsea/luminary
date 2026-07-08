@@ -372,8 +372,35 @@ compat).
   MarkdownCodeEditor now closes an open completion via a window-capture
   keydown handler (preventDefault+stopPropagation) and the sheet keeps a
   backup onEscapeKeyDown guard; Esc with popup open closes only the popup.
-- [ ] WP6 /notes/:id route + capture unification
-- [ ] WP7 cleanup + consistency + full CI
+- [x] WP6 /notes/:id route + capture unification — done 2026-07-09.
+  `pages/Notes/NotePage.tsx` registered via a new `note-page` manifest surface
+  (public/feature, route /notes/:noteId -- mirrors /collections/:id; schema +
+  coverage lints green): full-page editor with back nav, view toggles, single
+  header title, autosave, properties rail, backlinks, and an outline rail for
+  3+-heading notes (fence-aware parser; click scrolls the editor via a new
+  MarkdownEditorHandle.scrollToLine, or the nth rendered heading in reading
+  view). `QuickNoteComposer.tsx` = the one creation surface (Notes "New" +
+  gap preloads + reader selection capture + reader section notes via new
+  autosave `createExtras` stamping document_id/section_id; CreateNotePayload
+  gained section_id); it keeps the append-to-existing command and adds an
+  "Open full note" hatch that flushes then navigates. Notes.tsx cards/list
+  navigate to the page. SectionListItem's bespoke inline editor DELETED
+  (composer replaces it); DocumentReader's NoteReaderSheet usage replaced;
+  NoteReaderSheet.tsx DELETED (zero consumers -- the full page + composer
+  cover everything it did). Live-drive verified: card->page URL, deep-link
+  fresh load, back nav, outline render+scroll (6 headings), composer->open-
+  full-note->delete round trip, section capture POST carries section_id.
+- [x] WP7 cleanup + consistency + full CI — done 2026-07-09. Dead `group`
+  FilterState/param stripped from Notes.tsx (backend param untouched);
+  list-view title cell now uses note.title ?? deriveTitle (was raw content
+  slice; stripMarkdown stays out of cells per I-12); orphaned
+  LinkAutocomplete.tsx deleted; stale NoteReaderSheet comments updated;
+  Notes.tsx 2026-02 audit header replaced with a current one-liner.
+  docs/architecture.md Notes entry + CHANGELOG Unreleased entry written.
+  Gates: vitest 432/443 (11 pre-existing PDF failures), tsc clean, lint 0 new
+  errors (4 pre-existing on HEAD), dev build green, public-tier build green
+  with 0 admin/quality/monitoring chunks, backend tests/test_surface.py 5/5
+  after the manifest addition (26 surfaces).
 
 ## Risks
 
