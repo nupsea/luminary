@@ -15,7 +15,6 @@ from app.models import FlashcardModel
 
 logger = logging.getLogger(__name__)
 
-
 _FTS5_SPECIAL = re.compile(r'[(){}*:^~"\[\]<>]')
 
 
@@ -94,7 +93,7 @@ class FlashcardSearchService:
         """
         from sqlalchemy import or_  # noqa: PLC0415
 
-        from app.models import CollectionMemberModel, NoteTagIndexModel  # noqa: PLC0415
+        from app.models import NoteTagIndexModel  # noqa: PLC0415
 
         stmt = select(FlashcardModel)
         _fts_query_used = False
@@ -123,11 +122,9 @@ class FlashcardSearchService:
             stmt = stmt.where(FlashcardModel.document_id == document_id)
 
         if collection_id:
-            member_sub = select(CollectionMemberModel.member_id).where(
-                CollectionMemberModel.collection_id == collection_id,
-                CollectionMemberModel.member_type == "note",
-            )
-            stmt = stmt.where(FlashcardModel.note_id.in_(member_sub))
+            from app.repos.flashcard_repo import collection_card_filter  # noqa: PLC0415
+
+            stmt = stmt.where(collection_card_filter(collection_id))
 
         if tag:
             tag_sub = select(NoteTagIndexModel.note_id).where(
@@ -181,11 +178,9 @@ class FlashcardSearchService:
             if document_id:
                 stmt_fallback = stmt_fallback.where(FlashcardModel.document_id == document_id)
             if collection_id:
-                member_sub2 = select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id == collection_id,
-                    CollectionMemberModel.member_type == "note",
-                )
-                stmt_fallback = stmt_fallback.where(FlashcardModel.note_id.in_(member_sub2))
+                from app.repos.flashcard_repo import collection_card_filter  # noqa: PLC0415
+
+                stmt_fallback = stmt_fallback.where(collection_card_filter(collection_id))
             if tag:
                 tag_sub2 = select(NoteTagIndexModel.note_id).where(
                     or_(

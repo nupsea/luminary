@@ -26,7 +26,6 @@ from app.services.flashcard_parsers import (
     _parse_llm_response,
 )
 from app.services.flashcard_prompts import (
-    _BLOOM_L3_INSTRUCTION,
     _BOOK_CONTENT_GUIDELINE,
     _DIFFICULTY_GUIDELINES,
     _TECH_TITLE_KEYWORDS,
@@ -77,7 +76,6 @@ __all__ = [
     "NOTES_CONCEPT_EXTRACT_TMPL",
     "TECH_FLASHCARD_SYSTEM",
     "TECH_FLASHCARD_USER_TMPL",
-    "_BLOOM_L3_INSTRUCTION",
     "_BOOK_CONTENT_GUIDELINE",
     "_CLOZE_BLANK_RE",
     "_DIFFICULTY_GUIDELINES",

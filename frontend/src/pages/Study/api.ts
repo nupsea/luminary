@@ -152,6 +152,18 @@ export async function deleteAllFlashcardsForDocument(
   }
 }
 
+export async function deleteAllFlashcardsForCollection(
+  collectionId: string,
+): Promise<{ deleted: number }> {
+  try {
+    return await apiDelete<{ deleted: number }>(
+      `/flashcards/collection/${encodeURIComponent(collectionId)}`,
+    )
+  } catch {
+    throw new Error("Failed to delete collection flashcards")
+  }
+}
+
 export async function generateFlashcardsFromGraph(
   documentId: string,
   k: number,

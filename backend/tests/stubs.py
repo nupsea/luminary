@@ -45,6 +45,25 @@ class MockLLMService:
             yield t
 
 
+class SequenceLLMService(MockLLMService):
+    """Returns a different response per generate() call, in order.
+
+    The last response repeats once the sequence is exhausted. Useful for
+    exercising retry/backfill logic where successive LLM passes must differ.
+    """
+
+    def __init__(self, responses: list[str]):
+        super().__init__(response=responses[-1] if responses else "")
+        self._responses = list(responses)
+
+    async def generate(
+        self, prompt: str, system: str = "", stream: bool = False, model=None, **kwargs
+    ):
+        self.call_count += 1
+        idx = min(self.call_count - 1, len(self._responses) - 1)
+        return self._responses[idx]
+
+
 class CapturingLLMService(MockLLMService):
     """Extends MockLLMService to record arguments passed to the LLM."""
 

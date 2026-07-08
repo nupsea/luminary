@@ -11,13 +11,50 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+RecommendationKind = Literal[
+    "overdue_reviews",
+    "weak_concept",
+    "open_misconception",
+    "calibration_blind_spot",
+    "stalled_reading",
+]
+
+
+class RecommendationReason(BaseModel):
+    """One evidence line behind a recommendation -- never asserted without one
+    (docs/recommender-spec.md)."""
+
+    signal: str
+    detail: str
+
+
+class Recommendation(BaseModel):
+    id: str  # recommendation_feedback row id -- the dismiss/acted handle
+    kind: RecommendationKind
+    target_type: Literal["study", "concept", "flashcard", "document"]
+    target_ref: str
+    label: str
+    score: float
+    reasons: list[RecommendationReason]
+    count: int | None = None
+    # navigation context; target_ref alone is not always routable
+    document_id: str | None = None
+    concept_slug: str | None = None
+
 
 class TodayAction(BaseModel):
     """Single, dominant CTA on the hub. Picked by the backend so the UI
     has one shape regardless of which signal was strongest."""
 
-    kind: Literal["review_cards", "continue_reading", "resume_note"]
-    target_id: str | None = None  # document_id for read; note_id for resume
+    kind: Literal[
+        "review_cards",
+        "continue_reading",
+        "resume_note",
+        "drill_concept",
+        "fix_misconception",
+        "confidence_check",
+    ]
+    target_id: str | None = None  # document_id for read; note_id for resume; slug for concepts
     label: str
     count: int | None = None  # total due-card count for kind='review_cards'
     # Focused collection context for review_cards — the most active project
@@ -26,6 +63,11 @@ class TodayAction(BaseModel):
     collection_name: str | None = None
     collection_color: str | None = None
     scoped_count: int | None = None  # due cards scoped to that collection
+    # evidence + feedback handle when the recommender picked this action
+    reasons: list[RecommendationReason] = []
+    recommendation_id: str | None = None
+    # doc fallback for fix_misconception when the card has no concept slug
+    document_id: str | None = None
 
 
 class RecentItem(BaseModel):
@@ -98,6 +140,8 @@ class HomeOverviewResponse(BaseModel):
     continue_reading: list[ContinueReadingItem] = []
     fading_items: list[FadingItem] = []
     weekly_stats: WeeklyStats | None = None
+    # evidence-scored next-best-actions after the hero (docs/recommender-spec.md)
+    recommendations: list[Recommendation] = []
 
 
 class CollectionTagChip(BaseModel):

@@ -5,6 +5,7 @@
  */
 
 import { API_BASE } from "@/lib/config"
+import { distributeByWeight } from "@/lib/studyDistribute"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -343,10 +344,13 @@ export interface CollectionGenerationResult {
   errors: string[]
 }
 
+// Generate roughly `totalCount` cards for the WHOLE collection (not per source):
+// the total is split across sources proportionally to their content size, so a
+// book earns most of the questions and a short note a few. Sources allotted 0
+// are skipped.
 export async function generateCollectionFlashcards(
-  collectionId: string,
-  sources: { id: string; type: "document" | "note" }[],
-  count: number = 10,
+  sources: { id: string; type: "document" | "note"; weight?: number }[],
+  totalCount: number = 20,
   difficulty: Difficulty = "medium",
 ): Promise<CollectionGenerationResult> {
   const result: CollectionGenerationResult = {
@@ -356,44 +360,43 @@ export async function generateCollectionFlashcards(
     documentsProcessed: 0,
     errors: [],
   }
+  if (sources.length === 0) return result
 
-  const hasNotes = sources.some((s) => s.type === "note")
-  if (hasNotes) {
+  const targets = distributeByWeight(
+    totalCount,
+    sources.map((s) => s.weight ?? 0),
+  )
+
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i]
+    const count = targets[i]
+    if (count <= 0) continue
     try {
-      const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collection_id: collectionId,
-          count,
-          difficulty,
-        }),
-      })
-      if (res.ok) {
-        const data = (await res.json()) as {
-          created?: number
-          skipped?: number
-        }
-        result.noteCreated = data.created ?? 0
-        result.noteSkipped = data.skipped ?? 0
-        result.totalCreated += result.noteCreated
+      if (source.type === "document") {
+        const created = await generateDocumentFlashcards(source.id, count, difficulty)
+        result.totalCreated += created
+        result.documentsProcessed += 1
       } else {
-        result.errors.push(`Notes generation failed (HTTP ${res.status})`)
+        // Per-note call (note_ids path) so each note gets its own share.
+        const res = await fetch(`${API_BASE}/notes/flashcards/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note_ids: [source.id], count, difficulty }),
+        })
+        if (!res.ok) {
+          result.errors.push(`Note generation failed (HTTP ${res.status})`)
+        } else {
+          const data = (await res.json()) as unknown
+          const created = Array.isArray(data)
+            ? data.length
+            : ((data as { created?: number })?.created ?? 0)
+          result.noteCreated += created
+          result.totalCreated += created
+        }
       }
     } catch (e) {
-      result.errors.push(`Notes: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-
-  const docIds = sources.filter((s) => s.type === "document").map((s) => s.id)
-  for (const docId of docIds) {
-    try {
-      const created = await generateDocumentFlashcards(docId, count, difficulty)
-      result.totalCreated += created
-      result.documentsProcessed += 1
-    } catch (e) {
       result.errors.push(
-        `Document ${docId}: ${e instanceof Error ? e.message : String(e)}`,
+        `${source.type} ${source.id}: ${e instanceof Error ? e.message : String(e)}`,
       )
     }
   }

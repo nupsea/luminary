@@ -4,14 +4,16 @@ GET /home/overview is the single-fetch contract for the hub UI. It composes
 recent-activity, active-collections, recent-tags, and a today_action CTA so
 the hub never makes a follow-up call per section.
 
-Reads only -- the only writer of content_activity is ActivityService.
+Content tables are read-only here (the only writer of content_activity is
+ActivityService); the recommender upserts its own recommendation_feedback
+shown-counts as a side effect of the overview fetch.
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,7 @@ from app.schemas.home import (
     TodayAction,
     WeeklyStats,
 )
+from app.services import recommender_service
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,24 @@ async def get_home_overview(
     continue_reading = await _fetch_continue_reading(session)
     fading_items = await _fetch_fading_items(session)
     weekly_stats = await _fetch_weekly_stats(session)
-    today_action = await _pick_today_action(session, recent_items)
+
+    recommendations = await recommender_service.get_recommendations(session)
+    today_action: TodayAction | None = None
+    if recommendations:
+        top = recommendations[0]
+        if top.kind == "overdue_reviews":
+            # the legacy picker produces the same review_cards action enriched
+            # with collection context the hero renders -- reuse it, attach evidence
+            today_action = await _pick_today_action(session, recent_items)
+            if today_action is not None:
+                today_action.reasons = top.reasons
+                today_action.recommendation_id = top.id
+        else:
+            today_action = recommender_service.to_today_action(top)
+    if today_action is None:
+        # no candidate fired: degrade to the original heuristic floor
+        today_action = await _pick_today_action(session, recent_items, include_due_cards=False)
+
     return HomeOverviewResponse(
         today_action=today_action,
         recent_items=recent_items,
@@ -64,7 +84,26 @@ async def get_home_overview(
         continue_reading=continue_reading,
         fading_items=fading_items,
         weekly_stats=weekly_stats,
+        recommendations=recommendations[1:],
     )
+
+
+@router.post("/recommendations/{feedback_id}/dismiss", status_code=204)
+async def dismiss_recommendation(
+    feedback_id: str, session: AsyncSession = Depends(get_db)
+) -> Response:
+    if not await recommender_service.mark_dismissed(session, feedback_id):
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return Response(status_code=204)
+
+
+@router.post("/recommendations/{feedback_id}/acted", status_code=204)
+async def act_on_recommendation(
+    feedback_id: str, session: AsyncSession = Depends(get_db)
+) -> Response:
+    if not await recommender_service.mark_acted(session, feedback_id):
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return Response(status_code=204)
 
 
 async def _fetch_recent_items(session: AsyncSession, limit: int) -> list[RecentItem]:
@@ -217,22 +256,27 @@ async def _fetch_recent_tags(session: AsyncSession) -> list[RecentTag]:
 
 
 async def _pick_today_action(
-    session: AsyncSession, recent_items: list[RecentItem]
+    session: AsyncSession, recent_items: list[RecentItem], *, include_due_cards: bool = True
 ) -> TodayAction | None:
     """Heuristic priority: review-cards > continue-reading > resume-note > None.
 
     The hub renders whatever wins; it never has to pick between options.
+    include_due_cards=False when called as the recommender's fallback floor:
+    due cards are the recommender's signal there, and re-emitting them here
+    would resurrect a dismissed recommendation.
     """
     # 1. Due flashcards beat everything -- spaced repetition is time-sensitive.
-    due_row = (
-        await session.execute(
-            text(
-                "SELECT COUNT(*) FROM flashcards "
-                "WHERE due_date IS NOT NULL AND due_date <= datetime('now')"
+    due_count = 0
+    if include_due_cards:
+        due_row = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM flashcards "
+                    "WHERE due_date IS NOT NULL AND due_date <= datetime('now')"
+                )
             )
-        )
-    ).first()
-    due_count = int(due_row[0]) if due_row else 0
+        ).first()
+        due_count = int(due_row[0]) if due_row else 0
     if due_count > 0:
         top_col = (
             await session.execute(

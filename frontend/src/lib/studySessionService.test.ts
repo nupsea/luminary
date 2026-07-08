@@ -145,6 +145,29 @@ describe("prepareStudySession -- invariant: one user action = one session", () =
     expect(outcome.session.answeredCount).toBe(5)
   })
 
+  it("closes a STALE session (planned cards deleted, unreviewed) and starts fresh", async () => {
+    // The reported bug: a session planned 22 cards, 12 answered, but the
+    // remaining planned cards were deleted/regenerated -> 0 live remaining. It
+    // must not resurface as a stuck "complete" screen; close it, start fresh.
+    mocks.fetchOpenSession.mockResolvedValue({ id: "stale-sid" })
+    mocks.fetchSessionTeachbackResults.mockResolvedValue([])
+    mocks.fetchSessionRemainingCards.mockResolvedValue({
+      answered_count: 12,
+      planned_count: 22,
+      cards: [],
+    })
+    mocks.fetchDueCards.mockResolvedValue([{ id: "fresh-card" }])
+    mocks.startSession.mockResolvedValue("fresh-sid")
+
+    const outcome = await prepareStudySession(scope)
+
+    expect(mocks.endSession).toHaveBeenCalledWith("stale-sid")
+    expect(mocks.startSession).toHaveBeenCalledTimes(1)
+    expect(outcome.kind).toBe("studying")
+    if (outcome.kind !== "studying") throw new Error("unreachable")
+    expect(outcome.session.id).toBe("fresh-sid")
+  })
+
   it("explicit resumeSessionId reattaches even when no work remains", async () => {
     mocks.fetchSessionTeachbackResults.mockResolvedValue([])
     mocks.fetchSessionRemainingCards.mockResolvedValue({

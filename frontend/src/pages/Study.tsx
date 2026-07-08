@@ -56,7 +56,7 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
 import { fetchDocList } from "./Study/api"
-import { DocPicker } from "./Study/DocPicker"
+import { StudyBrowser, type CollectionNode } from "./Study/StudyBrowser"
 import { DocumentTopics } from "@/components/DocumentTopics"
 import { FlashcardManager } from "./Study/FlashcardManager"
 
@@ -65,8 +65,6 @@ import { FlashcardManager } from "./Study/FlashcardManager"
 export type { DocListItem } from "./Study/types"  // re-exported for Progress.tsx
 
 // SessionHistoryTab replaced by SessionManager component
-
-// DocPicker now lives in pages/Study/DocPicker.tsx.
 
 const _SESSION_SIZE = 15
 
@@ -417,8 +415,10 @@ export default function Study() {
   // ---- Main study dashboard -------------------------------------------------
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
+      {/* Header. relative z-30 lifts this bar (and the StudyBrowser dropdown it
+          contains) above the scrolling content below, so the popover isn't
+          composited under the hero card. */}
+      <div className="relative z-30 flex items-center justify-between border-b border-border bg-card/30 px-8 py-3 backdrop-blur-md">
         <div className="flex items-center gap-8">
           {canGoBack && (
             <button
@@ -439,12 +439,22 @@ export default function Study() {
             Study
           </h1>
 
-          <DocPicker
+          <StudyBrowser
             docs={docList.filter(isDocumentReady)}
-            activeId={studyDocumentId}
-            onSelect={(id) => {
+            collections={collections as CollectionNode[]}
+            activeDocId={studyDocumentId}
+            activeCollectionId={activeCollectionId}
+            onSelectDoc={(id) => {
+              setActiveCollectionId(null)
               setActiveDocument(id)
-              if (id) setActiveCollectionId(null)
+            }}
+            onSelectCollection={(id) => {
+              setActiveDocument(null)
+              setActiveCollectionId(id)
+            }}
+            onClear={() => {
+              setActiveCollectionId(null)
+              setActiveDocument(null)
             }}
           />
         </div>

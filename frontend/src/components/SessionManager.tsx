@@ -1,7 +1,7 @@
 /**
  * SessionManager -- active (in-progress) and completed session lists on the
  * Study landing page. Completed rows use the shared SessionHistoryRow so the
- * landing page and the scoped per-doc/per-enclave history stay in sync.
+ * landing page and the scoped per-doc/per-collection history stay in sync.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"

@@ -14,12 +14,29 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import ChunkModel, FlashcardModel
+from app.models import ChunkModel, CollectionMemberModel, FlashcardModel
 from app.services.repo_helpers import get_or_404
+
+
+def collection_card_filter(collection_id: str):
+    """A collection's flashcards are those sourced from its document members OR
+    its note members. Shared by search and delete so both target the same set."""
+    doc_members = select(CollectionMemberModel.member_id).where(
+        CollectionMemberModel.collection_id == collection_id,
+        CollectionMemberModel.member_type == "document",
+    )
+    note_members = select(CollectionMemberModel.member_id).where(
+        CollectionMemberModel.collection_id == collection_id,
+        CollectionMemberModel.member_type == "note",
+    )
+    return or_(
+        FlashcardModel.document_id.in_(doc_members),
+        FlashcardModel.note_id.in_(note_members),
+    )
 
 
 class FlashcardRepo:
@@ -85,6 +102,12 @@ class FlashcardRepo:
     async def list_ids_for_document(self, document_id: str) -> list[str]:
         result = await self.session.execute(
             select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
+        )
+        return list(result.scalars().all())
+
+    async def list_ids_for_collection(self, collection_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(FlashcardModel.id).where(collection_card_filter(collection_id))
         )
         return list(result.scalars().all())
 

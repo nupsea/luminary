@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from stubs import CapturingLLMService as _CapturingLLMService
 from stubs import MockLLMService as _MockLLMService
+from stubs import SequenceLLMService as _SequenceLLMService
 
 import app.database as db_module
 from app.database import make_engine
@@ -156,7 +157,11 @@ async def test_service_strips_markdown_fences(test_db):
         session.add(_make_chunk(chunk_id, doc_id=doc_id))
         await session.commit()
 
-    llm_json = '```json\n[{"question": "Q1?", "answer": "A1.", "source_excerpt": "src."}]\n```'
+    llm_json = (
+        '```json\n[{"question": "What does a replication log record?", '
+        '"answer": "The ordered sequence of writes followers replay to stay '
+        'consistent with the leader.", "source_excerpt": "src."}]\n```'
+    )
     mock_llm = _MockLLMService(response=llm_json)
 
     with patch("app.services.flashcard.get_llm_service", return_value=mock_llm):
@@ -171,7 +176,7 @@ async def test_service_strips_markdown_fences(test_db):
             )
 
     assert len(cards) == 1
-    assert cards[0].question == "Q1?"
+    assert cards[0].question == "What does a replication log record?"
 
 
 async def test_service_returns_empty_when_no_chunks(test_db):
@@ -432,7 +437,12 @@ async def test_generate_endpoint_returns_201(test_db):
 
     llm_json = json.dumps(
         [
-            {"question": "Q?", "answer": "A.", "source_excerpt": "src."},
+            {
+                "question": "What problem does quorum consistency solve?",
+                "answer": "It ensures a read overlaps a recent write so at least one "
+                "queried replica returns the latest value.",
+                "source_excerpt": "src.",
+            },
         ]
     )
     mock_llm = _MockLLMService(response=llm_json)
@@ -449,8 +459,64 @@ async def test_generate_endpoint_returns_201(test_db):
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["fsrs_state"] == "new"
-    assert data[0]["question"] == "Q?"
+    assert data[0]["question"] == "What problem does quorum consistency solve?"
     assert data[0]["is_user_edited"] is False
+
+
+async def test_generate_retries_to_backfill_gated_cards(test_db):
+    """When some cards fail the quality gate, extra LLM passes backfill the
+    shortfall so the requested count is met."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(chunk_id, doc_id=doc_id))
+        await session.commit()
+
+    # first pass: 2 good cards + 2 one-word answers (gated out); second pass
+    # supplies 2 fresh good cards to reach the requested 4.
+    first = json.dumps(
+        {
+            "flashcards": [
+                {"question": "What is a write-ahead log?",
+                 "answer": "A durable append-only record written before applying changes."},
+                {"question": "What is a follower replica?",
+                 "answer": "A replica that applies the leader's writes to serve reads."},
+                {"question": "What input closes the analytics loop?", "answer": "Feedback"},
+                {"question": "What names a data partition?", "answer": "Shard"},
+            ]
+        }
+    )
+    second = json.dumps(
+        {
+            "flashcards": [
+                {"question": "What does a quorum guarantee?",
+                 "answer": "That a read and a write overlap on at least one replica."},
+                {"question": "What is eventual consistency?",
+                 "answer": "Replicas converge to the same value once writes stop."},
+            ]
+        }
+    )
+    seq_llm = _SequenceLLMService([first, second])
+
+    with patch("app.services.flashcard.get_llm_service", return_value=seq_llm):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/flashcards/generate",
+                json={"document_id": doc_id, "scope": "full", "count": 4},
+            )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data) == 4
+    # the backfill actually ran a second pass
+    assert seq_llm.call_count == 2
+    # no gated card survived, and every answer is a real explanation
+    questions = {c["question"] for c in data}
+    assert "What input closes the analytics loop?" not in questions
+    assert all(len(c["answer"].split()) >= 2 for c in data)
 
 
 async def test_list_flashcards_returns_all_for_document(test_db):

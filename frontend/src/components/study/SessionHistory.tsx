@@ -94,7 +94,7 @@ export function SessionHistory({
   const sessions = data?.items ?? []
   const hasAny = sessions.length > 0
   const scopeLabel =
-    scope.kind === "collection" ? "this enclave" : "this document"
+    scope.kind === "collection" ? "this collection" : "this document"
 
   const allSelected =
     sessions.length > 0 && sessions.every((s) => selectedIds.has(s.id))

@@ -21,6 +21,7 @@ import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { SessionHistory } from "@/components/study/SessionHistory"
+import { endOpenSessionsForScope } from "@/lib/studySessionService"
 import { useAppStore } from "@/store"
 
 import {
@@ -58,7 +59,9 @@ export function FlashcardManager({
   const [page, setPage] = useState(1)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState<null | "selected" | "all">(null)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState<
+    null | "selected" | "all" | "replace"
+  >(null)
   // When the user clicks "Study" on a Chapter Goal in the reader,
   // DocumentReader sets `studySectionFilter` and navigates here. We consume
   // it once on mount, copy to local state, and clear the store value so
@@ -177,7 +180,11 @@ export function FlashcardManager({
   })
 
   const deleteAllMutation = useMutation({
-    mutationFn: () => deleteAllFlashcardsForDocument(documentId),
+    mutationFn: async () => {
+      await deleteAllFlashcardsForDocument(documentId)
+      // Drop any in-progress session so it can't resume with deleted cards.
+      await endOpenSessionsForScope(documentId, null)
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
@@ -187,6 +194,42 @@ export function FlashcardManager({
       toast.success("All flashcards deleted for this document")
     },
     onError: () => toast.error("Failed to delete flashcards"),
+  })
+
+  // Regenerate (replace): delete the current cards, then generate a fresh set of
+  // the same size. A clean slate -- the old cards and their review history go.
+  const replaceMutation = useMutation({
+    mutationFn: async () => {
+      await deleteAllFlashcardsForDocument(documentId)
+      // Fresh cards -> fresh review: drop the stale in-progress session.
+      await endOpenSessionsForScope(documentId, null)
+      const count = Math.min(Math.max(totalCards || 10, 1), 50)
+      return generateFlashcards({
+        document_id: documentId,
+        scope: "full",
+        section_heading: null,
+        count,
+        difficulty: "medium",
+      })
+    },
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+      qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
+      clearSelection()
+      setSelectionMode(false)
+      setConfirmBulkDelete(null)
+      setPage(1)
+      toast.success(
+        `Replaced with ${created.length} fresh card${created.length === 1 ? "" : "s"}`,
+      )
+    },
+    onError: (err: Error) => {
+      const msg =
+        err instanceof GenerateError && err.status === 503
+          ? "Ollama is unavailable. Start it with: ollama serve"
+          : "Failed to regenerate cards"
+      toast.error(msg)
+    },
   })
 
   const generateMutation = useMutation({
@@ -439,48 +482,72 @@ export function FlashcardManager({
             </>
           )}
           <button
+            onClick={() => setConfirmBulkDelete("replace")}
+            disabled={replaceMutation.isPending}
+            className="ml-auto flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+          >
+            {replaceMutation.isPending ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <Zap size={11} />
+            )}
+            Regenerate (replace)
+          </button>
+          <button
             onClick={() => setConfirmBulkDelete("all")}
             disabled={deleteAllMutation.isPending}
-            className="ml-auto rounded border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+            className="rounded border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
           >
             Delete all ({totalCards})
           </button>
         </div>
       )}
 
-      {/* Bulk delete confirmation */}
-      {confirmBulkDelete && (
-        <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
-          <AlertCircle size={16} />
-          <span className="flex-1">
-            {confirmBulkDelete === "selected"
-              ? `Permanently delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
-              : `Permanently delete ALL ${totalCards} flashcards for this document? This cannot be undone.`}
-          </span>
-          <button
-            onClick={() => {
-              if (confirmBulkDelete === "selected") {
-                bulkDeleteMutation.mutate(Array.from(selectedIds))
-              } else {
-                deleteAllMutation.mutate()
-              }
-            }}
-            disabled={bulkDeleteMutation.isPending || deleteAllMutation.isPending}
-            className="flex items-center gap-1 rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {(bulkDeleteMutation.isPending || deleteAllMutation.isPending) && (
-              <Loader2 size={12} className="animate-spin" />
-            )}
-            Confirm delete
-          </button>
-          <button
-            onClick={() => setConfirmBulkDelete(null)}
-            className="rounded border border-red-300 px-3 py-1 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+      {/* Bulk delete / replace confirmation */}
+      {confirmBulkDelete && (() => {
+        const isReplace = confirmBulkDelete === "replace"
+        const busy =
+          bulkDeleteMutation.isPending || deleteAllMutation.isPending || replaceMutation.isPending
+        const tone = isReplace
+          ? "border-primary/30 bg-primary/5 text-foreground"
+          : "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"
+        return (
+          <div className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm ${tone}`}>
+            <AlertCircle size={16} />
+            <span className="flex-1">
+              {confirmBulkDelete === "selected"
+                ? `Permanently delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
+                : isReplace
+                  ? `Replace all ${totalCards} flashcard${totalCards === 1 ? "" : "s"} with a freshly generated set? This deletes the current cards and their review history.`
+                  : `Permanently delete ALL ${totalCards} flashcards for this document? This cannot be undone.`}
+            </span>
+            <button
+              onClick={() => {
+                if (confirmBulkDelete === "selected") {
+                  bulkDeleteMutation.mutate(Array.from(selectedIds))
+                } else if (isReplace) {
+                  replaceMutation.mutate()
+                } else {
+                  deleteAllMutation.mutate()
+                }
+              }}
+              disabled={busy}
+              className={`flex items-center gap-1 rounded px-3 py-1 text-xs font-semibold text-white disabled:opacity-50 ${
+                isReplace ? "bg-primary hover:bg-primary/90" : "bg-red-600 hover:bg-red-700"
+              }`}
+            >
+              {busy && <Loader2 size={12} className="animate-spin" />}
+              {isReplace ? "Replace" : "Confirm delete"}
+            </button>
+            <button
+              onClick={() => setConfirmBulkDelete(null)}
+              className="rounded border border-border px-3 py-1 text-xs font-medium hover:bg-accent"
+            >
+              Cancel
+            </button>
+          </div>
+        )
+      })()}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 flex flex-col gap-4">

@@ -114,6 +114,90 @@ def card_field(item: dict, *names: str) -> str:
     return ""
 
 
+# A trailing source pointer the model sometimes appends despite instructions,
+# e.g. "... rather than assuming independence. In Part I. Foundations of Data
+# Systems." The source is tracked separately, so strip it from the answer.
+_TRAILING_SOURCE_REF = re.compile(
+    r"[\s.]*(?:In|See)\s+(?:Part|Chapter|Section|Ch\.?|Sec\.?)\b.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_source_ref(answer: str) -> str:
+    """Remove a trailing 'In Part/Chapter/Section ...' citation from an answer.
+
+    Conservative: only fires when such a pointer starts a clause at the very end,
+    and only when a real answer remains before it (never strips the whole thing).
+    """
+    stripped = _TRAILING_SOURCE_REF.sub("", answer).strip()
+    if len(stripped.split()) >= _MIN_ANSWER_WORDS:
+        return stripped if stripped[-1:] in ".!?" or not stripped else stripped + "."
+    return answer.strip()
+
+
+# Quality gate for generated Q/A cards. FLASHCARD_SYSTEM already forbids these
+# shapes, but small local models still emit them; this is the deterministic
+# backstop so a weak card never reaches the deck regardless of model.
+_MIN_ANSWER_WORDS = 2
+_BLOATED_QUESTION_WORDS = 22
+_TRIVIAL_ANSWER_WORDS = 3
+
+# Source-referencing / deictic phrases that make no sense on a standalone card.
+_LEADING_PHRASES = (
+    "in this passage",
+    "in this text",
+    "in this excerpt",
+    "in this book",
+    "in this document",
+    "according to the text",
+    "as described",
+    "as stated",
+    "this scenario",
+    "the scenario",
+    "this situation",
+    "this case",
+    "this context",
+    "this example",
+    "the author",
+    "the writer",
+)
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text))
+
+
+def card_rejection_reason(question: str, answer: str) -> str | None:
+    """Why this Q/A card is low quality, or None if it passes the gate.
+
+    Catches the failure modes the generation prompt forbids but weak models
+    still produce: empty fields, one-word answers (which includes bare yes/no),
+    source-referencing/leading questions, and bloated leading questions paired
+    with a trivial answer. Cloze cards use a separate builder and are
+    intentionally not run through this gate.
+    """
+    q = question.strip()
+    a = answer.strip()
+    if not q or not a:
+        return "empty question or answer"
+
+    q_words = _word_count(q)
+    a_words = _word_count(a)
+
+    if a_words < _MIN_ANSWER_WORDS:
+        return f"answer too short ({a_words} word)"
+
+    q_lower = q.lower()
+    for phrase in _LEADING_PHRASES:
+        if phrase in q_lower:
+            return f"leading/deictic phrase in question ({phrase!r})"
+
+    if q_words >= _BLOATED_QUESTION_WORDS and a_words <= _TRIVIAL_ANSWER_WORDS:
+        return f"bloated question ({q_words}w) with trivial answer ({a_words}w)"
+
+    return None
+
+
 def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
     """Parse a single {front, back} JSON object from LLM response for one gap."""
     raw = raw.strip()

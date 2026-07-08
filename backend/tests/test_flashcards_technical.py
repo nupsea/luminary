@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from stubs import MockLLMService as _MockLLMService
+from stubs import SequenceLLMService as _SequenceLLMService
 
 import app.database as db_module
 from app.database import make_engine
@@ -362,7 +363,7 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
         [
             {
                 "question": "What is the output of print(2 ** 3)?",
-                "answer": "8",
+                "answer": "8 -- the ** operator raises 2 to the power 3.",
                 "source_excerpt": "2 ** 3",
                 "flashcard_type": "trace",
                 "bloom_level": 4,
@@ -384,6 +385,50 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
     assert len(data) == 1
     assert data[0]["flashcard_type"] is not None
     assert data[0]["bloom_level"] is not None
+
+
+async def test_generate_technical_backfills_gated_cards(test_db):
+    """The technical path also retries to replace cards lost to the quality
+    gate, reaching the requested count."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(chunk_id, doc_id=doc_id))
+        await session.commit()
+
+    first = json.dumps(
+        [
+            {"question": "What does the ** operator do in Python?",
+             "answer": "It raises the left operand to the power of the right operand.",
+             "flashcard_type": "definition", "bloom_level": 2},
+            {"question": "What is the output of print(2 ** 3)?", "answer": "8",
+             "flashcard_type": "trace", "bloom_level": 4},
+        ]
+    )
+    second = json.dumps(
+        [
+            {"question": "How does floor division // differ from / in Python?",
+             "answer": "// discards the fractional part and returns an integer-valued result.",
+             "flashcard_type": "definition", "bloom_level": 2},
+        ]
+    )
+    seq_llm = _SequenceLLMService([first, second])
+
+    with patch("app.services.flashcard.get_llm_service", return_value=seq_llm):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/flashcards/generate-technical",
+                json={"document_id": doc_id, "scope": "full", "count": 2},
+            )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data) == 2
+    assert seq_llm.call_count == 2
+    assert all(len(c["answer"].split()) >= 2 for c in data)
 
 
 # bloom_level string coercion

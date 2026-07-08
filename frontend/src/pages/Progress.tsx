@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react"
-import { AlertCircle, ArrowLeft, BookOpen, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
+import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import {
   Bar,
@@ -36,6 +36,7 @@ import type { components } from "@/types/api"
 type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
 type DueCountResponse = components["schemas"]["DueCountResponse"]
 type SessionListResponse = components["schemas"]["SessionListResponse"]
+type MisconceptionStats = components["schemas"]["MisconceptionStatsResponse"]
 
 // Local-only: minimal subset of /monitoring/overview consumed by the
 // summary stats bar; the full MonitoringOverview has many more fields.
@@ -54,6 +55,9 @@ const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
 
 const fetchDueCount = (): Promise<DueCountResponse> =>
   apiGet<DueCountResponse>("/study/due-count")
+
+const fetchMisconceptionStats = (): Promise<MisconceptionStats> =>
+  apiGet<MisconceptionStats>("/study/misconception-stats")
 
 const fetchOverview = (): Promise<MonitoringOverview> =>
   apiGet<MonitoringOverview>("/monitoring/overview")
@@ -388,6 +392,9 @@ export default function Progress() {
   const [dueLoading, setDueLoading] = useState(true)
   const [dueCount, setDueCount] = useState<number>(0)
 
+  const [gapsLoading, setGapsLoading] = useState(true)
+  const [gapsClosed, setGapsClosed] = useState<number>(0)
+
   const [overviewLoading, setOverviewLoading] = useState(true)
   const [overviewError, setOverviewError] = useState(false)
   const [overview, setOverview] = useState<MonitoringOverview | null>(null)
@@ -432,6 +439,18 @@ export default function Progress() {
       .catch((e: unknown) => {
         logger.warn("[Progress] study/due-count failed", e)
         if (!cancelled) setDueLoading(false)
+      })
+
+    fetchMisconceptionStats()
+      .then((d) => {
+        if (!cancelled) {
+          setGapsClosed(d.resolved_count)
+          setGapsLoading(false)
+        }
+      })
+      .catch((e: unknown) => {
+        logger.warn("[Progress] study/misconception-stats failed", e)
+        if (!cancelled) setGapsLoading(false)
       })
 
     fetchOverview()
@@ -583,13 +602,20 @@ export default function Progress() {
             accent="amber"
           />
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard
             label="Reviews (30d)"
             value={totalReviewed}
             icon={BookOpen}
             loading={historyLoading}
             accent="primary"
+          />
+          <StatCard
+            label="Gaps Closed"
+            value={gapsClosed}
+            icon={CheckCircle2}
+            loading={gapsLoading}
+            accent="emerald"
           />
           <StatCard
             label="Documents"

@@ -50,7 +50,7 @@ from app.schemas.study import (
     CalibrationWeekItem,
     CardStabilityItem,
     CollectionSource,
-    CollectionSubEnclave,
+    CollectionSubCollection,
     CollectionTopic,
     DailyHistoryItem,
     DecayDebtItem,
@@ -58,6 +58,7 @@ from app.schemas.study import (
     DocumentTopicsResponse,
     DueCountResponse,
     GapResult,
+    MisconceptionStatsResponse,
     RubricCompletenessResponse,
     RubricDimensionResponse,
     SectionHeatmapItem,
@@ -95,6 +96,13 @@ from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.mastery_service import get_mastery_service
+from app.services.misconceptions import (
+    PASSING_TEACHBACK_SCORE,
+    resolve_for_flashcard,
+)
+from app.services.misconceptions import (
+    get_stats as get_misconception_stats,
+)
 from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
@@ -911,27 +919,45 @@ async def get_collection_study_dashboard(
     # over the wire only to slice the first line.
     sources: list[CollectionSource] = []
     if doc_ids:
-        doc_title_rows = (
+        # Weight documents by CHUNK COUNT, not word_count: word_count is 0 on many
+        # large imported books (e.g. DDIA), which would starve the biggest source
+        # to zero cards when splitting a collection-wide generation total.
+        chunk_count_subq = (
+            select(func.count(ChunkModel.id))
+            .where(ChunkModel.document_id == DocumentModel.id)
+            .scalar_subquery()
+        )
+        doc_rows = (
             await session.execute(
-                select(DocumentModel.id, DocumentModel.title).where(
-                    DocumentModel.id.in_(list(doc_ids))
-                )
+                select(
+                    DocumentModel.id, DocumentModel.title, chunk_count_subq.label("chunks")
+                ).where(DocumentModel.id.in_(list(doc_ids)))
             )
         ).all()
-        for did, dtitle in doc_title_rows:
-            sources.append(CollectionSource(id=did, title=dtitle, type="document"))
+        for did, dtitle, dchunks in doc_rows:
+            sources.append(
+                CollectionSource(
+                    id=did, title=dtitle, type="document", weight=int(dchunks or 0)
+                )
+            )
     if note_ids:
         note_snippet_rows = (
             await session.execute(
                 select(
                     NoteModel.id,
                     func.substr(NoteModel.content, 1, 120).label("snippet"),
+                    func.length(NoteModel.content).label("chars"),
                 ).where(NoteModel.id.in_(list(note_ids)))
             )
         ).all()
-        for nid, snippet in note_snippet_rows:
+        for nid, snippet, chars in note_snippet_rows:
             ntitle = (snippet or "").split("\n")[0][:60] or "Untitled Note"
-            sources.append(CollectionSource(id=nid, title=ntitle, type="note"))
+            # express note size in chunk-equivalents (~1500 chars/chunk) so notes
+            # share a unit with documents; never 0 for a non-empty note.
+            note_weight = max(1, int((chars or 0) / 1500)) if chars else 0
+            sources.append(
+                CollectionSource(id=nid, title=ntitle, type="note", weight=note_weight)
+            )
 
     # 7. Sub-enclaves: for each direct child we already know its full descendant set.
     # Map descendant collection ID -> sub-enclave root, then bucket the members rows
@@ -1000,13 +1026,13 @@ async def get_collection_study_dashboard(
         ).all()
         child_name_map = {cid: name for cid, name in name_rows}
 
-    sub_collections: list[CollectionSubEnclave] = []
+    sub_collections: list[CollectionSubCollection] = []
     for child_id in direct_children:
         count = sum(cards_per_doc.get(d, 0) for d in sub_doc_ids.get(child_id, ())) + sum(
             cards_per_note.get(n, 0) for n in sub_note_ids.get(child_id, ())
         )
         sub_collections.append(
-            CollectionSubEnclave(
+            CollectionSubCollection(
                 id=child_id,
                 name=child_name_map.get(child_id, ""),
                 card_count=count,
@@ -1310,6 +1336,11 @@ async def teachback(
             misconception=misconceptions[0],
             session=session,
         )
+
+    # this legacy path skips FSRS scheduling, so the resolve-on-good-review hook
+    # in fsrs_service never fires here -- resolve passing scores explicitly
+    if score >= PASSING_TEACHBACK_SCORE:
+        await resolve_for_flashcard(session, card.id)
 
     await session.commit()
     logger.info(
@@ -1999,6 +2030,13 @@ async def get_decay_debt(
     items.sort(key=lambda x: x.avg_retention)
     total_at_risk = sum(i.card_count for i in items)
     return DecayDebtResponse(items=items[:limit], total_at_risk=total_at_risk)
+
+
+@router.get("/misconception-stats", response_model=MisconceptionStatsResponse)
+async def misconception_stats(
+    session: AsyncSession = Depends(get_db),
+) -> MisconceptionStatsResponse:
+    return MisconceptionStatsResponse(**await get_misconception_stats(session))
 
 
 @router.get("/calibration-stats", response_model=CalibrationStatsResponse)
