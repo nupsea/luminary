@@ -10,6 +10,7 @@ export interface CreateNotePayload {
   content: string
   tags: string[]
   document_id: string | null
+  section_id?: string | null
   source_document_ids?: string[]
   /** Optional manual title; when set the note is flagged manual-title. */
   title?: string

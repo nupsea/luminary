@@ -37,6 +37,8 @@ export interface MarkdownEditorHandle {
   getSelection: () => string
   focus: () => void
   scrollDOM: () => HTMLElement | null
+  /** Move the cursor to a 0-based line and scroll it to the top (outline nav). */
+  scrollToLine: (line: number) => void
 }
 
 export interface MarkdownCodeEditorProps {
@@ -288,6 +290,16 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
         },
         focus: () => viewRef.current?.focus(),
         scrollDOM: () => viewRef.current?.scrollDOM ?? null,
+        scrollToLine: (line) => {
+          const v = viewRef.current
+          if (!v) return
+          const docLine = v.state.doc.line(Math.min(line + 1, v.state.doc.lines))
+          v.dispatch({
+            selection: { anchor: docLine.from },
+            effects: EditorView.scrollIntoView(docLine.from, { y: "start", yMargin: 8 }),
+          })
+          v.focus()
+        },
       }),
       [],
     )

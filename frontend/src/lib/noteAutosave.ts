@@ -114,6 +114,8 @@ export interface UseNoteAutosaveOptions {
   draft: NoteDraft
   enabled: boolean
   debounceMs?: number
+  /** Fixed context stamped onto the created row (reader section capture). */
+  createExtras?: { documentId?: string | null; sectionId?: string | null }
   onCreated?: (note: Note) => void
   onSaved?: (note: Note) => void
 }
@@ -132,7 +134,9 @@ export function useNoteAutosave(options: UseNoteAutosaveOptions) {
           content: d.content,
           tags: d.tags,
           title: d.title.trim() || undefined,
-          document_id: d.sourceDocIds[0] || null,
+          document_id:
+            latest.current.createExtras?.documentId ?? (d.sourceDocIds[0] || null),
+          section_id: latest.current.createExtras?.sectionId ?? null,
           source_document_ids: d.sourceDocIds,
         }),
       patch: (noteId, d) =>

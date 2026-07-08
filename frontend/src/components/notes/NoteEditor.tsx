@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState, type RefObject } from "react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteDiagramDialog } from "@/components/NoteDiagramDialog"
 import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor"
@@ -26,6 +26,8 @@ export interface NoteEditorProps {
   imageVariant?: (path: string) => string
   editorClassName?: string
   linkCompletion?: NoteLinkCompletionConfig
+  /** External handle (outline navigation); defaults to an internal ref. */
+  editorRef?: RefObject<MarkdownEditorHandle | null>
 }
 
 export function NoteEditor({
@@ -36,8 +38,10 @@ export function NoteEditor({
   imageVariant = (path) => `![Pasted Image|medium](${path})`,
   editorClassName,
   linkCompletion,
+  editorRef: externalEditorRef,
 }: NoteEditorProps) {
-  const editorRef = useRef<MarkdownEditorHandle | null>(null)
+  const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
+  const editorRef = externalEditorRef ?? internalEditorRef
 
   const [diagramOpen, setDiagramOpen] = useState(false)
   const [editingDiagramRef, setEditingDiagramRef] = useState<ExcalidrawNoteDiagramRef | null>(null)
