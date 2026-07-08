@@ -399,7 +399,7 @@ export function BlogPublishDialog({
                 onContentChange={setBody}
                 editorLabel="Body markdown"
                 placeholder="Write your post in Markdown..."
-                textareaClassName="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                editorClassName="min-h-0 w-full flex-1 overflow-hidden rounded-md border border-slate-300 bg-white text-slate-900"
                 previewClassName="flex-1 overflow-auto"
                 preview={
                   <BlogPreview

@@ -53,7 +53,7 @@ import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
 import { API_BASE } from "@/lib/config"
-import { backfillNoteDescriptions, type Note } from "@/lib/notesApi"
+import { backfillNoteDescriptions, getNote, type Note } from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1446,6 +1446,14 @@ export default function NotesPage() {
         initialContent={notePreload?.content}
         initialCollectionId={notePreload?.collectionId}
         documents={documents}
+        onOpenNote={(noteId) => {
+          void getNote(noteId)
+            .then((n) => {
+              setEditingNote(n)
+              setIsCreating(false)
+            })
+            .catch(() => toast.error("Could not open linked note"))
+        }}
         onClose={() => {
           setEditingNote(null)
           setIsCreating(false)

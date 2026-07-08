@@ -24,8 +24,20 @@ export interface PatchNotePayload {
   title?: string
 }
 
+export type NoteAutocompleteItem = components["schemas"]["NoteAutocompleteItem"]
+
 export const createNote = (payload: CreateNotePayload): Promise<Note> =>
   apiPost<Note>("/notes", payload)
+
+export const getNote = (id: string): Promise<Note> => apiGet<Note>(`/notes/${id}`)
+
+export async function fetchNoteAutocomplete(q: string): Promise<NoteAutocompleteItem[]> {
+  try {
+    return await apiGet<NoteAutocompleteItem[]>("/notes/autocomplete", { q })
+  } catch {
+    return []
+  }
+}
 
 export const patchNote = (id: string, data: PatchNotePayload): Promise<Note> =>
   apiPatch<Note>(`/notes/${id}`, data)

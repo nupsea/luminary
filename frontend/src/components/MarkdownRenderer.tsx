@@ -25,6 +25,8 @@ interface MarkdownRendererProps {
    * the compact sans body used in chat answers so they match the UI chrome. */
   serif?: boolean
   onEditExcalidrawDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+  /** When set, [[id|text]] note links become navigable buttons. */
+  onNoteLinkClick?: (noteId: string) => void
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -161,7 +163,7 @@ function ExcalidrawDiagramPreview({
   )
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false }: MarkdownRendererProps) {
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick }: MarkdownRendererProps) {
   const processed = preprocessLinks(children)
 
   return (
@@ -228,6 +230,18 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
                   </span>
                 )
               }
+              if (onNoteLinkClick) {
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onNoteLinkClick(id)}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900 dark:text-indigo-300 dark:hover:bg-indigo-800 font-medium not-prose cursor-pointer"
+                    title="Open linked note"
+                  >
+                    {label}
+                  </button>
+                )
+              }
               return (
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 font-medium not-prose">
                   {label}
@@ -251,12 +265,13 @@ export function MarkdownRenderer({
   imageSize = "medium",
   serif = false,
   onEditExcalidrawDiagram,
+  onNoteLinkClick,
 }: MarkdownRendererProps) {
   const diagrams = findExcalidrawDiagrams(children)
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
         {children}
       </MarkdownBody>
     )
@@ -270,7 +285,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
                 {before}
               </MarkdownBody>
             )}
@@ -283,7 +298,7 @@ export function MarkdownRenderer({
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}

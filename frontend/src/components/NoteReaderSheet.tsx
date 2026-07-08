@@ -1,24 +1,35 @@
 /**
- * NoteReaderSheet -- full-width reader/editor panel for notes.
+ * NoteReaderSheet -- always-live note editor panel. No read/edit mode split:
+ * the note is directly editable, with an optional distraction-free reading
+ * view and a collapsible properties rail (tags / collections / source docs).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  BookOpen,
   Check,
+  Columns2,
   FileText,
   LayoutGrid,
-  Maximize2,
-  Minimize2,
-  Pencil,
+  Loader2,
+  PanelRight,
+  PencilLine,
   Search,
   Tag,
   Trash2,
+  Wand2,
   X,
 } from "lucide-react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { NoteConceptChips } from "@/components/NoteConceptChips"
+import { TagAutocomplete } from "@/components/TagAutocomplete"
+import { NoteBacklinks } from "@/components/notes/NoteBacklinks"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
+import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
+import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import {
   Sheet,
   SheetContent,
@@ -26,21 +37,28 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
+import {
+  EMPTY_DRAFT,
+  NEW_NOTE_KEY,
+  useNoteAutosave,
+  type NoteDraft,
+} from "@/lib/noteAutosave"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
   addNoteToCollection,
-  createNote,
+  createNoteLink,
   deleteNote,
   fetchCollectionTree,
+  fetchNoteAutocomplete,
   fetchSuggestedTags,
   patchNote,
   removeNoteFromCollection,
   type Note,
 } from "@/lib/notesApi"
+import { useNoteEditorUi } from "@/store/noteEditorUi"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +108,8 @@ export interface NoteReaderSheetProps {
   initialSourceDocIds?: string[]
   /** When set, this collection appears checked and cannot be unchecked (reader context). */
   lockedCollectionId?: string | null
+  /** Navigate to another note (backlinks / [[ links). Absent = links read-only. */
+  onOpenNote?: (noteId: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -106,10 +126,9 @@ export function NoteReaderSheet({
   initialCollectionId,
   initialSourceDocIds,
   lockedCollectionId,
+  onOpenNote,
 }: NoteReaderSheetProps) {
-  const [mode, setMode] = useState<"read" | "edit">(isNew ? "edit" : "read")
-  // Per-open state; not persisted.
-  const [focusMode, setFocusMode] = useState(false)
+  const [readingView, setReadingView] = useState(false)
   const [editContent, setEditContent] = useState("")
   const [editTags, setEditTags] = useState<string[]>([])
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
@@ -118,10 +137,19 @@ export function NoteReaderSheet({
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const [editTitle, setEditTitle] = useState("")
+  // Row auto-created by autosave for a still-"new" composer; deleted on close
+  // if the content ends up empty.
+  const [draftId, setDraftId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const prevNoteId = useRef<string | undefined>(undefined)
   const prevIsNew = useRef<boolean>(false)
+  const closingRef = useRef(false)
   const qc = useQueryClient()
+
+  const propsRailOpen = useNoteEditorUi((s) => s.propsRailOpen)
+  const setPropsRailOpen = useNoteEditorUi((s) => s.setPropsRailOpen)
+  const splitPreview = useNoteEditorUi((s) => s.splitPreview)
+  const setSplitPreview = useNoteEditorUi((s) => s.setSplitPreview)
 
   const [appendTarget, setAppendTarget] = useState<ExistingNoteSummary | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -129,14 +157,17 @@ export function NoteReaderSheet({
   const [existingNotes, setExistingNotes] = useState<ExistingNoteSummary[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
 
+  const isOpen = note !== null || isNew
+
   useEffect(() => {
     if (isNew) {
       setEditContent(initialContent ?? "")
       setEditTags([])
       setEditTitle("")
+      setDraftId(null)
       setCheckedCollectionIds(initialCollectionId ? new Set([initialCollectionId]) : new Set())
       setSelectedDocIds(initialSourceDocIds ?? [])
-      setMode("edit")
+      setReadingView(false)
       setConfirmDelete(false)
       setSuggestedTags([])
       setIsFetchingTags(false)
@@ -156,12 +187,12 @@ export function NoteReaderSheet({
             ? [note.document_id]
             : [],
       )
-      setMode("read")
+      setReadingView(false)
       setConfirmDelete(false)
 
       // Only clear suggestions if we're switching to a genuinely different existing note.
       // Crucially, if we just transitioned from isNew=true to an actual note,
-      // we DON'T clear suggestions because they were likely just fetched by saveMut.
+      // we DON'T clear suggestions because they were likely just fetched by the save.
       const justSaved = prevIsNew.current && !isNew
       const noteChanged = prevNoteId.current && prevNoteId.current !== note.id
 
@@ -169,28 +200,38 @@ export function NoteReaderSheet({
         setSuggestedTags([])
         setIsFetchingTags(false)
       }
-      
+
       prevNoteId.current = note.id
       prevIsNew.current = isNew
     }
   }, [note?.id, isNew])
 
-  // Trigger tag suggestions on mode change or content threshold
+  // Surface tag suggestions once a tagless note has enough content.
   useEffect(() => {
-    // If we're in edit mode, or if a newly saved note just switched to read mode
     const hasEnoughContent = editContent.trim().length > 30
     const needsTags = !isNew && note && note.tags.length === 0
 
     if (needsTags && hasEnoughContent && suggestedTags.length === 0 && !isFetchingTags) {
-      void handleFetchSuggestions(mode === "edit")
+      void handleFetchSuggestions()
     }
-  }, [mode, isNew, note?.id, editContent.length])
+  }, [isNew, note?.id, editContent.length])
 
-  async function handleFetchSuggestions(autoAdd = false, injectedNote?: Note) {
+  // Mod-e flips between the live editor and the distraction-free reading view.
+  useEffect(() => {
+    if (!isOpen) return
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "e") {
+        e.preventDefault()
+        setReadingView((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isOpen])
+
+  async function handleFetchSuggestions(injectedNote?: Note) {
     const targetNote = injectedNote || note
-    if (!targetNote && !isNew) return
-    // Tag suggestions for brand new notes aren't supported yet 
-    if (!targetNote) return 
+    if (!targetNote) return
 
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -199,102 +240,138 @@ export function NoteReaderSheet({
     try {
       const suggestions = await fetchSuggestedTags(targetNote.id, controller.signal)
       if (controller.signal.aborted) return
-
-      if (autoAdd && editTags.length === 0) {
-        setEditTags(suggestions)
-        setSuggestedTags([])
-      } else {
-        const novel = suggestions.filter((t) => !editTags.includes(t))
-        setSuggestedTags(novel)
-      }
+      const novel = suggestions.filter((t) => !editTags.includes(t))
+      setSuggestedTags(novel)
     } finally {
       if (!controller.signal.aborted) setIsFetchingTags(false)
     }
   }
 
-  async function handleAddSuggestedTag(tag: string) {
-    const newTags = [...new Set([...editTags, tag])]
-    setEditTags(newTags)
+  function handleAddSuggestedTag(tag: string) {
+    // Autosave persists the change; no direct PATCH needed.
+    setEditTags((prev) => [...new Set([...prev, tag])])
     setSuggestedTags((prev) => prev.filter((t) => t !== tag))
-    
-    // If in read mode, we need to save this change immediately
-    if (mode === "read" && note) {
-      try {
-        await patchNote(note.id, { tags: newTags })
-        void qc.invalidateQueries({ queryKey: ["notes"] })
-      } catch {
-        // revert local state on error
-        setEditTags(editTags)
-      }
-    }
   }
 
   const { data: collectionTree, isLoading: collectionsLoading } = useQuery({
     queryKey: ["collections-tree"],
     queryFn: () => fetchCollectionTree(),
     staleTime: 30_000,
-    enabled: note !== null || isNew,
+    enabled: isOpen,
   })
   const allCollections = collectionTree ? flattenCollectionTree(collectionTree) : []
 
-  const saveMut = useMutation({
-    mutationFn: async () => {
-      if (appendTarget) {
-        return patchNote(appendTarget.id, {
-          content: editContent,
-          tags: editTags,
-        })
-      }
-      if (isNew) {
-        const saved = await createNote({
-          content: editContent,
-          tags: editTags,
-          title: editTitle.trim() || undefined,
-          document_id: selectedDocIds[0] || null,
-          source_document_ids: selectedDocIds,
-        })
-        // Apply any collection selections the user made while the note was
-        // unsaved. Includes lockedCollectionId for back-compat -- if the
-        // caller set both lockedCollectionId and added it to the staged set
-        // (e.g. via initialCollectionId), the Set dedupes.
-        const pending = new Set(checkedCollectionIds)
-        if (lockedCollectionId) pending.add(lockedCollectionId)
-        await Promise.all(
-          Array.from(pending).map((cid) => addNoteToCollection(cid, saved.id)),
-        )
-        return saved
-      } else {
-        return patchNote(note!.id, {
-          content: editContent,
-          tags: editTags,
-          title: editTitle.trim(),
-          source_document_ids: selectedDocIds,
-        })
-      }
-    },
-    onSuccess: (savedNote) => {
+  const autosaveEnabled = isOpen && !appendTarget
+
+  function invalidateNoteQueries() {
+    void qc.invalidateQueries({ queryKey: ["notes"] })
+    void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+    void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+  }
+
+  // The backend summarises the note into `description` in the background, so
+  // refetch once shortly after to surface it on the card without a manual
+  // refresh. The card shows the content snippet until then.
+  function scheduleDescriptionRefetch(saved: Note) {
+    if (saved.content.trim().length < 40) return
+    setTimeout(() => {
       void qc.invalidateQueries({ queryKey: ["notes"] })
       void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-      if (!isNew) {
-        setMode("read")
-      }
+    }, 6000)
+  }
 
-      // The backend summarises the note into `description` in the background, so
-      // refetch once shortly after to surface it on the card without a manual
-      // refresh. The card shows the content snippet until then.
-      if (savedNote.content.trim().length >= 40) {
-        setTimeout(() => {
-          void qc.invalidateQueries({ queryKey: ["notes"] })
-          void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-        }, 6000)
-      }
-      // Trigger suggestions fetch for new notes so they are ready when the user clicks 'Edit'
-      if (isNew && savedNote.content.trim().length > 30) {
-        void handleFetchSuggestions(false, savedNote)
-      }
+  // Apply collection selections staged while the note had no id yet. Includes
+  // lockedCollectionId for back-compat -- the Set dedupes if the caller set
+  // both it and initialCollectionId.
+  function handleDraftCreated(saved: Note) {
+    setDraftId(saved.id)
+    const pending = new Set(checkedCollectionIds)
+    if (lockedCollectionId) pending.add(lockedCollectionId)
+    for (const cid of pending) {
+      void addNoteToCollection(cid, saved.id).catch(() => {})
+    }
+  }
+
+  const autosaveBaseline: NoteDraft =
+    isNew || !note
+      ? EMPTY_DRAFT
+      : {
+          content: note.content,
+          title: note.title ?? "",
+          tags: note.tags ?? [],
+          sourceDocIds:
+            note.source_document_ids?.length > 0
+              ? note.source_document_ids
+              : note.document_id
+                ? [note.document_id]
+                : [],
+        }
+
+  const { status: saveStatus, flush, savedNoteId } = useNoteAutosave({
+    // Suspended (null) while an append target is picked; append stays an
+    // explicit action because it rewrites another note's content.
+    bindKey: isNew ? (appendTarget ? null : NEW_NOTE_KEY) : (note?.id ?? null),
+    baseline: autosaveBaseline,
+    draft: { content: editContent, title: editTitle, tags: editTags, sourceDocIds: selectedDocIds },
+    enabled: autosaveEnabled,
+    onCreated: handleDraftCreated,
+  })
+
+  const appendMut = useMutation({
+    mutationFn: () =>
+      patchNote(appendTarget!.id, {
+        content: editContent,
+        tags: editTags,
+      }),
+    onSuccess: (savedNote) => {
+      invalidateNoteQueries()
+      scheduleDescriptionRefetch(savedNote)
       onSaved(savedNote)
     },
   })
+
+  // Sheet dismissal (Esc / overlay / X / Done) flushes instead of discarding.
+  // The sheet is controlled, so it stays open until this resolves; a failed
+  // save keeps it open with the content intact.
+  async function handleSheetDismiss() {
+    if (closingRef.current) return
+    closingRef.current = true
+    try {
+      if (!autosaveEnabled) {
+        onClose()
+        return
+      }
+      let saved: Note | null
+      try {
+        saved = await flush()
+      } catch {
+        toast.error("Could not save note -- it stays open until saving works")
+        return
+      }
+      const emptyDraftId = isNew ? (savedNoteId() ?? draftId) : null
+      if (isNew && emptyDraftId && !editContent.trim()) {
+        try {
+          await deleteNote(emptyDraftId)
+          toast.info("Empty note discarded")
+        } catch {
+          // orphaned empty draft; the list refetch below still hides nothing real
+        }
+        invalidateNoteQueries()
+        onClose()
+        return
+      }
+      if (isNew && saved) {
+        scheduleDescriptionRefetch(saved)
+        onSaved(saved)
+      } else if (saved) {
+        invalidateNoteQueries()
+        scheduleDescriptionRefetch(saved)
+      }
+      onClose()
+    } finally {
+      closingRef.current = false
+    }
+  }
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note!.id),
@@ -305,7 +382,41 @@ export function NoteReaderSheet({
     },
   })
 
-  useNoteSaveShortcut(() => saveMut.mutate(), mode === "edit")
+  // Flush pending edits before swapping to a linked note, so following a
+  // link can never drop the current draft.
+  async function handleOpenLinkedNote(targetId: string) {
+    if (!onOpenNote) return
+    try {
+      await flush()
+    } catch {
+      toast.error("Could not save note before navigating")
+      return
+    }
+    onOpenNote(targetId)
+  }
+
+  const linkCompletion = useMemo<NoteLinkCompletionConfig>(
+    () => ({
+      fetchCandidates: fetchNoteAutocomplete,
+      excludeId: () => note?.id ?? draftId,
+      onPick: (targetId) => {
+        const sourceId = note?.id ?? draftId ?? savedNoteId()
+        if (!sourceId || sourceId === targetId) return
+        void createNoteLink(sourceId, targetId, "see-also")
+          .then(() => {
+            void qc.invalidateQueries({ queryKey: ["note-links", sourceId] })
+          })
+          .catch(() => {})
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [note?.id, draftId],
+  )
+
+  useNoteSaveShortcut(() => {
+    if (appendTarget) appendMut.mutate()
+    else void flush().catch(() => {})
+  }, isOpen)
 
   useEffect(() => {
     if (pickerOpen && existingNotes.length === 0 && !notesLoading) {
@@ -343,9 +454,10 @@ export function NoteReaderSheet({
   }
 
   function handleCollectionToggle(collectionId: string, checked: boolean) {
-    // For new notes we don't have an id yet, so stage the selection in local
-    // state. saveMut applies the staged set as memberships after createNote.
-    if (isNew || !note) {
+    // Before any row exists, stage the selection locally; handleDraftCreated
+    // applies the staged set once autosave creates the note.
+    const targetId = note?.id ?? draftId
+    if (!targetId) {
       setCheckedCollectionIds((prev) => {
         const next = new Set(prev)
         if (checked) next.add(collectionId)
@@ -355,12 +467,12 @@ export function NoteReaderSheet({
       return
     }
     if (checked) {
-      void addNoteToCollection(collectionId, note.id).then(() => {
+      void addNoteToCollection(collectionId, targetId).then(() => {
         setCheckedCollectionIds((prev) => new Set([...prev, collectionId]))
         void qc.invalidateQueries({ queryKey: ["notes"] })
       })
     } else {
-      void removeNoteFromCollection(collectionId, note.id).then(() => {
+      void removeNoteFromCollection(collectionId, targetId).then(() => {
         setCheckedCollectionIds((prev) => {
           const next = new Set(prev)
           next.delete(collectionId)
@@ -371,56 +483,90 @@ export function NoteReaderSheet({
     }
   }
 
-  function handleCancelEdit() {
-    if (isNew) {
-      onClose()
-      return
-    }
-    setMode("read")
-    setEditContent(note?.content ?? "")
-    setEditTags(note?.tags ?? [])
-    setSelectedDocIds(note?.source_document_ids ?? (note?.document_id ? [note.document_id] : []))
-  }
-
-  // Editing always uses the big working area; reading stays compact.
-  const isEditing = mode === "edit" || isNew
-
-  // Titles are manual now; the header just reflects the current value.
   const displayTitle = appendTarget
     ? `Appending to: ${firstLine(appendTarget.content) || "Untitled"}`
-    : isEditing
-      ? editTitle.trim() || "Untitled note"
-      : note?.title || "Untitled note"
+    : editTitle.trim() || "Untitled note"
 
   const sourceDoc = !isNew && note?.document_id
     ? (documents.find((d) => d.id === note.document_id) ?? null)
     : null
 
+  const tagChips = (
+    <div className="flex flex-wrap gap-1.5">
+      {editTags.length ? (
+        editTags.map((t) => {
+          const parts = t.split("/")
+          return (
+            <button
+              key={t}
+              onClick={() => dispatchTagNavigate(t)}
+              className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
+            >
+              <span className="text-primary">{parts[0]}</span>
+              {parts.length > 1 && (
+                <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
+              )}
+            </button>
+          )
+        })
+      ) : (
+        <span className="text-xs text-muted-foreground italic">No tags</span>
+      )}
+    </div>
+  )
+
   return (
-    <Sheet open={note !== null || isNew} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Sheet
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) void handleSheetDismiss()
+      }}
+    >
       <SheetContent
         side="right"
-        className={`flex flex-col p-0 overflow-hidden transition-[width] duration-200 ${
-          focusMode
-            ? "w-screen max-w-none sm:max-w-none"
-            : isEditing
-              ? "w-[90vw] max-w-none sm:max-w-none"
-              : "w-[58vw] max-w-4xl sm:max-w-4xl"
-        }`}
+        className="flex w-[90vw] max-w-none flex-col overflow-hidden p-0 sm:max-w-none"
       >
-        <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-          <button
-            onClick={() => setFocusMode((v) => !v)}
-            className="absolute left-3 top-3 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title={focusMode ? "Exit focus mode" : "Focus mode — distraction-free, full screen"}
-            aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
-          >
-            {focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
-          <SheetTitle className="text-xl font-semibold leading-tight pl-7 pr-8 truncate">
+        <SheetHeader className="shrink-0 border-b border-border px-6 pt-6 pb-4">
+          <div className="absolute left-3 top-3 flex items-center gap-1">
+            <button
+              onClick={() => setReadingView((v) => !v)}
+              className={`rounded p-1 hover:bg-accent hover:text-foreground ${
+                readingView ? "text-primary" : "text-muted-foreground"
+              }`}
+              title={readingView ? "Back to editor (Cmd+E)" : "Reading view (Cmd+E)"}
+              aria-label={readingView ? "Back to editor" : "Reading view"}
+            >
+              {readingView ? <PencilLine size={14} /> : <BookOpen size={14} />}
+            </button>
+            {!readingView && (
+              <>
+                <button
+                  onClick={() => setSplitPreview(!splitPreview)}
+                  className={`rounded p-1 hover:bg-accent hover:text-foreground ${
+                    splitPreview ? "text-primary" : "text-muted-foreground"
+                  }`}
+                  title={splitPreview ? "Hide preview pane" : "Show preview pane"}
+                  aria-label={splitPreview ? "Hide preview pane" : "Show preview pane"}
+                >
+                  <Columns2 size={14} />
+                </button>
+                <button
+                  onClick={() => setPropsRailOpen(!propsRailOpen)}
+                  className={`rounded p-1 hover:bg-accent hover:text-foreground ${
+                    propsRailOpen ? "text-primary" : "text-muted-foreground"
+                  }`}
+                  title={propsRailOpen ? "Hide properties" : "Show properties (tags, collections)"}
+                  aria-label={propsRailOpen ? "Hide properties" : "Show properties"}
+                >
+                  <PanelRight size={14} />
+                </button>
+              </>
+            )}
+          </div>
+          <SheetTitle className="text-xl font-semibold leading-tight pl-16 pr-8 truncate">
             {displayTitle}
           </SheetTitle>
-          {!focusMode && sourceDoc && !appendTarget && (
+          {sourceDoc && !appendTarget && (
             <SheetDescription asChild>
               <button
                 className="w-fit text-left text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
@@ -437,7 +583,7 @@ export function NoteReaderSheet({
               </button>
             </SheetDescription>
           )}
-          {!focusMode && isNew && (
+          {isNew && (
             <SheetDescription asChild>
               <div className="mt-1 flex flex-col gap-2">
                 {appendTarget ? (
@@ -524,189 +670,210 @@ export function NoteReaderSheet({
           )}
         </SheetHeader>
 
-        <div className={`flex-1 ${mode === "read" && !isNew ? "overflow-auto" : "flex flex-col overflow-hidden min-h-0"}`}>
-          <div className={`px-6 py-5 ${mode === "read" && !isNew ? "min-h-full flex flex-col" : "flex flex-col flex-1 min-h-0 gap-4"}`}>
-            {mode === "read" && !isNew ? (
-              <>
-                <div
-                  className="flex-1 cursor-text select-text"
-                  onDoubleClick={() => setMode("edit")}
-                  title="Double-click to edit"
-                >
-                  {note === null ? (
-                    <div className="flex flex-col gap-3">
-                      <Skeleton className="h-4 w-3/4" />
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-2/3" />
-                    </div>
-                  ) : note.content.trim() ? (
-                    <MarkdownRenderer serif>{note.content}</MarkdownRenderer>
-                  ) : (
-                    <p className="text-muted-foreground italic text-sm">Start writing...</p>
-                  )}
-                </div>
-                {!focusMode && (
-                <div className="mt-12 pt-8 border-t border-border space-y-6 pb-24">
+        <div className="flex min-h-0 flex-1">
+          {readingView ? (
+            <div className="flex-1 overflow-auto">
+              <div className="mx-auto max-w-3xl px-8 py-6">
+                {editContent.trim() ? (
+                  <MarkdownRenderer
+                    serif
+                    onNoteLinkClick={onOpenNote ? (id) => void handleOpenLinkedNote(id) : undefined}
+                  >
+                    {editContent}
+                  </MarkdownRenderer>
+                ) : (
+                  <p className="text-muted-foreground italic text-sm">Start writing...</p>
+                )}
+                <div className="mt-12 space-y-6 border-t border-border pt-6 pb-12">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Tag size={12} />
                       <span className="text-[10px] font-bold uppercase tracking-wider">Tags</span>
                     </div>
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        {note?.tags.length ? (
-                          note.tags.map((t) => {
-                            const parts = t.split("/")
-                            return (
-                              <button
-                                key={t}
-                                onClick={() => dispatchTagNavigate(t)}
-                                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs hover:bg-accent transition-colors"
-                              >
-                                <span className="text-primary">{parts[0]}</span>
-                                {parts.length > 1 && (
-                                  <span className="text-muted-foreground">{"/" + parts.slice(1).join("/")}</span>
-                                )}
-                              </button>
-                            )
-                          })
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">No tags</span>
-                        )}
-                      </div>
-                      {suggestedTags.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[10px] font-medium text-muted-foreground">Suggestions:</span>
-                          {suggestedTags.map((tag) => (
-                            <button
-                              key={tag}
-                              onClick={() => void handleAddSuggestedTag(tag)}
-                              className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <Check size={9} />
-                              {tag}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    {tagChips}
                   </div>
                   {note?.id && !isNew && (
                     <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <LayoutGrid size={12} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Collections</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {note && note.collections.length > 0 ? (
-                          allCollections
-                            .filter((c) => checkedCollectionIds.has(c.id))
-                            .map((c) => (
-                              <div key={c.id} className="flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs">
-                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: c.color }} />
-                                {c.name}
-                              </div>
-                            ))
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">Standalone note</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <FileText size={12} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Source Documents</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedDocIds.length > 0 ? (
-                          selectedDocIds.map((id) => {
-                            const doc = documents.find((d) => d.id === id)
-                            return (
-                              <div key={id} className="rounded bg-muted px-2 py-0.5 text-xs truncate max-w-[200px]">
-                                {doc?.title ?? id}
-                              </div>
-                            )
-                          })
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">No source documents</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  {note?.id && !isNew && (
+                    <NoteBacklinks
+                      noteId={note.id}
+                      onOpenNote={onOpenNote ? (id) => void handleOpenLinkedNote(id) : undefined}
+                    />
+                  )}
                 </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-5">
+                {!appendTarget && (
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Note title (optional)"
+                    className="w-full shrink-0 bg-transparent text-lg font-semibold leading-tight text-foreground placeholder:text-muted-foreground/60 placeholder:font-normal focus:outline-none"
+                  />
                 )}
-              </>
-            ) : (
-              <>
-              {!appendTarget && (
-                <input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Note title (optional)"
-                  className="w-full shrink-0 bg-transparent text-lg font-semibold leading-tight text-foreground placeholder:text-muted-foreground/60 placeholder:font-normal focus:outline-none"
+                <NoteEditor
+                  layout={splitPreview ? "splitter" : "editor"}
+                  content={editContent}
+                  onContentChange={setEditContent}
+                  linkCompletion={linkCompletion}
                 />
+                {note?.id && !isNew && !appendTarget && (
+                  <NoteBacklinks
+                    noteId={note.id}
+                    onOpenNote={onOpenNote ? (id) => void handleOpenLinkedNote(id) : undefined}
+                  />
+                )}
+              </div>
+
+              {propsRailOpen && (
+                <aside className="flex w-[320px] shrink-0 flex-col gap-6 overflow-y-auto border-l border-border px-4 py-5">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Tag size={12} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Tags</span>
+                      </div>
+                      {!isNew && note && (
+                        <button
+                          onClick={() => void handleFetchSuggestions()}
+                          disabled={isFetchingTags}
+                          className="flex items-center gap-1 text-[10px] text-primary hover:underline disabled:opacity-50"
+                        >
+                          {isFetchingTags ? (
+                            <Loader2 size={10} className="animate-spin" />
+                          ) : (
+                            <Wand2 size={10} />
+                          )}
+                          Suggest tags
+                        </button>
+                      )}
+                    </div>
+                    <TagAutocomplete tags={editTags} onChange={setEditTags} />
+                    {suggestedTags.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-medium text-muted-foreground">
+                          Suggestions:
+                        </span>
+                        {suggestedTags.map((tag) => (
+                          <button
+                            key={tag}
+                            onClick={() => handleAddSuggestedTag(tag)}
+                            className="flex items-center gap-1 rounded-full border border-dashed border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <Check size={9} />
+                            {tag}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setSuggestedTags([])}
+                          className="text-[10px] text-muted-foreground hover:underline"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {note?.id && !isNew && (
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                  )}
+
+                  {!appendTarget && (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <LayoutGrid size={12} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">
+                            Collections
+                          </span>
+                        </div>
+                        <NoteCollectionsField
+                          collections={allCollections}
+                          checkedIds={checkedCollectionIds}
+                          onToggle={handleCollectionToggle}
+                          loading={collectionsLoading}
+                          lockedCollectionId={lockedCollectionId ?? null}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <FileText size={12} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">
+                            Source Documents
+                          </span>
+                        </div>
+                        <NoteSourceDocsField
+                          documents={documents}
+                          selectedIds={selectedDocIds}
+                          onChange={setSelectedDocIds}
+                          emptyMessage="No source documents available"
+                        />
+                      </div>
+                    </>
+                  )}
+                </aside>
               )}
-              <NoteEditor
-                layout="splitter"
-                content={editContent}
-                onContentChange={setEditContent}
-                tags={editTags}
-                onTagsChange={setEditTags}
-                selectedDocIds={selectedDocIds}
-                onSelectedDocIdsChange={setSelectedDocIds}
-                checkedCollectionIds={checkedCollectionIds}
-                onCollectionToggle={handleCollectionToggle}
-                documents={documents}
-                collections={allCollections}
-                isNew={isNew}
-                lockedCollectionId={lockedCollectionId ?? null}
-                collectionsLoading={collectionsLoading}
-                showCollections={!appendTarget}
-                showSourceDocs={!appendTarget}
-                showMeta={!focusMode}
-                showToolbar={!focusMode}
-                suggestedTags={suggestedTags}
-                suggestionsBusy={isFetchingTags}
-                onSuggestTags={() => void handleFetchSuggestions()}
-                onAddSuggestedTag={(tag) => void handleAddSuggestedTag(tag)}
-                onDismissSuggestions={() => setSuggestedTags([])}
-              />
-              </>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <div className="shrink-0 border-t border-border bg-background px-6 py-4 flex items-center gap-3">
-          {mode === "read" && !isNew ? (
-            confirmDelete ? (
-              <div className="flex flex-1 items-center justify-end gap-3">
-                <span className="text-xs text-muted-foreground">Delete note forever?</span>
-                <button
-                  onClick={() => deleteMut.mutate()}
-                  disabled={deleteMut.isPending}
-                  className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-white hover:bg-destructive/90 disabled:opacity-50"
-                >
-                  Confirm Delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="rounded border border-border px-3 py-1.5 text-xs hover:bg-accent"
-                >
-                  Cancel
-                </button>
+          {confirmDelete ? (
+            <div className="flex flex-1 items-center justify-end gap-3">
+              <span className="text-xs text-muted-foreground">Delete note forever?</span>
+              <button
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-white hover:bg-destructive/90 disabled:opacity-50"
+              >
+                Confirm Delete
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded border border-border px-3 py-1.5 text-xs hover:bg-accent"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              <div
+                role="status"
+                className="mr-auto flex items-center gap-2 text-[10px] text-muted-foreground"
+              >
+                {appendTarget ? (
+                  <>
+                    <kbd className="rounded border bg-muted px-1">Ctrl+S</kbd> to save
+                  </>
+                ) : saveStatus === "saving" ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Saving...
+                  </>
+                ) : saveStatus === "saved" ? (
+                  <>
+                    <Check size={12} className="text-green-600" />
+                    Saved
+                  </>
+                ) : saveStatus === "error" ? (
+                  <>
+                    <span className="font-medium text-destructive">Save failed</span>
+                    <button
+                      onClick={() => void flush().catch(() => {})}
+                      className="rounded border border-border px-2 py-0.5 hover:bg-accent"
+                    >
+                      Retry
+                    </button>
+                  </>
+                ) : (
+                  <>Autosaves as you type</>
+                )}
               </div>
-            ) : (
-              <>
-                <button
-                  onClick={onClose}
-                  className="rounded border border-border bg-background px-4 py-2 text-xs text-muted-foreground hover:bg-accent transition-colors"
-                >
-                  Close
-                </button>
-                <div className="flex-1" />
+              {note && !isNew && (
                 <button
                   onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
@@ -714,39 +881,31 @@ export function NoteReaderSheet({
                 >
                   <Trash2 size={14} />
                 </button>
+              )}
+              {appendTarget ? (
+                <>
+                  <button
+                    onClick={onClose}
+                    className="rounded border border-border bg-background px-4 py-2 text-xs text-muted-foreground hover:bg-accent shadow-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => appendMut.mutate()}
+                    disabled={!editContent.trim() || appendMut.isPending}
+                    className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shadow-sm transition-colors"
+                  >
+                    {appendMut.isPending ? "Saving..." : "Append"}
+                  </button>
+                </>
+              ) : (
                 <button
-                  onClick={() => setMode("edit")}
+                  onClick={() => void handleSheetDismiss()}
                   className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 shadow-sm transition-colors"
                 >
-                  <Pencil size={14} />
-                  Edit Note
+                  Done
                 </button>
-              </>
-            )
-          ) : (
-            <>
-              <div className="mr-auto flex items-center gap-2 text-[10px] text-muted-foreground">
-                <kbd className="rounded border bg-muted px-1">Ctrl+S</kbd> to save
-              </div>
-              <button
-                onClick={handleCancelEdit}
-                className="rounded border border-border bg-background px-4 py-2 text-xs text-muted-foreground hover:bg-accent shadow-sm transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => saveMut.mutate()}
-                disabled={!editContent.trim() || saveMut.isPending}
-                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shadow-sm transition-colors"
-              >
-                {saveMut.isPending
-                  ? "Saving..."
-                  : appendTarget
-                    ? "Append"
-                    : isNew
-                      ? "Create Note"
-                      : "Save Changes"}
-              </button>
+              )}
             </>
           )}
         </div>
