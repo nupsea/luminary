@@ -65,7 +65,7 @@ any concept/mastery/graph/study work, read:
 **Learner rail (top of sidebar):** `Library | Notes | Study | Ask | Map | Progress`
 
 - `Library` (route `/`) — document grid; landing page. Today-hero strip surfaces due cards or Continue-reading.
-- `Notes` (`/notes`) — markdown notes, collections, tags.
+- `Notes` (`/notes`) — markdown notes list, collections, tags. Individual notes live at `/notes/:noteId` (always-live CodeMirror editor, autosave, reading view, `[[` wiki-links + backlinks, outline rail); quick capture via `QuickNoteComposer` (Notes "New", reader selection/section notes, gap-analysis preloads).
 - `Study` (`/study`) — flashcards (FSRS), teach-back, collection study dashboard.
 - `Ask` (`/chat`) — RAG chat across the library with source citations. Renamed from "Chat" in the design refactor; route name preserved for deep-link / cross-tab event compatibility.
 - `Map` (`/viz`) — knowledge graph (Sigma.js entity + relationship view). Renamed from "Viz" for the same reasons.

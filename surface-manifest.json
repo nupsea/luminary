@@ -5,49 +5,132 @@
       "id": "luminary_hub",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/", "component": "pages/Hub" },
-      "backend": { "routers": ["home", "engagement", "goals", "mastery"] },
-      "labels": { "en": "Luminary" }
+      "frontend": {
+        "route": "/",
+        "component": "pages/Hub"
+      },
+      "backend": {
+        "routers": [
+          "home",
+          "engagement",
+          "goals",
+          "mastery"
+        ]
+      },
+      "labels": {
+        "en": "Luminary"
+      }
     },
     {
       "id": "library",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/library", "component": "pages/Learning" },
-      "backend": { "routers": ["documents", "sections", "reading", "concepts"] },
-      "labels": { "en": "Library" }
+      "frontend": {
+        "route": "/library",
+        "component": "pages/Learning"
+      },
+      "backend": {
+        "routers": [
+          "documents",
+          "sections",
+          "reading",
+          "concepts"
+        ]
+      },
+      "labels": {
+        "en": "Library"
+      }
     },
     {
       "id": "notes",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/notes", "component": "pages/Notes" },
-      "backend": { "routers": ["notes", "annotations", "references", "clips"] },
-      "labels": { "en": "Notes" }
+      "frontend": {
+        "route": "/notes",
+        "component": "pages/Notes"
+      },
+      "backend": {
+        "routers": [
+          "notes",
+          "annotations",
+          "references",
+          "clips"
+        ]
+      },
+      "labels": {
+        "en": "Notes"
+      }
+    },
+    {
+      "id": "note-page",
+      "tier": "public",
+      "kind": "feature",
+      "frontend": {
+        "route": "/notes/:noteId",
+        "component": "pages/Notes/NotePage"
+      },
+      "backend": {
+        "routers": []
+      },
+      "labels": {
+        "en": "Note"
+      }
     },
     {
       "id": "study",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/study", "component": "pages/Study" },
-      "backend": { "routers": ["study", "flashcards"] },
-      "labels": { "en": "Study" }
+      "frontend": {
+        "route": "/study",
+        "component": "pages/Study"
+      },
+      "backend": {
+        "routers": [
+          "study",
+          "flashcards"
+        ]
+      },
+      "labels": {
+        "en": "Study"
+      }
     },
     {
       "id": "ask",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/chat", "component": "pages/Chat" },
-      "backend": { "routers": ["qa", "chat_sessions", "chat_meta", "summarize", "search"] },
-      "labels": { "en": "Ask" }
+      "frontend": {
+        "route": "/chat",
+        "component": "pages/Chat"
+      },
+      "backend": {
+        "routers": [
+          "qa",
+          "chat_sessions",
+          "chat_meta",
+          "summarize",
+          "search"
+        ]
+      },
+      "labels": {
+        "en": "Ask"
+      }
     },
     {
       "id": "map",
       "tier": "labs",
       "kind": "feature",
-      "frontend": { "route": "/viz", "component": "pages/Viz" },
-      "backend": { "routers": ["graph"] },
-      "labels": { "en": "Map" },
+      "frontend": {
+        "route": "/viz",
+        "component": "pages/Viz"
+      },
+      "backend": {
+        "routers": [
+          "graph"
+        ]
+      },
+      "labels": {
+        "en": "Map"
+      },
       "description": "Explore your library as a tag/concept graph. Experimental.",
       "default_off": true
     },
@@ -55,40 +138,84 @@
       "id": "progress",
       "tier": "public",
       "kind": "nav_tab",
-      "frontend": { "route": "/progress", "component": "pages/Progress" },
-      "backend": { "routers": [] },
-      "labels": { "en": "Progress" }
+      "frontend": {
+        "route": "/progress",
+        "component": "pages/Progress"
+      },
+      "backend": {
+        "routers": []
+      },
+      "labels": {
+        "en": "Progress"
+      }
     },
     {
       "id": "collections",
       "tier": "public",
       "kind": "feature",
-      "frontend": { "route": "/collections/:id", "component": "pages/CollectionWorkspace" },
-      "backend": { "routers": ["collections"] },
-      "labels": { "en": "Collections" }
+      "frontend": {
+        "route": "/collections/:id",
+        "component": "pages/CollectionWorkspace"
+      },
+      "backend": {
+        "routers": [
+          "collections"
+        ]
+      },
+      "labels": {
+        "en": "Collections"
+      }
     },
     {
       "id": "doc_overview",
       "tier": "public",
       "kind": "feature",
-      "frontend": { "route": "/library/doc/:id", "component": "pages/DocumentOverview" },
-      "backend": { "routers": ["references"] },
-      "labels": { "en": "Document overview" }
+      "frontend": {
+        "route": "/library/doc/:id",
+        "component": "pages/DocumentOverview"
+      },
+      "backend": {
+        "routers": [
+          "references"
+        ]
+      },
+      "labels": {
+        "en": "Document overview"
+      }
     },
     {
       "id": "tags",
       "tier": "public",
       "kind": "feature",
-      "backend": { "routers": ["tags"] },
-      "labels": { "en": "Tags" }
+      "backend": {
+        "routers": [
+          "tags"
+        ]
+      },
+      "labels": {
+        "en": "Tags"
+      }
     },
     {
       "id": "blog",
       "tier": "labs",
       "kind": "feature",
-      "frontend": { "components": ["components/blog/BlogPublishDialog"] },
-      "backend": { "routers": ["blog"], "services": ["blog_service"] },
-      "labels": { "en": "Blog Publishing" },
+      "frontend": {
+        "components": [
+          "components/blog/BlogPublishDialog"
+        ]
+      },
+      "backend": {
+        "routers": [
+          "blog"
+        ],
+        "services": [
+          "blog_service"
+        ]
+      },
+      "labels": {
+        "en": "Blog Publishing"
+      },
       "description": "Publish a note as a post on your personal Astro site.",
       "default_off": true
     },
@@ -96,9 +223,23 @@
       "id": "feynman",
       "tier": "labs",
       "kind": "feature",
-      "frontend": { "components": ["components/Teachback"] },
-      "backend": { "routers": ["feynman"], "services": ["feynman_service", "feynman_strategies"] },
-      "labels": { "en": "Feynman / Teach-back" },
+      "frontend": {
+        "components": [
+          "components/Teachback"
+        ]
+      },
+      "backend": {
+        "routers": [
+          "feynman"
+        ],
+        "services": [
+          "feynman_service",
+          "feynman_strategies"
+        ]
+      },
+      "labels": {
+        "en": "Feynman / Teach-back"
+      },
       "description": "Socratic explanation sessions graded against source material.",
       "default_off": true
     },
@@ -106,8 +247,17 @@
       "id": "code_executor",
       "tier": "labs",
       "kind": "feature",
-      "backend": { "routers": ["code_executor"], "services": ["code_executor"] },
-      "labels": { "en": "Code executor" },
+      "backend": {
+        "routers": [
+          "code_executor"
+        ],
+        "services": [
+          "code_executor"
+        ]
+      },
+      "labels": {
+        "en": "Code executor"
+      },
       "description": "Run code snippets extracted from technical documents in a sandbox.",
       "default_off": true
     },
@@ -115,8 +265,18 @@
       "id": "image_enrichment",
       "tier": "labs",
       "kind": "service",
-      "backend": { "routers": ["images"], "services": ["image_extractor", "image_enricher"] },
-      "labels": { "en": "Image extraction & enrichment" },
+      "backend": {
+        "routers": [
+          "images"
+        ],
+        "services": [
+          "image_extractor",
+          "image_enricher"
+        ]
+      },
+      "labels": {
+        "en": "Image extraction & enrichment"
+      },
       "description": "Extract figures from documents and caption them with a vision model (LLaVA).",
       "default_off": true
     },
@@ -124,8 +284,17 @@
       "id": "concept_linker",
       "tier": "labs",
       "kind": "service",
-      "backend": { "routers": ["explain"], "services": ["concept_linker"] },
-      "labels": { "en": "Concept linker" },
+      "backend": {
+        "routers": [
+          "explain"
+        ],
+        "services": [
+          "concept_linker"
+        ]
+      },
+      "labels": {
+        "en": "Concept linker"
+      },
       "description": "Cross-link related concepts across documents in the knowledge graph.",
       "default_off": true
     },
@@ -133,8 +302,15 @@
       "id": "web_ingest",
       "tier": "labs",
       "kind": "service",
-      "backend": { "services": ["web_searcher", "article_extractor"] },
-      "labels": { "en": "Web search & URL ingestion" },
+      "backend": {
+        "services": [
+          "web_searcher",
+          "article_extractor"
+        ]
+      },
+      "labels": {
+        "en": "Web search & URL ingestion"
+      },
       "description": "Augment answers with live web search and ingest articles from URLs (requires the labs dependency group).",
       "default_off": true
     },
@@ -142,8 +318,14 @@
       "id": "youtube_ingest",
       "tier": "labs",
       "kind": "service",
-      "backend": { "services": ["youtube_downloader"] },
-      "labels": { "en": "YouTube ingestion" },
+      "backend": {
+        "services": [
+          "youtube_downloader"
+        ]
+      },
+      "labels": {
+        "en": "YouTube ingestion"
+      },
       "description": "Ingest and transcribe YouTube lectures as study documents.",
       "default_off": true
     },
@@ -151,8 +333,14 @@
       "id": "audio_transcribe",
       "tier": "labs",
       "kind": "service",
-      "backend": { "services": ["audio_transcriber"] },
-      "labels": { "en": "Audio transcription" },
+      "backend": {
+        "services": [
+          "audio_transcriber"
+        ]
+      },
+      "labels": {
+        "en": "Audio transcription"
+      },
       "description": "Transcribe audio files into study documents.",
       "default_off": true
     },
@@ -160,8 +348,17 @@
       "id": "code_parsing",
       "tier": "labs",
       "kind": "service",
-      "backend": { "services": ["code_parser", "tech_book_chunker", "tech_section_parser", "tech_relation_extractor"] },
-      "labels": { "en": "Technical-book parsing" },
+      "backend": {
+        "services": [
+          "code_parser",
+          "tech_book_chunker",
+          "tech_section_parser",
+          "tech_relation_extractor"
+        ]
+      },
+      "labels": {
+        "en": "Technical-book parsing"
+      },
       "description": "Code-aware chunking and relation extraction for technical books.",
       "default_off": true
     },
@@ -169,9 +366,19 @@
       "id": "clustering_orgplan",
       "tier": "labs",
       "kind": "feature",
-      "frontend": { "components": ["components/OrganizationPlanDialog"] },
-      "backend": { "services": ["clustering_service"] },
-      "labels": { "en": "Clustering / organization plan" },
+      "frontend": {
+        "components": [
+          "components/OrganizationPlanDialog"
+        ]
+      },
+      "backend": {
+        "services": [
+          "clustering_service"
+        ]
+      },
+      "labels": {
+        "en": "Clustering / organization plan"
+      },
       "description": "Suggest collections by clustering related documents.",
       "default_off": true
     },
@@ -179,8 +386,14 @@
       "id": "dataset_generator",
       "tier": "labs",
       "kind": "service",
-      "backend": { "services": ["dataset_generator_service"] },
-      "labels": { "en": "Dataset generator" },
+      "backend": {
+        "services": [
+          "dataset_generator_service"
+        ]
+      },
+      "labels": {
+        "en": "Dataset generator"
+      },
       "description": "Generate golden Q&A datasets from ingested documents for eval.",
       "default_off": true
     },
@@ -188,9 +401,22 @@
       "id": "pomodoro",
       "tier": "labs",
       "kind": "feature",
-      "frontend": { "components": ["components/FocusTimerPill"] },
-      "backend": { "routers": ["pomodoro"], "services": ["pomodoro_service"] },
-      "labels": { "en": "Pomodoro timer" },
+      "frontend": {
+        "components": [
+          "components/FocusTimerPill"
+        ]
+      },
+      "backend": {
+        "routers": [
+          "pomodoro"
+        ],
+        "services": [
+          "pomodoro_service"
+        ]
+      },
+      "labels": {
+        "en": "Pomodoro timer"
+      },
       "description": "Focus-timer pill for timed study sessions.",
       "default_off": true
     },
@@ -198,9 +424,18 @@
       "id": "quality_dashboard",
       "tier": "labs",
       "kind": "nav_tab",
-      "frontend": { "route": "/quality", "component": "pages/Quality" },
-      "backend": { "routers": ["evals"] },
-      "labels": { "en": "Quality" },
+      "frontend": {
+        "route": "/quality",
+        "component": "pages/Quality"
+      },
+      "backend": {
+        "routers": [
+          "evals"
+        ]
+      },
+      "labels": {
+        "en": "Quality"
+      },
       "description": "Eval harness UI: retrieval (HR@5/MRR), topic, and generation metrics.",
       "default_off": true
     },
@@ -208,17 +443,35 @@
       "id": "admin",
       "tier": "dev",
       "kind": "nav_tab",
-      "frontend": { "route": "/admin", "component": "pages/Admin" },
-      "backend": { "routers": ["admin"] },
-      "labels": { "en": "Admin" }
+      "frontend": {
+        "route": "/admin",
+        "component": "pages/Admin"
+      },
+      "backend": {
+        "routers": [
+          "admin"
+        ]
+      },
+      "labels": {
+        "en": "Admin"
+      }
     },
     {
       "id": "monitoring",
       "tier": "dev",
       "kind": "nav_tab",
-      "frontend": { "route": "/monitoring", "component": "pages/Monitoring" },
-      "backend": { "routers": ["monitoring"] },
-      "labels": { "en": "Monitoring" }
+      "frontend": {
+        "route": "/monitoring",
+        "component": "pages/Monitoring"
+      },
+      "backend": {
+        "routers": [
+          "monitoring"
+        ]
+      },
+      "labels": {
+        "en": "Monitoring"
+      }
     }
   ]
 }

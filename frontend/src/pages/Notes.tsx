@@ -1,20 +1,6 @@
 /**
- * /notes — standalone notes management page with two-column layout.
- *
- * Audit: 2026-02-26
- * (a) fetchNotes calls GET /notes with params: document_id, group, tag — matches backend ✓
- * (b) Backend accepts document_id, group, tag params ✓
- * (c) Backend uses `content` for note body (not `text` or `body`)
- * (d) POST /notes returns flat NoteResponse (id, document_id, content, tags, group_name, created_at, updated_at)
- * (e) No create form existed — added (textarea, optional tags, doc selector, Save → POST /notes)
- *
- * Fixes applied per S50:
- * - Loading: 3 Skeleton h-12 rows (was 6 h-28 grid)
- * - Empty: "No notes yet. Click + to create your first note." + visible + button
- * - Error: inline amber alert "Could not load notes" + Retry button (was red, no retry)
- * - Create form: textarea + comma-separated tags input + doc selector + Save
- * - Delete: inline "Delete this note? [Yes] [No]" confirmation (was immediate delete)
- * - Edit: uses PATCH /notes/{id} (was PUT)
+ * /notes — notes list + filters. Existing notes open at /notes/:id
+ * (NotePage); creation goes through QuickNoteComposer.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -29,7 +15,7 @@ import { TagTree } from "@/components/TagTree"
 import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
-import { NoteReaderSheet } from "@/components/NoteReaderSheet"
+import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
 import { BlogsPanel } from "@/components/blog/BlogsPanel"
 import type { BlogKind } from "@/lib/blogApi"
@@ -86,13 +72,11 @@ interface Clip {
 
 async function fetchNotes(
   documentId?: string,
-  group?: string,
   tag?: string,
   collectionId?: string,
 ): Promise<Note[]> {
   const params = new URLSearchParams()
   if (documentId) params.set("document_id", documentId)
-  if (group) params.set("group", group)
   if (tag) params.set("tag", tag)
   if (collectionId) params.set("collection_id", collectionId)
   const res = await fetch(`${API_BASE}/notes?${params.toString()}`)
@@ -490,7 +474,7 @@ function ReadingJournalTab({ documents, onConvertToNote, onCreateFlashcard, navi
 }
 
 // ---------------------------------------------------------------------------
-// NoteCard — card view; editing is delegated to NoteReaderSheet
+// NoteCard — card view; click opens /notes/:id
 // ---------------------------------------------------------------------------
 
 interface NoteCardProps {
@@ -723,7 +707,6 @@ type FilterState =
   | { type: "all" }
   | { type: "journal" }
   | { type: "blogs" }
-  | { type: "group"; name: string }
   | { type: "tag"; name: string }
 
 export default function NotesPage() {
@@ -734,7 +717,6 @@ export default function NotesPage() {
     [pageLabsEnabled],
   )
   const [isCreating, setIsCreating] = useState(false)
-  const [editingNote, setEditingNote] = useState<Note | null>(null)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
   const [showCreateCollection, setShowCreateCollection] = useState(false)
@@ -765,7 +747,7 @@ export default function NotesPage() {
   useEffect(() => {
     if (notePreload) {
       setIsCreating(true)
-      // preload is consumed by NoteReaderSheet via props; clear store after opening
+      // preload is consumed by QuickNoteComposer via props; clear store after opening
       // Use a microtask to ensure the sheet opens first
       queueMicrotask(() => setNotePreload(null))
     }
@@ -799,10 +781,9 @@ export default function NotesPage() {
     return found ? found.name : id.slice(0, 8) + "..."
   }
 
-  const groupParam = filter.type === "group" ? filter.name : undefined
   // activeTag from store takes precedence over sidebar filter tag
   const tagParam = activeTag ?? (filter.type === "tag" ? filter.name : undefined)
-  // When a collection is active, clear group/tag params and use collection filter instead.
+  // When a collection is active, clear tag params and use collection filter instead.
   const collectionParam = activeCollectionId ?? undefined
 
   const {
@@ -811,8 +792,8 @@ export default function NotesPage() {
     isError: notesError,
     refetch,
   } = useQuery({
-    queryKey: ["notes", groupParam, tagParam, collectionParam, notesDocumentId],
-    queryFn: () => fetchNotes(notesDocumentId ?? undefined, groupParam, tagParam, collectionParam),
+    queryKey: ["notes", tagParam, collectionParam, notesDocumentId],
+    queryFn: () => fetchNotes(notesDocumentId ?? undefined, tagParam, collectionParam),
     gcTime: 60_000,
   })
 
@@ -936,6 +917,9 @@ export default function NotesPage() {
 
   const noteList = notes ?? []
 
+  const openNote = (id: string) =>
+    navigate(`/notes/${id}`, { state: { from: "/notes" } })
+
   // Determine right panel content
   let panelContent: React.ReactNode
 
@@ -998,7 +982,7 @@ export default function NotesPage() {
               <NoteCard
                 key={note.id}
                 note={note}
-                onEdit={() => setEditingNote(note)}
+                onEdit={() => openNote(note.id)}
                 onDeleted={handleRefetch}
               />
             ))}
@@ -1096,12 +1080,12 @@ export default function NotesPage() {
             <TableRow
               key={note.id}
               className="cursor-pointer"
-              onClick={() => setEditingNote(note)}
+              onClick={() => openNote(note.id)}
               draggable
               onDragStart={(e) => e.dataTransfer.setData("text/plain", note.id)}
             >
               <TableCell className="max-w-[200px] truncate font-medium text-foreground">
-                {stripMarkdown(note.content).slice(0, 60)}
+                {note.title?.trim() || deriveTitle(note.content)}
               </TableCell>
               <TableCell className="text-xs">
                 {note.tags.length > 0 ? (
@@ -1138,7 +1122,7 @@ export default function NotesPage() {
               </TableCell>
               <TableCell>
                 <button
-                  onClick={(e) => { e.stopPropagation(); setEditingNote(note) }}
+                  onClick={(e) => { e.stopPropagation(); openNote(note.id) }}
                   className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent"
                   title="Edit"
                 >
@@ -1157,7 +1141,7 @@ export default function NotesPage() {
           <NoteCard
             key={note.id}
             note={note}
-            onEdit={() => setEditingNote(note)}
+            onEdit={() => openNote(note.id)}
             onDeleted={handleRefetch}
           />
         ))}
@@ -1367,9 +1351,7 @@ export default function NotesPage() {
                       ? "Reading Journal"
                       : filter.type === "blogs"
                         ? "Blog & Thoughts"
-                        : filter.type === "group"
-                          ? filter.name
-                          : `#${filter.name}`}
+                        : `#${filter.name}`}
           </h2>
           {notesDocumentId && (
             <button
@@ -1439,37 +1421,16 @@ export default function NotesPage() {
         {panelContent}
       </div>
 
-      {/* NoteReaderSheet — rendered once at page level for both View and Create */}
-      <NoteReaderSheet
-        note={editingNote}
-        isNew={isCreating}
+      {/* QuickNoteComposer — creation only; existing notes open at /notes/:id */}
+      <QuickNoteComposer
+        open={isCreating}
         initialContent={notePreload?.content}
-        initialCollectionId={notePreload?.collectionId}
-        documents={documents}
-        onClose={() => {
-          setEditingNote(null)
-          setIsCreating(false)
-        }}
-        onSaved={(savedNote) => {
+        initialCollectionId={notePreload?.collectionId ?? activeCollectionId ?? undefined}
+        onClose={() => setIsCreating(false)}
+        onSaved={() => {
           void qc.invalidateQueries({ queryKey: ["notes"] })
           void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           void qc.invalidateQueries({ queryKey: ["collections-tree"] })
-          
-          if (isCreating && activeCollectionId) {
-            // If we're inside a collection, add the new note to it immediately
-            void fetch(`${API_BASE}/collections/${activeCollectionId}/members`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ member_ids: [savedNote.id], member_type: "note" }),
-            }).then(() => {
-              void qc.invalidateQueries({ queryKey: ["notes"] })
-              void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-              void qc.invalidateQueries({ queryKey: ["collections-tree"] })
-            })
-          }
-
-          setEditingNote(savedNote)
-          setIsCreating(false)
         }}
       />
 

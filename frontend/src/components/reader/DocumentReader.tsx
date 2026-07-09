@@ -30,7 +30,7 @@ import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
 import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
-import { NoteReaderSheet } from "@/components/NoteReaderSheet"
+import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
 import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
@@ -429,20 +429,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     staleTime: 60_000,
   })
 
-  // Documents list used to populate the source-doc picker in NoteReaderSheet.
-  const { data: docsList = [] } = useQuery<{ id: string; title: string }[]>({
-    queryKey: ["documents-list-mini"],
-    queryFn: async () => {
-      try {
-        const data = await apiGet<{ items?: { id: string; title: string }[] }>("/documents", { page_size: 100 })
-        return data.items ?? []
-      } catch {
-        return []
-      }
-    },
-    staleTime: 60_000,
-  })
-
   // Fetch annotations for highlight reconstruction and panel
   const {
     data: docAnnotations,
@@ -692,15 +678,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     [doc, pdfCurrentPage, documentId],
   )
 
-  const handleNoteSaved = useCallback(() => {
-    setOpenNoteEditor(null)
-    void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-    void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-    void qc.invalidateQueries({ queryKey: ["notes"] })
-    void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-    void qc.invalidateQueries({ queryKey: ["collections"] })
-  }, [qc, documentId])
-
   const handleExplain = useCallback((text: string, mode: ExplainMode) => {
     setSheetText(text)
     setSheetMode(mode)
@@ -755,7 +732,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
     return sectionsToRender.map((section) => {
       const hasNote = notedSections.has(section.id)
-      const editorOpen = openNoteEditor === section.id
       const heatmapItem = heatmapData?.[section.id] ?? null
       
       return (
@@ -767,7 +743,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           isVideo={isVideo}
           isYouTube={isYouTube}
           hasNote={hasNote}
-          editorOpen={editorOpen}
           heatmapItem={heatmapItem}
           searchHit={searchHitSectionIds.has(section.id)}
           searchSnippet={searchSnippetMap.get(section.id)}
@@ -804,8 +779,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           }}
           onMediaJump={(t) => isAudio ? seekAndPlay(t) : seekAndPlayVideo(t)}
           onToggleNote={(sid) => setOpenNoteEditor(openNoteEditor === sid ? null : sid)}
-          onSaved={handleNoteSaved}
-          onCancel={() => setOpenNoteEditor(null)}
           onFeynman={setFeynmanSection}
           onPrefetchFeynman={(sid) => prefetchFeynmanSummary(doc.id, sid)}
           onShowGoals={(sid) => setActiveSectionGoals(activeSectionGoals === sid ? null : sid)}
@@ -832,7 +805,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     collapsedParents,
     toggleCollapsed,
     isSectionHidden,
-    handleNoteSaved,
     listLimit,
   ])
 
@@ -993,7 +965,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
       </div>
 
-      {/* Two-panel layout (NoteReaderSheet overlays from the right when capturing) */}
+      {/* Two-panel layout (QuickNoteComposer overlays from the right when capturing) */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex w-3/5 flex-col overflow-hidden border-r border-border">
@@ -1292,16 +1264,18 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           />
         </div>
 
-        <NoteReaderSheet
-          note={null}
-          documents={docsList}
-          onClose={selection.closeNote}
+        <QuickNoteComposer
+          open={selection.noteOpen || openNoteEditor !== null}
+          onClose={() => {
+            selection.closeNote()
+            setOpenNoteEditor(null)
+          }}
           onSaved={() => {
             void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
             void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            selection.closeNote()
+            void qc.invalidateQueries({ queryKey: ["notes"] })
+            void qc.invalidateQueries({ queryKey: ["notes-groups"] })
           }}
-          isNew={selection.noteOpen}
           initialContent={(() => {
             if (!selection.noteOpen) return ""
             const parts = [selection.noteSourceRef?.documentTitle, selection.noteHeading].filter(Boolean)
@@ -1310,6 +1284,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           })()}
           initialSourceDocIds={[documentId]}
           lockedCollectionId={autoCollection?.id ?? null}
+          documentId={documentId}
+          sectionId={openNoteEditor}
         />
       </div>
 

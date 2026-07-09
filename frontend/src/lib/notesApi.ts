@@ -10,6 +10,7 @@ export interface CreateNotePayload {
   content: string
   tags: string[]
   document_id: string | null
+  section_id?: string | null
   source_document_ids?: string[]
   /** Optional manual title; when set the note is flagged manual-title. */
   title?: string
@@ -24,8 +25,20 @@ export interface PatchNotePayload {
   title?: string
 }
 
+export type NoteAutocompleteItem = components["schemas"]["NoteAutocompleteItem"]
+
 export const createNote = (payload: CreateNotePayload): Promise<Note> =>
   apiPost<Note>("/notes", payload)
+
+export const getNote = (id: string): Promise<Note> => apiGet<Note>(`/notes/${id}`)
+
+export async function fetchNoteAutocomplete(q: string): Promise<NoteAutocompleteItem[]> {
+  try {
+    return await apiGet<NoteAutocompleteItem[]>("/notes/autocomplete", { q })
+  } catch {
+    return []
+  }
+}
 
 export const patchNote = (id: string, data: PatchNotePayload): Promise<Note> =>
   apiPatch<Note>(`/notes/${id}`, data)

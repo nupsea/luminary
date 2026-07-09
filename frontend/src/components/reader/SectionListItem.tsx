@@ -1,7 +1,6 @@
-import { BookOpen, Brain, Check, ChevronDown, ChevronRight, StickyNote, X } from "lucide-react"
-import { memo, useState } from "react"
+import { BookOpen, Brain, ChevronDown, ChevronRight, StickyNote } from "lucide-react"
+import { memo } from "react"
 
-import { apiPost } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
 
 import { ChapterProgressRing } from "./ChapterGoalsPanel"
@@ -86,102 +85,6 @@ function buildYouTubeTimestampUrl(sourceUrl: string, seconds: number): string {
   return sourceUrl.includes("?") ? `${sourceUrl}&t=${t}` : `${sourceUrl}?t=${t}`
 }
 
-interface NoteEditorProps {
-  documentId: string
-  sectionId: string
-  onSaved: () => void
-  onCancel: () => void
-}
-
-function NoteEditor({ documentId, sectionId, onSaved, onCancel }: NoteEditorProps) {
-  const [content, setContent] = useState("")
-  const [tagInput, setTagInput] = useState("")
-  const [tags, setTags] = useState<string[]>([])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  function addTag(input: string) {
-    const t = input.trim()
-    if (t && !tags.includes(t)) setTags((prev) => [...prev, t])
-    setTagInput("")
-  }
-
-  async function handleSave() {
-    if (!content.trim()) return
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await apiPost("/notes", {
-        document_id: documentId,
-        section_id: sectionId,
-        content,
-        tags,
-        group_name: null,
-      })
-      onSaved()
-    } catch {
-      setSaveError("Failed to save note. Please try again.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="mt-2 flex flex-col gap-2 rounded-md border border-primary/40 bg-background p-2">
-      {saveError && <p className="text-xs text-destructive">{saveError}</p>}
-      <textarea
-        autoFocus
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Write a note..."
-        className="min-h-[72px] w-full resize-none bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-      />
-      <div className="flex flex-wrap items-center gap-1">
-        {tags.map((t) => (
-          <span
-            key={t}
-            className="flex items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {t}
-            <button onClick={() => setTags((prev) => prev.filter((x) => x !== t))}>
-              <X size={9} />
-            </button>
-          </span>
-        ))}
-        <input
-          value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === ",") {
-              e.preventDefault()
-              addTag(tagInput)
-            }
-          }}
-          onBlur={() => { if (tagInput.trim()) addTag(tagInput) }}
-          placeholder="Add tag, press Enter"
-          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          onClick={() => void handleSave()}
-          disabled={saving || !content.trim()}
-          className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Check size={11} />
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
 interface SectionListItemProps {
   section: SectionItem
   isAudio: boolean
@@ -189,7 +92,6 @@ interface SectionListItemProps {
   isYouTube: boolean
   doc: { id: string; format?: string; source_url?: string | null }
   hasNote: boolean
-  editorOpen: boolean
   heatmapItem: SectionHeatmapItem | null
   searchHit: boolean
   searchSnippet?: string
@@ -205,8 +107,6 @@ interface SectionListItemProps {
   onPdfJump: (p: number) => void
   onMediaJump: (t: number) => void
   onToggleNote: (id: string) => void
-  onSaved: () => void
-  onCancel: () => void
   onFeynman: (id: string) => void
   onPrefetchFeynman: (id: string) => void
   onShowGoals: (id: string) => void
@@ -221,7 +121,6 @@ export const SectionListItem = memo(({
   isYouTube,
   doc,
   hasNote,
-  editorOpen,
   heatmapItem,
   searchHit,
   searchSnippet,
@@ -237,8 +136,6 @@ export const SectionListItem = memo(({
   onPdfJump,
   onMediaJump,
   onToggleNote,
-  onSaved,
-  onCancel,
   onFeynman,
   onPrefetchFeynman,
   onShowGoals,
@@ -426,14 +323,6 @@ export const SectionListItem = memo(({
           sectionId={section.id}
           documentId={doc.id}
           preview={section.preview}
-        />
-      )}
-      {editorOpen && (
-        <NoteEditor
-          documentId={doc.id}
-          sectionId={section.id}
-          onSaved={onSaved}
-          onCancel={onCancel}
         />
       )}
     </li>

@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Notes editor redesign** — the note editor is now always-live (no read/edit
+  mode split) with autosave and draft safety: closing a note flushes instead of
+  discarding, and empty auto-created drafts are deleted with a toast. The raw
+  textarea is replaced by a CodeMirror 6 markdown editor (syntax highlighting,
+  list/task/quote continuation, Ctrl/Cmd+B/I, paste-image upload). A `/` slash
+  menu inserts blocks (headings, lists, tables, code/math, mermaid templates,
+  Excalidraw), replacing the old toolbar; image sizing is a click popover on
+  rendered images. `[[` links notes with server-backed autocomplete, rendered
+  links are navigable, and every note shows a backlinks panel. Existing notes
+  open at a deep-linkable `/notes/:noteId` page with an outline rail for
+  structured notes; quick capture (Notes "New", reader selection/section notes)
+  goes through a compact autosaving composer with an "open full note" hatch.
+  Metadata (tags/collections/source docs) moved to a collapsible full-height
+  properties rail; a reading view (Cmd/Ctrl+E) renders distraction-free serif.
+
+### Removed
+- Notes: legacy `group` list filter UI, the read-mode/edit-mode state machine,
+  the markdown toolbar (image-spec buttons + mermaid quick-insert/cheat sheet),
+  and the orphaned `LinkAutocomplete`/`NoteReaderSheet` components.
+
 ## [0.2.2] - 2026-06-30
 
 ### Fixed

@@ -1,24 +1,32 @@
 import { useRef, useState, type ReactNode, type RefObject } from "react"
+import {
+  MarkdownCodeEditor,
+  type MarkdownEditorHandle,
+} from "@/components/notes/MarkdownCodeEditor"
+import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
+import { type SlashCommandConfig } from "@/components/notes/slashCommands"
 
-export type MarkdownSplitLayout = "splitter" | "tabs"
+export type MarkdownSplitLayout = "splitter" | "tabs" | "editor"
 
 export interface MarkdownSplitEditorProps {
   content: string
   onContentChange: (next: string) => void
   preview: ReactNode
   layout?: MarkdownSplitLayout
-  textareaRef?: RefObject<HTMLTextAreaElement | null>
-  onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>
-  editorToolbar?: ReactNode
+  editorRef?: RefObject<MarkdownEditorHandle | null>
+  onPasteImage?: (file: File) => Promise<string>
+  linkCompletion?: NoteLinkCompletionConfig
+  slashCommands?: SlashCommandConfig
   placeholder?: string
+  autoFocus?: boolean
   editorLabel?: string
   previewLabel?: string
-  textareaClassName?: string
+  editorClassName?: string
   previewClassName?: string
 }
 
-const DEFAULT_TEXTAREA_CLASS =
-  "w-full flex-1 resize-none overflow-auto rounded border-none bg-background px-2 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+const DEFAULT_EDITOR_CLASS =
+  "min-h-0 w-full flex-1 overflow-hidden rounded border-none bg-background text-foreground"
 
 const DEFAULT_PREVIEW_CLASS = "prose-sm flex-1 overflow-auto px-2 py-2"
 
@@ -27,17 +35,19 @@ export function MarkdownSplitEditor({
   onContentChange,
   preview,
   layout = "splitter",
-  textareaRef: externalTextareaRef,
-  onPaste,
-  editorToolbar,
+  editorRef: externalEditorRef,
+  onPasteImage,
+  linkCompletion,
+  slashCommands,
   placeholder = "Write your note in Markdown...",
+  autoFocus,
   editorLabel = "Editor",
   previewLabel = "Preview",
-  textareaClassName,
+  editorClassName,
   previewClassName,
 }: MarkdownSplitEditorProps) {
-  const internalTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const textareaRef = externalTextareaRef ?? internalTextareaRef
+  const internalEditorRef = useRef<MarkdownEditorHandle | null>(null)
+  const editorRef = externalEditorRef ?? internalEditorRef
   const previewRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const syncingRef = useRef<"write" | "preview" | null>(null)
@@ -48,8 +58,10 @@ export function MarkdownSplitEditor({
 
   function syncScroll(source: "write" | "preview") {
     if (syncingRef.current && syncingRef.current !== source) return
-    const src = source === "write" ? textareaRef.current : previewRef.current
-    const dst = source === "write" ? previewRef.current : textareaRef.current
+    const writeEl = editorRef.current?.scrollDOM() ?? null
+    const previewEl = previewRef.current
+    const src = source === "write" ? writeEl : previewEl
+    const dst = source === "write" ? previewEl : writeEl
     if (!src || !dst) return
     const srcMax = src.scrollHeight - src.clientHeight
     const dstMax = dst.scrollHeight - dst.clientHeight
@@ -83,15 +95,17 @@ export function MarkdownSplitEditor({
 
   const writePane = (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {editorToolbar}
-      <textarea
-        ref={textareaRef}
+      <MarkdownCodeEditor
+        ref={editorRef}
         value={content}
-        onChange={(e) => onContentChange(e.target.value)}
+        onChange={onContentChange}
         onScroll={layout === "splitter" ? () => syncScroll("write") : undefined}
-        onPaste={onPaste}
+        onPasteImage={onPasteImage}
+        linkCompletion={linkCompletion}
+        slashCommands={slashCommands}
         placeholder={placeholder}
-        className={textareaClassName ?? DEFAULT_TEXTAREA_CLASS}
+        autoFocus={autoFocus}
+        className={editorClassName ?? DEFAULT_EDITOR_CLASS}
       />
     </div>
   )
@@ -114,6 +128,10 @@ export function MarkdownSplitEditor({
       </div>
     </div>
   )
+
+  if (layout === "editor") {
+    return writePane
+  }
 
   if (layout === "splitter") {
     return (

@@ -4,7 +4,7 @@
  * confirm), which commits the file + asset-dir removal.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, ExternalLink, Loader2, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -28,7 +28,7 @@ import {
   type BlogPublishResult,
 } from "@/lib/blogApi"
 import { MarkdownSplitEditor } from "@/components/notes/MarkdownSplitEditor"
-import { createImagePasteHandler } from "@/lib/noteEditorUtils"
+import { uploadNoteAsset } from "@/lib/noteAssets"
 import { BlogPreview } from "./BlogPreview"
 import { PushBlogButton } from "./PushBlogButton"
 
@@ -74,7 +74,6 @@ export function BlogEditDialog({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [result, setResult] = useState<BlogPublishResult | null>(null)
-  const bodyRef = useRef<HTMLTextAreaElement>(null)
   const qc = useQueryClient()
 
   const { data, isLoading, isError, error } = useQuery({
@@ -207,16 +206,13 @@ export function BlogEditDialog({
               layout="splitter"
               content={body}
               onContentChange={setBody}
-              textareaRef={bodyRef}
-              onPaste={createImagePasteHandler(
-                () => bodyRef.current,
-                () => body,
-                setBody,
-                (path) => `![image](${path})`,
-              )}
+              onPasteImage={async (file) => {
+                const data = await uploadNoteAsset(file)
+                return `![image](${data.path})`
+              }}
               editorLabel="Body markdown"
               placeholder="Write your post in Markdown... (paste an image to add it)"
-              textareaClassName="w-full flex-1 resize-none rounded-md border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+              editorClassName="min-h-0 w-full flex-1 overflow-hidden rounded-md border border-slate-300 bg-white text-slate-900"
               previewClassName="flex-1 overflow-auto"
               preview={
                 <BlogPreview

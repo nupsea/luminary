@@ -43,6 +43,7 @@ const Progress = lazy(() => import("@/pages/Progress"))
 const Admin = lazy(() => import("@/pages/Admin"))
 const Monitoring = lazy(() => import("@/pages/Monitoring"))
 const CollectionWorkspace = lazy(() => import("@/pages/CollectionWorkspace"))
+const NotePage = lazy(() => import("@/pages/Notes/NotePage"))
 const DocumentOverview = lazy(() => import("@/pages/DocumentOverview"))
 const Hub = lazy(() => import("@/pages/Hub"))
 
@@ -57,6 +58,7 @@ const COMPONENT_REGISTRY: Record<string, LazyPage> = {
   "pages/Viz": Viz,
   "pages/Progress": Progress,
   "pages/CollectionWorkspace": CollectionWorkspace,
+  "pages/Notes/NotePage": NotePage,
   "pages/DocumentOverview": DocumentOverview,
   "pages/Quality": Quality,
   "pages/Admin": Admin,
@@ -477,7 +479,7 @@ function AppShell() {
         setActiveTag(tagPath)
         navigate("/notes", fromState)
       } else if (detail.tab === "learning") {
-        // source document subtitle click from NoteReaderSheet
+        // source document subtitle click from the note page
         const target = detail.documentId ? `/library?doc=${detail.documentId}` : "/library"
         navigate(target, fromState)
       } else if (detail.tab === "chat") {
