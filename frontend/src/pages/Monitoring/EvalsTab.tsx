@@ -4,7 +4,7 @@
 
 import { EvalTrendsPanel } from "@/components/EvalTrendsPanel"
 
-import { EvalHistorySparkline, RAGQualityChart } from "./Charts"
+import { EvalHistorySparkline, RAGQualityChart, RetrievalFunnelChart } from "./Charts"
 import { EvalPanel } from "./EvalPanel"
 import { EmptyState, SectionErrorCard, SectionSkeleton } from "./SharedUI"
 import { fetchEvalHistory, fetchEvalRuns } from "./api"
@@ -26,6 +26,22 @@ export function EvalsTab() {
           <SectionErrorCard name="RAG Quality" />
         ) : (
           <RAGQualityChart evalRuns={evalRuns.data} />
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Retrieval Funnel</h2>
+        <p className="text-xs text-muted-foreground">
+          L1 pool recall is what candidate generation hands the reranker; the fused and
+          reranked bars are the top-5 cut. A tall recall bar over a short rerank bar means
+          the ceiling is L2 (the cross-encoder), not L1. Latest ablation run per dataset.
+        </p>
+        {evalRuns.loading ? (
+          <SectionSkeleton rows={4} />
+        ) : evalRuns.error ? (
+          <SectionErrorCard name="Retrieval Funnel" />
+        ) : (
+          <RetrievalFunnelChart evalRuns={evalRuns.data} />
         )}
       </section>
 

@@ -68,6 +68,21 @@ function rowView(run: EvalRunFull) {
       .filter((s) => arms[s] && shipped?.label !== s)
       .map((s) => `${s} ${pct(arms[s].hit_rate_5)}/${pct(arms[s].mrr)}`)
     if (others.length) details.push(others.join(" · "))
+    // L1 recall ceiling: Recall@K of the raw RRF pool (no rerank). A flat
+    // reranked HR@5 is ambiguous — this separates "gold missing from the pool"
+    // (L1 problem) from "reranker failed to lift it" (L2 problem).
+    const pool = arms["rrf-pool"]
+    if (pool) {
+      const depths = Object.keys(pool)
+        .filter((k) => k.startsWith("recall_"))
+        .map((k) => Number(k.slice("recall_".length)))
+        .filter((d) => Number.isFinite(d))
+        .sort((a, b) => a - b)
+      if (depths.length) {
+        const parts = depths.map((d) => `@${d} ${pct(pool[`recall_${d}`])}`).join(" / ")
+        details.push(`L1 pool recall ${parts}`)
+      }
+    }
   }
   if (run.eval_kind === "routing") {
     details.push(`routing ${pct(run.routing_accuracy)}`)

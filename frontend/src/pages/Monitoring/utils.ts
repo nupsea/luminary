@@ -66,6 +66,57 @@ export function buildRagChartData(evalRuns: EvalRun[]) {
   }))
 }
 
+export interface FunnelRow {
+  dataset: string
+  poolRecall: number | null
+  rrf: number | null
+  rerank: number | null
+}
+
+// Retrieval funnel per dataset: L1 pool recall (candidate-generation ceiling)
+// narrowing to the top-5 cut after fusion, then after rerank. The smallest
+// measured pool depth == the reranker's input window (RERANK_DEPTH), so recall
+// there is the precise ceiling the cross-encoder had to work with.
+export function buildFunnelData(evalRuns: EvalRun[]): {
+  rows: FunnelRow[]
+  poolDepth: number | null
+} {
+  const byDataset: Record<string, EvalRun> = {}
+  for (const run of evalRuns) {
+    if (run.eval_kind !== "ablation") continue
+    if (!byDataset[run.dataset_name]) byDataset[run.dataset_name] = run
+  }
+  let poolDepth: number | null = null
+  const rows: FunnelRow[] = []
+  for (const [dataset, run] of Object.entries(byDataset)) {
+    const m = (run.ablation_metrics ?? {}) as Record<
+      string,
+      Record<string, number> | undefined
+    >
+    const pool = m["rrf-pool"]
+    let poolRecall: number | null = null
+    if (pool) {
+      const depths = Object.keys(pool)
+        .filter((k) => k.startsWith("recall_"))
+        .map((k) => Number(k.slice("recall_".length)))
+        .filter((d) => Number.isFinite(d))
+        .sort((a, b) => a - b)
+      if (depths.length) {
+        poolDepth = depths[0]
+        const v = pool[`recall_${depths[0]}`]
+        poolRecall = typeof v === "number" ? v : null
+      }
+    }
+    const rrfHr = m["rrf"]?.hit_rate_5
+    const rerankHr = m["rrf+rerank"]?.hit_rate_5
+    const rrf = typeof rrfHr === "number" ? rrfHr : null
+    const rerank = typeof rerankHr === "number" ? rerankHr : null
+    if (poolRecall == null && rrf == null && rerank == null) continue
+    rows.push({ dataset, poolRecall, rrf, rerank })
+  }
+  return { rows, poolDepth }
+}
+
 export function formatDuration(ms: number): string {
   if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)} min`
   if (ms >= 1_000) return `${(ms / 1_000).toFixed(2)} s`
