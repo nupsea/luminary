@@ -189,6 +189,8 @@ def search_chunks(
     *,
     hyde: bool = False,
     rerank: bool = False,
+    rerank_depth: int | None = None,
+    rerank_threshold: float | None = None,
     strategy: str = "rrf",
 ) -> list[str]:
     """Run GET /search and return up to top-10 chunk texts.
@@ -204,6 +206,10 @@ def search_chunks(
         params["hyde"] = "true"
     if rerank:
         params["rerank"] = "true"
+        if rerank_depth is not None:
+            params["rerank_depth"] = str(rerank_depth)
+        if rerank_threshold is not None:
+            params["rerank_threshold"] = str(rerank_threshold)
     if strategy != "rrf":
         params["strategy"] = strategy
     try:
@@ -425,6 +431,30 @@ def main() -> None:
         "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
     parser.add_argument(
+        "--rerank-depth",
+        type=int,
+        default=None,
+        dest="rerank_depth",
+        help="RRF candidate pool fed to the cross-encoder (backend default: 50).",
+    )
+    parser.add_argument(
+        "--rerank-threshold",
+        type=float,
+        default=None,
+        dest="rerank_threshold",
+        help="Drop reranked candidates below this cross-encoder logit (default: no cut).",
+    )
+    parser.add_argument(
+        "--rerank-depths",
+        default="",
+        dest="rerank_depths",
+        metavar="N,N,...",
+        help=(
+            "Ablation-only depth sweep: adds one rrf+rerank@N arm per value "
+            "(e.g. 25,50,100,200). Requires --ablation."
+        ),
+    )
+    parser.add_argument(
         "--judge-model",
         default="",
         dest="judge_model",
@@ -471,6 +501,10 @@ def main() -> None:
 
     if bool(args.dataset) == bool(args.dataset_id):
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
+        sys.exit(1)
+
+    if args.rerank_depths and not args.ablation:
+        print("ERROR: --rerank-depths requires --ablation", file=sys.stderr)
         sys.exit(1)
 
     # Auto-detect /api prefix so the harness works against prod backends too.
@@ -520,17 +554,25 @@ def main() -> None:
         source_to_doc_id[src] = doc_id
 
     if args.ablation:
-        # (label, search-strategy, rerank). "rrf+rerank" is the full pipeline the
-        # user actually ships, so it belongs in the strategy breakdown.
+        # (label, search-strategy, rerank, rerank-depth). "rrf+rerank" is the
+        # full pipeline the user actually ships, so it belongs in the strategy
+        # breakdown.
         strategy_specs = [
-            ("vector", "vector", False),
-            ("fts", "fts", False),
-            ("graph", "graph", False),
-            ("rrf", "rrf", False),
-            ("rrf+rerank", "rrf", True),
+            ("vector", "vector", False, None),
+            ("fts", "fts", False, None),
+            ("graph", "graph", False, None),
+            ("rrf", "rrf", False, None),
+            ("rrf+rerank", "rrf", True, args.rerank_depth),
         ]
+        # Depth sweep arms measure the L2 recall ceiling directly: reranked
+        # HR@5 is bounded by HR@depth of the RRF pool, so if HR@5 climbs with
+        # depth the gap is L1-reachable; if it plateaus the missing documents
+        # were never in ANY leg's candidates and no L2 tuning can recover them.
+        for depth_str in (s.strip() for s in args.rerank_depths.split(",") if s.strip()):
+            depth = int(depth_str)
+            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth))
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for label, search_strategy, do_rerank in strategy_specs:
+        for label, search_strategy, do_rerank, depth in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -548,6 +590,8 @@ def main() -> None:
                     doc_id,
                     hyde=args.hyde,
                     rerank=do_rerank or args.rerank,
+                    rerank_depth=depth,
+                    rerank_threshold=args.rerank_threshold,
                     strategy=search_strategy,
                 )
                 samples.append(
@@ -603,7 +647,13 @@ def main() -> None:
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
         chunks = search_chunks(
-            args.backend_url, question, doc_id, hyde=args.hyde, rerank=args.rerank
+            args.backend_url,
+            question,
+            doc_id,
+            hyde=args.hyde,
+            rerank=args.rerank,
+            rerank_depth=args.rerank_depth,
+            rerank_threshold=args.rerank_threshold,
         )
 
         answer = ""
@@ -728,6 +778,10 @@ def main() -> None:
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
     }
+    if args.rerank and args.rerank_depth is not None:
+        metrics["rerank_depth"] = args.rerank_depth
+    if args.rerank and args.rerank_threshold is not None:
+        metrics["rerank_threshold"] = args.rerank_threshold
     if needs_qa:
         # Provenance: which model authored the judged answers. "app-default"
         # means the product's own /qa pipeline default -- the shipped path.

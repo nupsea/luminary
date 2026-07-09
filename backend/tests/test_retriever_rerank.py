@@ -70,6 +70,42 @@ def test_rerank_candidates_handles_empty_input():
     assert result == []
 
 
+def test_rerank_threshold_cuts_low_scores():
+    """Candidates below the threshold are dropped even when k has room."""
+    chunks = [_make_chunk(f"c{i}", f"text {i}") for i in range(4)]
+    mock_reranker = MagicMock()
+    mock_reranker.score.return_value = [5.0, -3.0, 2.0, -8.0]
+
+    with patch("app.services.retriever._get_reranker", return_value=mock_reranker):
+        result = _rerank_candidates("q", chunks, k=4, threshold=0.0)
+
+    assert [c.chunk_id for c in result] == ["c0", "c2"]
+
+
+def test_rerank_threshold_keeps_top_candidate_when_all_below():
+    """A threshold that cuts everything still returns the best candidate."""
+    chunks = [_make_chunk(f"c{i}", f"text {i}") for i in range(3)]
+    mock_reranker = MagicMock()
+    mock_reranker.score.return_value = [-5.0, -1.0, -9.0]
+
+    with patch("app.services.retriever._get_reranker", return_value=mock_reranker):
+        result = _rerank_candidates("q", chunks, k=3, threshold=0.0)
+
+    assert [c.chunk_id for c in result] == ["c1"]
+
+
+def test_rerank_error_ignores_threshold():
+    """Fail-soft path returns RRF top-k without applying the score cut."""
+    chunks = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.1) for i in range(3)]
+    mock_reranker = MagicMock()
+    mock_reranker.score.side_effect = RuntimeError("boom")
+
+    with patch("app.services.retriever._get_reranker", return_value=mock_reranker):
+        result = _rerank_candidates("q", chunks, k=2, threshold=100.0)
+
+    assert [c.chunk_id for c in result] == ["c0", "c1"]
+
+
 @pytest.mark.asyncio
 async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
     """retrieve(rerank=True) widens the pool, reranks, and returns top-k."""
@@ -101,6 +137,83 @@ async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
     assert len(results) == 5
     assert results[0].chunk_id == "c49"
     assert results[-1].chunk_id == "c45"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rerank_depth_controls_pool():
+    """rerank_depth overrides the settings default for the cross-encoder pool."""
+    retriever = HybridRetriever()
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.001) for i in range(100)]
+
+    mock_reranker = MagicMock()
+    mock_reranker.score.side_effect = lambda q, texts: [0.5] * len(texts)
+
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._get_reranker", return_value=mock_reranker),
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=30, graph_expand=False
+        )
+
+    args, _kwargs = mock_reranker.score.call_args
+    assert len(args[1]) == 30
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rerank_depth_is_capped():
+    """Request-supplied depth cannot exceed the DoS guardrail."""
+    retriever = HybridRetriever()
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.001) for i in range(300)]
+
+    mock_reranker = MagicMock()
+    mock_reranker.score.side_effect = lambda q, texts: [0.5] * len(texts)
+
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._get_reranker", return_value=mock_reranker),
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_depth=9999, graph_expand=False
+        )
+
+    args, _kwargs = mock_reranker.score.call_args
+    assert len(args[1]) == 200
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rerank_threshold_flows_to_results():
+    """rerank_threshold cuts low-scoring chunks from retrieve() output."""
+    retriever = HybridRetriever()
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.01) for i in range(20)]
+
+    mock_reranker = MagicMock()
+    # Only the first two candidates clear the cut.
+    mock_reranker.score.side_effect = lambda q, texts: [
+        3.0 if i < 2 else -3.0 for i in range(len(texts))
+    ]
+
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._get_reranker", return_value=mock_reranker),
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        results = await retriever.retrieve(
+            "q",
+            document_ids=["doc-1"],
+            k=5,
+            rerank=True,
+            rerank_threshold=0.0,
+            graph_expand=False,
+        )
+
+    assert len(results) == 2
+    assert all(c.score >= 0.0 for c in results)
 
 
 @pytest.mark.asyncio

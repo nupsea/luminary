@@ -123,7 +123,7 @@ async def search_node(state: ChatState) -> dict:
     # For library-wide queries use a tighter k to avoid scattered context
     k = 6 if scope == "all" else 10
 
-    # L3 of the retrieval funnel: cross-encoder rerank of the RRF pool.
+    # L2 of the retrieval funnel: cross-encoder rerank of the RRF pool.
     # DB-backed toggle so users on slow CPUs can opt out; the reranker itself
     # fails soft to plain RRF order, and so does this read.
     try:

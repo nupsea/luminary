@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     # the answer carries a trailing citations JSON with excerpts. At 2048 the
     # generation hit done_reason=length mid-JSON, losing answers entirely.
     QA_NUM_CTX: int = 4096
+    # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
+    # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
+    # recall lever L2 owns; cross-encoder latency scales linearly with it
+    # (~5ms/pair CPU). Tune via evals `--rerank-depths` sweep before changing.
+    RERANK_DEPTH: int = 50
+    # L2 funnel: minimum cross-encoder logit to keep a candidate (ms-marco
+    # MiniLM logits are unbounded, roughly -11..+11; relevant pairs usually
+    # score > 0). None/unset = no cut. The top candidate always survives so a
+    # strict threshold degrades context, never empties it.
+    RERANK_SCORE_THRESHOLD: float | None = None
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

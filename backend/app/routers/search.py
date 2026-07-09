@@ -47,6 +47,8 @@ async def search(
     limit: int = Query(default=20, ge=1, le=100),
     hyde: bool = Query(default=False),
     rerank: bool = Query(default=False),
+    rerank_depth: int | None = Query(default=None, ge=1, le=200),
+    rerank_threshold: float | None = Query(default=None),
     graph_expand: bool = Query(default=True),
     strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
     session: AsyncSession = Depends(get_db),
@@ -68,11 +70,14 @@ async def search(
     the query. Deterministic and local-first per I-16; pairs with 
     index-time entity injection.
 
-    When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
-    cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
-    but recovers answer chunks whose vocabulary diverges from the
-    question's surface form -- the remaining failure mode after
-    HyDE. Local-first per I-16. Fails soft on any reranker error.
+    When ``rerank`` is true, the top-N RRF candidates (``rerank_depth``,
+    default from ``RERANK_DEPTH`` settings) are re-scored by a cross-encoder
+    and the top-``limit`` returned; candidates scoring below
+    ``rerank_threshold`` (default ``RERANK_SCORE_THRESHOLD``) are cut. Adds
+    ~100-300ms per query at depth 50 (CPU, linear in depth) but recovers
+    answer chunks whose vocabulary diverges from the question's surface
+    form -- the remaining failure mode after HyDE. Local-first per I-16.
+    Fails soft on any reranker error.
     """
     # Resolve document_ids for content_type filter
     document_ids: list[str] | None = None
@@ -97,6 +102,8 @@ async def search(
         k=limit,
         hyde=hyde,
         rerank=rerank,
+        rerank_depth=rerank_depth,
+        rerank_threshold=rerank_threshold,
         graph_expand=graph_expand,
         strategy=strategy,  # type: ignore[arg-type]
     )

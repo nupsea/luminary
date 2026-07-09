@@ -4,6 +4,7 @@ from typing import Literal
 
 from sqlalchemy import text
 
+from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
@@ -26,16 +27,17 @@ logger = logging.getLogger(__name__)
 RetrievalStrategy = Literal["rrf", "vector", "fts", "graph"]
 
 RRF_K = 60
-# Top-N RRF candidates fed into the reranker. 50 is generous enough for the
-# answer chunk to be reachable when its rank in either vector or BM25 is in
-# the 30s, while keeping cross-encoder latency under ~250ms per query on CPU.
-_RERANK_CANDIDATE_POOL = 50
+# Guardrail on request-supplied rerank depth: cross-encoder latency is linear
+# in depth (~5ms/pair CPU), so an unbounded value turns /search into a DoS
+# vector against local CPUs.
+_RERANK_DEPTH_MAX = 200
 
 
 def _rerank_candidates(
     query: str,
     candidates: list[ScoredChunk],
     k: int,
+    threshold: float | None = None,
 ) -> list[ScoredChunk]:
     """Re-score *candidates* with a cross-encoder and return the top *k*.
 
@@ -44,9 +46,16 @@ def _rerank_candidates(
     chunks whose vocabulary diverges from the question's surface form but
     semantically answer it -- the dominant failure mode.
 
+    When *threshold* is set, candidates scoring below it are dropped after
+    re-ranking -- a precision cut so generation is not fed confidently-ranked
+    junk. The top candidate always survives: an all-empty context would
+    silently break the chat flow, and "nothing relevant" belongs to the
+    generation layer's honesty handling, not a retrieval-side cliff.
+
     Fails soft: any model load or inference error logs a warning and falls
-    back to ``candidates[:k]`` so retrieval is never harder than the no-rerank
-    baseline.
+    back to ``candidates[:k]`` (threshold unapplied -- there are no
+    cross-encoder scores to cut on) so retrieval is never harder than the
+    no-rerank baseline.
     """
     if not candidates:
         return candidates
@@ -71,6 +80,16 @@ def _rerank_candidates(
         for c, s in zip(candidates, scores, strict=True)
     ]
     rescored.sort(key=lambda c: c.score, reverse=True)
+    if threshold is not None:
+        kept = [c for c in rescored if c.score >= threshold]
+        if len(kept) < len(rescored):
+            logger.info(
+                "rerank threshold %.2f cut %d/%d candidates",
+                threshold,
+                len(rescored) - len(kept),
+                len(rescored),
+            )
+        rescored = kept or rescored[:1]
     return rescored[:k]
 
 
@@ -284,6 +303,8 @@ class HybridRetriever:
         *,
         hyde: bool = False,
         rerank: bool = False,
+        rerank_depth: int | None = None,
+        rerank_threshold: float | None = None,
         graph_expand: bool = True,
         strategy: RetrievalStrategy = "rrf",
     ) -> list[ScoredChunk]:
@@ -312,21 +333,31 @@ class HybridRetriever:
         is skipped when reranking (the cross-encoder already optimises for
         relevance, and section breadth would dilute the rerank signal).
         Fails soft: any reranker error returns the RRF order unchanged.
+
+        *rerank_depth* overrides the settings-default candidate pool fed to
+        the cross-encoder; *rerank_threshold* overrides the settings-default
+        score cut. Both are per-request so the eval harness can sweep them
+        without process restarts.
         """
+        settings = _config_module.get_settings()
         scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
         # Widen the candidate pool when scoped to a single document. With a
         # cross-document corpus, 20+20 leaves enough headroom for RRF; with
         # a single book of ~500 chunks where the question phrasing diverges
         # from the answer phrasing, the right chunk can sit at rank 25-40
         # in vector or BM25 alone and never reach RRF.
-        # When rerank=True we always need a wide pool (50) so the cross-encoder
-        # has enough headroom to recover answer chunks at deep ranks.
+        # When rerank=True the pool IS the L2 depth: the cross-encoder can
+        # only recover chunks L1 hands it, so depth bounds reranked HR@k.
         if rerank:
-            candidate_pool = _RERANK_CANDIDATE_POOL
+            depth = rerank_depth if rerank_depth is not None else settings.RERANK_DEPTH
+            candidate_pool = max(k, min(depth, _RERANK_DEPTH_MAX))
         elif scoped_single_doc:
             candidate_pool = 50
         else:
             candidate_pool = 20
+        threshold = (
+            rerank_threshold if rerank_threshold is not None else settings.RERANK_SCORE_THRESHOLD
+        )
 
         # graph_expand flows only into the dense vector search. Embeddings
         # reward semantic similarity, so appending canonical entity tokens
@@ -348,6 +379,10 @@ class HybridRetriever:
             span.set_attribute("retrieval.rerank", rerank)
             span.set_attribute("retrieval.graph_expand", graph_expand)
             span.set_attribute("retrieval.strategy", strategy)
+            if rerank:
+                span.set_attribute("retrieval.rerank_depth", candidate_pool)
+                if threshold is not None:
+                    span.set_attribute("retrieval.rerank_threshold", threshold)
             if strategy == "vector":
                 results = await asyncio.to_thread(
                     self.vector_search, query, document_ids, candidate_pool
@@ -393,7 +428,9 @@ class HybridRetriever:
                 # source text, and the cross-encoder rewards chunks containing
                 # that hallucinated vocabulary over the answer chunks. The
                 # original query is the user's authoritative intent.
-                results = await asyncio.to_thread(_rerank_candidates, query, results, k)
+                results = await asyncio.to_thread(
+                    _rerank_candidates, query, results, k, threshold
+                )
             results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
@@ -454,6 +491,8 @@ class HybridRetriever:
         k: int,
         *,
         rerank: bool = False,
+        rerank_depth: int | None = None,
+        rerank_threshold: float | None = None,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -463,7 +502,14 @@ class HybridRetriever:
         """
         try:
 
-            chunks = await self.retrieve(query, document_ids, k, rerank=rerank)
+            chunks = await self.retrieve(
+                query,
+                document_ids,
+                k,
+                rerank=rerank,
+                rerank_depth=rerank_depth,
+                rerank_threshold=rerank_threshold,
+            )
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
             # is None) an unscoped image search matches the whole corpus and can
@@ -488,7 +534,14 @@ class HybridRetriever:
             return chunks, image_ids
         except Exception as exc:
             logger.warning("retrieve_with_images: falling back to retrieve() only: %s", exc)
-            chunks = await self.retrieve(query, document_ids, k, rerank=rerank)
+            chunks = await self.retrieve(
+                query,
+                document_ids,
+                k,
+                rerank=rerank,
+                rerank_depth=rerank_depth,
+                rerank_threshold=rerank_threshold,
+            )
             return chunks, []
 
 
