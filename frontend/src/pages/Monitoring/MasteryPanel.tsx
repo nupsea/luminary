@@ -1,11 +1,10 @@
 // MasteryPanel -- Concept mastery heatmap + weak-spots list +
 // "no flashcards yet" chips, scoped to a single document chosen via a
-// header dropdown.
+// header dropdown. The data block is keyed by document id so switching
+// documents remounts it with fresh loading state (no setState-in-effect).
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
-
-import { logger } from "@/lib/logger"
 
 import { fetchMasteryConcepts, fetchMasteryHeatmap } from "./api"
 import {
@@ -17,72 +16,24 @@ import type {
   Document,
   MasteryConceptsResponse,
   MasteryHeatmapResponse,
-  SectionState,
 } from "./types"
-import { initSection } from "./types"
+import { useSection } from "./useSection"
 import { masteryColor } from "./utils"
 
 export function MasteryPanel({ documents }: { documents: Document[] }) {
-  const [selectedDocId, setSelectedDocId] = useState<string>(documents[0]?.id ?? "")
-  const [conceptsState, setConceptsState] = useState<
-    SectionState<MasteryConceptsResponse | null>
-  >(initSection(null))
-  const [heatmapState, setHeatmapState] = useState<
-    SectionState<MasteryHeatmapResponse | null>
-  >(initSection(null))
-
-  // When documents load after mount (selectedDocId is ""), auto-select the first
-  useEffect(() => {
-    if (!selectedDocId && documents.length > 0) {
-      setSelectedDocId(documents[0].id)
-    }
-  }, [documents, selectedDocId])
-
-  useEffect(() => {
-    if (!selectedDocId) return
-    let cancelled = false
-    setConceptsState(initSection(null))
-    setHeatmapState(initSection(null))
-
-    fetchMasteryConcepts([selectedDocId])
-      .then((d) => {
-        if (!cancelled) setConceptsState({ loading: false, data: d, error: false })
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] mastery/concepts failed", e)
-        if (!cancelled) setConceptsState({ loading: false, data: null, error: true })
-      })
-
-    fetchMasteryHeatmap(selectedDocId)
-      .then((d) => {
-        if (!cancelled) setHeatmapState({ loading: false, data: d, error: false })
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Monitoring] mastery/heatmap failed", e)
-        if (!cancelled) setHeatmapState({ loading: false, data: null, error: true })
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedDocId])
+  const [selectedDocId, setSelectedDocId] = useState<string>("")
+  const docId = selectedDocId || documents[0]?.id || ""
 
   if (documents.length === 0) {
     return <EmptyState message="No documents yet. Ingest a document to see mastery data." />
   }
 
-  const concepts = conceptsState.data?.concepts ?? []
-  const heatmap = heatmapState.data
-  const weakSpots = concepts.filter((c) => c.mastery < 0.4 && c.card_count >= 1).slice(0, 5)
-  const noCards = concepts.filter((c) => c.no_flashcards).slice(0, 5)
-
   return (
     <div className="flex flex-col gap-6">
-      {/* Document selector */}
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium text-foreground">Document:</label>
         <select
-          value={selectedDocId}
+          value={docId}
           onChange={(e) => setSelectedDocId(e.target.value)}
           className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground"
         >
@@ -94,6 +45,30 @@ export function MasteryPanel({ documents }: { documents: Document[] }) {
         </select>
       </div>
 
+      {docId && <MasteryData key={docId} docId={docId} />}
+    </div>
+  )
+}
+
+function MasteryData({ docId }: { docId: string }) {
+  const conceptsState = useSection<MasteryConceptsResponse | null>(
+    "Mastery Concepts",
+    () => fetchMasteryConcepts([docId]),
+    null,
+  )
+  const heatmapState = useSection<MasteryHeatmapResponse | null>(
+    "Mastery Heatmap",
+    () => fetchMasteryHeatmap(docId),
+    null,
+  )
+
+  const concepts = conceptsState.data?.concepts ?? []
+  const heatmap = heatmapState.data
+  const weakSpots = concepts.filter((c) => c.mastery < 0.4 && c.card_count >= 1).slice(0, 5)
+  const noCards = concepts.filter((c) => c.no_flashcards).slice(0, 5)
+
+  return (
+    <>
       {/* Heatmap */}
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Concept Mastery Heatmap</h2>
@@ -182,7 +157,7 @@ export function MasteryPanel({ documents }: { documents: Document[] }) {
                   <span>{(c.mastery * 100).toFixed(0)}% mastery</span>
                   <span>{c.card_count} cards</span>
                   {c.due_soon > 0 && (
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/60 dark:text-amber-400">
                       {c.due_soon} due soon
                     </span>
                   )}
@@ -218,6 +193,6 @@ export function MasteryPanel({ documents }: { documents: Document[] }) {
           </div>
         </section>
       )}
-    </div>
+    </>
   )
 }
