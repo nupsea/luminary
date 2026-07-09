@@ -61,6 +61,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_hit_rate_5,
     compute_mrr,
     compute_ndcg_10,
+    compute_recall_at,
 )
 from evals.lib.runners import GenerationEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -192,16 +193,23 @@ def search_chunks(
     rerank_depth: int | None = None,
     rerank_threshold: float | None = None,
     strategy: str = "rrf",
+    limit: int | None = None,
+    expand_context: bool = True,
 ) -> list[str]:
     """Run GET /search and return up to top-10 chunk texts.
 
     HR@5 and MRR@5 cap their own depth at 5; the extra tail exists for
-    nDCG@10.
+    nDCG@10. An explicit *limit* widens the window past 10 -- the pool-recall
+    arm needs the full ranked list to measure Recall@K.
     """
     params: dict[str, str] = {"q": question}
     if document_id:
         params["document_id"] = document_id
         params["limit"] = "20"
+    if limit is not None:
+        params["limit"] = str(limit)
+    if not expand_context:
+        params["expand_context"] = "false"
     if hyde:
         params["hyde"] = "true"
     if rerank:
@@ -213,7 +221,7 @@ def search_chunks(
     if strategy != "rrf":
         params["strategy"] = strategy
     try:
-        request_timeout = 60.0 if (hyde or rerank) else 30.0
+        request_timeout = 60.0 if (hyde or rerank or limit) else 30.0
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
         resp.raise_for_status()
         body = resp.json()
@@ -228,7 +236,7 @@ def search_chunks(
             if document_id and group.get("document_id") != document_id:
                 continue
             all_matches.extend(group.get("matches", []))
-        return [m.get("text", "") for m in all_matches[:10]]
+        return [m.get("text", "") for m in all_matches[: limit or 10]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
@@ -289,12 +297,21 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     print(f"{'=' * 56}")
     print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10} {'NDCG@10':>10}")
     for strategy, metrics in ablation_metrics.items():
+        if strategy == "rrf-pool":
+            continue
         print(
             f"  {strategy:<12} "
             f"{metrics.get('hit_rate_5', 0.0):>10.4f} "
             f"{metrics.get('mrr', 0.0):>10.4f} "
             f"{metrics.get('ndcg_10', 0.0):>10.4f}"
         )
+    pool = ablation_metrics.get("rrf-pool")
+    if pool:
+        print(f"  {'-' * 52}")
+        print("  L1 pool recall (raw RRF, no rerank):")
+        for key in sorted(pool, key=lambda s: int(s.rsplit("_", 1)[1])):
+            depth = key.rsplit("_", 1)[1]
+            print(f"  {'recall@' + depth:<12} {pool[key]:>10.4f}")
     print(f"{'=' * 56}\n")
 
 
@@ -309,6 +326,7 @@ __all__ = [
     "VALID_DATASETS",
     "_extract_hint_norms",
     "_norm",
+    "compute_recall_at",
     "append_history",
     "compute_hit_rate_5",
     "compute_mrr",
@@ -452,6 +470,16 @@ def main() -> None:
         help=(
             "Ablation-only depth sweep: adds one rrf+rerank@N arm per value "
             "(e.g. 25,50,100,200). Requires --ablation."
+        ),
+    )
+    parser.add_argument(
+        "--recall-depths",
+        default="50,100,200",
+        dest="recall_depths",
+        metavar="N,N,...",
+        help=(
+            "Ablation-only L1 pool recall: measures Recall@K of the raw RRF pool "
+            "(no rerank) at each depth (max 200). Pass an empty string to skip."
         ),
     )
     parser.add_argument(
@@ -608,6 +636,41 @@ def main() -> None:
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
                 "ndcg_10": compute_ndcg_10(samples),
+            }
+
+        # L1 pool recall: Recall@K over the raw RRF pool (no rerank, no fixed-k
+        # cut). This is the funnel's recall ceiling stated directly -- a flat
+        # reranked HR@5 is ambiguous (gold missing from the pool vs. the
+        # cross-encoder failing to lift it); Recall@K separates the two.
+        recall_depths = sorted(
+            {min(int(d), 200) for d in (s.strip() for s in args.recall_depths.split(",")) if d}
+        )
+        if recall_depths:
+            pool_limit = max(recall_depths)
+            pool_samples: list[dict] = []
+            for i, row in enumerate(rows, start=1):
+                question = row["question"]
+                source_file = row.get("source_file", "")
+                doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
+                print(f"  [rrf-pool@{pool_limit} {i}/{len(rows)}] Searching: {question[:60]}...")
+                chunks = search_chunks(
+                    args.backend_url,
+                    question,
+                    doc_id,
+                    hyde=args.hyde,
+                    limit=pool_limit,
+                    expand_context=False,
+                )
+                pool_samples.append(
+                    {
+                        "question": question,
+                        "contexts": chunks or [""],
+                        "context_hint": row.get("context_hint", ""),
+                        "relevance": row.get("relevance") or [],
+                    }
+                )
+            ablation_metrics["rrf-pool"] = {
+                f"recall_{d}": compute_recall_at(pool_samples, d) for d in recall_depths
             }
 
         metrics = {"ablation_metrics": ablation_metrics}

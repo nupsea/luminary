@@ -62,6 +62,14 @@ uv run python ../evals/run_eval.py --backend-url http://localhost:7820 \
     --dataset book_time_machine --rerank --rerank-threshold 0.0
 ```
 
+Every `--ablation` run also reports **L1 pool recall** -- Recall@K of the raw
+RRF pool (no rerank, no neighbour expansion; `--recall-depths`, default
+`50,100,200`). This is the funnel's recall ceiling stated directly:
+`recall@depth - reranked HR@5` is the precision loss chargeable to L2, and
+`1 - recall@depth` is the true L1 gap no downstream layer can recover. The
+arm uses `/search?expand_context=false` so the measured pool is exactly what
+the cross-encoder would see at that depth.
+
 DB-generated datasets (Monitoring -> Evals) run the same way with
 `--dataset-id <uuid>` instead of `--dataset`.
 
@@ -73,11 +81,11 @@ expansion) and no L2 tuning will fix it. Per the eval-integrity rule, sweeps
 are document-agnostic: pick depths/thresholds on one dataset only if they hold
 on the others too.
 
-## Measured results (2026-07-09)
+## Measured results (2026-07-09, corrected same day)
 
-Depth sweep (25/50/100/200) and threshold probe (logit 0.0) over three
-30-question datasets: `apache_iceberg_20250526_gpt5_4` (db), `d2l_gpt5.4`
-(db), `book_time_machine` (file). HR@5 / MRR@5:
+Depth sweep (25/50/100/200), threshold probe (logit 0.0), and L1 pool recall
+over three 30-question datasets: `apache_iceberg_20250526_gpt5_4` (db),
+`d2l_gpt5.4` (db), `book_time_machine` (file). HR@5 / MRR@5:
 
 | arm | iceberg | d2l | time_machine |
 |---|---|---|---|
@@ -87,6 +95,14 @@ Depth sweep (25/50/100/200) and threshold probe (logit 0.0) over three
 | rrf+rerank@100 | .633 / .541 | .767 / .633 | .567 / .494 |
 | rrf+rerank@200 | .667 / .558 | .767 / .633 | .567 / .494 |
 | @50 + threshold 0.0 | .600 / .530 | -- | .567 / .494 |
+
+L1 pool recall (raw RRF pool, no rerank, no expansion):
+
+| | iceberg | d2l | time_machine |
+|---|---|---|---|
+| recall@50 | .867 | .900 | .867 |
+| recall@100 | .967 | .933 | .867 |
+| recall@200 | 1.000 | .933 | .900 |
 
 Decisions:
 
@@ -98,17 +114,18 @@ Decisions:
   iceberg (HR@5 .633 -> .600) and did nothing elsewhere. The retrieval side
   can only be hurt by a cut; turn it on only if a generation-eval shows a
   faithfulness win that outweighs it.
-- **The HR@5 ceiling is L1's, confirmed.** A pool probe (top-100 RRF, no
-  rerank) shows the gold passage is absent from the pool entirely for 7/30
-  iceberg and 3/30 d2l questions. The misses are dominated by short deictic
-  follow-ups from the persona-diverse golden generator ("data masking?",
-  "CTAS for what here?", "explain auditing here") -- queries with no lexical
-  or semantic anchor to the gold passage. The lever is query expansion /
-  context carrying (HyDE, coreference), not chunking and not L2.
-- **Remaining L2 headroom is the model, not the knobs.** Iceberg and d2l
-  each have 7 questions whose gold sits at ranks 6-46 -- inside the default
-  depth-50 window -- yet the MiniLM cross-encoder lifts only some of them
-  into the top 5, and on time_machine it nets *negative* HR@5 (.633 -> .567,
-  gold demoted out of top-5) while still raising MRR. A stronger
-  cross-encoder, or an L3 blend of RRF and CE scores that stops confident
-  demotions, is the next precision lever.
+- **The bottleneck is L2 precision, not L1 recall.** L1 places the gold
+  inside the default depth-50 window for 87-90% of questions (100% at depth
+  200 on iceberg), yet reranked HR@5 lands at 57-77%. The 20-30 point gap
+  between recall@50 and reranked HR@5 is the MiniLM cross-encoder failing to
+  lift gold it was handed -- on time_machine it nets *negative* HR@5 versus
+  raw RRF (.633 -> .567, gold demoted out of the top 5) while still raising
+  MRR. The next quality lever is a stronger cross-encoder and/or an L3 blend
+  of RRF and CE scores that stops confident demotions; L1 work (chunking,
+  query expansion) can recover at most the last ~10%.
+- An earlier same-day probe concluded the opposite ("misses are absent from
+  the pool -- an L1 gap"). That measurement was wrong: without rerank the
+  retriever silently truncated its legs to 50 candidates regardless of the
+  requested limit, so the "top-100 pool" it inspected never existed. The
+  truncation is fixed (pool floors at `k`), and the recall arm now measures
+  the real pool.

@@ -217,6 +217,48 @@ async def test_retrieve_rerank_threshold_flows_to_results():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_without_rerank_pool_respects_k():
+    """A no-rerank request for k>50 must fetch legs that deep -- the eval
+    pool-recall arm reads the raw RRF pool at limit=200 and a silently
+    truncated 50-deep pool would understate L1 recall."""
+    retriever = HybridRetriever()
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.001) for i in range(300)]
+
+    with (
+        patch.object(retriever, "vector_search", return_value=pool) as mock_vec,
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)) as mock_kw,
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=200, graph_expand=False
+        )
+
+    assert mock_vec.call_args[0][2] == 200
+    assert mock_kw.call_args.kwargs["k"] == 200
+    assert len(results) == 200
+
+
+@pytest.mark.asyncio
+async def test_retrieve_expand_context_false_skips_expansion():
+    """expand_context=False returns the raw ranked list -- no neighbour chunks."""
+    retriever = HybridRetriever()
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.01) for i in range(20)]
+
+    mock_expand = AsyncMock(side_effect=lambda r, k: r)
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._expand_context", new=mock_expand),
+    ):
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, graph_expand=False, expand_context=False
+        )
+
+    mock_expand.assert_not_called()
+    assert len(results) == 5
+
+
+@pytest.mark.asyncio
 async def test_retrieve_without_rerank_does_not_invoke_reranker():
     """retrieve(rerank=False) never touches the cross-encoder."""
     retriever = HybridRetriever()

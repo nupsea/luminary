@@ -44,12 +44,15 @@ async def search(
     q: str = Query(..., min_length=1),
     content_types: str = Query(default=""),
     document_id: str = Query(default=""),
-    limit: int = Query(default=20, ge=1, le=100),
+    # Cap matches the rerank-depth DoS guardrail: a plain fetch at 200 is one
+    # LanceDB + one FTS5 query, the same work rerank_depth=200 already allows.
+    limit: int = Query(default=20, ge=1, le=200),
     hyde: bool = Query(default=False),
     rerank: bool = Query(default=False),
     rerank_depth: int | None = Query(default=None, ge=1, le=200),
     rerank_threshold: float | None = Query(default=None),
     graph_expand: bool = Query(default=True),
+    expand_context: bool = Query(default=True),
     strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
     session: AsyncSession = Depends(get_db),
     retriever: HybridRetriever = Depends(get_retriever),
@@ -105,6 +108,7 @@ async def search(
         rerank_depth=rerank_depth,
         rerank_threshold=rerank_threshold,
         graph_expand=graph_expand,
+        expand_context=expand_context,
         strategy=strategy,  # type: ignore[arg-type]
     )
 

@@ -306,9 +306,16 @@ class HybridRetriever:
         rerank_depth: int | None = None,
         rerank_threshold: float | None = None,
         graph_expand: bool = True,
+        expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
     ) -> list[ScoredChunk]:
         """Full hybrid retrieval: vector(k=20) + keyword(k=20) fused via RRF + context expansion.
+
+        *expand_context=False* skips the neighbour-window expansion and returns
+        the raw ranked list. The eval harness needs this to measure L1 pool
+        recall exactly: expansion appends neighbours the cross-encoder never
+        saw, which would leak past the "reranked HR@k is bounded by pool
+        recall@depth" invariant the ablation exists to test.
 
         Diversity re-ranking is disabled when the query is scoped to a
         single document. In that case the user is asking a focused
@@ -348,13 +355,16 @@ class HybridRetriever:
         # in vector or BM25 alone and never reach RRF.
         # When rerank=True the pool IS the L2 depth: the cross-encoder can
         # only recover chunks L1 hands it, so depth bounds reranked HR@k.
+        # Without rerank the pool still floors at k: a caller asking for
+        # limit=200 (the eval harness measuring L1 pool recall) must get legs
+        # that deep, not a fused 50+50 pool silently truncating the request.
         if rerank:
             depth = rerank_depth if rerank_depth is not None else settings.RERANK_DEPTH
             candidate_pool = max(k, min(depth, _RERANK_DEPTH_MAX))
         elif scoped_single_doc:
-            candidate_pool = 50
+            candidate_pool = max(k, 50)
         else:
-            candidate_pool = 20
+            candidate_pool = max(k, 20)
         threshold = (
             rerank_threshold if rerank_threshold is not None else settings.RERANK_SCORE_THRESHOLD
         )
@@ -431,7 +441,8 @@ class HybridRetriever:
                 results = await asyncio.to_thread(
                     _rerank_candidates, query, results, k, threshold
                 )
-            results = await _expand_context(results, k=k)
+            if expand_context:
+                results = await _expand_context(results, k=k)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
                 span.set_attribute("retrieval.top_score", round(results[0].score, 4))
