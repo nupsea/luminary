@@ -522,6 +522,119 @@ async def test_get_eval_regressions_endpoint(test_db):
     assert data[0]["metric"] == "mrr"
 
 
+# GET /monitoring/metrics
+
+
+async def test_metrics_without_phoenix_still_returns_qa_daily(test_db, monkeypatch):
+    """With Phoenix off, metrics returns zero-filled 7-day QA trend and null latencies."""
+    _, factory, _ = test_db
+
+    import app.routers.monitoring as mon_module
+
+    async def _not_running() -> bool:
+        return False
+
+    monkeypatch.setattr(mon_module, "_check_phoenix_running", _not_running)
+
+    doc = _make_document()
+    qa = _make_qa(doc.id, datetime.now(tz=UTC).replace(tzinfo=None))
+    async with factory() as session:
+        session.add_all([doc, qa])
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/metrics")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["phoenix_available"] is False
+    assert data["latency_p50_ms"] is None
+    assert data["error_rate"] is None
+    assert data["spans_sampled"] == 0
+    assert len(data["qa_daily"]) == 7
+    assert data["qa_daily"][-1]["count"] >= 1
+    assert sum(d["count"] for d in data["qa_daily"][:-1]) == 0
+
+
+async def test_metrics_aggregates_span_sample(test_db, monkeypatch):
+    """Latency percentiles, error rate, token totals, and kind counts from spans."""
+    monkeypatch.setenv("PHOENIX_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    import app.routers.monitoring as mon_module
+    from app.routers.monitoring import TraceItem
+
+    def _span(
+        i: int,
+        kind: str,
+        duration: float,
+        parent: str | None,
+        status: str = "ok",
+        attrs: dict | None = None,
+    ):
+        return TraceItem(
+            span_id=f"s{i}",
+            trace_id=f"t{i % 3}",
+            operation_name=f"op{i}",
+            span_kind=kind,
+            parent_id=parent,
+            start_time="2026-07-09T00:00:00+00:00",
+            duration_ms=duration,
+            status=status,
+            attributes=attrs or {},
+        )
+
+    fake_spans = [
+        _span(1, "CHAIN", 100.0, None),
+        _span(2, "CHAIN", 200.0, None),
+        _span(3, "CHAIN", 1000.0, None, status="error"),
+        _span(
+            4,
+            "LLM",
+            90.0,
+            "s1",
+            attrs={"llm.token_count.prompt": 30, "llm.token_count.completion": 10},
+        ),
+        _span(
+            5,
+            "LLM",
+            190.0,
+            "s2",
+            attrs={"llm.token_count.prompt": 50, "llm.token_count.completion": 20},
+        ),
+        _span(6, "RETRIEVER", 15.0, "s1"),
+    ]
+
+    async def _running() -> bool:
+        return True
+
+    async def _fetch(limit: int = 200):
+        return fake_spans
+
+    monkeypatch.setattr(mon_module, "_check_phoenix_running", _running)
+    monkeypatch.setattr(mon_module, "_fetch_phoenix_spans", _fetch)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/metrics")
+
+    get_settings.cache_clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["phoenix_available"] is True
+    assert data["spans_sampled"] == 6
+    assert data["traces_sampled"] == 3
+    assert data["latency_p50_ms"] == pytest.approx(200.0)
+    assert data["latency_p95_ms"] == pytest.approx(1000.0)
+    assert data["error_count"] == 1
+    assert data["error_rate"] == pytest.approx(1 / 6, abs=1e-3)
+    assert data["llm_calls"] == 2
+    assert data["llm_prompt_tokens"] == 80
+    assert data["llm_completion_tokens"] == 30
+    assert data["spans_by_kind"] == {"CHAIN": 3, "LLM": 2, "RETRIEVER": 1}
+
+
 # GET /monitoring/model-usage
 
 
@@ -562,7 +675,7 @@ async def test_model_usage_empty_when_no_qa_history(test_db):
 
 @pytest.mark.asyncio
 async def test_phoenix_url_returns_url_and_enabled_flag(test_db, monkeypatch):
-    """When Phoenix is enabled and reachable, enabled=true is returned."""
+    """When Phoenix is enabled and reachable, enabled=true and configured=true."""
     import httpx
 
     from app.routers import monitoring as mon_module
@@ -573,48 +686,150 @@ async def test_phoenix_url_returns_url_and_enabled_flag(test_db, monkeypatch):
     class _FakeResponse:
         status_code = 200
 
-    async def _fake_head(self, url, **kwargs):  # noqa: ARG001
-        return _FakeResponse()
+    orig_get = httpx.AsyncClient.get
+
+    # Only intercept the Phoenix health probe; the ASGI test client also
+    # goes through httpx.AsyncClient.get.
+    async def _fake_get(self, url, **kwargs):
+        if ":6006" in str(url):
+            return _FakeResponse()
+        return await orig_get(self, url, **kwargs)
 
     monkeypatch.setenv("PHOENIX_ENABLED", "true")
     from app.config import get_settings
 
     get_settings.cache_clear()
 
-    with unittest.mock.patch.object(httpx.AsyncClient, "head", _fake_head):
+    with unittest.mock.patch.object(httpx.AsyncClient, "get", _fake_get):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/monitoring/phoenix-url")
 
     get_settings.cache_clear()
+    mon_module._phoenix_reachability_cache.clear()
     assert resp.status_code == 200
     body = resp.json()
     assert "url" in body
     assert body["enabled"] is True
+    assert body["configured"] is True
 
 
 @pytest.mark.asyncio
 async def test_phoenix_url_disabled_when_unreachable(test_db, monkeypatch):
-    """When Phoenix HEAD request times out, enabled=false is returned."""
+    """When the Phoenix health check times out, enabled=false but configured=true."""
     import httpx
 
     from app.routers import monitoring as mon_module
 
     mon_module._phoenix_reachability_cache.clear()
 
-    async def _timeout_head(self, url, **kwargs):  # noqa: ARG001
-        raise httpx.ConnectError("unreachable")
+    orig_get = httpx.AsyncClient.get
+
+    async def _timeout_get(self, url, **kwargs):
+        if ":6006" in str(url):
+            raise httpx.ConnectError("unreachable")
+        return await orig_get(self, url, **kwargs)
 
     monkeypatch.setenv("PHOENIX_ENABLED", "true")
     from app.config import get_settings
 
     get_settings.cache_clear()
 
-    with unittest.mock.patch.object(httpx.AsyncClient, "head", _timeout_head):
+    with unittest.mock.patch.object(httpx.AsyncClient, "get", _timeout_get):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/monitoring/phoenix-url")
 
     get_settings.cache_clear()
+    mon_module._phoenix_reachability_cache.clear()
     assert resp.status_code == 200
     body = resp.json()
     assert "url" in body
     assert body["enabled"] is False
+    assert body["configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_phoenix_url_not_configured(test_db, monkeypatch):
+    """When PHOENIX_ENABLED=false, configured=false and no health probe is made."""
+    monkeypatch.setenv("PHOENIX_ENABLED", "false")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/monitoring/phoenix-url")
+
+    get_settings.cache_clear()
+    body = resp.json()
+    assert body["enabled"] is False
+    assert body["configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_phoenix_spans_parses_project_spans_shape(monkeypatch):
+    """_fetch_phoenix_spans hits /v1/projects/{project}/spans and maps the 13.x shape."""
+    import httpx
+
+    from app.routers import monitoring as mon_module
+
+    seen: dict = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "next_cursor": None,
+                "data": [
+                    {
+                        "id": "U3Bhbjox",
+                        "name": "qa.stream_answer",
+                        "context": {"trace_id": "t1", "span_id": "s1"},
+                        "span_kind": "CHAIN",
+                        "parent_id": None,
+                        "start_time": "2026-07-09T00:00:00+00:00",
+                        "end_time": "2026-07-09T00:00:01.500000+00:00",
+                        "status_code": "OK",
+                        "status_message": "",
+                        "attributes": {"input.value": "What is X?"},
+                        "events": [],
+                    },
+                    {
+                        "id": "U3Bhbjoy",
+                        "name": "retrieval.hybrid",
+                        "context": {"trace_id": "t1", "span_id": "s2"},
+                        "span_kind": "RETRIEVER",
+                        "parent_id": "s1",
+                        "start_time": "2026-07-09T00:00:00+00:00",
+                        "end_time": "2026-07-09T00:00:00.250000+00:00",
+                        "status_code": "UNSET",
+                        "status_message": "",
+                        "attributes": {},
+                        "events": [],
+                    },
+                ],
+            }
+
+    async def _fake_get(self, url, **kwargs):  # noqa: ARG001
+        seen["url"] = url
+        seen["params"] = kwargs.get("params")
+        return _FakeResponse()
+
+    with unittest.mock.patch.object(httpx.AsyncClient, "get", _fake_get):
+        items = await mon_module._fetch_phoenix_spans(limit=50)
+
+    assert seen["url"].endswith("/v1/projects/luminary/spans")
+    assert seen["params"] == {"limit": 50}
+    assert len(items) == 2
+    root, child = items
+    assert root.span_id == "s1"
+    assert root.trace_id == "t1"
+    assert root.operation_name == "qa.stream_answer"
+    assert root.span_kind == "CHAIN"
+    assert root.parent_id is None
+    assert root.duration_ms == pytest.approx(1500.0)
+    assert root.status == "ok"
+    assert child.parent_id == "s1"
+    assert child.span_kind == "RETRIEVER"
+    assert child.status == "unset"
+    assert child.duration_ms == pytest.approx(250.0)
