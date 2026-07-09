@@ -13,7 +13,7 @@ import type {
   LLMSettings,
   MasteryConceptsResponse,
   MasteryHeatmapResponse,
-  ModelUsageItem,
+  MonitoringMetrics,
   MonitoringOverview,
   PhoenixUrl,
   TracesResponse,
@@ -28,8 +28,8 @@ export const fetchTraces = (): Promise<TracesResponse> =>
 export const fetchEvalRuns = (): Promise<EvalRun[]> =>
   apiGet<EvalRun[]>("/monitoring/evals")
 
-export const fetchModelUsage = (): Promise<ModelUsageItem[]> =>
-  apiGet<ModelUsageItem[]>("/monitoring/model-usage")
+export const fetchMetrics = (): Promise<MonitoringMetrics> =>
+  apiGet<MonitoringMetrics>("/monitoring/metrics")
 
 export const fetchLLMSettings = (): Promise<LLMSettings> =>
   apiGet<LLMSettings>("/settings/llm")
@@ -50,8 +50,14 @@ export const fetchPhoenixUrl = (): Promise<PhoenixUrl> =>
 export const fetchEvalResults = (): Promise<EvalResultItem[]> =>
   apiGet<EvalResultItem[]>("/evals/results")
 
-export const fetchEvalDatasets = (): Promise<string[]> =>
-  apiGet<string[]>("/evals/datasets")
+// /evals/datasets returns GoldenDatasetListItem objects (older builds
+// returned bare strings); EvalPanel only needs the names.
+export async function fetchEvalDatasets(): Promise<string[]> {
+  const data = await apiGet<Array<string | { name?: string }>>("/evals/datasets")
+  return data
+    .map((d) => (typeof d === "string" ? d : (d.name ?? "")))
+    .filter((name) => name.length > 0)
+}
 
 export const triggerEvalRun = (dataset: string): Promise<void> =>
   apiPost<void>("/evals/run", { dataset })

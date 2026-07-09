@@ -2,7 +2,7 @@
 // constants) consumed by the Monitoring page sub-components. No
 // React, no fetches.
 
-import type { EvalHistoryItem, EvalRun, ModelUsageItem } from "./types"
+import type { EvalHistoryItem, EvalRun } from "./types"
 
 // Colour palettes
 
@@ -24,8 +24,6 @@ export const METRIC_BARS = [
   { key: "answer_relevance", label: "Answer Rel.", color: "#f59e0b" },
   { key: "context_precision", label: "Ctx Prec.", color: "#ec4899" },
 ]
-
-export const PIE_COLORS = ["#6366f1", "#0ea5e9", "#22c55e", "#f59e0b", "#ec4899"]
 
 export const EVAL_THRESHOLDS: Record<string, number> = {
   hit_rate_5: 0.6,
@@ -68,17 +66,17 @@ export function buildRagChartData(evalRuns: EvalRun[]) {
   }))
 }
 
-export function buildPieData(modelUsage: ModelUsageItem[]) {
-  const local = modelUsage
-    .filter((m) => m.model.startsWith("ollama/"))
-    .reduce((s, m) => s + m.call_count, 0)
-  const cloud = modelUsage
-    .filter((m) => !m.model.startsWith("ollama/"))
-    .reduce((s, m) => s + m.call_count, 0)
-  return [
-    { name: "Local (Ollama)", value: local },
-    { name: "Cloud", value: cloud },
-  ].filter((d) => d.value > 0)
+export function formatDuration(ms: number): string {
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)} min`
+  if (ms >= 1_000) return `${(ms / 1_000).toFixed(2)} s`
+  return `${ms.toFixed(1)} ms`
+}
+
+export function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 10_000) return `${(n / 1_000).toFixed(0)}k`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
 }
 
 // Score / mastery colour mappers

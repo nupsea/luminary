@@ -3142,7 +3142,7 @@ export interface paths {
         };
         /**
          * Get Phoenix Url
-         * @description Return the Phoenix UI URL and whether it is currently reachable.
+         * @description Return the Phoenix UI URL, whether tracing is configured, and reachability.
          */
         get: operations["get_phoenix_url_monitoring_phoenix_url_get"];
         put?: never;
@@ -3162,7 +3162,7 @@ export interface paths {
         };
         /**
          * Get Traces
-         * @description Return last 50 spans from Phoenix. Returns empty list if Phoenix is not running.
+         * @description Return recent spans from Phoenix. Returns empty list if Phoenix is not running.
          */
         get: operations["get_traces_monitoring_traces_get"];
         put?: never;
@@ -3245,6 +3245,28 @@ export interface paths {
          * @description Return eval metrics whose latest value dropped versus a moving baseline.
          */
         get: operations["get_eval_regressions_monitoring_evals_regressions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitoring/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metrics
+         * @description Operational metrics: latency/error/token stats from a sample of recent
+         *     Phoenix spans, plus a 7-day QA activity trend from SQLite (available even
+         *     when tracing is off).
+         */
+        get: operations["get_metrics_monitoring_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7937,8 +7959,35 @@ export interface components {
             model: string;
             /** Call Count */
             call_count: number;
-            /** Avg Latency Ms */
-            avg_latency_ms: number | null;
+        };
+        /** MonitoringMetrics */
+        MonitoringMetrics: {
+            /** Phoenix Available */
+            phoenix_available: boolean;
+            /** Spans Sampled */
+            spans_sampled: number;
+            /** Traces Sampled */
+            traces_sampled: number;
+            /** Latency P50 Ms */
+            latency_p50_ms: number | null;
+            /** Latency P95 Ms */
+            latency_p95_ms: number | null;
+            /** Error Count */
+            error_count: number;
+            /** Error Rate */
+            error_rate: number | null;
+            /** Llm Calls */
+            llm_calls: number;
+            /** Llm Prompt Tokens */
+            llm_prompt_tokens: number;
+            /** Llm Completion Tokens */
+            llm_completion_tokens: number;
+            /** Spans By Kind */
+            spans_by_kind: {
+                [key: string]: number;
+            };
+            /** Qa Daily */
+            qa_daily: components["schemas"]["QADailyCount"][];
         };
         /** MonitoringOverview */
         MonitoringOverview: {
@@ -7946,6 +7995,11 @@ export interface components {
             llm_status: string;
             /** Phoenix Running */
             phoenix_running: boolean;
+            /**
+             * Phoenix Configured
+             * @default false
+             */
+            phoenix_configured: boolean;
             /** Langfuse Configured */
             langfuse_configured: boolean;
             /** Total Documents */
@@ -7954,8 +8008,6 @@ export interface components {
             total_chunks: number;
             /** Qa Calls Today */
             qa_calls_today: number;
-            /** Avg Latency Ms */
-            avg_latency_ms: number | null;
         };
         /** NamingFixItem */
         NamingFixItem: {
@@ -8264,6 +8316,11 @@ export interface components {
             url: string;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
         };
         /** ProgressResponse */
         ProgressResponse: {
@@ -8286,6 +8343,13 @@ export interface components {
             deleted: number;
             /** Labels */
             labels: string[];
+        };
+        /** QADailyCount */
+        QADailyCount: {
+            /** Date */
+            date: string;
+            /** Count */
+            count: number;
         };
         /** QARequest */
         QARequest: {
@@ -9247,12 +9311,24 @@ export interface components {
             trace_id: string;
             /** Operation Name */
             operation_name: string;
+            /**
+             * Span Kind
+             * @default UNKNOWN
+             */
+            span_kind: string;
+            /** Parent Id */
+            parent_id?: string | null;
             /** Start Time */
             start_time: string;
             /** Duration Ms */
             duration_ms: number;
             /** Status */
             status: string;
+            /**
+             * Status Message
+             * @default
+             */
+            status_message: string;
             /** Attributes */
             attributes: {
                 [key: string]: unknown;
@@ -15008,7 +15084,9 @@ export interface operations {
     };
     get_traces_monitoring_traces_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15022,6 +15100,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TracesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15127,6 +15214,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_monitoring_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringMetrics"];
                 };
             };
         };
