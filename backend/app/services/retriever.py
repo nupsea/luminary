@@ -120,7 +120,7 @@ class HybridRetriever:
                     logger.debug("vector_search: LanceDB table empty, returning []")
                     return []
 
-            vector = _embedder_module.get_embedding_service().encode([query])[0]
+            vector = _embedder_module.embed_query(query)
             table = svc._get_table()
             search = table.search(vector).metric("cosine").limit(k)
             if document_ids:
@@ -529,7 +529,7 @@ class HybridRetriever:
             answer_doc_ids = list({c.document_id for c in chunks if c.document_id})
             if not answer_doc_ids:
                 return chunks, []
-            query_vector = _embedder_module.get_embedding_service().encode([query])[0]
+            query_vector = _embedder_module.embed_query(query)
             image_ids_vec = self._image_vector_search(
                 query_vector, answer_doc_ids, k=5, threshold=0.5
             )
