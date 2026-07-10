@@ -105,13 +105,19 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("keyword_index", state):
         try:
             async with get_session_factory()() as session:
-                # concatenate text || entities_text (when present) so FTS5 BM25
-                # matches canonical entity names even if the surface form differs.
+                # FTS text = context_header || text || entities_text (when each is
+                # present). The header lives out of chunks.text (kept off the
+                # embedding) but is still indexed for BM25 so section/title terms
+                # remain matchable; entities_text bridges canonical entity names.
                 await session.execute(
                     text(
                         "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
                         "SELECT rowid, "
-                        "       text || CASE "
+                        "       CASE "
+                        "         WHEN context_header IS NOT NULL AND context_header != '' "
+                        "         THEN context_header || ' ' "
+                        "         ELSE '' END "
+                        "       || text || CASE "
                         "         WHEN entities_text IS NOT NULL AND entities_text != '' "
                         "         THEN ' ' || entities_text "
                         "         ELSE '' END, "

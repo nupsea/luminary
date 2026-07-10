@@ -104,6 +104,12 @@ class ChunkModel(Base):
     # ("[Entities: A, B, C]"); concatenated into FTS5 text and embedding input,
     # not into the displayed text.
     entities_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "[Title > Section]" provenance header. Concatenated into FTS text (and
+    # available for display), but DELIBERATELY kept out of the embedding: a
+    # constant per-section prefix compresses the normalized bge-small space and
+    # measurably lowered dense recall (iceberg vector HR@5 .53->.43 with it in).
+    # Held here instead of in text so citations stay clean.
+    context_header: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
