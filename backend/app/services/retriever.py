@@ -33,11 +33,19 @@ RRF_K = 60
 _RERANK_DEPTH_MAX = 200
 
 
+def _minmax(xs: list[float]) -> list[float]:
+    lo, hi = min(xs), max(xs)
+    if hi - lo < 1e-9:
+        return [0.5 for _ in xs]
+    return [(x - lo) / (hi - lo) for x in xs]
+
+
 def _rerank_candidates(
     query: str,
     candidates: list[ScoredChunk],
     k: int,
     threshold: float | None = None,
+    blend_alpha: float | None = None,
 ) -> list[ScoredChunk]:
     """Re-score *candidates* with a cross-encoder and return the top *k*.
 
@@ -60,37 +68,48 @@ def _rerank_candidates(
     if not candidates:
         return candidates
     try:
-        scores = _get_reranker().score(query, [c.text for c in candidates])
+        ce = [float(s) for s in _get_reranker().score(query, [c.text for c in candidates])]
     except Exception as exc:
         logger.warning("rerank failed, falling back to RRF order: %s", exc)
         return candidates[:k]
 
-    rescored = [
-        ScoredChunk(
-            chunk_id=c.chunk_id,
-            document_id=c.document_id,
-            text=c.text,
-            section_heading=c.section_heading,
-            page=c.page,
-            score=s,
-            source=c.source,
-            chunk_index=c.chunk_index,
-            speaker=c.speaker,
-        )
-        for c, s in zip(candidates, scores, strict=True)
-    ]
-    rescored.sort(key=lambda c: c.score, reverse=True)
+    # blend_alpha convex-combines the RRF score (candidates still carry it here)
+    # with the CE score so a confident RRF hit resists a weak CE demotion.
+    # None => pure CE, identical to the historical behaviour.
+    if blend_alpha is not None:
+        rrf_n = _minmax([c.score for c in candidates])
+        ce_n = _minmax(ce)
+        final = [blend_alpha * rrf_n[i] + (1.0 - blend_alpha) * ce_n[i] for i in range(len(ce))]
+    else:
+        final = ce
+
+    order = sorted(range(len(candidates)), key=lambda i: final[i], reverse=True)
+    # The threshold is a precision cut on the CE logit's native scale, so it
+    # applies to CE regardless of how the ordering was scored.
     if threshold is not None:
-        kept = [c for c in rescored if c.score >= threshold]
-        if len(kept) < len(rescored):
+        kept = [i for i in order if ce[i] >= threshold]
+        if len(kept) < len(order):
             logger.info(
                 "rerank threshold %.2f cut %d/%d candidates",
                 threshold,
-                len(rescored) - len(kept),
-                len(rescored),
+                len(order) - len(kept),
+                len(order),
             )
-        rescored = kept or rescored[:1]
-    return rescored[:k]
+        order = kept or order[:1]
+    return [
+        ScoredChunk(
+            chunk_id=candidates[i].chunk_id,
+            document_id=candidates[i].document_id,
+            text=candidates[i].text,
+            section_heading=candidates[i].section_heading,
+            page=candidates[i].page,
+            score=final[i],
+            source=candidates[i].source,
+            chunk_index=candidates[i].chunk_index,
+            speaker=candidates[i].speaker,
+        )
+        for i in order[:k]
+    ]
 
 
 class HybridRetriever:
@@ -305,6 +324,7 @@ class HybridRetriever:
         rerank: bool = False,
         rerank_depth: int | None = None,
         rerank_threshold: float | None = None,
+        rerank_blend: float | None = None,
         graph_expand: bool = True,
         expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
@@ -368,6 +388,7 @@ class HybridRetriever:
         threshold = (
             rerank_threshold if rerank_threshold is not None else settings.RERANK_SCORE_THRESHOLD
         )
+        blend = rerank_blend if rerank_blend is not None else settings.RERANK_BLEND_ALPHA
 
         # graph_expand flows only into the dense vector search. Embeddings
         # reward semantic similarity, so appending canonical entity tokens
@@ -439,7 +460,7 @@ class HybridRetriever:
                 # that hallucinated vocabulary over the answer chunks. The
                 # original query is the user's authoritative intent.
                 results = await asyncio.to_thread(
-                    _rerank_candidates, query, results, k, threshold
+                    _rerank_candidates, query, results, k, threshold, blend
                 )
             if expand_context:
                 results = await _expand_context(results, k=k)
@@ -504,6 +525,7 @@ class HybridRetriever:
         rerank: bool = False,
         rerank_depth: int | None = None,
         rerank_threshold: float | None = None,
+        rerank_blend: float | None = None,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -520,6 +542,7 @@ class HybridRetriever:
                 rerank=rerank,
                 rerank_depth=rerank_depth,
                 rerank_threshold=rerank_threshold,
+                rerank_blend=rerank_blend,
             )
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
@@ -552,6 +575,7 @@ class HybridRetriever:
                 rerank=rerank,
                 rerank_depth=rerank_depth,
                 rerank_threshold=rerank_threshold,
+                rerank_blend=rerank_blend,
             )
             return chunks, []
 

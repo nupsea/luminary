@@ -192,6 +192,7 @@ def search_chunks(
     rerank: bool = False,
     rerank_depth: int | None = None,
     rerank_threshold: float | None = None,
+    rerank_blend: float | None = None,
     strategy: str = "rrf",
     limit: int | None = None,
     expand_context: bool = True,
@@ -218,6 +219,8 @@ def search_chunks(
             params["rerank_depth"] = str(rerank_depth)
         if rerank_threshold is not None:
             params["rerank_threshold"] = str(rerank_threshold)
+        if rerank_blend is not None:
+            params["rerank_blend"] = str(rerank_blend)
     if strategy != "rrf":
         params["strategy"] = strategy
     try:

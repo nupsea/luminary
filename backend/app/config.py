@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # score > 0). None/unset = no cut. The top candidate always survives so a
     # strict threshold degrades context, never empties it.
     RERANK_SCORE_THRESHOLD: float | None = None
+    # L2 funnel: convex blend of RRF and cross-encoder scores when reranking.
+    # final = alpha*norm(RRF) + (1-alpha)*norm(CE). Guards a confident RRF hit
+    # from a weak CE demotion (the MiniLM CE nets NEGATIVE HR@5 on some sets).
+    # None/0 = pure CE. 1 = pure RRF (no rerank effect). 0.7 chosen by sweep:
+    # HR@5 >= both rrf and pure-CE on iceberg/d2l/time_machine, best avg HR@5
+    # (.70) + MRR (.57), and it fixes the pure-CE negative-rerank regression on
+    # time_machine (.567 -> .700). Heavy RRF weight reflects a weak MiniLM CE.
+    RERANK_BLEND_ALPHA: float | None = 0.7
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

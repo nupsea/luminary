@@ -123,8 +123,10 @@ async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
         patch("app.services.retriever._get_reranker", return_value=mock_reranker),
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
+        # blend=0 isolates the pure cross-encoder ordering (the default blends
+        # with RRF); this asserts the CE reordering mechanics deterministically.
         results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, graph_expand=False
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.0, graph_expand=False
         )
 
     # Reranker should have been called once with the full RRF pool (50 chunks).
@@ -137,6 +139,30 @@ async def test_retrieve_with_rerank_invokes_reranker_and_returns_top_k():
     assert len(results) == 5
     assert results[0].chunk_id == "c49"
     assert results[-1].chunk_id == "c45"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rerank_blend_guards_confident_rrf_hit():
+    """A high blend weight lets a confident RRF hit survive a CE that would
+    otherwise demote it (the fix for pure-CE netting negative HR@5)."""
+    retriever = HybridRetriever()
+    # c0 is RRF's top hit; the CE ranks it LAST. With blend=0.7 (RRF-heavy) c0
+    # must still come out on top instead of being demoted.
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.01) for i in range(50)]
+    mock_reranker = MagicMock()
+    mock_reranker.score.return_value = [float(i) for i in range(len(pool))]
+
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._get_reranker", return_value=mock_reranker),
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.7, graph_expand=False
+        )
+
+    assert results[0].chunk_id == "c0"
 
 
 @pytest.mark.asyncio
