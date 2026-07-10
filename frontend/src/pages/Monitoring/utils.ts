@@ -70,6 +70,7 @@ export interface FunnelRow {
   dataset: string
   poolRecall: number | null
   rrf: number | null
+  rerankCe: number | null
   rerank: number | null
 }
 
@@ -108,11 +109,13 @@ export function buildFunnelData(evalRuns: EvalRun[]): {
       }
     }
     const rrfHr = m["rrf"]?.hit_rate_5
+    const ceHr = m["rrf+rerank-ce"]?.hit_rate_5
     const rerankHr = m["rrf+rerank"]?.hit_rate_5
     const rrf = typeof rrfHr === "number" ? rrfHr : null
+    const rerankCe = typeof ceHr === "number" ? ceHr : null
     const rerank = typeof rerankHr === "number" ? rerankHr : null
-    if (poolRecall == null && rrf == null && rerank == null) continue
-    rows.push({ dataset, poolRecall, rrf, rerank })
+    if (poolRecall == null && rrf == null && rerankCe == null && rerank == null) continue
+    rows.push({ dataset, poolRecall, rrf, rerankCe, rerank })
   }
   return { rows, poolDepth }
 }

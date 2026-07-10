@@ -32,9 +32,10 @@ export function EvalsTab() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-foreground">Retrieval Funnel</h2>
         <p className="text-xs text-muted-foreground">
-          L1 pool recall is what candidate generation hands the reranker; the fused and
-          reranked bars are the top-5 cut. A tall recall bar over a short rerank bar means
-          the ceiling is L2 (the cross-encoder), not L1. Latest ablation run per dataset.
+          L1 pool recall is what candidate generation hands the reranker; fused → CE-only →
+          blended are the top-5 cut. CE-only is the raw cross-encoder; blended (shipped) adds
+          the RRF/CE blend — the gap between them is what the blend buys. A tall recall bar
+          over a short rerank bar means the ceiling is L2, not L1. Latest ablation per dataset.
         </p>
         {evalRuns.loading ? (
           <SectionSkeleton rows={4} />

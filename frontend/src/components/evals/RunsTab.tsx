@@ -68,6 +68,12 @@ function rowView(run: EvalRunFull) {
       .filter((s) => arms[s] && shipped?.label !== s)
       .map((s) => `${s} ${pct(arms[s].hit_rate_5)}/${pct(arms[s].mrr)}`)
     if (others.length) details.push(others.join(" · "))
+    // Pure cross-encoder (blend=0) vs the shipped blended rrf+rerank in the
+    // HR@5 column: the gap is what the RRF/CE blend buys over CE alone.
+    const ce = arms["rrf+rerank-ce"]
+    if (ce && shipped?.label !== "rrf+rerank-ce") {
+      details.push(`CE-only ${pct(ce.hit_rate_5)}/${pct(ce.mrr)}`)
+    }
     // L1 recall ceiling: Recall@K of the raw RRF pool (no rerank). A flat
     // reranked HR@5 is ambiguous — this separates "gold missing from the pool"
     // (L1 problem) from "reranker failed to lift it" (L2 problem).

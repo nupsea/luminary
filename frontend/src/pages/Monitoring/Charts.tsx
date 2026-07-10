@@ -130,7 +130,8 @@ export function RetrievalFunnelChart({ evalRuns }: { evalRuns: EvalRun[] }) {
         <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="poolRecall" name={poolLabel} fill="#94a3b8" />
         <Bar dataKey="rrf" name="rrf HR@5 (fused)" fill="#3b82f6" />
-        <Bar dataKey="rerank" name="rrf+rerank HR@5 (shipped)" fill="#8b5cf6" />
+        <Bar dataKey="rerankCe" name="rrf+rerank HR@5 (CE-only)" fill="#c084fc" />
+        <Bar dataKey="rerank" name="rrf+rerank HR@5 (blended, shipped)" fill="#8b5cf6" />
       </BarChart>
     </ResponsiveContainer>
   )
