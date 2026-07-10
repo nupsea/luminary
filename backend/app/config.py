@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # (.70) + MRR (.57), and it fixes the pure-CE negative-rerank regression on
     # time_machine (.567 -> .700). Heavy RRF weight reflects a weak MiniLM CE.
     RERANK_BLEND_ALPHA: float | None = 0.7
+    # Cross-encoder used for L2 reranking. Swappable for A/B (e.g.
+    # cross-encoder/ms-marco-MiniLM-L-12-v2, BAAI/bge-reranker-v2-m3). A stronger
+    # CE may warrant a lower RERANK_BLEND_ALPHA.
+    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

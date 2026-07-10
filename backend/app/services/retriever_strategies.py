@@ -281,10 +281,13 @@ class _CrossEncoderReranker:
 
 
         settings = _config_module.get_settings()
-        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "ms-marco-minilm"
+        model_name = settings.RERANK_MODEL or _RERANK_MODEL
+        # Per-model cache subdir so switching models never mixes weights.
+        slug = model_name.rsplit("/", 1)[-1].lower()
+        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / slug
         cache_dir.mkdir(parents=True, exist_ok=True)
-        self._model = CrossEncoder(_RERANK_MODEL, cache_folder=str(cache_dir), device="cpu")
-        logger.info("Loaded cross-encoder reranker %s", _RERANK_MODEL)
+        self._model = CrossEncoder(model_name, cache_folder=str(cache_dir), device="cpu")
+        logger.info("Loaded cross-encoder reranker %s", model_name)
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         self._load()

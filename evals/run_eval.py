@@ -585,15 +585,18 @@ def main() -> None:
         source_to_doc_id[src] = doc_id
 
     if args.ablation:
-        # (label, search-strategy, rerank, rerank-depth). "rrf+rerank" is the
-        # full pipeline the user actually ships, so it belongs in the strategy
-        # breakdown.
+        # (label, search-strategy, rerank, rerank-depth, rerank-blend).
+        # "rrf+rerank" is the shipped pipeline (blend=None -> server default
+        # RERANK_BLEND_ALPHA). "rrf+rerank-ce" pins blend=0 to isolate the pure
+        # cross-encoder, so the run always records what the RRF/CE blend buys
+        # over CE alone -- the L2 analogue of the rrf-pool recall arm.
         strategy_specs = [
-            ("vector", "vector", False, None),
-            ("fts", "fts", False, None),
-            ("graph", "graph", False, None),
-            ("rrf", "rrf", False, None),
-            ("rrf+rerank", "rrf", True, args.rerank_depth),
+            ("vector", "vector", False, None, None),
+            ("fts", "fts", False, None, None),
+            ("graph", "graph", False, None, None),
+            ("rrf", "rrf", False, None, None),
+            ("rrf+rerank-ce", "rrf", True, args.rerank_depth, 0.0),
+            ("rrf+rerank", "rrf", True, args.rerank_depth, None),
         ]
         # Depth sweep arms measure the L2 recall ceiling directly: reranked
         # HR@5 is bounded by HR@depth of the RRF pool, so if HR@5 climbs with
@@ -601,9 +604,9 @@ def main() -> None:
         # were never in ANY leg's candidates and no L2 tuning can recover them.
         for depth_str in (s.strip() for s in args.rerank_depths.split(",") if s.strip()):
             depth = int(depth_str)
-            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth))
+            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth, None))
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for label, search_strategy, do_rerank, depth in strategy_specs:
+        for label, search_strategy, do_rerank, depth, blend in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -623,6 +626,7 @@ def main() -> None:
                     rerank=do_rerank or args.rerank,
                     rerank_depth=depth,
                     rerank_threshold=args.rerank_threshold,
+                    rerank_blend=blend,
                     strategy=search_strategy,
                 )
                 samples.append(
