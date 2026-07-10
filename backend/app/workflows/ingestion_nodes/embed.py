@@ -91,6 +91,24 @@ async def embed_node(state: IngestionState) -> IngestionState:
                     min(end_idx, len(lancedb_rows)),
                 )
 
+            # Integrity guard: a silent LanceDB write failure (e.g. a spill/IO
+            # error under concurrent ingestion -- LanceDB is single-writer) must
+            # NEVER leave a document marked complete with missing vectors. Verify
+            # the count, retry the upsert once, and fail the node loudly if it is
+            # still short so retrieval can't run against a half-indexed doc.
+            written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
+            if written != len(chunks):
+                logger.warning(
+                    "embed integrity: doc=%s vectors=%d != chunks=%d, retrying upsert",
+                    doc_id, written, len(chunks),
+                )
+                await asyncio.to_thread(lancedb_svc.upsert_chunks, lancedb_rows)
+                written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
+            if written != len(chunks):
+                msg = f"vector count {written} != chunk count {len(chunks)} after retry"
+                logger.error("embed integrity check FAILED: doc=%s %s", doc_id, msg)
+                return {**state, "status": "error", "error": msg}
+
             logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}
         except Exception as exc:
