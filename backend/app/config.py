@@ -53,17 +53,19 @@ class Settings(BaseSettings):
     # strict threshold degrades context, never empties it.
     RERANK_SCORE_THRESHOLD: float | None = None
     # L2 funnel: convex blend of RRF and cross-encoder scores when reranking.
-    # final = alpha*norm(RRF) + (1-alpha)*norm(CE). Guards a confident RRF hit
-    # from a weak CE demotion (the MiniLM CE nets NEGATIVE HR@5 on some sets).
-    # None/0 = pure CE. 1 = pure RRF (no rerank effect). 0.7 chosen by sweep:
-    # HR@5 >= both rrf and pure-CE on iceberg/d2l/time_machine, best avg HR@5
-    # (.70) + MRR (.57), and it fixes the pure-CE negative-rerank regression on
-    # time_machine (.567 -> .700). Heavy RRF weight reflects a weak MiniLM CE.
-    RERANK_BLEND_ALPHA: float | None = 0.7
-    # Cross-encoder used for L2 reranking. Swappable for A/B (e.g.
-    # cross-encoder/ms-marco-MiniLM-L-12-v2, BAAI/bge-reranker-v2-m3). A stronger
-    # CE may warrant a lower RERANK_BLEND_ALPHA.
-    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # final = alpha*norm(RRF) + (1-alpha)*norm(CE); None = pure CE. The blend
+    # existed to guard against a weak CE demoting confident RRF hits, but the
+    # 12-doc model x alpha sweep showed the guard is compensation for a weak
+    # model: with L-12, alpha 0/.2/.3 are indistinguishable (.693/.690/.691)
+    # and pure CE is best + simplest. Kept as a per-request knob
+    # (/search?rerank_blend=) for experiments, off by default.
+    RERANK_BLEND_ALPHA: float | None = None
+    # Cross-encoder for L2 reranking. L-12 chosen by the 12-doc sweep: best
+    # mean HR@5 (.693 vs L-6-best .688), passes the "no dataset >1 question
+    # below no-rerank" constraint that every low-alpha L-6 config fails
+    # (time_machine -2q), and fixes hamlet (.567 -> .667). Cost: rerank adds
+    # ~510ms/query on CPU vs ~250ms for L-6 -- quality/safety over speed.
+    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
     # Signal-adaptive blend: treat RERANK_BLEND_ALPHA as a CEILING and scale the
     # actual blend by cross-encoder confidence per query (guard-when-CE-weak).
     # Off by default while it's a prototype under evaluation.
