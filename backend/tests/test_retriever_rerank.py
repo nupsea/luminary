@@ -165,6 +165,23 @@ async def test_retrieve_rerank_blend_guards_confident_rrf_hit():
     assert results[0].chunk_id == "c0"
 
 
+def test_adaptive_alpha_scales_with_ce_confidence():
+    """guard-when-CE-weak: a peaked CE (clear winner) yields a low blend weight
+    (trust CE); a flat CE yields the full ceiling (fall back to RRF)."""
+    from app.services.retriever import _adaptive_alpha
+
+    # one score far above the rest -> confident -> alpha near 0
+    peaked = [10.0] + [0.0] * 20
+    assert _adaptive_alpha(peaked, 0.7) < 0.15
+    # all scores identical -> no signal -> full ceiling
+    flat = [1.0] * 20
+    assert _adaptive_alpha(flat, 0.7) == 0.7
+    # mildly separated -> intermediate
+    mid = [3.0] + [1.0] * 20
+    a = _adaptive_alpha(mid, 0.7)
+    assert 0.0 <= a <= 0.7
+
+
 @pytest.mark.asyncio
 async def test_retrieve_rerank_depth_controls_pool():
     """rerank_depth overrides the settings default for the cross-encoder pool."""

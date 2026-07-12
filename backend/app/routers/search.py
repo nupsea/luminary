@@ -52,6 +52,7 @@ async def search(
     rerank_depth: int | None = Query(default=None, ge=1, le=200),
     rerank_threshold: float | None = Query(default=None),
     rerank_blend: float | None = Query(default=None, ge=0.0, le=1.0),
+    rerank_adaptive: bool | None = Query(default=None),
     graph_expand: bool = Query(default=True),
     expand_context: bool = Query(default=True),
     strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
@@ -109,6 +110,7 @@ async def search(
         rerank_depth=rerank_depth,
         rerank_threshold=rerank_threshold,
         rerank_blend=rerank_blend,
+        rerank_adaptive=rerank_adaptive,
         graph_expand=graph_expand,
         expand_context=expand_context,
         strategy=strategy,  # type: ignore[arg-type]

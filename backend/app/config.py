@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # cross-encoder/ms-marco-MiniLM-L-12-v2, BAAI/bge-reranker-v2-m3). A stronger
     # CE may warrant a lower RERANK_BLEND_ALPHA.
     RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Signal-adaptive blend: treat RERANK_BLEND_ALPHA as a CEILING and scale the
+    # actual blend by cross-encoder confidence per query (guard-when-CE-weak).
+    # Off by default while it's a prototype under evaluation.
+    RERANK_BLEND_ADAPTIVE: bool = False
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

@@ -40,12 +40,38 @@ def _minmax(xs: list[float]) -> list[float]:
     return [(x - lo) / (hi - lo) for x in xs]
 
 
+# Signal-adaptive blend ("guard-when-CE-weak"). A fixed RRF-heavy alpha helps
+# only when the cross-encoder is weaker than RRF; a broad 12-doc sweep showed
+# it drags a *strong* CE down on most content. So instead of a constant alpha,
+# scale it by CE CONFIDENCE: when the top CE score sits many std devs above the
+# pool mean (a clear winner), trust the CE (alpha -> 0); when the CE scores are
+# flat/uncertain, fall back toward RRF (alpha -> alpha_max). z-score is scale-
+# invariant, so this needs no CE-model-specific threshold.
+_ADAPTIVE_Z_LOW = 1.0  # top CE this flat above the mean -> lean fully on RRF
+_ADAPTIVE_Z_HIGH = 3.0  # top CE this peaked -> trust CE, no RRF pull
+
+
+def _adaptive_alpha(ce: list[float], alpha_max: float) -> float:
+    n = len(ce)
+    if n < 3:
+        return alpha_max
+    mean = sum(ce) / n
+    std = (sum((x - mean) ** 2 for x in ce) / n) ** 0.5
+    if std < 1e-9:
+        return alpha_max
+    z = (max(ce) - mean) / std
+    t = (z - _ADAPTIVE_Z_LOW) / (_ADAPTIVE_Z_HIGH - _ADAPTIVE_Z_LOW)
+    t = max(0.0, min(1.0, t))
+    return alpha_max * (1.0 - t)
+
+
 def _rerank_candidates(
     query: str,
     candidates: list[ScoredChunk],
     k: int,
     threshold: float | None = None,
     blend_alpha: float | None = None,
+    adaptive: bool = False,
 ) -> list[ScoredChunk]:
     """Re-score *candidates* with a cross-encoder and return the top *k*.
 
@@ -77,9 +103,10 @@ def _rerank_candidates(
     # with the CE score so a confident RRF hit resists a weak CE demotion.
     # None => pure CE, identical to the historical behaviour.
     if blend_alpha is not None:
+        alpha = _adaptive_alpha(ce, blend_alpha) if adaptive else blend_alpha
         rrf_n = _minmax([c.score for c in candidates])
         ce_n = _minmax(ce)
-        final = [blend_alpha * rrf_n[i] + (1.0 - blend_alpha) * ce_n[i] for i in range(len(ce))]
+        final = [alpha * rrf_n[i] + (1.0 - alpha) * ce_n[i] for i in range(len(ce))]
     else:
         final = ce
 
@@ -325,6 +352,7 @@ class HybridRetriever:
         rerank_depth: int | None = None,
         rerank_threshold: float | None = None,
         rerank_blend: float | None = None,
+        rerank_adaptive: bool | None = None,
         graph_expand: bool = True,
         expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
@@ -389,6 +417,9 @@ class HybridRetriever:
             rerank_threshold if rerank_threshold is not None else settings.RERANK_SCORE_THRESHOLD
         )
         blend = rerank_blend if rerank_blend is not None else settings.RERANK_BLEND_ALPHA
+        adaptive = (
+            rerank_adaptive if rerank_adaptive is not None else settings.RERANK_BLEND_ADAPTIVE
+        )
 
         # graph_expand flows only into the dense vector search. Embeddings
         # reward semantic similarity, so appending canonical entity tokens
@@ -460,7 +491,7 @@ class HybridRetriever:
                 # that hallucinated vocabulary over the answer chunks. The
                 # original query is the user's authoritative intent.
                 results = await asyncio.to_thread(
-                    _rerank_candidates, query, results, k, threshold, blend
+                    _rerank_candidates, query, results, k, threshold, blend, adaptive
                 )
             if expand_context:
                 results = await _expand_context(results, k=k)
@@ -526,6 +557,7 @@ class HybridRetriever:
         rerank_depth: int | None = None,
         rerank_threshold: float | None = None,
         rerank_blend: float | None = None,
+        rerank_adaptive: bool | None = None,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -543,6 +575,7 @@ class HybridRetriever:
                 rerank_depth=rerank_depth,
                 rerank_threshold=rerank_threshold,
                 rerank_blend=rerank_blend,
+                rerank_adaptive=rerank_adaptive,
             )
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
@@ -576,6 +609,7 @@ class HybridRetriever:
                 rerank_depth=rerank_depth,
                 rerank_threshold=rerank_threshold,
                 rerank_blend=rerank_blend,
+                rerank_adaptive=rerank_adaptive,
             )
             return chunks, []
 
