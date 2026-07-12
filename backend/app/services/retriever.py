@@ -101,14 +101,20 @@ def _rerank_candidates(
 
     # blend_alpha convex-combines the RRF score (candidates still carry it here)
     # with the CE score so a confident RRF hit resists a weak CE demotion.
-    # None => pure CE, identical to the historical behaviour.
-    if blend_alpha is not None:
-        alpha = _adaptive_alpha(ce, blend_alpha) if adaptive else blend_alpha
+    # None == 0.0 == pure CE. Scores are ALWAYS minmax-normalised to [0, 1]:
+    # raw ms-marco logits are often negative, and downstream consumers assume
+    # non-negative scores -- _expand_context's `score * factor` neighbour
+    # discount silently PROMOTED neighbours above their reranked parents on
+    # negative logits, inverting the cross-encoder's ordering.
+    alpha = blend_alpha if blend_alpha is not None else 0.0
+    if adaptive:
+        alpha = _adaptive_alpha(ce, alpha)
+    ce_n = _minmax(ce)
+    if alpha > 0.0:
         rrf_n = _minmax([c.score for c in candidates])
-        ce_n = _minmax(ce)
         final = [alpha * rrf_n[i] + (1.0 - alpha) * ce_n[i] for i in range(len(ce))]
     else:
-        final = ce
+        final = ce_n
 
     order = sorted(range(len(candidates)), key=lambda i: final[i], reverse=True)
     # The threshold is a precision cut on the CE logit's native scale, so it

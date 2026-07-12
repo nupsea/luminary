@@ -43,9 +43,35 @@ def test_rerank_candidates_reorders_by_cross_encoder_score():
         result = _rerank_candidates("who is weena?", chunks, k=2)
 
     assert [c.chunk_id for c in result] == ["c2", "c3"]
-    assert result[0].score == pytest.approx(0.95)
-    assert result[1].score == pytest.approx(0.4)
+    # scores are minmax-normalised CE ([0.1, 0.95, 0.4] -> [0, 1, ~0.353]):
+    # non-negative by construction so downstream score arithmetic (expansion
+    # neighbour discount) can never invert the ordering.
+    assert result[0].score == pytest.approx(1.0)
+    assert result[1].score == pytest.approx((0.4 - 0.1) / (0.95 - 0.1))
     mock_reranker.score.assert_called_once()
+
+
+def test_rerank_blend_none_equals_zero_and_scores_nonnegative():
+    """blend=None must produce the same ordering as blend=0 (both pure CE),
+    with non-negative scores even when the CE emits raw NEGATIVE logits.
+    Regression: negative logits fed into _expand_context's neighbour discount
+    promoted neighbours above their reranked parents (score * 0.75 moves a
+    negative UP), silently inverting the cross-encoder's decision."""
+    chunks = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.1) for i in range(5)]
+    mock_reranker = MagicMock()
+    # realistic ms-marco logits: all negative, c3 is the CE's best
+    mock_reranker.score.return_value = [-4.2, -2.9, -6.1, -1.4, -3.3]
+
+    with patch("app.services.retriever._get_reranker", return_value=mock_reranker):
+        by_none = _rerank_candidates("q", chunks, k=5, blend_alpha=None)
+    mock_reranker.score.reset_mock()
+    mock_reranker.score.return_value = [-4.2, -2.9, -6.1, -1.4, -3.3]
+    with patch("app.services.retriever._get_reranker", return_value=mock_reranker):
+        by_zero = _rerank_candidates("q", chunks, k=5, blend_alpha=0.0)
+
+    assert [c.chunk_id for c in by_none] == [c.chunk_id for c in by_zero]
+    assert by_none[0].chunk_id == "c3"
+    assert all(c.score >= 0.0 for c in by_none)
 
 
 def test_rerank_candidates_falls_back_on_reranker_error():

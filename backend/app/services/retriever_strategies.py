@@ -243,7 +243,11 @@ async def _expand_context(
                 if neighbor_id == chunk.chunk_id:
                     continue
 
-                neighbor_score = chunk.score * _EXPANSION_SCORE_FACTOR
+                # Sign-safe discount: neighbours must rank BELOW their parent
+                # whatever the score's sign. A bare `score * factor` moves
+                # NEGATIVE scores UP (-2 * 0.75 = -1.5), promoting neighbours
+                # above the hits that earned their rank.
+                neighbor_score = chunk.score - abs(chunk.score) * (1 - _EXPANSION_SCORE_FACTOR)
                 existing = expanded_by_id.get(neighbor_id)
                 if existing is not None and existing.score >= neighbor_score:
                     continue
