@@ -117,12 +117,19 @@ def test_parse_real_conversation_fixture():
 
     result = up.parse(fixture_path, "txt")
     assert result is not None
-    # Check for speaker detection in headings (UniversalParser chat mode)
-    # The fixture is short (< 50 matches), so it won't be grouped.
-    # Actually, it's about 40 turns. Let's see.
-    assert len(result.sections) > 10
-    assert any("Alice:" in s.heading for s in result.sections)
-    assert any("Bob:" in s.heading for s in result.sections)
+    # ~47-turn transcript: must be grouped (Transcript Part N), NOT split into
+    # one "Speaker: utterance" heading per line. The ungrouped path stranded
+    # each utterance in a heading and left the body "(Empty Section)", losing
+    # ~98% of the content -- regression guard for that bug.
+    assert len(result.sections) <= 3
+    assert all("Transcript Part" in s.heading for s in result.sections)
+    assert not any(s.text.strip() == "(Empty Section)" for s in result.sections)
+    # utterances live in section BODIES now, so the content is retrievable
+    assert any("Alice:" in s.text for s in result.sections)
+    assert any("Bob:" in s.text for s in result.sections)
+    # substantially all of the source survives into section text
+    src_len = len(fixture_path.read_text())
+    assert sum(len(s.text) for s in result.sections) >= 0.9 * src_len
 
 
 def test_no_signature_returns_none(tmp_path):
