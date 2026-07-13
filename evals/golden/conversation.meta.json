@@ -1,0 +1,24 @@
+{
+  "name": "conversation",
+  "source_file": "DATA/conversations/engineering_sync.txt",
+  "generated_at": "2026-07-13T05:07:43.232131+00:00",
+  "generator_model": "openai/gpt-5.4",
+  "verify_models": [
+    "openai/gpt-5.1",
+    "ollama/qwen2.5:14b-instruct"
+  ],
+  "verify_axes": [
+    "answerable",
+    "answer_correct"
+  ],
+  "personas": [
+    "newcomer",
+    "practitioner",
+    "decision_maker",
+    "deep_diver",
+    "skeptic"
+  ],
+  "target": 30,
+  "accepted": 18,
+  "flagged": 0
+}
