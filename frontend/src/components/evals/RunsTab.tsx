@@ -93,6 +93,21 @@ function rowView(run: EvalRunFull) {
   if (run.eval_kind === "routing") {
     details.push(`routing ${pct(run.routing_accuracy)}`)
   }
+  if (run.eval_kind === "corpus_routing") {
+    // Unscoped "All documents" routing. HR@5 (the column) is corpus-wide and
+    // runs below scoped ablations by design; route@1/@5 = top-1/5 chunk is from
+    // the gold document. Typo variant (if run) shows spell-correction robustness.
+    config = "corpus-wide"
+    const parts = [
+      `route@1 ${pct(run.routing_accuracy)}`,
+      `route@5 ${pct(num(x.route_5))}`,
+    ]
+    const t1 = num(x.route_1_typo)
+    if (t1 != null) {
+      parts.push(`typo route@1 ${pct(t1)} · HR@5 ${pct(num(x.hr_5_typo))}`)
+    }
+    details.push(parts.join(" · "))
+  }
   if (run.eval_kind === "topic") {
     details.push(`F1 ${pct(num(x.topic_f1))} · junk ${pct(num(x.junk_rate))}`)
   }
@@ -242,6 +257,7 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
           <option value="retrieval">retrieval</option>
           <option value="topic">topic</option>
           <option value="routing">routing</option>
+          <option value="corpus_routing">corpus_routing</option>
           <option value="ablation">ablation</option>
           <option value="faithfulness">faithfulness</option>
           <option value="generation">generation</option>

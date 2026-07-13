@@ -35,6 +35,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "backend"):
         sys.path.insert(0, str(_p))
 
 from evals.lib.retrieval_metrics import _extract_hint_norms, _norm  # noqa: E402
+from evals.lib.store import store_results  # noqa: E402
 from evals.run_eval import (  # noqa: E402
     load_golden,
     load_golden_by_id,
@@ -106,6 +107,7 @@ def main():
     ap.add_argument("--datasets", required=True, help="comma-separated golden names or UUIDs")
     ap.add_argument("--backend-url", default="http://localhost:7820")
     ap.add_argument("--typo", action="store_true", help="also run a single-char-typo variant")
+    ap.add_argument("--no-store", action="store_true", help="don't persist runs to the backend")
     args = ap.parse_args()
 
     manifest = load_manifest()
@@ -122,13 +124,27 @@ def main():
                 print(f"{label:<20} (no usable rows)")
                 continue
             cells = []
+            scored = {}
             for arm in arms:
                 r1, r5, hr = eval_one(client, args.backend_url, rows, typo=(arm == "typo"))
+                scored[arm] = (r1, r5, hr)
                 agg[arm]["r1"].append(r1)
                 agg[arm]["r5"].append(r5)
                 agg[arm]["hr"].append(hr)
                 cells.append(f"{r1:.2f}/{r5:.2f}/{hr:.2f}")
             print(f"{label[:20]:<20} " + "        ".join(cells), flush=True)
+
+            if not args.no_store:
+                cr1, cr5, chr_ = scored["clean"]
+                # route@1 -> routing_accuracy (known column), HR@5 -> hit_rate_5;
+                # route@5 + the typo arm ride along in extra_metrics.
+                metrics = {"hit_rate_5": chr_, "routing_accuracy": cr1, "route_5": cr5,
+                           "n_questions": len(rows)}
+                if "typo" in scored:
+                    tr1, tr5, thr = scored["typo"]
+                    metrics.update({"route_1_typo": tr1, "route_5_typo": tr5, "hr_5_typo": thr})
+                store_results(args.backend_url, label, "no-llm", metrics,
+                              eval_kind="corpus_routing")
 
     print()
     for arm in arms:
