@@ -76,7 +76,6 @@ VALID_DATASETS = [
     "book",
     "book_time_machine",
     "book_alice",
-    "book_odyssey",
     "book_frankenstein",
     "d2l",
     "odyssey",

@@ -59,7 +59,7 @@ Located in `evals/golden/`. Each `.jsonl` has one JSON object per line:
 |---------|--------|-----------|
 | `book` | The Time Machine (H.G. Wells) | 30 |
 | `book_alice` | Alice in Wonderland | 20 |
-| `book_odyssey` | The Odyssey (Butler translation) | 20 |
+| `odyssey` | The Odyssey (Butler translation) — gpt-5.4 generated + cross-verified | 40 |
 | `d2l` | Dive into Deep Learning (CC-BY-SA 4.0) — technical reference corpus | ~50 |
 
 Documents are auto-ingested on first run and their IDs cached in `evals/golden/manifest.json`. Re-runs skip ingestion.

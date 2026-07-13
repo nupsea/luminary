@@ -90,6 +90,25 @@ def complete(model: str, prompt: str, *, timeout: float = 300.0) -> str:
     return resp.choices[0].message.content or ""
 
 
+_PG_START_RE = re.compile(r"\*\*\*\s*START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*", re.I)
+_PG_END_RE = re.compile(r"\*\*\*\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*", re.I)
+
+
+def strip_gutenberg_boilerplate(text: str) -> str:
+    """Cut the Project Gutenberg header/license via the standard markers.
+
+    Ingestion strips this boilerplate, so it never becomes retrievable chunks --
+    a golden question sampled from the license appendix is unfindable by
+    construction (the alice regeneration produced 12/40 such questions).
+    Keyed on the official PG markers only; a no-op for non-PG documents.
+    """
+    start = _PG_START_RE.search(text)
+    end = _PG_END_RE.search(text)
+    lo = start.end() if start else 0
+    hi = end.start() if end else len(text)
+    return text[lo:hi] if hi > lo else text
+
+
 def chunk_source(text: str, *, min_chars: int = 700, max_chars: int = 3000) -> list[str]:
     """Section-aware chunking: split on markdown headings, then pack paragraphs
     into windows. Falls back to paragraph packing for heading-less text."""
@@ -166,7 +185,7 @@ def main() -> None:
                     help="value written to each row's source_file (default: --source path)")
     args = ap.parse_args()
 
-    text = args.source.read_text(encoding="utf-8")
+    text = strip_gutenberg_boilerplate(args.source.read_text(encoding="utf-8"))
     source_label = args.source_file_label or str(args.source)
     chunks = [c for c in chunk_source(text) if not is_structural_chunk(c)]
     # Shuffle so a candidate cap doesn't bias the golden toward early chapters.

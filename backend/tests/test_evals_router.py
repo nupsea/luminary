@@ -157,7 +157,7 @@ async def test_post_run_invalid_dataset(test_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dataset", ["book_time_machine", "book_alice", "book_odyssey"])
+@pytest.mark.parametrize("dataset", ["book_time_machine", "book_alice", "odyssey"])
 async def test_post_run_per_book_dataset(test_db, monkeypatch, dataset):
     """POST /evals/run with per-book dataset names returns HTTP 202 when the JSONL file exists."""
     golden_dir = test_db / "golden"

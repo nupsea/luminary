@@ -10,7 +10,7 @@ export const DATASET_COLORS: Record<string, string> = {
   book: "#6366f1",
   book_time_machine: "#8b5cf6",
   book_alice: "#ec4899",
-  book_odyssey: "#f97316",
+  odyssey: "#f97316",
   paper: "#0ea5e9",
   notes: "#22c55e",
   conversation: "#f59e0b",
