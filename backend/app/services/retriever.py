@@ -567,6 +567,12 @@ class HybridRetriever:
                 )
             if expand_context:
                 results = await _expand_context(results, k=k)
+                # Context expansion pulls in ±1 neighbours by index, which can
+                # cross an entry-date boundary (a July entry's neighbour is the
+                # tail of a June entry). A temporal window is a hard boundary, so
+                # re-cut after expansion.
+                if date_filtering:
+                    results = await self._filter_by_entry_date(results, date_from, date_to)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
                 span.set_attribute("retrieval.top_score", round(results[0].score, 4))

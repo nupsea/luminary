@@ -119,6 +119,7 @@ async def search_node(state: ChatState) -> dict:
     # chunks whose content date falls inside it). Scoped queries already have an
     # explicit doc set, so we don't second-guess them.
     date_from = date_to = None
+    narrowed = False
     if scope != "single":
         filters = parse_query_filters(q)
         date_from, date_to = filters.date_from, filters.date_to
@@ -132,6 +133,7 @@ async def search_node(state: ChatState) -> dict:
                 typed_ids = [str(r[0]) for r in rows]
             if typed_ids:
                 effective_doc_ids = typed_ids
+                narrowed = True
         if filters.has_filter:
             logger.info(
                 "search_node: applied filters content_types=%s dates=%s..%s docs=%s",
@@ -148,8 +150,11 @@ async def search_node(state: ChatState) -> dict:
         len(effective_doc_ids) if effective_doc_ids else "all",
     )
 
-    # For library-wide queries use a tighter k to avoid scattered context
-    k = 6 if scope == "all" else 10
+    # For library-wide queries use a tighter k to avoid scattered context.
+    # But when content-type routing narrowed the corpus to a specific doc set
+    # ("my notes this month"), the user WANTS breadth within it -- treat it like
+    # a scoped read and pull a wider window.
+    k = 12 if narrowed else (6 if scope == "all" else 10)
 
     # L2 of the retrieval funnel: cross-encoder rerank of the RRF pool.
     # DB-backed toggle so users on slow CPUs can opt out; the reranker itself
@@ -220,8 +225,10 @@ async def search_node(state: ChatState) -> dict:
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
 
-    # For scope='all': cap at 2 chunks per document so no single doc dominates context
-    if scope == "all" and chunks_dicts:
+    # For scope='all': cap at 2 chunks per document so no single doc dominates
+    # context. Skip the cap when routing deliberately narrowed to a doc set --
+    # there the target doc SHOULD dominate.
+    if scope == "all" and chunks_dicts and not narrowed:
 
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
