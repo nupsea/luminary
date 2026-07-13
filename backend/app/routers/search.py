@@ -1,6 +1,7 @@
 """GET /search endpoint — hybrid cross-document search with grouping by document."""
 
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -14,6 +15,13 @@ from app.services.retriever import HybridRetriever, get_retriever
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+
+def _parse_date(s: str) -> date | None:
+    try:
+        return date.fromisoformat(s[:10]) if s else None
+    except ValueError:
+        return None
 
 
 class SearchResult(BaseModel):
@@ -54,6 +62,8 @@ async def search(
     rerank_blend: float | None = Query(default=None, ge=0.0, le=1.0),
     rerank_adaptive: bool | None = Query(default=None),
     spell_correct: bool | None = Query(default=None),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
     graph_expand: bool = Query(default=True),
     expand_context: bool = Query(default=True),
     strategy: str = Query(default="rrf", pattern="^(rrf|vector|fts|graph)$"),
@@ -113,6 +123,8 @@ async def search(
         rerank_blend=rerank_blend,
         rerank_adaptive=rerank_adaptive,
         spell_correct=spell_correct,
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
         graph_expand=graph_expand,
         expand_context=expand_context,
         strategy=strategy,  # type: ignore[arg-type]

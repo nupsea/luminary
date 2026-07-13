@@ -12,8 +12,9 @@ import time
 from sqlalchemy import and_, or_, select
 
 from app.database import get_session_factory
-from app.models import ChunkModel, SectionSummaryModel
+from app.models import ChunkModel, DocumentModel, SectionSummaryModel
 from app.services.context_packer import _cap_per_document
+from app.services.query_understanding import parse_query_filters
 from app.services.retriever import get_retriever
 from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
@@ -113,6 +114,33 @@ async def search_node(state: ChatState) -> dict:
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
 
+    # Corpus-wide queries carry their own routing: "my notes this month" names a
+    # content_type (-> narrow to those documents) and a time window (-> keep only
+    # chunks whose content date falls inside it). Scoped queries already have an
+    # explicit doc set, so we don't second-guess them.
+    date_from = date_to = None
+    if scope != "single":
+        filters = parse_query_filters(q)
+        date_from, date_to = filters.date_from, filters.date_to
+        if filters.content_types:
+            async with get_session_factory()() as session:
+                rows = await session.execute(
+                    select(DocumentModel.id).where(
+                        DocumentModel.content_type.in_(filters.content_types)
+                    )
+                )
+                typed_ids = [str(r[0]) for r in rows]
+            if typed_ids:
+                effective_doc_ids = typed_ids
+        if filters.has_filter:
+            logger.info(
+                "search_node: applied filters content_types=%s dates=%s..%s docs=%s",
+                filters.content_types,
+                date_from,
+                date_to,
+                len(effective_doc_ids) if effective_doc_ids else "all",
+            )
+
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
         q[:80],
@@ -140,7 +168,8 @@ async def search_node(state: ChatState) -> dict:
         retriever = get_retriever()
         chunks: list[ScoredChunk]
         chunks, image_ids = await retriever.retrieve_with_images(
-            q, effective_doc_ids, k=k, rerank=rerank
+            q, effective_doc_ids, k=k, rerank=rerank,
+            date_from=date_from, date_to=date_to,
         )
         logger.info(
             "[perf] search_node retrieve_with_images took %.2fs (%d chunks)",

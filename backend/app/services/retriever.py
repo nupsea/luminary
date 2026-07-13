@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date
 from typing import Literal
 
 from sqlalchemy import text
@@ -32,6 +33,13 @@ RRF_K = 60
 # in depth (~5ms/pair CPU), so an unbounded value turns /search into a DoS
 # vector against local CPUs.
 _RERANK_DEPTH_MAX = 200
+
+
+def _parse_iso_date(s: str) -> date | None:
+    try:
+        return date.fromisoformat(s[:10])
+    except (ValueError, TypeError):
+        return None
 
 
 def _minmax(xs: list[float]) -> list[float]:
@@ -348,6 +356,42 @@ class HybridRetriever:
             return candidates[:k]
         return _diversify(candidates, k)
 
+    async def _filter_by_entry_date(
+        self,
+        results: list[ScoredChunk],
+        date_from: date | None,
+        date_to: date | None,
+    ) -> list[ScoredChunk]:
+        """Keep only chunks whose content date (entry_date) falls in the range.
+        Undated chunks are DROPPED -- a temporal query wants dated content."""
+        if not results:
+            return results
+        ids = [c.chunk_id for c in results]
+        id_list = ", ".join(f"'{i}'" for i in ids)
+        async with get_session_factory()() as session:
+            rows = (
+                await session.execute(
+                    text(f"SELECT id, entry_date FROM chunks WHERE id IN ({id_list})")
+                )
+            ).fetchall()
+        dmap: dict[str, date] = {}
+        for cid, ed in rows:
+            if ed is None:
+                continue
+            d = ed if isinstance(ed, date) else _parse_iso_date(ed)
+            if d is not None:
+                dmap[cid] = d
+
+        def _ok(cid: str) -> bool:
+            d = dmap.get(cid)
+            if d is None:
+                return False
+            if date_from is not None and d < date_from:
+                return False
+            return not (date_to is not None and d > date_to)
+
+        return [c for c in results if _ok(c.chunk_id)]
+
     async def retrieve(
         self,
         query: str,
@@ -361,6 +405,8 @@ class HybridRetriever:
         rerank_blend: float | None = None,
         rerank_adaptive: bool | None = None,
         spell_correct: bool | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         graph_expand: bool = True,
         expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
@@ -430,6 +476,11 @@ class HybridRetriever:
             candidate_pool = max(k, 50)
         else:
             candidate_pool = max(k, 20)
+        # Deepen the pool when date-filtering so enough date-valid chunks
+        # survive the post-merge cut (the legs can't filter entry_date directly).
+        date_filtering = date_from is not None or date_to is not None
+        if date_filtering:
+            candidate_pool = min(max(candidate_pool, 60) * 2, _RERANK_DEPTH_MAX)
         threshold = (
             rerank_threshold if rerank_threshold is not None else settings.RERANK_SCORE_THRESHOLD
         )
@@ -491,7 +542,7 @@ class HybridRetriever:
             # cross-encoder can re-score them. Skip diversification regardless
             # of single-doc scope -- relevance reranking and section breadth
             # are orthogonal goals; mixing them dilutes the rerank signal.
-            merge_k = candidate_pool if rerank else k
+            merge_k = candidate_pool if (rerank or date_filtering) else k
             diversify = (not rerank) and (not scoped_single_doc)
             results = self.rrf_merge(
                 vector_results,
@@ -499,6 +550,10 @@ class HybridRetriever:
                 k=merge_k,
                 diversify=diversify,
             )
+            if date_filtering:
+                results = await self._filter_by_entry_date(results, date_from, date_to)
+                if not rerank:
+                    results = results[:k]
             if rerank:
                 # Use the original query (not the HyDE-augmented one) for the
                 # cross-encoder. Iteration 6 verified that passing the augmented
@@ -576,6 +631,8 @@ class HybridRetriever:
         rerank_blend: float | None = None,
         rerank_adaptive: bool | None = None,
         spell_correct: bool | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -595,6 +652,8 @@ class HybridRetriever:
                 rerank_blend=rerank_blend,
                 rerank_adaptive=rerank_adaptive,
                 spell_correct=spell_correct,
+                date_from=date_from,
+                date_to=date_to,
             )
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
@@ -630,6 +689,8 @@ class HybridRetriever:
                 rerank_blend=rerank_blend,
                 rerank_adaptive=rerank_adaptive,
                 spell_correct=spell_correct,
+                date_from=date_from,
+                date_to=date_to,
             )
             return chunks, []
 
