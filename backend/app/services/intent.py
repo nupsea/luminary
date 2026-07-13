@@ -183,6 +183,38 @@ _COMPARATIVE_KWS: frozenset[str] = frozenset(
     }
 )
 
+# Generative-synthesis requests ("write a kids story based on ...", "turn this
+# into a poem"). These match no question keyword and would otherwise fall to the
+# exploratory catch-all at 0.5, deferring to the LLM classifier -- which mislabels
+# them teach_back/notes and routes AWAY from retrieval, so the grounding content is
+# never fetched. They are open-ended generation grounded in the corpus: route to
+# search_node with confidence high enough to skip the LLM.
+_GENERATIVE_KWS: frozenset[str] = frozenset(
+    {
+        "write a",
+        "write an",
+        "write me",
+        "write us",
+        "generate a",
+        "generate an",
+        "create a",
+        "create an",
+        "compose a",
+        "compose an",
+        "compose me",
+        "make up a",
+        "make me a",
+        "draft a",
+        "draft an",
+        "draft me",
+        "turn this into",
+        "turn it into",
+        "turn these into",
+        "tell me a story",
+        "tell a story",
+    }
+)
+
 _FACTUAL_KWS: frozenset[str] = frozenset(
     {
         # Who
@@ -252,6 +284,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
       relational  confidence=0.85 — falls through to LLM classifier as a hint
       comparative confidence=0.85 — falls through to LLM classifier as a hint
       factual     confidence=0.8  — falls through to LLM classifier as a hint
+      generative  confidence=0.75 — "write a story based on ..." → search_node,
+                                     bypasses the LLM (which mislabels these)
       exploratory confidence=0.5 (catch-all) — falls through to LLM classifier
 
     Returns:
@@ -275,6 +309,8 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         return ("comparative", 0.85)
     if any(kw in q for kw in _FACTUAL_KWS):
         return ("factual", 0.8)
+    if any(kw in q for kw in _GENERATIVE_KWS):
+        return ("exploratory", 0.75)
     return ("exploratory", 0.5)
 
 
