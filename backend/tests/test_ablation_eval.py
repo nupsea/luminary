@@ -138,12 +138,13 @@ def test_run_eval_ablation_produces_five_metric_sets(monkeypatch):
 
     run_eval.main()
 
-    # rrf+rerank issues an extra search with strategy="rrf" (rerank=True), and
-    # the L1 pool-recall arm adds one more raw-rrf pass at the end.
-    assert strategies_seen == ["vector", "fts", "graph", "rrf", "rrf", "rrf"]
+    # Two rerank passes issue strategy="rrf" (rerank=True) -- rrf+rerank-ce
+    # (pure CE, blend=0) and the shipped rrf+rerank -- and the L1 pool-recall
+    # arm adds one more raw-rrf pass at the end.
+    assert strategies_seen == ["vector", "fts", "graph", "rrf", "rrf", "rrf", "rrf"]
     assert history_rows[0][0] == "ablation"
     assert set(history_rows[0][1]["ablation_metrics"]) == {
-        "vector", "fts", "graph", "rrf", "rrf+rerank", "rrf-pool",
+        "vector", "fts", "graph", "rrf", "rrf+rerank-ce", "rrf+rerank", "rrf-pool",
     }
     assert history_rows[0][1]["ablation_metrics"]["rrf-pool"] == {
         "recall_50": 1.0, "recall_100": 1.0, "recall_200": 1.0,
