@@ -146,6 +146,18 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
                 )
                 await session.commit()
             logger.info("FTS5 index populated", extra={"doc_id": doc_id})
+            # Forward-fill per-chunk content dates for temporal query filters.
+            # Non-fatal: a date-parse hiccup must not fail indexing.
+            try:
+                from app.services.content_dates import assign_entry_dates
+
+                async with get_session_factory()() as session:
+                    dated = await assign_entry_dates(session, doc_id)
+                    await session.commit()
+                if dated:
+                    logger.info("dated %d chunks", dated, extra={"doc_id": doc_id})
+            except Exception as exc:
+                logger.warning("entry_date assignment failed (non-fatal): %s", exc)
         except Exception as exc:
             logger.error("keyword_index_node failed", exc_info=exc)
         await _update_stage(doc_id, "indexing")

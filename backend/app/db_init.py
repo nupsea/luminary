@@ -231,6 +231,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE chunks ADD COLUMN entities_text TEXT",
             # [Title > Section] header: FTS/display only, kept out of the embedding
             "ALTER TABLE chunks ADD COLUMN context_header TEXT",
+            # content date (written-on), forward-filled, for temporal query filters
+            "ALTER TABLE chunks ADD COLUMN entry_date DATE",
             # cloze deletion text with {{term}} markers; null for non-cloze cards
             "ALTER TABLE flashcards ADD COLUMN cloze_text TEXT",
             # durable card->concept binding by stable slug (survives a concept rebuild)

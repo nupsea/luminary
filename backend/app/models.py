@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -110,6 +110,10 @@ class ChunkModel(Base):
     # measurably lowered dense recall (iceberg vector HR@5 .53->.43 with it in).
     # Held here instead of in text so citations stay clean.
     context_header: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Content date parsed from the chunk (forward-filled per entry) -- the date
+    # the text was WRITTEN, for temporal query filters ("notes from this month").
+    # Distinct from created_at (ingest time). Null when no date is detectable.
+    entry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
