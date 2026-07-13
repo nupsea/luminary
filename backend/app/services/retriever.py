@@ -7,6 +7,7 @@ from sqlalchemy import text
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
+from app.services import query_spellcorrect as _spellcorrect_module
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
@@ -359,6 +360,7 @@ class HybridRetriever:
         rerank_threshold: float | None = None,
         rerank_blend: float | None = None,
         rerank_adaptive: bool | None = None,
+        spell_correct: bool | None = None,
         graph_expand: bool = True,
         expand_context: bool = True,
         strategy: RetrievalStrategy = "rrf",
@@ -401,6 +403,15 @@ class HybridRetriever:
         without process restarts.
         """
         settings = _config_module.get_settings()
+        # Correct typo'd query tokens to their nearest corpus term BEFORE any
+        # leg runs, so a mistyped proper noun can't collapse corpus-wide search
+        # to the wrong documents. Threaded: the first call builds a vocab.
+        do_spell = spell_correct if spell_correct is not None else settings.QUERY_SPELL_CORRECT
+        if do_spell:
+            corrected = await asyncio.to_thread(_spellcorrect_module.correct_query, query)
+            if corrected != query:
+                logger.info("spell-corrected query: %r -> %r", query, corrected)
+                query = corrected
         scoped_single_doc = bool(document_ids) and len(document_ids or []) == 1
         # Widen the candidate pool when scoped to a single document. With a
         # cross-document corpus, 20+20 leaves enough headroom for RRF; with
@@ -564,6 +575,7 @@ class HybridRetriever:
         rerank_threshold: float | None = None,
         rerank_blend: float | None = None,
         rerank_adaptive: bool | None = None,
+        spell_correct: bool | None = None,
     ) -> tuple[list[ScoredChunk], list[str]]:
         """Hybrid retrieval returning chunks and matched image_ids.
 
@@ -582,6 +594,7 @@ class HybridRetriever:
                 rerank_threshold=rerank_threshold,
                 rerank_blend=rerank_blend,
                 rerank_adaptive=rerank_adaptive,
+                spell_correct=spell_correct,
             )
             # An image reference must come from a document that actually
             # contributed to the answer. For a library-wide query (document_ids
@@ -616,6 +629,7 @@ class HybridRetriever:
                 rerank_threshold=rerank_threshold,
                 rerank_blend=rerank_blend,
                 rerank_adaptive=rerank_adaptive,
+                spell_correct=spell_correct,
             )
             return chunks, []
 

@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # actual blend by cross-encoder confidence per query (guard-when-CE-weak).
     # Off by default while it's a prototype under evaluation.
     RERANK_BLEND_ADAPTIVE: bool = False
+    # Correct out-of-corpus query tokens to their nearest corpus token before
+    # retrieval (fixes typo'd proper nouns that collapse corpus-wide search to
+    # the wrong documents). Proven safe: full typo recovery, zero clean-query
+    # regression. Per-request override via /search?spell_correct=.
+    QUERY_SPELL_CORRECT: bool = True
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).
