@@ -30,6 +30,49 @@ L3  final re-ordering      (not built) MMR diversity, dedup, listwise polish
   are the current stand-ins; a real L3 would do MMR/dedup over the reranked
   list. Out of scope for the L2 branch.
 
+## Query understanding & corpus routing (pre-L1)
+
+Before the funnel ranks, a corpus-wide ("All documents") query is routed. These
+steps are deterministic and local-first (no LLM) and apply to any corpus -- they
+key off content-type strings and dated-entry structure, never a specific
+document.
+
+- **Spell correction** (`query_spellcorrect.py`). Out-of-vocabulary query tokens
+  (length >= 4) are corrected to the nearest corpus token by Norvig
+  edit-distance-1, frequency-ranked. A single mistyped proper noun otherwise
+  collapses an exact-match BM25 query to the wrong document. `QUERY_SPELL_CORRECT`
+  (default on); per-request `spell_correct=`.
+- **Query filters** (`query_understanding.py::parse_query_filters`). Extracts a
+  content-type set and a date window from natural language via keyword/regex
+  rules (`content_types`, `date_from`, `date_to`). A journal-style request
+  resolves to a content type (narrow to those documents) and a month window
+  (keep only chunks written in it) instead of running semantic search over the
+  raw phrase.
+- **Content dates** (`content_dates.py`). At ingest each chunk gets an
+  `entry_date` parsed from its own text and forward-filled -- but only for
+  documents that look like dated-entry logs (a density gate: enough directly
+  dated chunks, over a minimum fraction, across several distinct dates). This
+  keeps a stray reference date in a book from smearing across every chunk.
+- **Filtered retrieval.** `retrieve()` / `retrieve_with_images()` / `/search`
+  take `date_from`/`date_to`; `_filter_by_entry_date` drops undated and
+  out-of-range chunks after the RRF merge and again after context expansion (a
+  neighbour window can cross a date boundary). The candidate pool is deepened
+  when date-filtering so enough dated chunks survive the cut. In chat,
+  `search_node` applies the parsed filters on unscoped queries, resolving
+  content types to document IDs; when routing narrows to a doc set it widens `k`
+  and skips the per-document cap so the target document can dominate.
+- **Generative intent** (`intent.py`). A "write/generate/compose ... based on
+  ..." request matches no question keyword, so the heuristic would fall to the
+  low-confidence catch-all and defer to the LLM classifier -- which mislabels it
+  and routes away from retrieval, so the grounding content is never fetched. A
+  generative-verb rule classifies these at confidence >= 0.7 so they route
+  straight to `search_node`. (Note: generation of the creative output itself is
+  still extractive-QA style; a dedicated creative mode is future work.)
+
+The unscoped routing regime is measured by `evals/run_corpus_routing.py`
+(route@1 / route@5 / HR@5, with a `--typo` arm), persisted as
+`eval_kind=corpus_routing` and shown in the Quality Runs tab.
+
 ## L2 knobs
 
 | Knob | Default | Where |
