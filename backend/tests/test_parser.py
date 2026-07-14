@@ -1,7 +1,12 @@
 import pytest
 
-from app.services.parser import DocumentParser
-from app.types import ParsedDocument
+from app.services.parser import (
+    DocumentParser,
+    _heading_is_prose,
+    _norm_ws,
+    _sections_plausible,
+)
+from app.types import ParsedDocument, Section
 
 
 @pytest.fixture(scope="session")
@@ -104,3 +109,114 @@ def test_md_parse_detects_headings(parser, md_file):
     assert result.format == "md"
     headings = [s.heading for s in result.sections]
     assert "Title" in headings or "Background" in headings or "Methods" in headings
+
+
+@pytest.mark.parametrize(
+    "heading,expected",
+    [
+        ("Chapter 5 describes the foundations of machine learning", True),
+        ("Chapter 7 focuses on modern developments", True),
+        ("Chapter 11 along with some of their fundamental properties", True),
+        ("Part 3 are the same triangle", True),
+        ("volume 22 of Carus Mathematical Monographs", True),
+        ("Chapter 5. Machine Learning", False),
+        ("Chapter 5: Optimization", False),
+        ("Chapter 5 Machine Learning", False),
+        ("Chapter 1 — The Beginning", False),
+        ("CHAPTER I", False),
+        ("Introduction", False),
+        ("Methods", False),
+    ],
+)
+def test_heading_is_prose(heading, expected):
+    assert _heading_is_prose(heading) is expected
+
+
+def test_sections_plausible_rejects_all_prose():
+    secs = [
+        Section(heading=h, level=1, text="x", page_start=1, page_end=1)
+        for h in (
+            "Chapter 5 describes the foundations",
+            "Chapter 7 focuses on developments",
+            "Part 3 are the same triangle",
+        )
+    ]
+    assert _sections_plausible(secs) is False
+
+
+def test_sections_plausible_accepts_real_headings():
+    secs = [
+        Section(heading=h, level=1, text="x", page_start=1, page_end=1)
+        for h in ("Chapter 1 — The Beginning", "Chapter 2 — The Middle", "Chapter 3 — The End")
+    ]
+    assert _sections_plausible(secs) is True
+
+
+def test_sections_plausible_empty():
+    assert _sections_plausible([]) is False
+
+
+@pytest.fixture(scope="session")
+def prose_trap_pdf(tmp_fixtures):
+    """A PDF whose preface enumerates its own chapters in body font — the exact
+    trap that made chapter-regex matching produce prose-fragment headings."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+    path = tmp_fixtures / "prose_trap.pdf"
+    doc = SimpleDocTemplate(str(path), pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = [
+        Paragraph("Preface", styles["Heading1"]),
+        Paragraph(
+            "Chapter 5 describes the foundations of machine learning, both algorithms "
+            "for optimizing over given training examples and their analysis.",
+            styles["Normal"],
+        ),
+        Paragraph(
+            "Chapter 7 focuses on modern developments in understanding these methods.",
+            styles["Normal"],
+        ),
+        Paragraph(
+            "Part 3 discusses ranking and social choice as well as related problems.",
+            styles["Normal"],
+        ),
+        Paragraph("Introduction", styles["Heading1"]),
+        Paragraph(
+            "The real introduction body with enough content to fill a section.",
+            styles["Normal"],
+        ),
+        Paragraph("Methods", styles["Heading1"]),
+        Paragraph(
+            "This describes the actual methods used in this study in detail.",
+            styles["Normal"],
+        ),
+    ]
+    doc.build(elements)
+    return path
+
+
+def test_pdf_preface_prose_not_mistaken_for_headings(parser, prose_trap_pdf):
+    result = parser.parse(prose_trap_pdf, "pdf")
+    headings = [s.heading for s in result.sections]
+    assert not any(_heading_is_prose(h) for h in headings), headings
+    assert not any(h.lower().startswith("chapter 5 describes") for h in headings), headings
+    # Headings carry no multi-space runs (PyMuPDF span-join artifact).
+    assert not any("  " in h for h in headings), headings
+    # The real font-based headings survive.
+    joined = " ".join(headings).lower()
+    assert any(k in joined for k in ("introduction", "methods", "preface")), headings
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("The   Law   of   Large   Numbers", "The Law of Large Numbers"),
+        ("  Best Rank- k   Approximations ", "Best Rank- k Approximations"),
+        ("Singular\tValue\nDecomposition", "Singular Value Decomposition"),
+        ("Introduction", "Introduction"),
+    ],
+)
+def test_norm_ws(raw, expected):
+    assert _norm_ws(raw) == expected

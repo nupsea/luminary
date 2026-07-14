@@ -188,6 +188,21 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             extra={"doc_id": doc_id},
         )
 
+    # Persist parser word/page counts (chunk nodes only wrote chapter_count).
+    # pd is None for audio/video, which set word_count in transcribe.
+    pd = state.get("parsed_document")
+    if pd:
+        async with get_session_factory()() as session:
+            await session.execute(
+                _update(DocumentModel)
+                .where(DocumentModel.id == doc_id)
+                .values(
+                    word_count=pd.get("word_count") or 0,
+                    page_count=pd.get("pages") or 0,
+                )
+            )
+            await session.commit()
+
     # Phase 2: mark complete BEFORE creating background tasks.
     # asyncio.create_task schedules work that runs at the next await; if tasks
     # were created earlier, _dispatch_pending would race with this write for the
