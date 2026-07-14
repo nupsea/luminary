@@ -9,6 +9,7 @@ export const THRESHOLDS = {
   mrr: 0.35,
   ndcg_10: 0.4,
   faithfulness: 0.65,
+  answer_relevance: 0.5,
 } as const
 
 export function metricColor(v: number | null | undefined, threshold: number): string {

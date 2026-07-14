@@ -14,7 +14,7 @@ import {
 } from "./api"
 import type { GoldenDataset } from "./types"
 
-type Mode = "single" | "ablation"
+type Mode = "retrieval" | "generation" | "ablation"
 
 interface RunConsoleProps {
   datasets: GoldenDataset[]
@@ -49,17 +49,20 @@ export function RunConsole({
     return { generated, files, all: [...generated, ...files] }
   }, [datasets])
 
-  const [mode, setMode] = useState<Mode>("single")
+  const [mode, setMode] = useState<Mode>("retrieval")
   const [rerank, setRerank] = useState(false)
   const [judgeModel, setJudgeModel] = useState("")
   const [maxQuestions, setMaxQuestions] = useState(50)
+
+  const generation = mode === "generation"
+  const ablation = mode === "ablation"
 
   const modelsQuery = useQuery({
     queryKey: ["eval-models"],
     queryFn: fetchEvalModels,
     staleTime: 60_000,
   })
-  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — fast retrieval metrics")
+  const judgeOptions = judgeOptionsFrom(modelsQuery.data, "None — faithfulness only (no judge)")
 
   const fallback = options.all.find((o) => o.runnable) ?? options.all[0] ?? null
   const selected = value
@@ -70,15 +73,16 @@ export function RunConsole({
     : fallback
   const selection = selected?.sel ?? null
   const runnable = selected?.runnable ?? false
-  const external = isExternalJudge(judgeModel)
+  const external = generation && isExternalJudge(judgeModel)
 
   const runMutation = useMutation({
     mutationFn: async () => {
       if (!selection) throw new Error("Pick a dataset first")
       const payload = {
-        judge_model: mode === "ablation" ? "" : judgeModel,
-        rerank: mode === "single" ? rerank : false,
-        ablation: mode === "ablation",
+        judge_model: generation ? judgeModel : "",
+        rerank: ablation ? false : rerank,
+        ablation,
+        generate: generation,
         max_questions: maxQuestions,
       }
       const res =
@@ -97,13 +101,13 @@ export function RunConsole({
       return res.json()
     },
     onSuccess: () => {
-      const cfg =
-        mode === "ablation"
-          ? "strategy ablation"
-          : rerank
-            ? "rerank on"
-            : "rerank off"
-      const judge = judgeModel && mode === "single" ? ` · judge ${judgeModel.split("/").pop()}` : " · no judge"
+      const cfg = ablation
+        ? "strategy ablation"
+        : generation
+          ? `generation${rerank ? " · rerank on" : ""}`
+          : `retrieval${rerank ? " · rerank on" : ""}`
+      const judge =
+        generation && judgeModel ? ` · judge ${judgeModel.split("/").pop()}` : ""
       onStarted(`${selection?.name ?? ""} · ${cfg}${judge}`)
       toast.success("Eval started")
     },
@@ -169,7 +173,8 @@ export function RunConsole({
             value={mode}
             onChange={(e) => setMode(e.target.value as Mode)}
           >
-            <option value="single">Single run</option>
+            <option value="retrieval">Retrieval only — fast HR@5 / MRR</option>
+            <option value="generation">Generation — answers + faithfulness</option>
             <option value="ablation">Strategy ablation (vector/fts/graph/rrf/+rerank)</option>
           </select>
         </label>
@@ -177,14 +182,14 @@ export function RunConsole({
         <label className="grid gap-1 text-xs">
           <span
             className="font-medium text-muted-foreground"
-            title="When set, answers are generated live by the app QA pipeline and scored by this judge"
+            title="Optional. Faithfulness is scored without a judge; a judge adds answer relevance."
           >
-            Judge (generation){mode === "ablation" ? " — not used" : ""}
+            Judge (answer relevance){generation ? " — optional" : " — generation only"}
           </span>
           <select
             className="h-9 rounded-md border bg-background px-2 text-sm disabled:opacity-50"
-            value={mode === "ablation" ? "" : judgeModel}
-            disabled={mode === "ablation"}
+            value={generation ? judgeModel : ""}
+            disabled={!generation}
             onChange={(e) => setJudgeModel(e.target.value)}
           >
             {judgeOptions.map((m) => (
@@ -209,22 +214,29 @@ export function RunConsole({
         </label>
       </div>
 
-      {mode === "ablation" && judgeModel && (
-        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Ablation is retrieval-only — your judge selection ({judgeModel.split("/").pop()}) will
-          NOT be used and the run records no Faithfulness. Switch Mode to Single run to judge
-          generated answers.
+      {mode === "retrieval" && (
+        <div className="mt-2 rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Retrieval metrics only (HR@5 / MRR / nDCG). No answers are generated, so Faithfulness
+          is not scored — switch Mode to Generation for that.
         </div>
       )}
-      {mode === "single" && judgeModel && (
+      {generation && !judgeModel && (
         <div className="mt-2 rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          Judged run: every question gets a live /qa answer, then the judge scores it. With
-          local models expect roughly a minute per question — lower Max questions for a quick
+          Answers are generated live by the app QA pipeline, then scored for Faithfulness by the
+          local NLI model (HHEM) — deterministic, no LLM cost. Add a judge above for answer
+          relevance. Expect roughly a minute per question locally; lower Max questions for a quick
           read.
         </div>
       )}
+      {generation && judgeModel && (
+        <div className="mt-2 rounded-md border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Judged run: every question gets a live /qa answer, scored for Faithfulness (HHEM) plus
+          answer relevance by the judge. With local models expect roughly a minute per question —
+          lower Max questions for a quick read.
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-4">
-        {mode === "single" && (
+        {!ablation && (
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={rerank} onChange={(e) => setRerank(e.target.checked)} />
             Cross-encoder reranker

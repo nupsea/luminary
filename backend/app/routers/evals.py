@@ -153,6 +153,8 @@ class EvalRunRequest(BaseModel):
     max_questions: int | None = None
     rerank: bool = False
     ablation: bool = False
+    # App-default QA answers so faithfulness is scored without a judge.
+    generate: bool = False
 
 
 class EvalRunListItem(BaseModel):
@@ -255,6 +257,7 @@ class GeneratedRunRequest(BaseModel):
     max_questions: int | None = None
     rerank: bool = False
     ablation: bool = False
+    generate: bool = False
 
 
 class GeneratedRunResponse(BaseModel):
@@ -287,6 +290,7 @@ async def _run_eval_subprocess(
     rerank: bool = False,
     ablation: bool = False,
     model: str | None = None,
+    generate: bool = False,
 ) -> None:
     cmd = [
         "uv", "run", "python", "run_eval.py",
@@ -307,6 +311,8 @@ async def _run_eval_subprocess(
         cmd.append("--rerank")
     if ablation:
         cmd.append("--ablation")
+    if generate:
+        cmd.append("--generate")
     logger.info("eval subprocess starting: dataset=%s cmd=%s", dataset, cmd)
     error: str | None = None
     try:
@@ -341,8 +347,14 @@ async def _run_eval_subprocess(
         if error:
             await _persist_failed_run(
                 dataset,
-                model_used=judge_model or "no-llm",
-                eval_kind="ablation" if ablation else "generation" if judge_model else "retrieval",
+                model_used=judge_model or model or ("app-default" if generate else "no-llm"),
+                eval_kind=(
+                    "ablation"
+                    if ablation
+                    else "generation"
+                    if (judge_model or generate or model)
+                    else "retrieval"
+                ),
                 error=error,
             )
 
@@ -357,6 +369,7 @@ async def _run_generated_eval_subprocess(
     max_questions: int | None,
     rerank: bool = False,
     ablation: bool = False,
+    generate: bool = False,
 ) -> None:
     cmd = [
         "uv", "run", "python", "run_eval.py",
@@ -377,6 +390,8 @@ async def _run_generated_eval_subprocess(
         cmd.append("--rerank")
     if ablation:
         cmd.append("--ablation")
+    if generate:
+        cmd.append("--generate")
     logger.info("eval subprocess starting: dataset_id=%s cmd=%s", dataset_id, cmd)
     error: str | None = None
     try:
@@ -408,12 +423,12 @@ async def _run_generated_eval_subprocess(
         if error:
             await _persist_failed_run(
                 dataset_id,
-                model_used=model or judge_model or "no-llm",
+                model_used=model or judge_model or ("app-default" if generate else "no-llm"),
                 eval_kind=(
                     "ablation"
                     if ablation
                     else "generation"
-                    if (model or judge_model)
+                    if (model or judge_model or generate)
                     else "retrieval"
                 ),
                 error=error,
@@ -1001,6 +1016,7 @@ async def run_generated_dataset_eval(
             req.max_questions,
             rerank=req.rerank,
             ablation=req.ablation,
+            generate=req.generate,
         )
     )
     return GeneratedRunResponse(status="started", run_id=run_id, dataset_id=dataset_id)
@@ -1102,10 +1118,11 @@ async def run_eval(req: EvalRunRequest) -> dict:
             status_code=404,
             detail=f"Dataset '{req.dataset}' not found (missing {golden_file.name})",
         )
-    # Ablation is retrieval-only — it never calls a judge, so ignore any judge model.
+    # Ablation is retrieval-only — it never calls a judge or generates answers.
     if req.ablation:
         req.judge_model = ""
         req.model = None
+        req.generate = False
     settings = get_settings()
     for candidate in (req.judge_model, req.model):
         if candidate:
@@ -1129,6 +1146,7 @@ async def run_eval(req: EvalRunRequest) -> dict:
             req.rerank,
             req.ablation,
             req.model,
+            req.generate,
         )
     )
     logger.info(

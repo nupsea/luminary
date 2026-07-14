@@ -62,6 +62,67 @@ def _get_cached_embeddings() -> Any:
     return _CACHED_EMBEDDINGS
 
 
+# Default HHEM-2.1-Open; swap via FAITHFULNESS_MODEL env var.
+_HHEM_MODEL = "vectara/hallucination_evaluation_model"
+_faith_scorer: "_NliFaithfulnessScorer | None" = None
+
+
+def _models_cache_dir(model_name: str) -> Any:
+    # Same $DATA_DIR/models/<slug> tree as the reranker; standalone evals have no
+    # app config, so resolve DATA_DIR from env, falling back to backend/.luminary.
+    import os  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    repo_root = Path(__file__).resolve().parents[2]
+    data_dir = os.environ.get("LUMINARY_DATA_DIR") or str(repo_root / "backend" / ".luminary")
+    slug = model_name.rsplit("/", 1)[-1].lower()
+    cache_dir = Path(data_dir).expanduser() / "models" / slug
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+class _NliFaithfulnessScorer:
+    def __init__(self, model_name: str | None = None) -> None:
+        import os  # noqa: PLC0415
+
+        self._model: Any = None
+        self._model_name = model_name or os.environ.get("FAITHFULNESS_MODEL", _HHEM_MODEL)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        from transformers import AutoModelForSequenceClassification  # noqa: PLC0415
+
+        cache_dir = _models_cache_dir(self._model_name)
+        # trust_remote_code: HHEM ships a custom model class. Pin a revision if
+        # this ever runs outside the eval harness.
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            self._model_name,
+            trust_remote_code=True,
+            cache_dir=str(cache_dir),
+        )
+        print(f"Loaded NLI faithfulness model {self._model_name}", file=sys.stderr)
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Score (premise, hypothesis) pairs -> per-pair consistency in [0, 1]."""
+        if not pairs:
+            return []
+        self._load()
+        raw = self._model.predict(pairs)
+        return [float(s) for s in raw]
+
+
+def _get_faithfulness_scorer() -> _NliFaithfulnessScorer:
+    global _faith_scorer  # noqa: PLW0603
+    if _faith_scorer is None:
+        _faith_scorer = _NliFaithfulnessScorer()
+    return _faith_scorer
+
+
 class _BaseEval(ABC):
     eval_kind: str = "base"
 
@@ -102,6 +163,29 @@ class RetrievalEval(_BaseEval):
         }
 
 
+class NliFaithfulnessEval(_BaseEval):
+    """Deterministic NLI faithfulness (no judge): premise=context, hypothesis=answer."""
+
+    eval_kind = "generation"
+
+    def run(self, samples: list[dict], **kwargs) -> dict:
+        scored = [s for s in samples if s.get("answer", "").strip()]
+        if not scored:
+            return {"faithfulness": None, "faithfulness_model": None}
+        try:
+            scorer = _get_faithfulness_scorer()
+            pairs = [("\n".join(s.get("contexts") or []), s["answer"]) for s in scored]
+            values = scorer.score_pairs(pairs)
+            faith = sum(values) / len(values) if values else None
+            return {"faithfulness": faith, "faithfulness_model": scorer.model_name}
+        except Exception as exc:
+            print(
+                f"WARNING: NLI faithfulness failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return {"faithfulness": None, "faithfulness_model": None}
+
+
 _EMPTY_GENERATION_METRICS = {
     "faithfulness": None,
     "answer_relevance": None,
@@ -111,10 +195,7 @@ _EMPTY_GENERATION_METRICS = {
 
 
 class GenerationEval(_BaseEval):
-    """LLM-judge generation eval (faithfulness, answer relevance).
-
-    Implemented in S214 (RAGAS + local Ollama judge by default per I-16).
-    """
+    """LLM-judge answer relevance; faithfulness lives in NliFaithfulnessEval (include_faithfulness=True restores the RAGAS path)."""  # noqa: E501
 
     eval_kind = "generation"
 
@@ -193,7 +274,11 @@ class GenerationEval(_BaseEval):
 
             llm_wrapper = LangchainLLMWrapper(chat_llm)
             embed_wrapper = _get_cached_embeddings()
-            metrics_list = [faithfulness, answer_relevancy]
+            # NliFaithfulnessEval owns faithfulness; skip it here by default.
+            include_faithfulness: bool = bool(kwargs.get("include_faithfulness", False))
+            metrics_list = [answer_relevancy]
+            if include_faithfulness:
+                metrics_list.insert(0, faithfulness)
             if full_metrics:
                 metrics_list.extend([context_precision, context_recall])
             for metric in metrics_list:

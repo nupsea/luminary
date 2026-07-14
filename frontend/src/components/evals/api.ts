@@ -1,8 +1,8 @@
 import { apiGet } from "@/lib/apiClient"
 import type { GoldenDataset } from "./types"
 
-// Judge-model helpers shared by RunConsole and RunEvalDialog so the two run
-// surfaces can never disagree on which judges exist or count as external.
+// Judge-model helpers for the run console: which judges exist and which count
+// as external.
 export interface EvalModels {
   local: string[]
   frontier: string[]

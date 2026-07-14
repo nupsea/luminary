@@ -11,4 +11,5 @@ dependencies = [
     "langchain-ollama>=0.2.0",
     "langchain-huggingface>=0.1.0",
     "sentence-transformers>=3.0.0",
+    "transformers>=4.40,<5",  # HHEM remote code breaks on transformers 5.x
 ]

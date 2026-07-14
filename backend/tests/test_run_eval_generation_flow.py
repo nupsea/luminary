@@ -30,7 +30,26 @@ _GOLDEN = [
 ]
 
 
+class _FakeNliFaithfulness:
+    """Deterministic stand-in for the HHEM model so tests never download it.
+
+    Captures the samples it scored so a test can assert the NLI path also sees
+    generated answers (not golden ground truth).
+    """
+
+    scored_batches: list[list[dict]] = []
+
+    def run(self, samples, **kwargs):
+        answered = [s for s in samples if s.get("answer", "").strip()]
+        type(self).scored_batches.append(answered)
+        if not answered:
+            return {"faithfulness": None, "faithfulness_model": None}
+        return {"faithfulness": 0.95, "faithfulness_model": "fake/hhem"}
+
+
 def _wire_common(monkeypatch, history):
+    _FakeNliFaithfulness.scored_batches = []
+    monkeypatch.setattr(run_eval, "NliFaithfulnessEval", _FakeNliFaithfulness)
     monkeypatch.setattr(run_eval, "load_golden", lambda dataset: [dict(r) for r in _GOLDEN])
     monkeypatch.setattr(run_eval, "load_manifest", lambda: {})
     monkeypatch.setattr(
@@ -101,7 +120,12 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     assert metrics["answer_model"] == "app-default"
     assert metrics["qa_failed_calls"] == 0
     assert metrics["judge_failed_calls"] == 1
-    assert metrics["faithfulness"] == 0.9
+    # Faithfulness now comes from the deterministic NLI scorer, not the judge.
+    assert metrics["faithfulness"] == 0.95
+    assert metrics["faithfulness_model"] == "fake/hhem"
+    # NLI must score the live-generated answers, never the golden ground truth.
+    nli_answers = {s["answer"] for s in _FakeNliFaithfulness.scored_batches[-1]}
+    assert nli_answers == {"GENERATED::Q1", "GENERATED::Q2"}
     # hint one matches the search chunk, hint two does not: HR@5 = 1/2 either
     # way because retrieval metrics ignore the cited chunk.
     assert metrics["hit_rate_5"] == 0.5

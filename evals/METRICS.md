@@ -105,19 +105,21 @@ returned nothing RRF collapsed onto it; now that `fts` contributes, they diverge
 
 ---
 
-## 3. Generation metrics (RAGAS — local judge)
+## 3. Generation metrics
 
-Only computed when you pick a Judge model (defaults to *None — fast*, and the
-CLI `--judge-model` default is empty — judging is always opt-in). The judge is a
-**local Ollama model** (I-16); a frontier model is never used to score.
+All generation metrics score **real generated answers**: the eval calls
+`POST /qa` per question (the app's default QA pipeline, or `--model` to override)
+and scores *those* answers. The golden ground-truth answer is never scored —
+judging the golden against retrieved context would self-grade the dataset and
+trend to 100% by construction. Every generation run records `answer_model`
+("app-default" or the override) so the UI can distinguish real generation scores
+from legacy self-graded ones.
 
-**A judge always implies real generated answers.** Selecting a judge makes the
-eval call `POST /qa` per question (the app's default QA pipeline, or `--model`
-to override) and score *those* answers. The golden ground-truth answer is never
-fed to the judge — judging the golden against retrieved context would self-grade
-the dataset and trend to 100% by construction. Every generation run records
-`answer_model` ("app-default" or the override) so the UI can distinguish real
-generation scores from legacy self-graded ones.
+**Faithfulness uses a dedicated NLI model; the other metrics use a local judge.**
+Faithfulness is deterministic and always runs when answers exist. Answer
+relevance (and the optional context metrics) still use a **local Ollama judge**
+(I-16); a frontier model is never used to score, and the judge is opt-in via
+`--judge-model` (default empty).
 
 Small local judges are noisy — rows that fail JSON decoding are dropped and the
 score is the mean of successful rows. The run records `judge_failed_calls` /
@@ -125,11 +127,23 @@ score is the mean of successful rows. The run records `judge_failed_calls` /
 questions), and the Runs tab surfaces them instead of a silent n/a.
 
 ### Faithfulness
-- **Computed:** the judge decomposes the generated answer into atomic claims and
-  measures the fraction **supported by the retrieved context**.
+- **Computed:** a dedicated NLI consistency model (Vectara HHEM-2.1-Open by
+  default, `FAITHFULNESS_MODEL` to swap) scores `premise = joined retrieved
+  context` against `hypothesis = generated answer` → P(answer supported by
+  context), averaged over answers. **No LLM judge** — deterministic, fully local,
+  runs whenever real answers exist (independent of `--judge-model`). This is why
+  faithfulness now reliably appears instead of dropping to n/a on judge flakiness.
+  Weights are Apache-2.0, <600MB, CPU-friendly, cached under
+  `$DATA_DIR/models/<slug>` on first run; provenance is recorded as
+  `faithfulness_model` in `extra_metrics`. Loading uses `trust_remote_code=True`
+  (Vectara's official repo). Measures grounding in the retrieved context, not
+  world truth — a true-but-ungrounded claim scores low, which is correct.
 - **Signifies:** hallucination-freeness — is the answer grounded, not invented?
-- **Interpret:** 0–1. **Gate ≥ 0.65.** Low with a high HR@5 = the generator is
-  drifting from good context (a generation problem, not retrieval).
+- **Interpret:** 0–1. **Gate ≥ 0.65 is REPORT-ONLY** while HHEM is re-baselined —
+  its distribution differs from the old RAGAS judge (a clearly-supported claim
+  scores ~0.8, not ~1.0), so the gate must be re-derived from a labeled run before
+  it enforces. Low with a high HR@5 = the generator is drifting from good context
+  (a generation problem, not retrieval).
 
 ### Answer Relevance
 - **Computed:** the judge generates questions the answer would answer and measures
