@@ -19,6 +19,7 @@ export interface QaStreamRequest {
   model: string | null
   messages?: { role: "user" | "assistant"; content: string }[]
   web_enabled: boolean
+  creative?: boolean
 }
 
 export interface QaDoneEvent {

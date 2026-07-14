@@ -249,6 +249,7 @@ class LLMService:
         background: bool = False,
         response_format: dict | None = None,
         num_ctx: int | None = None,
+        temperature: float | None = None,
     ) -> str | AsyncGenerator[str]:
         messages: list[dict] = []
         if system:
@@ -256,7 +257,12 @@ class LLMService:
         messages.append({"role": "user", "content": prompt})
         if stream:
             return await self.stream_messages(
-                messages, model=model, background=background, timeout=timeout, num_ctx=num_ctx
+                messages,
+                model=model,
+                background=background,
+                timeout=timeout,
+                num_ctx=num_ctx,
+                temperature=temperature,
             )
         return await self.complete(
             messages,
@@ -265,6 +271,7 @@ class LLMService:
             timeout=timeout,
             response_format=response_format,
             num_ctx=num_ctx,
+            temperature=temperature,
         )
 
     async def _token_stream(self, kwargs: dict) -> AsyncGenerator[str]:

@@ -158,6 +158,28 @@ QA_SYSTEM_PROMPT = (
     '"confidence":"high|medium|low"}'
 )
 
+# Creative mode: opt-in via the UI toggle. Still grounded in the learner's own
+# retrieved material (synthesize_node returns not_found when nothing is retrieved),
+# but the model is licensed to invent narrative framing/voice and the sampling
+# temperature is raised. Deliberately omits the NOT_FOUND sentinel: creative
+# requests over real grounding should always produce a piece, not refuse.
+QA_CREATIVE_SYSTEM_PROMPT = (
+    "You are Lumen, an imaginative learning companion. The user wants a creative piece "
+    "(a story, poem, dialogue, analogy, or the like) grounded in their own material below. "
+    "Draw the facts, themes, characters, and details from the provided context. Invent the "
+    "narrative framing, structure, and voice freely -- but never invent facts that contradict "
+    "the material. Write vivid, engaging Markdown prose; be playful and original while staying "
+    "true to the source. "
+    "Then on a new line write this JSON: "
+    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
+    '"confidence":"high|medium|low"}'
+)
+
+# Higher sampling temperature for creative mode. Models that reject temperature
+# (e.g. gpt-5) drop it harmlessly via litellm.drop_params.
+QA_CREATIVE_TEMPERATURE = 0.85
+
+
 # Used only for factual intent: falls back to general knowledge with a disclaimer
 # when the document doesn't contain the answer.
 QA_FACTUAL_SYSTEM_PROMPT = (
@@ -382,6 +404,7 @@ class QAService:
         conversation_history: list[dict] | None = None,
         web_enabled: bool = False,
         socratic: bool = False,
+        creative: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -561,6 +584,13 @@ class QAService:
                 # called until iteration begins. The try/except must therefore cover both
                 # the generate() call AND the subsequent iteration loops.
                 system_prompt = result.get("_system_prompt") or ""
+                # Creative mode replaces the strict grounded prompt with the
+                # creative one and raises the temperature. The ground-truth path
+                # (creative=False) is untouched: same prompt, temperature=None.
+                llm_temperature: float | None = None
+                if creative and system_prompt:
+                    system_prompt = QA_CREATIVE_SYSTEM_PROMPT
+                    llm_temperature = QA_CREATIVE_TEMPERATURE
                 if socratic and system_prompt:
                     system_prompt = (
                         "Before answering, start with one probing question (1-2 sentences) "
@@ -582,6 +612,7 @@ class QAService:
                         model=model,
                         stream=True,
                         num_ctx=get_settings().QA_NUM_CTX,
+                        temperature=llm_temperature,
                     )
                     ttft_logged = False
 

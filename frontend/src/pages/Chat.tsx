@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Sparkles, Trash2, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -501,6 +501,7 @@ export default function Chat() {
   const llmMode = useAppStore((s) => s.llmMode)
   const [hydratingSession, setHydratingSession] = useState(false)
   const [webEnabled, setWebEnabled] = useState(false)
+  const [creativeEnabled, setCreativeEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -824,6 +825,7 @@ export default function Chat() {
           model: model || null,
           messages: historySlice.length > 0 ? historySlice : undefined,
           web_enabled: webEnabled,
+          creative: creativeEnabled,
         }),
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
@@ -1087,6 +1089,25 @@ export default function Chat() {
             effectiveDefault={effectiveModel}
           />
         )}
+
+        {/* Creative mode -- primary per-question toggle (grounded generative answers) */}
+        <button
+          onClick={() => setCreativeEnabled((prev) => !prev)}
+          aria-pressed={creativeEnabled}
+          title={
+            creativeEnabled
+              ? "Creative mode is on: imaginative answers grounded in your material. Click for strict, cited answers."
+              : "Creative mode: turn answers into stories, poems, and analogies grounded in your own material."
+          }
+          className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+            creativeEnabled
+              ? "border-purple-300 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300"
+              : "border-border text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          <Sparkles size={14} />
+          Creative
+        </button>
 
         {/* Web call counter -- shown when web is enabled and conversation is active */}
         {webEnabled && messages.length > 0 && (
