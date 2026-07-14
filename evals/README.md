@@ -59,7 +59,7 @@ Located in `evals/golden/`. Each `.jsonl` has one JSON object per line:
 |---------|--------|-----------|
 | `book` | The Time Machine (H.G. Wells) | 30 |
 | `book_alice` | Alice in Wonderland | 20 |
-| `book_odyssey` | The Odyssey (Butler translation) | 20 |
+| `odyssey` | The Odyssey (Butler translation) — gpt-5.4 generated + cross-verified | 40 |
 | `d2l` | Dive into Deep Learning (CC-BY-SA 4.0) — technical reference corpus | ~50 |
 
 Documents are auto-ingested on first run and their IDs cached in `evals/golden/manifest.json`. Re-runs skip ingestion.
@@ -120,7 +120,22 @@ The `--ablation` flag benchmarks each strategy independently:
 uv run python run_eval.py --dataset book --ablation
 ```
 
-Output shows HR@5 and MRR for `vector`, `fts`, `graph`, `rrf`, and `rrf+rerank` side by side.
+Output shows HR@5 and MRR for `vector`, `fts`, `graph`, `rrf`, `rrf+rerank-ce` (pure cross-encoder), and `rrf+rerank` (shipped) side by side, plus the raw-RRF `rrf-pool` recall@50/100/200.
+
+## Corpus-wide routing eval
+
+`--ablation` runs **scoped** (the gold document is pinned per question), so it measures chunk ranking *within* the right document and never tests whether retrieval picks the right document. Real "All documents" chat has no such luxury — a short query with one mistyped proper noun can collapse to the wrong corpus. `run_corpus_routing.py` measures that regime **unscoped**:
+
+```bash
+uv run --project backend python run_corpus_routing.py \
+    --datasets odyssey,book_frankenstein,paper,conversation,notes --typo
+```
+
+- `route@1` / `route@5` — top-1 / top-5 chunk is from the gold source document (did we route to the right doc?)
+- `HR@5` — gold hint in the top-5 chunks, corpus-wide
+- `--typo` — re-runs each question with a single-char deletion on its longest word (routing robustness). With `QUERY_SPELL_CORRECT` on (default) the typo gap should be near-zero.
+
+Corpus-wide numbers run well below scoped-ablation numbers — this is the least-hardened retrieval regime.
 
 ---
 

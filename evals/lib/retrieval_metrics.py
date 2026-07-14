@@ -63,6 +63,25 @@ def compute_hit_rate_5(samples: list[dict]) -> float:
     return hits / len(samples)
 
 
+def compute_recall_at(samples: list[dict], k: int) -> float:
+    """Recall@k: fraction of questions where ANY hint substring is in the top-k chunks.
+
+    Order-insensitive within the window -- this measures whether L1 surfaced
+    the gold passage at all, the recall ceiling no downstream layer can raise.
+    """
+    if not samples:
+        return 0.0
+    hits = 0
+    for s in samples:
+        hint_norms = _extract_hint_norms(s)
+        if not hint_norms:
+            continue
+        chunks = s.get("contexts", [])[:k]
+        if any(any(h in _norm(ctx) for h in hint_norms) for ctx in chunks):
+            hits += 1
+    return hits / len(samples)
+
+
 def compute_mrr(samples: list[dict]) -> float:
     """MRR@5: mean reciprocal rank of the FIRST chunk matching ANY hint.
 

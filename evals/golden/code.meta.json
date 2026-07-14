@@ -1,0 +1,24 @@
+{
+  "name": "code",
+  "source_file": "DATA/code/embedder.py",
+  "generated_at": "2026-07-13T05:15:44.531208+00:00",
+  "generator_model": "openai/gpt-5.4",
+  "verify_models": [
+    "openai/gpt-5.1",
+    "ollama/qwen2.5:14b-instruct"
+  ],
+  "verify_axes": [
+    "answerable",
+    "answer_correct"
+  ],
+  "personas": [
+    "newcomer",
+    "practitioner",
+    "decision_maker",
+    "deep_diver",
+    "skeptic"
+  ],
+  "target": 12,
+  "accepted": 5,
+  "flagged": 0
+}

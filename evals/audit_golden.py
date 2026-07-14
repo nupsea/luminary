@@ -20,7 +20,7 @@ Usage::
     cd evals
     uv run python audit_golden.py --dataset book_alice
     uv run python audit_golden.py --dataset book_time_machine --limit-chunks 50
-    uv run python audit_golden.py --dataset book_odyssey --backend-url http://localhost:7820
+    uv run python audit_golden.py --dataset odyssey --backend-url http://localhost:7820
     uv run python audit_golden.py --all  # every dataset listed in run_eval.VALID_DATASETS
 
 The shape of /search results, the manifest contract, and the hint-norm

@@ -1,0 +1,24 @@
+{
+  "name": "book_alice",
+  "source_file": "DATA/books/alice_in_wonderland.txt",
+  "generated_at": "2026-07-13T00:49:13.550606+00:00",
+  "generator_model": "openai/gpt-5.4",
+  "verify_models": [
+    "openai/gpt-5.1",
+    "ollama/qwen2.5:14b-instruct"
+  ],
+  "verify_axes": [
+    "answerable",
+    "answer_correct"
+  ],
+  "personas": [
+    "newcomer",
+    "practitioner",
+    "decision_maker",
+    "deep_diver",
+    "skeptic"
+  ],
+  "target": 40,
+  "accepted": 40,
+  "flagged": 2
+}

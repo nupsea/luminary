@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 BATCH_SIZE = 128  # Larger batches are more efficient for lighter models
 
+# bge-*-en-v1.5 is asymmetric: the query gets an instruction, the passage does
+# not. Passages are embedded via encode() (no prefix), so applying this to the
+# query side only aligns us with the model's s2p training WITHOUT re-indexing
+# the corpus. Omit it and dense retrieval silently underperforms lexical.
+QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
 
 _embedder_lock = threading.Lock()
 
@@ -93,3 +99,7 @@ def get_embedding_service() -> EmbeddingService:
     if _embedding_service is None:
         _embedding_service = EmbeddingService()
     return _embedding_service
+
+
+def embed_query(query: str) -> list[float]:
+    return get_embedding_service().encode([QUERY_INSTRUCTION + query])[0]

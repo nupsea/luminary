@@ -62,6 +62,9 @@ export interface AblationArm {
   hit_rate_5: number | null
   mrr: number | null
   ndcg_10?: number | null
+  // The "rrf-pool" arm carries L1 pool Recall@K instead of ranking metrics,
+  // one key per measured depth (recall_50, recall_100, ...).
+  [depth: `recall_${number}`]: number | null | undefined
 }
 
 export interface EvalRunFull {

@@ -43,6 +43,7 @@ from run_eval import (  # noqa: E402
     compute_hit_rate_5,
     compute_mrr,
     compute_ndcg_10,
+    compute_recall_at,
     split_rows_by_document_liveness,
     thresholds_for_dataset,
 )
@@ -132,6 +133,30 @@ def test_hit_rate_newline_in_chunk():
     chunk = "any\nreal body must have extension in four directions: it must have"
     samples = [_sample("q1", hint, [chunk])]
     assert compute_hit_rate_5(samples) == pytest.approx(1.0)
+
+
+# Recall@K tests (L1 pool recall)
+
+
+def test_recall_at_hit_inside_window():
+    """Hit at rank 7 counts for recall@10 but not recall@5."""
+    chunks = ["filler"] * 6 + ["the gold passage text"] + ["filler"] * 3
+    samples = [_sample("q1", "the gold passage text", chunks)]
+    assert compute_recall_at(samples, 5) == pytest.approx(0.0)
+    assert compute_recall_at(samples, 10) == pytest.approx(1.0)
+
+
+def test_recall_at_mixed():
+    """One hit inside the window, one gold absent entirely -> 0.5."""
+    samples = [
+        _sample("q1", "found passage", ["filler", "found passage here"]),
+        _sample("q2", "missing passage", ["unrelated"] * 50),
+    ]
+    assert compute_recall_at(samples, 50) == pytest.approx(0.5)
+
+
+def test_recall_at_empty_samples():
+    assert compute_recall_at([], 100) == pytest.approx(0.0)
 
 
 # MRR tests

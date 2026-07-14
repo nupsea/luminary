@@ -91,6 +91,24 @@ async def embed_node(state: IngestionState) -> IngestionState:
                     min(end_idx, len(lancedb_rows)),
                 )
 
+            # Integrity guard: a silent LanceDB write failure (e.g. a spill/IO
+            # error under concurrent ingestion -- LanceDB is single-writer) must
+            # NEVER leave a document marked complete with missing vectors. Verify
+            # the count, retry the upsert once, and fail the node loudly if it is
+            # still short so retrieval can't run against a half-indexed doc.
+            written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
+            if written != len(chunks):
+                logger.warning(
+                    "embed integrity: doc=%s vectors=%d != chunks=%d, retrying upsert",
+                    doc_id, written, len(chunks),
+                )
+                await asyncio.to_thread(lancedb_svc.upsert_chunks, lancedb_rows)
+                written = await asyncio.to_thread(lancedb_svc.count_for_document, doc_id)
+            if written != len(chunks):
+                msg = f"vector count {written} != chunk count {len(chunks)} after retry"
+                logger.error("embed integrity check FAILED: doc=%s %s", doc_id, msg)
+                return {**state, "status": "error", "error": msg}
+
             logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}
         except Exception as exc:
@@ -105,13 +123,19 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
     with trace_ingestion_node("keyword_index", state):
         try:
             async with get_session_factory()() as session:
-                # concatenate text || entities_text (when present) so FTS5 BM25
-                # matches canonical entity names even if the surface form differs.
+                # FTS text = context_header || text || entities_text (when each is
+                # present). The header lives out of chunks.text (kept off the
+                # embedding) but is still indexed for BM25 so section/title terms
+                # remain matchable; entities_text bridges canonical entity names.
                 await session.execute(
                     text(
                         "INSERT INTO chunks_fts(rowid, text, chunk_id, document_id) "
                         "SELECT rowid, "
-                        "       text || CASE "
+                        "       CASE "
+                        "         WHEN context_header IS NOT NULL AND context_header != '' "
+                        "         THEN context_header || ' ' "
+                        "         ELSE '' END "
+                        "       || text || CASE "
                         "         WHEN entities_text IS NOT NULL AND entities_text != '' "
                         "         THEN ' ' || entities_text "
                         "         ELSE '' END, "
@@ -122,6 +146,18 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
                 )
                 await session.commit()
             logger.info("FTS5 index populated", extra={"doc_id": doc_id})
+            # Forward-fill per-chunk content dates for temporal query filters.
+            # Non-fatal: a date-parse hiccup must not fail indexing.
+            try:
+                from app.services.content_dates import assign_entry_dates
+
+                async with get_session_factory()() as session:
+                    dated = await assign_entry_dates(session, doc_id)
+                    await session.commit()
+                if dated:
+                    logger.info("dated %d chunks", dated, extra={"doc_id": doc_id})
+            except Exception as exc:
+                logger.warning("entry_date assignment failed (non-fatal): %s", exc)
         except Exception as exc:
             logger.error("keyword_index_node failed", exc_info=exc)
         await _update_stage(doc_id, "indexing")

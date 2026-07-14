@@ -1,0 +1,24 @@
+{
+  "name": "notes",
+  "source_file": "DATA/notes/ml_notes.txt",
+  "generated_at": "2026-07-13T05:15:10.144273+00:00",
+  "generator_model": "openai/gpt-5.4",
+  "verify_models": [
+    "openai/gpt-5.1",
+    "ollama/qwen2.5:14b-instruct"
+  ],
+  "verify_axes": [
+    "answerable",
+    "answer_correct"
+  ],
+  "personas": [
+    "newcomer",
+    "practitioner",
+    "decision_maker",
+    "deep_diver",
+    "skeptic"
+  ],
+  "target": 20,
+  "accepted": 20,
+  "flagged": 0
+}

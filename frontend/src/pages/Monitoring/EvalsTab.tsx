@@ -4,7 +4,7 @@
 
 import { EvalTrendsPanel } from "@/components/EvalTrendsPanel"
 
-import { EvalHistorySparkline, RAGQualityChart } from "./Charts"
+import { EvalHistorySparkline, RAGQualityChart, RetrievalFunnelChart } from "./Charts"
 import { EvalPanel } from "./EvalPanel"
 import { EmptyState, SectionErrorCard, SectionSkeleton } from "./SharedUI"
 import { fetchEvalHistory, fetchEvalRuns } from "./api"
@@ -26,6 +26,23 @@ export function EvalsTab() {
           <SectionErrorCard name="RAG Quality" />
         ) : (
           <RAGQualityChart evalRuns={evalRuns.data} />
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-foreground">Retrieval Funnel</h2>
+        <p className="text-xs text-muted-foreground">
+          L1 pool recall is what candidate generation hands the reranker; fused → CE-only →
+          blended are the top-5 cut. CE-only is the raw cross-encoder; blended (shipped) adds
+          the RRF/CE blend — the gap between them is what the blend buys. A tall recall bar
+          over a short rerank bar means the ceiling is L2, not L1. Latest ablation per dataset.
+        </p>
+        {evalRuns.loading ? (
+          <SectionSkeleton rows={4} />
+        ) : evalRuns.error ? (
+          <SectionErrorCard name="Retrieval Funnel" />
+        ) : (
+          <RetrievalFunnelChart evalRuns={evalRuns.data} />
         )}
       </section>
 

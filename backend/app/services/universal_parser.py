@@ -373,8 +373,13 @@ class UniversalParser:
         if not matches:
             return []
 
-        # If it's a high-frequency chat, group turns into chunks
-        if sig.doc_type == "chat" and len(matches) > 50:
+        # Chat/transcript: group turns into chunks. The generic loop below
+        # treats each "Speaker: utterance" line as a HEADING (group 0) with an
+        # empty body, so single-line turns become "(Empty Section)" and the
+        # utterance is stranded in the heading -- a 40-turn transcript lost 98%
+        # of its content this way. Group whenever there is real turn structure;
+        # the >50 floor was far too high (missed any sub-50-turn transcript).
+        if sig.doc_type == "chat" and len(matches) >= 5:
             return self._segment_chat_grouped(text, matches)
 
         for i, m in enumerate(matches):

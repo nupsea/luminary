@@ -61,6 +61,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_hit_rate_5,
     compute_mrr,
     compute_ndcg_10,
+    compute_recall_at,
 )
 from evals.lib.runners import GenerationEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -75,7 +76,6 @@ VALID_DATASETS = [
     "book",
     "book_time_machine",
     "book_alice",
-    "book_odyssey",
     "book_frankenstein",
     "d2l",
     "odyssey",
@@ -189,25 +189,44 @@ def search_chunks(
     *,
     hyde: bool = False,
     rerank: bool = False,
+    rerank_depth: int | None = None,
+    rerank_threshold: float | None = None,
+    rerank_blend: float | None = None,
+    rerank_adaptive: bool = False,
     strategy: str = "rrf",
+    limit: int | None = None,
+    expand_context: bool = True,
 ) -> list[str]:
     """Run GET /search and return up to top-10 chunk texts.
 
     HR@5 and MRR@5 cap their own depth at 5; the extra tail exists for
-    nDCG@10.
+    nDCG@10. An explicit *limit* widens the window past 10 -- the pool-recall
+    arm needs the full ranked list to measure Recall@K.
     """
     params: dict[str, str] = {"q": question}
     if document_id:
         params["document_id"] = document_id
         params["limit"] = "20"
+    if limit is not None:
+        params["limit"] = str(limit)
+    if not expand_context:
+        params["expand_context"] = "false"
     if hyde:
         params["hyde"] = "true"
     if rerank:
         params["rerank"] = "true"
+        if rerank_depth is not None:
+            params["rerank_depth"] = str(rerank_depth)
+        if rerank_threshold is not None:
+            params["rerank_threshold"] = str(rerank_threshold)
+        if rerank_blend is not None:
+            params["rerank_blend"] = str(rerank_blend)
+        if rerank_adaptive:
+            params["rerank_adaptive"] = "true"
     if strategy != "rrf":
         params["strategy"] = strategy
     try:
-        request_timeout = 60.0 if (hyde or rerank) else 30.0
+        request_timeout = 60.0 if (hyde or rerank or limit) else 30.0
         resp = httpx.get(f"{backend_url}/search", params=params, timeout=request_timeout)
         resp.raise_for_status()
         body = resp.json()
@@ -222,7 +241,7 @@ def search_chunks(
             if document_id and group.get("document_id") != document_id:
                 continue
             all_matches.extend(group.get("matches", []))
-        return [m.get("text", "") for m in all_matches[:10]]
+        return [m.get("text", "") for m in all_matches[: limit or 10]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
@@ -283,12 +302,21 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     print(f"{'=' * 56}")
     print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10} {'NDCG@10':>10}")
     for strategy, metrics in ablation_metrics.items():
+        if strategy == "rrf-pool":
+            continue
         print(
             f"  {strategy:<12} "
             f"{metrics.get('hit_rate_5', 0.0):>10.4f} "
             f"{metrics.get('mrr', 0.0):>10.4f} "
             f"{metrics.get('ndcg_10', 0.0):>10.4f}"
         )
+    pool = ablation_metrics.get("rrf-pool")
+    if pool:
+        print(f"  {'-' * 52}")
+        print("  L1 pool recall (raw RRF, no rerank):")
+        for key in sorted(pool, key=lambda s: int(s.rsplit("_", 1)[1])):
+            depth = key.rsplit("_", 1)[1]
+            print(f"  {'recall@' + depth:<12} {pool[key]:>10.4f}")
     print(f"{'=' * 56}\n")
 
 
@@ -303,6 +331,7 @@ __all__ = [
     "VALID_DATASETS",
     "_extract_hint_norms",
     "_norm",
+    "compute_recall_at",
     "append_history",
     "compute_hit_rate_5",
     "compute_mrr",
@@ -425,6 +454,40 @@ def main() -> None:
         "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
     parser.add_argument(
+        "--rerank-depth",
+        type=int,
+        default=None,
+        dest="rerank_depth",
+        help="RRF candidate pool fed to the cross-encoder (backend default: 50).",
+    )
+    parser.add_argument(
+        "--rerank-threshold",
+        type=float,
+        default=None,
+        dest="rerank_threshold",
+        help="Drop reranked candidates below this cross-encoder logit (default: no cut).",
+    )
+    parser.add_argument(
+        "--rerank-depths",
+        default="",
+        dest="rerank_depths",
+        metavar="N,N,...",
+        help=(
+            "Ablation-only depth sweep: adds one rrf+rerank@N arm per value "
+            "(e.g. 25,50,100,200). Requires --ablation."
+        ),
+    )
+    parser.add_argument(
+        "--recall-depths",
+        default="50,100,200",
+        dest="recall_depths",
+        metavar="N,N,...",
+        help=(
+            "Ablation-only L1 pool recall: measures Recall@K of the raw RRF pool "
+            "(no rerank) at each depth (max 200). Pass an empty string to skip."
+        ),
+    )
+    parser.add_argument(
         "--judge-model",
         default="",
         dest="judge_model",
@@ -471,6 +534,10 @@ def main() -> None:
 
     if bool(args.dataset) == bool(args.dataset_id):
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
+        sys.exit(1)
+
+    if args.rerank_depths and not args.ablation:
+        print("ERROR: --rerank-depths requires --ablation", file=sys.stderr)
         sys.exit(1)
 
     # Auto-detect /api prefix so the harness works against prod backends too.
@@ -520,17 +587,28 @@ def main() -> None:
         source_to_doc_id[src] = doc_id
 
     if args.ablation:
-        # (label, search-strategy, rerank). "rrf+rerank" is the full pipeline the
-        # user actually ships, so it belongs in the strategy breakdown.
+        # (label, search-strategy, rerank, rerank-depth, rerank-blend).
+        # "rrf+rerank" is the shipped pipeline (blend=None -> server default
+        # RERANK_BLEND_ALPHA). "rrf+rerank-ce" pins blend=0 to isolate the pure
+        # cross-encoder, so the run always records what the RRF/CE blend buys
+        # over CE alone -- the L2 analogue of the rrf-pool recall arm.
         strategy_specs = [
-            ("vector", "vector", False),
-            ("fts", "fts", False),
-            ("graph", "graph", False),
-            ("rrf", "rrf", False),
-            ("rrf+rerank", "rrf", True),
+            ("vector", "vector", False, None, None),
+            ("fts", "fts", False, None, None),
+            ("graph", "graph", False, None, None),
+            ("rrf", "rrf", False, None, None),
+            ("rrf+rerank-ce", "rrf", True, args.rerank_depth, 0.0),
+            ("rrf+rerank", "rrf", True, args.rerank_depth, None),
         ]
+        # Depth sweep arms measure the L2 recall ceiling directly: reranked
+        # HR@5 is bounded by HR@depth of the RRF pool, so if HR@5 climbs with
+        # depth the gap is L1-reachable; if it plateaus the missing documents
+        # were never in ANY leg's candidates and no L2 tuning can recover them.
+        for depth_str in (s.strip() for s in args.rerank_depths.split(",") if s.strip()):
+            depth = int(depth_str)
+            strategy_specs.append((f"rrf+rerank@{depth}", "rrf", True, depth, None))
         ablation_metrics: dict[str, dict[str, float]] = {}
-        for label, search_strategy, do_rerank in strategy_specs:
+        for label, search_strategy, do_rerank, depth, blend in strategy_specs:
             samples: list[dict] = []
             for i, row in enumerate(rows, start=1):
                 question = row["question"]
@@ -548,6 +626,9 @@ def main() -> None:
                     doc_id,
                     hyde=args.hyde,
                     rerank=do_rerank or args.rerank,
+                    rerank_depth=depth,
+                    rerank_threshold=args.rerank_threshold,
+                    rerank_blend=blend,
                     strategy=search_strategy,
                 )
                 samples.append(
@@ -564,6 +645,41 @@ def main() -> None:
                 "hit_rate_5": compute_hit_rate_5(samples),
                 "mrr": compute_mrr(samples),
                 "ndcg_10": compute_ndcg_10(samples),
+            }
+
+        # L1 pool recall: Recall@K over the raw RRF pool (no rerank, no fixed-k
+        # cut). This is the funnel's recall ceiling stated directly -- a flat
+        # reranked HR@5 is ambiguous (gold missing from the pool vs. the
+        # cross-encoder failing to lift it); Recall@K separates the two.
+        recall_depths = sorted(
+            {min(int(d), 200) for d in (s.strip() for s in args.recall_depths.split(",")) if d}
+        )
+        if recall_depths:
+            pool_limit = max(recall_depths)
+            pool_samples: list[dict] = []
+            for i, row in enumerate(rows, start=1):
+                question = row["question"]
+                source_file = row.get("source_file", "")
+                doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
+                print(f"  [rrf-pool@{pool_limit} {i}/{len(rows)}] Searching: {question[:60]}...")
+                chunks = search_chunks(
+                    args.backend_url,
+                    question,
+                    doc_id,
+                    hyde=args.hyde,
+                    limit=pool_limit,
+                    expand_context=False,
+                )
+                pool_samples.append(
+                    {
+                        "question": question,
+                        "contexts": chunks or [""],
+                        "context_hint": row.get("context_hint", ""),
+                        "relevance": row.get("relevance") or [],
+                    }
+                )
+            ablation_metrics["rrf-pool"] = {
+                f"recall_{d}": compute_recall_at(pool_samples, d) for d in recall_depths
             }
 
         metrics = {"ablation_metrics": ablation_metrics}
@@ -603,7 +719,13 @@ def main() -> None:
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
         chunks = search_chunks(
-            args.backend_url, question, doc_id, hyde=args.hyde, rerank=args.rerank
+            args.backend_url,
+            question,
+            doc_id,
+            hyde=args.hyde,
+            rerank=args.rerank,
+            rerank_depth=args.rerank_depth,
+            rerank_threshold=args.rerank_threshold,
         )
 
         answer = ""
@@ -728,6 +850,10 @@ def main() -> None:
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
     }
+    if args.rerank and args.rerank_depth is not None:
+        metrics["rerank_depth"] = args.rerank_depth
+    if args.rerank and args.rerank_threshold is not None:
+        metrics["rerank_threshold"] = args.rerank_threshold
     if needs_qa:
         # Provenance: which model authored the judged answers. "app-default"
         # means the product's own /qa pipeline default -- the shipped path.

@@ -12,8 +12,9 @@ import time
 from sqlalchemy import and_, or_, select
 
 from app.database import get_session_factory
-from app.models import ChunkModel, SectionSummaryModel
+from app.models import ChunkModel, DocumentModel, SectionSummaryModel
 from app.services.context_packer import _cap_per_document
+from app.services.query_understanding import parse_query_filters
 from app.services.retriever import get_retriever
 from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
@@ -113,6 +114,35 @@ async def search_node(state: ChatState) -> dict:
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
 
+    # Corpus-wide queries carry their own routing: "my notes this month" names a
+    # content_type (-> narrow to those documents) and a time window (-> keep only
+    # chunks whose content date falls inside it). Scoped queries already have an
+    # explicit doc set, so we don't second-guess them.
+    date_from = date_to = None
+    narrowed = False
+    if scope != "single":
+        filters = parse_query_filters(q)
+        date_from, date_to = filters.date_from, filters.date_to
+        if filters.content_types:
+            async with get_session_factory()() as session:
+                rows = await session.execute(
+                    select(DocumentModel.id).where(
+                        DocumentModel.content_type.in_(filters.content_types)
+                    )
+                )
+                typed_ids = [str(r[0]) for r in rows]
+            if typed_ids:
+                effective_doc_ids = typed_ids
+                narrowed = True
+        if filters.has_filter:
+            logger.info(
+                "search_node: applied filters content_types=%s dates=%s..%s docs=%s",
+                filters.content_types,
+                date_from,
+                date_to,
+                len(effective_doc_ids) if effective_doc_ids else "all",
+            )
+
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
         q[:80],
@@ -120,10 +150,13 @@ async def search_node(state: ChatState) -> dict:
         len(effective_doc_ids) if effective_doc_ids else "all",
     )
 
-    # For library-wide queries use a tighter k to avoid scattered context
-    k = 6 if scope == "all" else 10
+    # For library-wide queries use a tighter k to avoid scattered context.
+    # But when content-type routing narrowed the corpus to a specific doc set
+    # ("my notes this month"), the user WANTS breadth within it -- treat it like
+    # a scoped read and pull a wider window.
+    k = 12 if narrowed else (6 if scope == "all" else 10)
 
-    # L3 of the retrieval funnel: cross-encoder rerank of the RRF pool.
+    # L2 of the retrieval funnel: cross-encoder rerank of the RRF pool.
     # DB-backed toggle so users on slow CPUs can opt out; the reranker itself
     # fails soft to plain RRF order, and so does this read.
     try:
@@ -140,7 +173,8 @@ async def search_node(state: ChatState) -> dict:
         retriever = get_retriever()
         chunks: list[ScoredChunk]
         chunks, image_ids = await retriever.retrieve_with_images(
-            q, effective_doc_ids, k=k, rerank=rerank
+            q, effective_doc_ids, k=k, rerank=rerank,
+            date_from=date_from, date_to=date_to,
         )
         logger.info(
             "[perf] search_node retrieve_with_images took %.2fs (%d chunks)",
@@ -191,8 +225,10 @@ async def search_node(state: ChatState) -> dict:
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
 
-    # For scope='all': cap at 2 chunks per document so no single doc dominates context
-    if scope == "all" and chunks_dicts:
+    # For scope='all': cap at 2 chunks per document so no single doc dominates
+    # context. Skip the cap when routing deliberately narrowed to a doc set --
+    # there the target doc SHOULD dominate.
+    if scope == "all" and chunks_dicts and not narrowed:
 
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 

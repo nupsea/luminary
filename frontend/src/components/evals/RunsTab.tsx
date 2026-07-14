@@ -1,10 +1,10 @@
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { metricColor, shippedAblationArm, THRESHOLDS } from "./thresholds"
-import type { EvalRunFull } from "./types"
+import type { AblationArm, EvalRunFull } from "./types"
 
 async function fetchEvalRuns(params: {
   dataset_name?: string
@@ -68,9 +68,45 @@ function rowView(run: EvalRunFull) {
       .filter((s) => arms[s] && shipped?.label !== s)
       .map((s) => `${s} ${pct(arms[s].hit_rate_5)}/${pct(arms[s].mrr)}`)
     if (others.length) details.push(others.join(" · "))
+    // Pure cross-encoder (blend=0) vs the shipped blended rrf+rerank in the
+    // HR@5 column: the gap is what the RRF/CE blend buys over CE alone.
+    const ce = arms["rrf+rerank-ce"]
+    if (ce && shipped?.label !== "rrf+rerank-ce") {
+      details.push(`CE-only ${pct(ce.hit_rate_5)}/${pct(ce.mrr)}`)
+    }
+    // L1 recall ceiling: Recall@K of the raw RRF pool (no rerank). A flat
+    // reranked HR@5 is ambiguous — this separates "gold missing from the pool"
+    // (L1 problem) from "reranker failed to lift it" (L2 problem).
+    const pool = arms["rrf-pool"]
+    if (pool) {
+      const depths = Object.keys(pool)
+        .filter((k) => k.startsWith("recall_"))
+        .map((k) => Number(k.slice("recall_".length)))
+        .filter((d) => Number.isFinite(d))
+        .sort((a, b) => a - b)
+      if (depths.length) {
+        const parts = depths.map((d) => `@${d} ${pct(pool[`recall_${d}`])}`).join(" / ")
+        details.push(`L1 pool recall ${parts}`)
+      }
+    }
   }
   if (run.eval_kind === "routing") {
     details.push(`routing ${pct(run.routing_accuracy)}`)
+  }
+  if (run.eval_kind === "corpus_routing") {
+    // Unscoped "All documents" routing. HR@5 (the column) is corpus-wide and
+    // runs below scoped ablations by design; route@1/@5 = top-1/5 chunk is from
+    // the gold document. Typo variant (if run) shows spell-correction robustness.
+    config = "corpus-wide"
+    const parts = [
+      `route@1 ${pct(run.routing_accuracy)}`,
+      `route@5 ${pct(num(x.route_5))}`,
+    ]
+    const t1 = num(x.route_1_typo)
+    if (t1 != null) {
+      parts.push(`typo route@1 ${pct(t1)} · HR@5 ${pct(num(x.hr_5_typo))}`)
+    }
+    details.push(parts.join(" · "))
   }
   if (run.eval_kind === "topic") {
     details.push(`F1 ${pct(num(x.topic_f1))} · junk ${pct(num(x.junk_rate))}`)
@@ -115,7 +151,69 @@ function rowView(run: EvalRunFull) {
   return { hr5, mrr, config, details: details.join(" · ") || "—" }
 }
 
+// Full ablation breakdown: every arm x {HR@5, MRR, nDCG@10} plus the L1 pool
+// recall curve. Rendered in an expandable row so no metric is stranded outside
+// the UI -- CE-only vs blended, the depth sweep, and nDCG are all inspectable.
+const ARM_ORDER = ["vector", "fts", "graph", "rrf", "rrf+rerank-ce", "rrf+rerank"]
+const ARM_LABEL: Record<string, string> = {
+  "rrf+rerank-ce": "rrf+rerank (CE-only)",
+  "rrf+rerank": "rrf+rerank (blended, shipped)",
+}
+
+function AblationDetail({ run }: { run: EvalRunFull }) {
+  const arms = run.ablation_metrics ?? {}
+  const depthArms = Object.keys(arms)
+    .filter((k) => /^rrf\+rerank@\d+$/.test(k))
+    .sort((a, b) => Number(a.split("@")[1]) - Number(b.split("@")[1]))
+  const armKeys = [...ARM_ORDER.filter((k) => arms[k]), ...depthArms]
+  const pool = arms["rrf-pool"] as AblationArm | undefined
+  const depths = pool
+    ? Object.keys(pool)
+        .filter((k) => k.startsWith("recall_"))
+        .map((k) => Number(k.slice("recall_".length)))
+        .filter((d) => Number.isFinite(d))
+        .sort((a, b) => a - b)
+    : []
+
+  if (!armKeys.length && !depths.length) {
+    return <div className="p-3 text-xs text-muted-foreground">No ablation metrics recorded.</div>
+  }
+  return (
+    <div className="overflow-x-auto p-3">
+      <table className="text-xs">
+        <thead>
+          <tr className="text-left text-muted-foreground">
+            <th className="py-1 pr-6 font-medium">Retrieval arm</th>
+            <th className="py-1 pr-6 font-medium">HR@5</th>
+            <th className="py-1 pr-6 font-medium">MRR@5</th>
+            <th className="py-1 pr-6 font-medium">nDCG@10</th>
+          </tr>
+        </thead>
+        <tbody>
+          {armKeys.map((k) => (
+            <tr key={k} className="border-t border-border/50">
+              <td className="py-1 pr-6">{ARM_LABEL[k] ?? k}</td>
+              <td className="py-1 pr-6">{pct(arms[k].hit_rate_5)}</td>
+              <td className="py-1 pr-6">{pct(arms[k].mrr)}</td>
+              <td className="py-1 pr-6">{pct(arms[k].ndcg_10)}</td>
+            </tr>
+          ))}
+          {depths.length > 0 && (
+            <tr className="border-t border-border/50">
+              <td className="py-1 pr-6 text-muted-foreground">L1 pool recall (raw RRF)</td>
+              <td className="py-1 pr-6 text-muted-foreground" colSpan={3}>
+                {depths.map((d) => `@${d} ${pct(pool?.[`recall_${d}`])}`).join("  ·  ")}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function RunsTab({ polling = false }: { polling?: boolean }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [datasetFilter, setDatasetFilter] = useState("")
   const [kindFilter, setKindFilter] = useState("")
   const [modelFilter, setModelFilter] = useState("")
@@ -159,6 +257,7 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
           <option value="retrieval">retrieval</option>
           <option value="topic">topic</option>
           <option value="routing">routing</option>
+          <option value="corpus_routing">corpus_routing</option>
           <option value="ablation">ablation</option>
           <option value="faithfulness">faithfulness</option>
           <option value="generation">generation</option>
@@ -215,12 +314,24 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
             <tbody>
               {query.data.map((run) => {
                 const view = rowView(run)
+                const expandable = run.eval_kind === "ablation" && run.ablation_metrics != null
+                const expanded = expandedId === run.id
                 return (
-                  <tr key={run.id} className="border-b last:border-0">
+                  <Fragment key={run.id}>
+                  <tr
+                    className={cn(
+                      "border-b last:border-0",
+                      expandable && "cursor-pointer hover:bg-muted/40",
+                    )}
+                    onClick={expandable ? () => setExpandedId(expanded ? null : run.id) : undefined}
+                  >
                     {/* dataset names are plain slugs — stripMarkdown would eat their underscores.
                         Generated-dataset runs store the dataset id in dataset_name; the
                         backend-resolved label keeps the table human-readable. */}
-                    <td className="py-2 pr-3">{run.dataset_label ?? run.dataset_name}</td>
+                    <td className="py-2 pr-3">
+                      {expandable && <span className="mr-1 inline-block w-3 text-muted-foreground">{expanded ? "▾" : "▸"}</span>}
+                      {run.dataset_label ?? run.dataset_name}
+                    </td>
                     <td className="py-2 pr-3 text-muted-foreground">
                       {run.status === "failed" ? (
                         <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
@@ -258,6 +369,14 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                       {view.details}
                     </td>
                   </tr>
+                  {expandable && expanded && (
+                    <tr className="border-b bg-muted/20 last:border-0">
+                      <td colSpan={8} className="p-0">
+                        <AblationDetail run={run} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

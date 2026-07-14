@@ -23,6 +23,7 @@ import type { EvalHistoryItem, EvalRun, PhoenixUrl, QADailyCount } from "./types
 import {
   DATASET_COLORS,
   METRIC_BARS,
+  buildFunnelData,
   buildRagChartData,
   buildSparklineData,
 } from "./utils"
@@ -106,6 +107,31 @@ export function RAGQualityChart({ evalRuns }: { evalRuns: EvalRun[] }) {
         {METRIC_BARS.map((m) => (
           <Bar key={m.key} dataKey={m.key} name={m.label} fill={m.color} />
         ))}
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function RetrievalFunnelChart({ evalRuns }: { evalRuns: EvalRun[] }) {
+  const { rows, poolDepth } = buildFunnelData(evalRuns)
+  if (rows.length === 0) {
+    return (
+      <EmptyState message="No ablation runs yet. Run an ablation eval (with L1 pool recall) to populate." />
+    )
+  }
+  const poolLabel = `L1 pool recall${poolDepth ? `@${poolDepth}` : ""}`
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={rows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+        <XAxis dataKey="dataset" tick={{ fontSize: 11 }} />
+        <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} />
+        <Tooltip formatter={(v) => (typeof v === "number" ? v.toFixed(3) : (v ?? "—"))} />
+        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="poolRecall" name={poolLabel} fill="#94a3b8" />
+        <Bar dataKey="rrf" name="rrf HR@5 (fused)" fill="#3b82f6" />
+        <Bar dataKey="rerankCe" name="rrf+rerank HR@5 (CE-only)" fill="#c084fc" />
+        <Bar dataKey="rerank" name="rrf+rerank HR@5 (blended, shipped)" fill="#8b5cf6" />
       </BarChart>
     </ResponsiveContainer>
   )

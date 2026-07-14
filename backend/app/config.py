@@ -42,6 +42,39 @@ class Settings(BaseSettings):
     # the answer carries a trailing citations JSON with excerpts. At 2048 the
     # generation hit done_reason=length mid-JSON, losing answers entirely.
     QA_NUM_CTX: int = 4096
+    # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
+    # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
+    # recall lever L2 owns; cross-encoder latency scales linearly with it
+    # (~5ms/pair CPU). Tune via evals `--rerank-depths` sweep before changing.
+    RERANK_DEPTH: int = 50
+    # L2 funnel: minimum cross-encoder logit to keep a candidate (ms-marco
+    # MiniLM logits are unbounded, roughly -11..+11; relevant pairs usually
+    # score > 0). None/unset = no cut. The top candidate always survives so a
+    # strict threshold degrades context, never empties it.
+    RERANK_SCORE_THRESHOLD: float | None = None
+    # L2 funnel: convex blend of RRF and cross-encoder scores when reranking.
+    # final = alpha*norm(RRF) + (1-alpha)*norm(CE); None = pure CE. The blend
+    # existed to guard against a weak CE demoting confident RRF hits, but the
+    # 12-doc model x alpha sweep showed the guard is compensation for a weak
+    # model: with L-12, alpha 0/.2/.3 are indistinguishable (.693/.690/.691)
+    # and pure CE is best + simplest. Kept as a per-request knob
+    # (/search?rerank_blend=) for experiments, off by default.
+    RERANK_BLEND_ALPHA: float | None = None
+    # Cross-encoder for L2 reranking. L-12 chosen by the 12-doc sweep: best
+    # mean HR@5 (.693 vs L-6-best .688), passes the "no dataset >1 question
+    # below no-rerank" constraint that every low-alpha L-6 config fails
+    # (time_machine -2q), and fixes hamlet (.567 -> .667). Cost: rerank adds
+    # ~510ms/query on CPU vs ~250ms for L-6 -- quality/safety over speed.
+    RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    # Signal-adaptive blend: treat RERANK_BLEND_ALPHA as a CEILING and scale the
+    # actual blend by cross-encoder confidence per query (guard-when-CE-weak).
+    # Off by default while it's a prototype under evaluation.
+    RERANK_BLEND_ADAPTIVE: bool = False
+    # Correct out-of-corpus query tokens to their nearest corpus token before
+    # retrieval (fixes typo'd proper nouns that collapse corpus-wide search to
+    # the wrong documents). Proven safe: full typo recovery, zero clean-query
+    # regression. Per-request override via /search?spell_correct=.
+    QUERY_SPELL_CORRECT: bool = True
     LOG_LEVEL: str = "INFO"
     LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
     # Model for high-quality generation (flashcards, etc).

@@ -106,6 +106,24 @@ def test_exploratory_for_unknown_question():
     assert confidence == 0.5
 
 
+def test_generative_request_routes_to_search_not_llm():
+    """A 'write a story based on ...' request must classify at >= 0.7 so it routes to
+    search_node instead of deferring to the LLM (which mislabels it teach_back/notes)."""
+    for q in (
+        "Write a kids story based on the content: My Daily Thoughts",
+        "generate a poem from the document",
+        "turn this into a short story",
+    ):
+        intent, confidence = classify_intent_heuristic(q)
+        assert intent == "exploratory", q
+        assert confidence >= 0.7, q
+
+
+def test_explicit_intent_still_beats_generative():
+    """Explicit summary/comparative phrasing wins over the generative verb rule."""
+    assert classify_intent_heuristic("write a summary of the book")[0] == "summary"
+
+
 # New ACs: 'summary' word alone, and 'how does'/'how do' not relational
 
 

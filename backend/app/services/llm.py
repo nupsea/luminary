@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 litellm.suppress_debug_info = True
 litellm.telemetry = False
+# Drop provider-unsupported params instead of crashing: gpt-5 models reject
+# temperature != 1 (and reasoning models reject others). Without this a chat
+# routed to a gpt-5 model dies with UnsupportedParamsError -> blank screen.
+# The model just falls back to its supported default for the dropped param.
+litellm.drop_params = True
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 # LiteLLM serializes the assembled streaming ModelResponse in its internal logging path; its

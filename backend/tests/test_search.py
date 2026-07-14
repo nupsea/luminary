@@ -235,6 +235,73 @@ def test_search_rerank_default_false():
     assert call_kwargs.get("rerank") is False
 
 
+def test_search_rerank_depth_and_threshold_pass_through():
+    """?rerank_depth / ?rerank_threshold forward to retriever.retrieve (L2 funnel)."""
+    chunks = [_make_chunk("c1", "doc-a", 0.9)]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+    session = _mock_session([[("doc-a", "Paper A", "paper")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&rerank=true&rerank_depth=100&rerank_threshold=0.5")
+
+    assert resp.status_code == 200
+    call_kwargs = retriever.retrieve.call_args.kwargs
+    assert call_kwargs.get("rerank_depth") == 100
+    assert call_kwargs.get("rerank_threshold") == 0.5
+
+
+def test_search_rerank_depth_over_cap_returns_422():
+    """rerank_depth beyond the guardrail is rejected at the API boundary."""
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&rerank=true&rerank_depth=500")
+    assert resp.status_code == 422
+
+
+def test_search_limit_200_passes_through():
+    """limit=200 is accepted and forwarded as k -- the eval pool-recall arm needs it."""
+    chunks = [_make_chunk("c1", "doc-a", 0.9)]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+    session = _mock_session([[("doc-a", "Paper A", "paper")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&limit=200")
+
+    assert resp.status_code == 200
+    assert retriever.retrieve.call_args.kwargs.get("k") == 200
+
+
+def test_search_limit_over_cap_returns_422():
+    """limit shares the depth guardrail ceiling."""
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&limit=201")
+    assert resp.status_code == 422
+
+
+def test_search_expand_context_flag_passes_through():
+    """?expand_context=false forwards to retriever.retrieve (eval pool-recall arm)."""
+    chunks = [_make_chunk("c1", "doc-a", 0.9)]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+    session = _mock_session([[("doc-a", "Paper A", "paper")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test&expand_context=false")
+
+    assert resp.status_code == 200
+    assert retriever.retrieve.call_args.kwargs.get("expand_context") is False
+
+
 def test_search_result_fields():
     """Result items contain all expected fields with correct types."""
     chunks = [_make_chunk("c1", "doc-a", 0.876)]

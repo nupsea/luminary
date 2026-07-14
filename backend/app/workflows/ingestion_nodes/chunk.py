@@ -179,7 +179,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                 continue
 
             section_heading = section_model.heading
-            context_header = f"[{book_title} > {section_heading}] "
+            context_header = f"[{book_title} > {section_heading}]"
 
             # populate pdf_page_number for PDF-format documents (1-based page).
             # Use \f (form feed) markers inserted by book_parser to compute per-chunk
@@ -215,27 +215,28 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                     else:
                         chunk_pdf_page = section_page_start
 
-                # Inject context into the text that will be embedded/indexed
-                enriched_text = context_header + raw_chunk_text
+                # text stays clean; the header rides in context_header (FTS +
+                # display), never the embedding -- see ChunkModel.context_header.
                 chunk_id = str(uuid.uuid4())
                 chunk_models.append(
                     ChunkModel(
                         id=chunk_id,
                         document_id=doc_id,
                         section_id=section_model.id,
-                        text=enriched_text,
-                        token_count=len(enriched_text.split()),
+                        text=raw_chunk_text,
+                        token_count=len(raw_chunk_text.split()),
                         page_number=s.get("page_start", 0),
                         speaker=None,
                         chunk_index=chunk_idx,
                         pdf_page_number=chunk_pdf_page,
+                        context_header=context_header,
                     )
                 )
                 chunks.append(
                     {
                         "id": chunk_id,
                         "document_id": doc_id,
-                        "text": enriched_text,
+                        "text": raw_chunk_text,
                         "index": chunk_idx,
                     }
                 )
@@ -339,7 +340,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             if not section_text.strip():
                 continue
 
-            context_header = f"[{doc_title} > {section_model.heading}] "
+            context_header = f"[{doc_title} > {section_model.heading}]"
             # pdf_page_number for this section (None for non-PDF)
             section_pdf_page: int | None = None
             if tech_fmt == "pdf":
@@ -353,14 +354,15 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                 cfg["chunk_overlap"],
             ):
                 chunk_id = str(uuid.uuid4())
-                # Inject context header for semantic richness (same as book chunking)
-                enriched_text = context_header + chunk_dict["text"]
+                # text stays clean; header rides in context_header (FTS/display),
+                # kept out of the embedding -- see ChunkModel.context_header.
+                clean_text = chunk_dict["text"]
                 chunk_model = ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
                     section_id=section_model.id,
-                    text=enriched_text,
-                    token_count=len(enriched_text.split()),
+                    text=clean_text,
+                    token_count=len(clean_text.split()),
                     page_number=s.get("page_start", 0),
                     speaker=None,
                     chunk_index=chunk_idx,
@@ -368,13 +370,14 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                     code_language=chunk_dict["code_language"],
                     code_signature=chunk_dict["code_signature"],
                     pdf_page_number=section_pdf_page,
+                    context_header=context_header,
                 )
                 chunk_models.append(chunk_model)
                 chunks.append(
                     {
                         "id": chunk_id,
                         "document_id": doc_id,
-                        "text": enriched_text,
+                        "text": clean_text,
                         "index": chunk_idx,
                     }
                 )

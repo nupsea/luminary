@@ -243,7 +243,11 @@ async def _expand_context(
                 if neighbor_id == chunk.chunk_id:
                     continue
 
-                neighbor_score = chunk.score * _EXPANSION_SCORE_FACTOR
+                # Sign-safe discount: neighbours must rank BELOW their parent
+                # whatever the score's sign. A bare `score * factor` moves
+                # NEGATIVE scores UP (-2 * 0.75 = -1.5), promoting neighbours
+                # above the hits that earned their rank.
+                neighbor_score = chunk.score - abs(chunk.score) * (1 - _EXPANSION_SCORE_FACTOR)
                 existing = expanded_by_id.get(neighbor_id)
                 if existing is not None and existing.score >= neighbor_score:
                     continue
@@ -281,10 +285,13 @@ class _CrossEncoderReranker:
 
 
         settings = _config_module.get_settings()
-        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / "ms-marco-minilm"
+        model_name = settings.RERANK_MODEL or _RERANK_MODEL
+        # Per-model cache subdir so switching models never mixes weights.
+        slug = model_name.rsplit("/", 1)[-1].lower()
+        cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / slug
         cache_dir.mkdir(parents=True, exist_ok=True)
-        self._model = CrossEncoder(_RERANK_MODEL, cache_folder=str(cache_dir), device="cpu")
-        logger.info("Loaded cross-encoder reranker %s", _RERANK_MODEL)
+        self._model = CrossEncoder(model_name, cache_folder=str(cache_dir), device="cpu")
+        logger.info("Loaded cross-encoder reranker %s", model_name)
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         self._load()
