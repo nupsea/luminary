@@ -96,8 +96,8 @@ export function MessageBubble({ msg, effectiveDocId, onQuizSubmit, navigateToCit
                   title={c.excerpt}
                 >
                   {c.document_title
-                    ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""} · p.${c.page}`
-                    : `p.${c.page}`}
+                    ? `${c.document_title.slice(0, 20)}${c.document_title.length > 20 ? "…" : ""}${c.page > 0 ? ` · p.${c.page}` : ""}`
+                    : c.page > 0 ? `p.${c.page}` : "Doc"}
                   {c.version_mismatch && (
                     <span className="ml-1 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                       Version mismatch
