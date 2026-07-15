@@ -91,3 +91,12 @@ LiteLLM carries bytes; OKF carries portable knowledge -- never couple them. OKF 
 
 **I-22. A rejected or edited graph element must not reappear after re-parse.**
 Re-parse produces fresh proposals, then `applyOverrides()` re-applies every user decision on top. Rejected concepts/edges and dismissed gaps stay gone (hidden, not deleted). Overrides survive re-parsing -- they are the user's permanent voice over Lumen's guesses.
+
+**I-23. Schema changes are Alembic revisions. The `ALTER TABLE` list in `db_init.py` is frozen.**
+`models.py` is the source of truth; `make db-revision m="..."` generates the migration and the server applies it on boot. `db_init.create_all_tables()` is a one-time bridge that lifts pre-Alembic databases to the baseline -- never add to it. Generate revisions ONLY via `make db-revision` (it diffs against a throwaway database): pointed at a long-lived one, autogenerate emits `drop_table()` for real user tables. `tests/test_schema_drift.py` fails CI when models and migrations disagree.
+
+**I-24. Never add code that clears a Kuzu lock or kills a process holding one.**
+Kuzu takes an exclusive OS-level file lock that the kernel releases the instant the holder dies (verified against SIGKILL; no lock artifacts on disk). A stale lock therefore cannot exist, so any "release the stale lock" logic can only ever kill a LIVE process mid-write -- which is how a graph database gets corrupted. A held lock means a real second process (another server, or `make concepts`): surface it and let the user stop it. A hand-rolled lockfile is strictly worse than Kuzu's own, because ours *can* go stale.
+
+**I-25. Scope decides WHERE to look, never WHAT was asked.**
+`scope='all'|'single'` must not influence intent classification. Telling the classifier to prefer `summary` when scope is the whole library made every bare topic ("Apache Iceberg") a summary request under All-documents while the identical query returned `factual` under a single document. Any node that cannot serve its intent falls through to retrieval (`return {"intent": "factual"}`, which `_route_after_strategy` sends to `search_node`) rather than answering with a placeholder -- a question always gets a real answer.

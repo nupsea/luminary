@@ -182,6 +182,8 @@ All settings are environment variables in `backend/.env` (gitignored).
 
 Everything — library database, vector embeddings, knowledge graph, notes — is in `.luminary/` at the project root. To move to a new machine: copy `.luminary/`, `DATA/` (source files), and `backend/.env`.
 
+The library database schema is versioned with Alembic, and the server applies any pending migrations on startup. Upgrading Luminary keeps your existing library, flashcards and review history — you never need to delete the database to take a new version.
+
 Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flashcard CSV.
 
 ---
@@ -197,6 +199,8 @@ Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flash
 | `make test` | Unit + integration tests |
 | `make lint` | Ruff + tsc |
 | `make ci` | Full CI: deps, lint, layer check, tests, build |
+| `make db-migrate` | Apply pending database migrations (the server also does this on boot) |
+| `make db-revision m="..."` | Generate a migration after changing `models.py` |
 | `make docker-build` | Build the Docker image |
 | `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
 
@@ -204,13 +208,13 @@ Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flash
 
 ## Evaluation harness
 
-Luminary ships a RAGAS-based retrieval eval harness with golden Q&A datasets. See [`evals/README.md`](evals/README.md) for the full picture.
+Luminary ships a retrieval and generation eval harness with golden Q&A datasets. Retrieval is scored with HR@5 / MRR / nDCG@10; faithfulness uses a dedicated NLI model (Vectara HHEM-2.1-Open) rather than an LLM judge, so it is deterministic and needs no API key. An optional `--judge-model` adds answer relevance. See [`evals/README.md`](evals/README.md) for the full picture.
 
 ```bash
 cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
 ```
 
-Thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45, Faithfulness ≥ 0.65.
+Enforced thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45. Faithfulness is currently **report-only** — the metric moved from an LLM judge to NLI, so its old floor no longer applies and a new one has yet to be derived from a labelled run.
 
 ---
 
