@@ -1,8 +1,8 @@
 """Tests for S83: confidence fixes and multi-doc scope improvements.
 
-(a) test_library_summary_missing_returns_medium:
-    summary_node with scope='all' and no LibrarySummaryModel returns
-    confidence='medium' and 'being generated' in answer.
+(a) test_library_summary_missing_falls_through_to_search:
+    summary_node with scope='all' and no LibrarySummaryModel falls through to
+    retrieval (intent='factual') and fires background generation.
 
 (b) test_split_response_defaults_medium_for_long_answer:
     _split_response with a long answer (>80 chars) and no JSON block
@@ -92,12 +92,12 @@ def _make_scored_chunk(doc_id: str, text: str = "Some text content.", i: int = 0
     )
 
 
-# (a) test_library_summary_missing_returns_medium
+# (a) test_library_summary_missing_falls_through_to_search
 
 
 @pytest.mark.asyncio
-async def test_library_summary_missing_returns_medium(test_db):
-    """summary_node with scope='all' and no LibrarySummaryModel returns medium confidence."""
+async def test_library_summary_missing_falls_through_to_search(test_db):
+    """scope='all' with no LibrarySummaryModel: answer from retrieval, not a placeholder."""
     state = {
         "question": "Summarize all documents",
         "scope": "all",
@@ -132,13 +132,14 @@ async def test_library_summary_missing_returns_medium(test_db):
     ):
         result = await summary_node(state)
 
-    assert result.get("confidence") == "medium", (
-        f"Expected confidence='medium', got {result.get('confidence')!r}"
+    # Falls through to retrieval instead of answering "ask again in a moment": the
+    # summary warms in the background, but the question still gets a real answer now.
+    # intent='factual' is the fallthrough signal _route_after_strategy re-routes to
+    # search_node.
+    assert result == {"intent": "factual"}, (
+        f"Expected fallthrough to search, got {result!r}"
     )
-    assert "being generated" in result.get("answer", "").lower(), (
-        f"Expected 'being generated' in answer, got {result.get('answer')!r}"
-    )
-    # Background task should have been fired
+    # Background generation must still be fired.
     assert mock_create_task.call_count >= 1
 
 

@@ -1,9 +1,13 @@
 """summary_node and its DB helpers.
 
-intent='summary' path: serve cached executive summaries (per-doc or
-library-wide). Single-doc returns the cached summary as section_context
-so synthesize_node still tailors to the question; library-wide returns
-the cached LibrarySummaryModel directly with confidence='high'.
+intent='summary' path: serve cached executive summaries (per-doc or library-wide)
+as section_context, so synthesize_node still tailors them to the actual question
+rather than replaying the same cached text at every question.
+
+When the cached summary is missing, both paths fall through to retrieval
+(intent='factual', which _route_after_strategy sends to search_node) instead of
+refusing to answer; the library-wide path also kicks off generation in the
+background for next time.
 """
 
 import asyncio
@@ -177,8 +181,8 @@ async def summary_node(state: ChatState) -> dict:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
-    return {
-        "answer": ("The library summary is being generated. Please ask again in a moment."),
-        "confidence": "medium",
-        "not_found": False,
-    }
+    # Fall through to retrieval rather than answering "ask again in a moment". The
+    # summary is warming in the background, but the question still deserves a real
+    # answer now, from the documents it is actually about. Mirrors the single-doc
+    # path above, which already falls through when its summary is missing.
+    return {"intent": "factual"}
