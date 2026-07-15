@@ -145,10 +145,17 @@ def _upgrade_head(connection) -> None:
     command.upgrade(_alembic_config(connection), "head")
 
 
-def _stamp_head(connection) -> None:
+def _stamp_baseline(connection) -> None:
+    from alembic.script import ScriptDirectory  # noqa: PLC0415
+
     from alembic import command  # noqa: PLC0415
 
-    command.stamp(_alembic_config(connection), "head")
+    cfg = _alembic_config(connection)
+    # The bridge lands a database exactly on the BASELINE, not on head. Stamping head
+    # here would mark every later revision as already-applied, so the upgrade that
+    # follows would be a no-op and a legacy database would silently skip every
+    # migration ever written after the cutover.
+    command.stamp(cfg, ScriptDirectory.from_config(cfg).get_base())
 
 
 async def init_database(engine: AsyncEngine) -> None:
@@ -179,7 +186,7 @@ async def init_database(engine: AsyncEngine) -> None:
         logger.info("Pre-Alembic database detected; running legacy bridge to baseline")
         await create_all_tables(engine)
         async with engine.begin() as conn:
-            await conn.run_sync(_stamp_head)
+            await conn.run_sync(_stamp_baseline)
         logger.info("Database stamped at baseline")
 
     async with engine.begin() as conn:
