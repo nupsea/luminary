@@ -1,6 +1,7 @@
 import logging
+from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base
@@ -98,6 +99,92 @@ USING fts5(
 )
 """
 
+# Column ORDER is a contract, not a detail: SQLite names the shadow-table columns
+# positionally (c0/c1/c2), and queries like flashcard_search.py:42 select on them by
+# name. Reordering a column here returns wrong rows instead of raising. See I-4.
+ALL_FTS5_DDL = (
+    FTS5_DDL,
+    NOTES_FTS5_DDL,
+    IMAGES_FTS5_DDL,
+    FLASHCARDS_FTS5_DDL,
+    CHAT_MESSAGES_FTS5_DDL,
+)
+
+
+def alembic_include_name(name: str | None, type_: str, parent_names: dict) -> bool:  # noqa: ARG001
+    # FTS5 virtual tables and the shadow tables SQLite derives from them
+    # (*_fts_data/_idx/_docsize/_content/_config) exist in the database but never in
+    # Base.metadata, so unfiltered autogenerate emits drop_table() for every one --
+    # taking the search index and the c0/c1/c2 shadow contract (I-4) with it.
+    # Shared by alembic/env.py and the drift test so the two cannot diverge.
+    if type_ == "table" and name and "_fts" in name:
+        return False
+    return True
+
+
+_ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
+
+# Any table that only ever exists once the ORM schema has been created. Used to tell a
+# pre-Alembic database apart from an empty one.
+_LEGACY_MARKER_TABLE = "documents"
+
+
+def _alembic_config(connection):
+    from alembic.config import Config  # noqa: PLC0415
+
+    cfg = Config(str(_ALEMBIC_INI))
+    # env.py picks this up instead of opening its own engine -- a second connection
+    # against the WAL-locked file would contend with the app's.
+    cfg.attributes["connection"] = connection
+    return cfg
+
+
+def _upgrade_head(connection) -> None:
+    from alembic import command  # noqa: PLC0415
+
+    command.upgrade(_alembic_config(connection), "head")
+
+
+def _stamp_head(connection) -> None:
+    from alembic import command  # noqa: PLC0415
+
+    command.stamp(_alembic_config(connection), "head")
+
+
+async def init_database(engine: AsyncEngine) -> None:
+    """Bring the database to the current schema, then hand it to Alembic.
+
+    Three states exist in the wild:
+      - stamped      -> apply any revisions past the baseline
+      - pre-Alembic  -> run the legacy bridge once to reach the baseline, then stamp
+      - empty        -> the baseline revision creates everything
+
+    The legacy bridge is create_all_tables(): ~800 lines whose whole job is dragging
+    any historical database up to the current shape. That is exactly the baseline, so
+    it runs once and is then replaced by version tracking -- rather than its 82 ALTERs
+    being re-litigated as revisions.
+    """
+    async with engine.begin() as conn:
+
+        def _state(sync_conn) -> tuple[bool, bool]:
+            insp = inspect(sync_conn)
+            return (
+                insp.has_table("alembic_version"),
+                insp.has_table(_LEGACY_MARKER_TABLE),
+            )
+
+        stamped, legacy = await conn.run_sync(_state)
+
+    if not stamped and legacy:
+        logger.info("Pre-Alembic database detected; running legacy bridge to baseline")
+        await create_all_tables(engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(_stamp_head)
+        logger.info("Database stamped at baseline")
+
+    async with engine.begin() as conn:
+        await conn.run_sync(_upgrade_head)
+
 
 async def create_all_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
@@ -139,11 +226,8 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                 text("ALTER TABLE canonical_tags RENAME COLUMN note_count TO usage_count")
             )
 
-        await conn.execute(text(FTS5_DDL))
-        await conn.execute(text(NOTES_FTS5_DDL))
-        await conn.execute(text(IMAGES_FTS5_DDL))
-        await conn.execute(text(FLASHCARDS_FTS5_DDL))
-        await conn.execute(text(CHAT_MESSAGES_FTS5_DDL))
+        for fts_ddl in ALL_FTS5_DDL:
+            await conn.execute(text(fts_ddl))
         await conn.execute(text("PRAGMA foreign_keys = ON"))
 
         # Rename note_collections to collections.
@@ -196,6 +280,12 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         except Exception as e:
             logger.warning("Migration failed (non-critical): %s", e)
 
+        # FROZEN. Do NOT add to this list -- new schema changes are Alembic revisions:
+        #   make db-revision m="describe your change"
+        # Every column here is already declared in models.py and so is already in the
+        # baseline revision; the list exists only to drag a pre-Alembic database up to
+        # that baseline, after which init_database() stamps it and this never runs
+        # again. It can be deleted once no supported database predates the baseline.
         for ddl in [
             "ALTER TABLE documents ADD COLUMN file_hash TEXT",
             "ALTER TABLE documents ADD COLUMN chapter_count INTEGER",

@@ -18,7 +18,7 @@ Look for issues labeled `good first issue`. These are selected as good entry poi
 
 ## Pull Requests
 
-1. Fork the repo and create your branch from `main`.
+1. Fork the repo and create your branch from `master`.
 2. If you've added code that should be tested, add tests.
 3. Ensure the test suite passes.
 4. Make sure your code lints.
@@ -33,3 +33,40 @@ See `README.md` for instructions on setting up the backend and frontend.
 - `make ci`: Run all CI checks (linting, tests, build).
 - `make test`: Run backend tests.
 - `make lint`: Run backend and frontend linting/type checking.
+- `make db-migrate`: Apply pending database migrations.
+- `make db-revision m="..."`: Generate a migration from your model changes.
+
+## Changing the Database Schema
+
+`backend/app/models.py` is the source of truth. Schema changes are versioned with
+Alembic; the server applies pending migrations automatically on boot.
+
+1. Edit the model in `backend/app/models.py`.
+2. Generate a revision: `make db-revision m="add foo to bar"`.
+3. **Read the generated file** in `backend/alembic/versions/` before committing.
+   Autogenerate is a first draft, not an oracle — it cannot infer data backfills, and
+   it will happily emit a destructive `drop_table`/`drop_column` if it misreads intent.
+4. Apply it: `make db-migrate`.
+5. Commit the revision alongside the model change.
+
+`make test` fails if `models.py` and the migrations disagree (`tests/test_schema_drift.py`),
+so a forgotten revision is caught in CI rather than by a user's database.
+
+Two things worth knowing:
+
+- **Generate revisions with `make db-revision`, not `alembic revision` directly.** The
+  target builds a throwaway database from the migrations and diffs against that. Run
+  bare against a long-lived dev database, autogenerate picks up orphan tables from
+  removed features and TEXT-vs-VARCHAR noise from the legacy `ALTER` list, and proposes
+  dropping real user tables.
+- **The `ALTER TABLE` list in `db_init.py` is frozen.** It is a one-time bridge that
+  lifts pre-Alembic databases to the baseline revision. Do not add to it.
+
+### FTS5 tables
+
+The five FTS5 virtual tables are raw DDL in `db_init.py`, outside `Base.metadata`.
+Alembic is configured to ignore them (`alembic_include_name`) — without that filter it
+would drop them and the search index with them. Their **column order is a contract**:
+SQLite names the shadow-table columns positionally (`c0/c1/c2`) and code queries those
+names, so reordering returns wrong rows instead of raising. See invariant I-4 in
+`docs/invariants.md`.

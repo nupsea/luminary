@@ -15,7 +15,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def _get_db_url() -> str:
+def get_db_url() -> str:
     settings = get_settings()
     data_dir = Path(settings.DATA_DIR).expanduser()
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -31,7 +31,7 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
 
 
 def make_engine(db_url: str | None = None):
-    url = db_url or _get_db_url()
+    url = db_url or get_db_url()
     kwargs: dict = {}
     if ":memory:" in url:
         kwargs["poolclass"] = StaticPool

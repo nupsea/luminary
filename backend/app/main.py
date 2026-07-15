@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
-from app.db_init import create_all_tables
+from app.db_init import init_database
 from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
 
     # Initial DB setup
     engine = get_engine()
-    await create_all_tables(engine)
+    await init_database(engine)
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts
