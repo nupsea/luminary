@@ -12,8 +12,8 @@ If you're evaluating a RAG pipeline and want a reproducible, open benchmark loop
 |--------|--------------|
 | **HR@5** (Hit Rate at 5) | Does the right chunk appear in the top 5 retrieved results? |
 | **MRR** (Mean Reciprocal Rank) | How high does the right chunk rank? |
-| **Faithfulness** (RAGAS) | Is the generated answer grounded in the retrieved context? |
-| **Answer Relevance** (RAGAS) | Does the answer actually address the question? |
+| **Faithfulness** (HHEM NLI) | Is the generated answer grounded in the retrieved context? Deterministic, no judge — each claim is scored against each context chunk and takes its best match. |
+| **Answer Relevance** (RAGAS) | Does the answer actually address the question? Needs `--judge-model`. |
 | **Citation Support Rate** | Do inline citations support the specific claims they're attached to? |
 
 ---
@@ -146,7 +146,7 @@ Corpus-wide numbers run well below scoped-ablation numbers — this is the least
 | `--dataset` | — | Golden dataset name (required, one of: `book`, `alice`, `odyssey`) |
 | `--backend-url` | `http://localhost:8000` | Luminary backend URL |
 | `--model` | — | LiteLLM model string for QA generation |
-| `--judge-model` | settings default | LiteLLM model for RAGAS scoring |
+| `--judge-model` | settings default | LiteLLM model for RAGAS answer-relevance scoring. Optional — faithfulness is judge-free. |
 | `--max-questions N` | all | Sample N questions (deterministic, seed=42) for fast runs |
 | `--assert-thresholds` | false | Exit 1 if any threshold violated |
 | `--export-html PATH` | — | Write a self-contained HTML report |
