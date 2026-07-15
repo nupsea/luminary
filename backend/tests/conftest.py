@@ -14,6 +14,7 @@ baseline: even tests that don't define their own DB fixture will never touch
 
 import os
 import warnings
+from unittest.mock import patch
 
 import pytest
 
@@ -77,6 +78,30 @@ def _reset_lancedb_singleton():
 
     _vs_module._lancedb_service = None
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_library_summary_generation():
+    """Stop summary_node's fire-and-forget task from outliving the test that spawned it.
+
+    scope='all' with no cached library summary fires
+    `asyncio.create_task(_generate_library_summary_task())`. In the app that is
+    correct -- it warms the summary for next time. In tests it is a live task holding
+    an LLM call, and pytest-asyncio gives each test its own event loop: the task
+    outlives its test, and the NEXT loop close calls _cancel_all_tasks, which cancels
+    then gathers. An LLM call sitting in a thread executor cannot be cancelled, so the
+    gather blocks until the 120s per-test timeout kills the whole session -- attributed
+    to whatever unlucky test happened to be running (seen on CI in test_note_title, and
+    locally ~30% into the suite; the culprit is neither).
+
+    Neutralising the coroutine keeps the create_task call observable -- tests asserting
+    that generation was fired still pass -- while the task completes instantly.
+    """
+    async def _noop() -> None:
+        return
+
+    with patch("app.runtime.chat_nodes.summary._generate_library_summary_task", _noop):
+        yield
 
 
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
