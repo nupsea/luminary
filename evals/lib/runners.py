@@ -89,15 +89,31 @@ def _get_cached_embeddings() -> Any:
 _HHEM_MODEL = "vectara/hallucination_evaluation_model"
 
 # HHEM-2.1-Open has no context limit (unlike 1.0's 512 cap), so the tokenizer's
-# "longer than 512" warning is flan-t5-base's nominal default and is safe to
-# ignore. Memory is the real constraint: predict() pads every pair to the batch
-# longest and runs them in ONE forward, and T5 attention costs
-# batch * heads * seq^2 * 4B per layer -- a 4.7k-token premise over ~350 pairs
-# asks for ~377GB in a single allocation, which the OS answers by killing
-# unrelated apps rather than raising OOM. Batches are therefore sized adaptively
-# against a fixed attention budget so peak memory stays flat as seq grows.
-_FAITH_ATTN_BUDGET = 32 * 512 * 512  # ~0.4GB/layer on flan-t5-base
-_FAITH_MAX_BATCH = 32
+# "longer than 512" warning is flan-t5-base's nominal default and is safe to ignore.
+# Memory is the real constraint: predict() pads every pair to the batch longest and
+# runs them in ONE forward, so an unbatched call asks for hundreds of GB and the OS
+# answers by killing unrelated apps rather than raising OOM. Batches are therefore
+# sized against a fixed budget on batch*seq^2.
+#
+# The budget is MEASURED, not derived. Predicting it from batch*heads*seq^2*4B is
+# ~18x optimistic: T5 keeps several such tensors live at once (scores, softmax
+# output, relative-position bias) across 12 layers, and torch's caching allocator
+# never returns freed blocks to the OS, so RSS settles at the high-water mark.
+# Peak RSS on 400 real pairs (~490 tok), one process per row:
+#
+#     budget      peak RSS   elapsed
+#     262144        923 MB     41.7s
+#     524288       1108 MB     40.6s
+#    1048576       1642 MB     39.6s
+#    2097152       2262 MB     40.2s
+#    8388608       6685 MB     38.2s   <- previous value; watchdog SIGKILLed the run
+#
+# Elapsed is FLAT across a 32x range of batch sizes -- this is CPU-bound, so a large
+# batch buys ~9% and costs 7x the memory. Hence the smallest budget: one ~512-token
+# pair per forward, proportionally more when the pairs are shorter. Re-measure with
+# scratchpad/sweep.py if the model or hardware changes; do not re-derive on paper.
+_FAITH_ATTN_BUDGET = 512 * 512
+_FAITH_MAX_BATCH = 32  # ceiling for very short pairs, where the budget allows many
 # Backstop only: real context units run ~477 tok (p95 819), so this should never
 # bite. It exists so one pathological premise cannot resurrect the blowup.
 _FAITH_MAX_TOKENS = 2048
