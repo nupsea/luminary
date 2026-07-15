@@ -410,3 +410,67 @@ async def test_streaming_not_buffered():
         f"First SSE token emitted only after all {len(token_order)} LLM tokens "
         f"were generated — streaming is buffered, not progressive."
     )
+
+
+async def _run_qa_done(include_context: bool) -> dict:
+    from app.services.qa import get_qa_service  # noqa: PLC0415
+
+    async def _stream(*_args, **_kwargs):
+        for tok in ["Grounded", " answer.", '{"citations":[],"confidence":"high"}']:
+            yield tok
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(side_effect=_stream)
+
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(
+        return_value={
+            "answer": "",
+            "confidence": "high",
+            "citations": [],
+            "chunks": [
+                {"chunk_id": "c1", "text": "First grounding chunk."},
+                {"chunk_id": "c2", "text": "Second grounding chunk."},
+            ],
+            "section_context": "",
+            "intent": "factual",
+            "_llm_prompt": "What is the answer?",
+            "_system_prompt": "You are a helpful assistant.",
+        }
+    )
+
+    qa = get_qa_service()
+    with (
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch.object(qa, "_store_qa", AsyncMock(return_value="qa-1")),
+    ):
+        sse = "".join(
+            [
+                chunk
+                async for chunk in qa.stream_answer(
+                    question="What is the answer?",
+                    document_ids=[],
+                    scope="all",
+                    model=None,
+                    include_context=include_context,
+                )
+            ]
+        )
+    return _parse_sse_done(sse)
+
+
+async def test_include_context_echoes_grounding_chunks():
+    """include_context=True echoes the graph's grounding chunk texts so the eval
+    scores faithfulness against the answer's real context, not a parallel search."""
+    done = await _run_qa_done(include_context=True)
+    assert done.get("context_chunks") == [
+        "First grounding chunk.",
+        "Second grounding chunk.",
+    ]
+
+
+async def test_context_chunks_absent_by_default():
+    """UI clients never opt in, so normal done events stay lean (no context_chunks)."""
+    done = await _run_qa_done(include_context=False)
+    assert "context_chunks" not in done

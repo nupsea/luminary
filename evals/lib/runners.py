@@ -6,9 +6,32 @@ GenerationEval added in S214; ClassifierEval added in S218) implement
 quality gates.
 """
 
+import re
 import sys
 from abc import ABC, abstractmethod
 from typing import Any
+
+# Split an answer into claim-level units. HHEM scores a single (premise,
+# hypothesis) pair, and a whole multi-sentence answer collapses to a near-zero
+# score the moment ONE sentence is unsupported -- even when every other sentence
+# is strongly entailed. Faithfulness is therefore measured claim-by-claim (as
+# RAGAS does) and averaged, so an unsupported sentence costs 1/N, not the whole
+# answer. Strip leading markdown list markers so bullet points score as claims.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_LIST_MARKER = re.compile(r"^\s*([-*+]|\d+[.)])\s+")
+
+
+def _split_claims(answer: str) -> list[str]:
+    claims: list[str] = []
+    for raw_line in answer.splitlines():
+        line = _LIST_MARKER.sub("", raw_line.strip())
+        if not line:
+            continue
+        for raw_sentence in _SENTENCE_SPLIT.split(line):
+            sentence = raw_sentence.strip()
+            if len(sentence) >= 12:
+                claims.append(sentence)
+    return claims
 
 # Module-level singletons -- HuggingFace embedding model and the LangChain
 # wrappers around it are expensive to instantiate (~5-10s cold start). Reuse
@@ -64,6 +87,21 @@ def _get_cached_embeddings() -> Any:
 
 # Default HHEM-2.1-Open; swap via FAITHFULNESS_MODEL env var.
 _HHEM_MODEL = "vectara/hallucination_evaluation_model"
+
+# HHEM-2.1-Open has no context limit (unlike 1.0's 512 cap), so the tokenizer's
+# "longer than 512" warning is flan-t5-base's nominal default and is safe to
+# ignore. Memory is the real constraint: predict() pads every pair to the batch
+# longest and runs them in ONE forward, and T5 attention costs
+# batch * heads * seq^2 * 4B per layer -- a 4.7k-token premise over ~350 pairs
+# asks for ~377GB in a single allocation, which the OS answers by killing
+# unrelated apps rather than raising OOM. Batches are therefore sized adaptively
+# against a fixed attention budget so peak memory stays flat as seq grows.
+_FAITH_ATTN_BUDGET = 32 * 512 * 512  # ~0.4GB/layer on flan-t5-base
+_FAITH_MAX_BATCH = 32
+# Backstop only: real context units run ~477 tok (p95 819), so this should never
+# bite. It exists so one pathological premise cannot resurrect the blowup.
+_FAITH_MAX_TOKENS = 2048
+_PROMPT_OVERHEAD_TOKENS = 32  # the "Determine if the hypothesis..." wrapper
 _faith_scorer: "_NliFaithfulnessScorer | None" = None
 
 
@@ -107,13 +145,72 @@ class _NliFaithfulnessScorer:
         )
         print(f"Loaded NLI faithfulness model {self._model_name}", file=sys.stderr)
 
+    def _tokenizer(self) -> Any:
+        # HHEM's custom class misspells the attribute (`tokenzier`); fall back to
+        # the foundation tokenizer if a swapped-in model spells it correctly.
+        tok = getattr(self._model, "tokenzier", None) or getattr(self._model, "tokenizer", None)
+        if tok is None:
+            from transformers import AutoTokenizer  # noqa: PLC0415
+
+            tok = AutoTokenizer.from_pretrained(self._model.config.foundation)
+        return tok
+
+    def _n_tokens(self, text: str) -> int:
+        return len(self._tokenizer()(text, add_special_tokens=False)["input_ids"])
+
+    def _truncate(self, text: str, budget: int) -> str:
+        if budget <= 0:
+            return ""
+        tok = self._tokenizer()
+        ids = tok(text, add_special_tokens=False)["input_ids"]
+        if len(ids) <= budget:
+            return text
+        return tok.decode(ids[:budget], skip_special_tokens=True)
+
     def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """Score (premise, hypothesis) pairs -> per-pair consistency in [0, 1]."""
+        """Score (premise, hypothesis) pairs -> per-pair consistency in [0, 1].
+
+        Batched to bound peak memory; see _FAITH_ATTN_BUDGET. Pairs are sorted by
+        length so padding tracks each batch's longest rather than the global
+        longest, and each batch is sized so batch * seq^2 stays under budget --
+        keeping peak memory flat whether the premises are 200 or 2000 tokens.
+        """
         if not pairs:
             return []
         self._load()
-        raw = self._model.predict(pairs)
-        return [float(s) for s in raw]
+
+        prepared: list[tuple[str, str, int]] = []
+        for raw_premise, raw_hypothesis in pairs:
+            hypothesis = self._truncate(raw_hypothesis, _FAITH_MAX_TOKENS // 2)
+            hyp_n = self._n_tokens(hypothesis)
+            budget = _FAITH_MAX_TOKENS - hyp_n - _PROMPT_OVERHEAD_TOKENS
+            premise = self._truncate(raw_premise, budget)
+            seq = self._n_tokens(premise) + hyp_n + _PROMPT_OVERHEAD_TOKENS
+            prepared.append((premise, hypothesis, seq))
+
+        scores: list[float] = [0.0] * len(pairs)
+        order = sorted(range(len(prepared)), key=lambda i: prepared[i][2])
+
+        def flush(idxs: list[int]) -> None:
+            raw = self._model.predict([(prepared[i][0], prepared[i][1]) for i in idxs])
+            for i, score in zip(idxs, raw, strict=True):
+                scores[i] = float(score)
+
+        batch: list[int] = []
+        for i in order:
+            # Ascending order means `i` is the longest in the batch, so it alone
+            # sets the padded width.
+            seq = prepared[i][2]
+            if batch and (
+                len(batch) >= _FAITH_MAX_BATCH
+                or (len(batch) + 1) * seq * seq > _FAITH_ATTN_BUDGET
+            ):
+                flush(batch)
+                batch = []
+            batch.append(i)
+        if batch:
+            flush(batch)
+        return scores
 
 
 def _get_faithfulness_scorer() -> _NliFaithfulnessScorer:
@@ -164,7 +261,17 @@ class RetrievalEval(_BaseEval):
 
 
 class NliFaithfulnessEval(_BaseEval):
-    """Deterministic NLI faithfulness (no judge): premise=context, hypothesis=answer."""
+    """Deterministic NLI faithfulness (no judge): premise=chunk, hypothesis=claim.
+
+    Each claim is scored against every context chunk INDIVIDUALLY and takes its
+    best match -- a claim is grounded if any one chunk supports it. Scoring
+    against the chunks joined into one ~4.7k-token premise is what HHEM's
+    quadratic attention turns into a multi-hundred-GB allocation; per-chunk
+    premises keep seq at ~477 tok, and dilute the signal less. Per-answer score
+    is the mean over claims, so one unsupported claim costs 1/N rather than the
+    whole answer, and answers are weighted equally so a verbose answer does not
+    dominate the dataset metric.
+    """
 
     eval_kind = "generation"
 
@@ -174,9 +281,29 @@ class NliFaithfulnessEval(_BaseEval):
             return {"faithfulness": None, "faithfulness_model": None}
         try:
             scorer = _get_faithfulness_scorer()
-            pairs = [("\n".join(s.get("contexts") or []), s["answer"]) for s in scored]
+            pairs: list[tuple[str, str]] = []
+            layout: list[list[tuple[int, int]]] = []
+            for s in scored:
+                contexts = [c for c in (s.get("contexts") or []) if c and c.strip()]
+                claims = _split_claims(s["answer"]) or [s["answer"]]
+                claim_spans: list[tuple[int, int]] = []
+                for claim in claims:
+                    start = len(pairs)
+                    pairs.extend((ctx, claim) for ctx in contexts)
+                    claim_spans.append((start, len(pairs)))
+                layout.append(claim_spans)
             values = scorer.score_pairs(pairs)
-            faith = sum(values) / len(values) if values else None
+            per_answer: list[float] = []
+            for claim_spans in layout:
+                # A claim with no context to score against (retrieval returned
+                # nothing, yet the pipeline still answered) is by definition
+                # ungrounded -> 0.0. Skipping it instead would let a pipeline
+                # that retrieves nothing and hallucinates freely drop out of the
+                # metric rather than be penalised by it.
+                best = [max(values[a:b]) if b > a else 0.0 for a, b in claim_spans]
+                if best:
+                    per_answer.append(sum(best) / len(best))
+            faith = sum(per_answer) / len(per_answer) if per_answer else None
             return {"faithfulness": faith, "faithfulness_model": scorer.model_name}
         except Exception as exc:
             print(

@@ -250,7 +250,7 @@ def search_chunks(
 def post_qa(backend_url: str, question: str, model: str, document_id: str | None) -> dict:
     """POST to /qa and return the response JSON (or empty dict on failure)."""
     try:
-        payload: dict = {"question": question}
+        payload: dict = {"question": question, "include_context": True}
         if document_id:
             payload["document_ids"] = [document_id]
         if model:
@@ -735,22 +735,19 @@ def main() -> None:
 
         answer = ""
         qa_resp: dict = {}
-        # Judged contexts include the chunks /qa actually cited; retrieval
-        # metrics stay on the raw search result so HR@5 and MRR measure the
-        # same thing in every eval kind. The judge keeps seeing top-5 — the
-        # 6-10 tail exists only for nDCG@10, and doubling judge input would
-        # change generation scores and cost for no judging benefit.
+        # Faithfulness must score the answer against the exact chunks /qa
+        # grounded it on, NOT this eval's separate /search — a parallel
+        # retrieval only partially overlaps the answer's real context and
+        # collapses the NLI score. /qa echoes those chunks in `context_chunks`
+        # (include_context=True). Fall back to the search top-5 only when the
+        # pipeline returns no grounding (e.g. a pass-through answer).
         ragas_contexts = list(chunks[:5])
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
-            citations = qa_resp.get("citations", [])
-            qa_chunks = [c.get("text", "") for c in citations if isinstance(c, dict)]
-            seen = set(ragas_contexts)
-            for c in qa_chunks:
-                if c and c not in seen:
-                    ragas_contexts.append(c)
-                    seen.add(c)
+            grounding = [c for c in (qa_resp.get("context_chunks") or []) if c]
+            if grounding:
+                ragas_contexts = grounding
         # Distinguish the pipeline DECLINING (not_found: a real product answer,
         # "I don't know") from the harness failing to get any response at all
         # (timeout / error / no done event). Both yield an empty answer and are

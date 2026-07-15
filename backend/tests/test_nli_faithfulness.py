@@ -1,7 +1,7 @@
 """Unit tests for evals.lib.runners.NliFaithfulnessEval.
 
-The HHEM model is mocked -- these assert the whole-answer aggregation, the
-premise = joined-context / hypothesis = answer contract, provenance, and the
+The HHEM model is mocked -- these assert the claim-vs-chunk fan-out, the
+max-over-chunks / mean-over-claims aggregation, provenance, and the
 graceful-skip paths. A real-model check lives behind the ``slow`` marker.
 """
 
@@ -33,7 +33,7 @@ def _patch_scorer(monkeypatch, scorer):
     monkeypatch.setattr(runners, "_get_faithfulness_scorer", lambda: scorer)
 
 
-def test_whole_answer_aggregation_and_provenance(monkeypatch):
+def test_claims_fan_out_across_chunks_and_provenance(monkeypatch):
     scorer = _FakeScorer()
     _patch_scorer(monkeypatch, scorer)
     samples = [
@@ -45,11 +45,43 @@ def test_whole_answer_aggregation_and_provenance(monkeypatch):
 
     assert out["faithfulness"] == pytest.approx(0.9)
     assert out["faithfulness_model"] == "fake/hhem"
-    # premise = joined contexts, hypothesis = answer, one pair per sample.
+    # Each claim is paired with each chunk SEPARATELY -- never a joined premise,
+    # which is what made the batch blow up to hundreds of GB.
     assert scorer.seen_pairs == [
-        ("The sky appears blue.\nRayleigh.", "The sky is blue."),
+        ("The sky appears blue.", "The sky is blue."),
+        ("Rayleigh.", "The sky is blue."),
         ("Grass is green.", "Grass is green."),
     ]
+
+
+def test_claim_takes_max_over_chunks(monkeypatch):
+    # One chunk supports the claim, the other does not: the claim is grounded.
+    class _OneSupports(_FakeScorer):
+        def score_pairs(self, pairs):
+            self.seen_pairs = list(pairs)
+            return [0.02, 0.95]
+
+    _patch_scorer(monkeypatch, _OneSupports())
+    samples = [{"answer": "The sky is blue.", "contexts": ["Unrelated.", "The sky is blue."]}]
+
+    out = NliFaithfulnessEval().run(samples)
+
+    assert out["faithfulness"] == pytest.approx(0.95)
+
+
+def test_unsupported_claim_costs_one_over_n(monkeypatch):
+    # Two claims, one chunk each: one supported, one not -> mean, not collapse.
+    class _Split(_FakeScorer):
+        def score_pairs(self, pairs):
+            self.seen_pairs = list(pairs)
+            return [1.0, 0.0]
+
+    _patch_scorer(monkeypatch, _Split())
+    samples = [{"answer": "The sky is blue. Grass is purple.", "contexts": ["The sky is blue."]}]
+
+    out = NliFaithfulnessEval().run(samples)
+
+    assert out["faithfulness"] == pytest.approx(0.5)
 
 
 def test_mean_over_samples(monkeypatch):
@@ -105,14 +137,17 @@ def test_scorer_failure_is_graceful(monkeypatch):
     assert out == {"faithfulness": None, "faithfulness_model": None}
 
 
-def test_missing_contexts_defaults_to_empty_premise(monkeypatch):
+def test_answer_without_context_scores_zero(monkeypatch):
+    # An answer produced with no retrieved context is ungrounded by definition.
+    # It must score 0, not be skipped -- skipping would let a pipeline that
+    # retrieves nothing and hallucinates drop out of the metric entirely.
     scorer = _FakeScorer()
     _patch_scorer(monkeypatch, scorer)
 
     out = NliFaithfulnessEval().run([{"answer": "x"}])
 
-    assert scorer.seen_pairs == [("", "x")]
-    assert out["faithfulness"] == pytest.approx(0.9)
+    assert scorer.seen_pairs == []
+    assert out["faithfulness"] == pytest.approx(0.0)
 
 
 @pytest.mark.slow

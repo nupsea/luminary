@@ -77,7 +77,10 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
         run_eval,
         "post_qa",
         lambda url, question, model, doc_id: qa_calls.append(question)
-        or {"answer": f"GENERATED::{question}", "citations": [{"text": "cited chunk"}]},
+        or {
+            "answer": f"GENERATED::{question}",
+            "context_chunks": ["grounding chunk"],
+        },
     )
 
     class _FakeGenerationEval:
@@ -111,8 +114,11 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     answers = {s["answer"] for s in judged[0]}
     assert answers == {"GENERATED::Q1", "GENERATED::Q2"}
     assert not any("GOLD" in a for a in answers)
-    # /qa citations feed the judged contexts but must not leak into HR@5/MRR.
-    assert "cited chunk" in judged[0][0]["contexts"]
+    # Faithfulness must score against the chunks /qa actually grounded on, so
+    # `context_chunks` REPLACES the harness's parallel /search result rather
+    # than being merged with it -- a partially-overlapping premise is what
+    # collapses the NLI score. It must not leak into HR@5/MRR either.
+    assert judged[0][0]["contexts"] == ["grounding chunk"]
 
     eval_kind, model, metrics, _ = history[0]
     assert eval_kind == "generation"
@@ -129,6 +135,29 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     # hint one matches the search chunk, hint two does not: HR@5 = 1/2 either
     # way because retrieval metrics ignore the cited chunk.
     assert metrics["hit_rate_5"] == 0.5
+
+
+def test_contexts_fall_back_to_search_when_qa_returns_no_grounding(monkeypatch):
+    # A pass-through answer carries no context_chunks; faithfulness then has to
+    # fall back to the harness's own search hits rather than score against
+    # nothing (which would read as a 0.0 hallucination).
+    history: list[tuple] = []
+    _wire_common(monkeypatch, history)
+    monkeypatch.setattr(
+        run_eval,
+        "post_qa",
+        lambda url, question, model, doc_id: {"answer": f"GENERATED::{question}"},
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_eval.py", "--dataset", "book", "--backend-url", "http://test", "--generate"],
+    )
+
+    run_eval.main()
+
+    scored = _FakeNliFaithfulness.scored_batches[-1]
+    assert scored[0]["contexts"] == ["chunk with hint one inside"]
 
 
 def test_no_judge_by_default_and_no_qa(monkeypatch):

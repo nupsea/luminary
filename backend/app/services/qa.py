@@ -405,6 +405,7 @@ class QAService:
         web_enabled: bool = False,
         socratic: bool = False,
         creative: bool = False,
+        include_context: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
 
@@ -782,6 +783,13 @@ class QAService:
                 # chunk-derived source citations for trust/navigation
                 "source_citations": result.get("source_citations") or [],
             }
+            # Eval-only: the faithfulness NLI must score the answer against the
+            # exact chunks it was grounded on, not a parallel /search. UI clients
+            # never set include_context, so normal chat payloads stay lean.
+            if include_context:
+                final["context_chunks"] = [
+                    c.get("text", "") for c in chunks_returned if c.get("text")
+                ]
             yield f"data: {json.dumps(final)}\n\n"
             logger.info(
                 "[perf] stream_answer total: %.2fs (question=%r)",
