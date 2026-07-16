@@ -3,7 +3,6 @@
 // Contains five sections:
 //   1. Library context: doc filter + per-doc quick-select list
 //   2. Notes in Context (when the notes layer is on)
-//   3. Learning path start-entity input (only in learning_path mode)
 //   4. Layers toggles (diagrams, prerequisites, cross-book, notes,
 //      retention)
 //   5. Needs Attention list (only when retention overlay is on)
@@ -46,10 +45,6 @@ interface VizSidebarProps {
   selectedNoteId: string | null
   onSelectNoteId: (id: string | null) => void
   onClearSelectedNode: () => void
-  // Learning path
-  lpInputDraft: string
-  onLpInputDraftChange: (v: string) => void
-  onSetLearningPathStart: (entity: string) => void
   // Layers
   showDiagramNodes: boolean
   setShowDiagramNodes: (fn: (v: boolean) => boolean) => void
@@ -88,9 +83,6 @@ export function VizSidebar(props: VizSidebarProps) {
     selectedNoteId,
     onSelectNoteId,
     onClearSelectedNode,
-    lpInputDraft,
-    onLpInputDraftChange,
-    onSetLearningPathStart,
     showDiagramNodes,
     setShowDiagramNodes,
     showPrerequisites,
@@ -255,35 +247,6 @@ export function VizSidebar(props: VizSidebarProps) {
         </div>
       )}
 
-      {/* Learning path: start entity input */}
-      {viewMode === "learning_path" && (
-        <div className="p-4 border-b border-border/50">
-          <p className="lum-eyebrow mb-2">
-            Start Entity
-          </p>
-          <div className="flex gap-1.5">
-            <input
-              type="text"
-              value={lpInputDraft}
-              onChange={(e) => onLpInputDraftChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSetLearningPathStart(lpInputDraft.trim())
-              }}
-              placeholder="Concept name..."
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <button
-              onClick={() => onSetLearningPathStart(lpInputDraft.trim())}
-              className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Go
-            </button>
-          </div>
-          <p className="mt-1.5 text-[10px] text-muted-foreground/60">
-            Orange arrows show prerequisite chains
-          </p>
-        </div>
-      )}
 
       {/* Layers section */}
       <div className="p-4 border-b border-border/50">

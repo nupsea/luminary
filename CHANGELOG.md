@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The Map's Learning Path view.** It required typing an exact concept name
+  before it would render anything, and returned a chain only for entities with
+  `PREREQUISITE_OF` edges — so in practice it was an empty canvas asking for
+  input. Gone with it: `GET /graph/learning-path` (the Map was its only caller),
+  the start-entity sidebar input, the prerequisite breadcrumb in the node
+  popover, and the LP graph builder/types/overlays. Prerequisite edges are
+  untouched — they still render as the Map's Prerequisites layer, and the
+  prereq-chain traversal still backs the FSRS study path (`GET /study/path`).
+
 ### Changed
 - **Two surface modes replace the public/labs/dev tiers.** One knob —
   `LUMINARY_MODE=full` (default; what `make luminary` runs — every feature on,

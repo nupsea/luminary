@@ -29,7 +29,6 @@ import {
   DIM_COLOR,
   LABEL_COLOR,
   LABEL_COLOR_DARK,
-  LP_EDGE_COLOR,
   NEUTRAL_EDGE_COLOR,
   NEUTRAL_EDGE_COLOR_DARK,
 } from "./constants"
@@ -38,7 +37,6 @@ import { masteryColor } from "./utils"
 
 interface UseSigmaOptions {
   filteredGraph: Graph | null
-  viewMode: string
   search: string
   showRetention: boolean
   masteryMap: Map<string, MasteryConceptItem>
@@ -58,7 +56,6 @@ interface UseSigmaResult {
 export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
   const {
     filteredGraph,
-    viewMode,
     search,
     showRetention,
     masteryMap,
@@ -107,12 +104,7 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
       // live instance when the user toggles without a rebuild.
       const s = new Sigma(filteredGraph, currentEl, {
         renderEdgeLabels: false,
-        defaultEdgeColor:
-          viewMode === "learning_path"
-            ? LP_EDGE_COLOR
-            : isDark()
-              ? NEUTRAL_EDGE_COLOR_DARK
-              : NEUTRAL_EDGE_COLOR,
+        defaultEdgeColor: isDark() ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR,
         labelSize: 12,
         labelWeight: "normal",
         labelColor: { color: isDark() ? LABEL_COLOR_DARK : LABEL_COLOR },
@@ -295,11 +287,9 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
     const s = sigmaRef.current
     if (!s) return
     s.setSetting("labelColor", { color: dark ? LABEL_COLOR_DARK : LABEL_COLOR })
-    if (viewMode !== "learning_path") {
-      s.setSetting("defaultEdgeColor", dark ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR)
-    }
+    s.setSetting("defaultEdgeColor", dark ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR)
     s.refresh()
-  }, [dark, viewMode, filteredGraph])
+  }, [dark, filteredGraph])
 
   // -------------------------------------------------------------------------
   // Camera controls

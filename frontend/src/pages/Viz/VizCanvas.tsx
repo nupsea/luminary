@@ -1,6 +1,6 @@
 // VizCanvas -- the right-hand pane that holds the Sigma canvas and
 // every overlay that lives above it: state overlays (no-doc-selected,
-// LP/KG loading/error/empty), the optional <TagGraph> in tags mode,
+// KG loading/error/empty), the optional <TagGraph> in tags mode,
 // the interaction hint banner, camera controls, legend, note preview
 // panel, node click popover, and edge hover tooltip.
 //
@@ -36,12 +36,6 @@ interface VizCanvasProps {
   noDocSelected: boolean
   onShowAll: () => void
   // Overlay states
-  lpNoInput: boolean
-  lpShowLoading: boolean
-  lpShowError: boolean
-  lpShowEmpty: boolean
-  learningPathStart: string
-  onLpRetry: () => void
   kgIsLoading: boolean
   kgIsError: boolean
   showEmpty: boolean
@@ -59,7 +53,6 @@ interface VizCanvasProps {
   onCloseNotePreview: () => void
   selectedNode: SelectedNodeInfo | null
   onCloseNode: () => void
-  lpBreadcrumb: string[]
   activeDocumentId: string | null
   onNavigate: (path: string) => void
   edgeTooltip: string | null
@@ -76,12 +69,6 @@ export function VizCanvas(props: VizCanvasProps) {
     onTagGraphRetry,
     noDocSelected,
     onShowAll,
-    lpNoInput,
-    lpShowLoading,
-    lpShowError,
-    lpShowEmpty,
-    learningPathStart,
-    onLpRetry,
     kgIsLoading,
     kgIsError,
     showEmpty,
@@ -97,7 +84,6 @@ export function VizCanvas(props: VizCanvasProps) {
     onCloseNotePreview,
     selectedNode,
     onCloseNode,
-    lpBreadcrumb,
     activeDocumentId,
     onNavigate,
     edgeTooltip,
@@ -127,14 +113,8 @@ export function VizCanvas(props: VizCanvasProps) {
         </div>
       )}
 
-      {/* Learning path + knowledge graph state overlays */}
+      {/* Knowledge graph state overlays */}
       <CanvasOverlays
-        lpNoInput={lpNoInput}
-        lpShowLoading={lpShowLoading}
-        lpShowError={lpShowError}
-        lpShowEmpty={lpShowEmpty}
-        learningPathStart={learningPathStart}
-        onLpRetry={onLpRetry}
         kgShowLoading={!noDocSelected && kgIsLoading && viewMode !== "tags"}
         kgShowError={!noDocSelected && !kgIsLoading && kgIsError && viewMode !== "tags"}
         showEmpty={showEmpty}
@@ -200,8 +180,6 @@ export function VizCanvas(props: VizCanvasProps) {
       {selectedNode && (
         <NodePopover
           node={selectedNode}
-          viewMode={viewMode}
-          lpBreadcrumb={lpBreadcrumb}
           activeDocumentId={activeDocumentId}
           onClose={onCloseNode}
           onNavigate={onNavigate}

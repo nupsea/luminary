@@ -12,14 +12,13 @@ import type { ClusterNodeDef, EntityType } from "@/lib/vizUtils"
 import {
   DEFAULT_COLOR,
   LINKS_TO_EDGE_COLOR,
-  LP_EDGE_COLOR,
   PREREQ_EDGE_COLOR,
   SAME_CONCEPT_COLOR,
   SAME_CONCEPT_CONTRADICTION_COLOR,
   TYPE_COLORS,
   WRITTEN_ABOUT_EDGE_COLOR,
 } from "./constants"
-import type { GraphEdge, GraphNode, LearningPathData, LearningPathNode } from "./types"
+import type { GraphEdge, GraphNode } from "./types"
 
 /** Build the main viz graph: entity + diagram + note nodes, all
  *  edge categories (CO_OCCURS / PREREQUISITE_OF / SAME_CONCEPT /
@@ -123,9 +122,9 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
           weight: edge.weight ?? 1,
           relation: edge.relation ?? "CO_OCCURS",
         }
-        if (isPrereq) edgeAttrs.color = PREREQ_EDGE_COLOR
         if (isPrereq) {
           // Directed edge for PREREQUISITE_OF to show arrow direction
+          edgeAttrs.color = PREREQ_EDGE_COLOR
           g.addDirectedEdge(edge.source, edge.target, edgeAttrs)
         } else {
           g.addUndirectedEdge(edge.source, edge.target, edgeAttrs)
@@ -137,64 +136,6 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
   if (g.order > 0) {
     forceAtlas2.assign(g, {
       iterations: 100,
-      settings: forceAtlas2.inferSettings(g),
-    })
-  }
-
-  return g
-}
-
-/** Learning path graph: directed graphology graph with
- *  vertical depth-based layout so deeper prerequisites sit lower. */
-export function buildLearningPathGraph(data: LearningPathData): Graph {
-  // Use a directed graph so Sigma renders arrows
-  const g = new Graph({ type: "directed" })
-
-  const nodeById: Record<string, LearningPathNode> = {}
-  data.nodes.forEach((n) => {
-    nodeById[n.entity_id] = n
-  })
-
-  const maxDepth = data.nodes.reduce((max, n) => Math.max(max, n.depth), 0)
-
-  data.nodes.forEach((node) => {
-    if (!g.hasNode(node.entity_id)) {
-      g.addNode(node.entity_id, {
-        label: node.name,
-        entityType: node.entity_type,
-        frequency: 1,
-        depth: node.depth,
-        x: Math.random() * 200 - 100,
-        // Spread nodes vertically by depth: deeper prerequisites lower on screen
-        y: maxDepth > 0 ? ((maxDepth - node.depth) / maxDepth) * 200 - 100 : 0,
-        size: 10,
-        color: TYPE_COLORS[node.entity_type as EntityType] ?? DEFAULT_COLOR,
-      })
-    }
-  })
-
-  data.edges.forEach((edge, idx) => {
-    // Look up IDs from name
-    const fromNode = data.nodes.find((n) => n.name === edge.from_entity)
-    const toNode = data.nodes.find((n) => n.name === edge.to_entity)
-    if (!fromNode || !toNode) return
-    const from = fromNode.entity_id
-    const to = toNode.entity_id
-    if (g.hasNode(from) && g.hasNode(to) && from !== to) {
-      if (!g.hasEdge(from, to)) {
-        g.addEdge(from, to, {
-          key: `lp-e-${idx}`,
-          weight: edge.confidence,
-          color: LP_EDGE_COLOR,
-          type: "PREREQUISITE_OF",
-        })
-      }
-    }
-  })
-
-  if (g.order > 0) {
-    forceAtlas2.assign(g, {
-      iterations: 80,
       settings: forceAtlas2.inferSettings(g),
     })
   }

@@ -212,7 +212,7 @@ def test_get_graph_empty_doc_ids(client: TestClient):
     assert data["nodes"] == []
 
 
-# S117: PREREQUISITE_OF edges and learning-path
+# PREREQUISITE_OF edges and prerequisite-chain traversal
 
 
 def test_add_prerequisite_creates_edge(graph_svc: KuzuService):
@@ -288,42 +288,6 @@ def test_get_learning_path_no_prereq_edges_returns_empty(graph_svc: KuzuService)
     result = graph_svc.get_learning_path("gravity", "d1")
     assert result["nodes"] == []
     assert result["edges"] == []
-
-
-def test_learning_path_endpoint_returns_200(client: TestClient, tmp_path, monkeypatch):
-    import app.services.graph as graph_module
-
-    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
-    svc.upsert_entity("e1", "natural selection", "CONCEPT")
-    svc.upsert_entity("e2", "variation", "CONCEPT")
-    svc.upsert_document("d1", "Biology", "book")
-    svc.add_mention("e1", "d1")
-    svc.add_mention("e2", "d1")
-    svc.add_prerequisite("e1", "e2", "d1", 0.9)
-
-    resp = client.get("/graph/learning-path?start_entity=natural+selection&document_id=d1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "nodes" in data
-    assert "edges" in data
-
-
-def test_learning_path_endpoint_unknown_entity_returns_empty(client: TestClient):
-    resp = client.get("/graph/learning-path?start_entity=ghost&document_id=nonexistent")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["nodes"] == []
-
-
-def test_learning_path_route_not_captured_by_document_id_route(client: TestClient):
-    """Verify /graph/learning-path is not matched as document_id='learning-path'."""
-    resp = client.get("/graph/learning-path?start_entity=x&document_id=d999")
-    # Should return the learning-path response, not a graph-for-document response
-    assert resp.status_code == 200
-    data = resp.json()
-    # learning-path response always has start_entity, document_id, nodes, edges
-    assert "start_entity" in data
-    assert "nodes" in data
 
 
 def test_get_learning_path_cycle_handled_gracefully(graph_svc: KuzuService):

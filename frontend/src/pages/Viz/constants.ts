@@ -62,6 +62,3 @@ export const SAME_CONCEPT_CONTRADICTION_COLOR = "#ef4444" // red-500 -- contradi
 export const WRITTEN_ABOUT_EDGE_COLOR = "#94a3b8" // slate-400 -- thin grey lines
 export const LINKS_TO_EDGE_COLOR = "#6366f1" // indigo-500 -- note-to-note
 // NOTE_NODE_COLOR is imported from @/lib/noteGraphUtils
-
-// Learning path edges
-export const LP_EDGE_COLOR = "#f97316" // orange-500

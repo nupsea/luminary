@@ -2864,33 +2864,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/graph/learning-path": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Learning Path
-         * @description Return topologically sorted prerequisite chain for a concept.
-         *
-         *     Returns LearningPathResponse with nodes sorted from deepest prerequisite
-         *     toward the start node (start has highest depth index).
-         *     Returns empty nodes/edges if the entity is not found or has no edges.
-         *
-         *     IMPORTANT: This route must be declared before GET /{document_id} to prevent
-         *     FastAPI from matching 'learning-path' as a document_id path parameter.
-         */
-        get: operations["get_learning_path_graph_learning_path_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/graph/concepts/linked": {
         parameters: {
             query?: never;
@@ -7697,30 +7670,6 @@ export interface components {
             document_id: string;
             /** Objectives */
             objectives: components["schemas"]["LearningObjectiveItem"][];
-        };
-        /** LearningPathNode */
-        LearningPathNode: {
-            /** Entity Id */
-            entity_id: string;
-            /** Name */
-            name: string;
-            /** Entity Type */
-            entity_type: string;
-            /** Depth */
-            depth: number;
-        };
-        /** LearningPathResponse */
-        LearningPathResponse: {
-            /** Start Entity */
-            start_entity: string;
-            /** Document Id */
-            document_id: string;
-            /** Nodes */
-            nodes: components["schemas"]["LearningPathNode"][];
-            /** Edges */
-            edges: {
-                [key: string]: unknown;
-            }[];
         };
         /** LibrarySummarizeRequest */
         LibrarySummarizeRequest: {
@@ -14542,40 +14491,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceContextResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_learning_path_graph_learning_path_get: {
-        parameters: {
-            query: {
-                /** @description Entity name to start path from */
-                start_entity: string;
-                /** @description Document scope */
-                document_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LearningPathResponse"];
                 };
             };
             /** @description Validation Error */
