@@ -55,12 +55,6 @@ async def test_returns_zero_counts_for_unknown_tag(test_db):
         assert body == {"document_count": 0, "note_count": 0}
 
 
-# Flaky on GH CI only (memory pressure): POST /notes spawns fire-and-forget asyncio tasks
-# (embed/graph/description) that race the per-note tag-index write on the shared SQLite lock,
-# so one of the three notes intermittently isn't counted (note_count=2). Deterministically green
-# locally and in the PR-triggered run on the same commit; same class as the other tag/note
-# `unstable` tests. Excluded from CI; runnable via `uv run pytest -m unstable`.
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_splits_counts_across_documents_and_notes(test_db):
     _, factory = test_db

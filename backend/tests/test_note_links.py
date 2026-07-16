@@ -168,7 +168,6 @@ def test_get_links_3_note_chain(client):
 # GET /notes/autocomplete
 
 
-@pytest.mark.unstable
 def test_autocomplete_returns_matching_notes(client):
     """GET /notes/autocomplete?q= returns up to 8 notes by content prefix."""
     suffix = uuid.uuid4().hex[:6]
@@ -185,7 +184,6 @@ def test_autocomplete_returns_matching_notes(client):
         assert "preview" in item
 
 
-@pytest.mark.unstable
 def test_autocomplete_limit_8(client):
     """GET /notes/autocomplete returns at most 8 results."""
     suffix = uuid.uuid4().hex[:6]

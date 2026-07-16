@@ -98,7 +98,6 @@ async def test_suggest_tags_returns_normalized_slugs(test_db):
 # AC10: duplicate note creation within 5s window returns existing note
 
 
-@pytest.mark.unstable
 @pytest.mark.asyncio
 async def test_duplicate_note_dedup_within_5s(test_db):
     """POST /notes with identical (document_id, section_id, content) within 5s returns existing."""

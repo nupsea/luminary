@@ -1,7 +1,4 @@
 """GET /collections/{id}/overview (plan 2E.6 Overview tab)."""
-# All tests in this module share a SQLite test_db fixture and are susceptible
-# to event-loop teardown errors when run immediately after GLiNER-heavy tests.
-# Marked unstable so CI excludes them; run with: pytest -m unstable
 
 import uuid
 
@@ -15,8 +12,6 @@ from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, FlashcardModel
 from app.services.activity_service import ActivityService
-
-pytestmark = pytest.mark.unstable
 
 
 @pytest.fixture

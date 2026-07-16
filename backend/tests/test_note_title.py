@@ -176,7 +176,6 @@ async def test_patch_empty_title_clears_to_null(test_db):
         assert cleared["title_auto_generated"] is False
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_patch_other_fields_does_not_touch_title(test_db):
     """PATCH that omits `title` must leave the title + auto flag unchanged."""
