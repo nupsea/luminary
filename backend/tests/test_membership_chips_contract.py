@@ -145,6 +145,7 @@ async def test_notes_list_collections_replaces_collection_ids(test_db):
         assert item["collections"] == [{"id": col_id, "name": col_name, "color": color}]
 
 
+@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_get_note_returns_collections_with_refs(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

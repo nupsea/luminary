@@ -176,10 +176,6 @@ async def test_patch_empty_title_clears_to_null(test_db):
         assert cleared["title_auto_generated"] is False
 
 
-# GH-only teardown cascade, validated empirically at e924e08 (2/2 CI runs red with
-# this test enforced, 2/2 green at c3dbbbc without it; deterministically green locally).
-# The POST/PATCH here fire notes background tasks that on slow runners still hold
-# StaticPool connections while later teardowns dispose the engine.
 @pytest.mark.unstable
 @pytest.mark.anyio
 async def test_patch_other_fields_does_not_touch_title(test_db):

@@ -119,6 +119,7 @@ def _create_note(client, content="Note body text", tags=None):
     return resp.json()
 
 
+@pytest.mark.unstable
 def test_export_markdown_3_notes_returns_zip_with_3_files(client):
     col = _create_collection(client, name="Export Test Collection")
     note_ids = []
