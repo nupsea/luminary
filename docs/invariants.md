@@ -11,8 +11,8 @@ These are non-negotiable. Each one exists because its violation caused a real bu
 **I-1. Never share AsyncSession across `asyncio.gather` tasks.**
 Each concurrent task needs its own session or a `Semaphore(1)` serialiser. SQLAlchemy AsyncSession is not safe for concurrent use.
 
-**I-2. Wrap all synchronous LanceDB calls with `asyncio.to_thread`.**
-LanceDB is synchronous. Calling it directly in an async function blocks the event loop.
+**I-2. Wrap all synchronous LanceDB *and Kuzu* calls with `asyncio.to_thread`.**
+Both are synchronous. Calling either directly in an async function blocks the event loop -- and because the server runs a single worker, it stalls *every* concurrent request, not just the slow one. Measured: a 2ms `/tags/graph` took 8.5s sitting behind one all-library `/graph` traversal, which is why the Map's Tags view appeared to hang. Kuzu is safe to call from a worker thread: `ThreadSafeKuzuConnection` already serializes every `execute()` under an RLock.
 
 **I-3. Always guard Kuzu `get_next()` with `has_next()`.**
 `get_next()` raises if no rows exist. Every Kuzu result iteration must call `has_next()` first.

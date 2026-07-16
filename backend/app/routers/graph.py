@@ -1,5 +1,13 @@
-"""GET /graph endpoints for entity-relationship knowledge graph queries."""
+"""GET /graph endpoints for entity-relationship knowledge graph queries.
 
+Kuzu is synchronous, so every service call here goes through asyncio.to_thread:
+a full-library traversal takes seconds, and awaiting it on the event loop stalls
+the whole worker (a 2ms /tags/graph measured 8.5s behind one /graph). The
+connection is already serialized by ThreadSafeKuzuConnection's lock, so the
+worker thread is safe. Same rule as I-2 for LanceDB.
+"""
+
+import asyncio
 import logging
 
 from fastapi import APIRouter, Query
@@ -47,7 +55,7 @@ async def get_concept_clusters() -> ConceptLinkedResponse:
     FastAPI from matching 'concepts' as a document_id path parameter.
     """
     svc = get_graph_service()
-    raw = svc.get_concept_clusters()
+    raw = await asyncio.to_thread(svc.get_concept_clusters)
     return ConceptLinkedResponse(clusters=[ConceptClusterItem(**c) for c in raw])
 
 
@@ -62,7 +70,7 @@ async def get_entities_by_type(
     FastAPI from matching 'entities' as a document_id path parameter.
     """
     svc = get_graph_service()
-    raw = svc.get_entities_by_type(document_id, type)
+    raw = await asyncio.to_thread(svc.get_entities_by_type, document_id, type)
     return EntityListResponse(entities=[EntityItem(**e) for e in raw])
 
 
@@ -80,8 +88,10 @@ async def get_graph_for_document(
     """
     svc = get_graph_service()
     if type == "call_graph":
-        return svc.get_call_graph(document_id)
-    return svc.get_graph_for_document(document_id, include_notes=include_notes)
+        return await asyncio.to_thread(svc.get_call_graph, document_id)
+    return await asyncio.to_thread(
+        svc.get_graph_for_document, document_id, include_notes=include_notes
+    )
 
 
 @router.get("")
@@ -103,8 +113,9 @@ async def get_graph(
     else:
         # "all docs" scope -- expand to every Document node known to Kuzu so
         # the service's per-document MENTIONED_IN scan covers the full graph.
-        ids = svc.get_all_document_ids()
-    return svc.get_graph_for_documents(
+        ids = await asyncio.to_thread(svc.get_all_document_ids)
+    return await asyncio.to_thread(
+        svc.get_graph_for_documents,
         ids,
         include_same_concept=include_same_concept,
         include_notes=include_notes,

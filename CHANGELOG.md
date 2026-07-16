@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The Map's Tags view no longer stalls for ~7s** (and neither does anything
+  else that happens to run alongside a graph query). Kuzu is synchronous, and
+  the `/graph` handlers awaited it directly on the event loop; with a single
+  uvicorn worker that stalls *every* concurrent request. A 2ms `/tags/graph`
+  measured **8.5s** sitting behind one all-library `/graph` traversal. The graph
+  handlers now go through `asyncio.to_thread` (safe: `ThreadSafeKuzuConnection`
+  already serializes execution under an RLock). Tags renders in ~0.6s, down from
+  ~7.1s; `/tags/graph` alongside `/graph` drops from 8.58s to 0.034s. `/graph`
+  itself is still slow (~8s for 4.3k nodes) — it just no longer blocks the app.
+  I-2 extended to cover Kuzu, not just LanceDB.
+
 ### Removed
 - **The Map's Learning Path view.** It required typing an exact concept name
   before it would render anything, and returned a chain only for entities with
