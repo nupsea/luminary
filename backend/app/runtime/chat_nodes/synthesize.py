@@ -11,6 +11,7 @@ Pass-through behaviour: if a strategy node already set a non-empty
 node returns {} so stream_answer() emits the existing answer.
 """
 
+import asyncio
 import logging
 
 from sqlalchemy import select
@@ -82,7 +83,9 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
 
     try:
         svc = _graph_module.get_graph_service()
-        all_edges = svc.get_same_concept_edges()
+        # Kuzu is synchronous: keep it off the event loop (I-2). This runs on every
+        # synthesis and scans every SAME_CONCEPT edge, so it grows with the library.
+        all_edges = await asyncio.to_thread(svc.get_same_concept_edges)
         relevant = [
             e
             for e in all_edges
