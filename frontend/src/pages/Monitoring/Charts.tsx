@@ -7,13 +7,13 @@ import {
   BarChart,
   CartesianGrid,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
 
 import { EmptyState } from "./SharedUI"
 import type { PhoenixUrl, QADailyCount } from "./types"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 export function QAActivityChart({ daily }: { daily: QADailyCount[] }) {
   if (daily.every((d) => d.count === 0)) {
@@ -26,7 +26,8 @@ export function QAActivityChart({ daily }: { daily: QADailyCount[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 10 }} />
         <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={30} />
-        <Tooltip
+        <ChartTooltip
+
           formatter={(v) => [v ?? 0, "QA calls"]}
           labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ""}
         />

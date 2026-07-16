@@ -8,13 +8,14 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react"
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 
 import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { CoverageReport } from "./types"
 import { bloomBarFill, coverageBadgeClass } from "./utils"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 const fetchAudit = (documentId: string): Promise<CoverageReport> =>
   apiGet<CoverageReport>(`/flashcards/audit/${documentId}`)
@@ -117,7 +118,7 @@ export function DeckHealthPanel({ documentId }: DeckHealthPanelProps) {
                   <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
                     <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <Tooltip formatter={(value) => [value ?? 0, "Cards"]} />
+                    <ChartTooltip formatter={(value) => [value ?? 0, "Cards"]} />
                     <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                       {chartData.map((entry, index) => (
                         <Cell key={`bar-${index}`} fill={entry.fill} />

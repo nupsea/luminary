@@ -8,7 +8,6 @@ import {
   LineChart,
   ReferenceLine,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
@@ -19,6 +18,7 @@ import type { DatasetSelection } from "./api"
 import { StrategyFunnel } from "./StrategyFunnel"
 import { isStale, shippedAblationArm, THRESHOLDS, timeAgo } from "./thresholds"
 import type { EvalRunFull, GoldenDatasetDetail } from "./types"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 const RETRIEVAL_KINDS = new Set(["retrieval", "generation", "citation", null])
 
@@ -544,7 +544,7 @@ export function ResultsDashboard({ selection }: { selection: DatasetSelection | 
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
               <XAxis dataKey="run" tick={{ fontSize: 10 }} />
               <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} />
-              <Tooltip formatter={(v) => (typeof v === "number" ? v.toFixed(3) : "—")} />
+              <ChartTooltip formatter={(v) => (typeof v === "number" ? v.toFixed(3) : "—")} />
               <ReferenceLine y={THRESHOLDS.hit_rate_5} stroke="#94a3b8" strokeDasharray="4 4" />
               <Line type="monotone" dataKey="HR@5" stroke="#6366f1" dot={{ r: 2 }} connectNulls />
               <Line type="monotone" dataKey="MRR" stroke="#0ea5e9" dot={{ r: 2 }} connectNulls />
