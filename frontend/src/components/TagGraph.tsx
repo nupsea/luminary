@@ -17,7 +17,15 @@ import {
   nodeSizeFromCount,
   TAG_GRAPH_PALETTE,
 } from "@/lib/tagGraphUtils"
+import { useIsDark } from "@/hooks/useIsDark"
 import { logger } from "@/lib/logger"
+import { isDark } from "@/lib/theme"
+import {
+  LABEL_COLOR,
+  LABEL_COLOR_DARK,
+  NEUTRAL_EDGE_COLOR,
+  NEUTRAL_EDGE_COLOR_DARK,
+} from "@/pages/Viz/constants"
 
 export interface TagNodeData {
   id: string
@@ -87,6 +95,16 @@ function buildTagGraphology(nodes: TagNodeData[], edges: TagEdgeData[]): Graph {
 export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: TagGraphProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
+  const dark = useIsDark()
+
+  // Restyle the live instance on light/dark toggle without a rebuild.
+  useEffect(() => {
+    const s = sigmaRef.current
+    if (!s) return
+    s.setSetting("labelColor", { color: dark ? LABEL_COLOR_DARK : LABEL_COLOR })
+    s.setSetting("defaultEdgeColor", dark ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR)
+    s.refresh()
+  }, [dark])
 
   // Build Sigma whenever nodes/edges change
   useEffect(() => {
@@ -114,9 +132,10 @@ export default function TagGraph({ nodes, edges, isLoading, isError, onRetry }: 
 
     const s = new Sigma(g, el, {
       renderEdgeLabels: false,
-      defaultEdgeColor: "#e2e8f0",
+      defaultEdgeColor: isDark() ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR,
       labelSize: 11,
       labelWeight: "normal",
+      labelColor: { color: isDark() ? LABEL_COLOR_DARK : LABEL_COLOR },
       allowInvalidContainer: true,
     })
 

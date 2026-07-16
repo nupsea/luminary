@@ -116,12 +116,14 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
           return
         }
 
+        // Neutral CO_OCCURS edges carry no color: they inherit the theme-aware
+        // defaultEdgeColor from the Sigma settings in useSigma.
         const edgeAttrs: Record<string, unknown> = {
           key: `e-${idx}`,
           weight: edge.weight ?? 1,
-          color: isPrereq ? PREREQ_EDGE_COLOR : "#e2e8f0",
           relation: edge.relation ?? "CO_OCCURS",
         }
+        if (isPrereq) edgeAttrs.color = PREREQ_EDGE_COLOR
         if (isPrereq) {
           // Directed edge for PREREQUISITE_OF to show arrow direction
           g.addDirectedEdge(edge.source, edge.target, edgeAttrs)
@@ -281,7 +283,6 @@ export function buildClusterGraphology(
       g.addUndirectedEdge(srcId, tgtId, {
         key: `ce-${idx}`,
         weight: edge.weight ?? 1,
-        color: "#e2e8f0",
       })
     }
   }

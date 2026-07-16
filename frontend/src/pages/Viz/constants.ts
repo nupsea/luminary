@@ -42,6 +42,15 @@ export const TYPE_COLORS: Record<EntityType, string> = {
 export const DEFAULT_COLOR = "#94a3b8"
 export const DIM_COLOR = "rgba(200,200,200,0.15)"
 
+// Theme-dependent canvas colours. Sigma renders to WebGL/canvas, so CSS dark:
+// variants don't reach it -- useSigma applies these per effective theme.
+// Neutral (CO_OCCURS / cluster) edges carry no color attribute and fall back
+// to defaultEdgeColor, which is where the theme swap happens.
+export const NEUTRAL_EDGE_COLOR = "#e2e8f0" // slate-200 -- subtle on a light canvas
+export const NEUTRAL_EDGE_COLOR_DARK = "#334155" // slate-700 -- subtle on a dark canvas
+export const LABEL_COLOR = "#1e293b" // slate-800
+export const LABEL_COLOR_DARK = "#cbd5e1" // slate-300
+
 // PREREQUISITE_OF edges
 export const PREREQ_EDGE_COLOR = "#a855f7" // purple-500
 

@@ -25,6 +25,9 @@ export function isDark(): boolean {
 
 function apply(dark: boolean): void {
   document.documentElement.classList.toggle("dark", dark)
+  // Canvas-based surfaces (Sigma graph) can't use CSS dark: variants; they
+  // listen for this event to recolor at runtime.
+  window.dispatchEvent(new CustomEvent("luminary:theme", { detail: { dark } }))
 }
 
 export function setTheme(theme: Theme): void {
