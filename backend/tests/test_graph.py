@@ -212,6 +212,57 @@ def test_get_graph_empty_doc_ids(client: TestClient):
     assert data["nodes"] == []
 
 
+# SAME_CONCEPT contradiction edges — doc-scoped Cypher filter
+
+
+def _seed_same_concept(svc: KuzuService) -> None:
+    for e in ("e1", "e2", "e3", "e4"):
+        svc.upsert_entity(e, e, "CONCEPT")
+    # contradiction touching d1/d2
+    svc.add_same_concept_edge("e1", "e2", "d1", "d2", 0.9, contradiction=True,
+                              contradiction_note="A says X, B says Y")
+    # contradiction touching d3/d4 (unrelated to d1)
+    svc.add_same_concept_edge("e3", "e4", "d3", "d4", 0.8, contradiction=True,
+                              contradiction_note="C says P, D says Q")
+    # non-contradiction touching d1 — must be excluded
+    svc.add_same_concept_edge("e1", "e3", "d1", "d3", 0.7, contradiction=False)
+
+
+def test_contradiction_edges_for_docs_scopes_to_requested_docs(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    rows = graph_svc.get_contradiction_edges_for_docs(["d1"])
+    assert len(rows) == 1
+    assert rows[0]["contradiction_note"] == "A says X, B says Y"
+    assert rows[0]["contradiction"] is True
+
+
+def test_contradiction_edges_for_docs_matches_source_or_target(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    # d4 appears only as a target_doc_id
+    rows = graph_svc.get_contradiction_edges_for_docs(["d4"])
+    assert {r["contradiction_note"] for r in rows} == {"C says P, D says Q"}
+
+
+def test_contradiction_edges_for_docs_equivalent_to_python_filter(graph_svc: KuzuService):
+    """The Cypher filter returns exactly what a full scan + Python filter would."""
+    _seed_same_concept(graph_svc)
+    all_edges = graph_svc.get_same_concept_edges()
+    for docs in (["d1"], ["d2"], ["d3", "d4"], ["d1", "d3"], ["nope"]):
+        expected = {
+            (e["entity_id_a"], e["entity_id_b"])
+            for e in all_edges
+            if e["contradiction"] and (e["source_doc_id"] in docs or e["target_doc_id"] in docs)
+        }
+        rows = graph_svc.get_contradiction_edges_for_docs(docs)
+        got = {(e["entity_id_a"], e["entity_id_b"]) for e in rows}
+        assert got == expected, f"mismatch for {docs}"
+
+
+def test_contradiction_edges_for_docs_empty_input(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    assert graph_svc.get_contradiction_edges_for_docs([]) == []
+
+
 # PREREQUISITE_OF edges and prerequisite-chain traversal
 
 

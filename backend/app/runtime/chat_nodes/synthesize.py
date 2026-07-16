@@ -83,15 +83,13 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
 
     try:
         svc = _graph_module.get_graph_service()
-        # Kuzu is synchronous: keep it off the event loop (I-2). This runs on every
-        # synthesis and scans every SAME_CONCEPT edge, so it grows with the library.
-        all_edges = await asyncio.to_thread(svc.get_same_concept_edges)
-        relevant = [
-            e
-            for e in all_edges
-            if e["contradiction"]
-            and (e["source_doc_id"] in doc_ids or e["target_doc_id"] in doc_ids)
-        ]
+        # Kuzu is synchronous: keep it off the event loop (I-2). The contradiction
+        # + doc-scope filter is done in Cypher, so only the edges we'll actually
+        # use cross into Python (was: scan every SAME_CONCEPT edge in the library
+        # and filter here).
+        relevant = await asyncio.to_thread(
+            svc.get_contradiction_edges_for_docs, doc_ids
+        )
         if not relevant:
             return ""
 

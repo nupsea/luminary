@@ -186,6 +186,9 @@ class KuzuService:
     def get_same_concept_edges(self) -> list[dict]:
         return self._concept.get_same_concept_edges()
 
+    def get_contradiction_edges_for_docs(self, doc_ids: list[str]) -> list[dict]:
+        return self._concept.get_contradiction_edges_for_docs(doc_ids)
+
     def get_concept_clusters(self) -> list[dict]:
         return self._concept.get_concept_clusters()
 

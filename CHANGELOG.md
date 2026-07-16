@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself is still slow (~8s for 4.3k nodes) — it just no longer blocks the app.
   I-2 extended to cover Kuzu, not just LanceDB.
 
+### Changed
+- **Chat contradiction lookup filters in Cypher instead of Python.** The
+  per-answer contradiction-context step scanned *every* SAME_CONCEPT edge in the
+  library and built a Python dict for each, only to keep the ≤3 contradictions
+  touching the in-scope documents. New `get_contradiction_edges_for_docs(doc_ids)`
+  pushes the contradiction + doc-scope filter into the query, so only matching
+  rows cross into Python. Proven equivalent to the old full-scan-then-filter over
+  20 random doc-sets on the live graph. Kuzu has no index on `source_doc_id`, so
+  the edge scan is still O(edges); what this removes is the per-edge Python
+  materialization, which is what actually grew with library size.
+
 ### Removed
 - **The Map's Learning Path view.** It required typing an exact concept name
   before it would render anything, and returned a chain only for entities with
