@@ -784,12 +784,19 @@ class QAService:
                 "source_citations": result.get("source_citations") or [],
             }
             # Eval-only: the faithfulness NLI must score the answer against the
-            # exact chunks it was grounded on, not a parallel /search. UI clients
-            # never set include_context, so normal chat payloads stay lean.
+            # exact grounding it was generated from, not a parallel /search. UI
+            # clients never set include_context, so normal chat payloads stay lean.
+            # section_context counts: summary/graph/comparative routes can ground
+            # an answer on it with zero chunks, and omitting it scores a grounded
+            # answer as if it hallucinated everything.
             if include_context:
-                final["context_chunks"] = [
+                context_texts = [
                     c.get("text", "") for c in chunks_returned if c.get("text")
                 ]
+                section_context = result.get("section_context")
+                if section_context and section_context.strip():
+                    context_texts.append(section_context)
+                final["context_chunks"] = context_texts
             yield f"data: {json.dumps(final)}\n\n"
             logger.info(
                 "[perf] stream_answer total: %.2fs (question=%r)",

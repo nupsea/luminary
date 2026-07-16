@@ -412,7 +412,11 @@ async def test_streaming_not_buffered():
     )
 
 
-async def _run_qa_done(include_context: bool) -> dict:
+async def _run_qa_done(
+    include_context: bool,
+    chunks: list[dict] | None = None,
+    section_context: str = "",
+) -> dict:
     from app.services.qa import get_qa_service  # noqa: PLC0415
 
     async def _stream(*_args, **_kwargs):
@@ -422,17 +426,20 @@ async def _run_qa_done(include_context: bool) -> dict:
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(side_effect=_stream)
 
+    if chunks is None:
+        chunks = [
+            {"chunk_id": "c1", "text": "First grounding chunk."},
+            {"chunk_id": "c2", "text": "Second grounding chunk."},
+        ]
+
     mock_graph = MagicMock()
     mock_graph.ainvoke = AsyncMock(
         return_value={
             "answer": "",
             "confidence": "high",
             "citations": [],
-            "chunks": [
-                {"chunk_id": "c1", "text": "First grounding chunk."},
-                {"chunk_id": "c2", "text": "Second grounding chunk."},
-            ],
-            "section_context": "",
+            "chunks": chunks,
+            "section_context": section_context,
             "intent": "factual",
             "_llm_prompt": "What is the answer?",
             "_system_prompt": "You are a helpful assistant.",
@@ -474,3 +481,29 @@ async def test_context_chunks_absent_by_default():
     """UI clients never opt in, so normal done events stay lean (no context_chunks)."""
     done = await _run_qa_done(include_context=False)
     assert "context_chunks" not in done
+
+
+async def test_include_context_reports_section_context_without_chunks():
+    """Summary/graph routes can ground an answer on section_context with zero chunks.
+    The eval must receive that grounding — omitting it scores a grounded answer as if
+    it hallucinated everything (observed: faithfulness 0.0 on a real answer)."""
+    done = await _run_qa_done(
+        include_context=True,
+        chunks=[],
+        section_context="Per-document summary the answer was grounded on.",
+    )
+    assert done.get("context_chunks") == [
+        "Per-document summary the answer was grounded on.",
+    ]
+
+
+async def test_include_context_reports_chunks_and_section_context():
+    done = await _run_qa_done(
+        include_context=True,
+        section_context="Entity-graph supplement lines.",
+    )
+    assert done.get("context_chunks") == [
+        "First grounding chunk.",
+        "Second grounding chunk.",
+        "Entity-graph supplement lines.",
+    ]
