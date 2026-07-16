@@ -6,7 +6,6 @@ once, so its failure mode is silent and permanent.
 
 import sqlite3
 
-import pytest
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
@@ -80,12 +79,11 @@ async def test_boot_is_idempotent(tmp_path):
         await engine.dispose()
 
 
-@pytest.mark.parametrize(
-    "table",
-    ["curricula", "curriculum_nodes", "glossary_terms", "assessment_events", "note_collections"],
-)
-async def test_orphan_tables_absent_after_boot(tmp_path, table):
-    db = tmp_path / f"orphan_{table}.db"
+async def test_orphan_tables_absent_after_boot(tmp_path):
+    # One database, all five tables: parametrising this built five full databases
+    # (bridge + migrations each) to check five names, and the extra load is not free
+    # on a memory-constrained CI runner.
+    db = tmp_path / "orphans.db"
     engine = make_engine(f"sqlite+aiosqlite:///{db}")
     try:
         await init_database(engine)
@@ -94,9 +92,14 @@ async def test_orphan_tables_absent_after_boot(tmp_path, table):
 
     c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        found = c.execute(
-            "select name from sqlite_master where type='table' and name=?", (table,)
-        ).fetchone()
+        present = {
+            r[0]
+            for r in c.execute(
+                "select name from sqlite_master where type='table' and name in "
+                "('curricula','curriculum_nodes','glossary_terms','assessment_events',"
+                "'note_collections')"
+            )
+        }
     finally:
         c.close()
-    assert found is None, f"{table} should not exist after migrations"
+    assert present == set(), f"orphan tables should not exist after migrations: {present}"

@@ -12,11 +12,13 @@ baseline: even tests that don't define their own DB fixture will never touch
 ~/.luminary.
 """
 
+import asyncio
 import os
 import warnings
 from unittest.mock import patch
 
 import pytest
+import pytest_asyncio
 
 # Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
@@ -78,6 +80,32 @@ def _reset_lancedb_singleton():
 
     _vs_module._lancedb_service = None
     yield
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _drain_leaked_tasks():
+    """Cancel any fire-and-forget task the test spawned, while its loop is still alive.
+
+    Routers fire ~12 kinds of background task (document pre-generate, tag enrichment,
+    note embedding/description, XP awards...). In the app that is correct: the loop
+    outlives them. Under pytest-asyncio each test gets its OWN loop, so a task spawned
+    by test A is bound to loop A -- and whatever the task is awaiting (an LLM call, an
+    embedder load, a DB handle) resolves on a loop that is about to close. The task then
+    surfaces in a LATER test's teardown, where the finalizer awaits a future that can
+    never complete, and the suite hangs at the 120s timeout blaming an innocent test.
+
+    Cancelling here, inside the owning loop, is the only point where cancellation can
+    actually be processed.
+    """
+    yield
+    current = asyncio.current_task()
+    leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    for t in leaked:
+        t.cancel()
+    if leaked:
+        # Bounded: a task stuck in a thread executor cannot be cancelled, and waiting
+        # forever for it would recreate the hang this fixture exists to prevent.
+        await asyncio.wait(leaked, timeout=5)
 
 
 @pytest.fixture(autouse=True)
