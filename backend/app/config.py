@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/llava:7b"
+    # Max concurrent vision (image_analyze) LLM calls across all documents. Default
+    # 1 = one-at-a-time (safe on 8GB). Raise (e.g. 2-4) on a host with headroom and
+    # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
+    # profile sets this: public=1, standard=2, performance=4.
+    ENRICHMENT_VISION_CONCURRENCY: int = 1
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
     # 2D.2: seed document auto-tags with entities from the graph extraction.
     # On by default -- no extra LLM calls; uses entities already populated by

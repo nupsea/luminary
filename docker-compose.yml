@@ -27,6 +27,13 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
+    environment:
+      # Keep the text (llama3.2) and vision (llava) models resident together so
+      # enrichment does not thrash reloading them, and let one server batch
+      # concurrent requests. Defaults suit a ~16GB host; lower both to 1 on an
+      # 8GB host, raise on a bigger box. See install.sh profile prompt.
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
     restart: unless-stopped
     profiles:
       - ai

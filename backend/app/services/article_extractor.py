@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 
@@ -29,7 +30,7 @@ class ArticleExtractor:
     Unified article extraction for a high-fidelity reading experience.
     """
 
-    async def extract(self, url: str) -> ParsedDocument:
+    async def extract(self, url: str, doc_id: str | None = None) -> ParsedDocument:
         logger.info("Extracting unified article from URL: %s", url)
 
         require_extra("cloudscraper", "URL article extraction")
@@ -56,7 +57,10 @@ class ArticleExtractor:
         # 2. Extract metadata
         metadata = trafilatura.metadata.extract_metadata(html_content)
         title = (metadata.title if metadata and metadata.title else "Untitled Article").strip()
-        doc_id = hashlib.md5(url.encode()).hexdigest()
+        # Mirror images under the caller's document_id so image_extract_handler
+        # (which scans images/{document_id}) finds them. Fall back to a URL hash
+        # only when called outside the ingestion flow.
+        doc_id = doc_id or hashlib.md5(url.encode()).hexdigest()
 
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
@@ -78,8 +82,9 @@ class ArticleExtractor:
         )
 
         # 4. Localize Image Links in Markdown
-        # Trafilatura outputs markdown like ![alt](url)
-        markdown_text = await self._mirror_markdown_images(markdown_text, doc_id)
+        # Trafilatura outputs markdown like ![alt](url), often with root-relative
+        # src (/foo/bar.png) that must be resolved against the article URL.
+        markdown_text = await self._mirror_markdown_images(markdown_text, doc_id, url)
 
         # 5. Normalize Markdown (The "### Fix")
         markdown_text = self._normalize_markdown(markdown_text)
@@ -96,7 +101,7 @@ class ArticleExtractor:
             raw_text=markdown_text,
         )
 
-    async def _mirror_markdown_images(self, md: str, doc_id: str) -> str:
+    async def _mirror_markdown_images(self, md: str, doc_id: str, base_url: str) -> str:
         """Finds ![alt](url) in markdown, downloads them, and updates to local path."""
         import cloudscraper
 
@@ -108,8 +113,12 @@ class ArticleExtractor:
         async def replace_match(match):
             alt = match.group(1)
             url = match.group(2)
-            if url.startswith("__LUMINARY_IMG__"):
+            if url.startswith("__LUMINARY_IMG__") or url.startswith("data:"):
                 return match.group(0)
+
+            # Trafilatura emits root-relative or protocol-relative src; resolve
+            # against the article URL so the download has a scheme + host.
+            url = urljoin(base_url, url)
 
             try:
                 ext = url.split(".")[-1].split("?")[0].lower()

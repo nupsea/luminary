@@ -43,22 +43,46 @@ _VISION_PROMPT = (
     'Reply ONLY with JSON: {"image_type": "...", "description": "..."}'
 )
 
-# Semaphore to limit concurrent LLM calls (avoids OOM on large PDFs)
-_ENRICH_SEM = asyncio.Semaphore(1)
+# Bounds concurrent vision LLM calls across ALL documents (avoids OOM on large
+# PDFs). Sized lazily from ENRICHMENT_VISION_CONCURRENCY so a machine/profile with
+# headroom can batch several image_analyze calls (paired with OLLAMA_NUM_PARALLEL);
+# the default of 1 preserves the original one-at-a-time behaviour.
+_ENRICH_SEM: asyncio.Semaphore | None = None
+
+
+def _get_enrich_sem() -> asyncio.Semaphore:
+    global _ENRICH_SEM  # noqa: PLW0603
+    if _ENRICH_SEM is None:
+        try:
+            n = int(_config_module.get_settings().ENRICHMENT_VISION_CONCURRENCY)
+        except (TypeError, ValueError):
+            n = 1
+        _ENRICH_SEM = asyncio.Semaphore(max(1, n))
+    return _ENRICH_SEM
+
+
+# One color covering more than this fraction of pixels means a near-blank capture
+# (e.g. an all-white figure box) that anti-aliasing pushed past the 5-color floor.
+# Kept conservative so sparse-but-real line-art diagrams — well below this on their
+# background color — are still analyzed.
+_DECORATIVE_DOMINANT_FRAC = 0.99
 
 
 def _is_decorative(pil_image: object) -> bool:
-    """Return True if the image is decorative (solid-color or extreme aspect ratio).
+    """Return True if the image is decorative (no informational content).
 
-    Solid-color check: fewer than 5 unique RGB pixel values.
-    Rule-line check: max(w, h) / min(w, h) > 10.
+    - Solid-color: fewer than 5 unique RGB pixel values.
+    - Near-blank: a single color covers >99% of pixels.
+    - Rule-line: max(w, h) / min(w, h) > 10.
     """
 
     img = pil_image  # type: ignore[assignment]
     img_rgb = img.convert("RGB")  # type: ignore[attr-defined]
     pixels = np.array(img_rgb).reshape(-1, 3)
-    unique_count = len(np.unique(pixels, axis=0))
-    if unique_count < 5:
+    _colors, counts = np.unique(pixels, axis=0, return_counts=True)
+    if len(counts) < 5:
+        return True
+    if counts.max() / counts.sum() > _DECORATIVE_DOMINANT_FRAC:
         return True
     w, h = img.size  # type: ignore[attr-defined]
     ratio = max(w, h) / max(min(w, h), 1)
@@ -197,7 +221,7 @@ class ImageEnricherService:
                 )
                 continue
 
-            async with _ENRICH_SEM:
+            async with _get_enrich_sem():
                 try:
 
                     pil_img = _PILImage.open(str(abs_path))

@@ -72,6 +72,46 @@ def test_prefilter_varied_image_not_decorative(tmp_path: Path) -> None:
     assert _is_decorative(pil_img) is False
 
 
+def test_prefilter_near_blank_decorative() -> None:
+    """A near-blank capture (>99% one color, but >5 colors from noise) is decorative."""
+    img = PILImage.new("RGB", (200, 200), color=(255, 255, 255))
+    # Sprinkle a handful of stray colored pixels (<1%) — enough to exceed the
+    # 5-unique-color floor, but the image is still blank for all practical purposes.
+    for i in range(20):
+        img.putpixel((i, 0), (i * 10, i * 5, i * 2))
+    assert _is_decorative(img) is True
+
+
+def test_prefilter_sparse_lineart_not_decorative() -> None:
+    """Sparse line-art on white (a real diagram) survives the near-blank filter.
+
+    ~12% non-white ink across many colors (anti-aliasing/grays), like an actual
+    computational-graph figure: >5 unique colors and dominant white well under 99%.
+    """
+    img = PILImage.new("RGB", (200, 200), color=(255, 255, 255))
+    palette = [(0, 0, 0), (30, 30, 30), (60, 90, 200), (200, 40, 40),
+               (20, 140, 60), (120, 120, 120), (240, 160, 0), (90, 0, 140)]
+    for y in range(24):
+        for x in range(200):
+            img.putpixel((x, y), palette[(x + y) % len(palette)])
+    assert _is_decorative(img) is False
+
+
+def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
+    """_get_enrich_sem sizes the shared semaphore from ENRICHMENT_VISION_CONCURRENCY."""
+    import app.services.image_enricher as ie
+
+    monkeypatch.setattr(ie, "_ENRICH_SEM", None)
+    fake_settings = MagicMock()
+    fake_settings.ENRICHMENT_VISION_CONCURRENCY = 3
+    monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
+
+    sem = ie._get_enrich_sem()
+    assert sem._value == 3
+    # Cached: a second call returns the same instance.
+    assert ie._get_enrich_sem() is sem
+
+
 # Async fixtures
 
 

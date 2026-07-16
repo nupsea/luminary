@@ -94,9 +94,41 @@ else
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# Performance profile — sizes Ollama residency/parallelism + vision concurrency.
+# public=1/1/1 (~8GB), standard=2/2/2 (~16GB), performance=2/4/4 (bigger box).
+# ---------------------------------------------------------------------------
+PROFILE="${LUMINARY_PROFILE:-}"
+if [ -z "$PROFILE" ] && [ -t 0 ]; then
+    printf '\033[0;36m[install]\033[0m Performance profile? [1] public/8GB  [2] standard/16GB (default)  [3] performance : '
+    read -r _p || _p=""
+    case "$_p" in
+        1|public)      PROFILE="public" ;;
+        3|performance) PROFILE="performance" ;;
+        *)             PROFILE="standard" ;;
+    esac
+fi
+PROFILE="${PROFILE:-standard}"
+case "$PROFILE" in
+    public)      OLLAMA_MAX_LOADED_MODELS=1; OLLAMA_NUM_PARALLEL=1; VISION_CONCURRENCY=1 ;;
+    performance) OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
+    *)           OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=2; VISION_CONCURRENCY=2 ;;
+esac
+export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL
+_info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
+
+# Persist the app-side knob so the backend (which reads backend/.env) picks it up.
+ENV_FILE="$REPO_ROOT/backend/.env"
+touch "$ENV_FILE"
+if grep -q '^ENRICHMENT_VISION_CONCURRENCY=' "$ENV_FILE" 2>/dev/null; then
+    _tmp="$(mktemp)"
+    grep -v '^ENRICHMENT_VISION_CONCURRENCY=' "$ENV_FILE" > "$_tmp" && mv "$_tmp" "$ENV_FILE"
+fi
+printf 'ENRICHMENT_VISION_CONCURRENCY=%s\n' "$VISION_CONCURRENCY" >> "$ENV_FILE"
+
 # Start ollama if it's not already serving.
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
-    _info "Starting ollama server in background..."
+    _info "Starting ollama server in background (profile env applied)..."
     if [ "$OS" = "Darwin" ] && _have brew; then
         brew services start ollama >/dev/null 2>&1 || nohup ollama serve >/tmp/ollama.log 2>&1 &
     else
@@ -107,6 +139,14 @@ if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; t
         curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1 && break
         [ "$i" -eq 20 ] && { _err "ollama server didn't come up; check /tmp/ollama.log"; exit 1; }
     done
+    # brew services / launchd do not inherit our exported env; warn if that path ran.
+    if [ "$OS" = "Darwin" ] && _have brew && pgrep -f "Ollama" >/dev/null 2>&1; then
+        _warn "If Ollama is managed by brew services, apply the profile with:"
+        _warn "  launchctl setenv OLLAMA_MAX_LOADED_MODELS $OLLAMA_MAX_LOADED_MODELS && launchctl setenv OLLAMA_NUM_PARALLEL $OLLAMA_NUM_PARALLEL && brew services restart ollama"
+    fi
+else
+    _warn "Ollama already running — restart it to apply the profile:"
+    _warn "  OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ollama serve   (after stopping the current server)"
 fi
 
 # Pull models only if not already cached.

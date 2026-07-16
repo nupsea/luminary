@@ -22,6 +22,7 @@ import {
   insertBlockSpec,
   insertInlineSpec,
   replaceSelectionSpec,
+  syncDocSpec,
   toggleInlineMarkSpec,
 } from "./markdownEditorCommands"
 import {
@@ -255,10 +256,8 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
     useEffect(() => {
       const view = viewRef.current
       if (!view) return
-      const current = view.state.doc.toString()
-      if (value !== current) {
-        view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
-      }
+      const spec = syncDocSpec(view.state, value)
+      if (spec) view.dispatch(spec)
     }, [value])
 
     useImperativeHandle(

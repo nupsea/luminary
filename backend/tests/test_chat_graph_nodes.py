@@ -35,7 +35,14 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    ImageModel,
+    SectionModel,
+    SectionSummaryModel,
+    SummaryModel,
+)
 from app.runtime.chat_graph import (
     augment_node,
     comparative_node,
@@ -372,6 +379,108 @@ async def test_synthesize_node_prepares_llm_prompt(test_db):
     # answer should NOT be set — LLM not yet called
     assert not result.get("answer")
     assert not result.get("not_found")
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_injects_image_descriptions(test_db):
+    """Vision-analyzed figure descriptions land in the LLM prompt so diagrams and
+    charts inform the answer; decorative images are excluded."""
+    doc_id = str(uuid.uuid4())
+    _engine, factory, _tmp = test_db
+    await _insert_doc(factory, doc_id, title="Micrograd")
+
+    informative_id = str(uuid.uuid4())
+    decorative_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add_all(
+            [
+                ImageModel(
+                    id=informative_id,
+                    document_id=doc_id,
+                    page=0,
+                    path=f"images/{doc_id}/fig.png",
+                    width=800,
+                    height=600,
+                    content_hash="hash-fig",
+                    image_type="chart",
+                    description="A loss curve descending across training iterations.",
+                ),
+                ImageModel(
+                    id=decorative_id,
+                    document_id=doc_id,
+                    page=0,
+                    path=f"images/{doc_id}/rule.png",
+                    width=800,
+                    height=20,
+                    content_hash="hash-rule",
+                    image_type="decorative",
+                    description="Decorative image",
+                ),
+            ]
+        )
+        await session.commit()
+
+    chunks = [
+        {
+            "chunk_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "text": "Relevant passage about training.",
+            "section_heading": "Training",
+            "page": 1,
+            "score": 0.9,
+            "source": "vector",
+        }
+    ]
+    state = _make_state(
+        question="How does the loss behave?",
+        chunks=chunks,
+        intent="factual",
+        image_ids=[informative_id, decorative_id],
+    )
+
+    result = await synthesize_node(state)
+
+    prompt = result.get("_llm_prompt") or ""
+    assert "A loss curve descending across training iterations." in prompt
+    assert "Decorative image" not in prompt
+    assert "[Figure (chart)" in prompt
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_injects_contradiction_context(test_db):
+    """SAME_CONCEPT contradiction context reaches the LLM prompt (regression: it was
+    appended to `context` after the prompt was already built, so it never did)."""
+    doc_id = str(uuid.uuid4())
+    _engine, factory, _tmp = test_db
+    await _insert_doc(factory, doc_id)
+
+    chunks = [
+        {
+            "chunk_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "text": "Relevant passage.",
+            "section_heading": "Intro",
+            "page": 1,
+            "score": 0.9,
+            "source": "vector",
+        }
+    ]
+    state = _make_state(
+        question="Any conflicts?",
+        chunks=chunks,
+        intent="factual",
+        scope="all",
+        doc_ids=[doc_id],
+    )
+
+    sentinel = "CONTRADICTION: source A says X, source B says not-X."
+    with patch(
+        "app.runtime.chat_nodes.synthesize._fetch_contradiction_context",
+        new=AsyncMock(return_value=sentinel),
+    ):
+        result = await synthesize_node(state)
+
+    assert sentinel in (result.get("_llm_prompt") or "")
 
 
 @pytest.mark.asyncio

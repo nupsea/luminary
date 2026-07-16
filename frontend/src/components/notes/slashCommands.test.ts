@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { CompletionContext } from "@codemirror/autocomplete"
 import { EditorState, type TransactionSpec } from "@codemirror/state"
 import type { EditorView } from "@codemirror/view"
-import { setImageSizeInMarkdown } from "./markdownEditorCommands"
+import { setImageSizeInMarkdown, syncDocSpec } from "./markdownEditorCommands"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 
 function ctxAt(doc: string, pos = doc.length): CompletionContext {
@@ -118,5 +118,36 @@ describe("setImageSizeInMarkdown", () => {
   it("returns content unchanged when the src is not found", () => {
     const content = "![A](http://x/a.png)"
     expect(setImageSizeInMarkdown(content, "http://x/other.png", "large")).toBe(content)
+  })
+})
+
+describe("syncDocSpec", () => {
+  function applySync(doc: string, caret: number, value: string) {
+    const state = EditorState.create({ doc, selection: { anchor: caret } })
+    const spec = syncDocSpec(state, value)
+    if (!spec) return { doc, anchor: caret, dispatched: false }
+    const next = state.update(spec).state
+    return { doc: next.doc.toString(), anchor: next.selection.main.anchor, dispatched: true }
+  }
+
+  it("is a no-op when the value already matches the doc", () => {
+    expect(syncDocSpec(EditorState.create({ doc: "hello world" }), "hello world")).toBeNull()
+  })
+
+  it("keeps the caret put when an edit lands after it", () => {
+    const r = applySync("![Chart](x.png) tail", 3, "![Chart|large](x.png) tail")
+    expect(r.doc).toBe("![Chart|large](x.png) tail")
+    expect(r.anchor).toBe(3)
+  })
+
+  it("carries the caret forward when an edit lands before it", () => {
+    const r = applySync("intro body", 10, "intro extra body")
+    expect(r.doc).toBe("intro extra body")
+    expect(r.anchor).toBe(16)
+  })
+
+  it("does not eject the caret to the document start", () => {
+    const r = applySync("aaa bbb ccc", 5, "aaa bXb ccc")
+    expect(r.anchor).not.toBe(0)
   })
 })
