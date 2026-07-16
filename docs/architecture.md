@@ -43,7 +43,7 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 
 ## Data Stores
 
-- **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs)
+- **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
 - **LanceDB**: dense embeddings for chunks (bge-small, 384-dim), notes (bge-m3, 1024-dim), and **concepts** (384-dim centroid of evidence chunks, in chunk space -- derived, for similarity/linking/dedup, never retrieval-primary)
 - **SQLite FTS5**: `chunks_fts` and `notes_fts` virtual tables for BM25 keyword search
 - **Kuzu**: knowledge graph -- Entity, Document, Note, **Concept** nodes + 20+ relationship types. `Concept` is the studyable atom (topology: edges/routes/prereqs, `PROMOTED_FROM` an Entity cluster); `Entity` remains the raw NER layer beneath it.
@@ -83,7 +83,9 @@ backend/app/
   main.py            FastAPI app factory, router registration, lifespan
   config.py          Settings (pydantic-settings, @lru_cache singleton)
   database.py        Engine + async session factory
-  db_init.py         DDL: CREATE TABLE / CREATE INDEX (run at startup)
+  alembic/           Migrations (source of truth for schema changes; see I-23)
+  db_init.py         init_database() at startup: migrate to head. Also holds the
+                     FROZEN pre-Alembic bridge + the FTS5 DDL
   models.py          SQLAlchemy ORM models (single file)
   types.py           Cross-layer dataclasses / TypedDicts (no I/O)
   telemetry.py       Arize Phoenix tracing + OpenTelemetry exporters

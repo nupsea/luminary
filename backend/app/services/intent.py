@@ -331,10 +331,16 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
     """
     from app.services.llm import get_llm_service  # noqa: PLC0415
 
+    # Scope says WHERE to look, never WHAT is being asked. It used to add
+    # "especially when scope is the entire library" to the summary rule, which made
+    # every bare topic under scope='all' classify as `summary`: "Apache Iceberg"
+    # returned the library summary (or a "being generated" placeholder) instead of
+    # what the library says about Iceberg. The same query scoped to one document
+    # correctly returned `factual`.
     scope_hint = (
-        "The user is asking about their ENTIRE document library (all content)."
+        "The user is searching their ENTIRE document library (all content)."
         if scope == "all"
-        else "The user is asking about a SINGLE specific document."
+        else "The user is searching a SINGLE specific document."
     )
     try:
         content = await get_llm_service().complete(
@@ -351,10 +357,13 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                         "Use 'notes_gap' for questions asking to compare notes against "
                         "a book or find gaps. "
                         "Use 'notes' for questions about the user's personal notes or annotations. "
-                        "Use 'summary' for broad questions about themes, topics, patterns, "
-                        "or overviews -- especially when scope is the entire library. "
+                        "Use 'summary' ONLY when the user explicitly asks to summarize, or "
+                        "for an overview of a whole body of work. Breadth of scope is not a "
+                        "request for a summary. "
                         "Use 'factual' for questions about specific people, facts, concepts, "
-                        "or entities, even if phrased as what they 'discuss' or 'explain'."
+                        "or entities, even if phrased as what they 'discuss' or 'explain'. "
+                        "A bare topic or entity name with no verb (e.g. 'Apache Iceberg') is "
+                        "'factual', whatever the scope."
                     ),
                 },
                 {"role": "user", "content": question},

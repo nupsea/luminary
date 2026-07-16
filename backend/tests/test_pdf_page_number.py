@@ -127,6 +127,37 @@ async def test_pdf_chunks_have_page_numbers(test_db):
     assert None not in page_numbers, "pdf_page_number must not be None for PDF chunks"
 
 
+async def test_finalize_persists_word_and_page_count(test_db, monkeypatch):
+    """enrichment_enqueue_node writes parser word_count/page_count to the doc row
+    (chunk nodes only set chapter_count, leaving both at 0)."""
+    import app.workflows.ingestion_nodes.finalize as fin
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id, word_count=0, page_count=0))
+        await session.commit()
+
+    async def _noop(*_a, **_k):
+        return None
+
+    class _Worker:
+        async def _dispatch_pending(self):
+            return None
+
+    monkeypatch.setattr(fin, "_run_pregenerate", _noop)
+    monkeypatch.setattr(fin, "enrich_document_tags", _noop)
+    monkeypatch.setattr(fin, "get_enrichment_worker", lambda: _Worker())
+
+    state = _make_state(doc_id, _make_pdf_sections(5), format="pdf")
+    await fin.enrichment_enqueue_node(state)
+
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+        assert doc.word_count == state["parsed_document"]["word_count"] > 0
+        assert doc.page_count == 5
+
+
 async def test_txt_chunks_have_null_page_numbers(test_db):
     """Non-PDF chunks must have pdf_page_number = None."""
     engine, factory, _ = test_db

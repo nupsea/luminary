@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import type { DatasetSelection } from "./api"
+import { StrategyFunnel } from "./StrategyFunnel"
 import { isStale, shippedAblationArm, THRESHOLDS, timeAgo } from "./thresholds"
 import type { EvalRunFull, GoldenDatasetDetail } from "./types"
 
@@ -366,65 +367,6 @@ function Delta({ base, next }: { base: number | null; next: number | null }) {
   )
 }
 
-const ABLATION_ORDER = ["vector", "fts", "graph", "rrf", "rrf+rerank"]
-
-function AblationSection({ run }: { run: EvalRunFull }) {
-  const m = run.ablation_metrics
-  if (!m) return null
-  const rrf = m["rrf"]
-  const rrfrr = m["rrf+rerank"]
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Strategy ablation</h3>
-        <span className="text-xs text-muted-foreground">
-          {new Date(run.run_at).toLocaleString()}
-        </span>
-      </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="py-1.5 font-medium">Strategy</th>
-            <th className="py-1.5 text-right font-medium">HR@5</th>
-            <th className="py-1.5 text-right font-medium">MRR</th>
-            <th className="py-1.5 text-right font-medium">nDCG@10</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ABLATION_ORDER.filter((s) => m[s]).map((s) => (
-            <tr
-              key={s}
-              className={cn(
-                "border-b last:border-0",
-                s === "rrf+rerank" && "bg-primary/5 font-medium",
-              )}
-            >
-              <td className="py-2">{s === "rrf+rerank" ? "rrf + rerank (shipped)" : s}</td>
-              <td className="py-2 text-right tabular-nums">{pct(m[s].hit_rate_5)}</td>
-              <td className="py-2 text-right tabular-nums">{pct(m[s].mrr)}</td>
-              <td className="py-2 text-right tabular-nums">{pct(m[s].ndcg_10)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rrf && rrfrr && (
-        <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          <span>reranker effect vs RRF:</span>
-          <span className="inline-flex items-center gap-1">
-            HR@5 <Delta base={rrf.hit_rate_5} next={rrfrr.hit_rate_5} />
-          </span>
-          <span className="inline-flex items-center gap-1">
-            MRR <Delta base={rrf.mrr} next={rrfrr.mrr} />
-          </span>
-          <span className="inline-flex items-center gap-1">
-            nDCG@10 <Delta base={rrf.ndcg_10 ?? null} next={rrfrr.ndcg_10 ?? null} />
-          </span>
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function ResultsDashboard({ selection }: { selection: DatasetSelection | null }) {
   // Runs are keyed by golden name for file datasets and by dataset id for
   // generated ones — the selection carries the right key for both.
@@ -508,7 +450,7 @@ export function ResultsDashboard({ selection }: { selection: DatasetSelection | 
 
       {infoCard}
 
-      {ablation && <AblationSection run={ablation} />}
+      {ablation && <StrategyFunnel run={ablation} />}
 
       {/* Metric cards */}
       {headline && (

@@ -307,7 +307,8 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                 <th className="py-2 pr-3 font-medium">Run At</th>
                 <th className="py-2 pr-3 font-medium" title="Hit rate in top-5, within the source document">HR@5</th>
                 <th className="py-2 pr-3 font-medium" title="Mean reciprocal rank over the top-5 retrieved chunks">MRR@5</th>
-                <th className="py-2 pr-3 font-medium" title="Judge score over live /qa answers">Faith</th>
+                <th className="py-2 pr-3 font-medium" title="NLI faithfulness (HHEM) over live /qa answers — grounded in retrieved context">Faith</th>
+                <th className="py-2 pr-3 font-medium" title="Answer relevance — judge-gated; blank unless a judge model ran">Rel.</th>
                 <th className="py-2 pr-3 font-medium">Details</th>
               </tr>
             </thead>
@@ -360,6 +361,14 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                     </td>
                     <td
                       className={cn(
+                        "py-2 pr-3",
+                        metricColor(run.answer_relevance, THRESHOLDS.answer_relevance),
+                      )}
+                    >
+                      {pct(run.answer_relevance)}
+                    </td>
+                    <td
+                      className={cn(
                         "max-w-72 py-2 pr-3",
                         run.status === "failed"
                           ? "text-red-600 dark:text-red-400"
@@ -371,7 +380,7 @@ export function RunsTab({ polling = false }: { polling?: boolean }) {
                   </tr>
                   {expandable && expanded && (
                     <tr className="border-b bg-muted/20 last:border-0">
-                      <td colSpan={8} className="p-0">
+                      <td colSpan={9} className="p-0">
                         <AblationDetail run={run} />
                       </td>
                     </tr>

@@ -30,7 +30,26 @@ _GOLDEN = [
 ]
 
 
+class _FakeNliFaithfulness:
+    """Deterministic stand-in for the HHEM model so tests never download it.
+
+    Captures the samples it scored so a test can assert the NLI path also sees
+    generated answers (not golden ground truth).
+    """
+
+    scored_batches: list[list[dict]] = []
+
+    def run(self, samples, **kwargs):
+        answered = [s for s in samples if s.get("answer", "").strip()]
+        type(self).scored_batches.append(answered)
+        if not answered:
+            return {"faithfulness": None, "faithfulness_model": None}
+        return {"faithfulness": 0.95, "faithfulness_model": "fake/hhem"}
+
+
 def _wire_common(monkeypatch, history):
+    _FakeNliFaithfulness.scored_batches = []
+    monkeypatch.setattr(run_eval, "NliFaithfulnessEval", _FakeNliFaithfulness)
     monkeypatch.setattr(run_eval, "load_golden", lambda dataset: [dict(r) for r in _GOLDEN])
     monkeypatch.setattr(run_eval, "load_manifest", lambda: {})
     monkeypatch.setattr(
@@ -58,7 +77,10 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
         run_eval,
         "post_qa",
         lambda url, question, model, doc_id: qa_calls.append(question)
-        or {"answer": f"GENERATED::{question}", "citations": [{"text": "cited chunk"}]},
+        or {
+            "answer": f"GENERATED::{question}",
+            "context_chunks": ["grounding chunk"],
+        },
     )
 
     class _FakeGenerationEval:
@@ -92,8 +114,11 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     answers = {s["answer"] for s in judged[0]}
     assert answers == {"GENERATED::Q1", "GENERATED::Q2"}
     assert not any("GOLD" in a for a in answers)
-    # /qa citations feed the judged contexts but must not leak into HR@5/MRR.
-    assert "cited chunk" in judged[0][0]["contexts"]
+    # Faithfulness must score against the chunks /qa actually grounded on, so
+    # `context_chunks` REPLACES the harness's parallel /search result rather
+    # than being merged with it -- a partially-overlapping premise is what
+    # collapses the NLI score. It must not leak into HR@5/MRR either.
+    assert judged[0][0]["contexts"] == ["grounding chunk"]
 
     eval_kind, model, metrics, _ = history[0]
     assert eval_kind == "generation"
@@ -101,10 +126,38 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     assert metrics["answer_model"] == "app-default"
     assert metrics["qa_failed_calls"] == 0
     assert metrics["judge_failed_calls"] == 1
-    assert metrics["faithfulness"] == 0.9
+    # Faithfulness now comes from the deterministic NLI scorer, not the judge.
+    assert metrics["faithfulness"] == 0.95
+    assert metrics["faithfulness_model"] == "fake/hhem"
+    # NLI must score the live-generated answers, never the golden ground truth.
+    nli_answers = {s["answer"] for s in _FakeNliFaithfulness.scored_batches[-1]}
+    assert nli_answers == {"GENERATED::Q1", "GENERATED::Q2"}
     # hint one matches the search chunk, hint two does not: HR@5 = 1/2 either
     # way because retrieval metrics ignore the cited chunk.
     assert metrics["hit_rate_5"] == 0.5
+
+
+def test_contexts_fall_back_to_search_when_qa_returns_no_grounding(monkeypatch):
+    # A pass-through answer carries no context_chunks; faithfulness then has to
+    # fall back to the harness's own search hits rather than score against
+    # nothing (which would read as a 0.0 hallucination).
+    history: list[tuple] = []
+    _wire_common(monkeypatch, history)
+    monkeypatch.setattr(
+        run_eval,
+        "post_qa",
+        lambda url, question, model, doc_id: {"answer": f"GENERATED::{question}"},
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_eval.py", "--dataset", "book", "--backend-url", "http://test", "--generate"],
+    )
+
+    run_eval.main()
+
+    scored = _FakeNliFaithfulness.scored_batches[-1]
+    assert scored[0]["contexts"] == ["chunk with hint one inside"]
 
 
 def test_no_judge_by_default_and_no_qa(monkeypatch):
@@ -203,3 +256,35 @@ def test_not_found_counts_as_declined_not_failed(monkeypatch):
     # only the answered question is judged
     assert len(judged_batches[0]) == 1
     assert judged_batches[0][0]["question"] == "Q1"
+
+
+def test_post_qa_pins_scope_to_the_filtered_document(monkeypatch):
+    """document_ids without scope=single leaves scope=all, letting the intent
+    classifier route to library-wide summary synthesis -- which bypasses the
+    document filter and returns zero context chunks, so faithfulness numbers
+    stop being reproducible across runs."""
+    captured: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        captured.append(json)
+
+        class _Resp:
+            headers = {"content-type": "application/json"}
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"done": True, "answer": "a"}
+
+        return _Resp()
+
+    monkeypatch.setattr(run_eval.httpx, "post", _fake_post)
+
+    run_eval.post_qa("http://test", "Q", "", "doc-1")
+    assert captured[0]["scope"] == "single"
+    assert captured[0]["document_ids"] == ["doc-1"]
+
+    run_eval.post_qa("http://test", "Q", "", None)
+    assert "scope" not in captured[1]
+    assert "document_ids" not in captured[1]

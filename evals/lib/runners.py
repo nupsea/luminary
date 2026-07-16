@@ -6,9 +6,47 @@ GenerationEval added in S214; ClassifierEval added in S218) implement
 quality gates.
 """
 
+import re
 import sys
 from abc import ABC, abstractmethod
 from typing import Any
+
+# Split an answer into claim-level units. HHEM scores a single (premise,
+# hypothesis) pair, and a whole multi-sentence answer collapses to a near-zero
+# score the moment ONE sentence is unsupported -- even when every other sentence
+# is strongly entailed. Faithfulness is therefore measured claim-by-claim (as
+# RAGAS does) and averaged, so an unsupported sentence costs 1/N, not the whole
+# answer.
+#
+# Only ASSERTIONS may be scored. A heading or a citation marker asserts nothing,
+# so no chunk can entail it and HHEM returns an arbitrary middling number --
+# measuring formatting instead of grounding. Measured on one real answer: the
+# three genuine sentences scored 0.949 / 0.965 / 0.957, while "**Why a B-tree
+# needs a WAL**" scored 0.359 and "(Provided Context)" 0.776, dragging the answer
+# to 0.728. Non-assertions are therefore dropped, not scored.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_LIST_MARKER = re.compile(r"^\s*([-*+]|\d+[.)])\s+")
+_EMPHASIS = re.compile(r"(\*\*|__|\*|_|`)")
+# A line that is entirely bold, or an ATX heading: a section label, not a claim.
+_HEADING_LINE = re.compile(r"^\s*(#{1,6}\s+.*|\*\*[^*]+\*\*|__[^_]+__)\s*:?\s*$")
+# Bare parenthetical on its own, e.g. the "(Provided Context)" citation marker.
+_PARENTHETICAL_ONLY = re.compile(r"^\s*\([^)]*\)\s*$")
+
+
+def _split_claims(answer: str) -> list[str]:
+    claims: list[str] = []
+    for raw_line in answer.splitlines():
+        line = _LIST_MARKER.sub("", raw_line.strip())
+        if not line or _HEADING_LINE.match(line) or _PARENTHETICAL_ONLY.match(line):
+            continue
+        for raw_sentence in _SENTENCE_SPLIT.split(line):
+            # Emphasis markers are noise to an NLI model; the words carry the claim.
+            sentence = _EMPHASIS.sub("", raw_sentence).strip()
+            if _PARENTHETICAL_ONLY.match(sentence):
+                continue
+            if len(sentence) >= 12:
+                claims.append(sentence)
+    return claims
 
 # Module-level singletons -- HuggingFace embedding model and the LangChain
 # wrappers around it are expensive to instantiate (~5-10s cold start). Reuse
@@ -62,6 +100,157 @@ def _get_cached_embeddings() -> Any:
     return _CACHED_EMBEDDINGS
 
 
+# Default HHEM-2.1-Open; swap via FAITHFULNESS_MODEL env var.
+_HHEM_MODEL = "vectara/hallucination_evaluation_model"
+
+# HHEM-2.1-Open has no context limit (unlike 1.0's 512 cap), so the tokenizer's
+# "longer than 512" warning is flan-t5-base's nominal default and is safe to ignore.
+# Memory is the real constraint: predict() pads every pair to the batch longest and
+# runs them in ONE forward, so an unbatched call asks for hundreds of GB and the OS
+# answers by killing unrelated apps rather than raising OOM. Batches are therefore
+# sized against a fixed budget on batch*seq^2.
+#
+# The budget is MEASURED, not derived. Predicting it from batch*heads*seq^2*4B is
+# ~18x optimistic: T5 keeps several such tensors live at once (scores, softmax
+# output, relative-position bias) across 12 layers, and torch's caching allocator
+# never returns freed blocks to the OS, so RSS settles at the high-water mark.
+# Peak RSS on 400 real pairs (~490 tok), one process per row:
+#
+#     budget      peak RSS   elapsed
+#     262144        923 MB     41.7s
+#     524288       1108 MB     40.6s
+#    1048576       1642 MB     39.6s
+#    2097152       2262 MB     40.2s
+#    8388608       6685 MB     38.2s   <- previous value; watchdog SIGKILLed the run
+#
+# Elapsed is FLAT across a 32x range of batch sizes -- this is CPU-bound, so a large
+# batch buys ~9% and costs 7x the memory. Hence the smallest budget: one ~512-token
+# pair per forward, proportionally more when the pairs are shorter. Re-measure with
+# scratchpad/sweep.py if the model or hardware changes; do not re-derive on paper.
+_FAITH_ATTN_BUDGET = 512 * 512
+_FAITH_MAX_BATCH = 32  # ceiling for very short pairs, where the budget allows many
+# Backstop only: real context units run ~477 tok (p95 819), so this should never
+# bite. It exists so one pathological premise cannot resurrect the blowup.
+_FAITH_MAX_TOKENS = 2048
+_PROMPT_OVERHEAD_TOKENS = 32  # the "Determine if the hypothesis..." wrapper
+_faith_scorer: "_NliFaithfulnessScorer | None" = None
+
+
+def _models_cache_dir(model_name: str) -> Any:
+    # Same $DATA_DIR/models/<slug> tree as the reranker; standalone evals have no
+    # app config, so resolve DATA_DIR from env, falling back to backend/.luminary.
+    import os  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    repo_root = Path(__file__).resolve().parents[2]
+    data_dir = os.environ.get("LUMINARY_DATA_DIR") or str(repo_root / "backend" / ".luminary")
+    slug = model_name.rsplit("/", 1)[-1].lower()
+    cache_dir = Path(data_dir).expanduser() / "models" / slug
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+class _NliFaithfulnessScorer:
+    def __init__(self, model_name: str | None = None) -> None:
+        import os  # noqa: PLC0415
+
+        self._model: Any = None
+        self._model_name = model_name or os.environ.get("FAITHFULNESS_MODEL", _HHEM_MODEL)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        from transformers import AutoModelForSequenceClassification  # noqa: PLC0415
+
+        cache_dir = _models_cache_dir(self._model_name)
+        # trust_remote_code: HHEM ships a custom model class. Pin a revision if
+        # this ever runs outside the eval harness.
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            self._model_name,
+            trust_remote_code=True,
+            cache_dir=str(cache_dir),
+        )
+        print(f"Loaded NLI faithfulness model {self._model_name}", file=sys.stderr)
+
+    def _tokenizer(self) -> Any:
+        # HHEM's custom class misspells the attribute (`tokenzier`); fall back to
+        # the foundation tokenizer if a swapped-in model spells it correctly.
+        tok = getattr(self._model, "tokenzier", None) or getattr(self._model, "tokenizer", None)
+        if tok is None:
+            from transformers import AutoTokenizer  # noqa: PLC0415
+
+            tok = AutoTokenizer.from_pretrained(self._model.config.foundation)
+        return tok
+
+    def _n_tokens(self, text: str) -> int:
+        return len(self._tokenizer()(text, add_special_tokens=False)["input_ids"])
+
+    def _truncate(self, text: str, budget: int) -> str:
+        if budget <= 0:
+            return ""
+        tok = self._tokenizer()
+        ids = tok(text, add_special_tokens=False)["input_ids"]
+        if len(ids) <= budget:
+            return text
+        return tok.decode(ids[:budget], skip_special_tokens=True)
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Score (premise, hypothesis) pairs -> per-pair consistency in [0, 1].
+
+        Batched to bound peak memory; see _FAITH_ATTN_BUDGET. Pairs are sorted by
+        length so padding tracks each batch's longest rather than the global
+        longest, and each batch is sized so batch * seq^2 stays under budget --
+        keeping peak memory flat whether the premises are 200 or 2000 tokens.
+        """
+        if not pairs:
+            return []
+        self._load()
+
+        prepared: list[tuple[str, str, int]] = []
+        for raw_premise, raw_hypothesis in pairs:
+            hypothesis = self._truncate(raw_hypothesis, _FAITH_MAX_TOKENS // 2)
+            hyp_n = self._n_tokens(hypothesis)
+            budget = _FAITH_MAX_TOKENS - hyp_n - _PROMPT_OVERHEAD_TOKENS
+            premise = self._truncate(raw_premise, budget)
+            seq = self._n_tokens(premise) + hyp_n + _PROMPT_OVERHEAD_TOKENS
+            prepared.append((premise, hypothesis, seq))
+
+        scores: list[float] = [0.0] * len(pairs)
+        order = sorted(range(len(prepared)), key=lambda i: prepared[i][2])
+
+        def flush(idxs: list[int]) -> None:
+            raw = self._model.predict([(prepared[i][0], prepared[i][1]) for i in idxs])
+            for i, score in zip(idxs, raw, strict=True):
+                scores[i] = float(score)
+
+        batch: list[int] = []
+        for i in order:
+            # Ascending order means `i` is the longest in the batch, so it alone
+            # sets the padded width.
+            seq = prepared[i][2]
+            if batch and (
+                len(batch) >= _FAITH_MAX_BATCH
+                or (len(batch) + 1) * seq * seq > _FAITH_ATTN_BUDGET
+            ):
+                flush(batch)
+                batch = []
+            batch.append(i)
+        if batch:
+            flush(batch)
+        return scores
+
+
+def _get_faithfulness_scorer() -> _NliFaithfulnessScorer:
+    global _faith_scorer  # noqa: PLW0603
+    if _faith_scorer is None:
+        _faith_scorer = _NliFaithfulnessScorer()
+    return _faith_scorer
+
+
 class _BaseEval(ABC):
     eval_kind: str = "base"
 
@@ -102,6 +291,59 @@ class RetrievalEval(_BaseEval):
         }
 
 
+class NliFaithfulnessEval(_BaseEval):
+    """Deterministic NLI faithfulness (no judge): premise=chunk, hypothesis=claim.
+
+    Each claim is scored against every context chunk INDIVIDUALLY and takes its
+    best match -- a claim is grounded if any one chunk supports it. Scoring
+    against the chunks joined into one ~4.7k-token premise is what HHEM's
+    quadratic attention turns into a multi-hundred-GB allocation; per-chunk
+    premises keep seq at ~477 tok, and dilute the signal less. Per-answer score
+    is the mean over claims, so one unsupported claim costs 1/N rather than the
+    whole answer, and answers are weighted equally so a verbose answer does not
+    dominate the dataset metric.
+    """
+
+    eval_kind = "generation"
+
+    def run(self, samples: list[dict], **kwargs) -> dict:
+        scored = [s for s in samples if s.get("answer", "").strip()]
+        if not scored:
+            return {"faithfulness": None, "faithfulness_model": None}
+        try:
+            scorer = _get_faithfulness_scorer()
+            pairs: list[tuple[str, str]] = []
+            layout: list[list[tuple[int, int]]] = []
+            for s in scored:
+                contexts = [c for c in (s.get("contexts") or []) if c and c.strip()]
+                claims = _split_claims(s["answer"]) or [s["answer"]]
+                claim_spans: list[tuple[int, int]] = []
+                for claim in claims:
+                    start = len(pairs)
+                    pairs.extend((ctx, claim) for ctx in contexts)
+                    claim_spans.append((start, len(pairs)))
+                layout.append(claim_spans)
+            values = scorer.score_pairs(pairs)
+            per_answer: list[float] = []
+            for claim_spans in layout:
+                # A claim with no context to score against (retrieval returned
+                # nothing, yet the pipeline still answered) is by definition
+                # ungrounded -> 0.0. Skipping it instead would let a pipeline
+                # that retrieves nothing and hallucinates freely drop out of the
+                # metric rather than be penalised by it.
+                best = [max(values[a:b]) if b > a else 0.0 for a, b in claim_spans]
+                if best:
+                    per_answer.append(sum(best) / len(best))
+            faith = sum(per_answer) / len(per_answer) if per_answer else None
+            return {"faithfulness": faith, "faithfulness_model": scorer.model_name}
+        except Exception as exc:
+            print(
+                f"WARNING: NLI faithfulness failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return {"faithfulness": None, "faithfulness_model": None}
+
+
 _EMPTY_GENERATION_METRICS = {
     "faithfulness": None,
     "answer_relevance": None,
@@ -111,10 +353,7 @@ _EMPTY_GENERATION_METRICS = {
 
 
 class GenerationEval(_BaseEval):
-    """LLM-judge generation eval (faithfulness, answer relevance).
-
-    Implemented in S214 (RAGAS + local Ollama judge by default per I-16).
-    """
+    """LLM-judge answer relevance; faithfulness lives in NliFaithfulnessEval (include_faithfulness=True restores the RAGAS path)."""  # noqa: E501
 
     eval_kind = "generation"
 
@@ -193,7 +432,11 @@ class GenerationEval(_BaseEval):
 
             llm_wrapper = LangchainLLMWrapper(chat_llm)
             embed_wrapper = _get_cached_embeddings()
-            metrics_list = [faithfulness, answer_relevancy]
+            # NliFaithfulnessEval owns faithfulness; skip it here by default.
+            include_faithfulness: bool = bool(kwargs.get("include_faithfulness", False))
+            metrics_list = [answer_relevancy]
+            if include_faithfulness:
+                metrics_list.insert(0, faithfulness)
             if full_metrics:
                 metrics_list.extend([context_precision, context_recall])
             for metric in metrics_list:

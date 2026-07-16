@@ -7,7 +7,6 @@ import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
-import { RunEvalDialog } from "@/components/evals/RunEvalDialog"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
   DatasetSize,
@@ -106,7 +105,6 @@ export default function Quality() {
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>(getInitialTab)
   const [generateOpen, setGenerateOpen] = useState(false)
-  const [runOpen, setRunOpen] = useState(false)
   // db-backed selection
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // dataset being re-linked to a live document (source document deleted)
@@ -259,53 +257,6 @@ export default function Quality() {
       toast.success("Dataset generation started")
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Create failed"),
-  })
-
-  const runMutation = useMutation({
-    mutationFn: async (payload: {
-      judge_model: string
-      check_citations: boolean
-      max_questions: number
-      rerank: boolean
-      ablation: boolean
-    }) => {
-      if (selectedFileName) {
-        // File-backed: POST /evals/run. judge_model "" must stay "" — null
-        // would let the CLI fall back to a default judge the user disabled.
-        const res = await fetch(`${API_BASE}/evals/run`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dataset: selectedFileName,
-            judge_model: payload.judge_model,
-            check_citations: payload.check_citations,
-            max_questions: payload.max_questions,
-            rerank: payload.rerank,
-            ablation: payload.ablation,
-          }),
-        })
-        if (!res.ok) throw await errorFromResponse(res, "Failed to start eval run")
-        return res.json()
-      }
-      // DB-backed: POST /evals/datasets/{id}/run
-      const res = await fetch(`${API_BASE}/evals/datasets/${selectedId}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw await errorFromResponse(res, "Failed to start eval run")
-      return res.json()
-    },
-    onSuccess: () => {
-      setRunOpen(false)
-      markEvalRunning()
-      if (activeTab !== "runs") setActiveTab("runs")
-      if (selectedId) void qc.invalidateQueries({ queryKey: ["eval-dataset-runs", selectedId] })
-      if (selectedFileName)
-        void qc.invalidateQueries({ queryKey: ["eval-file-runs", selectedFileName] })
-      toast.success("Eval started — switching to Runs tab")
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Run failed"),
   })
 
   const relinkMutation = useMutation({
@@ -508,7 +459,8 @@ export default function Quality() {
                       <th className="py-2 pr-3 font-medium">Last Run</th>
                       <th className="py-2 pr-3 text-right font-medium" title="Hit rate in top-5, within the source document">HR@5</th>
                       <th className="py-2 pr-3 text-right font-medium" title="Mean reciprocal rank over the top-5 retrieved chunks">MRR@5</th>
-                      <th className="py-2 pr-3 text-right font-medium" title="Requires a judge model; scores live /qa answers">Faith</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="NLI faithfulness (HHEM) over generated answers; needs a Generation run — no judge required">Faith</th>
+                      <th className="py-2 pr-3 text-right font-medium" title="Answer relevance — judge-gated; blank unless a Generation run used a judge model">Rel.</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -588,7 +540,12 @@ export default function Quality() {
                           </td>
                           <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.faithfulness, THRESHOLDS.faithfulness))}>
                             {lr?.faithfulness != null ? pct(lr.faithfulness) : (
-                              <span className="text-muted-foreground/50" title="Run with a judge model to compute faithfulness">—</span>
+                              <span className="text-muted-foreground/50" title="Run in Generation mode to compute faithfulness">—</span>
+                            )}
+                          </td>
+                          <td className={cn("py-2.5 pr-3 text-right", metricColor(lr?.answer_relevance, THRESHOLDS.answer_relevance))}>
+                            {lr?.answer_relevance != null ? pct(lr.answer_relevance) : (
+                              <span className="text-muted-foreground/50" title="Run in Generation mode with a judge model to compute answer relevance">—</span>
                             )}
                           </td>
                         </tr>
@@ -629,7 +586,11 @@ export default function Quality() {
             setSelectedFileName(null)
           }
         }}
-        onRun={() => setRunOpen(true)}
+        onRun={() => {
+          // Close the sheet; the console already has this dataset selected.
+          setSelectedId(null)
+          setSelectedFileName(null)
+        }}
         deleting={deleteMutation.isPending}
         onDelete={() => {
           if (!selectedId) return
@@ -637,13 +598,6 @@ export default function Quality() {
             deleteMutation.mutate(selectedId)
           }
         }}
-      />
-
-      <RunEvalDialog
-        open={runOpen}
-        onOpenChange={setRunOpen}
-        submitting={runMutation.isPending}
-        onSubmit={(payload) => runMutation.mutate(payload)}
       />
 
       <RelinkDatasetDialog

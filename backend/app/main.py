@@ -1,10 +1,7 @@
 import asyncio
 import logging
 import logging.config
-import os
 import shutil
-import signal
-import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
-from app.db_init import create_all_tables
+from app.db_init import init_database
 from app.models import SettingsModel
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
@@ -94,45 +91,14 @@ def _read_app_version() -> str:
 _APP_VERSION = _read_app_version()
 
 
-def _release_kuzu_lock(kuzu_path: Path) -> None:
-    """Kill any other processes holding an open file handle on the Kuzu database file."""
-    if not kuzu_path.exists():
-        return
-    try:
-        result = subprocess.run(
-            ["lsof", "-t", str(kuzu_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
-        current_pid = os.getpid()
-        for pid in pids:
-            if pid == current_pid:
-                continue
-            try:
-                os.kill(pid, signal.SIGTERM)
-                logger.warning(
-                    "Released Kuzu lock by terminating stale process", extra={"pid": pid}
-                )
-            except ProcessLookupError:
-                pass
-    except Exception:
-        logger.warning("Could not check/release Kuzu lock -- proceeding anyway")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
 
-    # Release any stale Kuzu lock before initialising the graph service
-    kuzu_path = Path(settings.DATA_DIR).expanduser() / "graph.kuzu"
-    _release_kuzu_lock(kuzu_path)
-
     # Initial DB setup
     engine = get_engine()
-    await create_all_tables(engine)
+    await init_database(engine)
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts

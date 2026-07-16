@@ -25,6 +25,8 @@ from app.main import app
 from app.models import DocumentModel, QAHistoryModel
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
+    QA_CREATIVE_SYSTEM_PROMPT,
+    QA_CREATIVE_TEMPERATURE,
     QA_SYSTEM_PROMPT,
     QAService,
     _build_context,
@@ -823,3 +825,79 @@ async def test_qa_summary_question_routes_via_graph(test_db):
     done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload["done"] is True
     assert "summary_node" in done_payload["answer"]
+
+
+# Creative mode — grounded generative synthesis (UI toggle + creative prompt + higher temp)
+
+
+def _make_llm_capturing_generate():
+    """Return (mock_llm, calls) where mock_llm.generate records its kwargs and
+    streams two plain tokens (no stop markers, so a single iteration suffices)."""
+    calls: list[dict] = []
+
+    async def _generate(prompt, **kwargs):
+        calls.append({"prompt": prompt, **kwargs})
+        return _async_iter(["Once upon ", "a time."])
+
+    mock_llm = MagicMock()
+    mock_llm.generate = _generate
+    return mock_llm, calls
+
+
+@pytest.mark.asyncio
+async def test_creative_mode_uses_creative_prompt_and_higher_temperature(test_db):
+    """creative=True (Path B) swaps in the creative system prompt and raises temperature."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "My Daily Thoughts")
+
+    result = {
+        **_make_graph_result(answer="", intent="exploratory"),
+        "_llm_prompt": "Context:\n\n...\n\nQuestion: Write a kids story",
+        "_system_prompt": QA_SYSTEM_PROMPT,
+    }
+    mock_graph = _make_mock_graph(result)
+    mock_llm, calls = _make_llm_capturing_generate()
+
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        svc = QAService()
+        _ = [
+            e
+            async for e in svc.stream_answer(
+                "Write a kids story based on the content", [doc_id], "single", None, creative=True
+            )
+        ]
+
+    assert len(calls) == 1
+    assert calls[0]["system"] == QA_CREATIVE_SYSTEM_PROMPT
+    assert calls[0]["temperature"] == QA_CREATIVE_TEMPERATURE
+
+
+@pytest.mark.asyncio
+async def test_default_mode_preserves_grounded_prompt_and_no_temperature(test_db):
+    """creative defaults to False: the ground-truth prompt and temperature=None are untouched."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Physics")
+
+    result = {
+        **_make_graph_result(answer="", intent="factual"),
+        "_llm_prompt": "Context:\n\n...\n\nQuestion: What is force?",
+        "_system_prompt": QA_SYSTEM_PROMPT,
+    }
+    mock_graph = _make_mock_graph(result)
+    mock_llm, calls = _make_llm_capturing_generate()
+
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        svc = QAService()
+        _ = [e async for e in svc.stream_answer("What is force?", [doc_id], "single", None)]
+
+    assert len(calls) == 1
+    assert calls[0]["system"] == QA_SYSTEM_PROMPT
+    assert calls[0]["temperature"] is None

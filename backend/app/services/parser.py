@@ -30,6 +30,35 @@ logger = logging.getLogger(__name__)
 _book_parser = BookParser()
 _universal_parser = UniversalParser()
 
+# "Chapter 5 describes...", "Part 3 are...", "volume 22 of..." — a chapter/part
+# marker followed by a lowercase word is prose, not a heading. Real headings
+# capitalize the title ("Chapter 5 Machine Learning") or use punctuation.
+_RE_MARKER_PROSE = re.compile(
+    r"^(?:chapter|chap|part|book|section|volume|adventure)\s+\w+\s+(\w+)",
+    re.IGNORECASE,
+)
+
+
+def _norm_ws(s: str) -> str:
+    """Collapse the multi-space runs PyMuPDF leaves between spans."""
+    return _RE_WHITESPACE.sub(" ", s).strip()
+
+
+def _heading_is_prose(heading: str) -> bool:
+    h = heading.strip()
+    if len(h) > 100:
+        return True
+    m = _RE_MARKER_PROSE.match(h)
+    return bool(m and m.group(1)[:1].islower())
+
+
+def _sections_plausible(sections: list[Section]) -> bool:
+    """Reject a segmentation whose headings are mostly prose fragments."""
+    if not sections:
+        return False
+    prose = sum(1 for s in sections if _heading_is_prose(s.heading))
+    return prose < len(sections) / 2
+
 
 class DocumentParser:
     """
@@ -74,16 +103,6 @@ class DocumentParser:
         # "Chapter 4. Optimizing...", causing 1-page-off matches via running
         # headers on the next page).
         doc = fitz.open(str(file_path))
-        has_embedded_toc = len(doc.get_toc()) >= 3
-
-        if not has_embedded_toc:
-            # No usable TOC -- try BookParser (legacy regex families for
-            # classic books, e.g. Gutenberg)
-            doc.close()
-            result = _book_parser.parse(file_path, "pdf")
-            if result is not None:
-                return result
-            doc = fitz.open(str(file_path))
 
         # Skip UniversalParser for PDFs -- the font-size heuristic below
         # leverages actual font metrics from the PDF structure and produces
@@ -146,7 +165,7 @@ class DocumentParser:
                 raw_parts.append(text)
                 sections.append(
                     Section(
-                        heading=ti,
+                        heading=_norm_ws(ti),
                         level=lv,
                         text=text,
                         page_start=pg,
@@ -202,7 +221,7 @@ class DocumentParser:
             if text:
                 sections.append(
                     Section(
-                        heading=current_heading,
+                        heading=_norm_ws(current_heading),
                         level=current_level,
                         text=text,
                         page_start=current_page_start,
@@ -234,8 +253,38 @@ class DocumentParser:
                         raw_parts.append(line_text)
 
         flush_section("_end", 0, total_pages + 1)
-
         raw_text = "\n".join(raw_parts)
+
+        # Font metrics are the structural signal for PDFs. Fall back to the
+        # chapter-regex BookParser only when the font scan finds no plausible
+        # structure (e.g. flat-font PDFs) -- and reject its result if it looks
+        # like prose fragments, which is how a book that enumerates its own
+        # chapters ("Chapter 5 describes...") used to get mis-segmented.
+        if _sections_plausible(sections):
+            return ParsedDocument(
+                title=file_path.stem,
+                format="pdf",
+                pages=total_pages,
+                word_count=len(raw_text.split()),
+                sections=sections,
+                raw_text=raw_text,
+            )
+
+        doc.close()
+        book = _book_parser.parse(file_path, "pdf")
+        if book is not None and _sections_plausible(book.sections):
+            return book
+
+        if not sections:
+            sections = [
+                Section(
+                    heading="Introduction",
+                    level=1,
+                    text=raw_text,
+                    page_start=1,
+                    page_end=total_pages,
+                )
+            ]
         return ParsedDocument(
             title=file_path.stem,
             format="pdf",

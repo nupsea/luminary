@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -130,6 +131,7 @@ class SummaryModel(Base):
 
 class FlashcardModel(Base):
     __tablename__ = "flashcards"
+    __table_args__ = (Index("idx_flashcards_concept_id", "concept_id"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -193,6 +195,7 @@ class ConceptModel(Base):
     """
 
     __tablename__ = "concepts"
+    __table_args__ = (Index("idx_concepts_parent_id", "parent_id"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     # human-readable, stable across renames; the OKF filename and link target
@@ -517,6 +520,10 @@ class LearningGoalModel(Base):
     """
 
     __tablename__ = "learning_goals"
+    __table_args__ = (
+        Index("idx_learning_goals_status", "status"),
+        Index("idx_learning_goals_goal_type", "goal_type"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -819,6 +826,7 @@ class CollectionModel(Base):
     """
 
     __tablename__ = "collections"
+    __table_args__ = (Index("idx_collections_auto_doc_id", "auto_document_id"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -866,6 +874,10 @@ class NoteTagIndexModel(Base):
     """
 
     __tablename__ = "note_tag_index"
+    __table_args__ = (
+        Index("idx_note_tag_index_tag_full", "tag_full"),
+        Index("idx_note_tag_index_note_id", "note_id"),
+    )
 
     note_id: Mapped[str] = mapped_column(String, primary_key=True)
     tag_full: Mapped[str] = mapped_column(String, primary_key=True)
@@ -902,6 +914,10 @@ class DocumentTagIndexModel(Base):
     """
 
     __tablename__ = "document_tag_index"
+    __table_args__ = (
+        Index("idx_document_tag_index_tag_full", "tag_full"),
+        Index("idx_document_tag_index_document_id", "document_id"),
+    )
 
     document_id: Mapped[str] = mapped_column(String, primary_key=True)
     tag_full: Mapped[str] = mapped_column(String, primary_key=True)
@@ -947,6 +963,7 @@ class TagMergeSuggestionModel(Base):
     """
 
     __tablename__ = "tag_merge_suggestions"
+    __table_args__ = (Index("idx_tag_merge_suggestions_status", "status"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     tag_a_id: Mapped[str] = mapped_column(String, nullable=False)

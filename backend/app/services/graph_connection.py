@@ -18,6 +18,28 @@ import kuzu
 logger = logging.getLogger(__name__)
 
 
+class GraphDatabaseLockedError(RuntimeError):
+    """Another live process holds the Kuzu write lock."""
+
+
+def _open_database(db_path: str) -> kuzu.Database:
+    try:
+        return kuzu.Database(db_path)
+    except RuntimeError as exc:
+        if "lock" not in str(exc).lower():
+            raise
+        # Kuzu takes an exclusive OS-level file lock, which the kernel drops the moment
+        # the holder dies -- verified against SIGKILL. So this is never a stale lock
+        # from a crash: some process is alive and holding it right now, most likely a
+        # second server or an offline script (`make concepts`). Killing the holder
+        # would interrupt a live write, which is how a graph DB gets corrupted.
+        raise GraphDatabaseLockedError(
+            f"The knowledge graph at {db_path} is locked by another running process. "
+            "Stop the other Luminary server or offline script (e.g. `make concepts`) "
+            "and retry. The lock releases on its own when that process exits."
+        ) from exc
+
+
 class ThreadSafeKuzuConnection:
     """Thread-safe proxy wrapper for kuzu.Connection to serialize all executions."""
     def __init__(self, conn: kuzu.Connection, lock: threading.RLock) -> None:
@@ -41,7 +63,7 @@ class KuzuConnection:
 
     def __init__(self, data_dir: str) -> None:
         db_path = str(Path(data_dir).expanduser() / "graph.kuzu")
-        self.db = kuzu.Database(db_path)
+        self.db = _open_database(db_path)
         # Use RLock to allow reentrant query locking inside transactions (e.g. note_graph)
         self.lock = threading.RLock()
         raw_conn = kuzu.Connection(self.db)

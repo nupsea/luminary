@@ -36,12 +36,12 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
     judge_citation,
     parse_claims_with_citations,
 )
+from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
     GOLDEN_DIR,
@@ -63,7 +63,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_ndcg_10,
     compute_recall_at,
 )
-from evals.lib.runners import GenerationEval  # noqa: E402
+from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
@@ -96,11 +96,21 @@ QA_REQUEST_TIMEOUT = 300.0
 # carry single-passage relevance (nDCG degrades to a log-discounted single-hit
 # metric there). Promote it to an asserted gate once graded goldens exist and
 # baselines are recorded.
+# faithfulness is a COLLAPSE DETECTOR, not a quality bar. 0.65 was inherited from the
+# RAGAS LLM-judge metric and is meaningless for HHEM NLI, which scores grounding in the
+# retrieved context rather than truth -- a correct answer written from parametric
+# knowledge scores low by design. Measured on d2l (12 answers, HHEM claim-vs-chunk):
+# dataset mean 0.46-0.48, per-answer 0.354-0.660, nothing above 0.66; 0.65 would have
+# passed 1 of 12. The distribution is unimodal, so there is no gap between "grounded"
+# and "hallucinated" to put a quality bar in -- that needs labelled answers. 0.30 sits
+# below every observed answer and only fires when the metric genuinely collapses
+# (retrieval dies, context vanishes, scoring regresses). Raise it only from labelled
+# data; do not read it as "0.30 is good enough".
 THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
     "ndcg_10": 0.40,
-    "faithfulness": 0.65,
+    "faithfulness": 0.30,
     "answer_relevance": 0.50,
     "citation_support_rate": 0.80,
 }
@@ -250,9 +260,14 @@ def search_chunks(
 def post_qa(backend_url: str, question: str, model: str, document_id: str | None) -> dict:
     """POST to /qa and return the response JSON (or empty dict on failure)."""
     try:
-        payload: dict = {"question": question}
+        payload: dict = {"question": question, "include_context": True}
         if document_id:
+            # scope must match the filter: without it the intent classifier can
+            # route "exploratory" questions to library-wide summary synthesis,
+            # bypassing the document filter and returning zero context chunks --
+            # which makes faithfulness numbers non-reproducible across runs.
             payload["document_ids"] = [document_id]
+            payload["scope"] = "single"
         if model:
             payload["model"] = model
         resp = httpx.post(
@@ -367,8 +382,8 @@ def _export_html_report(
     passed: bool,
     violations: list[str],
 ) -> None:
-    from datetime import datetime
     import html as _html
+    from datetime import datetime
 
     status_color = "#22c55e" if passed else "#ef4444"
     status_label = "PASS" if passed else "FAIL"
@@ -432,6 +447,11 @@ def main() -> None:
         "--model",
         default="",
         help="LiteLLM model string for LLM-based RAGAS scoring (optional)",
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="Generate app-default QA answers so faithfulness is scored (no judge).",
     )
     parser.add_argument(
         "--backend-url",
@@ -707,7 +727,7 @@ def main() -> None:
     # async-safe; cap concurrency so we don't overwhelm a local Ollama judge.
     # A judge always implies real /qa answers: judging the golden ground truth
     # against retrieved context would self-grade the dataset, not the product.
-    needs_qa = bool(args.model or args.check_citations or args.judge_model)
+    needs_qa = bool(args.model or args.check_citations or args.judge_model or args.generate)
 
     def _process_row(idx_row: tuple[int, dict]) -> dict:
         i, row = idx_row
@@ -730,22 +750,19 @@ def main() -> None:
 
         answer = ""
         qa_resp: dict = {}
-        # Judged contexts include the chunks /qa actually cited; retrieval
-        # metrics stay on the raw search result so HR@5 and MRR measure the
-        # same thing in every eval kind. The judge keeps seeing top-5 — the
-        # 6-10 tail exists only for nDCG@10, and doubling judge input would
-        # change generation scores and cost for no judging benefit.
+        # Faithfulness must score the answer against the exact chunks /qa
+        # grounded it on, NOT this eval's separate /search — a parallel
+        # retrieval only partially overlaps the answer's real context and
+        # collapses the NLI score. /qa echoes those chunks in `context_chunks`
+        # (include_context=True). Fall back to the search top-5 only when the
+        # pipeline returns no grounding (e.g. a pass-through answer).
         ragas_contexts = list(chunks[:5])
         if needs_qa:
             qa_resp = post_qa(args.backend_url, question, args.model, doc_id)
             answer = qa_resp.get("answer", "")
-            citations = qa_resp.get("citations", [])
-            qa_chunks = [c.get("text", "") for c in citations if isinstance(c, dict)]
-            seen = set(ragas_contexts)
-            for c in qa_chunks:
-                if c and c not in seen:
-                    ragas_contexts.append(c)
-                    seen.add(c)
+            grounding = [c for c in (qa_resp.get("context_chunks") or []) if c]
+            if grounding:
+                ragas_contexts = grounding
         # Distinguish the pipeline DECLINING (not_found: a real product answer,
         # "I don't know") from the harness failing to get any response at all
         # (timeout / error / no done event). Both yield an empty answer and are
@@ -798,12 +815,22 @@ def main() -> None:
         "context_precision": None,
         "context_recall": None,
     }
+    faithfulness_model: str | None = None
+
+    answered = [
+        {**s, "contexts": s["ragas_contexts"]} for s in samples if s["answer"].strip()
+    ]
+
+    # NLI faithfulness runs on any generated answer, judge or not.
+    if answered:
+        print(f"Scoring NLI faithfulness over {len(answered)} generated answers...")
+        nli_scores = NliFaithfulnessEval().run(answered)
+        ragas_scores["faithfulness"] = nli_scores.get("faithfulness")
+        faithfulness_model = nli_scores.get("faithfulness_model")
+
     judge_attempted = False
     if args.judge_model:
-        judged = [
-            {**s, "contexts": s["ragas_contexts"]} for s in samples if s["answer"].strip()
-        ]
-        if not judged:
+        if not answered:
             print(
                 "WARNING: judge skipped -- /qa returned no answers to score.",
                 file=sys.stderr,
@@ -812,9 +839,12 @@ def main() -> None:
             judge_attempted = True
             print(
                 f"Running RAGAS judge with model={args.judge_model} "
-                f"over {len(judged)} generated answers..."
+                f"over {len(answered)} generated answers (answer relevance)..."
             )
-            ragas_scores = GenerationEval().run(judged, judge_model=args.judge_model)
+            judged_scores = GenerationEval().run(answered, judge_model=args.judge_model)
+            # NLI owns faithfulness; take answer_relevance/context_* from the judge.
+            judged_scores.pop("faithfulness", None)
+            ragas_scores.update(judged_scores)
 
     citation_support_rate: float | None = None
     if args.check_citations and not args.judge_model:
@@ -862,6 +892,8 @@ def main() -> None:
         metrics["qa_not_found_calls"] = qa_not_found
         metrics["qa_answered_calls"] = len(samples) - len(qa_empty)
         metrics["qa_total_calls"] = len(samples)
+    if faithfulness_model:
+        metrics["faithfulness_model"] = faithfulness_model
 
     threshold_violations: list[str] = []
     thresholds = thresholds_for_dataset(dataset_label)
@@ -869,9 +901,14 @@ def main() -> None:
         threshold_violations.append(f"HR@5 {hr5:.4f} < {thresholds['hit_rate_5']}")
     if mrr < thresholds["mrr"]:
         threshold_violations.append(f"MRR {mrr:.4f} < {thresholds['mrr']}")
+    # Faithfulness fires only on collapse, never on drift -- see THRESHOLDS. `None`
+    # means no answers were generated (retrieval-only run), which is not a violation.
     faith = ragas_scores.get("faithfulness")
     if faith is not None and faith < thresholds["faithfulness"]:
-        threshold_violations.append(f"Faithfulness {faith:.4f} < {thresholds['faithfulness']}")
+        threshold_violations.append(
+            f"Faithfulness {faith:.4f} < {thresholds['faithfulness']} "
+            "(collapse detector -- retrieval or grounding is broken, not a quality dip)"
+        )
     answer_rel = ragas_scores.get("answer_relevance")
     if answer_rel is not None and answer_rel < thresholds["answer_relevance"]:
         threshold_violations.append(
@@ -889,8 +926,11 @@ def main() -> None:
     passed = len(threshold_violations) == 0
     violations = threshold_violations if args.assert_thresholds else []
 
+    has_generation_metric = judge_attempted or ragas_scores.get("faithfulness") is not None
     eval_kind = (
-        "citation" if args.check_citations else "generation" if judge_attempted else "retrieval"
+        "citation" if args.check_citations
+        else "generation" if has_generation_metric
+        else "retrieval"
     )
     history_model = args.model or args.judge_model or "no-llm"
 
@@ -913,14 +953,16 @@ def main() -> None:
     n_questions = len(samples)
     # context_precision / context_recall are intentionally skipped now (they
     # duplicate HR@5/MRR signal). Don't surface a warning for them.
-    null_metrics = [
-        k for k in ("faithfulness", "answer_relevance") if metrics.get(k) is None
-    ]
-    if args.judge_model and null_metrics:
+    if answered and metrics.get("faithfulness") is None:
         print(
-            "\nWARNING: judge_model was set but the following metrics are "
-            f"null: {', '.join(null_metrics)}. Scroll up for per-metric "
-            "WARNING/NOTE lines explaining why.",
+            "\nWARNING: generated answers existed but faithfulness is null -- "
+            "the NLI model failed to load or score. Scroll up for the reason.",
+            file=sys.stderr,
+        )
+    if args.judge_model and metrics.get("answer_relevance") is None:
+        print(
+            "\nWARNING: judge_model was set but answer_relevance is null. Scroll "
+            "up for per-metric WARNING/NOTE lines explaining why.",
             file=sys.stderr,
         )
     if args.check_citations and metrics.get("citation_support_rate") is None:

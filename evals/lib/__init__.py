@@ -3,7 +3,6 @@
 Public API used by run_eval.py and future eval runners (S214-S218).
 """
 
-from evals.lib.loader import load_golden
 from evals.lib.citation_metrics import (
     compute_citation_support_rate,
     judge_citation,
@@ -16,14 +15,20 @@ from evals.lib.flashcard_metrics import (
     judge_flashcard,
     score_flashcards,
 )
+from evals.lib.golden_relevance import find_graded_relevance
 from evals.lib.intent_metrics import (
     compute_per_route_precision_recall,
     compute_routing_accuracy,
     normalize_route,
 )
-from evals.lib.golden_relevance import find_graded_relevance
+from evals.lib.loader import load_golden
 from evals.lib.retrieval_metrics import compute_hit_rate_5, compute_mrr, compute_ndcg_10
-from evals.lib.runners import ClassifierEval, GenerationEval, RetrievalEval
+from evals.lib.runners import (
+    ClassifierEval,
+    GenerationEval,
+    NliFaithfulnessEval,
+    RetrievalEval,
+)
 from evals.lib.schemas import (
     FlashcardGoldenEntry,
     GoldenEntry,
@@ -48,6 +53,7 @@ __all__ = [
     "GoldenEntry",
     "GradedHint",
     "IntentGoldenEntry",
+    "NliFaithfulnessEval",
     "RetrievalEval",
     "RetrievalGoldenEntry",
     "SummaryGoldenEntry",

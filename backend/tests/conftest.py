@@ -12,10 +12,13 @@ baseline: even tests that don't define their own DB fixture will never touch
 ~/.luminary.
 """
 
+import asyncio
 import os
 import warnings
+from unittest.mock import patch
 
 import pytest
+import pytest_asyncio
 
 # Filter aiosqlite DeprecationWarning for Python 3.12+ datetime adapter
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite")
@@ -77,6 +80,56 @@ def _reset_lancedb_singleton():
 
     _vs_module._lancedb_service = None
     yield
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _drain_leaked_tasks():
+    """Cancel any fire-and-forget task the test spawned, while its loop is still alive.
+
+    Routers fire ~12 kinds of background task (document pre-generate, tag enrichment,
+    note embedding/description, XP awards...). In the app that is correct: the loop
+    outlives them. Under pytest-asyncio each test gets its OWN loop, so a task spawned
+    by test A is bound to loop A -- and whatever the task is awaiting (an LLM call, an
+    embedder load, a DB handle) resolves on a loop that is about to close. The task then
+    surfaces in a LATER test's teardown, where the finalizer awaits a future that can
+    never complete, and the suite hangs at the 120s timeout blaming an innocent test.
+
+    Cancelling here, inside the owning loop, is the only point where cancellation can
+    actually be processed.
+    """
+    yield
+    current = asyncio.current_task()
+    leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    for t in leaked:
+        t.cancel()
+    if leaked:
+        # Bounded: a task stuck in a thread executor cannot be cancelled, and waiting
+        # forever for it would recreate the hang this fixture exists to prevent.
+        await asyncio.wait(leaked, timeout=5)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_library_summary_generation():
+    """Stop summary_node's fire-and-forget task from outliving the test that spawned it.
+
+    scope='all' with no cached library summary fires
+    `asyncio.create_task(_generate_library_summary_task())`. In the app that is
+    correct -- it warms the summary for next time. In tests it is a live task holding
+    an LLM call, and pytest-asyncio gives each test its own event loop: the task
+    outlives its test, and the NEXT loop close calls _cancel_all_tasks, which cancels
+    then gathers. An LLM call sitting in a thread executor cannot be cancelled, so the
+    gather blocks until the 120s per-test timeout kills the whole session -- attributed
+    to whatever unlucky test happened to be running (seen on CI in test_note_title, and
+    locally ~30% into the suite; the culprit is neither).
+
+    Neutralising the coroutine keeps the create_task call observable -- tests asserting
+    that generation was fired still pass -- while the task completes instantly.
+    """
+    async def _noop() -> None:
+        return
+
+    with patch("app.runtime.chat_nodes.summary._generate_library_summary_task", _noop):
+        yield
 
 
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
