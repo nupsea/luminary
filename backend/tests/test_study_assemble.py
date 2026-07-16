@@ -72,7 +72,7 @@ async def test_assemble_concept_scope_yields_event_and_due_card(test_db):
     assert body["preview"]["due_count"] == 1 and body["preview"]["mapped_count"] == 1
     assert body["preview"]["unmapped_count"] == 0
     assert body["preview"]["topic_mix"] == ["Iceberg"]
-    assert body["teachback_available"] is False  # feynman labs off by default
+    assert body["teachback_available"] is True  # feynman is always on in full mode
 
     # a StudyEvent row was recorded
     async with factory() as s:

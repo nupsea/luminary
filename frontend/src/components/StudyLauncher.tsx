@@ -1,6 +1,6 @@
 // StudyLauncher -- one sheet every study entry point opens (docs/study-launcher.md).
 // Reads launcherStore; mounted once in App.tsx. Opened via the luminary:launch-study
-// event. Honest preview + tier-aware teach-back; Start records a Study Event and
+// event. Honest preview + mode-aware teach-back; Start records a Study Event and
 // routes to Study.
 
 import { useEffect } from "react"

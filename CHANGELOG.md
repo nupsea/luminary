@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Two surface modes replace the public/labs/dev tiers.** One knob —
+  `LUMINARY_MODE=full` (default; what `make luminary` runs — every feature on,
+  including the Map, which returns to the learner rail as a nav tab) or
+  `LUMINARY_MODE=public` (Docker/installers — curated learner surfaces served
+  with the API under `/api` on one port). The old `LUMINARY_SURFACE_TIER` /
+  `VITE_SURFACE_TIER` variables, the Settings → Labs toggle panel, the
+  `labs_enabled` runtime setting, and `GET /settings/surface` /
+  `PATCH /settings/labs` are gone; the surface manifest is now v2 (`mode` key).
+  The backend `labs` dependency group is renamed `full`.
+- **Evals consolidated on the Quality console.** The Monitoring page keeps
+  Overview / Traces / Mastery; its stale Evals tab (pre-rebaseline RAGAS panels
+  and `scores_history` charts) is removed along with `GET /monitoring/evals`,
+  `GET /monitoring/eval-history`, and `GET /monitoring/evals/regressions`.
+  Eval runners now store results via `POST /evals/store` (moved from
+  `/monitoring/evals/store`).
 - **Notes editor redesign** — the note editor is now always-live (no read/edit
   mode split) with autosave and draft safety: closing a note flushes instead of
   discarding, and empty auto-created drafts are deleted with a toast. The raw

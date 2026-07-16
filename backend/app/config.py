@@ -6,11 +6,11 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DATA_DIR: str = ".luminary"
-    LUMINARY_SURFACE_TIER: Literal["public", "labs", "dev"] = "dev"
-    # prod: serve the built SPA and mount the API under /api on one port (no CORS).
-    # dev: routers at root, CORS open, frontend served separately by Vite.
-    LUMINARY_MODE: Literal["dev", "prod"] = "dev"
-    # Labs "publish note as blog": target Astro content repo + layout. Labs-only;
+    # full: every surface on, routers at root, CORS open for the Vite dev server
+    #       (`make luminary`). public: curated learner surfaces only, built SPA
+    #       served with the API under /api on one port (no CORS).
+    LUMINARY_MODE: Literal["full", "public"] = "full"
+    # "Publish note as blog": target Astro content repo + layout. Full-mode-only;
     # defaulted to the author's personal site checkout.
     LUMINARY_BLOG_REPO_PATH: str = "/Users/sethurama/DEV/LM/nupsea.github.io"
     LUMINARY_BLOG_CONTENT_SUBDIR: str = "src/content/blog"

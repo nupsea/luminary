@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 
 from app.config import get_settings
-from app.labs_extras import require_extra
+from app.full_extras import require_extra
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)

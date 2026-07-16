@@ -1,4 +1,4 @@
-// blogApi — typed client for the labs blog-publishing endpoints (/blog/*).
+// blogApi — typed client for the blog-publishing endpoints (/blog/*, full mode).
 // Shapes mirror backend/app/schemas/blog.py; not in the generated OpenAPI types.
 
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"

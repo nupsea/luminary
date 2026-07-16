@@ -47,7 +47,7 @@ type Scope =
 +------------------------------------------------------+
 | Study                                                |
 | Scope    Iceberg collection            [change v]    |
-| Mode     (o) Quick quiz  ( ) Full session  ( ) Drill |  <- teach-back option only if Feynman labs ON
+| Mode     (o) Quick quiz  ( ) Full session  ( ) Drill |  <- teach-back option only in full mode
 | Length   (o) 5 min  ( ) 15  ( ) 25                   |
 | Draw on  [x] due cards (7)  [x] new questions from   |
 |            material   [ ] teach-back at the end      |
@@ -66,7 +66,7 @@ type Scope =
 - **Lane A uses it too.** The Hub call is a pre-filled launcher invocation (`daily`, full session)
   -- proves "one engine."
 - **Tier-aware (constitution 11).** The teach-back mode/option renders only when the `feynman`
-  labs surface is enabled; otherwise the control is **absent** (not greyed-disabled).
+  surface ships (full mode); otherwise the control is **absent** (not greyed-disabled).
 - **Model-down (constitution 9).** If Ollama/LiteLLM is unreachable, "generate" options disable
   with the shipped banner pattern; **"due cards" still starts a pure-FSRS review.**
 

@@ -4,21 +4,18 @@ import logging
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
 from app.services.settings_service import (
-    get_labs_enabled,
     get_llm_settings,
     get_rerank_enabled,
-    set_labs_enabled,
     set_rerank_enabled,
     update_llm_settings,
 )
-from app.surface_manifest import labs_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -346,59 +343,3 @@ async def patch_retrieval_settings(
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
 
 
-# Surface tier + labs toggles
-
-
-class LabsSurface(BaseModel):
-    id: str
-    label: str
-    description: str | None = None
-    default_off: bool = False
-
-
-class SurfaceResponse(BaseModel):
-    tier: str
-    labs_enabled: list[str]
-    available_labs: list[LabsSurface]
-
-
-class LabsPatch(BaseModel):
-    labs_enabled: list[str]
-
-
-def _available_labs() -> list[LabsSurface]:
-    return [
-        LabsSurface(
-            id=s["id"],
-            label=s["labels"]["en"],
-            description=s.get("description"),
-            default_off=bool(s.get("default_off", False)),
-        )
-        for s in labs_surfaces()
-    ]
-
-
-@router.get("/surface", response_model=SurfaceResponse)
-async def get_surface(db: AsyncSession = Depends(get_db)) -> SurfaceResponse:
-    return SurfaceResponse(
-        tier=get_settings().LUMINARY_SURFACE_TIER,
-        labs_enabled=sorted(await get_labs_enabled(db)),
-        available_labs=_available_labs(),
-    )
-
-
-@router.patch("/labs", response_model=SurfaceResponse)
-async def patch_labs(
-    body: LabsPatch, db: AsyncSession = Depends(get_db)
-) -> SurfaceResponse:
-    if get_settings().LUMINARY_SURFACE_TIER == "public":
-        raise HTTPException(status_code=400, detail="labs are not available on a public build")
-    try:
-        await set_labs_enabled(db, set(body.labs_enabled))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return SurfaceResponse(
-        tier=get_settings().LUMINARY_SURFACE_TIER,
-        labs_enabled=sorted(await get_labs_enabled(db)),
-        available_labs=_available_labs(),
-    )

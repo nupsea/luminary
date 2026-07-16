@@ -1,6 +1,6 @@
 """Transform a Luminary note into a publishable Astro blog post.
 
-Pure transform plus filesystem/git helpers for the labs "publish note as blog"
+Pure transform plus filesystem/git helpers for the full-mode "publish note as blog"
 feature. The target is the user's personal Astro content collection at
 ``<repo>/src/content/blog/<slug>.md`` with co-located assets under
 ``<repo>/public/blog/<slug>/`` (served at ``/blog/<slug>/...``).

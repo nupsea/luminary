@@ -81,7 +81,7 @@ markers = [
 ]
 
 [dependency-groups]
-labs = [
+full = [
     "faster-whisper>=1.2.1",
     "yt-dlp>=2026.3.13",
     "tree-sitter>=0.25.2",
@@ -107,4 +107,4 @@ dev = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "labs"]
+default-groups = ["dev", "full"]

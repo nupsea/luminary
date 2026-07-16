@@ -28,7 +28,6 @@ import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
-import { useSurfaceStore } from "@/store/surface"
 import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
 import { retagDocument } from "@/pages/Learning/api"
 import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
@@ -140,9 +139,8 @@ export function DocumentCard({
   const navigate = useNavigate()
   // "View in graph" only makes sense when the Map surface ships in this build;
   // it's trimmed from public bundles, so drop the action there.
-  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
   const visibleActions = DOC_ACTIONS.filter(
-    ({ action }) => action !== "viz" || isSurfaceVisible("map", labsEnabled),
+    ({ action }) => action !== "viz" || isSurfaceVisible("map"),
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [typePopoverOpen, setTypePopoverOpen] = useState(false)

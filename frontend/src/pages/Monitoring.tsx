@@ -1,10 +1,10 @@
-// Monitoring page shell: hash-persisted tab nav over four panels.
+// Monitoring page shell: hash-persisted tab nav over three panels.
 // Each tab fetches its own data via useSection, so a failed endpoint
 // degrades one section, never the page (invariant I-10).
+// Eval dashboards live on the Quality page (/quality), not here.
 
 import { useEffect, useState } from "react"
 
-import { EvalsTab } from "./Monitoring/EvalsTab"
 import { MasteryPanel } from "./Monitoring/MasteryPanel"
 import { OverviewTab } from "./Monitoring/OverviewTab"
 import { PanelErrorBoundary } from "./Monitoring/SharedUI"
@@ -16,7 +16,6 @@ import { useSection } from "./Monitoring/useSection"
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "traces", label: "Traces" },
-  { id: "evals", label: "Evals" },
   { id: "mastery", label: "Mastery" },
 ] as const
 
@@ -66,11 +65,6 @@ export default function Monitoring() {
       {activeTab === "traces" && (
         <PanelErrorBoundary name="Traces">
           <TracesTab />
-        </PanelErrorBoundary>
-      )}
-      {activeTab === "evals" && (
-        <PanelErrorBoundary name="Evals">
-          <EvalsTab />
         </PanelErrorBoundary>
       )}
       {activeTab === "mastery" && (

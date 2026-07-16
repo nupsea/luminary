@@ -13,7 +13,7 @@ RUN npm ci --no-audit --no-fund
 COPY surface-manifest.json /surface-manifest.json
 
 COPY frontend/ .
-RUN VITE_SURFACE_TIER=public VITE_API_BASE=/api npm run build
+RUN VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
 
 # ---------------------------------------------------------------------------
 # Stage 2 — Production backend (serves the SPA too)
@@ -41,8 +41,7 @@ COPY surface-manifest.json /surface-manifest.json
 # (same reason surface-manifest.json is placed at / above).
 COPY --from=frontend-build /frontend/dist /frontend/dist
 
-ENV LUMINARY_MODE=prod \
-    LUMINARY_SURFACE_TIER=public \
+ENV LUMINARY_MODE=public \
     DATA_DIR=/data \
     PORT=7820
 

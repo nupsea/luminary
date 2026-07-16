@@ -1,10 +1,8 @@
 """LLM settings service — DB-backed mode/provider/key management with OS keychain storage."""
 
 import hashlib
-import json
 import logging
 import socket
-from pathlib import Path
 
 import keyring
 import keyring.errors
@@ -241,28 +239,6 @@ async def update_llm_settings(
     logger.debug("LLM settings updated: %s", list(updates_db.keys()))
 
 
-_LABS_KEY = "labs_enabled"
-
-
-async def get_labs_enabled(db: AsyncSession) -> set[str]:
-    result = await db.execute(select(SettingsModel).where(SettingsModel.key == _LABS_KEY))
-    row = result.scalar_one_or_none()
-    if row is None or not isinstance(row.value, list):
-        return set()
-    return set(row.value)
-
-
-async def set_labs_enabled(db: AsyncSession, features: set[str]) -> None:
-    from app.surface_manifest import labs_surfaces  # noqa: PLC0415
-
-    valid = {s["id"] for s in labs_surfaces()}
-    unknown = features - valid
-    if unknown:
-        raise ValueError(f"unknown labs surface ids: {sorted(unknown)}")
-    await db.merge(SettingsModel(key=_LABS_KEY, value=sorted(features)))
-    await db.commit()
-
-
 _RERANK_KEY = "rerank_enabled"
 
 # Default ON: the ablation harness already treats rrf+rerank as the shipped
@@ -282,35 +258,6 @@ async def get_rerank_enabled(db: AsyncSession) -> bool:
 async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
     await db.merge(SettingsModel(key=_RERANK_KEY, value=bool(enabled)))
     await db.commit()
-
-
-def read_labs_enabled_sync() -> set[str]:
-    # Router registration runs at module import, before the async engine exists,
-    # so labs gating reads the setting via a throwaway read-only sqlite connection.
-    import sqlite3  # noqa: PLC0415
-
-    from app.config import get_settings  # noqa: PLC0415
-
-    db_path = Path(get_settings().DATA_DIR).expanduser() / "luminary.db"
-    if not db_path.exists():
-        return set()
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        try:
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (_LABS_KEY,)
-            ).fetchone()
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return set()
-    if not row or not row[0]:
-        return set()
-    try:
-        value = json.loads(row[0])
-    except (ValueError, TypeError):
-        return set()
-    return set(value) if isinstance(value, list) else set()
 
 
 def get_llm_error_message() -> str:

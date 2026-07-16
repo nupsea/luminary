@@ -71,10 +71,21 @@ any concept/mastery/graph/study work, read:
 - `Map` (`/viz`) — knowledge graph (Sigma.js entity + relationship view). Renamed from "Viz" for the same reasons.
 - `Progress` (`/progress`) — streaks, XP, mastery, review schedule. Uses the Luminary lantern glyph as its nav icon.
 
-**Dev rail (bottom of sidebar):** `Quality | Admin`
+**Dev rail (bottom of sidebar, full mode only):** `Quality | Admin | Monitoring`
 
-- `Quality` (`/quality`) — RAGAS retrieval eval dashboard. Demoted from the learner rail in the design refactor.
-- `Admin` (`/admin`) — dev tools, ingestion queue, model usage. Also accessible at `/monitoring` (legacy alias).
+- `Quality` (`/quality`) — eval console: golden datasets, runs, retrieval/topic/generation metrics. The single eval surface.
+- `Admin` (`/admin`) — dev tools, ingestion queue, model usage.
+- `Monitoring` (`/monitoring`) — Phoenix traces, operational metrics, mastery heatmap (no evals; those live on Quality).
+
+## Surface modes
+
+Two modes, declared per surface in `surface-manifest.json` (v2, `mode` key) and selected by one env
+knob: `LUMINARY_MODE=full` (default; `make luminary` — every surface on, routers at root, CORS open
+for Vite) or `LUMINARY_MODE=public` (Docker/installers — curated learner set: Hub, Library, Notes,
+Study, Ask, Progress, Collections, document overview, tags; SPA + API on one port under `/api`).
+The frontend mirrors this at build time via `VITE_LUMINARY_MODE`. There are no runtime feature
+toggles; `backend/app/surface_manifest.py` and `frontend/src/lib/surfaceManifest.ts` must stay
+mirrored.
 
 ## Backend Directory
 
@@ -115,7 +126,7 @@ frontend/src/
     Chat.tsx, Chat/                      'Ask' tab
     Viz.tsx, Viz/                        'Map' tab
     Progress.tsx
-    Admin.tsx, Quality.tsx, Evals.tsx, Monitoring.tsx (dev surfaces)
+    Admin.tsx, Quality.tsx, Monitoring.tsx (full-mode dev-rail surfaces)
   components/
     library/         DocumentCard, FilterBar, SearchBar, UploadDialog, ...
     reader/          PDFViewer, EPUBViewer, DocumentReader, ...

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S177: Progress tab / Admin route
 # Verifies:
-#   1. GET /monitoring/rag-quality or /monitoring/evals still returns 200 (endpoint unchanged)
+#   1. GET /evals/runs still returns 200 (eval history lives on the Quality console)
 #   2. GET /monitoring/overview still returns 200
 #   3. GET /study/history still returns 200
 #   4. GET /study/due-count still returns 200
@@ -22,11 +22,11 @@ if [ "$STATUS" != "200" ]; then
 fi
 echo "  -> $STATUS OK"
 
-# 2. Monitoring evals still works (used by Admin page)
-echo "[2/4] GET /monitoring/evals"
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/monitoring/evals")
+# 2. Eval runs still work (Quality console)
+echo "[2/4] GET /evals/runs"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/evals/runs")
 if [ "$STATUS" != "200" ]; then
-  echo "FAIL: /monitoring/evals returned $STATUS (expected 200)"
+  echo "FAIL: /evals/runs returned $STATUS (expected 200)"
   exit 1
 fi
 echo "  -> $STATUS OK"

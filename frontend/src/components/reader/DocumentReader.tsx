@@ -17,7 +17,7 @@ import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
-import { SURFACE_TIER } from "@/lib/surfaceManifest"
+import { LUMINARY_MODE } from "@/lib/surfaceManifest"
 import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
@@ -574,7 +574,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         return new Map<string, string>()
       }
     },
-    enabled: SURFACE_TIER !== "public",
+    enabled: LUMINARY_MODE === "full",
     staleTime: 30_000,
   })
 

@@ -54,7 +54,7 @@ near-passthrough. The concept's stable `slug` (see schema) is the filename.
 Project the live stores into an OKF bundle on disk -- the local-first promise made literal.
 
 - New `services/okf_exporter.py` + `POST /okf/export` (new `okf` router, **public** tier).
-- Reframe the labs **blog publish** as "export/share an OKF bundle" (same plumbing, broader value).
+- Reframe the full-mode **blog publish** as "export/share an OKF bundle" (same plumbing, broader value).
 - **D6:** keep both the Markdown-vault export and OKF for one release (deprecation window), then
   hard-switch.
 

@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "surfaces": [
     {
       "id": "luminary_hub",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/",
@@ -23,7 +23,7 @@
     },
     {
       "id": "library",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/library",
@@ -43,7 +43,7 @@
     },
     {
       "id": "notes",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/notes",
@@ -63,7 +63,7 @@
     },
     {
       "id": "note-page",
-      "tier": "public",
+      "mode": "public",
       "kind": "feature",
       "frontend": {
         "route": "/notes/:noteId",
@@ -78,7 +78,7 @@
     },
     {
       "id": "study",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/study",
@@ -96,7 +96,7 @@
     },
     {
       "id": "ask",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/chat",
@@ -117,8 +117,8 @@
     },
     {
       "id": "map",
-      "tier": "labs",
-      "kind": "feature",
+      "mode": "full",
+      "kind": "nav_tab",
       "frontend": {
         "route": "/viz",
         "component": "pages/Viz"
@@ -131,12 +131,11 @@
       "labels": {
         "en": "Map"
       },
-      "description": "Explore your library as a tag/concept graph. Experimental.",
-      "default_off": true
+      "description": "Explore your library as a tag/concept graph."
     },
     {
       "id": "progress",
-      "tier": "public",
+      "mode": "public",
       "kind": "nav_tab",
       "frontend": {
         "route": "/progress",
@@ -151,7 +150,7 @@
     },
     {
       "id": "collections",
-      "tier": "public",
+      "mode": "public",
       "kind": "feature",
       "frontend": {
         "route": "/collections/:id",
@@ -168,7 +167,7 @@
     },
     {
       "id": "doc_overview",
-      "tier": "public",
+      "mode": "public",
       "kind": "feature",
       "frontend": {
         "route": "/library/doc/:id",
@@ -185,7 +184,7 @@
     },
     {
       "id": "tags",
-      "tier": "public",
+      "mode": "public",
       "kind": "feature",
       "backend": {
         "routers": [
@@ -198,7 +197,7 @@
     },
     {
       "id": "blog",
-      "tier": "labs",
+      "mode": "full",
       "kind": "feature",
       "frontend": {
         "components": [
@@ -216,12 +215,11 @@
       "labels": {
         "en": "Blog Publishing"
       },
-      "description": "Publish a note as a post on your personal Astro site.",
-      "default_off": true
+      "description": "Publish a note as a post on your personal Astro site."
     },
     {
       "id": "feynman",
-      "tier": "labs",
+      "mode": "full",
       "kind": "feature",
       "frontend": {
         "components": [
@@ -240,12 +238,11 @@
       "labels": {
         "en": "Feynman / Teach-back"
       },
-      "description": "Socratic explanation sessions graded against source material.",
-      "default_off": true
+      "description": "Socratic explanation sessions graded against source material."
     },
     {
       "id": "code_executor",
-      "tier": "labs",
+      "mode": "full",
       "kind": "feature",
       "backend": {
         "routers": [
@@ -258,12 +255,11 @@
       "labels": {
         "en": "Code executor"
       },
-      "description": "Run code snippets extracted from technical documents in a sandbox.",
-      "default_off": true
+      "description": "Run code snippets extracted from technical documents in a sandbox."
     },
     {
       "id": "image_enrichment",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "routers": [
@@ -277,12 +273,11 @@
       "labels": {
         "en": "Image extraction & enrichment"
       },
-      "description": "Extract figures from documents and caption them with a vision model (LLaVA).",
-      "default_off": true
+      "description": "Extract figures from documents and caption them with a vision model (LLaVA)."
     },
     {
       "id": "concept_linker",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "routers": [
@@ -295,12 +290,11 @@
       "labels": {
         "en": "Concept linker"
       },
-      "description": "Cross-link related concepts across documents in the knowledge graph.",
-      "default_off": true
+      "description": "Cross-link related concepts across documents in the knowledge graph."
     },
     {
       "id": "web_ingest",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "services": [
@@ -311,12 +305,11 @@
       "labels": {
         "en": "Web search & URL ingestion"
       },
-      "description": "Augment answers with live web search and ingest articles from URLs (requires the labs dependency group).",
-      "default_off": true
+      "description": "Augment answers with live web search and ingest articles from URLs (requires the full dependency group)."
     },
     {
       "id": "youtube_ingest",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "services": [
@@ -326,12 +319,11 @@
       "labels": {
         "en": "YouTube ingestion"
       },
-      "description": "Ingest and transcribe YouTube lectures as study documents.",
-      "default_off": true
+      "description": "Ingest and transcribe YouTube lectures as study documents."
     },
     {
       "id": "audio_transcribe",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "services": [
@@ -341,12 +333,11 @@
       "labels": {
         "en": "Audio transcription"
       },
-      "description": "Transcribe audio files into study documents.",
-      "default_off": true
+      "description": "Transcribe audio files into study documents."
     },
     {
       "id": "code_parsing",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "services": [
@@ -359,12 +350,11 @@
       "labels": {
         "en": "Technical-book parsing"
       },
-      "description": "Code-aware chunking and relation extraction for technical books.",
-      "default_off": true
+      "description": "Code-aware chunking and relation extraction for technical books."
     },
     {
       "id": "clustering_orgplan",
-      "tier": "labs",
+      "mode": "full",
       "kind": "feature",
       "frontend": {
         "components": [
@@ -379,12 +369,11 @@
       "labels": {
         "en": "Clustering / organization plan"
       },
-      "description": "Suggest collections by clustering related documents.",
-      "default_off": true
+      "description": "Suggest collections by clustering related documents."
     },
     {
       "id": "dataset_generator",
-      "tier": "labs",
+      "mode": "full",
       "kind": "service",
       "backend": {
         "services": [
@@ -394,12 +383,11 @@
       "labels": {
         "en": "Dataset generator"
       },
-      "description": "Generate golden Q&A datasets from ingested documents for eval.",
-      "default_off": true
+      "description": "Generate golden Q&A datasets from ingested documents for eval."
     },
     {
       "id": "pomodoro",
-      "tier": "labs",
+      "mode": "full",
       "kind": "feature",
       "frontend": {
         "components": [
@@ -417,13 +405,13 @@
       "labels": {
         "en": "Pomodoro timer"
       },
-      "description": "Focus-timer pill for timed study sessions.",
-      "default_off": true
+      "description": "Focus-timer pill for timed study sessions."
     },
     {
       "id": "quality_dashboard",
-      "tier": "labs",
+      "mode": "full",
       "kind": "nav_tab",
+      "rail": "dev",
       "frontend": {
         "route": "/quality",
         "component": "pages/Quality"
@@ -436,13 +424,13 @@
       "labels": {
         "en": "Quality"
       },
-      "description": "Eval harness UI: retrieval (HR@5/MRR), topic, and generation metrics.",
-      "default_off": true
+      "description": "Eval harness UI: retrieval (HR@5/MRR), topic, and generation metrics."
     },
     {
       "id": "admin",
-      "tier": "dev",
+      "mode": "full",
       "kind": "nav_tab",
+      "rail": "dev",
       "frontend": {
         "route": "/admin",
         "component": "pages/Admin"
@@ -458,8 +446,9 @@
     },
     {
       "id": "monitoring",
-      "tier": "dev",
+      "mode": "full",
       "kind": "nav_tab",
+      "rail": "dev",
       "frontend": {
         "route": "/monitoring",
         "component": "pages/Monitoring"

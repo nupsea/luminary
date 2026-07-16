@@ -19,8 +19,7 @@ import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
 import { BlogsPanel } from "@/components/blog/BlogsPanel"
 import type { BlogKind } from "@/lib/blogApi"
-import { visibleSurfaces } from "@/lib/surfaceManifest"
-import { useSurfaceStore } from "@/store/surface"
+import { isSurfaceVisible } from "@/lib/surfaceManifest"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -496,11 +495,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
-  const blogEnabled = useMemo(
-    () => visibleSurfaces(labsEnabled).some((s) => s.id === "blog"),
-    [labsEnabled],
-  )
+  const blogEnabled = isSurfaceVisible("blog")
   // A note is publishable to a collection only when it belongs to one named for
   // that target (case-insensitive): "BLOG" -> blog, "THOUGHTS" -> thoughts.
   const collectionNames = useMemo(
@@ -711,11 +706,7 @@ type FilterState =
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
-  const pageLabsEnabled = useSurfaceStore((s) => s.labsEnabled)
-  const blogsEnabled = useMemo(
-    () => visibleSurfaces(pageLabsEnabled).some((s) => s.id === "blog"),
-    [pageLabsEnabled],
-  )
+  const blogsEnabled = isSurfaceVisible("blog")
   const [isCreating, setIsCreating] = useState(false)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)

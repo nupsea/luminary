@@ -3,16 +3,12 @@
 Routes:
   GET /monitoring/traces        — last 50 spans from Phoenix (empty if Phoenix not running)
   GET /monitoring/overview      — aggregated counts from SQLite + Phoenix status
-  GET /monitoring/eval-history  — HR@5/MRR/Faithfulness history from scores_history.jsonl
 """
 
-import json
 import logging
 import math
 import time
-import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -22,8 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import ChunkModel, DocumentModel, EvalRunModel, QAHistoryModel
-from app.services.eval_regression_service import detect_regressions
+from app.models import ChunkModel, DocumentModel, QAHistoryModel
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +32,6 @@ _PHOENIX_REACHABILITY_TTL = 30.0  # seconds
 
 # Module-level cache: {"value": bool, "ts": float}
 _phoenix_reachability_cache: dict = {}
-
-# evals/scores_history.jsonl relative to this file (repo-root/evals/)
-_SCORES_HISTORY_PATH = Path(__file__).parent.parent.parent.parent / "evals" / "scores_history.jsonl"
 
 
 class TraceItem(BaseModel):
@@ -68,63 +60,6 @@ class MonitoringOverview(BaseModel):
     total_documents: int
     total_chunks: int
     qa_calls_today: int
-
-
-class EvalRunCreate(BaseModel):
-    dataset_name: str
-    model_used: str
-    eval_kind: str | None = "retrieval"
-    hit_rate_5: float | None = None
-    mrr: float | None = None
-    faithfulness: float | None = None
-    answer_relevance: float | None = None
-    context_precision: float | None = None
-    context_recall: float | None = None
-    citation_support_rate: float | None = None
-    theme_coverage: float | None = None
-    no_hallucination: float | None = None
-    conciseness_pct: float | None = None
-    factuality: float | None = None
-    atomicity: float | None = None
-    clarity_avg: float | None = None
-    routing_accuracy: float | None = None
-    per_route: dict | None = None
-    ablation_metrics: dict | None = None
-    extra_metrics: dict | None = None
-
-
-class EvalRunResponse(BaseModel):
-    id: str
-    dataset_name: str
-    model_used: str
-    eval_kind: str | None
-    run_at: datetime
-    hit_rate_5: float | None
-    mrr: float | None
-    faithfulness: float | None
-    answer_relevance: float | None
-    context_precision: float | None
-    context_recall: float | None
-    citation_support_rate: float | None = None
-    theme_coverage: float | None = None
-    no_hallucination: float | None = None
-    conciseness_pct: float | None = None
-    factuality: float | None = None
-    atomicity: float | None = None
-    clarity_avg: float | None = None
-    routing_accuracy: float | None = None
-    per_route: dict | None = None
-    ablation_metrics: dict | None = None
-    extra_metrics: dict | None = None
-
-
-class EvalRegressionResponse(BaseModel):
-    dataset: str
-    metric: str
-    current_value: float
-    baseline_value: float
-    drop_pct: float
-    eval_kind: str | None = None
 
 
 class PhoenixUrlResponse(BaseModel):
@@ -268,130 +203,6 @@ async def get_overview(
     )
 
 
-@router.post("/evals/store", response_model=EvalRunResponse, status_code=201)
-async def store_eval_run(
-    payload: EvalRunCreate,
-    db: AsyncSession = Depends(get_db),
-) -> EvalRunResponse:
-    """Persist a completed evaluation run to SQLite."""
-    run = EvalRunModel(
-        id=str(uuid.uuid4()),
-        dataset_name=payload.dataset_name,
-        model_used=payload.model_used,
-        eval_kind=payload.eval_kind or "retrieval",
-        run_at=datetime.now(tz=UTC),
-        hit_rate_5=payload.hit_rate_5,
-        mrr=payload.mrr,
-        faithfulness=payload.faithfulness,
-        answer_relevance=payload.answer_relevance,
-        context_precision=payload.context_precision,
-        context_recall=payload.context_recall,
-        citation_support_rate=payload.citation_support_rate,
-        theme_coverage=payload.theme_coverage,
-        no_hallucination=payload.no_hallucination,
-        conciseness_pct=payload.conciseness_pct,
-        factuality=payload.factuality,
-        atomicity=payload.atomicity,
-        clarity_avg=payload.clarity_avg,
-        routing_accuracy=payload.routing_accuracy,
-        per_route=payload.per_route,
-        ablation_metrics=payload.ablation_metrics,
-        extra_metrics=payload.extra_metrics,
-    )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
-    logger.info(
-        "Stored eval run",
-        extra={"id": run.id, "dataset_name": payload.dataset_name},
-    )
-    return EvalRunResponse(
-        id=run.id,
-        dataset_name=run.dataset_name,
-        model_used=run.model_used,
-        eval_kind=run.eval_kind,
-        # aiosqlite reads back tz-naive; attach UTC so clients don't parse as local
-        run_at=run.run_at.replace(tzinfo=UTC) if run.run_at.tzinfo is None else run.run_at,
-        hit_rate_5=run.hit_rate_5,
-        mrr=run.mrr,
-        faithfulness=run.faithfulness,
-        answer_relevance=run.answer_relevance,
-        context_precision=run.context_precision,
-        context_recall=run.context_recall,
-        citation_support_rate=run.citation_support_rate,
-        theme_coverage=run.theme_coverage,
-        no_hallucination=run.no_hallucination,
-        conciseness_pct=run.conciseness_pct,
-        factuality=run.factuality,
-        atomicity=run.atomicity,
-        clarity_avg=run.clarity_avg,
-        routing_accuracy=run.routing_accuracy,
-        per_route=run.per_route,
-        ablation_metrics=run.ablation_metrics,
-        extra_metrics=run.extra_metrics,
-    )
-
-
-@router.get("/evals", response_model=list[EvalRunResponse])
-async def get_eval_runs(
-    db: AsyncSession = Depends(get_db),
-) -> list[EvalRunResponse]:
-    """Return the last 10 eval runs per dataset, ordered by run_at desc."""
-    result = await db.execute(select(EvalRunModel).order_by(EvalRunModel.run_at.desc()).limit(50))
-    runs = result.scalars().all()
-
-    # Keep at most 10 per dataset
-    per_dataset: dict[str, list[EvalRunModel]] = {}
-    for run in runs:
-        per_dataset.setdefault(run.dataset_name, [])
-        if len(per_dataset[run.dataset_name]) < 10:
-            per_dataset[run.dataset_name].append(run)
-
-    # Flatten, preserving desc order within each dataset
-    all_runs: list[EvalRunModel] = []
-    for dataset_runs in per_dataset.values():
-        all_runs.extend(dataset_runs)
-    all_runs.sort(key=lambda r: r.run_at, reverse=True)
-
-    return [
-        EvalRunResponse(
-            id=r.id,
-            dataset_name=r.dataset_name,
-            model_used=r.model_used,
-            eval_kind=r.eval_kind,
-            run_at=r.run_at.replace(tzinfo=UTC) if r.run_at.tzinfo is None else r.run_at,
-            hit_rate_5=r.hit_rate_5,
-            mrr=r.mrr,
-            faithfulness=r.faithfulness,
-            answer_relevance=r.answer_relevance,
-            context_precision=r.context_precision,
-            context_recall=r.context_recall,
-            citation_support_rate=r.citation_support_rate,
-            theme_coverage=r.theme_coverage,
-            no_hallucination=r.no_hallucination,
-            conciseness_pct=r.conciseness_pct,
-            factuality=r.factuality,
-            atomicity=r.atomicity,
-            clarity_avg=r.clarity_avg,
-            routing_accuracy=r.routing_accuracy,
-            per_route=r.per_route,
-            ablation_metrics=r.ablation_metrics,
-        )
-        for r in all_runs
-    ]
-
-
-@router.get("/evals/regressions", response_model=list[EvalRegressionResponse])
-async def get_eval_regressions(
-    window: int = 5,
-    threshold_pct: float = 0.05,
-    db: AsyncSession = Depends(get_db),
-) -> list[EvalRegressionResponse]:
-    """Return eval metrics whose latest value dropped versus a moving baseline."""
-    regressions = await detect_regressions(db, window=window, threshold_pct=threshold_pct)
-    return [EvalRegressionResponse(**regression.__dict__) for regression in regressions]
-
-
 class QADailyCount(BaseModel):
     date: str  # YYYY-MM-DD (UTC)
     count: int
@@ -503,30 +314,3 @@ async def get_model_usage(
     return [ModelUsageItem(model=row.model_used, call_count=row.call_count) for row in rows]
 
 
-class EvalHistoryItem(BaseModel):
-    timestamp: str
-    dataset: str
-    model: str
-    hr5: float | None
-    mrr: float | None
-    faithfulness: float | None
-    passed: bool
-
-
-@router.get("/eval-history", response_model=list[EvalHistoryItem])
-async def get_eval_history() -> list[EvalHistoryItem]:
-    """Return eval score history from evals/scores_history.jsonl (all runs, oldest first)."""
-    if not _SCORES_HISTORY_PATH.exists():
-        return []
-    items: list[EvalHistoryItem] = []
-    with _SCORES_HISTORY_PATH.open() as f:
-        for raw_line in f:
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            try:
-                row = json.loads(stripped)
-                items.append(EvalHistoryItem(**row))
-            except Exception:
-                pass
-    return items

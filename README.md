@@ -172,7 +172,8 @@ All settings are environment variables in `backend/.env` (gitignored).
 |----------|---------|-------------|
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (optional, labs-gated) |
+| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (optional, full mode only) |
+| `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |
 
@@ -193,8 +194,8 @@ Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flash
 | Command | What it does |
 |---------|-------------|
 | `make install` | One-time setup (uv, Node, Ollama, models, build) |
-| `make start` | Start the prod server on :7820 |
-| `make luminary` | Start backend + frontend in dev mode (:7820 + :5173) |
+| `make start` | Start the public-mode server on :7820 (curated learner surfaces) |
+| `make luminary` | Start backend + frontend in full mode (:7820 + :5173) — every feature enabled |
 | `make stop` | Stop all Luminary processes |
 | `make test` | Unit + integration tests |
 | `make lint` | Ruff + tsc |

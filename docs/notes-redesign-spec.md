@@ -243,7 +243,7 @@ compat).
   WP5), unused props on `NoteEditor`/`MarkdownSplitEditor`, the second
   `NoteEditor` in SectionListItem (WP6 did it; verify no strays with a grep).
 - `docs/architecture.md` Notes tab description updated; CHANGELOG entry.
-- Full `make ci` + `npm run build` (public tier: `VITE_SURFACE_TIER=public
+- Full `make ci` + `npm run build` (public mode: `VITE_LUMINARY_MODE=public
   npm run build` must not pull CM6 into stripped surfaces' chunks).
 
 ---

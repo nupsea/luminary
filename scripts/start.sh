@@ -19,8 +19,7 @@ fi
 
 cd "$REPO_ROOT/backend"
 DATA_DIR="$REPO_ROOT/.luminary" \
-LUMINARY_MODE=prod \
-LUMINARY_SURFACE_TIER=public \
+LUMINARY_MODE=public \
     uv run uvicorn app.main:app --port "$PORT" 2>&1 &
 SERVER_PID=$!
 

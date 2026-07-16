@@ -290,20 +290,12 @@ async def test_qa_missing_question_returns_422(test_db):
     assert r.status_code == 422
 
 
-# /monitoring — graceful responses
+# /evals — graceful responses
 
 
-async def test_monitoring_evals_returns_200_list(test_db):
-    """GET /monitoring/evals returns 200 with an empty list when no runs exist."""
+async def test_evals_runs_returns_200_list(test_db):
+    """GET /evals/runs returns 200 with an empty list when no runs exist."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get("/monitoring/evals")
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
-
-
-async def test_monitoring_eval_history_returns_200_list(test_db):
-    """GET /monitoring/eval-history returns 200 with a list (may be empty)."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get("/monitoring/eval-history")
+        r = await c.get("/evals/runs")
     assert r.status_code == 200
     assert isinstance(r.json(), list)

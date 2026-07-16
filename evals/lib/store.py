@@ -1,4 +1,4 @@
-"""POST eval results to /monitoring/evals/store."""
+"""POST eval results to /evals/store."""
 
 import sys
 
@@ -46,7 +46,7 @@ def store_results(
     }
     try:
         resp = httpx.post(
-            f"{backend_url}/monitoring/evals/store",
+            f"{backend_url}/evals/store",
             json=payload,
             timeout=15.0,
         )

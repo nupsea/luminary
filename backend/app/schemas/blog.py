@@ -1,4 +1,4 @@
-"""Pydantic schemas for the labs blog-publishing router."""
+"""Pydantic schemas for the blog-publishing router (full mode)."""
 
 from pydantic import BaseModel
 

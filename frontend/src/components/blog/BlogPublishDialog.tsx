@@ -1,5 +1,5 @@
 /**
- * BlogPublishDialog — labs feature: turn a note into a post on the author's
+ * BlogPublishDialog — full-mode feature: turn a note into a post on the author's
  * Astro site. Shows a faithful in-app preview (matching the site's prose / Inter
  * / slate styling), an optional live `astro dev` render, then writes the post +
  * assets into the site repo and makes a LOCAL commit. The user pushes manually.

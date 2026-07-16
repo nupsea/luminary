@@ -8,8 +8,7 @@ services:
     volumes:
       - luminary-data:/data
     environment:
-      - LUMINARY_MODE=prod
-      - LUMINARY_SURFACE_TIER=public
+      - LUMINARY_MODE=public
       - DATA_DIR=/data
       # Point the backend at the ollama service. The backend reads OLLAMA_URL
       # (NOT OLLAMA_HOST); its default 127.0.0.1 would resolve to this container.
