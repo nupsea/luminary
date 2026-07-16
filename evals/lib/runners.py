@@ -16,19 +16,34 @@ from typing import Any
 # score the moment ONE sentence is unsupported -- even when every other sentence
 # is strongly entailed. Faithfulness is therefore measured claim-by-claim (as
 # RAGAS does) and averaged, so an unsupported sentence costs 1/N, not the whole
-# answer. Strip leading markdown list markers so bullet points score as claims.
+# answer.
+#
+# Only ASSERTIONS may be scored. A heading or a citation marker asserts nothing,
+# so no chunk can entail it and HHEM returns an arbitrary middling number --
+# measuring formatting instead of grounding. Measured on one real answer: the
+# three genuine sentences scored 0.949 / 0.965 / 0.957, while "**Why a B-tree
+# needs a WAL**" scored 0.359 and "(Provided Context)" 0.776, dragging the answer
+# to 0.728. Non-assertions are therefore dropped, not scored.
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _LIST_MARKER = re.compile(r"^\s*([-*+]|\d+[.)])\s+")
+_EMPHASIS = re.compile(r"(\*\*|__|\*|_|`)")
+# A line that is entirely bold, or an ATX heading: a section label, not a claim.
+_HEADING_LINE = re.compile(r"^\s*(#{1,6}\s+.*|\*\*[^*]+\*\*|__[^_]+__)\s*:?\s*$")
+# Bare parenthetical on its own, e.g. the "(Provided Context)" citation marker.
+_PARENTHETICAL_ONLY = re.compile(r"^\s*\([^)]*\)\s*$")
 
 
 def _split_claims(answer: str) -> list[str]:
     claims: list[str] = []
     for raw_line in answer.splitlines():
         line = _LIST_MARKER.sub("", raw_line.strip())
-        if not line:
+        if not line or _HEADING_LINE.match(line) or _PARENTHETICAL_ONLY.match(line):
             continue
         for raw_sentence in _SENTENCE_SPLIT.split(line):
-            sentence = raw_sentence.strip()
+            # Emphasis markers are noise to an NLI model; the words carry the claim.
+            sentence = _EMPHASIS.sub("", raw_sentence).strip()
+            if _PARENTHETICAL_ONLY.match(sentence):
+                continue
             if len(sentence) >= 12:
                 claims.append(sentence)
     return claims

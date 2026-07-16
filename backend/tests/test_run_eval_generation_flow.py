@@ -256,3 +256,35 @@ def test_not_found_counts_as_declined_not_failed(monkeypatch):
     # only the answered question is judged
     assert len(judged_batches[0]) == 1
     assert judged_batches[0][0]["question"] == "Q1"
+
+
+def test_post_qa_pins_scope_to_the_filtered_document(monkeypatch):
+    """document_ids without scope=single leaves scope=all, letting the intent
+    classifier route to library-wide summary synthesis -- which bypasses the
+    document filter and returns zero context chunks, so faithfulness numbers
+    stop being reproducible across runs."""
+    captured: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        captured.append(json)
+
+        class _Resp:
+            headers = {"content-type": "application/json"}
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"done": True, "answer": "a"}
+
+        return _Resp()
+
+    monkeypatch.setattr(run_eval.httpx, "post", _fake_post)
+
+    run_eval.post_qa("http://test", "Q", "", "doc-1")
+    assert captured[0]["scope"] == "single"
+    assert captured[0]["document_ids"] == ["doc-1"]
+
+    run_eval.post_qa("http://test", "Q", "", None)
+    assert "scope" not in captured[1]
+    assert "document_ids" not in captured[1]

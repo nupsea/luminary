@@ -128,22 +128,32 @@ questions), and the Runs tab surfaces them instead of a silent n/a.
 
 ### Faithfulness
 - **Computed:** a dedicated NLI consistency model (Vectara HHEM-2.1-Open by
-  default, `FAITHFULNESS_MODEL` to swap) scores `premise = joined retrieved
-  context` against `hypothesis = generated answer` → P(answer supported by
-  context), averaged over answers. **No LLM judge** — deterministic, fully local,
-  runs whenever real answers exist (independent of `--judge-model`). This is why
-  faithfulness now reliably appears instead of dropping to n/a on judge flakiness.
+  default, `FAITHFULNESS_MODEL` to swap) scores each answer **claim-vs-chunk**:
+  the answer is split into assertion sentences (headings, list markers, and bare
+  citation parentheticals are dropped), each claim is scored against every
+  grounding chunk, and a claim counts as supported at the score of its
+  best-supporting chunk (max-over-chunks). Per-answer = mean over claims, so an
+  unsupported claim costs 1/N. An answer with no grounding context scores 0.0 —
+  never skipped. **No LLM judge** — deterministic, fully local, runs whenever
+  real answers exist (independent of `--judge-model`). This is why faithfulness
+  now reliably appears instead of dropping to n/a on judge flakiness.
   Weights are Apache-2.0, <600MB, CPU-friendly, cached under
   `$DATA_DIR/models/<slug>` on first run; provenance is recorded as
   `faithfulness_model` in `extra_metrics`. Loading uses `trust_remote_code=True`
   (Vectara's official repo). Measures grounding in the retrieved context, not
   world truth — a true-but-ungrounded claim scores low, which is correct.
 - **Signifies:** hallucination-freeness — is the answer grounded, not invented?
-- **Interpret:** 0–1. **Gate ≥ 0.65 is REPORT-ONLY** while HHEM is re-baselined —
-  its distribution differs from the old RAGAS judge (a clearly-supported claim
-  scores ~0.8, not ~1.0), so the gate must be re-derived from a labeled run before
-  it enforces. Low with a high HR@5 = the generator is drifting from good context
-  (a generation problem, not retrieval).
+- **Interpret:** 0–1. **The gate (≥ 0.30) is a COLLAPSE DETECTOR, not a quality
+  bar.** Re-baselined 2026-07-16 on real runs: the measured distribution is
+  unimodal (dataset mean ~0.46–0.48, per-answer 0.35–0.66), with no gap between
+  "grounded" and "hallucinated" — so no quality bar is derivable without labeled
+  answers. 0.30 sits below every observed healthy answer and fires only when
+  retrieval or grounding is actually broken. Do not read a passing 0.30 as "good
+  enough", and do not compare HHEM claim-vs-chunk numbers to pre-2026-07-15 rows
+  in `scores_history.jsonl` (different metric). A mid-range score on discursive
+  questions usually means the generator paraphrases beyond the retrieved text —
+  a generation/grounding finding, not a metric bug. Low with a high HR@5 = the
+  generator is drifting from good context (a generation problem, not retrieval).
 
 ### Answer Relevance
 - **Computed:** the judge generates questions the answer would answer and measures
@@ -204,7 +214,7 @@ tuned to any document.
 |--------|------|
 | HR@5 | ≥ 0.50 |
 | MRR | ≥ 0.35 |
-| Faithfulness | ≥ 0.65 |
+| Faithfulness | ≥ 0.30 (collapse detector — see Faithfulness section) |
 | Answer Relevance | ≥ 0.50 |
 | Citation Support | ≥ 0.80 |
 | Topic F1 | ≥ 0.70 |

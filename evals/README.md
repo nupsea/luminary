@@ -104,7 +104,7 @@ Luminary's CI uses per-dataset thresholds (defined in `evals/lib/`):
 |--------|-----------------|
 | HR@5 | ≥ 0.50 |
 | MRR | ≥ 0.35 |
-| Faithfulness | ≥ 0.65 |
+| Faithfulness | ≥ 0.30 (collapse detector) |
 | Answer Relevance | ≥ 0.50 |
 | Citation Support Rate | ≥ 0.80 |
 

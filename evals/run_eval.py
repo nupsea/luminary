@@ -36,12 +36,12 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
     judge_citation,
     parse_claims_with_citations,
 )
+from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
     GOLDEN_DIR,
@@ -96,11 +96,21 @@ QA_REQUEST_TIMEOUT = 300.0
 # carry single-passage relevance (nDCG degrades to a log-discounted single-hit
 # metric there). Promote it to an asserted gate once graded goldens exist and
 # baselines are recorded.
+# faithfulness is a COLLAPSE DETECTOR, not a quality bar. 0.65 was inherited from the
+# RAGAS LLM-judge metric and is meaningless for HHEM NLI, which scores grounding in the
+# retrieved context rather than truth -- a correct answer written from parametric
+# knowledge scores low by design. Measured on d2l (12 answers, HHEM claim-vs-chunk):
+# dataset mean 0.46-0.48, per-answer 0.354-0.660, nothing above 0.66; 0.65 would have
+# passed 1 of 12. The distribution is unimodal, so there is no gap between "grounded"
+# and "hallucinated" to put a quality bar in -- that needs labelled answers. 0.30 sits
+# below every observed answer and only fires when the metric genuinely collapses
+# (retrieval dies, context vanishes, scoring regresses). Raise it only from labelled
+# data; do not read it as "0.30 is good enough".
 THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
     "ndcg_10": 0.40,
-    "faithfulness": 0.65,
+    "faithfulness": 0.30,
     "answer_relevance": 0.50,
     "citation_support_rate": 0.80,
 }
@@ -252,7 +262,12 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
     try:
         payload: dict = {"question": question, "include_context": True}
         if document_id:
+            # scope must match the filter: without it the intent classifier can
+            # route "exploratory" questions to library-wide summary synthesis,
+            # bypassing the document filter and returning zero context chunks --
+            # which makes faithfulness numbers non-reproducible across runs.
             payload["document_ids"] = [document_id]
+            payload["scope"] = "single"
         if model:
             payload["model"] = model
         resp = httpx.post(
@@ -367,8 +382,8 @@ def _export_html_report(
     passed: bool,
     violations: list[str],
 ) -> None:
-    from datetime import datetime
     import html as _html
+    from datetime import datetime
 
     status_color = "#22c55e" if passed else "#ef4444"
     status_label = "PASS" if passed else "FAIL"
@@ -886,7 +901,14 @@ def main() -> None:
         threshold_violations.append(f"HR@5 {hr5:.4f} < {thresholds['hit_rate_5']}")
     if mrr < thresholds["mrr"]:
         threshold_violations.append(f"MRR {mrr:.4f} < {thresholds['mrr']}")
-    # Faithfulness is report-only pending HHEM re-baseline (distribution differs from RAGAS).
+    # Faithfulness fires only on collapse, never on drift -- see THRESHOLDS. `None`
+    # means no answers were generated (retrieval-only run), which is not a violation.
+    faith = ragas_scores.get("faithfulness")
+    if faith is not None and faith < thresholds["faithfulness"]:
+        threshold_violations.append(
+            f"Faithfulness {faith:.4f} < {thresholds['faithfulness']} "
+            "(collapse detector -- retrieval or grounding is broken, not a quality dip)"
+        )
     answer_rel = ragas_scores.get("answer_relevance")
     if answer_rel is not None and answer_rel < thresholds["answer_relevance"]:
         threshold_violations.append(
