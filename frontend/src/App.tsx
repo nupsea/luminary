@@ -14,6 +14,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNaviga
 import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
+import { isTypingTarget } from "./lib/keyboard"
 import { toggleTheme } from "./lib/theme"
 import { useAppStore } from "./store"
 import { LUMINARY_MODE, navTabs, routedSurfaces, isSurfaceVisible } from "./lib/surfaceManifest"
@@ -498,13 +499,6 @@ function AppShell() {
   }, [])
 
   useEffect(() => {
-    function isTypingTarget(t: EventTarget | null): boolean {
-      if (!(t instanceof HTMLElement)) return false
-      if (t.isContentEditable) return true
-      const tag = t.tagName
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
-    }
-
     function onKeyDown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key === "k") {

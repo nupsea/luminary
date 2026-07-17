@@ -6,7 +6,8 @@
  * Falls back to Q&A rendering if cloze_text is null or has no valid blanks.
  */
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { isButtonActivation, isTypingTarget } from "@/lib/keyboard"
 
 type Rating = "again" | "hard" | "good" | "easy"
 
@@ -67,11 +68,51 @@ const RATINGS: { label: string; value: Rating; className: string }[] = [
 
 export function ClozeCard({ card, onRate, isRating }: ClozeCardProps) {
   const [revealedCount, setRevealedCount] = useState(0)
+  // Latch: the outgoing card keeps its window listener alive during the exit
+  // animation, so without it a fast second keypress would re-rate this card.
+  const ratedRef = useRef(false)
 
   // Validate cloze_text has at least one blank
   const segments = card.cloze_text ? parseClozeSegments(card.cloze_text) : []
   const blanks = segments.filter((s) => s.type === "blank")
   const totalBlanks = blanks.length
+  const allRevealed = revealedCount >= totalBlanks
+
+  function rateOnce(value: Rating) {
+    if (ratedRef.current) return
+    ratedRef.current = true
+    onRate(value).catch(() => {
+      ratedRef.current = false
+    })
+  }
+
+  // Keyboard: Space/Enter reveals the next blank; 1-4 grade once all blanks
+  // are revealed. Esc is handled by the session-level listener.
+  useEffect(() => {
+    if (totalBlanks === 0) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return
+      // A focused button owns Enter/Space -- let native activation click it.
+      if (isButtonActivation(e)) return
+      if (!allRevealed) {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault()
+          setRevealedCount((c) => c + 1)
+        }
+        return
+      }
+      if (isRating) return
+      const grade: Record<string, Rating> = { "1": "again", "2": "hard", "3": "good", "4": "easy" }
+      const rating = grade[e.key]
+      if (rating) {
+        e.preventDefault()
+        rateOnce(rating)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRevealed, totalBlanks, isRating])
 
   // Fallback to Q&A display if cloze_text is null or has no blanks
   if (totalBlanks === 0) {
@@ -87,7 +128,6 @@ export function ClozeCard({ card, onRate, isRating }: ClozeCardProps) {
     )
   }
 
-  const allRevealed = revealedCount >= totalBlanks
   let blankIndex = 0
 
   return (
@@ -126,24 +166,34 @@ export function ClozeCard({ card, onRate, isRating }: ClozeCardProps) {
       </div>
 
       {!allRevealed ? (
-        <button
-          onClick={() => setRevealedCount((c) => c + 1)}
-          className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          Reveal next blank
-        </button>
+        <div className="flex flex-col items-center gap-2">
+          <button
+            onClick={() => setRevealedCount((c) => c + 1)}
+            data-kbnav
+            className="rounded bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            Reveal next blank
+          </button>
+          <p className="text-[11px] text-muted-foreground">Space to reveal · Esc to end</p>
+        </div>
       ) : (
-        <div className="flex gap-3">
-          {RATINGS.map(({ label, value, className }) => (
-            <button
-              key={value}
-              onClick={() => void onRate(value)}
-              disabled={isRating}
-              className={`rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex gap-3">
+            {RATINGS.map(({ label, value, className }, i) => (
+              <button
+                key={value}
+                onClick={() => rateOnce(value)}
+                disabled={isRating}
+                data-kbnav
+                aria-label={`${label} (press ${i + 1})`}
+                className={`flex items-center gap-1.5 rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${className}`}
+              >
+                <span className="opacity-50">{i + 1}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">1–4 to rate · Esc to end</p>
         </div>
       )}
     </div>
