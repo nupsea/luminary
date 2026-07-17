@@ -60,6 +60,31 @@ def test_add_mention_increments_count(graph_svc: KuzuService):
     assert result.get_next()[0] == 2
 
 
+def test_delete_entities_for_document(graph_svc: KuzuService):
+    """Entities mentioned in the doc are DETACH-deleted with their edges;
+    entities of other documents survive."""
+    graph_svc.upsert_document("d1", "Odyssey", "book")
+    graph_svc.upsert_document("d2", "Iliad", "book")
+    graph_svc.upsert_entity("e1", "ulysses", "PERSON")
+    graph_svc.upsert_entity("e2", "telemachus", "PERSON")
+    graph_svc.upsert_entity("e3", "achilles", "PERSON")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_mention("e3", "d2")
+    graph_svc.add_co_occurrence("e1", "e2", "d1")
+
+    removed = graph_svc.delete_entities_for_document("d1")
+
+    assert removed == 2
+    entity_count, edge_count = graph_svc.count_for_document("d1")
+    assert (entity_count, edge_count) == (0, 0)
+    result = graph_svc._conn.execute("MATCH (e:Entity) RETURN e.id")
+    remaining = set()
+    while result.has_next():
+        remaining.add(result.get_next()[0])
+    assert remaining == {"e3"}
+
+
 def test_add_co_occurrence(graph_svc: KuzuService):
     graph_svc.upsert_entity("e1", "Newton", "PERSON")
     graph_svc.upsert_entity("e2", "Gravity", "CONCEPT")

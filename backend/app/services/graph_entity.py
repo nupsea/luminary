@@ -182,6 +182,27 @@ class KuzuEntityRepo:
                 {"aid": entity_id_a, "bid": entity_id_b, "did": document_id},
             )
 
+    def delete_entities_for_document(self, document_id: str) -> int:
+        """DETACH-delete every Entity mentioned in *document_id*; returns the count.
+
+        Entity ids are document-scoped (uuid5 of "doc_id:name"), so entities
+        reached via MENTIONED_IN belong exclusively to this document and can be
+        removed wholesale before a graph rebuild.
+        """
+        result = self._conn.execute(
+            "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) RETURN count(e)",
+            {"did": document_id},
+        )
+        count = int(result.get_next()[0]) if result.has_next() else 0
+        self._conn.execute(
+            "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document {id: $did}) DETACH DELETE e",
+            {"did": document_id},
+        )
+        logger.info(
+            "Deleted %d entities for document", count, extra={"document_id": document_id}
+        )
+        return count
+
     def add_relation(
         self, entity_id_a: str, entity_id_b: str, relation_label: str, confidence: float = 1.0
     ) -> None:

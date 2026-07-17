@@ -3,6 +3,13 @@
 Collapses surface-form variants (e.g. "Holmes", "Mr. Holmes", "Sherlock Holmes")
 into a single canonical name, keeping the original surface form as an alias.
 
+Merging is head-aware: an English noun phrase names its HEAD, so a shorter name
+may only merge into a longer phrase when it overlaps the phrase's head zone --
+the tokens after any possessor prefix ("ulysses' son" is a son, not ulysses)
+and before any "of"-complement ("stream of egypt" is a stream, not egypt).
+Within a merged cluster the canonical name is the most frequent surface form
+(ties go to the longer form), so plain names beat one-off epithets.
+
 Public API:
   _HONORIFICS          — frozenset of honorific tokens
   _strip_honorifics()  — lowercase + remove leading honorifics
@@ -12,6 +19,7 @@ Public API:
 
 import logging
 import re
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +28,15 @@ logger = logging.getLogger(__name__)
 # Using a separate group for the dotted tail avoids the repeated-group capture problem where
 # only the last match of (?:\.(\d+))* is retained.
 _VERSION_RE = re.compile(r"^(.*?)\s+(\d+)((?:\.\d+)+)?$")
+
+# Trailing genitive marker on a token: "ulysses'", "jove's", curly-quote variants.
+_GENITIVE_RE = re.compile(r"^(.+?)(?:'s|’s|'|’)$")
+
+# Function words excluded from Rule C content-token comparison so that e.g.
+# "king of ithaca" vs "queen of ithaca" share only {ithaca}, not {of, ithaca}.
+_STOPWORDS: frozenset[str] = frozenset(
+    {"the", "a", "an", "of", "and", "or", "in", "on", "at", "to", "for", "with", "by", "o"}
+)
 
 # Honorifics that may appear at the FRONT of a name and should be stripped
 # before matching.  "sr" is intentionally NOT included.
@@ -97,61 +114,136 @@ def _strip_honorifics(name: str) -> str:
     return " ".join(tokens)
 
 
-def find_canonical(name: str, entity_type: str, existing_names: list[str]) -> str:
-    """Resolve *name* to a canonical form from *existing_names*.
+def _tokenize(stripped: str) -> list[tuple[str, bool]]:
+    """Split a stripped name into (base_token, is_genitive) pairs.
 
-    All comparisons are done in lowercase.  The function does NOT cross
-    entity_type boundaries — callers must pass only names of the same type.
-
-    Rules applied in order (first match wins):
-      A. Exact stripped match:  _strip(name) == _strip(existing)
-      B. Substring containment: one stripped form is a substring of the other;
-         the longer stripped form wins.
-      C. Token overlap >= 2:    at least two tokens shared; the longer
-         stripped form wins.
-
-    Special case for LIBRARY entities: version-qualified names with different
-    patch versions ('Python 3.11' vs 'Python 3.13') naturally stay separate
-    because Rules B and C require exact substring containment or >=2 shared tokens
-    respectively.  Version strings like '3.11' and '3.13' are not shared tokens.
-
-    Returns *name* unchanged if no rule matches.
+    A genitive token carries a trailing possessive marker: "ulysses'" and
+    "jove's" both yield (base, True), so possessor forms compare equal to the
+    plain name while remaining detectable for head-zone computation.
     """
-    stripped_name = _strip_honorifics(name)
+    tokens: list[tuple[str, bool]] = []
+    for tok in stripped.split():
+        m = _GENITIVE_RE.match(tok)
+        if m:
+            tokens.append((m.group(1), True))
+        else:
+            tokens.append((tok, False))
+    return tokens
 
-    for existing in existing_names:
-        stripped_existing = _strip_honorifics(existing)
 
-        # Rule A — exact match after honorific stripping
-        if stripped_name == stripped_existing:
-            return existing
+def _bases(tokens: list[tuple[str, bool]]) -> list[str]:
+    return [base for base, _ in tokens]
 
-    for existing in existing_names:
-        stripped_existing = _strip_honorifics(existing)
 
-        # Rule B — substring containment (longer wins)
-        if stripped_name and stripped_existing:
-            if stripped_name in stripped_existing or stripped_existing in stripped_name:
-                # Return whichever (original form) corresponds to the longer stripped form
-                if len(stripped_existing) >= len(stripped_name):
-                    return existing
-                else:
-                    return name
+def _head_zone(tokens: list[tuple[str, bool]]) -> tuple[int, int]:
+    """Return the [start, end) token range holding the phrase's head.
 
-    for existing in existing_names:
-        stripped_existing = _strip_honorifics(existing)
+    The head follows any possessor prefix ("ulysses' | son") and precedes any
+    "of"-complement ("stream | of egypt").  A shorter name that matches only
+    tokens outside this zone names a different entity than the phrase.
+    """
+    start = 0
+    for i, (_, genitive) in enumerate(tokens[:-1]):
+        if genitive:
+            start = i + 1
+    end = len(tokens)
+    for i in range(start + 1, len(tokens)):
+        if tokens[i][0] == "of":
+            end = i
+            break
+    return start, end
 
-        # Rule C — token overlap >= 2 (longer wins)
-        tokens_name = set(stripped_name.split())
-        tokens_existing = set(stripped_existing.split())
-        if len(tokens_name & tokens_existing) >= 2:
-            if len(stripped_existing) >= len(stripped_name):
+
+def _match_exact(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
+    """Rule A: identical base-token sequences ("ulysses'" == "ulysses")."""
+    return _bases(a) == _bases(b)
+
+
+def _match_containment(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
+    """Rule B: the shorter name is a contiguous token slice of the longer one,
+    and that slice overlaps the longer phrase's head zone.
+
+    Token-level comparison prevents raw-substring accidents ("rome" / "romeo");
+    the head-zone requirement blocks possessive and of-complement false merges
+    ("ulysses" must not merge into "ulysses' son" or "house of ulysses").
+    """
+    if len(a) == len(b):
+        return False
+    short, long = (a, b) if len(a) < len(b) else (b, a)
+    short_bases, long_bases = _bases(short), _bases(long)
+    n = len(short_bases)
+    span_start = -1
+    for i in range(len(long_bases) - n + 1):
+        if long_bases[i : i + n] == short_bases:
+            span_start = i
+            break
+    if span_start == -1:
+        return False
+    zone_start, zone_end = _head_zone(long)
+    return span_start < zone_end and span_start + n > zone_start
+
+
+def _content_tokens(tokens: list[tuple[str, bool]]) -> set[str]:
+    return {base for base, _ in tokens if base not in _STOPWORDS}
+
+
+def _match_subset(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
+    """Rule C: one name's content tokens are a subset of the other's, with at
+    least two shared, and the shared tokens reach the superset's head zone.
+
+    Catches reordered variants ("ulysses' house" / "house of ulysses",
+    "john watson" / "john h. watson") while refusing sibling-style overlaps
+    ("george w bush" / "george h bush" share two tokens but neither contains
+    the other) and possessive extensions ("king priam" / "king priam's son").
+    """
+    ca, cb = _content_tokens(a), _content_tokens(b)
+    if len(ca & cb) < 2:
+        return False
+    if ca == cb:
+        return True
+    if ca < cb:
+        subset, superset = ca, b
+    elif cb < ca:
+        subset, superset = cb, a
+    else:
+        return False
+    zone_start, zone_end = _head_zone(superset)
+    zone_bases = {base for base, _ in superset[zone_start:zone_end]}
+    return bool(subset & zone_bases)
+
+
+_RULES = (_match_exact, _match_containment, _match_subset)
+
+
+def find_canonical(name: str, entity_type: str, existing_names: list[str]) -> str:
+    """Resolve *name* against *existing_names*, returning the matching existing
+    canonical or *name* unchanged when nothing matches.
+
+    All comparisons are done in lowercase on honorific-stripped, genitive-aware
+    tokens.  The function does NOT cross entity_type boundaries — callers must
+    pass only names of the same type.  Rules are tried in order across the whole
+    pool (exact, head-aware containment, head-aware content subset); the first
+    match wins.  Existing pool names always win over the incoming surface form
+    so already-stored canonicals stay stable.
+    """
+    tokens = _tokenize(_strip_honorifics(name))
+    if not tokens:
+        return name
+    existing_tokens = [(e, _tokenize(_strip_honorifics(e))) for e in existing_names]
+    for rule in _RULES:
+        for existing, etokens in existing_tokens:
+            if etokens and rule(tokens, etokens):
                 return existing
-            else:
-                return name
-
-    # No match — this name becomes its own canonical entry
     return name
+
+
+class _Cluster:
+    __slots__ = ("rep_tokens", "members", "pool_name")
+
+    def __init__(self, rep_tokens: list[tuple[str, bool]], pool_name: str | None) -> None:
+        self.rep_tokens = rep_tokens
+        self.members: list[str] = []
+        self.pool_name = pool_name
 
 
 def canonicalize_batch(
@@ -162,11 +254,12 @@ def canonicalize_batch(
 
     Args:
         entities: List of (name, entity_type) tuples as produced by the NER
-            pipeline (names are already lowercase).
+            pipeline, one per mention (names are already lowercase).  Mention
+            multiplicity is what makes frequency-based canonical naming work.
         existing_by_type: Dict mapping entity_type -> list of canonical names
-            already stored in the Kuzu graph for this document.  Used as the
-            initial lookup pool; new canonicals discovered within this batch
-            are added to the pool so later entries benefit from earlier ones.
+            already stored in the Kuzu graph for this document.  A batch name
+            that matches a stored canonical adopts it, so re-processing a
+            document never splits an existing node.
 
     Returns:
         List of (canonical_name, entity_type, original_name) triples in the
@@ -174,57 +267,71 @@ def canonicalize_batch(
         - canonical_name: resolved canonical form (may equal original_name)
         - entity_type:    unchanged
         - original_name:  surface form as given
+
+    Names are clustered greedily in descending mention-frequency order: each
+    unique name joins the first existing cluster whose representative it
+    matches (rules tried in order across all clusters), else seeds a new one.
+    A cluster's representative is its longest member so far, so a later, more
+    specific form ("sherlock holmes") can still attract short aliases, while
+    distinct specialisations ("python 3.11" vs "python 3.13") stay separate.
+    Each cluster's canonical is the pool name when one seeded it, otherwise
+    the member with the highest mention count (ties: longer form, then first
+    seen).
     """
-    # Deep-copy so we can extend pool without mutating the caller's dict
-    working: dict[str, list[str]] = {
-        etype: list(names) for etype, names in existing_by_type.items()
+    freq: Counter[tuple[str, str]] = Counter(entities)
+    first_seen: dict[tuple[str, str], int] = {}
+    for idx, key in enumerate(entities):
+        first_seen.setdefault(key, idx)
+
+    clusters_by_type: dict[str, list[_Cluster]] = {}
+    for etype, names in existing_by_type.items():
+        pool_clusters = clusters_by_type.setdefault(etype, [])
+        for pname in names:
+            pool_clusters.append(_Cluster(_tokenize(_strip_honorifics(pname)), pname))
+
+    ordered_unique = sorted(freq, key=lambda k: (-freq[k], first_seen[k]))
+
+    assignment: dict[tuple[str, str], _Cluster] = {}
+    for key in ordered_unique:
+        name, etype = key
+        tokens = _tokenize(_strip_honorifics(name))
+        clusters = clusters_by_type.setdefault(etype, [])
+        target: _Cluster | None = None
+        if tokens:
+            for rule in _RULES:
+                for cluster in clusters:
+                    if cluster.rep_tokens and rule(tokens, cluster.rep_tokens):
+                        target = cluster
+                        break
+                if target is not None:
+                    break
+        if target is None:
+            target = _Cluster(tokens, None)
+            clusters.append(target)
+        target.members.append(name)
+        assignment[key] = target
+        if len(tokens) > len(target.rep_tokens):
+            target.rep_tokens = tokens
+
+    def canonical_of(cluster: _Cluster, etype: str) -> str:
+        if cluster.pool_name is not None:
+            return cluster.pool_name
+        return max(
+            cluster.members,
+            key=lambda n: (
+                freq[(n, etype)],
+                len(_strip_honorifics(n)),
+                -first_seen[(n, etype)],
+            ),
+        )
+
+    canonical_by_key = {
+        key: canonical_of(assignment[key], key[1]) for key in freq
     }
 
-    # Pass 1 — build a stable pool: process every name and promote longer canonicals
-    # so the pool converges to the best (longest) representative for each cluster
-    # before we assign final results.  Without this pass, processing order determines
-    # which canonical wins; a shorter name processed first stays in the pool and
-    # causes later short-form aliases to match it via Rule A instead of the longer
-    # canonical that was processed second.
-    for name, entity_type in entities:
-        pool = working.setdefault(entity_type, [])
-        canonical = find_canonical(name, entity_type, pool)
-        if canonical not in pool:
-            # If this incoming name is longer than a pool entry it matched via
-            # Rule B or C, evict that shorter entry so it cannot be matched
-            # as a spurious canonical in subsequent iterations.
-            stripped_canonical = _strip_honorifics(canonical)
-            evict = [
-                p
-                for p in pool
-                if _strip_honorifics(p) != stripped_canonical
-                and (
-                    (
-                        stripped_canonical
-                        and _strip_honorifics(p)
-                        and (
-                            _strip_honorifics(p) in stripped_canonical
-                            or stripped_canonical in _strip_honorifics(p)
-                        )
-                        and len(stripped_canonical) > len(_strip_honorifics(p))
-                    )
-                    or (
-                        len(set(stripped_canonical.split()) & set(_strip_honorifics(p).split()))
-                        >= 2
-                        and len(stripped_canonical) > len(_strip_honorifics(p))
-                    )
-                )
-            ]
-            for old in evict:
-                pool.remove(old)
-            pool.append(canonical)
-
-    # Pass 2 — assign final results using the now-stable pool.
-    results: list[tuple[str, str, str]] = []
-    for name, entity_type in entities:
-        pool = working.get(entity_type, [])
-        canonical = find_canonical(name, entity_type, pool)
-        results.append((canonical, entity_type, name))
+    results = [
+        (canonical_by_key[(name, etype)], etype, name) for name, etype in entities
+    ]
 
     logger.debug(
         "canonicalize_batch: %d entities -> %d unique canonicals",

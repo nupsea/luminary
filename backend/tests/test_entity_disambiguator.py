@@ -125,3 +125,133 @@ def test_unversioned_library_does_not_merge_with_versioned():
     names = [t[0] for t in triples]
     # Both should canonicalize to the longer form
     assert all(n == "python 3.13" for n in names)
+
+
+# Head-aware merging: possessive and of-constructions name a DIFFERENT entity
+# than their possessor/complement, and must never merge with it.
+
+
+def test_possessive_does_not_merge_with_possessor():
+    """"ulysses' son" is Telemachus, not Ulysses -- no merge either direction."""
+    for son in ["ulysses' son", "ulysses’ son", "ulysses's son"]:
+        entities = [("ulysses", "PERSON")] * 5 + [(son, "PERSON")] * 2
+        names = {t[0] for t in canonicalize_batch(entities, {})}
+        assert names == {"ulysses", son}
+
+
+def test_possessor_not_absorbed_when_epithet_more_frequent():
+    """Merge blocking must not depend on which form is more frequent."""
+    entities = [("jove's daughter", "PERSON")] * 5 + [("jove", "PERSON")] * 2
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"jove's daughter", "jove"}
+
+
+def test_of_complement_does_not_merge_with_container():
+    """'stream of egypt' is a stream, not Egypt."""
+    entities = [
+        ("egypt", "PLACE"),
+        ("heaven-fed stream of egypt", "PLACE"),
+        ("egypt", "PLACE"),
+    ]
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"egypt", "heaven-fed stream of egypt"}
+
+
+def test_head_overlap_still_merges_epithet():
+    """'jove's daughter minerva' ends in the head 'minerva' -- merges with it,
+    while plain 'jove' stays a separate entity."""
+    entities = [
+        ("minerva", "PERSON"),
+        ("minerva", "PERSON"),
+        ("jove's daughter minerva", "PERSON"),
+        ("jove", "PERSON"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: t[0] for t in triples}
+    assert by_original["jove's daughter minerva"] == "minerva"
+    assert by_original["jove"] == "jove"
+
+
+def test_canonical_is_most_frequent_surface_form():
+    """The plain, frequent name wins over a rare longer epithet."""
+    entities = [("ithaca", "PLACE")] * 4 + [("ithaca itself", "PLACE")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "ithaca" for t in triples)
+
+
+def test_canonical_tie_prefers_longer_form():
+    """On equal frequency the longer, more specific form stays canonical."""
+    entities = [("penelope", "PERSON"), ("queen penelope", "PERSON")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "queen penelope" for t in triples)
+
+
+def test_token_boundary_containment():
+    """Raw substring must not merge distinct words ('rome' in 'romeo')."""
+    entities = [("rome", "PLACE"), ("romeo", "PLACE")]
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"rome", "romeo"}
+
+
+def test_shared_tokens_without_containment_do_not_merge():
+    """Sibling-style names share two tokens but are different people."""
+    entities = [("george w bush", "PERSON"), ("george h bush", "PERSON")]
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"george w bush", "george h bush"}
+
+
+def test_reordered_of_and_possessive_forms_merge():
+    """'ulysses' house' and 'house of ulysses' share the same content tokens
+    and the same head -- one place, one node."""
+    entities = [
+        ("house of ulysses", "PLACE"),
+        ("house of ulysses", "PLACE"),
+        ("ulysses' house", "PLACE"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "house of ulysses" for t in triples)
+
+
+def test_possessive_extension_of_multiword_name_blocked():
+    """'king priam's son' shares both tokens of 'king priam' but is his son."""
+    entities = [("king priam", "PERSON"), ("king priam's son", "PERSON")]
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"king priam", "king priam's son"}
+
+
+def test_bare_genitive_equals_plain_name():
+    """A trailing possessive marker alone is the same entity ('ulysses'' -> 'ulysses')."""
+    entities = [("ulysses", "PERSON"), ("ulysses'", "PERSON"), ("ulysses", "PERSON")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "ulysses" for t in triples)
+
+
+def test_middle_name_variant_merges():
+    """Content-subset variants of the same person collapse ('john watson' ⊂ 'john h. watson')."""
+    entities = [
+        ("john h. watson", "PERSON"),
+        ("john watson", "PERSON"),
+        ("john watson", "PERSON"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "john watson" for t in triples)
+
+
+def test_existing_pool_canonical_is_stable():
+    """A batch name matching a stored canonical adopts it even when the batch
+    form is more frequent -- re-processing must not split existing nodes."""
+    entities = [("holmes", "PERSON")] * 5
+    triples = canonicalize_batch(entities, {"PERSON": ["sherlock holmes"]})
+    assert all(t[0] == "sherlock holmes" for t in triples)
+
+
+def test_find_canonical_blocks_possessive():
+    assert find_canonical("ulysses", "PERSON", ["ulysses' son"]) == "ulysses"
+    assert find_canonical("ulysses' son", "PERSON", ["ulysses"]) == "ulysses' son"
+
+
+def test_find_canonical_returns_pool_match():
+    assert find_canonical("holmes", "PERSON", ["sherlock holmes"]) == "sherlock holmes"
+    assert find_canonical("minerva", "PERSON", ["jove's daughter minerva"]) == (
+        "jove's daughter minerva"
+    )

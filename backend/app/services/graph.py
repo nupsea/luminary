@@ -100,6 +100,9 @@ class KuzuService:
     def add_co_occurrence(self, entity_id_a: str, entity_id_b: str, document_id: str) -> None:
         return self._entity.add_co_occurrence(entity_id_a, entity_id_b, document_id)
 
+    def delete_entities_for_document(self, document_id: str) -> int:
+        return self._entity.delete_entities_for_document(document_id)
+
     def add_relation(
         self, entity_id_a: str, entity_id_b: str, relation_label: str, confidence: float = 1.0
     ) -> None:
