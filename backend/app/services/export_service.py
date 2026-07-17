@@ -212,6 +212,66 @@ class ExportService:
 
         return buf.getvalue()
 
+    async def export_note_markdown(
+        self,
+        note_id: str,
+        session: AsyncSession,
+    ) -> tuple[bytes, str]:
+        """Return (md_bytes, filename) for a single note.
+
+        Same shape as a vault entry: YAML frontmatter + Obsidian [[title]] wikilinks.
+        The collections list holds every collection the note belongs to.
+        """
+        note = (
+            await session.execute(select(NoteModel).where(NoteModel.id == note_id))
+        ).scalar_one_or_none()
+        if note is None:
+            raise ValueError(f"Note not found: {note_id}")
+
+        collection_names = [
+            row[0]
+            for row in (
+                await session.execute(
+                    select(CollectionModel.name)
+                    .join(
+                        CollectionMemberModel,
+                        CollectionMemberModel.collection_id == CollectionModel.id,
+                    )
+                    .where(
+                        CollectionMemberModel.member_id == note_id,
+                        CollectionMemberModel.member_type == "note",
+                    )
+                )
+            ).all()
+        ]
+
+        doc_title: str | None = None
+        if note.document_id:
+            doc_title = (
+                await session.execute(
+                    select(DocumentModel.title).where(DocumentModel.id == note.document_id)
+                )
+            ).scalar_one_or_none()
+
+        # Resolve [[id|text]] wikilinks against just the notes this one references
+        linked_ids = {m.group(1) for m in _LINK_RE.finditer(note.content)}
+        id_to_title: dict[str, str] = {}
+        if linked_ids:
+            linked_notes = (
+                (await session.execute(select(NoteModel).where(NoteModel.id.in_(linked_ids))))
+                .scalars()
+                .all()
+            )
+            id_to_title = {n.id: (n.title or "").strip() or _note_title(n) for n in linked_notes}
+
+        frontmatter = _build_yaml_frontmatter(note, collection_names, doc_title)
+        body = _resolve_links(note.content, id_to_title)
+        md_content = f"{frontmatter}\n\n{body}"
+
+        title = (note.title or "").strip() or _note_title(note)
+        filename = f"{_slugify(title)}.md"
+        return md_content.encode("utf-8"), filename
+
     async def export_collection_anki(
         self,
         collection_id: str,

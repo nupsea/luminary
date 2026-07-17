@@ -211,3 +211,59 @@ def test_export_invalid_format_returns_422(client):
 def test_export_nonexistent_collection_returns_404(client):
     resp = client.get(f"/collections/{str(uuid.uuid4())}/export?format=markdown")
     assert resp.status_code == 404
+
+
+# Single-note export: GET /notes/{note_id}/export
+
+
+def test_export_single_note_markdown(client):
+    note = _create_note(client, content="# Solo Note\nBody text.", tags=["physics"])
+
+    resp = client.get(f"/notes/{note['id']}/export?format=markdown")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/markdown")
+    disposition = resp.headers.get("content-disposition", "")
+    assert "attachment" in disposition
+    assert ".md" in disposition
+
+    content = resp.text
+    assert content.startswith("---")
+    assert "tags:" in content
+    assert "  - physics" in content
+    assert "collections:" in content
+    assert "# Solo Note" in content
+
+
+def test_export_single_note_includes_collection_names(client):
+    col = _create_collection(client, name="Note Export Collection")
+    note = _create_note(client, content="# In A Collection\nBody.")
+    client.post(f"/collections/{col['id']}/notes", json={"note_ids": [note["id"]]})
+
+    resp = client.get(f"/notes/{note['id']}/export")
+    assert resp.status_code == 200
+    # Collection names are normalized to UPPERCASE-KEBAB on creation.
+    assert "  - NOTE-EXPORT-COLLECTION" in resp.text
+
+
+def test_export_single_note_resolves_wikilinks(client):
+    target = _create_note(client, content="# Linked Target\nTarget body.")
+    source = _create_note(
+        client,
+        content=f"# Linking Note\nSee [[{target['id']}|the target]] here.",
+    )
+
+    resp = client.get(f"/notes/{source['id']}/export")
+    assert resp.status_code == 200
+    assert "[[Linked Target]]" in resp.text
+    assert f"[[{target['id']}|" not in resp.text
+
+
+def test_export_single_note_invalid_format_returns_422(client):
+    note = _create_note(client)
+    resp = client.get(f"/notes/{note['id']}/export?format=pdf")
+    assert resp.status_code == 422
+
+
+def test_export_nonexistent_note_returns_404(client):
+    resp = client.get(f"/notes/{str(uuid.uuid4())}/export")
+    assert resp.status_code == 404

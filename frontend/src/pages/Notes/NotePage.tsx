@@ -11,6 +11,7 @@ import {
   BookOpen,
   Check,
   Columns2,
+  Download,
   FileText,
   LayoutGrid,
   List,
@@ -30,6 +31,7 @@ import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor
 import { NoteBacklinks } from "@/components/notes/NoteBacklinks"
 import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { NotePdfExport } from "@/components/notes/NotePdfExport"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
@@ -38,6 +40,7 @@ import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import { API_BASE } from "@/lib/config"
 import { EMPTY_DRAFT, useNoteAutosave, type NoteDraft } from "@/lib/noteAutosave"
+import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
@@ -97,6 +100,8 @@ export default function NotePage() {
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [pdfExporting, setPdfExporting] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -267,6 +272,18 @@ export default function NotePage() {
     [note?.id],
   )
 
+  async function handleExportMarkdown() {
+    setExportMenuOpen(false)
+    if (!note) return
+    try {
+      await flush()
+    } catch {
+      toast.error("Could not save note before exporting")
+      return
+    }
+    await downloadNoteMarkdown(note.id)
+  }
+
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note!.id),
     onSuccess: () => {
@@ -396,6 +413,46 @@ export default function NotePage() {
               </>
             ) : (
               <>Autosaves as you type</>
+            )}
+          </div>
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen((v) => !v)}
+              disabled={pdfExporting}
+              className={`rounded-md border border-border bg-background p-1.5 transition-colors hover:text-foreground disabled:opacity-50 ${
+                exportMenuOpen ? "text-foreground" : "text-muted-foreground"
+              }`}
+              title="Export note"
+            >
+              {pdfExporting ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Download size={13} />
+              )}
+            </button>
+            {exportMenuOpen && (
+              <div
+                className="absolute right-0 top-full z-50 mt-0.5 min-w-[150px] rounded border border-border bg-popover py-1 shadow-md"
+                onMouseLeave={() => setExportMenuOpen(false)}
+              >
+                <button
+                  type="button"
+                  className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                  onClick={() => void handleExportMarkdown()}
+                >
+                  Markdown (.md)
+                </button>
+                <button
+                  type="button"
+                  className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    setPdfExporting(true)
+                  }}
+                >
+                  PDF (print)
+                </button>
+              </div>
             )}
           </div>
           {confirmDelete ? (
@@ -617,6 +674,13 @@ export default function NotePage() {
           </>
         )}
       </div>
+      {pdfExporting && (
+        <NotePdfExport
+          title={editTitle.trim() || note.title || ""}
+          content={editContent}
+          onDone={() => setPdfExporting(false)}
+        />
+      )}
     </div>
   )
 }

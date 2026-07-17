@@ -4,7 +4,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
+import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
@@ -543,6 +544,13 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
             Thought
           </button>
         )}
+        <button
+          onClick={(e) => { e.stopPropagation(); void downloadNoteMarkdown(note.id) }}
+          className="hover:text-foreground"
+          title="Download Markdown"
+        >
+          <Download size={12} />
+        </button>
         <button
           onClick={() => { onEdit(); setConfirming(false) }}
           className="hover:text-foreground"
