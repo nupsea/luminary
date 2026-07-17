@@ -12,4 +12,8 @@ RUN uv sync --frozen --all-groups
 # Copy application code, tests, and tools
 COPY . .
 
+# Relative DATA_DIR now anchors to the source root (== "/" in this image), so
+# pin the container's store location explicitly.
+ENV DATA_DIR=/app/.luminary
+
 CMD ["sh", "-c", "uv run ruff check . && uv run python tools/layer_linter.py && uv run python tools/boundary_checker.py && uv run pytest"]

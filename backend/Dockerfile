@@ -12,6 +12,10 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY app/ ./app/
 
+# Relative DATA_DIR now anchors to the source root (== "/" in this image), so
+# pin the container's store location explicitly.
+ENV DATA_DIR=/app/.luminary
+
 EXPOSE 7820
 
 CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7820"]

@@ -1,10 +1,19 @@
 import functools
+from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+# Anchor for relative DATA_DIR values: the repo root in a source checkout
+# (config.py lives at <root>/backend/app/), "/" in the container images
+# (which set DATA_DIR explicitly).
+_DATA_DIR_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    # Relative values resolve against the repo root, NOT the CWD: scripts run
+    # from backend/ used to silently create a stray backend/.luminary store.
     DATA_DIR: str = ".luminary"
     # full: every surface on, routers at root, CORS open for the Vite dev server
     #       (`make luminary`). public: curated learner surfaces only, built SPA
@@ -124,6 +133,14 @@ class Settings(BaseSettings):
     PHOENIX_GRPC_PORT: int = 4317
 
     model_config = {"env_file": (".env", "/app/.luminary/.env"), "env_file_encoding": "utf-8"}
+
+    @field_validator("DATA_DIR")
+    @classmethod
+    def _anchor_relative_data_dir(cls, v: str) -> str:
+        p = Path(v).expanduser()
+        if p.is_absolute():
+            return str(p)
+        return str((_DATA_DIR_ROOT / p).resolve())
 
 
 @functools.lru_cache
