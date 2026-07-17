@@ -134,6 +134,12 @@ describe("syncDocSpec", () => {
     expect(syncDocSpec(EditorState.create({ doc: "hello world" }), "hello world")).toBeNull()
   })
 
+  it("seeds an empty view and lands the caret at the end", () => {
+    const r = applySync("", 0, "loaded body")
+    expect(r.doc).toBe("loaded body")
+    expect(r.anchor).toBe("loaded body".length)
+  })
+
   it("keeps the caret put when an edit lands after it", () => {
     const r = applySync("![Chart](x.png) tail", 3, "![Chart|large](x.png) tail")
     expect(r.doc).toBe("![Chart|large](x.png) tail")

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react"
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
 import { autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
 import { EditorState } from "@codemirror/state"
 import {
@@ -253,7 +253,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       const view = viewRef.current
       if (!view) return
       const spec = syncDocSpec(view.state, value)

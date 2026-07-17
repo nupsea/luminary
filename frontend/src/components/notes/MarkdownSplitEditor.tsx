@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type RefObject } from "react"
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import {
   MarkdownCodeEditor,
   type MarkdownEditorHandle,
@@ -67,11 +67,38 @@ export function MarkdownSplitEditor({
     const dstMax = dst.scrollHeight - dst.clientHeight
     if (srcMax <= 0 || dstMax <= 0) return
     syncingRef.current = source
-    dst.scrollTop = (src.scrollTop / srcMax) * dstMax
+    // Proportional mapping is approximate (monospace editor vs serif preview), so
+    // near the end it can leave the last lines cut off. When the source is at or
+    // near its bottom — the type-at-end case — pin the destination to its true
+    // bottom so freshly typed text is always visible in the preview.
+    const nearBottom = srcMax - src.scrollTop <= 24
+    dst.scrollTop = nearBottom ? dstMax : (src.scrollTop / srcMax) * dstMax
     requestAnimationFrame(() => {
       syncingRef.current = null
     })
   }
+
+  // Typing at the bottom of the editor does not always fire a scroll event (the
+  // caret is already visible), and when it does the preview has not yet re-rendered
+  // the new text, so its height is stale. Either way the preview is left behind and
+  // freshly-typed content scrolls out of view. Re-sync after the preview re-renders
+  // on a content change so it follows the editor's scroll position.
+  useEffect(() => {
+    if (layout !== "splitter") return
+    // Second frame catches preview height changes that land after the first
+    // paint (web fonts, images, KaTeX) and would leave the sync short.
+    let id2 = 0
+    const id = requestAnimationFrame(() => {
+      syncScroll("write")
+      id2 = requestAnimationFrame(() => syncScroll("write"))
+    })
+    return () => {
+      cancelAnimationFrame(id)
+      cancelAnimationFrame(id2)
+    }
+    // syncScroll reads live DOM through refs; re-run only when content/layout change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, layout])
 
   function handleSplitterMouseDown(e: React.MouseEvent) {
     if (layout !== "splitter") return
