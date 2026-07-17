@@ -100,6 +100,7 @@ interface DocumentReaderProps {
   initialSectionId?: string
   initialChunkId?: string
   initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
+  initialSearch?: string  // opens the in-doc search bar prefilled (from Map entity deep-link)
 }
 
 export function DocumentReader(props: DocumentReaderProps) {
@@ -110,10 +111,10 @@ export function DocumentReader(props: DocumentReaderProps) {
   )
 }
 
-function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage }: DocumentReaderProps) {
+function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
-  const { data: doc, isLoading } = useQuery({
+  const { data: doc, isLoading, isError, refetch } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
     staleTime: 60_000,
@@ -508,6 +509,18 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (leftTab !== "sections" && searchOpen) closeReaderSearch()
   }, [leftTab, searchOpen, closeReaderSearch])
 
+  // Map entity deep-link (?search=) -> open the in-doc search bar prefilled
+  // once the document is loaded. Idempotent (no ref guard) so StrictMode's
+  // double-invoke is harmless; pendingSearchQuery is cleared on consumption.
+  useEffect(() => {
+    const query = initialSearch?.trim()
+    if (!query || !doc) return
+    setLeftTab("sections")
+    setPendingSearchQuery(query)
+    setSearchOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearch, doc])
+
   // Tags-tab click -> open in-doc search with the tag's surface form prefilled.
   // Listens on window so the panel doesn't need a prop drilled through SummaryPanel.
   useEffect(() => {
@@ -822,6 +835,30 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
         <div className="w-2/5">
           <div className="h-32 animate-pulse rounded bg-muted" />
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4">
+        <p className="text-sm text-muted-foreground">
+          Couldn't load this document. The backend may be starting up or unreachable.
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => void refetch()}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Retry
+          </button>
+          <button
+            onClick={onBack}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
+          >
+            Back to library
+          </button>
         </div>
       </div>
     )
