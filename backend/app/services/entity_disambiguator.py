@@ -114,20 +114,43 @@ def _strip_honorifics(name: str) -> str:
     return " ".join(tokens)
 
 
+def _singular_key(base: str) -> str:
+    """Collapse regular English plurals to a comparison key ('databases' ==
+    'database', 'libraries' == 'library') without a dictionary.
+
+    Keys are used only for token equality -- canonical display names are
+    chosen from real surface forms -- so the rule can be crude, but it must
+    stay conservative: endings where stripping commonly changes the word
+    ('ss', 'us', 'is', short tokens) are left alone, because a missed merge
+    is a smaller node while a false merge corrupts two entities.
+    """
+    if len(base) <= 3 or not base.endswith("s"):
+        return base
+    if base.endswith(("ss", "us", "is")):
+        return base
+    if base.endswith("ies") and len(base) > 4:
+        return base[:-3] + "y"
+    if base.endswith(("ches", "shes", "xes", "zes", "oes")):
+        return base[:-2]
+    return base[:-1]
+
+
 def _tokenize(stripped: str) -> list[tuple[str, bool]]:
     """Split a stripped name into (base_token, is_genitive) pairs.
 
     A genitive token carries a trailing possessive marker: "ulysses'" and
     "jove's" both yield (base, True), so possessor forms compare equal to the
-    plain name while remaining detectable for head-zone computation.
+    plain name while remaining detectable for head-zone computation. Bases are
+    plural-normalized via _singular_key so regular plural variants compare
+    equal ("database" / "databases").
     """
     tokens: list[tuple[str, bool]] = []
     for tok in stripped.split():
         m = _GENITIVE_RE.match(tok)
         if m:
-            tokens.append((m.group(1), True))
+            tokens.append((_singular_key(m.group(1)), True))
         else:
-            tokens.append((tok, False))
+            tokens.append((_singular_key(tok), False))
     return tokens
 
 

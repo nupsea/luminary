@@ -245,6 +245,56 @@ def test_existing_pool_canonical_is_stable():
     assert all(t[0] == "sherlock holmes" for t in triples)
 
 
+def test_regular_plural_merges_with_singular():
+    """'databases' and 'database' are one entity; the frequent form wins."""
+    entities = [("database", "CONCEPT")] * 5 + [("databases", "CONCEPT")] * 2
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "database" for t in triples)
+
+
+def test_multiword_plural_merges():
+    entities = [
+        ("data structures", "CONCEPT"),
+        ("data structure", "CONCEPT"),
+        ("data structure", "CONCEPT"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "data structure" for t in triples)
+
+
+def test_ies_plural_merges():
+    entities = [("library", "CONCEPT")] * 3 + [("libraries", "CONCEPT")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "library" for t in triples)
+
+
+def test_es_plural_merges():
+    entities = [("index", "CONCEPT"), ("indexes", "CONCEPT"), ("index", "CONCEPT")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "index" for t in triples)
+
+
+def test_protected_endings_do_not_strip():
+    """-ss/-us/-is words are not plurals; distinct entities stay separate."""
+    entities = [
+        ("class", "CONCEPT"),
+        ("cla", "CONCEPT"),
+        ("corpus", "CONCEPT"),
+        ("corpu", "CONCEPT"),
+        ("analysis", "CONCEPT"),
+        ("analysi", "CONCEPT"),
+    ]
+    names = {t[0] for t in canonicalize_batch(entities, {})}
+    assert names == {"class", "cla", "corpus", "corpu", "analysis", "analysi"}
+
+
+def test_plural_key_does_not_leak_into_canonical_name():
+    """The stem is a comparison key only -- the canonical is a real surface form."""
+    entities = [("libraries", "CONCEPT"), ("libraries", "CONCEPT"), ("library", "CONCEPT")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "libraries" for t in triples)
+
+
 def test_find_canonical_blocks_possessive():
     assert find_canonical("ulysses", "PERSON", ["ulysses' son"]) == "ulysses"
     assert find_canonical("ulysses' son", "PERSON", ["ulysses"]) == "ulysses' son"
