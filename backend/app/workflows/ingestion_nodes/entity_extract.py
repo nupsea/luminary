@@ -281,11 +281,13 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             alias_map: dict[str, list[str]] = {}
             canonical_entities = []
             chunk_to_entities: dict[str, set[str]] = {}
-            for (canonical, etype, original), ent in zip(canonical_triples, entities):
+            for (canonical, canonical_type, original), ent in zip(canonical_triples, entities):
                 canonical_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{canonical}"))
                 if original != canonical:
                     alias_map.setdefault(canonical_id, []).append(original)
-                canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
+                canonical_entities.append(
+                    {**ent, "id": canonical_id, "name": canonical, "type": canonical_type}
+                )
                 chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
 
             # Entity injection (option b) -- store canonical entities in a

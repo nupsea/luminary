@@ -19,6 +19,7 @@ Public API:
 
 import logging
 import re
+import unicodedata
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,27 @@ def _strip_honorifics(name: str) -> str:
     return " ".join(tokens)
 
 
+# Irregular plurals worth knowing without a dictionary. Deliberately tiny and
+# technical-noun-heavy; "data" is NOT mapped to "datum" because in this domain
+# "data" is its own word.
+_IRREGULAR_PLURALS: dict[str, str] = {
+    "indices": "index",
+    "matrices": "matrix",
+    "vertices": "vertex",
+    "criteria": "criterion",
+    "phenomena": "phenomenon",
+    "schemata": "schema",
+    "children": "child",
+}
+
+
+def _fold_ascii(s: str) -> str:
+    """Strip diacritics for comparison ('josé' == 'jose'). Key-only."""
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch)
+    )
+
+
 def _singular_key(base: str) -> str:
     """Collapse regular English plurals to a comparison key ('databases' ==
     'database', 'libraries' == 'library') without a dictionary.
@@ -124,7 +146,14 @@ def _singular_key(base: str) -> str:
     ('ss', 'us', 'is', short tokens) are left alone, because a missed merge
     is a smaller node while a false merge corrupts two entities.
     """
-    if len(base) <= 3 or not base.endswith("s"):
+    base = _IRREGULAR_PLURALS.get(base, base)
+    if len(base) <= 3:
+        return base
+    if not base.endswith("s"):
+        # 'caches' (-ches) strips to 'cach', so the singular of a mute-e word
+        # must key the same way ('cache' -> 'cach'); ditto -she/-xe/-ze.
+        if base.endswith(("che", "she", "xe", "ze")):
+            return base[:-1]
         return base
     if base.endswith(("ss", "us", "is")):
         return base
@@ -141,16 +170,18 @@ def _tokenize(stripped: str) -> list[tuple[str, bool]]:
     A genitive token carries a trailing possessive marker: "ulysses'" and
     "jove's" both yield (base, True), so possessor forms compare equal to the
     plain name while remaining detectable for head-zone computation. Bases are
-    plural-normalized via _singular_key so regular plural variants compare
+    diacritic-folded, hyphen-split ("batch-job" == "batch job"), and
+    plural-normalized via _singular_key so regular surface variants compare
     equal ("database" / "databases").
     """
     tokens: list[tuple[str, bool]] = []
     for tok in stripped.split():
         m = _GENITIVE_RE.match(tok)
-        if m:
-            tokens.append((_singular_key(m.group(1)), True))
-        else:
-            tokens.append((_singular_key(tok), False))
+        genitive = m is not None
+        raw = _fold_ascii(m.group(1) if m else tok)
+        parts = [p for p in raw.split("-") if p] or [raw]
+        for i, part in enumerate(parts):
+            tokens.append((_singular_key(part), genitive and i == len(parts) - 1))
     return tokens
 
 
@@ -261,12 +292,25 @@ def find_canonical(name: str, entity_type: str, existing_names: list[str]) -> st
 
 
 class _Cluster:
-    __slots__ = ("rep_tokens", "members", "pool_name")
+    __slots__ = ("rep_tokens", "members", "pool_name", "etype")
 
-    def __init__(self, rep_tokens: list[tuple[str, bool]], pool_name: str | None) -> None:
+    def __init__(
+        self,
+        rep_tokens: list[tuple[str, bool]],
+        etype: str,
+        pool_name: str | None = None,
+    ) -> None:
         self.rep_tokens = rep_tokens
-        self.members: list[str] = []
+        self.etype = etype
+        self.members: list[tuple[str, str]] = []  # (name, original etype) keys
         self.pool_name = pool_name
+
+
+# Cross-type fold threshold: a name-identical cluster in another type is
+# treated as extraction noise only when the dominant side has at least this
+# many times the minority's mentions. Balanced counts are what a genuine
+# homonym pair (a person and a place sharing a name) looks like -- kept apart.
+_TYPE_FOLD_DOMINANCE = 3
 
 
 def canonicalize_batch(
@@ -285,18 +329,28 @@ def canonicalize_batch(
             document never splits an existing node.
 
     Returns:
-        List of (canonical_name, entity_type, original_name) triples in the
+        List of (canonical_name, canonical_type, original_name) triples in the
         same order as *entities*.
         - canonical_name: resolved canonical form (may equal original_name)
-        - entity_type:    unchanged
+        - canonical_type: usually the input type; differs when a lopsided
+          cross-type variant was folded into its dominant twin (see below)
         - original_name:  surface form as given
 
-    Names are clustered greedily in descending mention-frequency order: each
-    unique name joins the first existing cluster whose representative it
-    matches (rules tried in order across all clusters), else seeds a new one.
-    A cluster's representative is its longest member so far, so a later, more
-    specific form ("sherlock holmes") can still attract short aliases, while
-    distinct specialisations ("python 3.11" vs "python 3.13") stay separate.
+    Stage 1 clusters names within each type, greedily in descending
+    mention-frequency order: each unique name joins the first existing cluster
+    whose representative it matches (rules tried in order across all
+    clusters), else seeds a new one.  A cluster's representative is its
+    longest member so far, so a later, more specific form ("sherlock holmes")
+    can still attract short aliases, while distinct specialisations
+    ("python 3.11" vs "python 3.13") stay separate.
+
+    Stage 2 reconciles across types: NER often tags surface variants of one
+    entity with different types ("node" PERSON / "nodes" DATA_STRUCTURE),
+    which per-type clustering can never repair.  Clusters whose representative
+    key sequences are identical across types are folded into the
+    mention-dominant one when the ratio is lopsided (>= _TYPE_FOLD_DOMINANCE);
+    balanced counts stay separate, preserving genuine homonyms.
+
     Each cluster's canonical is the pool name when one seeded it, otherwise
     the member with the highest mention count (ties: longer form, then first
     seen).
@@ -310,7 +364,9 @@ def canonicalize_batch(
     for etype, names in existing_by_type.items():
         pool_clusters = clusters_by_type.setdefault(etype, [])
         for pname in names:
-            pool_clusters.append(_Cluster(_tokenize(_strip_honorifics(pname)), pname))
+            pool_clusters.append(
+                _Cluster(_tokenize(_strip_honorifics(pname)), etype, pool_name=pname)
+            )
 
     ordered_unique = sorted(freq, key=lambda k: (-freq[k], first_seen[k]))
 
@@ -329,32 +385,53 @@ def canonicalize_batch(
                 if target is not None:
                     break
         if target is None:
-            target = _Cluster(tokens, None)
+            target = _Cluster(tokens, etype)
             clusters.append(target)
-        target.members.append(name)
+        target.members.append(key)
         assignment[key] = target
         if len(tokens) > len(target.rep_tokens):
             target.rep_tokens = tokens
 
-    def canonical_of(cluster: _Cluster, etype: str) -> str:
+    # Stage 2 -- cross-type reconciliation (pool clusters stay untouched:
+    # their canonical and type are already committed in the graph).
+    def batch_mentions(cluster: _Cluster) -> int:
+        return sum(freq[m] for m in cluster.members)
+
+    by_rep_key: dict[tuple[str, ...], list[_Cluster]] = {}
+    for clusters in clusters_by_type.values():
+        for cluster in clusters:
+            if cluster.pool_name is not None or not cluster.members:
+                continue
+            by_rep_key.setdefault(tuple(_bases(cluster.rep_tokens)), []).append(cluster)
+    for group in by_rep_key.values():
+        if len(group) < 2:
+            continue
+        sized = sorted(((batch_mentions(c), c) for c in group), key=lambda t: -t[0])
+        dominant_count, dominant = sized[0]
+        for count, cluster in sized[1:]:
+            if dominant_count >= _TYPE_FOLD_DOMINANCE * max(count, 1):
+                dominant.members.extend(cluster.members)
+                for member in cluster.members:
+                    assignment[member] = dominant
+                cluster.members = []
+
+    def canonical_of(cluster: _Cluster) -> str:
         if cluster.pool_name is not None:
             return cluster.pool_name
         return max(
             cluster.members,
-            key=lambda n: (
-                freq[(n, etype)],
-                len(_strip_honorifics(n)),
-                -first_seen[(n, etype)],
-            ),
-        )
+            key=lambda m: (freq[m], len(_strip_honorifics(m[0])), -first_seen[m]),
+        )[0]
 
-    canonical_by_key = {
-        key: canonical_of(assignment[key], key[1]) for key in freq
-    }
-
-    results = [
-        (canonical_by_key[(name, etype)], etype, name) for name, etype in entities
-    ]
+    canonical_cache: dict[int, str] = {}
+    results: list[tuple[str, str, str]] = []
+    for name, etype in entities:
+        cluster = assignment[(name, etype)]
+        canonical = canonical_cache.get(id(cluster))
+        if canonical is None:
+            canonical = canonical_of(cluster)
+            canonical_cache[id(cluster)] = canonical
+        results.append((canonical, cluster.etype, name))
 
     logger.debug(
         "canonicalize_batch: %d entities -> %d unique canonicals",

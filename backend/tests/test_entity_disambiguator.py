@@ -295,6 +295,75 @@ def test_plural_key_does_not_leak_into_canonical_name():
     assert all(t[0] == "libraries" for t in triples)
 
 
+def test_mute_e_plural_merges():
+    """'cache'/'caches' key identically despite the -ches/-e ambiguity."""
+    entities = [("cache", "DATA_STRUCTURE")] * 4 + [("caches", "DATA_STRUCTURE")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "cache" for t in triples)
+
+
+def test_irregular_plural_merges():
+    entities = [
+        ("index", "CONCEPT"),
+        ("indices", "CONCEPT"),
+        ("index", "CONCEPT"),
+        ("vertex", "CONCEPT"),
+        ("vertex", "CONCEPT"),
+        ("vertices", "CONCEPT"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: t[0] for t in triples}
+    assert by_original["indices"] == "index"
+    assert by_original["vertices"] == "vertex"
+
+
+def test_hyphen_variant_merges():
+    entities = [
+        ("batch job", "CONCEPT"),
+        ("batch job", "CONCEPT"),
+        ("batch-jobs", "CONCEPT"),
+    ]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "batch job" for t in triples)
+
+
+def test_diacritic_variant_merges():
+    entities = [("josé arcadio", "PERSON"), ("jose arcadio", "PERSON"), ("josé arcadio", "PERSON")]
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "josé arcadio" for t in triples)
+
+
+# Stage 2: cross-type reconciliation of NER type noise.
+
+
+def test_cross_type_plural_noise_folds_into_dominant():
+    """NER tagging 'nodes' with a different type than 'node' must not split
+    the entity; the minority folds into the dominant cluster and adopts its
+    name AND type."""
+    entities = [("node", "DATA_STRUCTURE")] * 9 + [("nodes", "PERSON")] * 2
+    triples = canonicalize_batch(entities, {})
+    assert all(t[0] == "node" for t in triples)
+    assert all(t[1] == "DATA_STRUCTURE" for t in triples)
+
+
+def test_cross_type_balanced_homonyms_stay_separate():
+    """Balanced mention counts are the genuine-homonym signature (a person and
+    a place sharing a name) -- never folded."""
+    entities = [("london", "PLACE")] * 3 + [("london", "PERSON")] * 2
+    triples = canonicalize_batch(entities, {})
+    types = {t[1] for t in triples}
+    assert types == {"PLACE", "PERSON"}
+
+
+def test_cross_type_fold_requires_name_identity():
+    """Only Rule-A-identical keys reconcile across types; containment does
+    not ('jove' PERSON must not fold into 'jove's daughter' PLACE)."""
+    entities = [("jove's daughter", "PLACE")] * 9 + [("jove", "PERSON")]
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: (t[0], t[1]) for t in triples}
+    assert by_original["jove"] == ("jove", "PERSON")
+
+
 def test_find_canonical_blocks_possessive():
     assert find_canonical("ulysses", "PERSON", ["ulysses' son"]) == "ulysses"
     assert find_canonical("ulysses' son", "PERSON", ["ulysses"]) == "ulysses' son"
