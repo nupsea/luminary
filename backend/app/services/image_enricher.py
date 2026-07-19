@@ -14,7 +14,6 @@ The document remains fully accessible without image analysis.
 
 import asyncio
 import base64
-import json
 import logging
 import uuid
 from datetime import UTC
@@ -27,21 +26,44 @@ from sqlalchemy import func, select
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
-from app.models import EnrichmentJobModel, ImageModel
+from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.llm_json import parse_llm_json_object
 
 logger = logging.getLogger(__name__)
 
+# Transcription-first prompting: forcing the model to commit to the labels it
+# can actually read before describing anchors the description in legible
+# content and measurably curbs invented node names on dense diagrams.
 _VISION_PROMPT = (
-    "Classify this image as one of: architecture_diagram, sequence_diagram, "
-    "er_diagram, flowchart, code_screenshot, table, chart, photo, other.\n"
-    "Then describe what the image shows in 1-2 sentences.\n"
-    'Reply ONLY with JSON: {"image_type": "...", "description": "..."}'
+    "You are analyzing an image extracted from a document.\n"
+    "Step 1 -- transcribe the text labels that are legible in the image, "
+    "exactly as written. Never guess or invent labels; omit any you cannot "
+    "read clearly.\n"
+    "Step 2 -- classify the image as one of: architecture_diagram, "
+    "sequence_diagram, er_diagram, flowchart, code_screenshot, table, chart, "
+    "photo, other.\n"
+    "Step 3 -- describe what the image shows and what it is for. For "
+    "diagrams, describe the structure: which labeled components exist and how "
+    "they connect or flow.\n"
+    "The image is the primary evidence. Any document context provided may be "
+    "vague, incomplete, or unrelated -- weigh it against what you see. When "
+    "the image is clear, describe it confidently even if the context says "
+    "little; use the context to supply names the image alone cannot (such as "
+    "what a figure or system is called), and only when it matches what you "
+    "see.\n"
+    'Reply ONLY with JSON: {"image_type": "...", "labels": ["..."], '
+    '"description": "..."}'
 )
+
+_CONTEXT_TMPL = "Document context:\n{context}\n\n"
+
+_MAX_PART_CHARS = 500
+_MAX_LABELS = 40
 
 # Bounds concurrent vision LLM calls across ALL documents (avoids OOM on large
 # PDFs). Sized lazily from ENRICHMENT_VISION_CONCURRENCY so a machine/profile with
@@ -89,7 +111,75 @@ def _is_decorative(pil_image: object) -> bool:
     return ratio > 10.0
 
 
-async def _call_vision_llm(image_path: Path, settings: object) -> dict:
+async def _load_image_contexts(document_id: str, images: list) -> dict[str, str]:
+    """Assemble the textual evidence available for each image -- document
+    title, the text anchored to it, and other text from the same page -- as
+    labeled sections. Every available source is passed; the vision prompt
+    instructs the model to weigh them against the image rather than trust
+    any single one."""
+    async with _database_module.get_session_factory()() as session:
+        title = (
+            await session.execute(
+                select(DocumentModel.title).where(DocumentModel.id == document_id)
+            )
+        ).scalar_one_or_none() or ""
+
+        chunk_ids = {img.chunk_id for img in images if img.chunk_id}
+        chunk_text_by_id: dict[str, str] = {}
+        if chunk_ids:
+            rows = await session.execute(
+                select(ChunkModel.id, ChunkModel.text).where(ChunkModel.id.in_(chunk_ids))
+            )
+            chunk_text_by_id = dict(rows.all())
+
+        # ImageModel.page is 0-based; ChunkModel.page_number is 1-based.
+        pages = {img.page + 1 for img in images}
+        page_text: dict[int, str] = {}
+        if pages:
+            rows = await session.execute(
+                select(ChunkModel.page_number, ChunkModel.text)
+                .where(
+                    ChunkModel.document_id == document_id,
+                    ChunkModel.page_number.in_(pages),
+                )
+                .order_by(ChunkModel.page_number, ChunkModel.chunk_index)
+            )
+            for page_number, text in rows.all():
+                page_text.setdefault(page_number, text)
+
+    contexts: dict[str, str] = {}
+    for img in images:
+        parts: list[str] = []
+        if title:
+            parts.append(f"Title: {title}")
+        anchored = chunk_text_by_id.get(img.chunk_id or "") or ""
+        if anchored:
+            parts.append(
+                "Text anchored to this image (may include its caption): "
+                + anchored[:_MAX_PART_CHARS]
+            )
+        same_page = page_text.get(img.page + 1) or ""
+        if same_page and same_page != anchored:
+            parts.append("Other text on the same page: " + same_page[:_MAX_PART_CHARS])
+        contexts[img.id] = "\n".join(parts)
+    return contexts
+
+
+def _merge_labels(parsed: dict) -> str:
+    """Fold the transcribed labels into the stored description so FTS search
+    and diagram extraction see the labels the model actually read."""
+    description = str(parsed.get("description") or "")
+    labels = parsed.get("labels")
+    if isinstance(labels, list):
+        clean = [str(label).strip() for label in labels if str(label).strip()]
+        if clean:
+            description = (
+                f"{description} Visible labels: {', '.join(clean[:_MAX_LABELS])}.".strip()
+            )
+    return description
+
+
+async def _call_vision_llm(image_path: Path, settings: object, context: str = "") -> dict:
     """Call the vision LLM and return parsed JSON response.
 
     Falls back to {"image_type": "other", "description": raw_text, ...} if JSON parse fails.
@@ -130,7 +220,13 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
                         {
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": _VISION_PROMPT},
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        _CONTEXT_TMPL.format(context=context) if context else ""
+                                    )
+                                    + _VISION_PROMPT,
+                                },
                                 {
                                     "type": "image_url",
                                     "image_url": {"url": f"data:image/png;base64,{b64}"},
@@ -159,23 +255,14 @@ async def _call_vision_llm(image_path: Path, settings: object) -> dict:
         assert last_exc is not None
         raise last_exc
 
-    # Strip optional markdown code fences
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].strip()
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")].strip()
-
-    try:
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("not a dict")
+    parsed = parse_llm_json_object(raw)
+    if parsed is not None:
         return parsed
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("_call_vision_llm: JSON parse failed, using raw text as description")
-        return {
-            "image_type": "other",
-            "description": raw,
-        }
+    logger.warning("_call_vision_llm: JSON parse failed, using raw text as description")
+    return {
+        "image_type": "other",
+        "description": raw,
+    }
 
 
 class ImageEnricherService:
@@ -209,6 +296,12 @@ class ImageEnricherService:
 
         logger.info("image_enricher: processing %d images for doc=%s", len(images), document_id)
 
+        try:
+            contexts = await _load_image_contexts(document_id, images)
+        except Exception as exc:
+            logger.warning("image_enricher: context load failed, analyzing blind: %s", exc)
+            contexts = {}
+
         processed = 0
         embedder = _embedder_module.get_embedding_service()
         lancedb_svc = _vector_store_module.get_lancedb_service()
@@ -231,9 +324,11 @@ class ImageEnricherService:
                         description = "Decorative image"
                         logger.debug("image_enricher: decorative image_id=%s", img.id)
                     else:
-                        parsed = await _call_vision_llm(abs_path, settings)
+                        parsed = await _call_vision_llm(
+                            abs_path, settings, contexts.get(img.id, "")
+                        )
                         image_type = parsed.get("image_type") or "other"
-                        description = parsed.get("description") or ""
+                        description = _merge_labels(parsed) or ""
 
                     # Embed description before any DB writes so a CPU/OOM failure
                     # does not leave the SQLite row updated without an FTS5 entry.

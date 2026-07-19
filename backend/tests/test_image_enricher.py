@@ -745,3 +745,104 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
         assert row.image_type is not None
 
     await engine.dispose()
+
+
+# Context grounding and label transcription
+
+
+def test_merge_labels_folds_into_description() -> None:
+    from app.services.image_enricher import _merge_labels
+
+    parsed = {
+        "description": "Scaled dot-product attention block.",
+        "labels": ["MatMul", "Scale", "Mask (opt.)", "SoftMax", " ", 3],
+    }
+    merged = _merge_labels(parsed)
+    assert merged.startswith("Scaled dot-product attention block.")
+    assert "Visible labels: MatMul, Scale, Mask (opt.), SoftMax, 3." in merged
+
+
+def test_merge_labels_ignores_missing_or_invalid() -> None:
+    from app.services.image_enricher import _merge_labels
+
+    assert _merge_labels({"description": "A chart."}) == "A chart."
+    assert _merge_labels({"description": "A chart.", "labels": "Q, K, V"}) == "A chart."
+    assert _merge_labels({"description": "A chart.", "labels": []}) == "A chart."
+
+
+@pytest.mark.asyncio
+async def test_vision_call_includes_context_when_given(tmp_path: Path) -> None:
+    from app.services.image_enricher import _call_vision_llm
+
+    img_path = tmp_path / "figure.png"
+    _make_varied_png(img_path)
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = '{"image_type": "flowchart", "description": "d"}'
+
+    with patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = mock_response
+        settings = MagicMock()
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+
+        await _call_vision_llm(img_path, settings, "Figure 1: The model architecture")
+        prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]
+        assert "Figure 1: The model architecture" in prompt_text
+        assert "transcribe the text labels" in prompt_text
+
+        await _call_vision_llm(img_path, settings, "")
+        prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]
+        assert "Document context" not in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_load_image_contexts_fuses_all_sources(doc_and_image, session_factory) -> None:
+    """The context carries every available evidence source as a labeled
+    section: title, anchored chunk text, and same-page text."""
+    from sqlalchemy import select
+
+    from app.models import ChunkModel
+    from app.services.image_enricher import _load_image_contexts
+
+    doc_id, image_id, _img_path, _data_dir = doc_and_image
+
+    async with session_factory() as session:
+        session.add(
+            ChunkModel(
+                id="chunk-anchor",
+                document_id=doc_id,
+                text="Figure 1: The model architecture.",
+                chunk_index=1,
+                page_number=1,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id="chunk-page",
+                document_id=doc_id,
+                text="The encoder is composed of a stack of identical layers.",
+                chunk_index=0,
+                page_number=1,
+            )
+        )
+        await session.commit()
+
+    with patch("app.database.get_session_factory", return_value=session_factory):
+        async with session_factory() as session:
+            img = (
+                await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+            ).scalar_one()
+
+        # No anchor: title + first same-page chunk
+        contexts = await _load_image_contexts(doc_id, [img])
+        assert "Title: Test Doc" in contexts[image_id]
+        assert "encoder is composed" in contexts[image_id]
+
+        # With anchor: anchored text AND the distinct same-page text
+        img.chunk_id = "chunk-anchor"
+        contexts = await _load_image_contexts(doc_id, [img])
+        assert "Figure 1: The model architecture." in contexts[image_id]
+        assert "encoder is composed" in contexts[image_id]
+        assert "Title: Test Doc" in contexts[image_id]
