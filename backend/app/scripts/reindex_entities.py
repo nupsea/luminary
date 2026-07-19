@@ -109,29 +109,20 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             {"id": row.id, "document_id": doc_id, "text": row.text} for row in chunk_rows
         ]
 
-        # NER -- CPU bound, run in thread pool. Reuse the cached extractor.
-        extractor = get_entity_extractor()
-        loop = asyncio.get_event_loop()
-        entities = await loop.run_in_executor(
-            None, extractor.extract, chunk_dicts, content_type
-        )
-
+        # Acquire the graph connection BEFORE the expensive NER pass so a
+        # lock held by another process fails fast instead of after minutes of
+        # inference. Deletion still happens after NER so a mid-inference
+        # crash never leaves the document's subgraph emptied.
+        #
         # Pool of stored canonicals: rebuilding starts from an empty pool so
         # fresh (frequency-based) canonicals win; otherwise reuse the stored
-        # names for stability. If Kuzu is locked by another process (e.g. the
-        # live backend holds it), fall back to empty existing_by_type -- the
-        # canonicalizer still converges within the batch.
+        # names for stability. If Kuzu is locked by another process, fall
+        # back to empty existing_by_type -- the canonicalizer still
+        # converges within the batch.
         existing_by_type: dict[str, list[str]] = {}
         graph = None
         if rebuild_graph:
             graph = get_graph_service()
-            removed = graph.delete_entities_for_document(doc_id)
-            graph.upsert_document(doc_id, doc_row.title or "", content_type)
-            logger.info(
-                "rebuild-graph: removed %d stale entities",
-                removed,
-                extra={"doc_id": doc_id},
-            )
         else:
             try:
                 existing_by_type = get_graph_service().get_entities_by_type_for_document(
@@ -142,6 +133,22 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                     "reindex_entities: Kuzu unavailable, using empty canonical pool",
                     extra={"doc_id": doc_id, "error": repr(exc)},
                 )
+
+        # NER -- CPU bound, run in thread pool. Reuse the cached extractor.
+        extractor = get_entity_extractor()
+        loop = asyncio.get_event_loop()
+        entities = await loop.run_in_executor(
+            None, extractor.extract, chunk_dicts, content_type
+        )
+
+        if rebuild_graph and graph is not None:
+            removed = graph.delete_entities_for_document(doc_id)
+            graph.upsert_document(doc_id, doc_row.title or "", content_type)
+            logger.info(
+                "rebuild-graph: removed %d stale entities",
+                removed,
+                extra={"doc_id": doc_id},
+            )
         canonical_triples = canonicalize_batch(
             [(ent["name"], ent["type"]) for ent in entities],
             existing_by_type,
