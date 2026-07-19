@@ -7,7 +7,6 @@ philosophy, history, science, literature, etc.). Stored in WebReferenceModel.
 No live HTTP calls when WEB_SEARCH_PROVIDER == 'none' (default).
 """
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -20,6 +19,7 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models import SectionSummaryModel, WebReferenceModel
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.llm_json import parse_llm_json_array
 from app.services.settings_service import get_llm_error_message
 
 logger = logging.getLogger(__name__)
@@ -68,16 +68,6 @@ def sort_by_quality(refs: list[dict]) -> list[dict]:
     )
 
 
-def _strip_fences(text: str) -> str:
-    """Remove leading/trailing markdown code fences from an LLM response."""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        # Drop first line (``` or ```json) and last line (```)
-        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
-    return cleaned
-
-
 async def _extract_references(section_content: str) -> list[dict]:
     """Call the LLM to extract canonical references from a section summary.
 
@@ -100,16 +90,13 @@ async def _extract_references(section_content: str) -> list[dict]:
             timeout=180.0,
             background=True,
         )
-    cleaned = _strip_fences(raw)
-    try:
-        parsed = json.loads(cleaned)
-        if isinstance(parsed, list):
-            return parsed
-        logger.warning("reference_enricher: LLM returned non-list JSON, ignoring")
-        return []
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("reference_enricher: JSON parse failed: %s -- raw=%s", exc, raw[:200])
-        return []
+    refs = [r for r in parse_llm_json_array(raw) if isinstance(r, dict) and r.get("url")]
+    if not refs and raw.strip() not in ("", "[]"):
+        logger.warning(
+            "reference_enricher: no references recovered from response -- raw=%s",
+            raw[:200],
+        )
+    return refs
 
 
 class ReferenceEnricherService:

@@ -9,10 +9,8 @@ DocumentModel.tags + shadow-index update.
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-import re
 from datetime import UTC, datetime
 from functools import lru_cache
 
@@ -28,6 +26,7 @@ from app.models import (
     SummaryModel,
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched in tests
+from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 
@@ -128,17 +127,8 @@ def _parse_tag_list(raw: str) -> list[str]:
     """Parse LLM output into a list of at most 5 tags. Never raises."""
     if not raw:
         return []
-    cleaned = re.sub(r"```[^\n]*\n?", "", raw).strip()
-    match = re.search(r"\[.*?\]", cleaned, re.DOTALL)
-    if not match:
-        return []
-    try:
-        result = json.loads(match.group(0))
-        if isinstance(result, list):
-            return [str(t).strip().lower() for t in result if str(t).strip()][:5]
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return []
+    result = parse_llm_json_array(raw)
+    return [str(t).strip().lower() for t in result if str(t).strip()][:5]
 
 
 class DocumentTaggerService:
