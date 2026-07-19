@@ -364,6 +364,57 @@ def test_cross_type_fold_requires_name_identity():
     assert by_original["jove"] == ("jove", "PERSON")
 
 
+def test_bare_head_does_not_merge_into_hyphenated_compound():
+    """Hyphen flattening must not feed the containment rules: 'tree' is not a
+    'b-tree' (observed on DDIA: 45 'tree' mentions swallowed by b-tree)."""
+    assert find_canonical("tree", "DATA_STRUCTURE", ["b-tree"]) == "tree"
+    entities = [("b-tree", "DATA_STRUCTURE")] * 3 + [("tree", "DATA_STRUCTURE")] * 2
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: t[0] for t in triples}
+    assert by_original["tree"] == "tree"
+    assert by_original["b-tree"] == "b-tree"
+
+
+def test_cross_type_fold_keys_on_canonical_not_drifted_rep():
+    """A cluster's rep drifts to its longest member ('messages' cluster rep
+    becoming 'message queues'); folding must key on the canonical name, so a
+    differently-named cluster sharing only the drifted rep stays separate
+    (observed on DDIA: 'message queue' TECHNOLOGY swallowed by 'messages')."""
+    entities = (
+        [("messages", "DATA_STRUCTURE")] * 9
+        + [("message queues", "DATA_STRUCTURE")]
+        + [("message queue", "TECHNOLOGY")] * 2
+    )
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: (t[0], t[1]) for t in triples}
+    assert by_original["message queue"] == ("message queue", "TECHNOLOGY")
+    assert by_original["messages"] == ("messages", "DATA_STRUCTURE")
+
+
+def test_cross_type_fold_survives_rep_drift():
+    """The intended fold must fire even when the dominant cluster's rep has
+    drifted past the shared name (observed on DDIA: 'database' TECHNOLOGY
+    1406 vs 'databases' ORGANIZATION 36 never folded)."""
+    entities = (
+        [("database", "TECHNOLOGY")] * 9
+        + [("distributed database", "TECHNOLOGY")]
+        + [("databases", "ORGANIZATION")] * 2
+    )
+    triples = canonicalize_batch(entities, {})
+    by_original = {t[2]: (t[0], t[1]) for t in triples}
+    assert by_original["databases"] == ("database", "TECHNOLOGY")
+    assert by_original["database"] == ("database", "TECHNOLOGY")
+
+
+def test_linebreak_hyphen_artifact_merges():
+    """A hyphenated compound split across a line break equals its clean
+    spelling via whole-name equality."""
+    assert (
+        find_canonical("in-\nmemory databases", "TECHNOLOGY", ["in-memory databases"])
+        == "in-memory databases"
+    )
+
+
 def test_find_canonical_blocks_possessive():
     assert find_canonical("ulysses", "PERSON", ["ulysses' son"]) == "ulysses"
     assert find_canonical("ulysses' son", "PERSON", ["ulysses"]) == "ulysses' son"

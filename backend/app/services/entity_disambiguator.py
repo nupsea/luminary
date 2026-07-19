@@ -1,12 +1,13 @@
 """Entity disambiguation: canonical name normalisation before Kuzu upsert.
 
-Collapses surface-form variants (e.g. "Holmes", "Mr. Holmes", "Sherlock Holmes")
-into a single canonical name, keeping the original surface form as an alias.
+Collapses surface-form variants of one entity into a single canonical name,
+keeping the original surface form as an alias.
 
 Merging is head-aware: an English noun phrase names its HEAD, so a shorter name
 may only merge into a longer phrase when it overlaps the phrase's head zone --
-the tokens after any possessor prefix ("ulysses' son" is a son, not ulysses)
-and before any "of"-complement ("stream of egypt" is a stream, not egypt).
+the tokens after any possessor prefix (a possessive phrase names the possessed,
+not the possessor) and before any "of"-complement (an of-phrase names its
+subject, not its complement).
 Within a merged cluster the canonical name is the most frequent surface form
 (ties go to the longer form), so plain names beat one-off epithets.
 
@@ -24,17 +25,17 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-# Matches a version qualifier at the end of a name: 'numpy 1.26', 'Python 3.13', 'React 18'.
-# Group 1: text before the version  Group 2: major number  Group 3: rest of version (e.g. '.13.1')
-# Using a separate group for the dotted tail avoids the repeated-group capture problem where
-# only the last match of (?:\.(\d+))* is retained.
+# Matches a trailing version qualifier: name text, major number, optional dotted
+# tail. A separate group for the dotted tail avoids the repeated-group capture
+# problem where only the last match of (?:\.(\d+))* is retained.
 _VERSION_RE = re.compile(r"^(.*?)\s+(\d+)((?:\.\d+)+)?$")
 
-# Trailing genitive marker on a token: "ulysses'", "jove's", curly-quote variants.
+# Trailing genitive marker on a token: straight or curly apostrophe, with or
+# without a following s.
 _GENITIVE_RE = re.compile(r"^(.+?)(?:'s|’s|'|’)$")
 
-# Function words excluded from Rule C content-token comparison so that e.g.
-# "king of ithaca" vs "queen of ithaca" share only {ithaca}, not {of, ithaca}.
+# Function words excluded from Rule C content-token comparison so shared
+# function words never count as evidence that two names co-refer.
 _STOPWORDS: frozenset[str] = frozenset(
     {"the", "a", "an", "of", "and", "or", "in", "on", "at", "to", "for", "with", "by", "o"}
 )
@@ -67,28 +68,20 @@ _HONORIFICS: frozenset[str] = frozenset(
 def _extract_version_qualifier(name: str) -> tuple[str, str | None]:
     """Split a versioned library name into (base_name, version_string | None).
 
-    The base name retains the major version number only, so that patch versions
-    ('Python 3.11', 'Python 3.13') are stored as separate nodes but both link
-    to a shared major-version base ('Python 3').
-
-    Examples:
-        'Python 3.13' -> ('Python 3', '3.13')
-        'numpy 1.26'  -> ('numpy 1', '1.26')
-        'React 18'    -> ('React 18', None)   -- single-part: already canonical
-        'numpy'       -> ('numpy', None)       -- no version
+    The base name retains the major version number only, so that different
+    patch versions are stored as separate nodes but all link to a shared
+    major-version base. Names with a single-component version or no version
+    are returned unchanged with no version string.
     """
     m = _VERSION_RE.match(name)
     if not m:
         return name, None
     base_text = m.group(1).strip()
     major = m.group(2)
-    dotted_tail = m.group(3)  # e.g. '.13' for 'Python 3.13', '.13.1' for 'Python 3.13.1'
+    dotted_tail = m.group(3)
     if dotted_tail is None:
-        # Single-component version (e.g. 'React 18') — already canonical, no split
         return name, None
-    # Reconstruct the full version string: major + dotted tail
-    full_version = major + dotted_tail  # e.g. '3.13' or '3.13.1'
-    # Multi-component version: base = "name major"
+    full_version = major + dotted_tail
     base_name = f"{base_text} {major}"
     return base_name, full_version
 
@@ -98,12 +91,6 @@ def _strip_honorifics(name: str) -> str:
 
     Trailing punctuation (period, comma) is stripped from each token before
     the honorific check.  Only tokens at the FRONT are removed.
-
-    Examples:
-        "Mr. Sherlock Holmes" -> "sherlock holmes"
-        "Dr. Watson"          -> "watson"
-        "Sr. Holmes"          -> "sr. holmes"  (sr not an honorific)
-        "Sherlock Holmes"     -> "sherlock holmes"
     """
     tokens = name.lower().strip().split()
     while tokens:
@@ -115,9 +102,9 @@ def _strip_honorifics(name: str) -> str:
     return " ".join(tokens)
 
 
-# Irregular plurals worth knowing without a dictionary. Deliberately tiny and
-# technical-noun-heavy; "data" is NOT mapped to "datum" because in this domain
-# "data" is its own word.
+# Irregular plurals worth knowing without a dictionary. Deliberately tiny;
+# formally-plural mass nouns are excluded because their Latin singular is a
+# different word in practice.
 _IRREGULAR_PLURALS: dict[str, str] = {
     "indices": "index",
     "matrices": "matrix",
@@ -130,15 +117,15 @@ _IRREGULAR_PLURALS: dict[str, str] = {
 
 
 def _fold_ascii(s: str) -> str:
-    """Strip diacritics for comparison ('josé' == 'jose'). Key-only."""
+    """Strip diacritics for comparison keys; never alters the stored name."""
     return "".join(
         ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch)
     )
 
 
 def _singular_key(base: str) -> str:
-    """Collapse regular English plurals to a comparison key ('databases' ==
-    'database', 'libraries' == 'library') without a dictionary.
+    """Collapse regular English plurals to a comparison key without a
+    dictionary.
 
     Keys are used only for token equality -- canonical display names are
     chosen from real surface forms -- so the rule can be crude, but it must
@@ -150,8 +137,9 @@ def _singular_key(base: str) -> str:
     if len(base) <= 3:
         return base
     if not base.endswith("s"):
-        # 'caches' (-ches) strips to 'cach', so the singular of a mute-e word
-        # must key the same way ('cache' -> 'cach'); ditto -she/-xe/-ze.
+        # An -es plural on a sibilant stem keys with its -es stripped, so a
+        # mute-e singular on the same stem must drop its final -e to key
+        # identically.
         if base.endswith(("che", "she", "xe", "ze")):
             return base[:-1]
         return base
@@ -167,21 +155,22 @@ def _singular_key(base: str) -> str:
 def _tokenize(stripped: str) -> list[tuple[str, bool]]:
     """Split a stripped name into (base_token, is_genitive) pairs.
 
-    A genitive token carries a trailing possessive marker: "ulysses'" and
-    "jove's" both yield (base, True), so possessor forms compare equal to the
-    plain name while remaining detectable for head-zone computation. Bases are
-    diacritic-folded, hyphen-split ("batch-job" == "batch job"), and
-    plural-normalized via _singular_key so regular surface variants compare
-    equal ("database" / "databases").
+    A genitive token yields (base, True), so possessor forms compare equal to
+    the plain name while remaining detectable for head-zone computation.
+    Bases are diacritic-folded and plural-normalized via _singular_key so
+    regular surface variants compare equal. A hyphenated compound stays ONE
+    token (each part singularized in place) -- the containment rules must
+    never see inside it, because a hyphenated compound names a different
+    entity than its bare head noun; hyphen-vs-space equivalence lives solely
+    in _exact_key.
     """
     tokens: list[tuple[str, bool]] = []
     for tok in stripped.split():
         m = _GENITIVE_RE.match(tok)
         genitive = m is not None
         raw = _fold_ascii(m.group(1) if m else tok)
-        parts = [p for p in raw.split("-") if p] or [raw]
-        for i, part in enumerate(parts):
-            tokens.append((_singular_key(part), genitive and i == len(parts) - 1))
+        parts = [_singular_key(p) for p in raw.split("-") if p]
+        tokens.append(("-".join(parts) if parts else raw, genitive))
     return tokens
 
 
@@ -189,12 +178,21 @@ def _bases(tokens: list[tuple[str, bool]]) -> list[str]:
     return [base for base, _ in tokens]
 
 
+def _exact_key(tokens: list[tuple[str, bool]]) -> tuple[str, ...]:
+    """Whole-name comparison key: hyphens flatten to word boundaries, so
+    hyphenated, spaced, and line-break-split spellings of one compound
+    compare equal. Safe ONLY for full-sequence equality; partial matching
+    over this key would merge a compound's bare head noun into the compound.
+    """
+    return tuple(part for base, _ in tokens for part in base.split("-"))
+
+
 def _head_zone(tokens: list[tuple[str, bool]]) -> tuple[int, int]:
     """Return the [start, end) token range holding the phrase's head.
 
-    The head follows any possessor prefix ("ulysses' | son") and precedes any
-    "of"-complement ("stream | of egypt").  A shorter name that matches only
-    tokens outside this zone names a different entity than the phrase.
+    The head follows any possessor prefix and precedes any "of"-complement.
+    A shorter name that matches only tokens outside this zone names a
+    different entity than the phrase.
     """
     start = 0
     for i, (_, genitive) in enumerate(tokens[:-1]):
@@ -209,17 +207,19 @@ def _head_zone(tokens: list[tuple[str, bool]]) -> tuple[int, int]:
 
 
 def _match_exact(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
-    """Rule A: identical base-token sequences ("ulysses'" == "ulysses")."""
-    return _bases(a) == _bases(b)
+    """Rule A: identical whole-name keys (genitive-, plural-, and
+    hyphen-insensitive)."""
+    return _exact_key(a) == _exact_key(b)
 
 
 def _match_containment(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
     """Rule B: the shorter name is a contiguous token slice of the longer one,
     and that slice overlaps the longer phrase's head zone.
 
-    Token-level comparison prevents raw-substring accidents ("rome" / "romeo");
-    the head-zone requirement blocks possessive and of-complement false merges
-    ("ulysses" must not merge into "ulysses' son" or "house of ulysses").
+    Token-level comparison prevents raw-substring accidents between unrelated
+    words that share a prefix; the head-zone requirement blocks possessive and
+    of-complement false merges, where the shorter name is the possessor or
+    complement rather than the phrase's referent.
     """
     if len(a) == len(b):
         return False
@@ -245,10 +245,10 @@ def _match_subset(a: list[tuple[str, bool]], b: list[tuple[str, bool]]) -> bool:
     """Rule C: one name's content tokens are a subset of the other's, with at
     least two shared, and the shared tokens reach the superset's head zone.
 
-    Catches reordered variants ("ulysses' house" / "house of ulysses",
-    "john watson" / "john h. watson") while refusing sibling-style overlaps
-    ("george w bush" / "george h bush" share two tokens but neither contains
-    the other) and possessive extensions ("king priam" / "king priam's son").
+    Catches reordered and initialed variants of one name while refusing
+    sibling-style overlaps (two names sharing modifier tokens but with
+    neither's content a subset of the other's) and possessive extensions
+    (a name versus a longer phrase possessed by it).
     """
     ca, cb = _content_tokens(a), _content_tokens(b)
     if len(ca & cb) < 2:
@@ -340,16 +340,15 @@ def canonicalize_batch(
     mention-frequency order: each unique name joins the first existing cluster
     whose representative it matches (rules tried in order across all
     clusters), else seeds a new one.  A cluster's representative is its
-    longest member so far, so a later, more specific form ("sherlock holmes")
-    can still attract short aliases, while distinct specialisations
-    ("python 3.11" vs "python 3.13") stay separate.
+    longest member so far, so a later, more specific form can still attract
+    short aliases, while distinct specialisations stay separate.
 
     Stage 2 reconciles across types: NER often tags surface variants of one
-    entity with different types ("node" PERSON / "nodes" DATA_STRUCTURE),
-    which per-type clustering can never repair.  Clusters whose representative
-    key sequences are identical across types are folded into the
-    mention-dominant one when the ratio is lopsided (>= _TYPE_FOLD_DOMINANCE);
-    balanced counts stay separate, preserving genuine homonyms.
+    entity with different types, which per-type clustering can never repair.
+    Clusters whose canonical-name keys are identical across types are folded
+    into the mention-dominant one when the ratio is lopsided
+    (>= _TYPE_FOLD_DOMINANCE); balanced counts stay separate, preserving
+    genuine homonyms.
 
     Each cluster's canonical is the pool name when one seeded it, otherwise
     the member with the highest mention count (ties: longer form, then first
@@ -392,18 +391,42 @@ def canonicalize_batch(
         if len(tokens) > len(target.rep_tokens):
             target.rep_tokens = tokens
 
-    # Stage 2 -- cross-type reconciliation (pool clusters stay untouched:
-    # their canonical and type are already committed in the graph).
     def batch_mentions(cluster: _Cluster) -> int:
         return sum(freq[m] for m in cluster.members)
 
-    by_rep_key: dict[tuple[str, ...], list[_Cluster]] = {}
+    def canonical_of(cluster: _Cluster) -> str:
+        if cluster.pool_name is not None:
+            return cluster.pool_name
+        return max(
+            cluster.members,
+            key=lambda m: (freq[m], len(_strip_honorifics(m[0])), -first_seen[m]),
+        )[0]
+
+    canonical_cache: dict[int, str] = {}
+
+    def cached_canonical(cluster: _Cluster) -> str:
+        got = canonical_cache.get(id(cluster))
+        if got is None:
+            got = canonical_of(cluster)
+            canonical_cache[id(cluster)] = got
+        return got
+
+    # Stage 2 -- cross-type reconciliation (pool clusters stay untouched:
+    # their canonical and type are already committed in the graph). Folding
+    # keys on each cluster's CANONICAL name, never its longest-member
+    # representative: the rep drifts as more specific phrases join, so
+    # rep-keyed folding both misses true twins and fuses unrelated clusters
+    # that merely share a drifted rep. Caching canonicals BEFORE folding also
+    # pins the dominant cluster's name against a high-frequency minority
+    # member changing it after the merge.
+    by_name_key: dict[tuple[str, ...], list[_Cluster]] = {}
     for clusters in clusters_by_type.values():
         for cluster in clusters:
             if cluster.pool_name is not None or not cluster.members:
                 continue
-            by_rep_key.setdefault(tuple(_bases(cluster.rep_tokens)), []).append(cluster)
-    for group in by_rep_key.values():
+            key = _exact_key(_tokenize(_strip_honorifics(cached_canonical(cluster))))
+            by_name_key.setdefault(key, []).append(cluster)
+    for group in by_name_key.values():
         if len(group) < 2:
             continue
         sized = sorted(((batch_mentions(c), c) for c in group), key=lambda t: -t[0])
@@ -415,23 +438,10 @@ def canonicalize_batch(
                     assignment[member] = dominant
                 cluster.members = []
 
-    def canonical_of(cluster: _Cluster) -> str:
-        if cluster.pool_name is not None:
-            return cluster.pool_name
-        return max(
-            cluster.members,
-            key=lambda m: (freq[m], len(_strip_honorifics(m[0])), -first_seen[m]),
-        )[0]
-
-    canonical_cache: dict[int, str] = {}
     results: list[tuple[str, str, str]] = []
     for name, etype in entities:
         cluster = assignment[(name, etype)]
-        canonical = canonical_cache.get(id(cluster))
-        if canonical is None:
-            canonical = canonical_of(cluster)
-            canonical_cache[id(cluster)] = canonical
-        results.append((canonical, cluster.etype, name))
+        results.append((cached_canonical(cluster), cluster.etype, name))
 
     logger.debug(
         "canonicalize_batch: %d entities -> %d unique canonicals",
