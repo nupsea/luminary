@@ -5,10 +5,14 @@ export type ContentType =
   | "notes"
   | "code"
   | "audio"
+  | "video"
   | "epub"
   | "kindle_clippings"
   | "tech_book"
   | "tech_article"
+  // Transient: uploads may carry this until ingestion resolves it to a
+  // tech_* variant; rows can render mid-ingest, so display maps cover it.
+  | "technical"
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed" | "weakest-first"
 export type ViewMode = "grid" | "list"

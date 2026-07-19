@@ -7,10 +7,11 @@ import {
   Book, 
   BookOpen, 
   Bookmark, 
-  Check, 
-  Code, 
-  Cpu, 
+  Check,
+  Code,
+  Cpu,
   FileText,
+  Film,
   FolderPlus,
   MessageSquare,
   Sparkles,
@@ -79,6 +80,8 @@ const CONTENT_TYPE_BADGE: Record<ContentType, { label: string; className: string
   kindle_clippings: { label: "Kindle", className: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900 dark:hover:bg-amber-900/50", icon: Bookmark },
   tech_book: { label: "Tech Book", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
   tech_article: { label: "Article", className: "bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-900 dark:hover:bg-teal-900/50", icon: Newspaper },
+  technical: { label: "Technical", className: "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900 dark:hover:bg-cyan-900/50", icon: Cpu },
+  video: { label: "Video", className: "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900 dark:hover:bg-rose-900/50", icon: Film },
 }
 
 const YOUTUBE_BADGE = { label: "YouTube", className: "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50" }
@@ -96,10 +99,12 @@ const ACCENT_COLORS: Record<string, string> = {
   kindle_clippings: "from-amber-500 to-yellow-500",
   tech_book: "from-blue-500 to-cyan-500",
   tech_article: "from-teal-500 to-emerald-500",
+  technical: "from-blue-500 to-cyan-500",
+  video: "from-rose-500 to-pink-500",
   youtube: "from-red-500 to-rose-500",
 }
 
-const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "tech_book", "tech_article"]
+const CHANGEABLE_TYPES: ContentType[] = ["book", "conversation", "notes", "paper", "tech_book", "tech_article"]
 
 const ACTION_ICONS: Record<DocAction, typeof BookOpen> = {
   read: BookOpen,

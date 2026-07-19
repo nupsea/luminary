@@ -13,7 +13,16 @@ import { cn } from "@/lib/utils"
 import { fetchSearch } from "./api"
 import type { DocumentGroup } from "./types"
 
-const ALL_CONTENT_TYPES: ContentType[] = ["book", "paper", "conversation", "notes", "code"]
+const ALL_CONTENT_TYPES: ContentType[] = [
+  "book",
+  "tech_book",
+  "tech_article",
+  "paper",
+  "conversation",
+  "notes",
+  "audio",
+  "code",
+]
 
 interface SearchPanelProps {
   query: string

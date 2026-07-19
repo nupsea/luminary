@@ -9,6 +9,7 @@ import {
   Mic, 
   Newspaper, 
   StickyNote, 
+  Video, 
   Youtube 
 } from "lucide-react"
 import type { ContentType, LearningStatus } from "./types"
@@ -26,6 +27,8 @@ export const CONTENT_TYPE_ICONS: Record<ContentType, React.ElementType> = {
   kindle_clippings: Bookmark,
   tech_book: Cpu,
   tech_article: Newspaper,
+  technical: Cpu,
+  video: Video,
 }
 
 export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {

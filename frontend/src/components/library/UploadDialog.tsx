@@ -33,14 +33,13 @@ const STAGE_LABELS: Record<string, string> = {
 const SLOW_STAGES = new Set(["embedding", "entity_extract"])
 
 const CONTENT_TYPE_OPTIONS = [
-  { value: "book" as const, label: "Book", description: "For novels, non-fiction, full-length documents" },
-  { value: "tech_book" as const, label: "Tech Book", description: "For programming/CS books with code blocks and numbered sections (enables per-section Feynman)" },
-  { value: "tech_article" as const, label: "Tech Article", description: "For technical articles, blog posts, and short technical writing" },
+  { value: "book" as const, label: "Book", description: "For novels, non-fiction, full-length documents (including EPUB)" },
+  { value: "technical" as const, label: "Technical", description: "For programming/CS books and articles with code or numbered sections (sizing auto-tuned to length and structure)" },
+  { value: "paper" as const, label: "Paper", description: "For research papers and academic writing" },
   { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
-  { value: "notes" as const, label: "Notes", description: "For personal notes, articles, papers, web clips" },
+  { value: "notes" as const, label: "Notes", description: "For personal notes, web clips, short mixed content" },
   { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
   { value: "video" as const, label: "Video", description: "For lecture recordings, screen captures, video talks (MP4)" },
-  { value: "epub" as const, label: "EPUB", description: "For EPUB e-books (auto-detected from .epub files)" },
 ]
 
 type DialogTab = "upload" | "paste" | "url"
@@ -63,7 +62,7 @@ function isKindleClippings(filename: string): boolean {
 // hard gate -- the radio stays visible for the user to correct.
 function detectContentType(filename: string): ContentTypeValue {
   const f = filename.toLowerCase()
-  if (f.endsWith(".epub")) return "epub"
+  if (f.endsWith(".epub")) return "book"
   if (/\.(mp3|m4a|wav)$/.test(f)) return "audio"
   if (f.endsWith(".mp4")) return "video"
   return "book"
@@ -78,6 +77,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
+  // True once the user has explicitly picked a type; auto-detection from the
+  // filename must never override an explicit choice.
+  const typeTouchedRef = useRef(false)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
   const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
@@ -146,6 +148,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     clearAutoClose()
     setSelectedFile(null)
     setUploadType(null)
+    typeTouchedRef.current = false
     setPasteLabel("")
     setPasteText("")
     setPasteType("notes")
@@ -180,7 +183,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.dataTransfer.files[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      setUploadType(detectContentType(file.name))
+      if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
     }
   }
 
@@ -188,7 +191,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const file = e.target.files?.[0]
     if (file && isAccepted(file)) {
       setSelectedFile(file)
-      setUploadType(detectContentType(file.name))
+      if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
     }
   }
 
@@ -520,7 +523,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     </p>
                   </div>
                 ) : (
-                  <ContentTypeRadioGroup value={uploadType} onChange={setUploadType} />
+                  <ContentTypeRadioGroup
+                    value={uploadType}
+                    onChange={(v) => {
+                      typeTouchedRef.current = true
+                      setUploadType(v)
+                    }}
+                  />
                 )}
 
                 {collectionTree && collectionTree.length > 0 && (
