@@ -68,7 +68,12 @@ ignore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-m 'not slow and not e2e and not unstable'"
+# 27 test files carry @pytest.mark.anyio, but asyncio_mode="auto" also makes
+# pytest-asyncio claim every async test -- so both plugins drove the same tests, each
+# with its own event loop. App background tasks landed on one loop while the other's
+# close routine gathered a different set, which is how a cancelled-but-unfinished task
+# could wedge teardown. Disabling the anyio plugin leaves exactly one async runner.
+addopts = "-p no:anyio -m 'not slow and not e2e and not unstable'"
 timeout = 120
 timeout_method = "thread"
 pythonpath = ["tests"]
@@ -78,6 +83,7 @@ markers = [
     "integration_http: ASGITransport upload tests with mocked ML; included in make ci",
     "unstable: known-broken or environment-flaky; excluded from CI, runnable locally via `uv run pytest -m unstable`",
     "flaky: mark test as flaky for rerunning or skipping",
+    "anyio: inert; the anyio plugin is disabled and pytest-asyncio drives async tests",
 ]
 
 [dependency-groups]
