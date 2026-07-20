@@ -83,74 +83,7 @@ def _reset_lancedb_singleton():
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _isolate_db_engine():
-    """Give every test its own SQLAlchemy engine, created on that test's own loop.
-
-    `app.database._engine` is a process-global built lazily on whichever loop happens
-    to touch it first. aiosqlite runs each connection on a worker thread bound to the
-    loop that opened it, so once a later test reuses that engine from its own loop
-    every await crosses loops: `call_soon_threadsafe` lands on a closed loop
-    ("Event loop is closed"), `engine.dispose()` waits on a future nothing will
-    resolve, and a background task holding a session can no longer finish being
-    cancelled -- which is what wedges loop teardown. Undisposed engines also leak an
-    aiosqlite worker thread each (CI thread dumps showed 2000+).
-
-    Resetting before the test keeps a stale cross-loop engine from being inherited;
-    disposing after -- still inside the loop that created it -- releases the thread.
-    Mirrors _reset_lancedb_singleton, for the same class of reason.
-    """
-    import app.database as db_module
-
-    db_module._engine = None
-    db_module._session_factory = None
-    yield
-    engine = db_module._engine
-    db_module._engine = None
-    db_module._session_factory = None
-    if engine is not None:
-        try:
-            await engine.dispose()
-        except Exception:  # noqa: BLE001 - teardown must not mask the test's own result
-            pass
-
-
-UNDRAINABLE_TASKS: list[str] = []
-
-
-def _detach_from_loop_shutdown(task: asyncio.Task) -> None:
-    """Remove a task from the registry that asyncio's loop-close routine walks.
-
-    There is no public API for this: `_cancel_all_tasks()` reads `asyncio.all_tasks()`,
-    so the only way to stop it waiting on a task that refuses to die is to unregister
-    the task itself.
-    """
-    try:
-        import _asyncio
-
-        _asyncio._unregister_task(task)
-        return
-    except Exception:  # noqa: BLE001 - pure-Python asyncio has no C accelerator
-        pass
-    try:
-        asyncio.tasks._all_tasks.discard(task)  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001 - best effort; a hang here is worse than a miss
-        pass
-
-
-def pytest_terminal_summary(terminalreporter):
-    if not UNDRAINABLE_TASKS:
-        return
-    terminalreporter.section("Leaked background tasks (ignored cancellation)", sep="=")
-    terminalreporter.write_line(
-        "These tasks survived cancellation and were detached so loop teardown could "
-        "finish. Each is a fire-and-forget task outliving the test that spawned it:"
-    )
-    for entry in UNDRAINABLE_TASKS:
-        terminalreporter.write_line(f"  {entry}")
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _drain_leaked_tasks(request):
+async def _drain_leaked_tasks():
     """Cancel any fire-and-forget task the test spawned, while its loop is still alive.
 
     Routers fire ~12 kinds of background task (document pre-generate, tag enrichment,
@@ -173,19 +106,6 @@ async def _drain_leaked_tasks(request):
         # Bounded: a task stuck in a thread executor cannot be cancelled, and waiting
         # forever for it would recreate the hang this fixture exists to prevent.
         await asyncio.wait(leaked, timeout=5)
-
-    # A task that outlives the bounded wait above is one that did not honour its
-    # cancellation. Left alone it still reaches pytest-asyncio's loop close, whose
-    # _cancel_all_tasks() gathers it WITHOUT a timeout -- so a single such task hangs
-    # the run until the 120s session timeout kills it, blaming whichever test happened
-    # to be running (the whole misattribution this fixture exists to prevent).
-    # Detaching it from asyncio's shutdown bookkeeping is the only way to keep that
-    # gather from blocking; the task is already cancelled and doomed either way.
-    # Reported loudly at session end so the leak stays visible instead of silent.
-    survivors = [t for t in leaked if not t.done()]
-    for t in survivors:
-        UNDRAINABLE_TASKS.append(f"{request.node.nodeid} :: {t!r}")
-        _detach_from_loop_shutdown(t)
 
 
 @pytest.fixture(autouse=True)
