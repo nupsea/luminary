@@ -431,6 +431,7 @@ export default function NotePage() {
               <>Autosaves as you type</>
             )}
           </div>
+          {note && (
           <div className="relative">
             <button
               onClick={() => setExportMenuOpen((v) => !v)}
@@ -471,7 +472,8 @@ export default function NotePage() {
               </div>
             )}
           </div>
-          {confirmDelete ? (
+          )}
+          {note && (confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Delete note forever?</span>
               <button
@@ -496,7 +498,7 @@ export default function NotePage() {
             >
               <Trash2 size={13} />
             </button>
-          )}
+          ))}
         </div>
         <input
           value={editTitle}
@@ -577,11 +579,15 @@ export default function NotePage() {
                     )}
                   </div>
                 </div>
-                <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
-                <NoteBacklinks
-                  noteId={note.id}
-                  onOpenNote={(id) => void handleOpenLinkedNote(id)}
-                />
+                {note && (
+                  <>
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                    <NoteBacklinks
+                      noteId={note.id}
+                      onOpenNote={(id) => void handleOpenLinkedNote(id)}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -595,10 +601,12 @@ export default function NotePage() {
                 linkCompletion={linkCompletion}
                 editorRef={editorHandleRef}
               />
-              <NoteBacklinks
-                noteId={note.id}
-                onOpenNote={(id) => void handleOpenLinkedNote(id)}
-              />
+              {note && (
+                <NoteBacklinks
+                  noteId={note.id}
+                  onOpenNote={(id) => void handleOpenLinkedNote(id)}
+                />
+              )}
             </div>
 
             {propsRailOpen && (
@@ -651,9 +659,11 @@ export default function NotePage() {
                   )}
                 </div>
 
-                <div className="shrink-0">
-                  <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
-                </div>
+                {note && (
+                  <div className="shrink-0">
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                  </div>
+                )}
 
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
                   <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
@@ -692,7 +702,7 @@ export default function NotePage() {
       </div>
       {pdfExporting && (
         <NotePdfExport
-          title={editTitle.trim() || note.title || ""}
+          title={editTitle.trim() || note?.title || ""}
           content={editContent}
           onDone={() => setPdfExporting(false)}
         />
