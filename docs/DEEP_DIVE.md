@@ -448,7 +448,7 @@ Flashcard review with FSRS scheduling (Again / Hard / Good / Easy), teach-back s
 Conversational Q&A backed by the agentic chat graph. Scope selector chooses single document, all documents, or selected documents. Responses stream in real-time via SSE with inline citations (section heading, page number, clickable excerpt). Sessions are persisted; the left rail lists past chats grouped by date. The same Chat component also renders in a 450px right slide-over panel that's callable from any tab.
 
 ### Map (`/viz`, icon: Network)
-WebGL knowledge graph using Sigma.js v3 and Graphology. Entity nodes are colored by type, edges show relationship labels (co-occurrence, prerequisite, same-concept, mentioned-in). Sidebar filters by entity type, retention strength, and document scope. View modes include the default entity graph, a learning-path mode (prerequisite chains), and a code call-graph for ingested source files. Handles 10,000+ nodes smoothly via GPU-accelerated rendering.
+WebGL knowledge graph using Sigma.js v3 and Graphology. Entity nodes are colored by type, edges show relationship labels (co-occurrence, prerequisite, same-concept, mentioned-in). Sidebar filters by entity type, retention strength, and document scope. View modes include the default entity graph, a tag graph, and a code call-graph for ingested source files. Handles 10,000+ nodes smoothly via GPU-accelerated rendering.
 
 ### Progress (`/progress`, icon: Luminary lantern glyph)
 The learner's progress dashboard: streak + XP widget, FSRS due-count, knowledge gap scanner (LLM-graded gap detection against notes), study activity (last 30 days), notes-over-time chart, and the study habits section. The nav icon is a custom `LuminaryGlyph` SVG (lantern silhouette) — the only custom icon on the rail; all other nav icons are Lucide stroke-style.
@@ -600,7 +600,7 @@ The story-based PRD queue (ralph workflow, `prd-v2.json`) was retired on 2026-05
 
 - **Cross-document concept linking** — `SAME_CONCEPT` edges in Kuzu when two documents discuss the same idea under different names. Confidence + contradiction tracking.
 - **Image enrichment** — extract diagrams from PDFs, generate text descriptions via vision model, embed for retrieval.
-- **Prerequisite detection** — `PREREQUISITE_OF` edges in Kuzu, used for learning-path generation.
+- **Prerequisite detection** — `PREREQUISITE_OF` edges in Kuzu, rendered as the Map's prerequisite layer and used by the FSRS study path (`GET /study/path`).
 - **Study path generation** — sequence documents into an optimal learning order from prerequisite graph + FSRS mastery + gap detection.
 - **Multi-modal ingestion** — YouTube transcription is already scaffolded; podcasts, slide decks, and handwritten OCR would follow the same pipeline with format-specific parse nodes.
 - **Export and interop** — Anki flashcard export, Neo4j/GraphML knowledge-graph export, Notion / Markdown summary export.

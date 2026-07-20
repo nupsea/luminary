@@ -25,6 +25,34 @@ export function insertInlineSpec(state: EditorState, text: string): TransactionS
   }
 }
 
+// Sync an external value into the view as a minimal edit. A full 0..len
+// replace would remap the caret to the document start; diffing to the changed
+// span lets CodeMirror carry the selection through, so a programmatic edit
+// (image-size pipe, diagram swap, append) does not eject the cursor.
+export function syncDocSpec(state: EditorState, value: string): TransactionSpec | null {
+  const current = state.doc.toString()
+  if (value === current) return null
+  let start = 0
+  const minLen = Math.min(current.length, value.length)
+  while (start < minLen && current.charCodeAt(start) === value.charCodeAt(start)) start++
+  let endCur = current.length
+  let endVal = value.length
+  while (
+    endCur > start &&
+    endVal > start &&
+    current.charCodeAt(endCur - 1) === value.charCodeAt(endVal - 1)
+  ) {
+    endCur--
+    endVal--
+  }
+  // Seeding an empty view with async-loaded content: land the caret at the
+  // end so the first keystroke appends instead of prepending at offset 0.
+  if (current.length === 0) {
+    return { changes: { from: 0, insert: value }, selection: { anchor: value.length } }
+  }
+  return { changes: { from: start, to: endCur, insert: value.slice(start, endVal) } }
+}
+
 export function replaceSelectionSpec(
   state: EditorState,
   fn: (selected: string) => string,

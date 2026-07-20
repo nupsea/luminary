@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
@@ -103,7 +104,6 @@ from app.services.misconceptions import (
 from app.services.misconceptions import (
     get_stats as get_misconception_stats,
 )
-from app.services.settings_service import get_labs_enabled
 from app.services.study_path_service import StudyPathService
 from app.services.study_session_service import (
     build_session_plan as _build_session_plan,
@@ -403,7 +403,7 @@ async def assemble_study(
     """Study Launcher backend: resolve a scope -> a valid Study Event (docs/study-launcher.md).
 
     Returns the assembled due-card set + an honest preview, and records a StudyEvent row.
-    Tier-aware: teachback_available reflects the feynman labs surface. Model-down still
+    Mode-aware: teachback_available reflects the feynman surface (full mode only). Model-down still
     yields due cards (generation is a separate seam).
     """
     result = await study_assembler.assemble(
@@ -436,7 +436,7 @@ async def assemble_study(
     cards = [
         _to_response(c, section_id=chunk_to_section.get(c.chunk_id or "")) for c in result.cards
     ]
-    teachback_available = "feynman" in await get_labs_enabled(session)
+    teachback_available = get_settings().LUMINARY_MODE == "full"
 
     return AssembleResponse(
         event_id=event_id,

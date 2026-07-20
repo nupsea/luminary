@@ -1,8 +1,8 @@
 # Eval Runbook — generating and running Luminary's metrics
 
-The eval harness is a **labs-tier** feature (surface `quality_dashboard`, route
+The eval harness is a **full-mode** feature (surface `quality_dashboard`, route
 `/quality`, plus the `dataset_generator` service). It is off in public builds and
-revealable via the Labs toggle on a labs build; `dev` shows it always.
+always on in full mode (`make luminary`).
 
 All commands run from the repo root. The backend must be running on
 `http://localhost:7820` for anything that searches or ingests.
@@ -77,7 +77,7 @@ uv run --project backend python evals/run_topic_eval.py --dataset d2l \
 ## 4. Where results show up
 
 Every run appends to `evals/scores_history.jsonl` **and** POSTs to the backend
-store. They appear in the **Quality dashboard** (`/quality`, labs tier):
+store. They appear in the **Quality dashboard** (`/quality`, full mode):
 
 - **Runs** tab — one row per run with HR@5, MRR, Faith, Routing, **Topic F1**,
   **Junk** (topic metrics ride in the generic `extra_metrics` column, so new

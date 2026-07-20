@@ -43,6 +43,7 @@ import {
   fetchSourceContext,
 } from "@/lib/studyApi"
 import { apiGet } from "@/lib/apiClient"
+import { arrowDelta, isArrowKey, isButtonActivation, isTypingTarget, moveKbnavFocus } from "@/lib/keyboard"
 import { useAppStore } from "@/store"
 
 // SourceContextPanel
@@ -381,17 +382,20 @@ function SessionComplete({ reviewed, correct, predictionsMade, predictionsCalibr
       <div className="flex items-center gap-3">
         <button
           onClick={onStartNext}
-          className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          data-kbnav
+          className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Start Next Set
         </button>
         <button
           onClick={onBack}
-          className="rounded-lg border border-border px-6 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
+          data-kbnav
+          className="rounded-lg border border-border px-6 py-2 text-sm font-medium text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Back to Study
         </button>
       </div>
+      <p className="text-[11px] text-muted-foreground">← → to choose · Enter to confirm · Esc to go back</p>
     </div>
   )
 }
@@ -593,16 +597,28 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
     void exit(onExit)
   }
 
+  function startNextSet() {
+    setCorrect(0)
+    setLastRating(null)
+    setPredictedRating(null)
+    setShowAnswer(false)
+    setRevealed(false)
+    setNextReviewDate(null)
+    setSourceContext(null)
+    setCalibrationInline(null)
+    // Calibration is the moat metric — carry it across sets so it never
+    // silently resets to zero when the learner continues into a new set.
+    dismissedSourceContextIds.current.clear()
+    void beginNew()
+  }
+
   // Keyboard control for the standard flashcard flow: Space/Enter flips (skipping
   // the prediction), 1-4 grade once the answer is shown, Enter/Space continues past
-  // a source panel, and Esc ends. Cloze cards own their own keys, so we no-op there.
+  // any source/continue panel, Enter starts the next set on the completion screen,
+  // and Esc ends. Arrow keys rove focus across the visible [data-kbnav] buttons,
+  // and a focused button always wins Enter/Space so arrow-then-Enter activates the
+  // chosen action. Cloze cards register their own reveal/rate keys in ClozeCard.
   useEffect(() => {
-    function isTypingTarget(t: EventTarget | null): boolean {
-      if (!(t instanceof HTMLElement)) return false
-      if (t.isContentEditable) return true
-      const tag = t.tagName
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
-    }
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return
       if (e.key === "Escape") {
@@ -610,10 +626,28 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         void exit(onExit)
         return
       }
+      if (isArrowKey(e.key)) {
+        e.preventDefault()
+        moveKbnavFocus(arrowDelta(e.key))
+        return
+      }
+      // A focused button owns Enter/Space -- let native activation click it.
+      if (isButtonActivation(e)) return
+      if (sessionState === "complete") {
+        if (e.key === "Enter") {
+          e.preventDefault()
+          startNextSet()
+        }
+        return
+      }
       const card = queue[currentIndex]
       if (!card) return
-      // A source/continue panel is open: Enter or Space advances.
-      if (sourceContext !== null) {
+      // A continue panel is open (source-context panel, or the "again" source
+      // panel that renders once loading settles): Enter or Space advances.
+      const continuePanelOpen =
+        sourceContext !== null ||
+        (lastRating === "again" && !sourceContextLoading && !isRating)
+      if (continuePanelOpen) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
           void advanceCard()
@@ -661,7 +695,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue, currentIndex, showAnswer, revealed, lastRating, isRating, sourceContext, onExit])
+  }, [queue, currentIndex, showAnswer, revealed, lastRating, isRating, sourceContext, sourceContextLoading, sessionState, onExit])
 
   if (sessionState === "loading") {
     return (
@@ -678,7 +712,8 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
         <p className="text-sm text-muted-foreground">No cards due for review right now.</p>
         <button
           onClick={onExit}
-          className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
+          data-kbnav
+          className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Back to Study
         </button>
@@ -696,20 +731,7 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
           predictionsMade={predictionsMade}
           predictionsCalibrated={predictionsCalibrated}
           onBack={() => void exit(onExit)}
-          onStartNext={() => {
-            setCorrect(0)
-            setLastRating(null)
-            setPredictedRating(null)
-            setShowAnswer(false)
-            setRevealed(false)
-            setNextReviewDate(null)
-            setSourceContext(null)
-            setCalibrationInline(null)
-            // Calibration is the moat metric — carry it across sets so it never
-            // silently resets to zero when the learner continues into a new set.
-            dismissedSourceContextIds.current.clear()
-            void beginNew()
-          }}
+          onStartNext={startNextSet}
         />
       </div>
     )
@@ -802,7 +824,8 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                       setRevealed(true)
                       setShowAnswer(true)
                     }}
-                    className={`rounded border px-4 py-1.5 text-xs font-medium transition-colors ${
+                    data-kbnav
+                    className={`rounded border px-4 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                       predictedRating === value
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border bg-background text-muted-foreground hover:bg-accent"
@@ -818,11 +841,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                   setRevealed(true)
                   setShowAnswer(true)
                 }}
-                className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                data-kbnav
+                className="rounded text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 Skip prediction → Show Answer
               </button>
-              <p className="text-[11px] text-muted-foreground">1–3 to predict · Space to skip</p>
+              <p className="text-[11px] text-muted-foreground">1–3 to predict · Space to skip · Esc to end</p>
             </div>
           ) : lastRating === null ? (
             <div className="flex flex-col items-center gap-2">
@@ -832,8 +856,9 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
                     key={value}
                     onClick={() => void handleRate(value)}
                     disabled={isRating}
+                    data-kbnav
                     aria-label={`${label} (press ${i + 1})`}
-                    className={`flex items-center gap-1.5 rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${className}`}
+                    className={`flex items-center gap-1.5 rounded border px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${className}`}
                   >
                     <span className="opacity-50">{i + 1}</span>
                     <Icon size={14} aria-hidden />
@@ -877,10 +902,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               />
               <button
                 onClick={() => void advanceCard()}
-                className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                data-kbnav
+                className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 Continue
               </button>
+              <p className="text-[11px] text-muted-foreground">Enter to continue · Esc to end</p>
             </>
           )}
 
@@ -889,10 +916,12 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
               <SourcePanel card={currentCard} />
               <button
                 onClick={() => void advanceCard()}
-                className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                data-kbnav
+                className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 Continue
               </button>
+              <p className="text-[11px] text-muted-foreground">Enter to continue · Esc to end</p>
             </>
           )}
         </>
@@ -900,9 +929,10 @@ export function StudySession({ initial, scopeForBeginNew, onExit }: StudySession
 
       <button
         onClick={() => void handleBackToStudy()}
+        title="End session (Esc)"
         className="text-xs text-muted-foreground hover:text-foreground"
       >
-        End session
+        End session <span className="opacity-50">(Esc)</span>
       </button>
     </div>
   )

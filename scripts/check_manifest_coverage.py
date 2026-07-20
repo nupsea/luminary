@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Assert every backend router and top-level frontend page declares a tier.
+"""Assert every backend router and top-level frontend page declares a mode.
 
 Each must be referenced in surface-manifest.json or be on an explicit allow-list
-of cross-cutting / always-on surfaces. Forces new routers/pages to pick a tier.
+of cross-cutting / always-on surfaces. Forces new routers/pages to pick a mode.
 Wired into `make lint`.
 """
 

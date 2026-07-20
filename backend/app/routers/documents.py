@@ -682,14 +682,14 @@ async def ingest_url(
     # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
     if not is_youtube_url(body.url):
 
+        doc_id = str(uuid.uuid4())
         try:
             extractor = get_article_extractor()
-            parsed = await extractor.extract(body.url)
+            parsed = await extractor.extract(body.url, doc_id=doc_id)
         except Exception as exc:
             logger.error("Article extraction failed for %s: %s", body.url, exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        doc_id = str(uuid.uuid4())
         data_dir = Path(settings.DATA_DIR).expanduser()
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)

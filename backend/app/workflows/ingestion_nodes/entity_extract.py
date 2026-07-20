@@ -86,6 +86,132 @@ def _build_call_graph(chunks: list[dict], graph, doc_id: str) -> None:
     )
 
 
+def write_entity_graph(
+    graph,
+    doc_id: str,
+    canonical_entities: list[dict],
+    alias_map: dict[str, list[str]],
+    ner_chunks: list[dict],
+    chunks: list[dict],
+    content_type: str,
+) -> None:
+    """Write a document's entity graph to Kuzu: Entity nodes, MENTIONED_IN,
+    CO_OCCURS, prerequisite/tech/version edges, and the code call graph.
+
+    Shared by entity_extract_node (ingestion) and reindex_entities
+    --rebuild-graph so both produce an identical graph for the same input.
+    """
+    # Upsert entities and add mentions; re-raise on Kuzu failure when
+    # entities were successfully extracted (data loss must not be silent).
+    try:
+        for ent in canonical_entities:
+            aliases = alias_map.get(ent["id"])
+            graph.upsert_entity(ent["id"], ent["name"], ent["type"], aliases=aliases)
+            graph.add_mention(ent["id"], doc_id)
+
+        # Co-occurrence: entities sharing the same chunk
+        chunk_entities: dict[str, list[str]] = {}
+        for ent in canonical_entities:
+            chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
+
+        for chunk_ent_ids in chunk_entities.values():
+            for eid_a, eid_b in combinations(chunk_ent_ids, 2):
+                graph.add_co_occurrence(eid_a, eid_b, doc_id)
+    except Exception:
+        if canonical_entities:
+            # Entities were extracted but Kuzu write failed — re-raise so the
+            # caller captures it and the root cause is visible in logs.
+            raise
+
+    # Prerequisite detection: scan chunk texts for marker phrases.
+    # Only creates edges between entities already confirmed by GLiNER.
+    try:
+        canonical_name_to_id: dict[str, str] = {
+            ent["name"]: ent["id"] for ent in canonical_entities
+        }
+        known_names: set[str] = set(canonical_name_to_id.keys())
+        prereq_pairs = detect_prerequisites(ner_chunks, known_names)
+        prereq_count = 0
+        for dep_name, prereq_name, confidence in prereq_pairs:
+            dep_id = canonical_name_to_id.get(dep_name)
+            prereq_id = canonical_name_to_id.get(prereq_name)
+            if dep_id and prereq_id and dep_id != prereq_id:
+                graph.add_prerequisite(dep_id, prereq_id, doc_id, confidence)
+                prereq_count += 1
+        logger.info(
+            "prerequisite edges created: %d",
+            prereq_count,
+            extra={"doc_id": doc_id},
+        )
+    except Exception as prereq_exc:
+        logger.warning(
+            "prerequisite detection failed (non-fatal)",
+            extra={"doc_id": doc_id},
+            exc_info=prereq_exc,
+        )
+
+    # Tech relationship extraction: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON
+    # Only run for tech-relevant content types to avoid false edges in prose.
+    if content_type in ("code", "tech_book", "tech_article"):
+        try:
+            canonical_name_to_id_tech: dict[str, str] = {
+                ent["name"]: ent["id"] for ent in canonical_entities
+            }
+            known_names_tech: set[str] = set(canonical_name_to_id_tech.keys())
+            tech_rel_pairs = extract_tech_relations(ner_chunks, known_names_tech)
+            tech_rel_count = 0
+            for name_a, name_b, rel_label in tech_rel_pairs:
+                id_a = canonical_name_to_id_tech.get(name_a)
+                id_b = canonical_name_to_id_tech.get(name_b)
+                if id_a and id_b and id_a != id_b:
+                    try:
+                        graph.add_tech_relation(id_a, id_b, rel_label, doc_id)
+                        tech_rel_count += 1
+                    except ValueError:
+                        logger.debug("Skipped unknown tech relation label: %r", rel_label)
+            logger.info(
+                "tech relation edges created: %d",
+                tech_rel_count,
+                extra={"doc_id": doc_id},
+            )
+
+            # Version-of edges: for LIBRARY entities with version qualifiers,
+            # link the versioned entity to its major-version base entity.
+
+            version_base_count = 0
+            for ent in canonical_entities:
+                if ent["type"] != "LIBRARY":
+                    continue
+                name = ent["name"]
+                base_name, version_str = _extract_version_qualifier(name)
+                if version_str is None or base_name == name:
+                    continue
+                # Create or find the base entity node
+
+                base_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
+                # Upsert base entity if it doesn't exist yet
+                graph.upsert_entity(base_id, base_name, "LIBRARY")
+                graph.add_mention(base_id, doc_id)
+                graph.add_version_of(ent["id"], base_id, doc_id)
+                version_base_count += 1
+            if version_base_count:
+                logger.info(
+                    "version_of edges created: %d",
+                    version_base_count,
+                    extra={"doc_id": doc_id},
+                )
+        except Exception as tech_exc:
+            logger.warning(
+                "tech relation extraction failed (non-fatal)",
+                extra={"doc_id": doc_id},
+                exc_info=tech_exc,
+            )
+
+    # Build call graph for code documents
+    if content_type == "code":
+        _build_call_graph(chunks, graph, doc_id)
+
+
 async def entity_extract_node(state: IngestionState) -> IngestionState:
     doc_id = state["document_id"]
     chunks = state.get("chunks") or []
@@ -155,11 +281,13 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             alias_map: dict[str, list[str]] = {}
             canonical_entities = []
             chunk_to_entities: dict[str, set[str]] = {}
-            for (canonical, etype, original), ent in zip(canonical_triples, entities):
+            for (canonical, canonical_type, original), ent in zip(canonical_triples, entities):
                 canonical_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{canonical}"))
                 if original != canonical:
                     alias_map.setdefault(canonical_id, []).append(original)
-                canonical_entities.append({**ent, "id": canonical_id, "name": canonical})
+                canonical_entities.append(
+                    {**ent, "id": canonical_id, "name": canonical, "type": canonical_type}
+                )
                 chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
 
             # Entity injection (option b) -- store canonical entities in a
@@ -183,119 +311,15 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                         )
                     await update_session.commit()
 
-            # Upsert entities and add mentions; re-raise on Kuzu failure when
-            # entities were successfully extracted (data loss must not be silent).
-            try:
-                for ent in canonical_entities:
-                    aliases = alias_map.get(ent["id"])
-                    graph.upsert_entity(ent["id"], ent["name"], ent["type"], aliases=aliases)
-                    graph.add_mention(ent["id"], doc_id)
-
-                # Co-occurrence: entities sharing the same chunk
-                chunk_entities: dict[str, list[str]] = {}
-                for ent in canonical_entities:
-                    chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
-
-                for chunk_ent_ids in chunk_entities.values():
-                    for eid_a, eid_b in combinations(chunk_ent_ids, 2):
-                        graph.add_co_occurrence(eid_a, eid_b, doc_id)
-            except Exception:
-                if entity_count > 0:
-                    # Entities were extracted but Kuzu write failed — re-raise so the
-                    # outer except captures it and the root cause is visible in logs.
-                    raise
-
-            # Prerequisite detection: scan chunk texts for marker phrases.
-            # Only creates edges between entities already confirmed by GLiNER.
-            try:
-
-                canonical_name_to_id: dict[str, str] = {
-                    ent["name"]: ent["id"] for ent in canonical_entities
-                }
-                known_names: set[str] = set(canonical_name_to_id.keys())
-                prereq_pairs = detect_prerequisites(ner_chunks, known_names)
-                prereq_count = 0
-                for dep_name, prereq_name, confidence in prereq_pairs:
-                    dep_id = canonical_name_to_id.get(dep_name)
-                    prereq_id = canonical_name_to_id.get(prereq_name)
-                    if dep_id and prereq_id and dep_id != prereq_id:
-                        graph.add_prerequisite(dep_id, prereq_id, doc_id, confidence)
-                        prereq_count += 1
-                logger.info(
-                    "prerequisite edges created: %d",
-                    prereq_count,
-                    extra={"doc_id": doc_id},
-                )
-            except Exception as prereq_exc:
-                logger.warning(
-                    "prerequisite detection failed (non-fatal)",
-                    extra={"doc_id": doc_id},
-                    exc_info=prereq_exc,
-                )
-
-            # Tech relationship extraction: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON
-            # Only run for tech-relevant content types to avoid false edges in prose.
-            content_type_for_tech = state.get("content_type") or ""
-            if content_type_for_tech in ("code", "tech_book", "tech_article"):
-                try:
-
-                    canonical_name_to_id_tech: dict[str, str] = {
-                        ent["name"]: ent["id"] for ent in canonical_entities
-                    }
-                    known_names_tech: set[str] = set(canonical_name_to_id_tech.keys())
-                    tech_rel_pairs = extract_tech_relations(ner_chunks, known_names_tech)
-                    tech_rel_count = 0
-                    for name_a, name_b, rel_label in tech_rel_pairs:
-                        id_a = canonical_name_to_id_tech.get(name_a)
-                        id_b = canonical_name_to_id_tech.get(name_b)
-                        if id_a and id_b and id_a != id_b:
-                            try:
-                                graph.add_tech_relation(id_a, id_b, rel_label, doc_id)
-                                tech_rel_count += 1
-                            except ValueError:
-                                logger.debug("Skipped unknown tech relation label: %r", rel_label)
-                    logger.info(
-                        "tech relation edges created: %d",
-                        tech_rel_count,
-                        extra={"doc_id": doc_id},
-                    )
-
-                    # Version-of edges: for LIBRARY entities with version qualifiers,
-                    # link the versioned entity to its major-version base entity.
-
-                    version_base_count = 0
-                    for ent in canonical_entities:
-                        if ent["type"] != "LIBRARY":
-                            continue
-                        name = ent["name"]
-                        base_name, version_str = _extract_version_qualifier(name)
-                        if version_str is None or base_name == name:
-                            continue
-                        # Create or find the base entity node
-
-                        base_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{base_name}"))
-                        # Upsert base entity if it doesn't exist yet
-                        graph.upsert_entity(base_id, base_name, "LIBRARY")
-                        graph.add_mention(base_id, doc_id)
-                        graph.add_version_of(ent["id"], base_id, doc_id)
-                        version_base_count += 1
-                    if version_base_count:
-                        logger.info(
-                            "version_of edges created: %d",
-                            version_base_count,
-                            extra={"doc_id": doc_id},
-                        )
-                except Exception as tech_exc:
-                    logger.warning(
-                        "tech relation extraction failed (non-fatal)",
-                        extra={"doc_id": doc_id},
-                        exc_info=tech_exc,
-                    )
-
-            # Build call graph for code documents
-            content_type = state.get("content_type") or ""
-            if content_type == "code":
-                _build_call_graph(chunks, graph, doc_id)
+            write_entity_graph(
+                graph,
+                doc_id,
+                canonical_entities,
+                alias_map,
+                ner_chunks,
+                chunks,
+                state.get("content_type") or "",
+            )
         except MemoryError as exc:
             logger.error(
                 "entity_extract_node: OOM loading GLiNER model -- "

@@ -7,7 +7,6 @@ import { apiGet } from "@/lib/apiClient"
 import type {
   DocListItem,
   GraphData,
-  LearningPathData,
   MasteryConceptsResponse,
   TagGraphData,
 } from "./types"
@@ -46,15 +45,6 @@ export const fetchGraphData = (
         include_same_concept: showCrossBook,
         include_notes: includeNotes,
       })
-
-export const fetchLearningPath = (
-  documentId: string,
-  startEntity: string,
-): Promise<LearningPathData> =>
-  apiGet<LearningPathData>("/graph/learning-path", {
-    document_id: documentId,
-    start_entity: startEntity,
-  })
 
 export async function fetchDocList(): Promise<DocListItem[]> {
   try {

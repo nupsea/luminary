@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,7 @@ from app.services.activity_service import ActivityService
 # cycles that have since been broken.
 from app.services.clustering_service import get_clustering_service
 from app.services.engagement_service import EngagementService
+from app.services.export_service import get_export_service
 from app.services.flashcard import get_flashcard_service
 from app.services.gap_detector import get_gap_detector
 from app.services.llm import LLMUnavailableError
@@ -193,7 +194,6 @@ async def create_note(
     # Automatic tag saving for new notes if none provided
     tags = [_nt for t in (req.tags or []) if (_nt := normalize_tag_slug(t))]
     if not tags and req.content.strip():
-
         try:
             raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(req.content)
             tags = [_nt for t in raw_tags if (_nt := normalize_tag_slug(t))]
@@ -259,7 +259,6 @@ async def create_note(
     # Fire-and-forget XP award for note creation.
     async def _award_note_xp() -> None:
         try:
-
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
                 await svc.award_note_xp(note.id, len(tags))
@@ -398,9 +397,7 @@ async def list_notes(
     src_map: dict[str, list[str]] = {}
     if notes:
         note_ids = [n.id for n in notes]
-        refs_by_note = await CollectionRepo(session).refs_for_members(
-            note_ids, member_type="note"
-        )
+        refs_by_note = await CollectionRepo(session).refs_for_members(note_ids, member_type="note")
         coll_map = {
             nid: [CollectionRef(id=cid, name=name, color=color) for cid, name, color in refs]
             for nid, refs in refs_by_note.items()
@@ -493,8 +490,7 @@ async def _apply_note_update(
     return _to_response(
         note,
         collections=[
-            CollectionRef(id=cid, name=name, color=color)
-            for cid, name, color in coll_refs_raw
+            CollectionRef(id=cid, name=name, color=color) for cid, name, color in coll_refs_raw
         ],
         source_document_ids=list(src_rows),
     )
@@ -548,6 +544,31 @@ async def get_note_entities(note_id: str) -> list[NoteEntityItem]:
 
     entities = await get_note_graph_service().get_entities_for_note(note_id)
     return [NoteEntityItem(**e) for e in entities]
+
+
+@router.get("/{note_id}/export")
+async def export_note(
+    note_id: str,
+    format: str = "markdown",
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export a single note as a Markdown file.
+
+    ?format=markdown -- returns .md with YAML frontmatter and Obsidian [[title]] wikilinks
+    (PDF export is rendered client-side via the browser's print dialog.)
+    """
+    if format != "markdown":
+        raise HTTPException(status_code=422, detail="format must be 'markdown'")
+
+    try:
+        data, filename = await get_export_service().export_note_markdown(note_id, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=data,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/flashcards/generate/preview")
@@ -673,7 +694,6 @@ async def trigger_cluster(
     # Check rate-limit synchronously before spawning task
     last_run = await svc.get_pending_last_run(session)
     if last_run is not None:
-
         now = datetime.now(UTC)
         age = now - (last_run.replace(tzinfo=UTC) if last_run.tzinfo is None else last_run)
         if age < timedelta(hours=1):
@@ -938,8 +958,7 @@ async def get_note(
         await CollectionRepo(repo.session).refs_for_members([note_id], member_type="note")
     ).get(note_id, [])
     coll_refs = [
-        CollectionRef(id=cid, name=name, color=color)
-        for cid, name, color in coll_refs_raw
+        CollectionRef(id=cid, name=name, color=color) for cid, name, color in coll_refs_raw
     ]
     return _to_response(note, coll_refs, src_rows)
 
@@ -952,7 +971,6 @@ async def gap_detect(
     """Identify book concepts absent from the user's notes."""
     if not req.note_ids:
         raise HTTPException(status_code=422, detail="note_ids must be non-empty")
-
 
     try:
         report = await get_gap_detector().detect_gaps(
@@ -992,7 +1010,6 @@ async def suggest_tags(
     # Grab content before releasing DB session to avoid holding a connection
     # during a potentially slow LLM call.
     note_content = note.content
-
 
     raw_tags = await _note_tagger_module.get_note_tagger().suggest_tags(note_content)
     tags = [n for t in raw_tags if (n := normalize_tag_slug(t))]

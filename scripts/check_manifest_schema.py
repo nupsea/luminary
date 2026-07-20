@@ -13,7 +13,8 @@ MANIFEST = REPO / "surface-manifest.json"
 ROUTERS = REPO / "backend" / "app" / "routers"
 FRONTEND_SRC = REPO / "frontend" / "src"
 
-TIERS = {"public", "labs", "dev"}
+MODES = {"public", "full"}
+RAILS = {"dev"}
 KINDS = {"nav_tab", "feature", "service"}
 
 
@@ -26,8 +27,8 @@ def main() -> int:
     data = json.loads(MANIFEST.read_text())
     errors: list[str] = []
 
-    if data.get("version") != 1:
-        errors.append(f"unsupported manifest version: {data.get('version')!r} (expected 1)")
+    if data.get("version") != 2:
+        errors.append(f"unsupported manifest version: {data.get('version')!r} (expected 2)")
 
     seen_ids: set[str] = set()
     seen_routes: dict[str, str] = {}
@@ -39,8 +40,10 @@ def main() -> int:
             errors.append(f"duplicate surface id: {sid}")
         seen_ids.add(sid)
 
-        if s.get("tier") not in TIERS:
-            errors.append(f"{sid}: invalid tier {s.get('tier')!r}")
+        if s.get("mode") not in MODES:
+            errors.append(f"{sid}: invalid mode {s.get('mode')!r}")
+        if "rail" in s and s.get("rail") not in RAILS:
+            errors.append(f"{sid}: invalid rail {s.get('rail')!r}")
         if s.get("kind") not in KINDS:
             errors.append(f"{sid}: invalid kind {s.get('kind')!r}")
 
@@ -51,8 +54,8 @@ def main() -> int:
         if s.get("kind") == "nav_tab" and (not route or not component):
             errors.append(f"{sid}: nav_tab requires frontend.route and frontend.component")
 
-        if s.get("tier") == "labs" and not s.get("description"):
-            errors.append(f"{sid}: labs surfaces require a description")
+        if s.get("mode") == "full" and s.get("rail") != "dev" and not s.get("description"):
+            errors.append(f"{sid}: full-mode surfaces require a description")
 
         if route:
             if route in seen_routes:

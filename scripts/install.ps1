@@ -315,7 +315,7 @@ if ($npmCiFailed) {
 }
 
 Write-Host "[install] Building production SPA..." -ForegroundColor Yellow
-$env:VITE_SURFACE_TIER="public"
+$env:VITE_LUMINARY_MODE="public"
 $env:VITE_API_BASE="/api"
 try {
     & $npmCommand run build
@@ -339,8 +339,7 @@ $startScriptContent = @'
 $ErrorActionPreference = "Stop"
 Set-Location -Path "$PSScriptRoot\backend"
 $env:DATA_DIR = "$PSScriptRoot\.luminary"
-$env:LUMINARY_MODE = "prod"
-$env:LUMINARY_SURFACE_TIER = "public"
+$env:LUMINARY_MODE = "public"
 $port = 7820
 
 Write-Host "Starting Luminary on http://localhost:$port ..." -ForegroundColor Cyan

@@ -612,6 +612,118 @@ async def get_eval_runs(
     ]
 
 
+class EvalRunCreate(BaseModel):
+    dataset_name: str
+    model_used: str
+    eval_kind: str | None = "retrieval"
+    hit_rate_5: float | None = None
+    mrr: float | None = None
+    faithfulness: float | None = None
+    answer_relevance: float | None = None
+    context_precision: float | None = None
+    context_recall: float | None = None
+    citation_support_rate: float | None = None
+    theme_coverage: float | None = None
+    no_hallucination: float | None = None
+    conciseness_pct: float | None = None
+    factuality: float | None = None
+    atomicity: float | None = None
+    clarity_avg: float | None = None
+    routing_accuracy: float | None = None
+    per_route: dict | None = None
+    ablation_metrics: dict | None = None
+    extra_metrics: dict | None = None
+
+
+class EvalRunStoredResponse(BaseModel):
+    id: str
+    dataset_name: str
+    model_used: str
+    eval_kind: str | None
+    run_at: datetime
+    hit_rate_5: float | None
+    mrr: float | None
+    faithfulness: float | None
+    answer_relevance: float | None
+    context_precision: float | None
+    context_recall: float | None
+    citation_support_rate: float | None = None
+    theme_coverage: float | None = None
+    no_hallucination: float | None = None
+    conciseness_pct: float | None = None
+    factuality: float | None = None
+    atomicity: float | None = None
+    clarity_avg: float | None = None
+    routing_accuracy: float | None = None
+    per_route: dict | None = None
+    ablation_metrics: dict | None = None
+    extra_metrics: dict | None = None
+
+
+@router.post("/store", response_model=EvalRunStoredResponse, status_code=201)
+async def store_eval_run(
+    payload: EvalRunCreate,
+    db: AsyncSession = Depends(get_db),
+) -> EvalRunStoredResponse:
+    """Persist a completed evaluation run to SQLite (used by the eval runners)."""
+    run = EvalRunModel(
+        id=str(uuid.uuid4()),
+        dataset_name=payload.dataset_name,
+        model_used=payload.model_used,
+        eval_kind=payload.eval_kind or "retrieval",
+        run_at=datetime.now(tz=UTC),
+        hit_rate_5=payload.hit_rate_5,
+        mrr=payload.mrr,
+        faithfulness=payload.faithfulness,
+        answer_relevance=payload.answer_relevance,
+        context_precision=payload.context_precision,
+        context_recall=payload.context_recall,
+        citation_support_rate=payload.citation_support_rate,
+        theme_coverage=payload.theme_coverage,
+        no_hallucination=payload.no_hallucination,
+        conciseness_pct=payload.conciseness_pct,
+        factuality=payload.factuality,
+        atomicity=payload.atomicity,
+        clarity_avg=payload.clarity_avg,
+        routing_accuracy=payload.routing_accuracy,
+        per_route=payload.per_route,
+        ablation_metrics=payload.ablation_metrics,
+        extra_metrics=payload.extra_metrics,
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    logger.info(
+        "Stored eval run",
+        extra={"id": run.id, "dataset_name": payload.dataset_name},
+    )
+    return EvalRunStoredResponse(
+        id=run.id,
+        dataset_name=run.dataset_name,
+        model_used=run.model_used,
+        eval_kind=run.eval_kind,
+        # aiosqlite reads back tz-naive; attach UTC so clients don't parse as local
+        run_at=run.run_at.replace(tzinfo=UTC) if run.run_at.tzinfo is None else run.run_at,
+        hit_rate_5=run.hit_rate_5,
+        mrr=run.mrr,
+        faithfulness=run.faithfulness,
+        answer_relevance=run.answer_relevance,
+        context_precision=run.context_precision,
+        context_recall=run.context_recall,
+        citation_support_rate=run.citation_support_rate,
+        theme_coverage=run.theme_coverage,
+        no_hallucination=run.no_hallucination,
+        conciseness_pct=run.conciseness_pct,
+        factuality=run.factuality,
+        atomicity=run.atomicity,
+        clarity_avg=run.clarity_avg,
+        routing_accuracy=run.routing_accuracy,
+        per_route=run.per_route,
+        ablation_metrics=run.ablation_metrics,
+        extra_metrics=run.extra_metrics,
+    )
+
+
 class GoldenInfoResponse(BaseModel):
     name: str
     question_count: int

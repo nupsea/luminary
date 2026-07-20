@@ -15,19 +15,28 @@
 import type Graph from "graphology"
 import { useEffect, useRef } from "react"
 import Sigma from "sigma"
+import { drawDiscNodeHover } from "sigma/rendering"
 import type { SigmaEdgeEventPayload, SigmaNodeEventPayload } from "sigma/types"
 
+import { useIsDark } from "@/hooks/useIsDark"
 import { logger } from "@/lib/logger"
 import NodeHexagonProgram from "@/lib/sigma-hexagon"
 import NodeSquareProgram from "@/lib/sigma-square"
+import { isDark } from "@/lib/theme"
 
-import { BLIND_SPOT_COLOR, DIM_COLOR, LP_EDGE_COLOR } from "./constants"
+import {
+  BLIND_SPOT_COLOR,
+  DIM_COLOR,
+  LABEL_COLOR,
+  LABEL_COLOR_DARK,
+  NEUTRAL_EDGE_COLOR,
+  NEUTRAL_EDGE_COLOR_DARK,
+} from "./constants"
 import type { MasteryConceptItem, SelectedNodeInfo } from "./types"
 import { masteryColor } from "./utils"
 
 interface UseSigmaOptions {
   filteredGraph: Graph | null
-  viewMode: string
   search: string
   showRetention: boolean
   masteryMap: Map<string, MasteryConceptItem>
@@ -47,7 +56,6 @@ interface UseSigmaResult {
 export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
   const {
     filteredGraph,
-    viewMode,
     search,
     showRetention,
     masteryMap,
@@ -56,6 +64,8 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
     onEdgeHover,
     onClusterToggle,
   } = opts
+
+  const dark = useIsDark()
 
   const canvasRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -90,11 +100,18 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
 
       currentEl.innerHTML = ""
 
+      // isDark() is read at build time; the theme effect below restyles the
+      // live instance when the user toggles without a rebuild.
       const s = new Sigma(filteredGraph, currentEl, {
         renderEdgeLabels: false,
-        defaultEdgeColor: viewMode === "learning_path" ? LP_EDGE_COLOR : "#e2e8f0",
+        defaultEdgeColor: isDark() ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR,
         labelSize: 12,
         labelWeight: "normal",
+        labelColor: { color: isDark() ? LABEL_COLOR_DARK : LABEL_COLOR },
+        // The hover bubble sigma draws is always white, so pin its text dark
+        // regardless of the theme-dependent labelColor above.
+        defaultDrawNodeHover: (context, data, settings) =>
+          drawDiscNodeHover(context, data, { ...settings, labelColor: { color: LABEL_COLOR } }),
         nodeProgramClasses: {
           hexagon: NodeHexagonProgram as any,
           square: NodeSquareProgram as any,
@@ -261,6 +278,18 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
       }
     }
   }, [search, filteredGraph, showRetention, masteryMap])
+
+  // -------------------------------------------------------------------------
+  // Theme effect: restyle the live instance on light/dark toggle (labels +
+  // neutral edges); camera position is preserved because nothing rebuilds.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const s = sigmaRef.current
+    if (!s) return
+    s.setSetting("labelColor", { color: dark ? LABEL_COLOR_DARK : LABEL_COLOR })
+    s.setSetting("defaultEdgeColor", dark ? NEUTRAL_EDGE_COLOR_DARK : NEUTRAL_EDGE_COLOR)
+    s.refresh()
+  }, [dark, filteredGraph])
 
   // -------------------------------------------------------------------------
   // Camera controls

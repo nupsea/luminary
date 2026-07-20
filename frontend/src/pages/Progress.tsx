@@ -21,7 +21,6 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
@@ -32,6 +31,7 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import { GoalsList } from "@/components/goals/GoalsList"
 import type { DocListItem } from "./Study"
 import type { components } from "@/types/api"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
 type DueCountResponse = components["schemas"]["DueCountResponse"]
@@ -368,7 +368,7 @@ function CalibrationWidget() {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="week" tick={{ fontSize: 10 }} />
             <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v) => [`${String(v)}%`, "Match rate"]} />
+            <ChartTooltip formatter={(v) => [`${String(v)}%`, "Match rate"]} />
             <Line
               type="monotone"
               dataKey="match_rate"
@@ -651,7 +651,7 @@ export default function Progress() {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Tooltip />
+              <ChartTooltip />
               <Bar dataKey="cards_reviewed" name="Cards reviewed" fill="#6366f1" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -679,7 +679,7 @@ export default function Progress() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <ChartTooltip />
                 <Bar dataKey="count" name="Notes" fill="#22c55e" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

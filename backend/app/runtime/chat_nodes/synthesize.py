@@ -11,13 +11,14 @@ Pass-through behaviour: if a strategy node already set a non-empty
 node returns {} so stream_answer() emits the existing answer.
 """
 
+import asyncio
 import logging
 
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel
+from app.models import ChunkModel, DocumentModel, ImageModel
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.context_packer import pack_context
@@ -35,6 +36,47 @@ logger = logging.getLogger(__name__)
 _MAX_CITATIONS = 5
 _CITATION_REL_RATIO = 0.5
 _CITATION_MIN_SCORE = 0.01
+
+
+# Cap injected visual descriptions so they inform the answer without crowding out
+# the retrieved prose. image_ids are already scoped to the answer's documents by
+# HybridRetriever.retrieve_with_images.
+_MAX_IMAGE_CONTEXT = 4
+
+
+async def _fetch_image_context(image_ids: list[str], doc_titles: dict[str, str]) -> str:
+    """Format vision-analyzed image descriptions as a labeled context block.
+
+    Skips decorative images (no informational content). Returns "" when no
+    described, non-decorative images are found so the prompt is unchanged.
+    """
+    if not image_ids:
+        return ""
+    async with get_session_factory()() as session:
+        rows = await session.execute(
+            select(ImageModel).where(
+                ImageModel.id.in_(image_ids),
+                ImageModel.description.is_not(None),
+                ImageModel.image_type != "decorative",
+            )
+        )
+        images = list(rows.scalars().all())
+
+    if not images:
+        return ""
+
+    # Preserve retrieval rank: image_ids arrive best-first from the retriever.
+    order = {iid: i for i, iid in enumerate(image_ids)}
+    images.sort(key=lambda im: order.get(im.id, len(order)))
+
+    lines: list[str] = []
+    for img in images[:_MAX_IMAGE_CONTEXT]:
+        title = doc_titles.get(img.document_id, "")
+        kind = (img.image_type or "image").replace("_", " ")
+        where = f" | Document: {title}" if title else ""
+        lines.append(f"[Figure ({kind}){where}]\n{img.description}")
+
+    return "The following figures appear in the source material:\n\n" + "\n\n".join(lines)
 
 
 async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, str]:
@@ -82,13 +124,13 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
 
     try:
         svc = _graph_module.get_graph_service()
-        all_edges = svc.get_same_concept_edges()
-        relevant = [
-            e
-            for e in all_edges
-            if e["contradiction"]
-            and (e["source_doc_id"] in doc_ids or e["target_doc_id"] in doc_ids)
-        ]
+        # Kuzu is synchronous: keep it off the event loop (I-2). The contradiction
+        # + doc-scope filter is done in Cypher, so only the edges we'll actually
+        # use cross into Python (was: scan every SAME_CONCEPT edge in the library
+        # and filter here).
+        relevant = await asyncio.to_thread(
+            svc.get_contradiction_edges_for_docs, doc_ids
+        )
         if not relevant:
             return ""
 
@@ -180,6 +222,22 @@ async def synthesize_node(state: ChatState) -> dict:
 
     context = "\n\n---\n\n".join(context_parts) if context_parts else ""
 
+    # Inject vision-analyzed figure descriptions so diagrams/charts/code
+    # screenshots inform the answer, not just retrieval. Must happen before the
+    # prompt is assembled below.
+    image_ids = state.get("image_ids") or []
+    if image_ids:
+        try:
+            image_doc_titles = await _fetch_doc_titles_for_chunks(chunks_dicts)
+            image_context = await _fetch_image_context(image_ids, image_doc_titles)
+            if image_context:
+                context = f"{context}\n\n---\n\n{image_context}" if context else image_context
+                logger.info(
+                    "synthesize_node: injected image context (%d chars)", len(image_context)
+                )
+        except Exception:
+            logger.debug("synthesize_node: image context fetch failed", exc_info=True)
+
     # For summary intent with scope=single: also prepend executive summary if chunks present
     if (
         intent != "summary"
@@ -221,6 +279,20 @@ async def synthesize_node(state: ChatState) -> dict:
         if lines_to_include:
             history_block = "Prior conversation (most recent last):\n" + "\n".join(lines_to_include)
 
+    # Inject SAME_CONCEPT contradiction context for scope=all. Must happen before
+    # the prompt is assembled below, or it never reaches the LLM.
+    if scope == "all" and state.get("doc_ids"):
+        try:
+            contradiction_ctx = await _fetch_contradiction_context(state["doc_ids"])
+            if contradiction_ctx:
+                context = contradiction_ctx + "\n\n---\n\n" + context
+                logger.info(
+                    "synthesize_node: injected contradiction context (%d chars)",
+                    len(contradiction_ctx),
+                )
+        except Exception:
+            logger.debug("synthesize_node: contradiction context fetch failed", exc_info=True)
+
     if history_block:
         prompt = f"{history_block}\n\nContext:\n\n{context}\n\nQuestion: {question}"
     else:
@@ -235,19 +307,6 @@ async def synthesize_node(state: ChatState) -> dict:
             "If the passages come from multiple documents, synthesise across them. "
             "Be explicit about which document each point comes from."
         )
-
-    # Inject SAME_CONCEPT contradiction context for scope=all
-    if scope == "all" and state.get("doc_ids"):
-        try:
-            contradiction_ctx = await _fetch_contradiction_context(state["doc_ids"])
-            if contradiction_ctx:
-                context = contradiction_ctx + "\n\n---\n\n" + context
-                logger.info(
-                    "synthesize_node: injected contradiction context (%d chars)",
-                    len(contradiction_ctx),
-                )
-        except Exception:
-            logger.debug("synthesize_node: contradiction context fetch failed", exc_info=True)
 
     # Inject version-mismatch detection instruction when web snippets are present
     web_snippets = state.get("web_snippets") or []

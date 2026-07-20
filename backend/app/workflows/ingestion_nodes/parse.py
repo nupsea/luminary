@@ -18,7 +18,9 @@ from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _classify,
     _parser,
+    _persist_content_type,
     _update_stage,
+    resolve_technical_variant,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,10 +68,20 @@ async def classify_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
     # Classification only runs for legacy paths where content_type is unknown.
-    if state.get("content_type") is not None:
+    provided = state.get("content_type")
+    if provided is not None:
+        if provided == "technical":
+            pd = state.get("parsed_document")
+            resolved = resolve_technical_variant(pd["raw_text"]) if pd else "tech_article"
+            await _persist_content_type(state["document_id"], resolved)
+            logger.info(
+                "classify_node: resolved user-provided 'technical'",
+                extra={"doc_id": state["document_id"], "content_type": resolved},
+            )
+            return {**state, "content_type": resolved, "status": "chunking"}
         logger.info(
             "classify_node: skipping (user-provided content_type)",
-            extra={"doc_id": state["document_id"], "content_type": state["content_type"]},
+            extra={"doc_id": state["document_id"], "content_type": provided},
         )
         return {**state, "status": "chunking"}
     with trace_ingestion_node("classify", state):

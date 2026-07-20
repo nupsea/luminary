@@ -29,6 +29,7 @@ function makePage(items: { str: string; height: number; transform?: number[] }[]
         transform: i.transform ?? [1, 0, 0, i.height, 0, 0],
       })),
     }),
+    cleanup: vi.fn(),
   }
 }
 

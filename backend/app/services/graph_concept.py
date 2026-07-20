@@ -125,6 +125,51 @@ class KuzuConceptRepo:
             logger.debug("get_same_concept_edges failed", exc_info=True)
             return []
 
+    def get_contradiction_edges_for_docs(self, doc_ids: list[str]) -> list[dict]:
+        """SAME_CONCEPT edges flagged as contradictions touching any of `doc_ids`.
+
+        Same row shape as get_same_concept_edges. The contradiction + doc-scope
+        filter is pushed into Cypher so only matching rows cross into Python --
+        the chat contradiction-context path keeps 3 of these per answer, and the
+        full-graph scan built a dict for every edge in the library to do it.
+        (Kuzu has no index on r.source_doc_id, so the edge scan is still O(edges);
+        what this drops is the per-edge Python materialization.)
+        """
+        if not doc_ids:
+            return []
+        try:
+            result = self._conn.execute(
+                "MATCH (a:Entity)-[r:SAME_CONCEPT]->(b:Entity)"
+                " WHERE r.contradiction = 1"
+                " AND (r.source_doc_id IN $doc_ids OR r.target_doc_id IN $doc_ids)"
+                " RETURN a.id, b.id, a.name, b.name,"
+                " r.source_doc_id, r.target_doc_id,"
+                " r.confidence, r.contradiction,"
+                " r.contradiction_note, r.prefer_source",
+                {"doc_ids": doc_ids},
+            )
+            edges: list[dict] = []
+            while result.has_next():
+                row = result.get_next()
+                edges.append(
+                    {
+                        "entity_id_a": row[0],
+                        "entity_id_b": row[1],
+                        "name_a": row[2],
+                        "name_b": row[3],
+                        "source_doc_id": row[4],
+                        "target_doc_id": row[5],
+                        "confidence": float(row[6] or 0.0),
+                        "contradiction": bool(row[7]),
+                        "contradiction_note": row[8] or "",
+                        "prefer_source": row[9] or "",
+                    }
+                )
+            return edges
+        except Exception:
+            logger.debug("get_contradiction_edges_for_docs failed", exc_info=True)
+            return []
+
     def get_concept_clusters(self) -> list[dict]:
         """Return concept clusters: groups of Entity nodes linked by SAME_CONCEPT edges.
 

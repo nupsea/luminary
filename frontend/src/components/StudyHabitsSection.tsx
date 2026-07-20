@@ -5,13 +5,13 @@ import {
   BarChart,
   CartesianGrid,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { cn } from "@/lib/utils"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 // Types
 
@@ -219,7 +219,7 @@ export function StudyHabitsSection() {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Tooltip />
+              <ChartTooltip />
               <Bar dataKey="xp" name="XP" fill="#f59e0b" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>

@@ -2,10 +2,14 @@ import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
 
 export type ContentTypeValue =
   | "book"
+  | "technical"
+  | "paper"
   | "conversation"
   | "notes"
   | "audio"
   | "video"
+  // Legacy stored values still accepted by the backend; not offered in the
+  // upload UI ("technical" resolves to a tech_* variant at ingest).
   | "epub"
   | "tech_book"
   | "tech_article"

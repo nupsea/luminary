@@ -86,12 +86,13 @@ if [[ "$USE_DOCKER_BACKEND" == "true" ]]; then
         -v "$REPO_ROOT/.luminary:/app/.luminary" \
         -e OLLAMA_URL="http://host.docker.internal:11434" \
         -e DATA_DIR="/app/.luminary" \
+        -e LUMINARY_MODE=full \
         -e PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
         $DOCKER_ENV_FILE_ARG \
         luminary-backend 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 else
-    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" PHOENIX_ENABLED=true LITELLM_LOCAL_MODEL_COST_MAP=true PHOENIX_TELEMETRY_ENABLED=false uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
+    (cd "$REPO_ROOT/backend" && DATA_DIR="$REPO_ROOT/.luminary" LUMINARY_MODE=full PHOENIX_ENABLED=true LITELLM_LOCAL_MODEL_COST_MAP=true PHOENIX_TELEMETRY_ENABLED=false uv run uvicorn app.main:app --reload --port "$BACKEND_PORT" 2>&1) \
         | awk 'BEGIN{p="\033[0;36m[BACKEND]\033[0m  "}{print p $0; fflush()}' &
 fi
 BACKEND_PIPE_PID=$!

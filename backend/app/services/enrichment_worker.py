@@ -32,6 +32,12 @@ _LLM_RETRY_MAX_ATTEMPTS = 3
 _LLM_RETRY_BASE_DELAY_S = 2.0
 _LLM_RETRY_MAX_DELAY_S = 30.0
 
+# How long stop() waits for cancelled job tasks before abandoning them. A job
+# cancelled inside a thread executor (embedding, vision -- see I-2) cannot observe
+# the cancellation until that call returns, so this wait must be bounded or
+# shutdown never finishes.
+_STOP_GRACE_S = 5.0
+
 
 class EnrichmentQueueWorker:
     """Background worker that drains the enrichment_jobs table.
@@ -94,15 +100,19 @@ class EnrichmentQueueWorker:
         self._running = False
         if self._task:
             self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            await asyncio.wait([self._task], timeout=_STOP_GRACE_S)
 
         for task in list(self._doc_tasks):
             task.cancel()
         if self._doc_tasks:
-            await asyncio.gather(*self._doc_tasks, return_exceptions=True)
+            _done, pending = await asyncio.wait(self._doc_tasks, timeout=_STOP_GRACE_S)
+            if pending:
+                logger.warning(
+                    "EnrichmentQueueWorker: %d job task(s) ignored cancellation after %ss; "
+                    "abandoning them so shutdown can finish",
+                    len(pending),
+                    _STOP_GRACE_S,
+                )
             self._doc_tasks.clear()
             self._active_doc_ids.clear()
 

@@ -13,7 +13,9 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, MessageSquare } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+
+import { arrowDelta, isArrowKey, isButtonActivation, isTypingTarget, moveKbnavFocus } from "@/lib/keyboard"
 
 import { ProgressBar } from "@/components/Teachback/ProgressBar"
 import { SessionComplete } from "@/components/Teachback/SessionComplete"
@@ -118,6 +120,33 @@ export function TeachbackSession({
     await exit(onExit)
   }
 
+  // Session-wide keys: Esc ends, arrows rove focus across [data-kbnav] buttons,
+  // and a focused button owns Enter/Space. Per-state Enter defaults live in
+  // TeachbackPanel and SessionComplete, which know which action is primary.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return
+      if (e.key === "Escape") {
+        e.preventDefault()
+        void exit(onExit)
+        return
+      }
+      if (isArrowKey(e.key)) {
+        e.preventDefault()
+        moveKbnavFocus(arrowDelta(e.key))
+        return
+      }
+      if (isButtonActivation(e)) return
+      if (sessionState === "empty" && e.key === "Enter") {
+        e.preventDefault()
+        onExit()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionState, onExit])
+
   if (sessionState === "loading") {
     return (
       <div className="flex h-full items-center justify-center">
@@ -140,7 +169,8 @@ export function TeachbackSession({
         </p>
         <button
           onClick={onExit}
-          className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent"
+          data-kbnav
+          className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Back to Study
         </button>
@@ -227,6 +257,7 @@ export function TeachbackSession({
             card={currentCard}
             onNext={handleTeachbackNext}
             onSubmitAsync={handleTeachbackSubmit}
+            onEndSession={() => void handleBackToStudy()}
             currentResult={currentLiveResult}
             isEvaluating={isTeachbackEvaluating}
             previousAttempt={previousAttemptResult}
@@ -236,9 +267,10 @@ export function TeachbackSession({
 
       <button
         onClick={() => void handleBackToStudy()}
+        title="End session (Esc)"
         className="text-xs text-muted-foreground hover:text-foreground"
       >
-        End session
+        End session <span className="opacity-50">(Esc)</span>
       </button>
     </div>
   )

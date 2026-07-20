@@ -6,7 +6,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The Map's Tags view no longer stalls for ~7s** (and neither does anything
+  else that happens to run alongside a graph query). Kuzu is synchronous, and
+  the `/graph` handlers awaited it directly on the event loop; with a single
+  uvicorn worker that stalls *every* concurrent request. A 2ms `/tags/graph`
+  measured **8.5s** sitting behind one all-library `/graph` traversal. The graph
+  handlers now go through `asyncio.to_thread` (safe: `ThreadSafeKuzuConnection`
+  already serializes execution under an RLock). Tags renders in ~0.6s, down from
+  ~7.1s; `/tags/graph` alongside `/graph` drops from 8.58s to 0.034s. `/graph`
+  itself is still slow (~8s for 4.3k nodes) — it just no longer blocks the app.
+  I-2 extended to cover Kuzu, not just LanceDB.
+
 ### Changed
+- **Chat contradiction lookup filters in Cypher instead of Python.** The
+  per-answer contradiction-context step scanned *every* SAME_CONCEPT edge in the
+  library and built a Python dict for each, only to keep the ≤3 contradictions
+  touching the in-scope documents. New `get_contradiction_edges_for_docs(doc_ids)`
+  pushes the contradiction + doc-scope filter into the query, so only matching
+  rows cross into Python. Proven equivalent to the old full-scan-then-filter over
+  20 random doc-sets on the live graph. Kuzu has no index on `source_doc_id`, so
+  the edge scan is still O(edges); what this removes is the per-edge Python
+  materialization, which is what actually grew with library size.
+
+### Removed
+- **The Map's Learning Path view.** It required typing an exact concept name
+  before it would render anything, and returned a chain only for entities with
+  `PREREQUISITE_OF` edges — so in practice it was an empty canvas asking for
+  input. Gone with it: `GET /graph/learning-path` (the Map was its only caller),
+  the start-entity sidebar input, the prerequisite breadcrumb in the node
+  popover, and the LP graph builder/types/overlays. Prerequisite edges are
+  untouched — they still render as the Map's Prerequisites layer, and the
+  prereq-chain traversal still backs the FSRS study path (`GET /study/path`).
+
+### Changed
+- **Two surface modes replace the public/labs/dev tiers.** One knob —
+  `LUMINARY_MODE=full` (default; what `make luminary` runs — every feature on,
+  including the Map, which returns to the learner rail as a nav tab) or
+  `LUMINARY_MODE=public` (Docker/installers — curated learner surfaces served
+  with the API under `/api` on one port). The old `LUMINARY_SURFACE_TIER` /
+  `VITE_SURFACE_TIER` variables, the Settings → Labs toggle panel, the
+  `labs_enabled` runtime setting, and `GET /settings/surface` /
+  `PATCH /settings/labs` are gone; the surface manifest is now v2 (`mode` key).
+  The backend `labs` dependency group is renamed `full`.
+- **Evals consolidated on the Quality console.** The Monitoring page keeps
+  Overview / Traces / Mastery; its stale Evals tab (pre-rebaseline RAGAS panels
+  and `scores_history` charts) is removed along with `GET /monitoring/evals`,
+  `GET /monitoring/eval-history`, and `GET /monitoring/evals/regressions`.
+  Eval runners now store results via `POST /evals/store` (moved from
+  `/monitoring/evals/store`).
 - **Notes editor redesign** — the note editor is now always-live (no read/edit
   mode split) with autosave and draft safety: closing a note flushes instead of
   discarding, and empty auto-created drafts are deleted with a toast. The raw

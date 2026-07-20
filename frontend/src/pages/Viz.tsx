@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
-import { ArrowLeft, GitBranch, Network, Tag, Zap } from "lucide-react"
+import { ArrowLeft, GitBranch, Network, Tag } from "lucide-react"
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
@@ -61,14 +61,12 @@ import { DIAGRAM_NODE_TYPES } from "./Viz/constants"
 import {
   fetchDocList,
   fetchGraphData,
-  fetchLearningPath,
   fetchMasteryConcepts,
   fetchTagGraph,
 } from "./Viz/api"
 import {
   buildClusterGraphology,
   buildGraph,
-  buildLearningPathGraph,
 } from "./Viz/graphBuilders"
 import { HeaderBar } from "./Viz/HeaderBar"
 import { useSigma } from "./Viz/useSigma"
@@ -110,7 +108,7 @@ export default function Viz() {
   const [docPickerSearch, setDocPickerSearch] = useState("")
   const [docPickerOpen, setDocPickerOpen] = useState(false)
   const docPickerRef = useRef<HTMLDivElement>(null)
-  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "learning_path" | "tags">("knowledge_graph")
+  const [viewMode, setViewMode] = useState<"knowledge_graph" | "call_graph" | "tags">("knowledge_graph")
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<string | null>(null)
   // Diagrams layer toggle: show/hide diagram-derived nodes
@@ -126,8 +124,6 @@ export default function Viz() {
   // Selected note node ID for NotePreviewPanel
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   // Learning path state
-  const [learningPathStart, setLearningPathStart] = useState("")
-  const [lpInputDraft, setLpInputDraft] = useState("")
   // (View options are always visible in the sidebar; no collapse state needed)
   // Cluster view toggle: when enabled and entity count > 200, collapse into type clusters
   const [clusterViewEnabled, setClusterViewEnabled] = useState(false)
@@ -199,20 +195,7 @@ export default function Viz() {
     ),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
-    enabled: !noDocSelected && viewMode !== "learning_path" && viewMode !== "tags",
-  })
-
-  // Learning path query
-  const {
-    data: lpData,
-    isLoading: lpLoading,
-    isError: lpError,
-    refetch: lpRefetch,
-  } = useQuery({
-    queryKey: ["learning-path", activeDocumentId, learningPathStart],
-    queryFn: () => fetchLearningPath(activeDocumentId!, learningPathStart),
-    staleTime: 30_000,
-    enabled: viewMode === "learning_path" && !!activeDocumentId && !!learningPathStart,
+    enabled: !noDocSelected && viewMode !== "tags",
   })
 
   // Tag graph query
@@ -276,10 +259,6 @@ export default function Viz() {
   // Not used for "tags" mode -- TagGraph component builds its own graphology instance.
   const filteredGraph = useMemo(() => {
     if (viewMode === "tags") return null
-    if (viewMode === "learning_path") {
-      if (!lpData || lpData.nodes.length === 0) return null
-      return buildLearningPathGraph(lpData)
-    }
     if (!data) return null
     const visibleNodes = data.nodes.filter((n) => {
       // Note nodes: controlled by showNotes toggle, independent of entity type filter
@@ -304,13 +283,12 @@ export default function Viz() {
       return buildClusterGraphology(visibleNodes, visibleEdges, clusterDefs, expandedClusters)
     }
     return buildGraph(visibleNodes, visibleEdges)
-  }, [data, activeTypes, viewMode, lpData, showDiagramNodes, showPrerequisites, showCrossBook, showNotes, clusterViewEnabled, expandedClusters])
+  }, [data, activeTypes, viewMode, showDiagramNodes, showPrerequisites, showCrossBook, showNotes, clusterViewEnabled, expandedClusters])
 
   // Sigma instance lifecycle (rebuild on graph change, click/hover wiring,
   // search + retention reducers, camera controls). See pages/Viz/useSigma.
   const { canvasRef, zoomIn, zoomOut, resetCamera } = useSigma({
     filteredGraph,
-    viewMode,
     search,
     showRetention,
     masteryMap,
@@ -332,7 +310,6 @@ export default function Viz() {
     !isLoading &&
     !isError &&
     (!data || data.nodes.length === 0) &&
-    viewMode !== "learning_path" &&
     viewMode !== "tags"
   // showAllHidden: only considers entity/diagram nodes; note nodes are separate
   const entityNodeCount = data ? data.nodes.filter((n) => n.type !== "note").length : 0
@@ -341,31 +318,7 @@ export default function Viz() {
     filteredGraph.order === 0 &&
     !!data &&
     entityNodeCount > 0 &&
-    viewMode !== "learning_path" &&
     viewMode !== "tags"
-
-  // Learning path render helpers
-  const lpNoInput = viewMode === "learning_path" && !learningPathStart
-  const lpShowLoading = viewMode === "learning_path" && !!learningPathStart && lpLoading
-  const lpShowError = viewMode === "learning_path" && !!learningPathStart && !lpLoading && lpError
-  const lpShowEmpty = viewMode === "learning_path" && !!learningPathStart && !lpLoading && !lpError && lpData && lpData.nodes.length === 0
-
-  // Learning path prerequisites breadcrumb for selected node
-  const lpBreadcrumb = useMemo((): string[] => {
-    if (!selectedNode || !lpData || viewMode !== "learning_path") return []
-    // Walk edges from selectedNode back toward start
-    const trail: string[] = [selectedNode.label]
-    const edgeMap: Record<string, string> = {}
-    lpData.edges.forEach((e) => { edgeMap[e.from_entity] = e.to_entity })
-    let current = selectedNode.label
-    const seen = new Set<string>([current])
-    while (edgeMap[current] && !seen.has(edgeMap[current])) {
-      current = edgeMap[current]
-      seen.add(current)
-      trail.push(current)
-    }
-    return trail
-  }, [selectedNode, lpData, viewMode])
 
   // Derived stats for the graph legend
   const graphStats = useMemo(() => {
@@ -387,7 +340,6 @@ export default function Viz() {
     const modes: { key: typeof viewMode; label: string; icon: typeof Network }[] = [
       { key: "knowledge_graph", label: "Knowledge", icon: Network },
       ...(isCodeDoc ? [{ key: "call_graph" as const, label: "Call Graph", icon: GitBranch }] : []),
-      { key: "learning_path", label: "Learning Path", icon: Zap },
       { key: "tags", label: "Tags", icon: Tag },
     ]
     return modes
@@ -436,9 +388,6 @@ export default function Viz() {
             selectedNoteId={selectedNoteId}
             onSelectNoteId={setSelectedNoteId}
             onClearSelectedNode={() => setSelectedNode(null)}
-            lpInputDraft={lpInputDraft}
-            onLpInputDraftChange={setLpInputDraft}
-            onSetLearningPathStart={setLearningPathStart}
             showDiagramNodes={showDiagramNodes}
             setShowDiagramNodes={setShowDiagramNodes}
             showPrerequisites={showPrerequisites}
@@ -469,12 +418,6 @@ export default function Viz() {
             onTagGraphRetry={() => void tagGraphRefetch()}
             noDocSelected={noDocSelected}
             onShowAll={() => setScope("all")}
-            lpNoInput={lpNoInput}
-            lpShowLoading={lpShowLoading}
-            lpShowError={lpShowError}
-            lpShowEmpty={Boolean(lpShowEmpty)}
-            learningPathStart={learningPathStart}
-            onLpRetry={() => void lpRefetch()}
             kgIsLoading={isLoading}
             kgIsError={isError}
             showEmpty={showEmpty}
@@ -490,7 +433,6 @@ export default function Viz() {
             onCloseNotePreview={() => setSelectedNoteId(null)}
             selectedNode={selectedNode}
             onCloseNode={() => setSelectedNode(null)}
-            lpBreadcrumb={lpBreadcrumb}
             activeDocumentId={activeDocumentId}
             onNavigate={(p) => navigate(p)}
             edgeTooltip={edgeTooltip}

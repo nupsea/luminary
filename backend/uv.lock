@@ -1723,7 +1723,7 @@ dev = [
     { name = "ruff" },
     { name = "tiktoken" },
 ]
-labs = [
+full = [
     { name = "cloudscraper" },
     { name = "faster-whisper" },
     { name = "trafilatura" },
@@ -1789,7 +1789,7 @@ dev = [
     { name = "ruff", specifier = ">=0.15.2" },
     { name = "tiktoken", specifier = ">=0.12.0" },
 ]
-labs = [
+full = [
     { name = "cloudscraper", specifier = ">=1.2.71" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "trafilatura", specifier = ">=2.0.0" },

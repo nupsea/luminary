@@ -12,7 +12,16 @@ function createMockElement(tag = "div"): any {
     style,
     setAttribute(k: string, v: string) { attrs[k] = v },
     getAttribute(k: string) { return attrs[k] ?? null },
-    appendChild(child: any) { children.push(child); return child },
+    appendChild(child: any) {
+      // Real DOM moves a fragment's children into the parent, leaving it empty.
+      if (child.isFragment) {
+        children.push(...child.children)
+        child.children.length = 0
+        return child
+      }
+      children.push(child)
+      return child
+    },
     replaceChildren(...nodes: any[]) { children.length = 0; children.push(...nodes) },
     remove() { /* no-op in isolation */ },
     querySelectorAll(selector: string) {
@@ -41,6 +50,11 @@ describe("renderOverlayDivs", () => {
     const stubDoc = {
       createElement(tag: string) {
         return createMockElement(tag)
+      },
+      createDocumentFragment() {
+        const fragment = createMockElement("#document-fragment")
+        fragment.isFragment = true
+        return fragment
       },
     }
     vi.stubGlobal("document", stubDoc)

@@ -5,25 +5,6 @@
 import type { components } from "@/types/api"
 import type { TagEdgeData, TagNodeData } from "@/components/TagGraph"
 
-// Learning path types. The generated LearningPathResponse types
-// `edges` as `{[k: string]: unknown}[]` (loose dict) -- locally we keep
-// the typed LearningPathEdge / LearningPathData so callers retain
-// field-level type safety. Only LearningPathNode aliases cleanly.
-export type LearningPathNode = components["schemas"]["LearningPathNode"]
-
-export interface LearningPathEdge {
-  from_entity: string
-  to_entity: string
-  confidence: number
-}
-
-export interface LearningPathData {
-  start_entity: string
-  document_id: string
-  nodes: LearningPathNode[]
-  edges: LearningPathEdge[]
-}
-
 // Tag graph types. Generated TagGraphResponse uses TagNodeItem /
 // TagEdgeItem; the Viz page renders via TagGraph component types which
 // have a different shape, so keep local.

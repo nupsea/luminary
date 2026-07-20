@@ -336,3 +336,87 @@ async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None
     assert doc.format == "txt"
+
+
+def test_resolve_technical_variant():
+    from app.workflows.ingestion_nodes._shared import resolve_technical_variant
+
+    numbered = "1.1 Storage engines\nprose here\n2.3 Indexes\nmore prose"
+    assert resolve_technical_variant(numbered) == "tech_book"
+    fenced = "intro\n```\nprint(1)\n```\n```\nprint(2)\n```\n```\nprint(3)\n```"
+    assert resolve_technical_variant(fenced) == "tech_book"
+    assert resolve_technical_variant("a short post about developer tooling") == "tech_article"
+
+
+async def test_classify_node_resolves_merged_technical_choice(test_db):
+    """A user-provided 'technical' type resolves to a concrete tech_* variant
+    and the resolved value is persisted on the document row."""
+    from app.workflows.ingestion import classify_node
+
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Tech Upload",
+                format="md",
+                content_type="technical",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/tech.md",
+                stage="classifying",
+            )
+        )
+        await session.commit()
+
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": "/tmp/tech.md",
+        "format": "md",
+        "parsed_document": {
+            "title": "Tech Upload",
+            "format": "md",
+            "pages": 1,
+            "word_count": 300,
+            "sections": [],
+            "raw_text": "1.1 Overview\ntext\n2.4 Internals\ntext",
+        },
+        "content_type": "technical",
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+
+    result = await classify_node(state)
+    assert result["status"] == "chunking"
+    assert result["content_type"] == "tech_book"
+
+    async with factory() as session:
+        row = await session.get(DocumentModel, doc_id)
+        assert row.content_type == "tech_book"
+
+
+async def test_classify_node_technical_without_structure_is_article(test_db):
+    from app.workflows.ingestion import classify_node
+
+    _engine, factory, _tmp = test_db
+    state: IngestionState = {
+        "document_id": "no-row-needed",
+        "file_path": "/tmp/post.md",
+        "format": "md",
+        "parsed_document": {
+            "title": "Post",
+            "format": "md",
+            "pages": 1,
+            "word_count": 120,
+            "sections": [],
+            "raw_text": "a plain technical blog post with no numbered sections",
+        },
+        "content_type": "technical",
+        "chunks": None,
+        "status": "classifying",
+        "error": None,
+    }
+    result = await classify_node(state)
+    assert result["content_type"] == "tech_article"

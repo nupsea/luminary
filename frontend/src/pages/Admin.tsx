@@ -24,7 +24,6 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
@@ -33,6 +32,7 @@ import { logger } from "@/lib/logger"
 
 import { apiGet } from "@/lib/apiClient"
 import type { components } from "@/types/api"
+import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 type TraceItem = components["schemas"]["TraceItem"]
 type TracesResponse = components["schemas"]["TracesResponse"]
@@ -261,7 +261,7 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
                   <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip />
+              <ChartTooltip />
             </PieChart>
           </ResponsiveContainer>
         ) : (
@@ -277,7 +277,7 @@ function ModelUsageSection({ modelUsage }: { modelUsage: ModelUsageItem[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="model" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} />
-            <Tooltip />
+            <ChartTooltip />
             <Bar dataKey="call_count" name="Calls" fill="#6366f1" />
           </BarChart>
         </ResponsiveContainer>

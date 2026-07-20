@@ -774,7 +774,7 @@ export interface paths {
          *
          *     Two signals, unioned: (1) engagement -- concepts the note's mapped cards point at;
          *     (2) lexical recall -- concepts whose label appears in the note's title/content. This
-         *     is the always-on degraded path; the concept_linker labs feature enriches it later.
+         *     is the always-on degraded path; the concept_linker full-mode feature enriches it later.
          */
         get: operations["concepts_for_note_concepts_for_note__note_id__get"];
         put?: never;
@@ -1836,6 +1836,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/store": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Store Eval Run
+         * @description Persist a completed evaluation run to SQLite (used by the eval runners).
+         */
+        post: operations["store_eval_run_evals_store_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/golden/{name}/info": {
         parameters: {
             query?: never;
@@ -2844,33 +2864,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/graph/learning-path": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Learning Path
-         * @description Return topologically sorted prerequisite chain for a concept.
-         *
-         *     Returns LearningPathResponse with nodes sorted from deepest prerequisite
-         *     toward the start node (start has highest depth index).
-         *     Returns empty nodes/edges if the entity is not found or has no edges.
-         *
-         *     IMPORTANT: This route must be declared before GET /{document_id} to prevent
-         *     FastAPI from matching 'learning-path' as a document_id path parameter.
-         */
-        get: operations["get_learning_path_graph_learning_path_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/graph/concepts/linked": {
         parameters: {
             query?: never;
@@ -3193,66 +3186,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/monitoring/evals/store": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Store Eval Run
-         * @description Persist a completed evaluation run to SQLite.
-         */
-        post: operations["store_eval_run_monitoring_evals_store_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/monitoring/evals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Eval Runs
-         * @description Return the last 10 eval runs per dataset, ordered by run_at desc.
-         */
-        get: operations["get_eval_runs_monitoring_evals_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/monitoring/evals/regressions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Eval Regressions
-         * @description Return eval metrics whose latest value dropped versus a moving baseline.
-         */
-        get: operations["get_eval_regressions_monitoring_evals_regressions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/monitoring/metrics": {
         parameters: {
             query?: never;
@@ -3287,26 +3220,6 @@ export interface paths {
          * @description Return call counts per model from QA history.
          */
         get: operations["get_model_usage_monitoring_model_usage_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/monitoring/eval-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Eval History
-         * @description Return eval score history from evals/scores_history.jsonl (all runs, oldest first).
-         */
-        get: operations["get_eval_history_monitoring_eval_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4158,11 +4071,14 @@ export interface paths {
          *     the query. Deterministic and local-first per I-16; pairs with
          *     index-time entity injection.
          *
-         *     When ``rerank`` is true, the top-50 RRF candidates are re-scored by a
-         *     cross-encoder and the top-N returned. Adds ~100-300ms per query (CPU)
-         *     but recovers answer chunks whose vocabulary diverges from the
-         *     question's surface form -- the remaining failure mode after
-         *     HyDE. Local-first per I-16. Fails soft on any reranker error.
+         *     When ``rerank`` is true, the top-N RRF candidates (``rerank_depth``,
+         *     default from ``RERANK_DEPTH`` settings) are re-scored by a cross-encoder
+         *     and the top-``limit`` returned; candidates scoring below
+         *     ``rerank_threshold`` (default ``RERANK_SCORE_THRESHOLD``) are cut. Adds
+         *     ~100-300ms per query at depth 50 (CPU, linear in depth) but recovers
+         *     answer chunks whose vocabulary diverges from the question's surface
+         *     form -- the remaining failure mode after HyDE. Local-first per I-16.
+         *     Fails soft on any reranker error.
          */
         get: operations["search_search_get"];
         put?: never;
@@ -4298,40 +4214,6 @@ export interface paths {
         patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
         trace?: never;
     };
-    "/settings/surface": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Surface */
-        get: operations["get_surface_settings_surface_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/settings/labs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Patch Labs */
-        patch: operations["patch_labs_settings_labs_patch"];
-        trace?: never;
-    };
     "/mastery/concepts": {
         parameters: {
             query?: never;
@@ -4426,7 +4308,7 @@ export interface paths {
          * @description Study Launcher backend: resolve a scope -> a valid Study Event (docs/study-launcher.md).
          *
          *     Returns the assembled due-card set + an honest preview, and records a StudyEvent row.
-         *     Tier-aware: teachback_available reflects the feynman labs surface. Model-down still
+         *     Mode-aware: teachback_available reflects the feynman surface (full mode only). Model-down still
          *     yields due cards (generation is a separate seam).
          */
         post: operations["assemble_study_study_assemble_post"];
@@ -6818,38 +6700,6 @@ export interface components {
             /** Chapters */
             chapters: components["schemas"]["EpubChapterTocItem"][];
         };
-        /** EvalHistoryItem */
-        EvalHistoryItem: {
-            /** Timestamp */
-            timestamp: string;
-            /** Dataset */
-            dataset: string;
-            /** Model */
-            model: string;
-            /** Hr5 */
-            hr5: number | null;
-            /** Mrr */
-            mrr: number | null;
-            /** Faithfulness */
-            faithfulness: number | null;
-            /** Passed */
-            passed: boolean;
-        };
-        /** EvalRegressionResponse */
-        EvalRegressionResponse: {
-            /** Dataset */
-            dataset: string;
-            /** Metric */
-            metric: string;
-            /** Current Value */
-            current_value: number;
-            /** Baseline Value */
-            baseline_value: number;
-            /** Drop Pct */
-            drop_pct: number;
-            /** Eval Kind */
-            eval_kind?: string | null;
-        };
         /** EvalResultItem */
         EvalResultItem: {
             /** Dataset */
@@ -6999,9 +6849,14 @@ export interface components {
              * @default false
              */
             ablation: boolean;
+            /**
+             * Generate
+             * @default false
+             */
+            generate: boolean;
         };
-        /** EvalRunResponse */
-        EvalRunResponse: {
+        /** EvalRunStoredResponse */
+        EvalRunStoredResponse: {
             /** Id */
             id: string;
             /** Dataset Name */
@@ -7407,6 +7262,11 @@ export interface components {
              * @default false
              */
             ablation: boolean;
+            /**
+             * Generate
+             * @default false
+             */
+            generate: boolean;
         };
         /** GeneratedRunResponse */
         GeneratedRunResponse: {
@@ -7785,25 +7645,6 @@ export interface components {
              */
             ollama_reachable: boolean;
         };
-        /** LabsPatch */
-        LabsPatch: {
-            /** Labs Enabled */
-            labs_enabled: string[];
-        };
-        /** LabsSurface */
-        LabsSurface: {
-            /** Id */
-            id: string;
-            /** Label */
-            label: string;
-            /** Description */
-            description?: string | null;
-            /**
-             * Default Off
-             * @default false
-             */
-            default_off: boolean;
-        };
         /** LearningObjectiveItem */
         LearningObjectiveItem: {
             /** Id */
@@ -7829,30 +7670,6 @@ export interface components {
             document_id: string;
             /** Objectives */
             objectives: components["schemas"]["LearningObjectiveItem"][];
-        };
-        /** LearningPathNode */
-        LearningPathNode: {
-            /** Entity Id */
-            entity_id: string;
-            /** Name */
-            name: string;
-            /** Entity Type */
-            entity_type: string;
-            /** Depth */
-            depth: number;
-        };
-        /** LearningPathResponse */
-        LearningPathResponse: {
-            /** Start Entity */
-            start_entity: string;
-            /** Document Id */
-            document_id: string;
-            /** Nodes */
-            nodes: components["schemas"]["LearningPathNode"][];
-            /** Edges */
-            edges: {
-                [key: string]: unknown;
-            }[];
         };
         /** LibrarySummarizeRequest */
         LibrarySummarizeRequest: {
@@ -8377,6 +8194,16 @@ export interface components {
              * @default false
              */
             socratic: boolean;
+            /**
+             * Creative
+             * @default false
+             */
+            creative: boolean;
+            /**
+             * Include Context
+             * @default false
+             */
+            include_context: boolean;
         };
         /** ReadingPositionResponse */
         ReadingPositionResponse: {
@@ -9014,15 +8841,6 @@ export interface components {
              * @default false
              */
             force_refresh: boolean;
-        };
-        /** SurfaceResponse */
-        SurfaceResponse: {
-            /** Tier */
-            tier: string;
-            /** Labs Enabled */
-            labs_enabled: string[];
-            /** Available Labs */
-            available_labs: components["schemas"]["LabsSurface"][];
         };
         /** TagAutocompleteResult */
         TagAutocompleteResult: {
@@ -12868,6 +12686,39 @@ export interface operations {
             };
         };
     };
+    store_eval_run_evals_store_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunStoredResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_golden_info_evals_golden__name__info_get: {
         parameters: {
             query?: never;
@@ -14653,40 +14504,6 @@ export interface operations {
             };
         };
     };
-    get_learning_path_graph_learning_path_get: {
-        parameters: {
-            query: {
-                /** @description Entity name to start path from */
-                start_entity: string;
-                /** @description Document scope */
-                document_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LearningPathResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_concept_clusters_graph_concepts_linked_get: {
         parameters: {
             query?: never;
@@ -15133,91 +14950,6 @@ export interface operations {
             };
         };
     };
-    store_eval_run_monitoring_evals_store_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EvalRunCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvalRunResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_eval_runs_monitoring_evals_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvalRunResponse"][];
-                };
-            };
-        };
-    };
-    get_eval_regressions_monitoring_evals_regressions_get: {
-        parameters: {
-            query?: {
-                window?: number;
-                threshold_pct?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvalRegressionResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_metrics_monitoring_metrics_get: {
         parameters: {
             query?: never;
@@ -15254,26 +14986,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelUsageItem"][];
-                };
-            };
-        };
-    };
-    get_eval_history_monitoring_eval_history_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvalHistoryItem"][];
                 };
             };
         };
@@ -16635,7 +16347,15 @@ export interface operations {
                 limit?: number;
                 hyde?: boolean;
                 rerank?: boolean;
+                rerank_depth?: number | null;
+                rerank_threshold?: number | null;
+                rerank_blend?: number | null;
+                rerank_adaptive?: boolean | null;
+                spell_correct?: boolean | null;
+                date_from?: string;
+                date_to?: string;
                 graph_expand?: boolean;
+                expand_context?: boolean;
                 strategy?: string;
             };
             header?: never;
@@ -16872,59 +16592,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievalSettingsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_surface_settings_surface_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SurfaceResponse"];
-                };
-            };
-        };
-    };
-    patch_labs_settings_labs_patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LabsPatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SurfaceResponse"];
                 };
             };
             /** @description Validation Error */

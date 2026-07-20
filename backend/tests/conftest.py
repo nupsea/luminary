@@ -82,8 +82,47 @@ def _reset_lancedb_singleton():
     yield
 
 
+UNDRAINABLE_TASKS: list[str] = []
+
+
+def _detach_from_loop_shutdown(task: asyncio.Task) -> None:
+    """Remove a task from the registry that asyncio's loop-close routine walks.
+
+    There is no public API: `_cancel_all_tasks()` reads `asyncio.all_tasks()`, so
+    unregistering the task is the only way to stop it being waited on.
+    """
+    try:
+        import _asyncio
+
+        _asyncio._unregister_task(task)
+        return
+    except Exception:  # noqa: BLE001 - pure-Python asyncio has no C accelerator
+        pass
+    try:
+        asyncio.tasks._all_tasks.discard(task)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - best effort; a hang here is worse than a miss
+        pass
+
+
+def pytest_terminal_summary(terminalreporter):
+    if not UNDRAINABLE_TASKS:
+        return
+    terminalreporter.section("Leaked background tasks (ignored cancellation)", sep="=")
+    for entry in UNDRAINABLE_TASKS:
+        terminalreporter.write_line(f"  {entry}")
+
+
+def _task_module(task: asyncio.Task) -> str:
+    """Module that a task's coroutine was defined in, or "" if it cannot be read."""
+    coro = task.get_coro()
+    frame = getattr(coro, "cr_frame", None) or getattr(coro, "ag_frame", None)
+    if frame is None:
+        return ""
+    return str(frame.f_globals.get("__name__", ""))
+
+
 @pytest_asyncio.fixture(autouse=True)
-async def _drain_leaked_tasks():
+async def _drain_leaked_tasks(request):
     """Cancel any fire-and-forget task the test spawned, while its loop is still alive.
 
     Routers fire ~12 kinds of background task (document pre-generate, tag enrichment,
@@ -96,16 +135,38 @@ async def _drain_leaked_tasks():
 
     Cancelling here, inside the owning loop, is the only point where cancellation can
     actually be processed.
+
+    Only tasks running OUR code are cancelled. Tests marked @pytest.mark.anyio are driven
+    by anyio's TestRunner, which runs the test -- and this very fixture -- from its own
+    asyncio tasks. Cancelling everything except `current` therefore cancelled the harness
+    running the test, which surfaced as CancelledError at teardown of every anyio test and
+    as "previous item was not torn down properly" in the tests after it.
     """
     yield
     current = asyncio.current_task()
-    leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    leaked = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not current and not t.done() and _task_module(t).startswith("app.")
+    ]
     for t in leaked:
         t.cancel()
     if leaked:
         # Bounded: a task stuck in a thread executor cannot be cancelled, and waiting
         # forever for it would recreate the hang this fixture exists to prevent.
         await asyncio.wait(leaked, timeout=5)
+
+    # Anything still alive ignored its cancellation -- typically sitting in a thread
+    # executor (GLiNER/NER, embedding) where cancellation cannot land until the call
+    # returns. Left registered, it is then gathered by the loop-close routine WITHOUT a
+    # timeout, so one such task hangs the run until the 120s session timeout kills it,
+    # blaming whichever test was running. Detaching lets teardown finish; the task is
+    # already cancelled and its loop is going away regardless. Reported at session end
+    # so the leak stays visible rather than silently tolerated.
+    survivors = [t for t in leaked if not t.done()]
+    for t in survivors:
+        UNDRAINABLE_TASKS.append(f"{request.node.nodeid} :: {_task_module(t)} :: {t!r}")
+        _detach_from_loop_shutdown(t)
 
 
 @pytest.fixture(autouse=True)

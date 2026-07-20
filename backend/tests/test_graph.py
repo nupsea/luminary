@@ -60,6 +60,31 @@ def test_add_mention_increments_count(graph_svc: KuzuService):
     assert result.get_next()[0] == 2
 
 
+def test_delete_entities_for_document(graph_svc: KuzuService):
+    """Entities mentioned in the doc are DETACH-deleted with their edges;
+    entities of other documents survive."""
+    graph_svc.upsert_document("d1", "Odyssey", "book")
+    graph_svc.upsert_document("d2", "Iliad", "book")
+    graph_svc.upsert_entity("e1", "ulysses", "PERSON")
+    graph_svc.upsert_entity("e2", "telemachus", "PERSON")
+    graph_svc.upsert_entity("e3", "achilles", "PERSON")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_mention("e3", "d2")
+    graph_svc.add_co_occurrence("e1", "e2", "d1")
+
+    removed = graph_svc.delete_entities_for_document("d1")
+
+    assert removed == 2
+    entity_count, edge_count = graph_svc.count_for_document("d1")
+    assert (entity_count, edge_count) == (0, 0)
+    result = graph_svc._conn.execute("MATCH (e:Entity) RETURN e.id")
+    remaining = set()
+    while result.has_next():
+        remaining.add(result.get_next()[0])
+    assert remaining == {"e3"}
+
+
 def test_add_co_occurrence(graph_svc: KuzuService):
     graph_svc.upsert_entity("e1", "Newton", "PERSON")
     graph_svc.upsert_entity("e2", "Gravity", "CONCEPT")
@@ -212,7 +237,58 @@ def test_get_graph_empty_doc_ids(client: TestClient):
     assert data["nodes"] == []
 
 
-# S117: PREREQUISITE_OF edges and learning-path
+# SAME_CONCEPT contradiction edges — doc-scoped Cypher filter
+
+
+def _seed_same_concept(svc: KuzuService) -> None:
+    for e in ("e1", "e2", "e3", "e4"):
+        svc.upsert_entity(e, e, "CONCEPT")
+    # contradiction touching d1/d2
+    svc.add_same_concept_edge("e1", "e2", "d1", "d2", 0.9, contradiction=True,
+                              contradiction_note="A says X, B says Y")
+    # contradiction touching d3/d4 (unrelated to d1)
+    svc.add_same_concept_edge("e3", "e4", "d3", "d4", 0.8, contradiction=True,
+                              contradiction_note="C says P, D says Q")
+    # non-contradiction touching d1 — must be excluded
+    svc.add_same_concept_edge("e1", "e3", "d1", "d3", 0.7, contradiction=False)
+
+
+def test_contradiction_edges_for_docs_scopes_to_requested_docs(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    rows = graph_svc.get_contradiction_edges_for_docs(["d1"])
+    assert len(rows) == 1
+    assert rows[0]["contradiction_note"] == "A says X, B says Y"
+    assert rows[0]["contradiction"] is True
+
+
+def test_contradiction_edges_for_docs_matches_source_or_target(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    # d4 appears only as a target_doc_id
+    rows = graph_svc.get_contradiction_edges_for_docs(["d4"])
+    assert {r["contradiction_note"] for r in rows} == {"C says P, D says Q"}
+
+
+def test_contradiction_edges_for_docs_equivalent_to_python_filter(graph_svc: KuzuService):
+    """The Cypher filter returns exactly what a full scan + Python filter would."""
+    _seed_same_concept(graph_svc)
+    all_edges = graph_svc.get_same_concept_edges()
+    for docs in (["d1"], ["d2"], ["d3", "d4"], ["d1", "d3"], ["nope"]):
+        expected = {
+            (e["entity_id_a"], e["entity_id_b"])
+            for e in all_edges
+            if e["contradiction"] and (e["source_doc_id"] in docs or e["target_doc_id"] in docs)
+        }
+        rows = graph_svc.get_contradiction_edges_for_docs(docs)
+        got = {(e["entity_id_a"], e["entity_id_b"]) for e in rows}
+        assert got == expected, f"mismatch for {docs}"
+
+
+def test_contradiction_edges_for_docs_empty_input(graph_svc: KuzuService):
+    _seed_same_concept(graph_svc)
+    assert graph_svc.get_contradiction_edges_for_docs([]) == []
+
+
+# PREREQUISITE_OF edges and prerequisite-chain traversal
 
 
 def test_add_prerequisite_creates_edge(graph_svc: KuzuService):
@@ -288,42 +364,6 @@ def test_get_learning_path_no_prereq_edges_returns_empty(graph_svc: KuzuService)
     result = graph_svc.get_learning_path("gravity", "d1")
     assert result["nodes"] == []
     assert result["edges"] == []
-
-
-def test_learning_path_endpoint_returns_200(client: TestClient, tmp_path, monkeypatch):
-    import app.services.graph as graph_module
-
-    svc: KuzuService = graph_module._graph_service  # type: ignore[assignment]
-    svc.upsert_entity("e1", "natural selection", "CONCEPT")
-    svc.upsert_entity("e2", "variation", "CONCEPT")
-    svc.upsert_document("d1", "Biology", "book")
-    svc.add_mention("e1", "d1")
-    svc.add_mention("e2", "d1")
-    svc.add_prerequisite("e1", "e2", "d1", 0.9)
-
-    resp = client.get("/graph/learning-path?start_entity=natural+selection&document_id=d1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "nodes" in data
-    assert "edges" in data
-
-
-def test_learning_path_endpoint_unknown_entity_returns_empty(client: TestClient):
-    resp = client.get("/graph/learning-path?start_entity=ghost&document_id=nonexistent")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["nodes"] == []
-
-
-def test_learning_path_route_not_captured_by_document_id_route(client: TestClient):
-    """Verify /graph/learning-path is not matched as document_id='learning-path'."""
-    resp = client.get("/graph/learning-path?start_entity=x&document_id=d999")
-    # Should return the learning-path response, not a graph-for-document response
-    assert resp.status_code == 200
-    data = resp.json()
-    # learning-path response always has start_entity, document_id, nodes, edges
-    assert "start_entity" in data
-    assert "nodes" in data
 
 
 def test_get_learning_path_cycle_handled_gracefully(graph_svc: KuzuService):

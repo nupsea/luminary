@@ -1,5 +1,5 @@
 // Floating popover that appears next to a clicked node. Shows the
-// label + type pill, the mention count or learning-path breadcrumb,
+// label + type pill, the mention count,
 // the source-diagram thumbnail when applicable, and a
 // "Find in document" jump.
 
@@ -13,8 +13,6 @@ import type { SelectedNodeInfo } from "./types"
 
 interface NodePopoverProps {
   node: SelectedNodeInfo
-  viewMode: string
-  lpBreadcrumb: string[]
   activeDocumentId: string | null
   onClose: () => void
   onNavigate: (path: string) => void
@@ -22,8 +20,6 @@ interface NodePopoverProps {
 
 export function NodePopover({
   node,
-  viewMode,
-  lpBreadcrumb,
   activeDocumentId,
   onClose,
   onNavigate,
@@ -51,20 +47,9 @@ export function NodePopover({
         </span>
       </div>
       <p className="text-sm font-bold text-foreground mb-1">{node.label}</p>
-      {viewMode === "learning_path" && lpBreadcrumb.length > 1 ? (
-        <div className="mb-3">
-          <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">
-            Prerequisites
-          </p>
-          <p className="text-xs text-foreground leading-relaxed">
-            {lpBreadcrumb.join(" -> ")}
-          </p>
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground mb-3">
-          {node.frequency} {node.frequency === 1 ? "mention" : "mentions"}
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground mb-3">
+        {node.frequency} {node.frequency === 1 ? "mention" : "mentions"}
+      </p>
       {/* Image thumbnail for diagram-derived nodes */}
       {node.source_image_id && (
         <div className="mb-3">

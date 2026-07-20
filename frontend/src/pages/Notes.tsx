@@ -1,13 +1,15 @@
 /**
- * /notes — notes list + filters. Existing notes open at /notes/:id
- * (NotePage); creation goes through QuickNoteComposer.
+ * /notes — notes list + filters. Both existing notes and new ones open the same
+ * full editor (NotePage): /notes/:id and /notes/new respectively. QuickNoteComposer
+ * remains for capture-with-content flows (reader clips, gap-analysis preload).
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, BookOpen, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
+import { NEW_NOTE_ROUTE_ID } from "@/lib/noteAutosave"
 import { toast } from "sonner"
 import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
@@ -19,8 +21,7 @@ import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
 import { BlogsPanel } from "@/components/blog/BlogsPanel"
 import type { BlogKind } from "@/lib/blogApi"
-import { visibleSurfaces } from "@/lib/surfaceManifest"
-import { useSurfaceStore } from "@/store/surface"
+import { isSurfaceVisible } from "@/lib/surfaceManifest"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -33,13 +34,20 @@ import {
 } from "@/components/ui/table"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
+import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
 
-import { API_BASE } from "@/lib/config"
-import { backfillNoteDescriptions, type Note } from "@/lib/notesApi"
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import { flattenCollectionTree } from "@/lib/collectionUtils"
+import {
+  backfillNoteDescriptions,
+  deleteNote,
+  fetchCollectionTree,
+  type Note,
+} from "@/lib/notesApi"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,70 +83,49 @@ async function fetchNotes(
   tag?: string,
   collectionId?: string,
 ): Promise<Note[]> {
-  const params = new URLSearchParams()
-  if (documentId) params.set("document_id", documentId)
-  if (tag) params.set("tag", tag)
-  if (collectionId) params.set("collection_id", collectionId)
-  const res = await fetch(`${API_BASE}/notes?${params.toString()}`)
-  if (!res.ok) throw new Error(`GET /notes failed: ${res.status}`)
-  return res.json() as Promise<Note[]>
+  return apiGet<Note[]>("/notes", {
+    document_id: documentId,
+    tag,
+    collection_id: collectionId,
+  })
 }
 
 async function fetchGroups(): Promise<GroupsData> {
-  const res = await fetch(`${API_BASE}/notes/groups`)
-  if (!res.ok) return { groups: [], tags: [], total_notes: 0 }
-  return res.json() as Promise<GroupsData>
+  try {
+    return await apiGet<GroupsData>("/notes/groups")
+  } catch {
+    return { groups: [], tags: [], total_notes: 0 }
+  }
 }
 
 async function fetchDocumentList(): Promise<DocumentItem[]> {
-  const res = await fetch(`${API_BASE}/documents?page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items?: DocumentItem[] } | DocumentItem[]
-  return Array.isArray(data) ? data : (data.items ?? [])
-}
-
-async function deleteNote(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204) throw new Error(`DELETE /notes/${id} failed: ${res.status}`)
+  try {
+    const data = await apiGet<{ items?: DocumentItem[] } | DocumentItem[]>("/documents", {
+      page_size: 100,
+    })
+    return Array.isArray(data) ? data : (data.items ?? [])
+  } catch {
+    return []
+  }
 }
 
 async function fetchClips(documentId?: string): Promise<Clip[]> {
-  const params = new URLSearchParams()
-  if (documentId) params.set("document_id", documentId)
-  const res = await fetch(`${API_BASE}/clips?${params.toString()}`)
-  if (!res.ok) throw new Error(`GET /clips failed: ${res.status}`)
-  return res.json() as Promise<Clip[]>
+  return apiGet<Clip[]>("/clips", { document_id: documentId })
 }
 
-async function patchClipNote(id: string, userNote: string): Promise<Clip> {
-  const res = await fetch(`${API_BASE}/clips/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_note: userNote }),
-  })
-  if (!res.ok) throw new Error(`PATCH /clips/${id} failed: ${res.status}`)
-  return res.json() as Promise<Clip>
-}
+const patchClipNote = (id: string, userNote: string): Promise<Clip> =>
+  apiPatch<Clip>(`/clips/${id}`, { user_note: userNote })
 
-async function deleteClip(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/clips/${id}`, { method: "DELETE" })
-  if (!res.ok && res.status !== 204) throw new Error(`DELETE /clips/${id} failed: ${res.status}`)
-}
+const deleteClip = (id: string): Promise<void> => apiDelete(`/clips/${id}`)
 
 async function createNoteFromClip(clip: Clip, docTitle: string): Promise<{ id: string }> {
   const body = `> ${clip.selected_text}\n\n*Source: ${docTitle}${clip.section_heading ? ` — ${clip.section_heading}` : ""}*`
-  const res = await fetch(`${API_BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      content: body,
-      tags: ["clip"],
-      document_id: clip.document_id,
-      section_id: clip.section_id ?? null,
-    }),
+  return apiPost<{ id: string }>("/notes", {
+    content: body,
+    tags: ["clip"],
+    document_id: clip.document_id,
+    section_id: clip.section_id ?? null,
   })
-  if (!res.ok) throw new Error(`POST /notes failed: ${res.status}`)
-  return res.json() as Promise<{ id: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -161,23 +148,18 @@ interface ClusterSuggestion {
   previews: ClusterNotePreview[]
 }
 
-async function fetchClusterSuggestions(): Promise<ClusterSuggestion[]> {
-  const res = await fetch(`${API_BASE}/notes/cluster/suggestions`)
-  if (!res.ok) throw new Error(`GET /notes/cluster/suggestions failed: ${res.status}`)
-  return res.json() as Promise<ClusterSuggestion[]>
-}
+const fetchClusterSuggestions = (): Promise<ClusterSuggestion[]> =>
+  apiGet<ClusterSuggestion[]>("/notes/cluster/suggestions")
 
-async function postCluster(): Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }> {
-  const res = await fetch(`${API_BASE}/notes/cluster`, { method: "POST" })
-  if (!res.ok) throw new Error(`POST /notes/cluster failed: ${res.status}`)
-  return res.json() as Promise<{ queued?: boolean; cached?: boolean; total_notes?: number; last_run?: string }>
-}
+const postCluster = (): Promise<{
+  queued?: boolean
+  cached?: boolean
+  total_notes?: number
+  last_run?: string
+}> => apiPost("/notes/cluster")
 
-async function fetchNamingViolations(): Promise<NamingViolation[]> {
-  const res = await fetch(`${API_BASE}/notes/cluster/normalize-check`, { method: "POST" })
-  if (!res.ok) throw new Error(`POST /notes/cluster/normalize-check failed: ${res.status}`)
-  return res.json() as Promise<NamingViolation[]>
-}
+const fetchNamingViolations = (): Promise<NamingViolation[]> =>
+  apiPost<NamingViolation[]>("/notes/cluster/normalize-check")
 
 // Individual accept/reject API helpers removed; OrganizationPlanDialog uses batch-accept.
 // Backend endpoints preserved for backward compatibility.
@@ -198,12 +180,8 @@ interface NoteSearchResponse {
   total: number
 }
 
-async function fetchNoteSearch(q: string, k = 10): Promise<NoteSearchResponse> {
-  const params = new URLSearchParams({ q, k: String(k) })
-  const res = await fetch(`${API_BASE}/notes/search?${params.toString()}`)
-  if (!res.ok) throw new Error(`GET /notes/search failed: ${res.status}`)
-  return res.json() as Promise<NoteSearchResponse>
-}
+const fetchNoteSearch = (q: string, k = 10): Promise<NoteSearchResponse> =>
+  apiGet<NoteSearchResponse>("/notes/search", { q, k })
 
 // ---------------------------------------------------------------------------
 // ClipCard — single clip entry in Reading Journal
@@ -496,11 +474,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
-  const blogEnabled = useMemo(
-    () => visibleSurfaces(labsEnabled).some((s) => s.id === "blog"),
-    [labsEnabled],
-  )
+  const blogEnabled = isSurfaceVisible("blog")
   // A note is publishable to a collection only when it belongs to one named for
   // that target (case-insensitive): "BLOG" -> blog, "THOUGHTS" -> thoughts.
   const collectionNames = useMemo(
@@ -548,6 +522,13 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
             Thought
           </button>
         )}
+        <button
+          onClick={(e) => { e.stopPropagation(); void downloadNoteMarkdown(note.id) }}
+          className="hover:text-foreground"
+          title="Download Markdown"
+        >
+          <Download size={12} />
+        </button>
         <button
           onClick={() => { onEdit(); setConfirming(false) }}
           className="hover:text-foreground"
@@ -711,11 +692,7 @@ type FilterState =
 
 export default function NotesPage() {
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
-  const pageLabsEnabled = useSurfaceStore((s) => s.labsEnabled)
-  const blogsEnabled = useMemo(
-    () => visibleSurfaces(pageLabsEnabled).some((s) => s.id === "blog"),
-    [pageLabsEnabled],
-  )
+  const blogsEnabled = isSurfaceVisible("blog")
   const [isCreating, setIsCreating] = useState(false)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
@@ -743,6 +720,13 @@ export default function NotesPage() {
     logger.info("[Notes] mounted")
   }, [])
 
+  // Creation opens the same full editor an existing note opens, so the two entry points
+  // are not two different editors. The note itself is still created lazily, on first
+  // content, by the autosaver behind /notes/new.
+  const openNewNote = useCallback(() => {
+    navigate(`/notes/${NEW_NOTE_ROUTE_ID}`, { state: { from: "/notes" } })
+  }, [navigate])
+
   // S197: consume notePreload from store (set by gap analysis "Take a note" action)
   useEffect(() => {
     if (notePreload) {
@@ -767,17 +751,12 @@ export default function NotesPage() {
   // S165: Fetch tree to resolve ID to name in header
   const { data: tree } = useQuery({
     queryKey: ["collections-tree"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/collections/tree`)
-      return (await res.json()) as any[]
-    },
+    queryFn: () => fetchCollectionTree(),
     staleTime: 30_000,
   })
 
   const getCollectionName = (id: string) => {
-    if (!tree) return id.slice(0, 8) + "..."
-    const flat = (items: any[]): any[] => items.flatMap(i => [i, ...flat(i.children || [])])
-    const found = flat(tree).find(i => i.id === id)
+    const found = tree ? flattenCollectionTree(tree).find((i) => i.id === id) : undefined
     return found ? found.name : id.slice(0, 8) + "..."
   }
 
@@ -1051,7 +1030,7 @@ export default function NotesPage() {
         <p className="text-base font-medium text-foreground">No notes yet</p>
         <p className="text-sm text-muted-foreground">Click + to create your first note.</p>
         <button
-          onClick={() => setIsCreating(true)}
+          onClick={openNewNote}
           className="flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
         >
           <Plus size={14} />
@@ -1407,7 +1386,7 @@ export default function NotesPage() {
                 Generate Summaries
               </button>
               <button
-                onClick={() => setIsCreating(true)}
+                onClick={openNewNote}
                 className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
                 title="New note"
               >

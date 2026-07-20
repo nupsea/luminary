@@ -29,8 +29,8 @@ install:
 	bash scripts/install.sh
 
 build:
-	@echo "Building production SPA (public tier, /api base)..."
-	cd frontend && VITE_SURFACE_TIER=public VITE_API_BASE=/api npm run build
+	@echo "Building production SPA (public mode, /api base)..."
+	cd frontend && VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
 
 start:
 	bash scripts/start.sh

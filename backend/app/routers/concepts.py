@@ -230,7 +230,7 @@ async def concepts_for_note(
 
     Two signals, unioned: (1) engagement -- concepts the note's mapped cards point at;
     (2) lexical recall -- concepts whose label appears in the note's title/content. This
-    is the always-on degraded path; the concept_linker labs feature enriches it later.
+    is the always-on degraded path; the concept_linker full-mode feature enriches it later.
     """
     note = await session.get(NoteModel, note_id)
     if note is None:

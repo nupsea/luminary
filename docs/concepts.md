@@ -85,7 +85,7 @@ The existing `WRITTEN_ABOUT (Note -> Entity)` engagement edges are reachable thr
 A concept's vector = **centroid of its evidence-chunk embeddings** (the chunks already live in
 LanceDB; this is a free vector mean, recomputed when evidence changes on re-parse). Chunks are
 embedded with **bge-small-en-v1.5 (384-dim)**, so concept vectors live in that same **384-dim chunk
-space** -- directly comparable to chunks and to bge-small query embeddings. A labs upgrade
+space** -- directly comparable to chunks and to bge-small query embeddings. A future upgrade
 synthesizes `label + gloss + top evidence` and re-embeds it with the same chunk embedder for higher
 quality (staying in one space). Notes live in a separate 1024-dim bge-m3 space, so note->concept
 matching embeds the note text with the chunk embedder (bge-small) or falls back to title/lexical.
@@ -134,7 +134,7 @@ Events) -- never recomputed by text match, never on documents or collections.
 ```
 mastery(concept) = fsrs_retrievability(concept's cards)        # backbone, always available
                    blended with calibration accuracy            # metacognition signal
-IF Feynman (labs) enabled AND a teach-back exists:
+IF Feynman available (full mode) AND a teach-back exists:
    teach-back coverage RAISES the attainable ceiling            # generation certifies
 ELSE:
    no artificial cap -- FSRS + calibration stand on their own   # the old "cap at 80" is REMOVED

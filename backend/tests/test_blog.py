@@ -1,4 +1,4 @@
-"""Tests for the labs blog-publishing feature: transform + publish-to-git."""
+"""Tests for the blog-publishing feature (full mode): transform + publish-to-git."""
 
 import subprocess
 from datetime import date

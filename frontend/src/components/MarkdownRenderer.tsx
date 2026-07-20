@@ -80,6 +80,7 @@ function MermaidBlock({ chart }: { chart: string }) {
 
   useEffect(() => {
     let cancelled = false
+    const renderId = `mermaid-${generatedId.replace(/:/g, "")}`
     async function renderMermaid() {
       try {
         setError(null)
@@ -87,11 +88,19 @@ function MermaidBlock({ chart }: { chart: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
+          // Without this, a diagram that fails to parse is not just thrown -- mermaid
+          // also appends its own "Syntax error in text" bomb graphic to document.body.
+          // That orphan outlives this component, so a chat full of malformed diagrams
+          // stacks bombs down the page instead of showing the error box below.
+          suppressErrorRendering: true,
           theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
         })
-        const { svg } = await mermaid.render(`mermaid-${generatedId.replace(/:/g, "")}`, chart)
+        const { svg } = await mermaid.render(renderId, chart)
         if (!cancelled) setSvg(svg)
       } catch (err) {
+        // Belt and braces: older mermaid builds ignore suppressErrorRendering and still
+        // leave the temporary container behind on failure.
+        document.getElementById(`d${renderId}`)?.remove()
         if (!cancelled) {
           setSvg("")
           setError(err instanceof Error ? err.message : "Could not render Mermaid diagram")

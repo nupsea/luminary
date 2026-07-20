@@ -1,7 +1,7 @@
 /**
- * /notes/:noteId -- full-page note editor. Deep-linkable home for existing
- * notes: live CM6 editor, reading view, properties rail, backlinks, and an
- * outline rail for structured notes (3+ headings).
+ * /notes/:noteId -- full-page note editor, also served at /notes/new for a note that
+ * does not exist yet. Deep-linkable home for notes: live CM6 editor, reading view,
+ * properties rail, backlinks, and an outline rail for structured notes (3+ headings).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -11,6 +11,7 @@ import {
   BookOpen,
   Check,
   Columns2,
+  Download,
   FileText,
   LayoutGrid,
   List,
@@ -30,6 +31,7 @@ import { type MarkdownEditorHandle } from "@/components/notes/MarkdownCodeEditor
 import { NoteBacklinks } from "@/components/notes/NoteBacklinks"
 import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteEditor } from "@/components/notes/NoteEditor"
+import { NotePdfExport } from "@/components/notes/NotePdfExport"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
@@ -37,7 +39,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import { API_BASE } from "@/lib/config"
-import { EMPTY_DRAFT, useNoteAutosave, type NoteDraft } from "@/lib/noteAutosave"
+import {
+  EMPTY_DRAFT,
+  NEW_NOTE_KEY,
+  NEW_NOTE_ROUTE_ID,
+  useNoteAutosave,
+  type NoteDraft,
+} from "@/lib/noteAutosave"
+import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
@@ -86,6 +95,10 @@ function parseOutline(content: string): OutlineItem[] {
 
 export default function NotePage() {
   const { noteId } = useParams<{ noteId: string }>()
+  // /notes/new renders the same editor with nothing loaded; the autosaver creates the
+  // note on first content, exactly as the quick composer does, and the URL is swapped
+  // for the real id once it exists.
+  const isNew = noteId === NEW_NOTE_ROUTE_ID
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const qc = useQueryClient()
@@ -97,6 +110,8 @@ export default function NotePage() {
   const [checkedCollectionIds, setCheckedCollectionIds] = useState<Set<string>>(new Set())
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [pdfExporting, setPdfExporting] = useState(false)
   const [suggestedTags, setSuggestedTags] = useState<string[]>([])
   const [isFetchingTags, setIsFetchingTags] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -116,7 +131,7 @@ export default function NotePage() {
   } = useQuery({
     queryKey: ["note", noteId],
     queryFn: () => getNote(noteId!),
-    enabled: Boolean(noteId),
+    enabled: Boolean(noteId) && !isNew,
     retry: false,
     staleTime: 10_000,
   })
@@ -195,12 +210,18 @@ export default function NotePage() {
     : EMPTY_DRAFT
 
   const { status: saveStatus, flush } = useNoteAutosave({
-    bindKey: note?.id ?? null,
+    bindKey: isNew ? NEW_NOTE_KEY : (note?.id ?? null),
     baseline: autosaveBaseline,
     draft: { content: editContent, title: editTitle, tags: editTags, sourceDocIds: selectedDocIds },
-    enabled: Boolean(note),
+    enabled: isNew || Boolean(note),
     onSaved: (saved) => {
-      qc.setQueryData(["note", noteId], saved)
+      qc.setQueryData(["note", saved.id], saved)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      if (isNew) {
+        // Swap /notes/new for the real id without adding a history entry, so Back still
+        // returns to the list rather than to an empty editor.
+        navigate(`/notes/${saved.id}`, { replace: true, state: { from: "/notes" } })
+      }
     },
   })
 
@@ -267,6 +288,18 @@ export default function NotePage() {
     [note?.id],
   )
 
+  async function handleExportMarkdown() {
+    setExportMenuOpen(false)
+    if (!note) return
+    try {
+      await flush()
+    } catch {
+      toast.error("Could not save note before exporting")
+      return
+    }
+    await downloadNoteMarkdown(note.id)
+  }
+
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note!.id),
     onSuccess: () => {
@@ -288,7 +321,7 @@ export default function NotePage() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading && !isNew) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
         <Skeleton className="h-8 w-1/2" />
@@ -299,7 +332,7 @@ export default function NotePage() {
     )
   }
 
-  if (isError || !note) {
+  if (!isNew && (isError || !note)) {
     return (
       <div className="flex flex-col items-center gap-3 py-24 text-center">
         <FileText size={32} className="text-muted-foreground/50" />
@@ -398,7 +431,49 @@ export default function NotePage() {
               <>Autosaves as you type</>
             )}
           </div>
-          {confirmDelete ? (
+          {note && (
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen((v) => !v)}
+              disabled={pdfExporting}
+              className={`rounded-md border border-border bg-background p-1.5 transition-colors hover:text-foreground disabled:opacity-50 ${
+                exportMenuOpen ? "text-foreground" : "text-muted-foreground"
+              }`}
+              title="Export note"
+            >
+              {pdfExporting ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Download size={13} />
+              )}
+            </button>
+            {exportMenuOpen && (
+              <div
+                className="absolute right-0 top-full z-50 mt-0.5 min-w-[150px] rounded border border-border bg-popover py-1 shadow-md"
+                onMouseLeave={() => setExportMenuOpen(false)}
+              >
+                <button
+                  type="button"
+                  className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                  onClick={() => void handleExportMarkdown()}
+                >
+                  Markdown (.md)
+                </button>
+                <button
+                  type="button"
+                  className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+                  onClick={() => {
+                    setExportMenuOpen(false)
+                    setPdfExporting(true)
+                  }}
+                >
+                  PDF (print)
+                </button>
+              </div>
+            )}
+          </div>
+          )}
+          {note && (confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Delete note forever?</span>
               <button
@@ -423,7 +498,7 @@ export default function NotePage() {
             >
               <Trash2 size={13} />
             </button>
-          )}
+          ))}
         </div>
         <input
           value={editTitle}
@@ -504,11 +579,15 @@ export default function NotePage() {
                     )}
                   </div>
                 </div>
-                <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
-                <NoteBacklinks
-                  noteId={note.id}
-                  onOpenNote={(id) => void handleOpenLinkedNote(id)}
-                />
+                {note && (
+                  <>
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                    <NoteBacklinks
+                      noteId={note.id}
+                      onOpenNote={(id) => void handleOpenLinkedNote(id)}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -522,10 +601,12 @@ export default function NotePage() {
                 linkCompletion={linkCompletion}
                 editorRef={editorHandleRef}
               />
-              <NoteBacklinks
-                noteId={note.id}
-                onOpenNote={(id) => void handleOpenLinkedNote(id)}
-              />
+              {note && (
+                <NoteBacklinks
+                  noteId={note.id}
+                  onOpenNote={(id) => void handleOpenLinkedNote(id)}
+                />
+              )}
             </div>
 
             {propsRailOpen && (
@@ -578,9 +659,11 @@ export default function NotePage() {
                   )}
                 </div>
 
-                <div className="shrink-0">
-                  <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
-                </div>
+                {note && (
+                  <div className="shrink-0">
+                    <NoteConceptChips noteId={note.id} noteTitle={note.title ?? undefined} />
+                  </div>
+                )}
 
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
                   <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
@@ -617,6 +700,13 @@ export default function NotePage() {
           </>
         )}
       </div>
+      {pdfExporting && (
+        <NotePdfExport
+          title={editTitle.trim() || note?.title || ""}
+          content={editContent}
+          onDone={() => setPdfExporting(false)}
+        />
+      )}
     </div>
   )
 }

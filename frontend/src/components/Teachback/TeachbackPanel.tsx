@@ -6,6 +6,7 @@ import { ArrowRight, BookOpen, Loader2, Mic, MicOff } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { isButtonActivation, isTypingTarget } from "@/lib/keyboard"
 import { type Flashcard, type TeachbackResultItem } from "@/lib/studyApi"
 
 import { InlineTeachbackFeedback } from "./InlineTeachbackFeedback"
@@ -19,6 +20,7 @@ interface TeachbackPanelProps {
   card: Flashcard
   onNext: () => void
   onSubmitAsync: (cardId: string, question: string, explanation: string) => void
+  onEndSession: () => void
   currentResult: TeachbackResultItem | null
   isEvaluating: boolean
   previousAttempt: TeachbackResultItem | null
@@ -28,6 +30,7 @@ export function TeachbackPanel({
   card,
   onNext,
   onSubmitAsync,
+  onEndSession,
   currentResult,
   isEvaluating,
   previousAttempt,
@@ -37,6 +40,15 @@ export function TeachbackPanel({
   const [isRecording, setIsRecording] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const manualStopRef = useRef(false)
+  // Latch: the outgoing panel keeps its window listener alive during the exit
+  // animation, and onNext increments the reviewed count -- fire it exactly once.
+  const advancedRef = useRef(false)
+
+  function nextOnce() {
+    if (advancedRef.current) return
+    advancedRef.current = true
+    onNext()
+  }
 
   useEffect(() => {
     return () => {
@@ -108,6 +120,29 @@ export function TeachbackPanel({
   const showResult = submitted && currentResult != null && currentResult.status === "complete"
   const showError = evalErrored || (submitted && !isEvaluating && !currentResult)
   const failed = showResult && (currentResult.score ?? 0) < 60
+  const canRetry = showError || failed
+
+  // Post-submit keys: Enter advances to the next card, R retries where a retry
+  // is offered. The form stage is textarea-driven (Ctrl/Cmd+Enter submits there).
+  useEffect(() => {
+    if (showForm) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return
+      if (isButtonActivation(e)) return
+      if (e.key === "Enter") {
+        e.preventDefault()
+        nextOnce()
+        return
+      }
+      if (canRetry && (e.key === "r" || e.key === "R")) {
+        e.preventDefault()
+        handleRetry()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, canRetry, onNext])
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
@@ -147,6 +182,21 @@ export function TeachbackPanel({
             <textarea
               value={explanation}
               onChange={(e) => setExplanation(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  handleSubmit()
+                  return
+                }
+                // The autofocused textarea swallows the session-level Esc: with a
+                // draft, Esc just leaves the field (second Esc ends); empty, it
+                // ends the session directly.
+                if (e.key === "Escape") {
+                  e.preventDefault()
+                  if (explanation.trim()) e.currentTarget.blur()
+                  else onEndSession()
+                }
+              }}
               placeholder="Type your explanation here..."
               className="h-36 w-full resize-none rounded-lg border border-border bg-background p-4 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-400"
               autoFocus
@@ -174,13 +224,17 @@ export function TeachbackPanel({
           {isRecording && (
             <p className="text-xs text-destructive">Recording... click the mic again to stop.</p>
           )}
-          <button
-            onClick={handleSubmit}
-            disabled={!explanation.trim()}
-            className="self-start rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-          >
-            Submit Explanation
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSubmit}
+              disabled={!explanation.trim()}
+              data-kbnav
+              className="self-start rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              Submit Explanation
+            </button>
+            <p className="text-[11px] text-muted-foreground">Ctrl/⌘+Enter to submit</p>
+          </div>
         </div>
       )}
 
@@ -193,14 +247,18 @@ export function TeachbackPanel({
               Evaluating your explanation...
             </span>
           </div>
-          <button
-            onClick={onNext}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:bg-accent"
-            title="Results will appear in the session summary"
-          >
-            Next Card
-            <ArrowRight size={12} />
-          </button>
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] text-muted-foreground">Enter for next card</p>
+            <button
+              onClick={nextOnce}
+              data-kbnav
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              title="Results will appear in the session summary"
+            >
+              Next Card
+              <ArrowRight size={12} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -216,19 +274,24 @@ export function TeachbackPanel({
           </p>
           <div className="flex items-center justify-center gap-3">
             <button
-              onClick={onNext}
+              onClick={nextOnce}
               autoFocus
-              className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-700"
+              data-kbnav
+              className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               Next Card <ArrowRight size={18} />
             </button>
             <button
               onClick={handleRetry}
-              className="rounded-lg border-2 border-red-300 px-5 py-2.5 text-sm font-semibold text-red-800 hover:bg-red-100 dark:border-red-700 dark:text-red-300"
+              data-kbnav
+              className="rounded-lg border-2 border-red-300 px-5 py-2.5 text-sm font-semibold text-red-800 hover:bg-red-100 dark:border-red-700 dark:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               Try Again
             </button>
           </div>
+          <p className="mt-3 text-center text-[11px] text-red-700 dark:text-red-400/80">
+            Enter for next card · R to retry
+          </p>
         </motion.div>
       )}
 
@@ -262,11 +325,12 @@ export function TeachbackPanel({
             </p>
             <div className="flex items-center justify-center gap-3">
               <motion.button
-                onClick={onNext}
+                onClick={nextOnce}
                 autoFocus
+                data-kbnav
                 initial={{ scale: 0.95 }}
                 animate={{ scale: 1 }}
-                className={`flex items-center gap-2 rounded-lg px-8 py-3 text-base font-bold shadow-lg ${
+                className={`flex items-center gap-2 rounded-lg px-8 py-3 text-base font-bold shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                   failed
                     ? "bg-amber-600 text-white hover:bg-amber-700"
                     : "bg-green-600 text-white hover:bg-green-700"
@@ -277,12 +341,22 @@ export function TeachbackPanel({
               {failed && (
                 <button
                   onClick={handleRetry}
-                  className="rounded-lg border-2 border-amber-400 px-6 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300"
+                  data-kbnav
+                  className="rounded-lg border-2 border-amber-400 px-6 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   Try Again
                 </button>
               )}
             </div>
+            <p
+              className={`mt-3 text-center text-[11px] ${
+                failed
+                  ? "text-amber-700 dark:text-amber-400/80"
+                  : "text-green-700 dark:text-green-400/80"
+              }`}
+            >
+              {failed ? "Enter for next card · R to retry" : "Enter for next card"}
+            </p>
           </motion.div>
         </>
       )}

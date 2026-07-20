@@ -16,15 +16,24 @@ export async function renderMermaidSvgs(content: string): Promise<Record<string,
   const blocks = extractMermaidBlocks(content)
   if (blocks.length === 0) return {}
   const mermaid = (await import("mermaid")).default
-  mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" })
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "default",
+    securityLevel: "loose",
+    // Keeps a malformed diagram from appending mermaid's error graphic to the
+    // live page while we are only rendering SVGs for export.
+    suppressErrorRendering: true,
+  })
   const result: Record<string, string> = {}
   for (let i = 0; i < blocks.length; i++) {
+    const renderId = `blog-mermaid-${i}-${Date.now()}`
     try {
-      const { svg } = await mermaid.render(`blog-mermaid-${i}-${Date.now()}`, blocks[i])
+      const { svg } = await mermaid.render(renderId, blocks[i])
       result[`mermaid-${i + 1}`] = svg
     } catch {
       // A broken diagram is skipped; publish reports the missing SVG so the
       // user can fix the note rather than shipping a blank image.
+      document.getElementById(`d${renderId}`)?.remove()
     }
   }
   return result

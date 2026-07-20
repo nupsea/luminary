@@ -37,12 +37,16 @@ ContentType = Literal[
     "book",
     "conversation",
     "notes",
+    "paper",
     "audio",
     "video",
     "epub",
     "kindle_clippings",
     "tech_book",
     "tech_article",
+    # Merged upload choice; classify_node resolves it to tech_book or
+    # tech_article from the parsed text and persists the resolved value.
+    "technical",
 ]
 
 _parser = DocumentParser()
@@ -122,6 +126,20 @@ class IngestionState(TypedDict):
     _audio_chunks: list[dict[str, Any]] | None
 
 
+def resolve_technical_variant(raw_text: str) -> str:
+    """Resolve the merged 'technical' upload choice into the sizing variant
+    the chunker expects. Dense numbered sections or fenced code blocks early
+    in the text read as a structured technical book; anything else chunks as
+    a technical article. The two variants share every other pipeline branch.
+    """
+    first_5k = raw_text[:5000]
+    code_fence_count = len(re.findall(r"```", first_5k))
+    numbered_section_count = len(re.findall(r"\b\d+\.\d+\b", first_5k))
+    if code_fence_count >= 6 or numbered_section_count >= 2:
+        return "tech_book"
+    return "tech_article"
+
+
 def _classify(
     raw_text: str, sections: list[dict], word_count: int, file_ext: str, filename: str = ""
 ) -> str:
@@ -150,12 +168,7 @@ def _classify(
         return "paper"
     if re.search(r"\b(abstract|methodology)\b", headings_lower):
         return "paper"
-    # tech_book: >= 3 fenced code blocks (= >= 6 triple-backtick tokens) in first 5000 chars,
-    # OR >= 2 numbered section headings (e.g. "1.1", "2.3") in first 5000 chars.
-    first_5k = raw_text[:5000]
-    code_fence_count = len(re.findall(r"```", first_5k))
-    numbered_section_count = len(re.findall(r"\b\d+\.\d+\b", first_5k))
-    if code_fence_count >= 6 or numbered_section_count >= 2:
+    if resolve_technical_variant(raw_text) == "tech_book":
         return "tech_book"
     chapter_count = len(re.findall(r"\bchapter\b", headings_lower))
     if chapter_count >= 2 and word_count > 40000:
@@ -171,5 +184,21 @@ async def _update_stage(document_id: str, stage: str) -> None:
     async with get_session_factory()() as session:
         await session.execute(
             update(DocumentModel).where(DocumentModel.id == document_id).values(stage=stage)
+        )
+        await session.commit()
+
+
+async def _persist_content_type(document_id: str, content_type: str) -> None:
+    """Write a resolved content_type back to the document row so the stored
+    value always names a concrete pipeline variant, never a merged choice."""
+    from sqlalchemy import update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(content_type=content_type)
         )
         await session.commit()

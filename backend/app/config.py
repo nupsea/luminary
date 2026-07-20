@@ -1,16 +1,25 @@
 import functools
+from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+# Anchor for relative DATA_DIR values: the repo root in a source checkout
+# (config.py lives at <root>/backend/app/), "/" in the container images
+# (which set DATA_DIR explicitly).
+_DATA_DIR_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    # Relative values resolve against the repo root, NOT the CWD: scripts run
+    # from backend/ used to silently create a stray backend/.luminary store.
     DATA_DIR: str = ".luminary"
-    LUMINARY_SURFACE_TIER: Literal["public", "labs", "dev"] = "dev"
-    # prod: serve the built SPA and mount the API under /api on one port (no CORS).
-    # dev: routers at root, CORS open, frontend served separately by Vite.
-    LUMINARY_MODE: Literal["dev", "prod"] = "dev"
-    # Labs "publish note as blog": target Astro content repo + layout. Labs-only;
+    # full: every surface on, routers at root, CORS open for the Vite dev server
+    #       (`make luminary`). public: curated learner surfaces only, built SPA
+    #       served with the API under /api on one port (no CORS).
+    LUMINARY_MODE: Literal["full", "public"] = "full"
+    # "Publish note as blog": target Astro content repo + layout. Full-mode-only;
     # defaulted to the author's personal site checkout.
     LUMINARY_BLOG_REPO_PATH: str = "/Users/sethurama/DEV/LM/nupsea.github.io"
     LUMINARY_BLOG_CONTENT_SUBDIR: str = "src/content/blog"
@@ -92,6 +101,11 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/llava:7b"
+    # Max concurrent vision (image_analyze) LLM calls across all documents. Default
+    # 1 = one-at-a-time (safe on 8GB). Raise (e.g. 2-4) on a host with headroom and
+    # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
+    # profile sets this: public=1, standard=2, performance=4.
+    ENRICHMENT_VISION_CONCURRENCY: int = 1
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
     # 2D.2: seed document auto-tags with entities from the graph extraction.
     # On by default -- no extra LLM calls; uses entities already populated by
@@ -119,6 +133,14 @@ class Settings(BaseSettings):
     PHOENIX_GRPC_PORT: int = 4317
 
     model_config = {"env_file": (".env", "/app/.luminary/.env"), "env_file_encoding": "utf-8"}
+
+    @field_validator("DATA_DIR")
+    @classmethod
+    def _anchor_relative_data_dir(cls, v: str) -> str:
+        p = Path(v).expanduser()
+        if p.is_absolute():
+            return str(p)
+        return str((_DATA_DIR_ROOT / p).resolve())
 
 
 @functools.lru_cache

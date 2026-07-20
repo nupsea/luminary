@@ -316,3 +316,66 @@ async def test_delete_generated_dataset_cascades_questions(test_db):
     async with db_module.get_session_factory()() as session:
         assert await session.get(GoldenDatasetModel, "ds-delete") is None
         assert await session.get(GoldenQuestionModel, "q-delete") is None
+
+
+# POST /evals/store (moved from the retired /monitoring/evals/store)
+
+
+async def test_store_eval_run_creates_row(test_db):
+    """POST /evals/store inserts an EvalRunModel row."""
+    payload = {
+        "dataset_name": "book",
+        "model_used": "ollama/mistral",
+        "hit_rate_5": 0.7,
+        "mrr": 0.6,
+        "faithfulness": 0.85,
+        "answer_relevance": 0.9,
+        "context_precision": 0.8,
+        "context_recall": 0.75,
+        "theme_coverage": 0.88,
+        "no_hallucination": 0.95,
+        "conciseness_pct": 1.1,
+        "factuality": 0.92,
+        "atomicity": 0.84,
+        "clarity_avg": 4.1,
+        "routing_accuracy": 0.93,
+        "per_route": {"search": {"precision": 1.0, "recall": 0.9}},
+        "ablation_metrics": {"vector": {"hit_rate_5": 0.5, "mrr": 0.4}},
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/evals/store", json=payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["dataset_name"] == "book"
+    assert data["model_used"] == "ollama/mistral"
+    assert data["hit_rate_5"] == pytest.approx(0.7)
+    assert data["routing_accuracy"] == pytest.approx(0.93)
+    assert data["per_route"]["search"]["recall"] == pytest.approx(0.9)
+    assert data["ablation_metrics"]["vector"]["mrr"] == pytest.approx(0.4)
+    assert "id" in data
+    assert "run_at" in data
+
+    async with db_module.get_session_factory()() as session:
+        row = await session.get(EvalRunModel, data["id"])
+    assert row is not None
+    assert row.dataset_name == "book"
+
+
+async def test_store_eval_run_with_null_ragas_scores(test_db):
+    """POST /evals/store accepts None for RAGAS metrics (LLM unavailable)."""
+    payload = {
+        "dataset_name": "paper",
+        "model_used": "ollama/mistral",
+        "hit_rate_5": 0.5,
+        "mrr": 0.4,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/evals/store", json=payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["faithfulness"] is None
+    assert data["answer_relevance"] is None

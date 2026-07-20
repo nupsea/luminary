@@ -5,7 +5,7 @@ description: The two-lane orchestration model -- how Lumen connects study, conce
 # The Two-Lane Model
 
 Luminary already ships the hard parts (local ingestion, hybrid retrieval, FSRS, cited chat, a
-knowledge graph, tiered labs). What it lacked is **orchestration** -- the product saying *"here is
+knowledge graph, moded surfaces). What it lacked is **orchestration** -- the product saying *"here is
 the one thing to do, and one door to do it from."* The two-lane model is that connective tissue.
 
 ## The loop
@@ -40,7 +40,7 @@ through **one pipeline** -> `sessions/*.json` transcript -> `memory.md` digest l
 
 | Kind | What | Writes |
 |---|---|---|
-| `full_session` | warm-up -> engage -> reflect (+ teach-back if Feynman labs on) | FSRS, calibration, (teach-back coverage) |
+| `full_session` | warm-up -> engage -> reflect (+ teach-back in full mode) | FSRS, calibration, (teach-back coverage) |
 | `quick_quiz` | 5-10 generated questions, one screen | FSRS, calibration |
 | `drill` | 3-min misconception fixer | FSRS, misconception status |
 | `checkpoint` | inline retrieval while reading | FSRS (light), signals |
@@ -82,31 +82,32 @@ confirms. Keeps the doc-grounded graph honest while letting user material lead. 
 8. **The learner model is files the user can read, edit, delete.** (OKF-backed -- see [okf.md](okf.md).)
 9. **Local by default, degraded gracefully.** Model down => review, reading, notes, manual cards still work.
 10. **Every surface earns its place by routing to action.** Can't launch a study event, link material, or correct the graph in one tap => it's decoration.
-11. **The manifest is law.** Every surface declares a tier; core never hard-depends on a labs feature.
-12. **Don't invent over what ships -- extend it.** New surfaces enter labelled; labs-first where unproven.
+11. **The manifest is law.** Every surface declares a mode; core (public) never hard-depends on a full-mode feature.
+12. **Don't invent over what ships -- extend it.** New surfaces enter labelled; full-mode-first where unproven.
 13. **Transport and knowledge are separate layers.** LiteLLM carries bytes; OKF carries portable knowledge. Never couple.
 14. **Local-first is a hard floor, not a default.** No external dep without a local alternative; never transmit user content to telemetry.
 
-## Per-tier behavior matrix (public / labs / dev)
+## Per-mode behavior matrix (public / full)
 
-The model must behave correctly in all three [surface tiers](../surface-manifest.json). Core never
-hard-depends on a labs feature -- it degrades (constitution 9, 11; invariant I-10).
+The model must behave correctly in both [surface modes](../surface-manifest.json). Public never
+hard-depends on a full-mode feature -- it degrades (constitution 9, 11; invariant I-10).
 
-| Capability | public | labs | dev |
-|---|---|---|---|
-| Concept extraction (document-driven) | yes | yes | yes |
-| Mastery / FSRS / Study Events | yes | yes | yes |
-| Study Launcher + all entry points | yes | yes | yes |
-| Concept vector (centroid) for linking/dedup | yes | yes | yes |
-| Within-collection concept linking | yes (after quality bar) | yes | yes |
-| Cross-library concept linking | -- | yes | yes |
-| Clustering / org-plan suggestions | yes | yes | yes |
-| Pomodoro focus pill | yes (quiet, in Study chrome) | yes | yes |
-| Teach-back / Feynman (4th session phase) | -- | yes | yes |
-| Web/URL, YouTube, audio, image, tech-book ingest | -- | yes | yes |
-| OKF export / grounding / import | yes (public router) | yes | yes |
-| Blog publish (reframed as OKF share) | -- | yes | yes |
-| Code executor, dataset generator | -- | -- | yes |
+| Capability | public | full |
+|---|---|---|
+| Concept extraction (document-driven) | yes | yes |
+| Mastery / FSRS / Study Events | yes | yes |
+| Study Launcher + all entry points | yes | yes |
+| Concept vector (centroid) for linking/dedup | yes | yes |
+| Within-collection concept linking | yes (after quality bar) | yes |
+| Cross-library concept linking | -- | yes |
+| Clustering / org-plan suggestions | -- | yes |
+| Pomodoro focus pill | -- | yes |
+| Teach-back / Feynman (4th session phase) | -- | yes |
+| Web/URL, YouTube, audio, image, tech-book ingest | -- | yes |
+| OKF export / grounding / import | yes (public router) | yes |
+| Blog publish (reframed as OKF share) | -- | yes |
+| Code executor, dataset generator | -- | yes |
+| Map (tag/concept graph) | -- | yes |
 
 Degrade rule: model down -> due-card review still starts, generation disabled with the shipped
 banner; note concept-chips fall back to title/centroid-vector match.

@@ -4,6 +4,7 @@ Unit tests use in-memory SQLite + mocked LiteDB and LiteLLM.
 Integration test (requires ollama llava) is guarded with pytest.mark.skipif.
 """
 
+import asyncio
 import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -70,6 +71,86 @@ def test_prefilter_varied_image_not_decorative(tmp_path: Path) -> None:
     _make_varied_png(img_path)
     pil_img = PILImage.open(str(img_path))
     assert _is_decorative(pil_img) is False
+
+
+def test_prefilter_near_blank_decorative() -> None:
+    """A near-blank capture (>99% one color, but >5 colors from noise) is decorative."""
+    img = PILImage.new("RGB", (200, 200), color=(255, 255, 255))
+    # Sprinkle a handful of stray colored pixels (<1%) — enough to exceed the
+    # 5-unique-color floor, but the image is still blank for all practical purposes.
+    for i in range(20):
+        img.putpixel((i, 0), (i * 10, i * 5, i * 2))
+    assert _is_decorative(img) is True
+
+
+def test_prefilter_sparse_lineart_not_decorative() -> None:
+    """Sparse line-art on white (a real diagram) survives the near-blank filter.
+
+    ~12% non-white ink across many colors (anti-aliasing/grays), like an actual
+    computational-graph figure: >5 unique colors and dominant white well under 99%.
+    """
+    img = PILImage.new("RGB", (200, 200), color=(255, 255, 255))
+    palette = [(0, 0, 0), (30, 30, 30), (60, 90, 200), (200, 40, 40),
+               (20, 140, 60), (120, 120, 120), (240, 160, 0), (90, 0, 140)]
+    for y in range(24):
+        for x in range(200):
+            img.putpixel((x, y), palette[(x + y) % len(palette)])
+    assert _is_decorative(img) is False
+
+
+async def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
+    """_get_enrich_sem sizes the shared semaphore from ENRICHMENT_VISION_CONCURRENCY."""
+    import weakref
+
+    import app.services.image_enricher as ie
+
+    monkeypatch.setattr(ie, "_ENRICH_SEMS", weakref.WeakKeyDictionary())
+    fake_settings = MagicMock()
+    fake_settings.ENRICHMENT_VISION_CONCURRENCY = 3
+    monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
+
+    sem = ie._get_enrich_sem()
+    assert sem._value == 3
+    # Cached per loop: a second call on the same loop returns the same instance.
+    assert ie._get_enrich_sem() is sem
+
+
+def test_enrich_semaphore_is_per_event_loop(monkeypatch) -> None:
+    """A second loop gets its own semaphore rather than reusing one bound elsewhere."""
+    import weakref
+
+    import app.services.image_enricher as ie
+
+    monkeypatch.setattr(ie, "_ENRICH_SEMS", weakref.WeakKeyDictionary())
+    fake_settings = MagicMock()
+    fake_settings.ENRICHMENT_VISION_CONCURRENCY = 1
+    monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
+
+    async def _acquire_and_leak() -> asyncio.Semaphore:
+        sem = ie._get_enrich_sem()
+        # Take the only permit and never release it, exactly as a holder killed
+        # with its loop would leave things.
+        await sem.acquire()
+        return sem
+
+    async def _fetch() -> asyncio.Semaphore:
+        return ie._get_enrich_sem()
+
+    first_loop = asyncio.new_event_loop()
+    try:
+        first_sem = first_loop.run_until_complete(_acquire_and_leak())
+    finally:
+        first_loop.close()
+
+    second_loop = asyncio.new_event_loop()
+    try:
+        second_sem = second_loop.run_until_complete(_fetch())
+    finally:
+        second_loop.close()
+
+    assert second_sem is not first_sem
+    # The fresh loop is not starved by the permit leaked on the previous one.
+    assert second_sem._value == 1
 
 
 # Async fixtures
@@ -705,3 +786,104 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
         assert row.image_type is not None
 
     await engine.dispose()
+
+
+# Context grounding and label transcription
+
+
+def test_merge_labels_folds_into_description() -> None:
+    from app.services.image_enricher import _merge_labels
+
+    parsed = {
+        "description": "Scaled dot-product attention block.",
+        "labels": ["MatMul", "Scale", "Mask (opt.)", "SoftMax", " ", 3],
+    }
+    merged = _merge_labels(parsed)
+    assert merged.startswith("Scaled dot-product attention block.")
+    assert "Visible labels: MatMul, Scale, Mask (opt.), SoftMax, 3." in merged
+
+
+def test_merge_labels_ignores_missing_or_invalid() -> None:
+    from app.services.image_enricher import _merge_labels
+
+    assert _merge_labels({"description": "A chart."}) == "A chart."
+    assert _merge_labels({"description": "A chart.", "labels": "Q, K, V"}) == "A chart."
+    assert _merge_labels({"description": "A chart.", "labels": []}) == "A chart."
+
+
+@pytest.mark.asyncio
+async def test_vision_call_includes_context_when_given(tmp_path: Path) -> None:
+    from app.services.image_enricher import _call_vision_llm
+
+    img_path = tmp_path / "figure.png"
+    _make_varied_png(img_path)
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = '{"image_type": "flowchart", "description": "d"}'
+
+    with patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = mock_response
+        settings = MagicMock()
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+
+        await _call_vision_llm(img_path, settings, "Figure 1: The model architecture")
+        prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]
+        assert "Figure 1: The model architecture" in prompt_text
+        assert "transcribe the text labels" in prompt_text
+
+        await _call_vision_llm(img_path, settings, "")
+        prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]
+        assert "Document context" not in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_load_image_contexts_fuses_all_sources(doc_and_image, session_factory) -> None:
+    """The context carries every available evidence source as a labeled
+    section: title, anchored chunk text, and same-page text."""
+    from sqlalchemy import select
+
+    from app.models import ChunkModel
+    from app.services.image_enricher import _load_image_contexts
+
+    doc_id, image_id, _img_path, _data_dir = doc_and_image
+
+    async with session_factory() as session:
+        session.add(
+            ChunkModel(
+                id="chunk-anchor",
+                document_id=doc_id,
+                text="Figure 1: The model architecture.",
+                chunk_index=1,
+                page_number=1,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id="chunk-page",
+                document_id=doc_id,
+                text="The encoder is composed of a stack of identical layers.",
+                chunk_index=0,
+                page_number=1,
+            )
+        )
+        await session.commit()
+
+    with patch("app.database.get_session_factory", return_value=session_factory):
+        async with session_factory() as session:
+            img = (
+                await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+            ).scalar_one()
+
+        # No anchor: title + first same-page chunk
+        contexts = await _load_image_contexts(doc_id, [img])
+        assert "Title: Test Doc" in contexts[image_id]
+        assert "encoder is composed" in contexts[image_id]
+
+        # With anchor: anchored text AND the distinct same-page text
+        img.chunk_id = "chunk-anchor"
+        contexts = await _load_image_contexts(doc_id, [img])
+        assert "Figure 1: The model architecture." in contexts[image_id]
+        assert "encoder is composed" in contexts[image_id]
+        assert "Title: Test Doc" in contexts[image_id]

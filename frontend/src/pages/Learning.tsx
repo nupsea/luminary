@@ -111,6 +111,9 @@ export default function Learning() {
     const n = parseInt(raw, 10)
     return isNaN(n) ? undefined : n
   })
+  const [savedSearch, setSavedSearch] = useState<string | undefined>(
+    searchParams.get("search") ?? undefined,
+  )
 
   const [search, setSearch] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
@@ -293,6 +296,7 @@ export default function Learning() {
       setSavedSectionId(sectionId)
       setSavedChunkId(chunkId)
       setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
+      setSavedSearch(searchParams.get("search") ?? undefined)
 
       setActiveDocument(docParam)
       setSearchParams((prev) => {
@@ -301,6 +305,7 @@ export default function Learning() {
         next.delete("section_id")
         next.delete("chunk_id")
         next.delete("page")
+        next.delete("search")
         return next
       }, { replace: true, state: routeLocation.state })
     }
@@ -320,6 +325,7 @@ export default function Learning() {
       setSavedSectionId(undefined)
       setSavedChunkId(undefined)
       setSavedPage(undefined)
+      setSavedSearch(undefined)
     }
 
     // Gate the reader on ingestion readiness. If we know the doc from the
@@ -352,6 +358,7 @@ export default function Learning() {
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
             initialPage={savedPage}
+            initialSearch={savedSearch}
           />
         </div>
       </div>

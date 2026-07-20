@@ -11,13 +11,13 @@ import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarCha
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { Toaster, toast } from "sonner"
+import { Toaster } from "sonner"
 import { cn } from "./lib/utils"
 import { getHomeRedirectTarget } from "./lib/homeRedirect"
+import { isTypingTarget } from "./lib/keyboard"
 import { toggleTheme } from "./lib/theme"
 import { useAppStore } from "./store"
-import { useSurfaceStore } from "./store/surface"
-import { SURFACE_TIER, navTabs, routedSurfaces, visibleSurfaces, findLabsSurfaceByRoute } from "./lib/surfaceManifest"
+import { LUMINARY_MODE, navTabs, routedSurfaces, isSurfaceVisible } from "./lib/surfaceManifest"
 import type { Surface } from "./lib/surfaceManifest"
 import { logger } from "./lib/logger"
 import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
@@ -167,23 +167,6 @@ function PageSkeleton() {
   )
 }
 
-// Whole-shell fallback while the surface manifest state loads, so the nav rail
-// never flashes a set of tabs it then has to remove.
-function BootSkeleton() {
-  return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background">
-      <div className="flex h-full w-[4.5rem] flex-col items-center gap-2 border-r border-border/50 bg-sidebar py-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-12 rounded-xl" />
-        ))}
-      </div>
-      <div className="flex-1">
-        <PageSkeleton />
-      </div>
-    </div>
-  )
-}
-
 // Sidebar with hover-prefetch. Tabs are manifest-driven; `mainTabs` are the
 // learner-facing rail and `devTabs` are demoted to small icons at the bottom.
 function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[] }) {
@@ -251,9 +234,9 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
           <StreakXPWidget />
         </div>
         <div className="flex flex-col items-center gap-2">
-          {/* Dev-tier surfaces are demoted from the learner rail to small icons.
-              They are only present here on a `dev` bundle — lower tiers shed them
-              from the manifest entirely, so prod ships no link or route. */}
+          {/* Dev-rail surfaces (Quality/Admin/Monitoring) sit as small icons below
+              the learner rail. They only ship in full mode — public builds shed
+              them from the manifest entirely, so no link or route exists. */}
           {devTabs.map((s) => {
             const Icon = ICONS[s.id] ?? Wrench
             return (
@@ -290,18 +273,13 @@ function Sidebar({ mainTabs, devTabs }: { mainTabs: Surface[]; devTabs: Surface[
   )
 }
 
-// About dialog — version + surface tier info for the end user.
+// About dialog — version + mode info for the end user.
 
-const TIER_META: Record<string, { label: string; color: string; description: string }> = {
-  dev: {
-    label: "dev",
+const MODE_META: Record<string, { label: string; color: string; description: string }> = {
+  full: {
+    label: "full",
     color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",
-    description: "All surfaces enabled, including quality tools and admin panels.",
-  },
-  labs: {
-    label: "labs",
-    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    description: "Experimental features toggled per-surface via the Labs panel.",
+    description: "Every feature enabled, including the Map, quality tools, and admin panels.",
   },
   public: {
     label: "public",
@@ -333,8 +311,7 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
     enabled: open,
     staleTime: 60_000,
   })
-  const tier = SURFACE_TIER
-  const meta = TIER_META[tier] ?? TIER_META.public
+  const meta = MODE_META[LUMINARY_MODE] ?? MODE_META.public
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-w-sm">
@@ -350,7 +327,7 @@ function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
             <span className="font-medium">{data?.version ?? "—"}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Build tier</span>
+            <span className="text-muted-foreground">Mode</span>
             <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", meta.color)}>
               {meta.label}
             </span>
@@ -386,22 +363,15 @@ function HomeRoute() {
   )
 }
 
-// Self-healing 404. A stale bookmark into a gated labs surface gets a toast and
-// a redirect home rather than a dead route; truly unknown URLs just redirect.
+// Self-healing 404. A stale bookmark into a surface this bundle doesn't ship
+// (or a truly unknown URL) redirects home rather than showing a dead route.
 function NotFoundRedirect() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
 
   useEffect(() => {
-    const labs = findLabsSurfaceByRoute(pathname)
-    // Only nudge toward the Labs panel on a `labs` build, where that panel exists.
-    // On `public` there's no way to enable it, so redirect home silently.
-    if (labs && SURFACE_TIER === "labs" && !labsEnabled.has(labs.id)) {
-      toast.info(`${labs.labels.en} is a Labs feature — enable it in Settings → Labs to use it.`)
-    }
     navigate("/", { replace: true })
-  }, [pathname, navigate, labsEnabled])
+  }, [pathname, navigate])
 
   return <PageSkeleton />
 }
@@ -419,18 +389,10 @@ function AppShell() {
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
 
-  const surfaceLoaded = useSurfaceStore((s) => s.loaded)
-  const labsEnabled = useSurfaceStore((s) => s.labsEnabled)
-
-  const mainTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier !== "dev"), [labsEnabled])
-  const devTabs = useMemo(() => navTabs(labsEnabled).filter((s) => s.tier === "dev"), [labsEnabled])
-  const routes = useMemo(() => routedSurfaces(labsEnabled), [labsEnabled])
-  const pomodoroVisible = useMemo(() => visibleSurfaces(labsEnabled).some((s) => s.id === "pomodoro"), [labsEnabled])
-
-  // Boot: load surface tier + labs toggles before rendering the rail/routes.
-  useEffect(() => {
-    void useSurfaceStore.getState().fetch()
-  }, [])
+  const mainTabs = useMemo(() => navTabs().filter((s) => s.rail !== "dev"), [])
+  const devTabs = useMemo(() => navTabs().filter((s) => s.rail === "dev"), [])
+  const routes = useMemo(() => routedSurfaces(), [])
+  const pomodoroVisible = isSurfaceVisible("pomodoro")
 
   // Surface a global warning when Ollama is unreachable in private mode
   const { data: llmData } = useQuery<{
@@ -537,13 +499,6 @@ function AppShell() {
   }, [])
 
   useEffect(() => {
-    function isTypingTarget(t: EventTarget | null): boolean {
-      if (!(t instanceof HTMLElement)) return false
-      if (t.isContentEditable) return true
-      const tag = t.tagName
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
-    }
-
     function onKeyDown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key === "k") {
@@ -577,8 +532,6 @@ function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [navigate, mainTabs])
 
-  if (!surfaceLoaded) return <BootSkeleton />
-
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar mainTabs={mainTabs} devTabs={devTabs} />
@@ -598,7 +551,7 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* global focus timer pill -- labs surface, only when pomodoro is visible */}
+        {/* global focus timer pill -- full-mode surface, only when pomodoro is visible */}
         {pomodoroVisible && (
           <div className="flex items-center justify-end gap-2 px-4 pt-3">
             <FocusTimerPill />
@@ -621,7 +574,7 @@ function AppShell() {
               />
             )
           })}
-          {SURFACE_TIER === "dev" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
+          {LUMINARY_MODE === "full" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </main>

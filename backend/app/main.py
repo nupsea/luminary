@@ -58,7 +58,7 @@ from app.services.image_extractor import image_extract_handler
 from app.services.prereq_extractor import prereq_extract_handler
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
-from app.services.settings_service import load_llm_settings, read_labs_enabled_sync
+from app.services.settings_service import load_llm_settings
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
 
@@ -272,9 +272,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Luminary", lifespan=lifespan)
 
 _mode = get_settings().LUMINARY_MODE
-# prod is single-origin (SPA + API on one port), so CORS is unnecessary; dev
+# public is single-origin (SPA + API on one port), so CORS is unnecessary; full
 # serves the frontend from Vite on a different port and needs it.
-if _mode == "dev":
+if _mode == "full":
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://localhost:\d+",
@@ -283,10 +283,10 @@ if _mode == "dev":
         allow_headers=["*"],
     )
 
-# In prod the whole API lives under /api so SPA client routes (/notes, /study,
-# /collections/:id, ...) never collide with router paths. dev/test keep routers
-# at root, so no test paths change.
-_API_PREFIX = "/api" if _mode == "prod" else ""
+# In public mode the whole API lives under /api so SPA client routes (/notes,
+# /study, /collections/:id, ...) never collide with router paths. full/test keep
+# routers at root, so no test paths change.
+_API_PREFIX = "/api" if _mode == "public" else ""
 
 
 ROUTER_REGISTRY = {
@@ -324,10 +324,8 @@ ROUTER_REGISTRY = {
     "tags": tags_router,
 }
 
-# settings is always registered: the Settings -> Labs panel needs it to toggle tiers.
-_tier = get_settings().LUMINARY_SURFACE_TIER
-_labs_enabled = read_labs_enabled_sync() if _tier != "dev" else set()
-_enabled = enabled_routers(_tier, _labs_enabled) | {"settings"}
+# settings is always registered: the Settings drawer needs it in both modes.
+_enabled = enabled_routers(_mode) | {"settings"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
         app.include_router(_router, prefix=_API_PREFIX)
@@ -447,9 +445,9 @@ def resolve_spa_asset(dist: Path, full_path: str) -> Path | None:
     return None
 
 
-# In prod, serve the built SPA. The API is under /api, so everything else falls
-# back to index.html for client-side routing (real files are served directly).
-if _mode == "prod":
+# In public mode, serve the built SPA. The API is under /api, so everything else
+# falls back to index.html for client-side routing (real files are served directly).
+if _mode == "public":
     _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
     @app.get("/{full_path:path}")
