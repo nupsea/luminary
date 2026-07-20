@@ -82,6 +82,15 @@ def _reset_lancedb_singleton():
     yield
 
 
+def _task_module(task: asyncio.Task) -> str:
+    """Module that a task's coroutine was defined in, or "" if it cannot be read."""
+    coro = task.get_coro()
+    frame = getattr(coro, "cr_frame", None) or getattr(coro, "ag_frame", None)
+    if frame is None:
+        return ""
+    return str(frame.f_globals.get("__name__", ""))
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _drain_leaked_tasks():
     """Cancel any fire-and-forget task the test spawned, while its loop is still alive.
@@ -96,10 +105,20 @@ async def _drain_leaked_tasks():
 
     Cancelling here, inside the owning loop, is the only point where cancellation can
     actually be processed.
+
+    Only tasks running OUR code are cancelled. Tests marked @pytest.mark.anyio are driven
+    by anyio's TestRunner, which runs the test -- and this very fixture -- from its own
+    asyncio tasks. Cancelling everything except `current` therefore cancelled the harness
+    running the test, which surfaced as CancelledError at teardown of every anyio test and
+    as "previous item was not torn down properly" in the tests after it.
     """
     yield
     current = asyncio.current_task()
-    leaked = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    leaked = [
+        t
+        for t in asyncio.all_tasks()
+        if t is not current and not t.done() and _task_module(t).startswith("app.")
+    ]
     for t in leaked:
         t.cancel()
     if leaked:
