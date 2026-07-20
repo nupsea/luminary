@@ -16,6 +16,7 @@ import asyncio
 import base64
 import logging
 import uuid
+import weakref
 from datetime import UTC
 from io import BytesIO
 from pathlib import Path
@@ -69,18 +70,27 @@ _MAX_LABELS = 40
 # PDFs). Sized lazily from ENRICHMENT_VISION_CONCURRENCY so a machine/profile with
 # headroom can batch several image_analyze calls (paired with OLLAMA_NUM_PARALLEL);
 # the default of 1 preserves the original one-at-a-time behaviour.
-_ENRICH_SEM: asyncio.Semaphore | None = None
+# Keyed by running loop, as in enrichment_concurrency: an asyncio.Semaphore binds
+# itself to a loop the first time it has to wait, so a single process-wide instance
+# raises "bound to a different event loop" once a second loop contends for it. The
+# binding only happens under contention, which is why a leaked permit -- a holder
+# killed with its loop, leaving the count at zero -- is what exposes it.
+_ENRICH_SEMS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _get_enrich_sem() -> asyncio.Semaphore:
-    global _ENRICH_SEM  # noqa: PLW0603
-    if _ENRICH_SEM is None:
+    loop = asyncio.get_running_loop()
+    sem = _ENRICH_SEMS.get(loop)
+    if sem is None:
         try:
             n = int(_config_module.get_settings().ENRICHMENT_VISION_CONCURRENCY)
         except (TypeError, ValueError):
             n = 1
-        _ENRICH_SEM = asyncio.Semaphore(max(1, n))
-    return _ENRICH_SEM
+        sem = asyncio.Semaphore(max(1, n))
+        _ENRICH_SEMS[loop] = sem
+    return sem
 
 
 # One color covering more than this fraction of pixels means a near-blank capture

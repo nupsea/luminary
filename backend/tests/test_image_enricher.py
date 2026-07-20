@@ -4,6 +4,7 @@ Unit tests use in-memory SQLite + mocked LiteDB and LiteLLM.
 Integration test (requires ollama llava) is guarded with pytest.mark.skipif.
 """
 
+import asyncio
 import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -97,19 +98,59 @@ def test_prefilter_sparse_lineart_not_decorative() -> None:
     assert _is_decorative(img) is False
 
 
-def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
+async def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
     """_get_enrich_sem sizes the shared semaphore from ENRICHMENT_VISION_CONCURRENCY."""
+    import weakref
+
     import app.services.image_enricher as ie
 
-    monkeypatch.setattr(ie, "_ENRICH_SEM", None)
+    monkeypatch.setattr(ie, "_ENRICH_SEMS", weakref.WeakKeyDictionary())
     fake_settings = MagicMock()
     fake_settings.ENRICHMENT_VISION_CONCURRENCY = 3
     monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
 
     sem = ie._get_enrich_sem()
     assert sem._value == 3
-    # Cached: a second call returns the same instance.
+    # Cached per loop: a second call on the same loop returns the same instance.
     assert ie._get_enrich_sem() is sem
+
+
+def test_enrich_semaphore_is_per_event_loop(monkeypatch) -> None:
+    """A second loop gets its own semaphore rather than reusing one bound elsewhere."""
+    import weakref
+
+    import app.services.image_enricher as ie
+
+    monkeypatch.setattr(ie, "_ENRICH_SEMS", weakref.WeakKeyDictionary())
+    fake_settings = MagicMock()
+    fake_settings.ENRICHMENT_VISION_CONCURRENCY = 1
+    monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
+
+    async def _acquire_and_leak() -> asyncio.Semaphore:
+        sem = ie._get_enrich_sem()
+        # Take the only permit and never release it, exactly as a holder killed
+        # with its loop would leave things.
+        await sem.acquire()
+        return sem
+
+    async def _fetch() -> asyncio.Semaphore:
+        return ie._get_enrich_sem()
+
+    first_loop = asyncio.new_event_loop()
+    try:
+        first_sem = first_loop.run_until_complete(_acquire_and_leak())
+    finally:
+        first_loop.close()
+
+    second_loop = asyncio.new_event_loop()
+    try:
+        second_sem = second_loop.run_until_complete(_fetch())
+    finally:
+        second_loop.close()
+
+    assert second_sem is not first_sem
+    # The fresh loop is not starved by the permit leaked on the previous one.
+    assert second_sem._value == 1
 
 
 # Async fixtures
