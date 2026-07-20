@@ -1,13 +1,15 @@
 /**
- * /notes — notes list + filters. Existing notes open at /notes/:id
- * (NotePage); creation goes through QuickNoteComposer.
+ * /notes — notes list + filters. Both existing notes and new ones open the same
+ * full editor (NotePage): /notes/:id and /notes/new respectively. QuickNoteComposer
+ * remains for capture-with-content flows (reader clips, gap-analysis preload).
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
+import { NEW_NOTE_ROUTE_ID } from "@/lib/noteAutosave"
 import { toast } from "sonner"
 import { CollectionTree } from "@/components/CollectionTree"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
@@ -718,6 +720,13 @@ export default function NotesPage() {
     logger.info("[Notes] mounted")
   }, [])
 
+  // Creation opens the same full editor an existing note opens, so the two entry points
+  // are not two different editors. The note itself is still created lazily, on first
+  // content, by the autosaver behind /notes/new.
+  const openNewNote = useCallback(() => {
+    navigate(`/notes/${NEW_NOTE_ROUTE_ID}`, { state: { from: "/notes" } })
+  }, [navigate])
+
   // S197: consume notePreload from store (set by gap analysis "Take a note" action)
   useEffect(() => {
     if (notePreload) {
@@ -1021,7 +1030,7 @@ export default function NotesPage() {
         <p className="text-base font-medium text-foreground">No notes yet</p>
         <p className="text-sm text-muted-foreground">Click + to create your first note.</p>
         <button
-          onClick={() => setIsCreating(true)}
+          onClick={openNewNote}
           className="flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
         >
           <Plus size={14} />
@@ -1377,7 +1386,7 @@ export default function NotesPage() {
                 Generate Summaries
               </button>
               <button
-                onClick={() => setIsCreating(true)}
+                onClick={openNewNote}
                 className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
                 title="New note"
               >

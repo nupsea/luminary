@@ -1,7 +1,7 @@
 /**
- * /notes/:noteId -- full-page note editor. Deep-linkable home for existing
- * notes: live CM6 editor, reading view, properties rail, backlinks, and an
- * outline rail for structured notes (3+ headings).
+ * /notes/:noteId -- full-page note editor, also served at /notes/new for a note that
+ * does not exist yet. Deep-linkable home for notes: live CM6 editor, reading view,
+ * properties rail, backlinks, and an outline rail for structured notes (3+ headings).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -39,7 +39,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 import { flattenCollectionTree } from "@/lib/collectionUtils"
 import { API_BASE } from "@/lib/config"
-import { EMPTY_DRAFT, useNoteAutosave, type NoteDraft } from "@/lib/noteAutosave"
+import {
+  EMPTY_DRAFT,
+  NEW_NOTE_KEY,
+  NEW_NOTE_ROUTE_ID,
+  useNoteAutosave,
+  type NoteDraft,
+} from "@/lib/noteAutosave"
 import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
@@ -89,6 +95,10 @@ function parseOutline(content: string): OutlineItem[] {
 
 export default function NotePage() {
   const { noteId } = useParams<{ noteId: string }>()
+  // /notes/new renders the same editor with nothing loaded; the autosaver creates the
+  // note on first content, exactly as the quick composer does, and the URL is swapped
+  // for the real id once it exists.
+  const isNew = noteId === NEW_NOTE_ROUTE_ID
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const qc = useQueryClient()
@@ -121,7 +131,7 @@ export default function NotePage() {
   } = useQuery({
     queryKey: ["note", noteId],
     queryFn: () => getNote(noteId!),
-    enabled: Boolean(noteId),
+    enabled: Boolean(noteId) && !isNew,
     retry: false,
     staleTime: 10_000,
   })
@@ -200,12 +210,18 @@ export default function NotePage() {
     : EMPTY_DRAFT
 
   const { status: saveStatus, flush } = useNoteAutosave({
-    bindKey: note?.id ?? null,
+    bindKey: isNew ? NEW_NOTE_KEY : (note?.id ?? null),
     baseline: autosaveBaseline,
     draft: { content: editContent, title: editTitle, tags: editTags, sourceDocIds: selectedDocIds },
-    enabled: Boolean(note),
+    enabled: isNew || Boolean(note),
     onSaved: (saved) => {
-      qc.setQueryData(["note", noteId], saved)
+      qc.setQueryData(["note", saved.id], saved)
+      void qc.invalidateQueries({ queryKey: ["notes"] })
+      if (isNew) {
+        // Swap /notes/new for the real id without adding a history entry, so Back still
+        // returns to the list rather than to an empty editor.
+        navigate(`/notes/${saved.id}`, { replace: true, state: { from: "/notes" } })
+      }
     },
   })
 
@@ -305,7 +321,7 @@ export default function NotePage() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading && !isNew) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
         <Skeleton className="h-8 w-1/2" />
@@ -316,7 +332,7 @@ export default function NotePage() {
     )
   }
 
-  if (isError || !note) {
+  if (!isNew && (isError || !note)) {
     return (
       <div className="flex flex-col items-center gap-3 py-24 text-center">
         <FileText size={32} className="text-muted-foreground/50" />

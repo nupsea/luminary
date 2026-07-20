@@ -107,6 +107,9 @@ export type NoteAutosaver = ReturnType<typeof createNoteAutosaver>
 
 export const NEW_NOTE_KEY = "__new__"
 
+/** URL segment for an unsaved note: /notes/new opens the full editor with no note yet. */
+export const NEW_NOTE_ROUTE_ID = "new"
+
 export interface UseNoteAutosaveOptions {
   /** Note id, NEW_NOTE_KEY for an unsaved composer, or null to suspend. */
   bindKey: string | null
