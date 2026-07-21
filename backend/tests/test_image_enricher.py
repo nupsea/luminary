@@ -694,13 +694,16 @@ def _ollama_has_llava() -> bool:
 _HAS_OLLAMA = _ollama_has_llava()
 
 
+@pytest.mark.e2e
 @pytest.mark.skipif(not _HAS_OLLAMA, reason="ollama not available in this environment")
 @pytest.mark.asyncio
 async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     """Integration: enrich() calls real vision LLM and stores description.
 
-    Requires: ollama running with llava:13b pulled.
-    Skipped automatically if ollama is not in PATH.
+    Requires ollama running with llava:7b pulled, and marked e2e because of it:
+    a real vision inference overruns the 120s global timeout, which kills the
+    whole session and blames whichever test happened to be running. The skipif
+    alone is not enough -- it passes on any developer machine that has the model.
     """
     from app.services.image_enricher import ImageEnricherService  # noqa: PLC0415
 
