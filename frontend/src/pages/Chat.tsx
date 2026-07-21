@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -780,7 +780,7 @@ export default function Chat() {
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
   }
 
-  async function sendMessage(question: string) {
+  async function sendMessage(question: string, opts?: { reuseUserTurn?: boolean }) {
     if (!question.trim() || isStreaming) return
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
@@ -816,13 +816,19 @@ export default function Chat() {
       }
     }
 
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
     const assistantId = crypto.randomUUID()
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", text: "", isStreaming: true }
-    setMessages((m) => [...m, userMsg, assistantMsg])
+    // On retry the user turn is already in the thread and already persisted, so
+    // reuse it -- re-adding would duplicate the question on the backend session.
+    if (opts?.reuseUserTurn) {
+      setMessages((m) => [...m, assistantMsg])
+    } else {
+      const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
+      setMessages((m) => [...m, userMsg, assistantMsg])
+    }
     setIsStreaming(true)
 
-    if (sessionId) {
+    if (sessionId && !opts?.reuseUserTurn) {
       void appendChatMessage(sessionId, { role: "user", content: question }).catch(() => {})
     }
 
@@ -920,7 +926,7 @@ export default function Chat() {
               }
             }
 
-            // SSE error event — end streaming, remove placeholder, show banner
+            // SSE error event — mark this turn failed so it can be retried inline.
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
@@ -933,8 +939,13 @@ export default function Chat() {
                     ? "No relevant content found. Make sure at least one document has been ingested."
                     : fallbackMsg
               setIsStreaming(false)
-              setMessages((m) => m.filter((msg) => msg.id !== assistantId))
-              setQaError(errorMsg)
+              setMessages((m) =>
+                m.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, isStreaming: false, text: "", error: errorMsg, failedQuestion: question }
+                    : msg,
+                ),
+              )
               break
             }
 
@@ -1014,14 +1025,27 @@ export default function Chat() {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
-      setQaError(
+      const shown =
         errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")
           ? "Cannot reach the server. Is the backend running on port 7820?"
           : `Could not get a response: ${errMsg}`
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, isStreaming: false, text: "", error: shown, failedQuestion: question }
+            : msg,
+        ),
       )
-      setMessages((m) => m.filter((msg) => msg.id !== assistantId))
       setIsStreaming(false)
     }
+  }
+
+  // Re-send a failed turn. The user turn stays (already shown and persisted); we
+  // drop only the errored assistant bubble and stream a fresh answer for it.
+  function retryMessage(assistantId: string, question: string) {
+    if (isStreaming || !question.trim()) return
+    setMessages((m) => m.filter((msg) => msg.id !== assistantId))
+    void sendMessage(question, { reuseUserTurn: true })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1275,6 +1299,21 @@ export default function Chat() {
                       ) : (
                         <p className="text-xs text-muted-foreground">Unknown card type</p>
                       )
+                    ) : msg.error ? (
+                      <div className="space-y-2">
+                        <p className="flex items-start gap-1.5 text-sm text-destructive">
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                          <span>{msg.error}</span>
+                        </p>
+                        <button
+                          onClick={() => retryMessage(msg.id, msg.failedQuestion ?? "")}
+                          disabled={isStreaming || !msg.failedQuestion}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} />
+                          Retry
+                        </button>
+                      </div>
                     ) : msg.not_found ? (
                       <p className="text-sm text-blue-600">
                         This information was not found in the selected content.

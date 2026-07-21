@@ -75,6 +75,10 @@ export interface ChatMessage {
   // Non-fatal routing notice, e.g. answered locally because the cloud provider
   // was unreachable. Shown inline above the answer.
   notice?: string
+  // Set when this turn failed (network, LLM unavailable, ...). Carries the
+  // message to show and the question to re-send via the inline Retry button.
+  error?: string
+  failedQuestion?: string
 }
 
 export type SessionPlanItem = components["schemas"]["SessionPlanItem"]
