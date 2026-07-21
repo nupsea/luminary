@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
-    VISION_MODEL: str = "ollama/llava:7b"
+    VISION_MODEL: str = "ollama/qwen2.5vl:7b"
     # Max concurrent vision (image_analyze) LLM calls across all documents. Default
     # 1 = one-at-a-time (safe on 8GB). Raise (e.g. 2-4) on a host with headroom and
     # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
