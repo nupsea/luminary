@@ -3,9 +3,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
+import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { components } from "@/types/api"
 import type { AnnotationItem, SectionContentItem } from "./types"
+
+type DocumentImage = components["schemas"]["ImageItem"]
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
   yellow: "bg-yellow-200/60 dark:bg-yellow-500/30",
@@ -46,7 +50,34 @@ interface LazySectionProps {
   section: SectionContentItem
   annotations: AnnotationItem[]
   highlightsVisible: boolean
+  images?: DocumentImage[]
 }
+
+// Figures live in the images table with a vision-generated description; the
+// reader previously rendered only text, so diagrams never appeared at all.
+const SectionFigures = memo(({ images }: { images: DocumentImage[] }) => {
+  if (images.length === 0) return null
+  return (
+    <div className="mt-6 space-y-6">
+      {images.map((img) => (
+        <figure key={img.id} className="rounded-lg border border-border bg-muted/20 p-3">
+          <img
+            src={`${API_BASE}/images/${img.id}/raw`}
+            alt={img.description || "Figure from this document"}
+            loading="lazy"
+            className="mx-auto max-h-[520px] w-auto max-w-full rounded"
+          />
+          {img.description && (
+            <figcaption className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              {img.description}
+            </figcaption>
+          )}
+        </figure>
+      ))}
+    </div>
+  )
+})
+SectionFigures.displayName = "SectionFigures"
 
 const HeadingTag = (level: number) => {
   if (level <= 1) return "h2"
@@ -57,7 +88,7 @@ const HeadingTag = (level: number) => {
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ section, annotations, highlightsVisible }: LazySectionProps) => {
+const LazySection = memo(({ section, annotations, highlightsVisible, images = [] }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -96,6 +127,7 @@ const LazySection = memo(({ section, annotations, highlightsVisible }: LazySecti
       {isVisible ? (
         <div className="leading-relaxed anim-fade-in">
           <MarkdownRenderer>{highlighted}</MarkdownRenderer>
+          <SectionFigures images={images} />
         </div>
       ) : (
         <div className="space-y-2 py-4">
@@ -111,6 +143,25 @@ LazySection.displayName = "LazySection"
 
 const fetchSectionContent = (documentId: string): Promise<SectionContentItem[]> =>
   apiGet<SectionContentItem[]>(`/sections/${documentId}/content`)
+
+const fetchDocumentImages = (documentId: string): Promise<DocumentImage[]> =>
+  apiGet<{ items: DocumentImage[] }>(`/documents/${documentId}/images`).then((r) => r.items)
+
+// ImageModel.page is the 0-based pymupdf page index, while SectionModel.page_start
+// is 1-based. Without this the figures land a page off, in the wrong section.
+const imageDisplayPage = (image: DocumentImage) => image.page + 1
+
+function imagesForSection(
+  section: SectionContentItem,
+  images: DocumentImage[],
+): DocumentImage[] {
+  if (!section.page_start) return []
+  const end = section.page_end || section.page_start
+  return images.filter((img) => {
+    const page = imageDisplayPage(img)
+    return page >= section.page_start && page <= end
+  })
+}
 
 /** Normalize whitespace for fuzzy matching: collapse runs to single space, trim. */
 function normalizeWs(s: string): string {
@@ -242,6 +293,14 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
     staleTime: 60_000,
   })
 
+  // Figures are supplementary: a failure here must not block the text, so this
+  // query has no error branch and simply yields no images.
+  const { data: docImages } = useQuery({
+    queryKey: ["document-images", documentId],
+    queryFn: () => fetchDocumentImages(documentId),
+    staleTime: 300_000,
+  })
+
   // Pre-group annotations by section_id to avoid O(N*M) lookups in render loops
   const annotationsBySection = useMemo(() => {
     const map = new Map<string, AnnotationItem[]>()
@@ -252,6 +311,22 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
     }
     return map
   }, [annotations])
+
+  // An image inside a section's page range renders once, under that section.
+  // Sections without page ranges (non-paginated formats) get none.
+  const imagesBySection = useMemo(() => {
+    const map = new Map<string, DocumentImage[]>()
+    if (!sections || !docImages?.length) return map
+    const claimed = new Set<string>()
+    for (const section of sections) {
+      const matched = imagesForSection(section, docImages).filter((i) => !claimed.has(i.id))
+      if (matched.length) {
+        matched.forEach((i) => claimed.add(i.id))
+        map.set(section.section_id, matched)
+      }
+    }
+    return map
+  }, [sections, docImages])
 
   // Scroll to initial section
   useEffect(() => {
@@ -367,6 +442,7 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
               section={section}
               annotations={annotationsBySection.get(section.section_id) || []}
               highlightsVisible={highlightsVisible}
+              images={imagesBySection.get(section.section_id)}
             />
           ))}
           

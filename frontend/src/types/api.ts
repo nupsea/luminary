@@ -3347,6 +3347,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Note
+         * @description Export a single note as a Markdown file.
+         *
+         *     ?format=markdown -- returns .md with YAML frontmatter and Obsidian [[title]] wikilinks
+         *     (PDF export is rendered client-side via the browser's print dialog.)
+         */
+        get: operations["export_note_notes__note_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/flashcards/generate/preview": {
         parameters: {
             query?: never;
@@ -5833,7 +5856,7 @@ export interface components {
              * Content Type
              * @enum {string}
              */
-            content_type: "book" | "conversation" | "notes" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article";
+            content_type: "book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical";
         };
         /** Body_ingest_kindle_documents_ingest_kindle_post */
         Body_ingest_kindle_documents_ingest_kindle_post: {
@@ -8120,7 +8143,7 @@ export interface components {
             /** Tags */
             tags?: string[] | null;
             /** Content Type */
-            content_type?: ("book" | "conversation" | "notes" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article") | null;
+            content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
         };
         /** PatchTagsRequest */
         PatchTagsRequest: {
@@ -8425,6 +8448,16 @@ export interface components {
             section_order: number;
             /** Content */
             content: string;
+            /**
+             * Page Start
+             * @default 0
+             */
+            page_start: number;
+            /**
+             * Page End
+             * @default 0
+             */
+            page_end: number;
         };
         /** SectionHeatmapItem */
         SectionHeatmapItem: {
@@ -15257,6 +15290,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NoteEntityItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_note_notes__note_id__export_get: {
+        parameters: {
+            query?: {
+                format?: string;
+            };
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

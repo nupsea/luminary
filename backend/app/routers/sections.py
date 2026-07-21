@@ -13,12 +13,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sections", tags=["sections"])
 
 
+_SETEXT_UNDERLINE_RE = re.compile(r"^[ \t]*(-{1,}|={1,})[ \t]*$")
+
+
+def _reader_safe(text: str) -> str:
+    """Neutralise markdown that document text triggers by accident.
+
+    Extracted PDF text is rendered as markdown, so a line of dashes directly
+    under a line of prose becomes a setext heading -- a hyphen left alone on its
+    own line by the PDF text layer silently promoted whole sentences to <h2>.
+    Inserting a blank line demotes it to a horizontal rule, which is what a
+    reader would expect, and leaves deliberate rules and lists untouched.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    out: list[str] = []
+    for line in lines:
+        if out and out[-1].strip() and _SETEXT_UNDERLINE_RE.match(line):
+            out.append("")
+        out.append(line)
+    return "\n".join(out)
+
+
 class SectionContentItem(BaseModel):
     section_id: str
     heading: str
     level: int
     section_order: int
     content: str
+    page_start: int = 0
+    page_end: int = 0
 
 
 class SectionResponse(BaseModel):
@@ -93,13 +118,15 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         # If preview exists and is NOT truncated (shorter than the storage cap),
         # use it -- it preserves original formatting.
         if s.preview and len(s.preview) < PREVIEW_LIMIT:
-            return s.preview
+            return _reader_safe(s.preview)
         # Preview was truncated or empty -- reassemble from chunks, stripping
         # the "[Title > Section] " enrichment prefix from each chunk.
         if chunk_texts:
-            return "\n\n".join(re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts)
+            return _reader_safe(
+                "\n\n".join(re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts)
+            )
         # Last resort: return whatever preview we have, even if truncated
-        return s.preview or ""
+        return _reader_safe(s.preview or "")
 
     result = [
         SectionContentItem(
@@ -108,6 +135,8 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
             level=s.level,
             section_order=s.section_order,
             content=_section_content(s),
+            page_start=s.page_start or 0,
+            page_end=s.page_end or 0,
         )
         for s in sections
     ]

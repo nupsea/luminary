@@ -998,8 +998,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             {confirmDelete && (
               <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-md border border-destructive/30 bg-popover px-3 py-2.5 shadow-lg">
                 <p className="mb-2 text-xs text-foreground">
-                  Delete <span className="font-semibold">{doc.title}</span>? This
-                  removes its chunks, vectors and highlights, and cannot be undone.
+                  Delete <span className="font-semibold">{doc.title}</span>?
+                </p>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  This also deletes the uploaded file itself, along with its
+                  chunks, vectors, highlights and notes. It cannot be undone.
                 </p>
                 <div className="flex justify-end gap-2">
                   <button
