@@ -11,7 +11,12 @@
 
 set -euo pipefail
 
-PREFIX="${LUMINARY_PREFIX:-$HOME/.luminary}"
+# The application and the library are deliberately separate trees. ~/.luminary is
+# the long-standing library location (documented in docs/architecture.md), so an
+# existing install is adopted in place rather than orphaned; the app prefix is
+# replaced wholesale on upgrade and must never contain user data.
+PREFIX="${LUMINARY_PREFIX:-$HOME/Library/Application Support/Luminary}"
+DATA_DIR="${LUMINARY_DATA_DIR:-$HOME/.luminary}"
 PORT="${LUMINARY_PORT:-7820}"
 REPO="${LUMINARY_REPO:-nupsea/luminary}"
 VERSION="${LUMINARY_VERSION:-latest}"
@@ -19,10 +24,9 @@ CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
 PROFILE="${LUMINARY_PROFILE:-}"
 
 APP_DIR="$PREFIX/app"
-DATA_DIR="$PREFIX/data"
 RUNTIME_DIR="$PREFIX/runtime"
 LOG_DIR="$PREFIX/logs"
-BIN_DIR="$PREFIX/bin"
+BIN_DIR="${LUMINARY_BIN_DIR:-$HOME/.local/bin}"
 VENV_DIR="$RUNTIME_DIR/venv"
 UV="$RUNTIME_DIR/bin/uv"
 PLIST="$HOME/Library/LaunchAgents/sh.luminary.app.plist"
@@ -69,6 +73,11 @@ fi
 _info "macOS $(sw_vers -productVersion) on Apple Silicon — supported."
 
 mkdir -p "$PREFIX" "$DATA_DIR" "$RUNTIME_DIR/bin" "$LOG_DIR" "$BIN_DIR"
+
+# An existing library must be adopted, never shadowed by an empty one.
+if [ -f "$DATA_DIR/luminary.db" ]; then
+    _info "Found an existing library at $DATA_DIR — it will be used as-is."
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Resolve + download the release
@@ -373,14 +382,23 @@ cat <<EOF
 
   It starts automatically at login. To manage it:
 
-    $BIN_DIR/luminary status
-    $BIN_DIR/luminary stop
-    $BIN_DIR/luminary uninstall
+    "$BIN_DIR/luminary" status
+    "$BIN_DIR/luminary" stop
+    "$BIN_DIR/luminary" uninstall
 
-  Add it to your PATH for convenience:
+EOF
 
-    echo 'export PATH="$BIN_DIR:\$PATH"' >> ~/.zshrc
+if ! command -v luminary >/dev/null 2>&1; then
+    cat <<EOF
+  Add the command to your PATH:
 
-  Your library lives in $DATA_DIR and is never touched by upgrades.
+    echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> ~/.zshrc
+
+EOF
+fi
+
+cat <<EOF
+  Your library:     $DATA_DIR   (never touched by upgrades)
+  The application:  $PREFIX
 
 EOF

@@ -5,12 +5,12 @@
 
 set -euo pipefail
 
-PREFIX="${LUMINARY_PREFIX:-$HOME/.luminary}"
+PREFIX="${LUMINARY_PREFIX:-$HOME/Library/Application Support/Luminary}"
+DATA_DIR="${LUMINARY_DATA_DIR:-$HOME/.luminary}"
 PORT="${LUMINARY_PORT:-7820}"
 LABEL="sh.luminary.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 APP_DIR="$PREFIX/app"
-DATA_DIR="$PREFIX/data"
 LOG_FILE="$PREFIX/logs/luminary.log"
 DOMAIN="gui/$(id -u)"
 
@@ -105,13 +105,16 @@ cmd_uninstall() {
     rm -f "$PLIST"
     _info "Service unregistered."
 
-    rm -rf "$APP_DIR" "$PREFIX/runtime" "$PREFIX/logs" "$PREFIX/bin"
-    _info "Application and runtime removed."
+    rm -rf "$APP_DIR" "$PREFIX/runtime" "$PREFIX/logs"
+    rmdir "$PREFIX" 2>/dev/null || true
+    rm -f "$HOME/.local/bin/luminary"
+    _info "Application and runtime removed from $PREFIX"
 
-    # The library is the user's own data — never delete it without an explicit,
-    # typed confirmation, and default to keeping it.
+    # The library lives in a separate tree and predates this installer -- it may
+    # hold years of work from a source install. Never delete it without an
+    # explicit, typed confirmation, and default to keeping it.
     if [ -d "$DATA_DIR" ]; then
-        local size
+        local size reply
         size="$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)"
         _info ""
         _info "Your library is still at $DATA_DIR ($size)."
