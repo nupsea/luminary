@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without leading v), e.g. 0.2.2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos-tarball:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building luminary-$VERSION"
+
+      # The tarball ships a prebuilt SPA so the installer never needs Node on the
+      # user's machine. Mirrors `make build`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build SPA (public mode)
+        run: |
+          cd frontend
+          npm ci
+          VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
+          test -f dist/index.html
+
+      # Layout must mirror the repo tree: backend/app/main.py resolves the SPA,
+      # the surface manifest, and its version via Path(__file__).parents[2].
+      # A missing surface-manifest.json is boot-fatal (import-time router registration).
+      - name: Assemble payload
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          STAGE="dist-stage/luminary-$VERSION"
+          mkdir -p "$STAGE/backend" "$STAGE/frontend"
+
+          cp surface-manifest.json "$STAGE/"
+          cp -R frontend/dist "$STAGE/frontend/dist"
+
+          cp -R backend/app "$STAGE/backend/app"
+          cp -R backend/alembic "$STAGE/backend/alembic"
+          cp backend/alembic.ini backend/pyproject.toml backend/uv.lock "$STAGE/backend/"
+          cp backend/.env.example "$STAGE/backend/"
+
+          # bootstrap.sh renders the plist template and installs the CLI from
+          # the extracted payload, so both must ship.
+          mkdir -p "$STAGE/scripts"
+          cp -R scripts/launchd "$STAGE/scripts/launchd"
+          cp -R scripts/cli "$STAGE/scripts/cli"
+          chmod +x "$STAGE/scripts/cli/luminary"
+
+          # Dev artifacts must never ship: stray *.db files, tests, tooling, Dockerfiles.
+          find "$STAGE" -name '__pycache__' -type d -prune -exec rm -rf {} +
+          find "$STAGE" -name '*.pyc' -delete
+          find "$STAGE" -name '*.db' -delete
+
+          # The code executor runs arbitrary code as the desktop user with full
+          # filesystem and network access. It is a development tool and must not
+          # reach an end user's laptop, where LUMINARY_MODE=full would expose it.
+          rm -f "$STAGE/backend/app/routers/code_executor.py"
+          rm -f "$STAGE/backend/app/services/code_executor.py"
+
+          echo "$VERSION" > "$STAGE/VERSION"
+
+          # Fail loudly here rather than on a user's machine.
+          test -f "$STAGE/surface-manifest.json"
+          test -f "$STAGE/frontend/dist/index.html"
+          test -f "$STAGE/backend/app/main.py"
+          test -f "$STAGE/backend/alembic.ini"
+          test -f "$STAGE/backend/uv.lock"
+          test -f "$STAGE/backend/.env.example"
+          test -d "$STAGE/backend/alembic/versions"
+          test -x "$STAGE/scripts/cli/luminary"
+          test -f "$STAGE/scripts/launchd/sh.luminary.app.plist.template"
+          # Fail the build rather than ship a code-execution endpoint.
+          ! test -e "$STAGE/backend/app/routers/code_executor.py"
+          ! test -e "$STAGE/backend/app/services/code_executor.py"
+          ! grep -rq "/Users/sethurama" "$STAGE/backend/app" || { echo "personal path in payload"; exit 1; }
+          ! find "$STAGE" -name '*.db' | grep -q . || { echo "stray .db in payload"; exit 1; }
+
+      - name: Create tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          TARBALL="luminary-$VERSION-macos.tar.gz"
+          tar -czf "$TARBALL" -C dist-stage "luminary-$VERSION"
+          shasum -a 256 "$TARBALL" > "$TARBALL.sha256"
+          ls -lh "$TARBALL"
+          cat "$TARBALL.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luminary-macos-tarball
+          path: |
+            luminary-*-macos.tar.gz
+            luminary-*-macos.tar.gz.sha256
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Luminary $VERSION" \
+            --generate-notes \
+            "luminary-$VERSION-macos.tar.gz" \
+            "luminary-$VERSION-macos.tar.gz.sha256" \
+          || gh release upload "$GITHUB_REF_NAME" \
+            "luminary-$VERSION-macos.tar.gz" \
+            "luminary-$VERSION-macos.tar.gz.sha256" --clobber

@@ -19,13 +19,15 @@ class Settings(BaseSettings):
     #       (`make luminary`). public: curated learner surfaces only, built SPA
     #       served with the API under /api on one port (no CORS).
     LUMINARY_MODE: Literal["full", "public"] = "full"
-    # "Publish note as blog": target Astro content repo + layout. Full-mode-only;
-    # defaulted to the author's personal site checkout.
-    LUMINARY_BLOG_REPO_PATH: str = "/Users/sethurama/DEV/LM/nupsea.github.io"
+    # "Publish note as blog": target Astro content repo + layout. Full-mode-only.
+    # Unset by default -- these ship to every installed copy, so they must not
+    # carry a developer's home path or site, and an empty repo path leaves the
+    # feature inert until a user deliberately points it somewhere.
+    LUMINARY_BLOG_REPO_PATH: str = ""
     LUMINARY_BLOG_CONTENT_SUBDIR: str = "src/content/blog"
     LUMINARY_BLOG_ASSET_SUBDIR: str = "public/blog"
     LUMINARY_BLOG_BRANCH: str = "master"
-    LUMINARY_BLOG_URL_BASE: str = "https://nupsea.github.io"
+    LUMINARY_BLOG_URL_BASE: str = ""
     OLLAMA_URL: str = "http://127.0.0.1:11434"
     # Keep the Ollama model resident in memory between requests so the first
     # query after an idle period does not re-pay the (large-model) load cost.

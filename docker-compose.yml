@@ -4,7 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "7820:7820"
+      # Loopback-only. The API has no authentication, so publishing on all host
+      # interfaces exposed the full library to whatever network the machine was
+      # on (cafe wifi, hotel wifi, office VLAN).
+      - "127.0.0.1:7820:7820"
     volumes:
       - luminary-data:/data
     environment:
@@ -24,7 +27,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama-models:/root/.ollama
     environment:

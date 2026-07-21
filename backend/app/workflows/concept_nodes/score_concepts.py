@@ -70,6 +70,7 @@ async def score_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
                     {"role": "user", "content": listing},
                 ],
                 temperature=0.0,
+                background=True,
             )
         except Exception:
             continue  # fail-open: leave this batch as proposed

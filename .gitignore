@@ -31,6 +31,12 @@ dist/
 # Local SQLite databases
 backend/app.db
 backend/*.db
+# Library databases must never be committed, wherever they land. Both tracked
+# copies were empty, but the guard only covered backend/.
+*.db
+*.db-wal
+*.db-shm
+!DATA/**/*.md
 
 # Test-run junk: when a test mocks Settings, the GLiNER downloader
 # materialises the str(MagicMock) path as a real directory tree.

@@ -35,6 +35,10 @@ class NoteDescriptionGeneratorService:
                 ],
                 temperature=0.3,
                 max_tokens=60,
+                # Automatic background work on private note content. Without this
+                # the startup backfill sent every note to the cloud provider in
+                # hybrid mode -- unprompted, and invisible outside the traces.
+                background=True,
             )
             return re.sub(r'^["\']|["\']$', "", raw.strip()).strip() or None
         except LLMUnavailableError:

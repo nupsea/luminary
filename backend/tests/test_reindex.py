@@ -266,21 +266,21 @@ def test_reindex_endpoint_correct_key_returns_200(test_db, monkeypatch):
         get_settings.cache_clear()
 
 
-def test_reindex_endpoint_no_auth_when_admin_key_empty(test_db):
-    """POST /admin/notes/reindex succeeds without header when ADMIN_KEY is empty."""
+def test_reindex_endpoint_denied_when_admin_key_empty(test_db):
+    """Admin routes fail closed when ADMIN_KEY is unset.
+
+    This previously asserted the opposite -- an empty ADMIN_KEY short-circuited
+    the check and left admin routes open on every default install. Auth that
+    disables itself by default is the bug, so the expectation is inverted.
+    """
     from app.config import get_settings
 
-    # Ensure ADMIN_KEY is empty (default)
     get_settings.cache_clear()
-    settings = get_settings()
-    assert settings.ADMIN_KEY == ""
+    assert get_settings().ADMIN_KEY == ""
 
     with TestClient(app) as c:
         resp = c.post("/admin/notes/reindex")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["queued"] is True
-    assert isinstance(body["total_notes"], int)
+    assert resp.status_code == 403
 
 
 # Performance test: 1,000-note tag query p95 < 100ms

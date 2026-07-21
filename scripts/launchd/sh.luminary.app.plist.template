@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>sh.luminary.app</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>@@PREFIX@@/runtime/venv/bin/python</string>
+		<string>-m</string>
+		<string>uvicorn</string>
+		<string>app.main:app</string>
+		<string>--host</string>
+		<string>127.0.0.1</string>
+		<string>--port</string>
+		<string>@@PORT@@</string>
+	</array>
+
+	<!-- Load-bearing: Settings.model_config reads ".env" as a CWD-relative path,
+	     so the server MUST start from the directory holding it. Launched from
+	     anywhere else the config silently falls back to defaults. -->
+	<key>WorkingDirectory</key>
+	<string>@@PREFIX@@/app/backend</string>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- Absolute, and deliberately OUTSIDE @@PREFIX@@/app: that directory is
+		     replaced wholesale on upgrade. A relative DATA_DIR would resolve
+		     under the app payload and be destroyed. -->
+		<key>DATA_DIR</key>
+		<string>@@DATA_DIR@@</string>
+
+		<key>LUMINARY_MODE</key>
+		<string>public</string>
+
+		<key>PYTHONPATH</key>
+		<string>@@PREFIX@@/app/backend</string>
+
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+
+		<!-- launchd hands processes a minimal PATH. The Ollama CLI location is
+		     included because POST /settings/ollama/pull execs the binary directly
+		     rather than going through the HTTP API. -->
+		<key>PATH</key>
+		<string>@@PREFIX@@/runtime/venv/bin:@@OLLAMA_BIN_DIR@@:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<true/>
+
+	<!-- Without this a crash-on-boot becomes a tight respawn loop. -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<!-- Standard/Background get CPU-throttled by macOS; embedding and reranking
+	     run in this process, so ask for normal scheduling. -->
+	<key>ProcessType</key>
+	<string>Interactive</string>
+
+	<key>StandardOutPath</key>
+	<string>@@PREFIX@@/logs/luminary.log</string>
+
+	<key>StandardErrorPath</key>
+	<string>@@PREFIX@@/logs/luminary.log</string>
+</dict>
+</plist>

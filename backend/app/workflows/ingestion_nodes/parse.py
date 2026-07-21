@@ -114,7 +114,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                         f"Document snippet (first 2000 chars):\n{snippet}\n\n"
                         "Reply with exactly one word from the list above."
                     )
-                    llm_result = await get_llm_service().generate(prompt)
+                    llm_result = await get_llm_service().generate(prompt, background=True)
                     llm_type = str(llm_result).strip().lower().split()[0]
                     _valid_types = {
                         "paper",

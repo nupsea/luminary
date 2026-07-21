@@ -187,8 +187,13 @@ async def serve_image_raw(image_id: str) -> FileResponse:
 async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     """Serve a locally mirrored image for an article."""
     settings = get_settings()
-    abs_path = Path(settings.DATA_DIR).expanduser() / "images" / doc_id / filename
-    if not abs_path.exists():
+    # doc_id and filename are unvalidated path segments. Starlette's [^/]+ match
+    # stops a literal slash but not "..", and percent-encoded "%2e%2e" survives
+    # ASGI decoding -- without containment this served anything one level above
+    # images/, which is DATA_DIR itself (luminary.db included).
+    root = (Path(settings.DATA_DIR).expanduser() / "images").resolve()
+    abs_path = (root / doc_id / filename).resolve()
+    if not abs_path.is_relative_to(root) or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="Local image not found")
 
     # Detect media type from extension
