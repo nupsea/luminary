@@ -52,7 +52,11 @@ ContentType = Literal[
 _parser = DocumentParser()
 
 CHUNK_CONFIGS: dict[str, dict[str, int]] = {
-    "paper": {"chunk_size": 300, "chunk_overlap": 45},
+    # Papers are the densest content type and previously had the smallest budget,
+    # tight enough that splits fell past word boundaries into mid-word cuts. The
+    # chunk embedder (bge-small-en-v1.5) carries 512 tokens (~2000 chars), so this
+    # still leaves headroom.
+    "paper": {"chunk_size": 900, "chunk_overlap": 150},
     "book": {"chunk_size": 600, "chunk_overlap": 120},
     "conversation": {"chunk_size": 450, "chunk_overlap": 90},
     "notes": {"chunk_size": 300, "chunk_overlap": 75},
