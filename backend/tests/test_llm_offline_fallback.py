@@ -10,8 +10,51 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import litellm
 import pytest
 
+from app.services import connectivity
 from app.services import settings_service as ss
-from app.services.llm import LLMService
+from app.services.llm import LLMService, _is_offline_error
+
+
+@pytest.fixture(autouse=True)
+def _online(monkeypatch):
+    """Default to 'provider reachable' so tests exercise the reactive path unless
+    they opt into the proactive offline reroute."""
+    connectivity.reset_cache()
+    monkeypatch.setattr(connectivity, "provider_reachable", lambda model: True)
+    yield
+    connectivity.reset_cache()
+
+
+def _connection_error() -> Exception:
+    """The exception litellm actually raises offline: InternalServerError whose
+    cause chain is a connection failure, NOT APIConnectionError."""
+    import litellm
+
+    root = ConnectionError("Cannot connect to host api.openai.com:443")
+    try:
+        raise litellm.InternalServerError(
+            message="OpenAIException - Connection error",
+            llm_provider="openai",
+            model="gpt-5-mini",
+        ) from root
+    except litellm.InternalServerError as exc:
+        return exc
+
+
+class TestOfflineErrorDetection:
+    def test_litellm_internal_server_error_from_connection_is_offline(self):
+        assert _is_offline_error(_connection_error())
+
+    def test_plain_value_error_is_not_offline(self):
+        assert not _is_offline_error(ValueError("bad json"))
+
+    def test_genuine_internal_server_error_is_not_offline(self):
+        import litellm
+
+        exc = litellm.InternalServerError(
+            message="upstream 500", llm_provider="openai", model="gpt-5-mini"
+        )
+        assert not _is_offline_error(exc)
 
 
 def _response(text: str) -> MagicMock:
@@ -43,15 +86,13 @@ def cloud_routing():
 
 
 def _unreachable_then_ok(text: str = "local answer"):
-    """First call fails as if offline; the retry succeeds."""
+    """First call fails with the exception litellm really raises offline; retry ok."""
     calls: list[dict] = []
 
     async def side_effect(**kwargs):
         calls.append(kwargs)
         if len(calls) == 1:
-            raise litellm.APIConnectionError(
-                message="offline", llm_provider="openai", model="gpt-5-mini"
-            )
+            raise _connection_error()
         return _response(text)
 
     return side_effect, calls
@@ -71,13 +112,32 @@ async def test_routed_cloud_call_falls_back_to_local(cloud_routing):
 
 
 @pytest.mark.asyncio
+async def test_offline_reroutes_before_any_cloud_call(cloud_routing, monkeypatch):
+    """When the probe says offline, no cloud call is attempted at all."""
+    monkeypatch.setattr(connectivity, "provider_reachable", lambda model: False)
+    svc = LLMService()
+    calls: list[dict] = []
+
+    async def side_effect(**kwargs):
+        calls.append(kwargs)
+        return _response("local answer")
+
+    with patch("litellm.acompletion", side_effect=side_effect):
+        result = await svc.complete([{"role": "user", "content": "hi"}])
+
+    assert result == "local answer"
+    assert len(calls) == 1, "must not attempt the cloud call first"
+    assert calls[0]["model"].startswith("ollama/")
+
+
+@pytest.mark.asyncio
 async def test_pinned_model_does_not_fall_back(cloud_routing):
     """An explicit model= is a reproducibility contract -- never silently swapped."""
     svc = LLMService()
     side_effect, calls = _unreachable_then_ok()
     with (
         patch("litellm.acompletion", side_effect=side_effect),
-        pytest.raises(litellm.APIConnectionError),
+        pytest.raises(litellm.InternalServerError),
     ):
         await svc.complete([{"role": "user", "content": "hi"}], model="openai/gpt-5-mini")
     assert len(calls) == 1
@@ -90,7 +150,7 @@ async def test_local_call_does_not_fall_back(cloud_routing):
     side_effect, calls = _unreachable_then_ok()
     with (
         patch("litellm.acompletion", side_effect=side_effect),
-        pytest.raises(litellm.APIConnectionError),
+        pytest.raises(litellm.InternalServerError),
     ):
         await svc.complete([{"role": "user", "content": "hi"}], model="ollama/qwen2.5:14b-instruct")
     assert len(calls) == 1

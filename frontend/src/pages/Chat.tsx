@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Sparkles, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -889,6 +889,16 @@ export default function Chat() {
               )
             }
 
+            // Offline / routing notice — non-fatal, shown inline above the answer.
+            if (payload["type"] === "notice" && typeof payload["message"] === "string") {
+              const noticeText = payload["message"] as string
+              setMessages((m) =>
+                m.map((msg) =>
+                  msg.id === assistantId ? { ...msg, notice: noticeText } : msg,
+                ),
+              )
+            }
+
             // S158: transparency event arrives before 'done' — silently omit if malformed
             if (payload["type"] === "transparency") {
               try {
@@ -1243,6 +1253,12 @@ export default function Chat() {
                         : "rounded-2xl rounded-tl-md border border-border bg-card text-card-foreground shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)]"
                       }`}
                   >
+                    {msg.notice && msg.role === "assistant" && (
+                      <div className="mb-2 flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                        <WifiOff size={12} className="shrink-0" />
+                        <span>{msg.notice}</span>
+                      </div>
+                    )}
                     {msg.type === "card" && msg.cardData !== undefined ? (
                       msg.cardData.type === "quiz_question" ? (
                         <QuizQuestionCard

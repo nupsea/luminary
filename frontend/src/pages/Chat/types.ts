@@ -72,6 +72,9 @@ export interface ChatMessage {
   web_sources?: WebSource[]
   source_citations?: SourceCitation[]
   transparency?: TransparencyInfo
+  // Non-fatal routing notice, e.g. answered locally because the cloud provider
+  // was unreachable. Shown inline above the answer.
+  notice?: string
 }
 
 export type SessionPlanItem = components["schemas"]["SessionPlanItem"]

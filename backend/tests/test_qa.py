@@ -213,10 +213,7 @@ def test_split_response_strips_leaked_citations_heading():
     """A markdown 'Citations:' heading the model writes before its JSON must not
     leak into the answer body."""
     prose = "Odysseus is inferred to hold authority in Ithaca."
-    full_text = (
-        prose + "\n\n**Citations:**\n"
-        + json.dumps({"citations": [], "confidence": "low"})
-    )
+    full_text = prose + "\n\n**Citations:**\n" + json.dumps({"citations": [], "confidence": "low"})
     answer, _, _ = _split_response(full_text)
     assert answer == prose
     assert "Citations" not in answer
@@ -317,6 +314,54 @@ def test_qa_system_prompt_mentions_citations():
 
 # QAService.stream_answer — normal flow
 # V2: mock the chat graph (graph.ainvoke returns pre-built result)
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_offline_notice_when_cloud_unreachable(test_db, monkeypatch):
+    """When routing would go to the cloud but the provider is unreachable, the Ask
+    stream tells the user it is answering locally."""
+    from app.services import connectivity, settings_service
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Biology Book")
+
+    monkeypatch.setattr(
+        settings_service, "get_effective_routing", lambda *a, **k: ("openai/gpt-5-mini", None)
+    )
+    connectivity.reset_cache()
+    monkeypatch.setattr(connectivity, "provider_reachable", lambda model: False)
+
+    result = _make_graph_result(answer="Local answer.", citations=[])
+    mock_graph = _make_mock_graph(result)
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
+
+    notices = [json.loads(e[len("data: ") :]) for e in events if '"notice"' in e]
+    assert notices, "expected an offline notice event"
+    assert notices[0]["level"] == "offline"
+
+
+@pytest.mark.asyncio
+async def test_stream_no_notice_when_provider_reachable(test_db, monkeypatch):
+    from app.services import connectivity, settings_service
+
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, "Biology Book")
+
+    monkeypatch.setattr(
+        settings_service, "get_effective_routing", lambda *a, **k: ("openai/gpt-5-mini", None)
+    )
+    connectivity.reset_cache()
+    monkeypatch.setattr(connectivity, "provider_reachable", lambda model: True)
+
+    result = _make_graph_result(answer="Cloud answer.", citations=[])
+    mock_graph = _make_mock_graph(result)
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        events = [e async for e in QAService().stream_answer("q?", [doc_id], "single", None)]
+
+    assert not any('"notice"' in e for e in events)
 
 
 @pytest.mark.asyncio
