@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, RefreshCw, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -190,6 +190,20 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
   const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
+
+  // Header "Delete" -> removes the open document without a trip back to the library.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const deleteDocumentMutation = useMutation({
+    mutationFn: () => apiDelete(`/documents/${documentId}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["documents"] })
+      void qc.invalidateQueries({ queryKey: ["documents-recent"] })
+      toast.success("Document deleted")
+      // The document this view is bound to no longer exists, so leave it.
+      onBack()
+    },
+    onError: () => toast.error("Failed to delete document. Please try again."),
+  })
 
   // Audio mini-player state — only active for audio documents
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -972,6 +986,42 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             <MessageSquare size={14} />
             Chat
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setConfirmDelete((open) => !open)}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
+              title="Delete this document"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+            {confirmDelete && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-md border border-destructive/30 bg-popover px-3 py-2.5 shadow-lg">
+                <p className="mb-2 text-xs text-foreground">
+                  Delete <span className="font-semibold">{doc.title}</span>? This
+                  removes its chunks, vectors and highlights, and cannot be undone.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="rounded border border-border px-2.5 py-1 text-xs hover:bg-accent"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setConfirmDelete(false)
+                      deleteDocumentMutation.mutate()
+                    }}
+                    disabled={deleteDocumentMutation.isPending}
+                    className="rounded bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+                  >
+                    {deleteDocumentMutation.isPending ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           {(docNotes?.length ?? 0) > 0 && (
             <button
               onClick={() => {
