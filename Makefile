@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types install docker-build docker-run
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types install release docker-build docker-run
 
 LUMINARY_PORT ?= 7820
 
@@ -34,6 +34,14 @@ build:
 
 start:
 	bash scripts/start.sh
+
+release:
+	@v=$$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1); \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is dirty — commit before tagging."; exit 1; \
+	fi; \
+	echo "Tagging v$$v — this triggers .github/workflows/release.yml"; \
+	git tag -a "v$$v" -m "Luminary $$v" && git push origin "v$$v"
 
 docker-build:
 	docker build -t luminary:latest .

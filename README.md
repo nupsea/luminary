@@ -10,7 +10,35 @@ No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any A
 
 ## Install and run
 
-### macOS (Apple Silicon), Linux & WSL
+### macOS (Apple Silicon) — one command
+
+> **Beta.** This installer is new and has not yet been tested across a wide range
+> of Macs. If it fails, use the source install below and please
+> [open an issue](https://github.com/nupsea/luminary/issues) — it registers a
+> background service, so `luminary uninstall` cleanly reverses it.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/bootstrap.sh | bash
+```
+
+Installs everything into `~/.luminary`, starts Luminary at login, and opens it in
+your browser. No Homebrew, Node, git or Xcode tools required.
+
+Requires macOS 14 (Sonoma) or newer. The first install downloads roughly 5GB of
+models and takes 15-25 minutes.
+
+Manage it with the `luminary` command (`~/.luminary/bin/luminary`):
+
+```bash
+luminary status      # version, paths, service and Ollama state
+luminary stop        # stop the background service
+luminary update      # upgrade in place; your library is preserved
+luminary uninstall   # remove the app; asks before touching your library
+```
+
+Your library lives in `~/.luminary/data` and is never touched by upgrades.
+
+### Linux & WSL — from source
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary

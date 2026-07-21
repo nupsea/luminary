@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# luminary — manage the installed Luminary service on macOS.
+#
+#   luminary start | stop | restart | status | open | logs | update | uninstall
+
+set -euo pipefail
+
+PREFIX="${LUMINARY_PREFIX:-$HOME/.luminary}"
+PORT="${LUMINARY_PORT:-7820}"
+LABEL="sh.luminary.app"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+APP_DIR="$PREFIX/app"
+DATA_DIR="$PREFIX/data"
+LOG_FILE="$PREFIX/logs/luminary.log"
+DOMAIN="gui/$(id -u)"
+
+_info() { printf '%s\n' "$*"; }
+_warn() { printf '\033[0;33mwarn\033[0m %s\n' "$*"; }
+_die()  { printf '\033[0;31merror\033[0m %s\n' "$*" >&2; exit 1; }
+
+_loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
+_healthy() { curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; }
+
+# start.sh has no port-clearing, so a stale listener turns into a raw uvicorn
+# bind error. Clear it before handing the port back to launchd.
+_free_port() {
+    local pids
+    pids="$(lsof -ti :"$PORT" 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        _warn "Port $PORT was held by PID(s) $pids — releasing."
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+    fi
+}
+
+_wait_ready() {
+    local i
+    for i in $(seq 1 "${1:-60}"); do
+        _healthy && return 0
+        sleep 1
+    done
+    return 1
+}
+
+cmd_start() {
+    [ -f "$PLIST" ] || _die "Not installed. Run the installer first."
+    if _healthy; then _info "Luminary is already running at http://localhost:$PORT"; return 0; fi
+    _free_port
+    launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null \
+        || launchctl kickstart -k "$DOMAIN/$LABEL" 2>/dev/null \
+        || _die "Could not start the service."
+    if _wait_ready 60; then
+        _info "Luminary is running at http://localhost:$PORT"
+    else
+        _die "Service started but did not become healthy. Logs: $LOG_FILE"
+    fi
+}
+
+cmd_stop() {
+    launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null || true
+    _free_port
+    _info "Luminary stopped."
+}
+
+cmd_restart() { cmd_stop; cmd_start; }
+
+cmd_status() {
+    if [ -f "$APP_DIR/VERSION" ]; then
+        _info "version   $(cat "$APP_DIR/VERSION")"
+    else
+        _info "version   (not installed)"
+    fi
+    _info "prefix    $PREFIX"
+    _info "library   $DATA_DIR"
+    if _loaded; then _info "service   registered"; else _info "service   not registered"; fi
+    if _healthy; then
+        _info "state     running — http://localhost:$PORT"
+    else
+        _info "state     not responding on port $PORT"
+    fi
+    if curl -sf --max-time 2 "http://127.0.0.1:11434/api/version" >/dev/null 2>&1; then
+        _info "ollama    running"
+    else
+        _info "ollama    not running (start the Ollama app)"
+    fi
+}
+
+cmd_open() {
+    _healthy || _warn "Luminary is not responding yet; opening anyway."
+    open "http://127.0.0.1:$PORT"
+}
+
+cmd_logs() { [ -f "$LOG_FILE" ] || _die "No log file at $LOG_FILE"; tail -f "$LOG_FILE"; }
+
+cmd_update() {
+    _info "Re-running the installer to upgrade in place (your library is preserved)..."
+    curl -fsSL "https://raw.githubusercontent.com/${LUMINARY_REPO:-nupsea/luminary}/master/scripts/bootstrap.sh" | bash
+}
+
+cmd_uninstall() {
+    _info "This will remove Luminary from $PREFIX and unregister the login service."
+    _info ""
+
+    launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null || true
+    rm -f "$PLIST"
+    _info "Service unregistered."
+
+    rm -rf "$APP_DIR" "$PREFIX/runtime" "$PREFIX/logs" "$PREFIX/bin"
+    _info "Application and runtime removed."
+
+    # The library is the user's own data — never delete it without an explicit,
+    # typed confirmation, and default to keeping it.
+    if [ -d "$DATA_DIR" ]; then
+        local size
+        size="$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1)"
+        _info ""
+        _info "Your library is still at $DATA_DIR ($size)."
+        _info "It holds every document, note, flashcard and review you have created."
+        _info ""
+        if [ -t 0 ]; then
+            printf 'Delete it permanently? Type DELETE to confirm, anything else to keep: '
+            read -r reply
+            if [ "$reply" = "DELETE" ]; then
+                rm -rf "$DATA_DIR"
+                _info "Library deleted."
+            else
+                _info "Library kept at $DATA_DIR"
+            fi
+        else
+            _info "Not running interactively — library kept."
+            _info "Remove it yourself with:  rm -rf \"$DATA_DIR\""
+        fi
+    fi
+
+    _info ""
+    _info "Done. Ollama was left installed — remove /Applications/Ollama.app and"
+    _info "~/.ollama separately if you no longer want it."
+}
+
+case "${1:-}" in
+    start)     cmd_start ;;
+    stop)      cmd_stop ;;
+    restart)   cmd_restart ;;
+    status)    cmd_status ;;
+    open)      cmd_open ;;
+    logs)      cmd_logs ;;
+    update)    cmd_update ;;
+    uninstall) cmd_uninstall ;;
+    *)
+        cat <<EOF
+luminary — manage the Luminary service
+
+  start      start the service and wait until it is healthy
+  stop       stop the service
+  restart    stop, then start
+  status     version, paths, service and Ollama state
+  open       open Luminary in your browser
+  logs       follow the server log
+  update     upgrade in place (library preserved)
+  uninstall  remove the app and service (asks before touching your library)
+
+EOF
+        [ -n "${1:-}" ] && exit 1 || exit 0
+        ;;
+esac
