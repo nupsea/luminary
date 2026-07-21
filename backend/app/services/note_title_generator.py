@@ -46,6 +46,7 @@ class NoteTitleGeneratorService:
                 ],
                 temperature=0.3,
                 max_tokens=30,
+                background=True,
             )
             title = raw.strip()
             title = re.sub(r'^["\']|["\']$', "", title)

@@ -254,6 +254,7 @@ class SuggestionService:
                     {"role": "user", "content": user},
                 ],
                 temperature=0.7,
+                background=True,
             )
             candidates = _parse_questions(raw)
             filtered = self.filter_near_duplicates(candidates, history)
