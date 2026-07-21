@@ -9,12 +9,12 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
@@ -26,13 +26,6 @@ from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
-try:
-    # Executes attacker-controllable code as the desktop user with full
-    # filesystem and network access -- it is not a sandbox despite its docstring.
-    # Distribution builds omit the module entirely; source checkouts keep it.
-    from app.routers.code_executor import router as code_executor_router
-except ImportError:
-    code_executor_router = None
 from app.routers.collections import router as collections_router
 from app.routers.concepts import router as concepts_router
 from app.routers.documents import router as documents_router
@@ -58,6 +51,15 @@ from app.routers.settings import router as settings_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+
+# Kept out of the sorted import block above: this one is conditional. The module
+# executes attacker-controllable code as the desktop user with full filesystem
+# and network access -- it is not a sandbox despite its docstring. Distribution
+# builds omit it entirely; source checkouts keep it.
+try:
+    from app.routers.code_executor import router as code_executor_router
+except ImportError:
+    code_executor_router = None
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
