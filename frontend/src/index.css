@@ -293,3 +293,78 @@
 html {
   transition: background-color 0.3s ease, color 0.2s ease;
 }
+
+/* --- Chat surface -------------------------------------------------------- */
+
+@keyframes lum-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lum-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes lum-halo {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.06);
+  }
+}
+
+.lum-msg-enter {
+  animation: lum-msg-in var(--dur-slow) var(--ease-out) both;
+}
+
+.lum-typing-dot {
+  animation: lum-typing 1.2s var(--ease-in-out) infinite;
+}
+.lum-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.lum-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.lum-halo {
+  animation: lum-halo 4s var(--ease-in-out) infinite;
+}
+
+/* The composer lifts and gains a primary-tinted ring when focused, so the
+   caret target reads as the page's active element without a hard border. */
+.lum-composer {
+  transition: box-shadow var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out);
+}
+.lum-composer:focus-within {
+  border-color: hsl(var(--primary) / 0.45);
+  box-shadow: var(--shadow-md), 0 0 0 4px hsl(var(--primary) / 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lum-msg-enter,
+  .lum-typing-dot,
+  .lum-halo {
+    animation: none;
+  }
+}
