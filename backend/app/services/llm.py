@@ -54,6 +54,16 @@ LLMUnavailableError: tuple[type[BaseException], ...] = (
     ConnectionRefusedError,
 )
 
+# The subset meaning "could not reach the provider" -- the offline case. Auth,
+# rate-limit and not-found are deliberately excluded: they are configuration
+# faults, and silently answering from a different model would hide them.
+LLMUnreachableError: tuple[type[BaseException], ...] = (
+    LLMServiceUnavailableError,
+    LLMAPIConnectionError,
+    LLMTimeoutError,
+    ConnectionRefusedError,
+)
+
 # Langfuse — optional LLM call observability
 
 _langfuse = None  # type: ignore[var-annotated]
@@ -150,6 +160,45 @@ class LLMService:
             kwargs["api_key"] = settings.GOOGLE_API_KEY
         return kwargs
 
+    def _offline_fallback_kwargs(
+        self,
+        requested_model: str | None,
+        effective_model: str,
+        kwargs: dict,
+        settings: Settings,
+        *,
+        num_ctx: int | None = None,
+    ) -> dict | None:
+        """Rebuild kwargs against the local model, or None when not applicable.
+
+        Keeps the app usable with no internet: a cloud call that cannot reach its
+        provider is retried on Ollama. Only for calls whose model came from
+        routing -- an explicitly pinned model is honoured or allowed to fail, so
+        evals and per-request overrides stay reproducible rather than silently
+        answering from a different model.
+        """
+        if requested_model is not None:
+            return None
+        if effective_model.startswith("ollama/"):
+            return None
+
+        local_model = settings.LITELLM_DEFAULT_MODEL
+        if not local_model.startswith("ollama/"):
+            local_model = f"ollama/{local_model}"
+
+        retry = self._build_kwargs(
+            local_model,
+            kwargs["messages"],
+            settings,
+            override_key=None,
+            timeout=kwargs.get("timeout"),
+            num_ctx=num_ctx,
+        )
+        for key in ("temperature", "max_tokens", "response_format", "stream"):
+            if key in kwargs:
+                retry[key] = kwargs[key]
+        return retry
+
     def _resolve_model(
         self, model: str | None, *, background: bool
     ) -> tuple[str, str | None]:
@@ -204,7 +253,23 @@ class LLMService:
             kwargs.update(extra)
 
         with trace_llm_call("complete", model=effective_model) as span:
-            response = await litellm.acompletion(**kwargs)
+            try:
+                response = await litellm.acompletion(**kwargs)
+            except LLMUnreachableError as exc:
+                retry = self._offline_fallback_kwargs(
+                    model, effective_model, kwargs, settings, num_ctx=num_ctx
+                )
+                if retry is None:
+                    raise
+                logger.warning(
+                    "%s unreachable (%s); retrying on local model %s",
+                    effective_model,
+                    type(exc).__name__,
+                    retry["model"],
+                )
+                effective_model = retry["model"]
+                span.set_attribute("llm.offline_fallback", True)
+                response = await litellm.acompletion(**retry)
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
             prompt_tokens = 0
@@ -237,7 +302,10 @@ class LLMService:
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
-        return self._token_stream(kwargs)
+        fallback = self._offline_fallback_kwargs(
+            model, effective_model, kwargs, settings, num_ctx=num_ctx
+        )
+        return self._token_stream(kwargs, fallback)
 
     async def generate(
         self,
@@ -274,8 +342,22 @@ class LLMService:
             temperature=temperature,
         )
 
-    async def _token_stream(self, kwargs: dict) -> AsyncGenerator[str]:
-        response = await litellm.acompletion(stream=True, **kwargs)
+    async def _token_stream(
+        self, kwargs: dict, fallback_kwargs: dict | None = None
+    ) -> AsyncGenerator[str]:
+        try:
+            response = await litellm.acompletion(stream=True, **kwargs)
+        except LLMUnreachableError as exc:
+            if fallback_kwargs is None:
+                raise
+            logger.warning(
+                "%s unreachable while streaming (%s); retrying on local model %s",
+                kwargs.get("model"),
+                type(exc).__name__,
+                fallback_kwargs["model"],
+            )
+            fallback_kwargs.pop("stream", None)
+            response = await litellm.acompletion(stream=True, **fallback_kwargs)
         async for chunk in response:
             delta = chunk.choices[0].delta.content
             if delta:

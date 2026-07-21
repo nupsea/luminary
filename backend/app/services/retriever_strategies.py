@@ -290,7 +290,22 @@ class _CrossEncoderReranker:
         slug = model_name.rsplit("/", 1)[-1].lower()
         cache_dir = Path(settings.DATA_DIR).expanduser() / "models" / slug
         cache_dir.mkdir(parents=True, exist_ok=True)
-        self._model = CrossEncoder(model_name, cache_folder=str(cache_dir), device="cpu")
+        # Cache-first, matching embedder/GLiNER/Whisper: without local_files_only
+        # the hub is contacted on every load, so with no internet this stalls on a
+        # network timeout before falling back -- on the chat path.
+        try:
+            self._model = CrossEncoder(
+                model_name,
+                cache_folder=str(cache_dir),
+                device="cpu",
+                local_files_only=True,
+            )
+        except Exception as local_exc:
+            logger.debug(
+                "Reranker local load failed (local_files_only=True), trying online: %s",
+                local_exc,
+            )
+            self._model = CrossEncoder(model_name, cache_folder=str(cache_dir), device="cpu")
         logger.info("Loaded cross-encoder reranker %s", model_name)
 
     def score(self, query: str, texts: list[str]) -> list[float]:
