@@ -28,9 +28,19 @@ AUTOMATIC_CALL_SITES = [
 
 @pytest.fixture
 def hybrid_routing():
+    """Hybrid mode with a stub cloud key.
+
+    The key must be present or the interactive branch raises before it can
+    return a model string -- and CI has no real key configured.
+    """
     original = dict(ss._cache)
     ss._cache.update(
-        {"llm_mode": "hybrid", "cloud_provider": "openai", "cloud_model": "gpt-5-mini"}
+        {
+            "llm_mode": "hybrid",
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-5-mini",
+            "openai_api_key": "sk-test-not-a-real-key",
+        }
     )
     yield
     ss._cache.clear()
