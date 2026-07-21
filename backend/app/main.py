@@ -2,12 +2,14 @@ import asyncio
 import logging
 import logging.config
 import shutil
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
@@ -24,7 +26,13 @@ from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
 from app.routers.clips import router as clips_router
-from app.routers.code_executor import router as code_executor_router
+try:
+    # Executes attacker-controllable code as the desktop user with full
+    # filesystem and network access -- it is not a sandbox despite its docstring.
+    # Distribution builds omit the module entirely; source checkouts keep it.
+    from app.routers.code_executor import router as code_executor_router
+except ImportError:
+    code_executor_router = None
 from app.routers.collections import router as collections_router
 from app.routers.concepts import router as concepts_router
 from app.routers.documents import router as documents_router
@@ -112,6 +120,10 @@ async def lifespan(app: FastAPI):
 
     data_dir = Path(settings.DATA_DIR).expanduser()
     data_dir.mkdir(parents=True, exist_ok=True)
+    # The library holds the user's documents, notes and (when no keyring is
+    # available) API keys. Default mkdir/umask leaves it 0o755 -- readable by
+    # every other local account and every unsandboxed app the user runs.
+    _restrict_permissions(data_dir)
     (data_dir / "corpus").mkdir(exist_ok=True)
     (data_dir / "images").mkdir(exist_ok=True)
     (data_dir / "notes").mkdir(exist_ok=True)
@@ -269,9 +281,38 @@ async def lifespan(app: FastAPI):
     await get_enrichment_worker().stop()
 
 
+def _restrict_permissions(data_dir: Path) -> None:
+    """Tighten the library to owner-only. Best-effort: a mounted volume may not
+    permit chmod, and that must not stop the app from starting."""
+    for path, mode in (
+        (data_dir, 0o700),
+        (data_dir / "luminary.db", 0o600),
+        (data_dir / "luminary.db-wal", 0o600),
+        (data_dir / "luminary.db-shm", 0o600),
+    ):
+        try:
+            if path.exists():
+                path.chmod(mode)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", path, exc)
+
+
 app = FastAPI(title="Luminary", lifespan=lifespan)
 
 _mode = get_settings().LUMINARY_MODE
+
+# Load-bearing against DNS rebinding. The server binds loopback and has no
+# authentication, so it trusts the network boundary entirely -- but a hostile
+# page can rebind its own domain to 127.0.0.1 and become same-origin, which
+# turns every endpoint into a readable, writable, same-origin resource. Pinning
+# Host to loopback names rejects those requests before routing.
+# Starlette strips the port before matching, so bare hostnames are correct here
+# (a "host:*" pattern would fail its wildcard assertion at import). Skipped under
+# pytest, where the ASGI transport invents its own Host values.
+if "pytest" not in sys.modules:
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "::1"]
+    )
 # public is single-origin (SPA + API on one port), so CORS is unnecessary; full
 # serves the frontend from Vite on a different port and needs it.
 if _mode == "full":
@@ -319,7 +360,7 @@ ROUTER_REGISTRY = {
     "settings": settings_router,
     "mastery": mastery_router,
     "study": study_router,
-    "code_executor": code_executor_router,
+    **({"code_executor": code_executor_router} if code_executor_router else {}),
     "summarize": summarize_router,
     "tags": tags_router,
 }

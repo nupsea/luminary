@@ -5,6 +5,7 @@ Routes: POST /admin/notes/reindex
 
 import asyncio
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 
@@ -17,9 +18,19 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _check_admin_key(x_admin_key: str | None = Header(default=None)) -> None:
-    """Dependency: verify X-Admin-Key header when ADMIN_KEY is configured."""
+    """Dependency: verify the X-Admin-Key header.
+
+    Fails closed. An unset ADMIN_KEY previously short-circuited the comparison
+    and disabled the check entirely, so every default install ran these routes
+    unauthenticated -- the failure mode gets worse each time a route is added.
+    """
     settings = get_settings()
-    if settings.ADMIN_KEY and x_admin_key != settings.ADMIN_KEY:
+    if not settings.ADMIN_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin routes are disabled: set ADMIN_KEY to enable them.",
+        )
+    if not x_admin_key or not secrets.compare_digest(x_admin_key, settings.ADMIN_KEY):
         raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Key header")
 
 

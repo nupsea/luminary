@@ -77,6 +77,12 @@ jobs:
           find "$STAGE" -name '*.pyc' -delete
           find "$STAGE" -name '*.db' -delete
 
+          # The code executor runs arbitrary code as the desktop user with full
+          # filesystem and network access. It is a development tool and must not
+          # reach an end user's laptop, where LUMINARY_MODE=full would expose it.
+          rm -f "$STAGE/backend/app/routers/code_executor.py"
+          rm -f "$STAGE/backend/app/services/code_executor.py"
+
           echo "$VERSION" > "$STAGE/VERSION"
 
           # Fail loudly here rather than on a user's machine.
@@ -89,6 +95,10 @@ jobs:
           test -d "$STAGE/backend/alembic/versions"
           test -x "$STAGE/scripts/cli/luminary"
           test -f "$STAGE/scripts/launchd/sh.luminary.app.plist.template"
+          # Fail the build rather than ship a code-execution endpoint.
+          ! test -e "$STAGE/backend/app/routers/code_executor.py"
+          ! test -e "$STAGE/backend/app/services/code_executor.py"
+          ! grep -rq "/Users/sethurama" "$STAGE/backend/app" || { echo "personal path in payload"; exit 1; }
           ! find "$STAGE" -name '*.db' | grep -q . || { echo "stray .db in payload"; exit 1; }
 
       - name: Create tarball

@@ -1669,7 +1669,7 @@ wheels = [
 
 [[package]]
 name = "luminary-backend"
-version = "0.2.2"
+version = "0.2.4"
 source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },
