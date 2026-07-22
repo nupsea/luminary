@@ -94,26 +94,31 @@
 
   .dark {
     --background: 222 35% 4%;
-    --foreground: 210 40% 98%;
+    /* Cool blue-gray body text. The glare came from near-max lightness (was 98%),
+       not the hue -- softened to 86% so it reads comfortably. Raise/lower the
+       lightness to taste; keep the hue cool. */
+    --foreground: 213 20% 86%;
+    /* Headings sit a touch above body so they pop as structure without glare. */
+    --heading: 213 22% 88%;
     --border: 217 33% 15%;
     --input: 217 33% 15%;
     --ring: 250 82% 65%;
     --primary: 250 82% 65%;
     --primary-foreground: 0 0% 100%;
     --secondary: 217 33% 12%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 213 20% 86%;
     --muted: 217 33% 12%;
     --muted-foreground: 215 20% 65%;
     --accent: 217 33% 12%;
-    --accent-foreground: 210 40% 98%;
+    --accent-foreground: 213 20% 86%;
     --popover: 222 35% 6%;
-    --popover-foreground: 210 40% 98%;
+    --popover-foreground: 213 20% 86%;
     --card: 222 35% 7%;
-    --card-foreground: 210 40% 98%;
+    --card-foreground: 213 20% 86%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --sidebar: 222 35% 6%;
-    --sidebar-foreground: 210 40% 98%;
+    --sidebar-foreground: 213 20% 86%;
   }
 }
 
@@ -183,6 +188,12 @@
   background: transparent !important;
   color: #24292e !important;
   padding: 0 !important;
+}
+
+/* Dark-mode prose headings default to pure white via prose-invert, which glares
+   against the softened body. Point them at the --heading token instead. */
+.dark .prose {
+  --tw-prose-invert-headings: hsl(var(--heading));
 }
 
 /* Dark mode: github-dark theme overrides */
