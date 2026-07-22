@@ -15,6 +15,18 @@ async def test_health_returns_ok():
 
 
 @pytest.mark.asyncio
+async def test_healthz_returns_ok_without_db():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/healthz")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "timestamp" in body
+    assert isinstance(body["timestamp"], str)
+    assert len(body["timestamp"]) > 0
+
+
+@pytest.mark.asyncio
 async def test_settings_masks_api_keys(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-key-value")
     # Clear the lru_cache to pick up monkeypatched env
