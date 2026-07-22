@@ -240,6 +240,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // rather than harsh #000/#fff; hue-rotate keeps colored links roughly right.
     const canvasFilter = darkPage ? "invert(0.9) hue-rotate(180deg)" : undefined
 
+    const pageCommitTimer = useRef<number | null>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const textLayerRef = useRef<HTMLDivElement>(null)
     const highlightOverlayRef = useRef<HTMLDivElement>(null)
@@ -606,6 +607,23 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (!isNaN(n)) goToPage(n)
     }
 
+    // The page field only committed on blur/Enter, so the spinner arrows (and any
+    // edit) changed the number without turning the page. Commit on change too,
+    // debounced so typing "38" navigates once to 38 rather than to 3 then 38.
+    function handlePageInputChange(value: string) {
+      setPageInput(value)
+      if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
+      const n = parseInt(value, 10)
+      if (isNaN(n)) return
+      pageCommitTimer.current = window.setTimeout(() => {
+        setCurrentPage(Math.max(1, Math.min(n, totalPages)))
+      }, 250)
+    }
+    function commitPageInputNow() {
+      if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
+      commitPageInput()
+    }
+
     // ── Search helpers ────────────────────────────────────────────────
 
     /** Extract text from a single PDF page and cache it. */
@@ -910,7 +928,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage <= 1}
-              title="Previous page"
+              title="Previous page (←)"
               aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -921,9 +939,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               value={pageInput}
               min={1}
               max={totalPages}
-              onChange={(e) => setPageInput(e.target.value)}
-              onBlur={commitPageInput}
-              onKeyDown={(e) => { if (e.key === "Enter") commitPageInput() }}
+              onChange={(e) => handlePageInputChange(e.target.value)}
+              onBlur={commitPageInputNow}
+              onKeyDown={(e) => { if (e.key === "Enter") commitPageInputNow() }}
               aria-label="Current page"
             />
             <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
@@ -931,7 +949,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
-              title="Next page"
+              title="Next page (→)"
               aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
