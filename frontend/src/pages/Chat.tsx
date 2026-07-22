@@ -194,6 +194,9 @@ interface ChatMessage {
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
   transparency?: TransparencyInfo       // S158: retrieval transparency panel
+  notice?: string                       // offline/routing notice, shown above the answer
+  error?: string                        // this turn failed; message shown with a Retry button
+  failedQuestion?: string               // question to re-send on Retry
 }
 
 interface SessionPlanItem {
