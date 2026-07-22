@@ -1,0 +1,82 @@
+name: "🐛 Bug Report"
+description: "File a structured bug report to help us reproduce and resolve the issue"
+title: "[Bug]: "
+labels: ["bug", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+        Please make sure you have searched the [existing issues](https://github.com/nupsea/luminary/issues) to avoid duplicates.
+  - type: textarea
+    id: description
+    attributes:
+      label: "Describe the Bug"
+      description: "A clear and concise description of what the bug is."
+      placeholder: "When I try to..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "To Reproduce"
+      description: "Steps to reproduce the behavior. Clear, step-by-step instructions help us fix it faster."
+      placeholder: |
+        1. Run `make dev`
+        2. Upload a 10MB PDF document named 'physics.pdf'
+        3. Click on the 'Study' tab
+        4. See error: '...'
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: "Operating System"
+      description: "What operating system are you running Luminary on?"
+      options:
+        - "macOS Apple Silicon (Native)"
+        - "macOS Intel (Docker)"
+        - "Windows (Native - install.ps1)"
+        - "Windows (Docker Compose)"
+        - "Linux / WSL (Native)"
+        - "Other"
+    validations:
+      required: true
+  - type: dropdown
+    id: ollama_model
+    attributes:
+      label: "Ollama Model Used"
+      description: "Which LLM model is serving your chat/synthesis requests?"
+      options:
+        - "Llama 3.2 3B (Default)"
+        - "Gemma 4 4B/26B"
+        - "Llama 3.1 8B"
+        - "Cloud Model (OpenAI/Anthropic/Google)"
+        - "None / Offline features only"
+        - "Other (please specify in context)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "Luminary Version / Commit Hash"
+      description: "Enter the version number or git commit hash (run `git rev-parse --short HEAD`)."
+      placeholder: "e.g., v0.4.2 or abc1234"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Terminal & Console Logs"
+      description: "Please paste any relevant console logs from `make dev` or your Docker terminal. Blockquote/code fences are added automatically."
+      render: shell
+      placeholder: "[INFO] app.main: Starting application..."
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: "Additional Context"
+      description: "Add any other context, configuration values, or screenshots that could help us."
+    validations:
+      required: false

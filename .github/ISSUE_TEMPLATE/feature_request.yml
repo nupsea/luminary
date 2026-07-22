@@ -1,0 +1,53 @@
+name: "💡 Feature Request"
+description: "Propose a new feature, enhancement, or user experience improvement"
+title: "[Feature]: "
+labels: ["enhancement", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We love hearing new ideas to make Luminary better!
+        Before proposing a feature, please consider how it aligns with Luminary's core goals: local-first, highly private, science-backed spaced repetition, and lightweight on resources.
+  - type: textarea
+    id: problem
+    attributes:
+      label: "What problem are you trying to solve?"
+      description: "A clear and concise description of the frustration or limitation. (e.g., 'I find it hard to study flashcards when...')"
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Describe your proposed solution"
+      description: "A clear and concise description of what you want to happen."
+      placeholder: "I would like to have a button that..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Describe alternatives you've considered"
+      description: "Any alternative workarounds, scripts, or features you've considered."
+      placeholder: "I tried doing X by using custom python scripts, but it would be better if..."
+    validations:
+      required: false
+  - type: dropdown
+    id: impact
+    attributes:
+      label: "Local-First Impact Check"
+      description: "How does this feature interact with Luminary's local-first philosophy?"
+      options:
+        - "Pure local execution (Runs on CPU/GPU via Ollama/SQLite/LanceDB)"
+        - "Optional cloud integration (e.g., syncing, alternative API keys)"
+        - "Requires a new local dependency/model"
+        - "Unsure / needs maintainer discussion"
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "Additional Context / UI Sketches"
+      description: "Add mockups, wireframes, screenshots, or any extra details."
+    validations:
+      required: false

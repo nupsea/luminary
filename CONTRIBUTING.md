@@ -1,72 +1,115 @@
-# Contributing to Learning Mate
+# Contributing to Luminary 🌟
 
-First off, thank you for considering contributing to Learning Mate! It's people like you that make it a great tool.
+First off, thank you for considering contributing to Luminary! It is people like you who make Luminary a premium, local-first learning cockpit.
 
-## Code of Conduct
-By participating in this project, you agree to abide by our code of conduct.
+By participating in this project, you agree to abide by our **Code of Conduct** (see [SECURITY.md](SECURITY.md)).
 
-## How Can I Contribute?
+---
 
-### Reporting Bugs
-Before creating bug reports, please check the existing issues to see if the problem has already been reported. When you are creating a bug report, please include as many details as possible. Fill out the [bug report template](.github/ISSUE_TEMPLATE/bug_report.md).
+## 🗺️ Contribution Paths
 
-### Suggesting Enhancements
-If you have an idea for a feature, feel free to open a [feature request](.github/ISSUE_TEMPLATE/feature_request.md).
+We welcome all kinds of contributions! Whether you write code, refine search evals, polish CSS, or edit documentation, there is a place for you:
 
-### Your First Code Contribution
-Look for issues labeled `good first issue`. These are selected as good entry points for new contributors.
+| Role | Focus Areas | Key Technologies |
+| :--- | :--- | :--- |
+| **Backend Engineer** | Ingestion pipeline, LiteLLM integrations, vector database search, API design | Python 3.13, FastAPI, SQLAlchemy, LanceDB, Kuzu |
+| **Frontend Engineer** | User interface, state management, PDF rendering, graph visualizations | React 18, TypeScript 5, Tailwind CSS, Zustand, Sigma.js |
+| **Search & AI Quality** | Retrieval accuracy (HR@5/MRR), faithfullness evaluation, golden datasets | Evals harness (`evals/`), RAGAS, NLI models |
+| **Technical Writer** | Setup guides, architecture descriptions, inline documentation | Markdown |
 
-## Pull Requests
+---
 
-1. Fork the repo and create your branch from `master`.
-2. If you've added code that should be tested, add tests.
-3. Ensure the test suite passes.
-4. Make sure your code lints.
-5. Issue that pull request!
+## 🚀 Quickstart Local Setup
 
-## Development Setup
+Before getting started, make sure you have:
+1. **Python 3.13** installed (with `uv` package manager recommended).
+2. **Node.js** (v18+) and `npm`.
+3. **Ollama** running locally (if testing local LLM features).
 
-See `README.md` for instructions on setting up the backend and frontend.
+### Development Workflow
+
+1. **Fork and Clone the Repo**:
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/luminary.git
+   cd luminary
+   ```
+2. **Install Dependencies**:
+   ```bash
+   make install
+   ```
+   *This sets up both frontend and backend virtual environments and downloads base models.*
+3. **Run Dev Servers**:
+   ```bash
+   make dev
+   ```
+   *Starts the FastAPI backend on port `7820` (hot-reloaded) and the Vite frontend on port `5173`.*
 
 ### Useful Commands
-- `make dev`: Start both backend and frontend.
-- `make ci`: Run all CI checks (linting, tests, build).
-- `make test`: Run backend tests.
-- `make lint`: Run backend and frontend linting/type checking.
-- `make db-migrate`: Apply pending database migrations.
-- `make db-revision m="..."`: Generate a migration from your model changes.
 
-## Changing the Database Schema
+| Command | Action |
+| :--- | :--- |
+| `make dev` | Start backend & frontend dev servers concurrently |
+| `make ci` | Run full CI checks (linters, typecheck, unit tests, build) |
+| `make test` | Run pytest suite |
+| `make lint` | Run `ruff` check and frontend typecheck (`tsc`) |
+| `make stop` | Stop all Luminary processes on ports `7820` and `5173` |
 
-`backend/app/models.py` is the source of truth. Schema changes are versioned with
-Alembic; the server applies pending migrations automatically on boot.
+---
 
-1. Edit the model in `backend/app/models.py`.
-2. Generate a revision: `make db-revision m="add foo to bar"`.
-3. **Read the generated file** in `backend/alembic/versions/` before committing.
-   Autogenerate is a first draft, not an oracle — it cannot infer data backfills, and
-   it will happily emit a destructive `drop_table`/`drop_column` if it misreads intent.
-4. Apply it: `make db-migrate`.
-5. Commit the revision alongside the model change.
+## 📐 Architecture & Key Concepts
 
-`make test` fails if `models.py` and the migrations disagree (`tests/test_schema_drift.py`),
-so a forgotten revision is caught in CI rather than by a user's database.
+To keep our codebase clean and maintainable, we enforce a set of strict architectural boundaries. Please review these files before writing code:
 
-Two things worth knowing:
+1. **Dependency Inversion**: Read [architecture.md](docs/architecture.md) to understand our **6-layer dependency rule**:
+   `Types -> Config -> Repo -> Service -> Runtime -> API` (no reverse/upward imports).
+2. **Invariants**: Read [invariants.md](docs/invariants.md) to understand critical safety contracts, such as column positions and database initializers.
+3. **Redesign Spec**: Read [notes-redesign-spec.md](docs/notes-redesign-spec.md) for notes editing patterns.
 
-- **Generate revisions with `make db-revision`, not `alembic revision` directly.** The
-  target builds a throwaway database from the migrations and diffs against that. Run
-  bare against a long-lived dev database, autogenerate picks up orphan tables from
-  removed features and TEXT-vs-VARCHAR noise from the legacy `ALTER` list, and proposes
-  dropping real user tables.
-- **The `ALTER TABLE` list in `db_init.py` is frozen.** It is a one-time bridge that
-  lifts pre-Alembic databases to the baseline revision. Do not add to it.
+---
 
-### FTS5 tables
+## 🛠️ Database Schema Changes & Alembic
 
-The five FTS5 virtual tables are raw DDL in `db_init.py`, outside `Base.metadata`.
-Alembic is configured to ignore them (`alembic_include_name`) — without that filter it
-would drop them and the search index with them. Their **column order is a contract**:
-SQLite names the shadow-table columns positionally (`c0/c1/c2`) and code queries those
-names, so reordering returns wrong rows instead of raising. See invariant I-4 in
-`docs/invariants.md`.
+`backend/app/models.py` is the source of truth for the relational metadata database. Schema changes are versioned using Alembic.
+
+1. **Edit Models**: Make changes in `backend/app/models.py`.
+2. **Generate Migration**: Run `make db-revision m="add table foo"`.
+   > [!WARNING]
+   > Always run `make db-revision` rather than raw `alembic revision`. The Makefile target builds a clean throwaway database from the migrations and diffs against that, avoiding spurious drop statements for local virtual tables.
+3. **Review Migration**: Open the generated file in `backend/alembic/versions/` and inspect the DDL. Ensure it doesn't contain destructive `drop_table`/`drop_column` commands due to misread schema differences.
+4. **Apply Migration**: Run `make db-migrate`.
+
+### ⚠️ FTS5 SQLite Virtual Tables Invariant
+The five FTS5 virtual tables are defined in raw SQL in `db_init.py`. Alembic is configured to ignore them via `alembic_include_name`. 
+*   **Column Order is a Contract**: SQLite references shadow-table columns positionally (e.g., `c0`, `c1`, `c2`). If you reorder columns in `db_init.py`, SQLite queries will return incorrect columns instead of raising errors. See invariant **I-4** in [invariants.md](docs/invariants.md).
+
+---
+
+## 📋 The Triage & Contribution Process
+
+```mermaid
+stateDiagram-v2
+    [*] --> Triage : Create Issue / Idea
+    Triage --> Accepted : Maintainer Validates
+    Accepted --> Available : Labeled & Open
+    Available --> InProgress : Claimed by Contributor
+    InProgress --> Review : PR Opened
+    Review --> Merged : Code Merged
+```
+
+### 1. Finding an Issue
+We use custom labels to classify tasks. Look for:
+*   `difficulty/good-first-issue` — highly scoped, localized, ideal for your first PR.
+*   `difficulty/medium` — requires a basic understanding of backend/frontend services.
+*   `area/frontend` or `area/backend` — to filter by stack.
+*   You can also check our [.github/SUGGESTED_ISSUES.md](.github/SUGGESTED_ISSUES.md) list for immediate ideas!
+
+### 2. Claiming an Issue
+*   To avoid duplicate work, please claim an issue before starting. Comment `.take` or `/assign` on the issue.
+*   A maintainer (or bot) will assign it to you.
+*   **Note**: To keep the issue tracker active, if there are no linked PRs or status updates within **7 days**, the issue will be unassigned and returned to `status/available`.
+
+### 3. Pull Request Guidelines
+*   Create a branch from `master` using a descriptive name (e.g., `feat/dark-mode-pdf` or `fix/ollama-timeout`).
+*   Fill out the template in [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
+*   Ensure that `make ci` passes locally before requesting a review.
+*   Link the issue your PR resolves (e.g., `Closes #123`).
