@@ -650,87 +650,218 @@ async def chunk_node(state: IngestionState) -> IngestionState:
             if content_type == "conversation":
                 return await _chunk_conversation(state, pd, doc_id)
 
-            cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
-            )
-            chunks = []
-            async with get_session_factory()() as session:
-                raw_sections = pd["sections"] if pd else []
-                if not raw_sections:
-                    raw_text = pd["raw_text"] if pd else ""
-                    raw_sections = [
-                        {
-                            "heading": "Full Text",
-                            "level": 1,
-                            "text": raw_text,
-                            "page_start": 0,
-                            "page_end": 0,
-                        }
-                    ]
+            if content_type == "paper":
+                return await _chunk_paper(state, pd, doc_id)
 
-                section_models: list[SectionModel] = []
-                for s_idx, s in enumerate(raw_sections):
-                    section_model = SectionModel(
-                        id=str(uuid.uuid4()),
-                        document_id=doc_id,
-                        heading=s.get("heading", "") or f"Section {s_idx + 1}",
-                        level=s.get("level", 1),
-                        page_start=s.get("page_start", 0),
-                        page_end=s.get("page_end", 0),
-                        section_order=s_idx,
-                        preview=s.get("text", "")[:10000],
-                    )
-                    session.add(section_model)
-                    section_models.append(section_model)
-                await session.flush()
-
-                chunk_models: list[ChunkModel] = []
-                chunk_idx = 0
-                fmt = state.get("format", "").lower()
-
-                for section_model, s in zip(section_models, raw_sections, strict=False):
-                    section_text = s.get("text", "")
-                    if not section_text.strip():
-                        continue
-
-                    chunk_pdf_page: int | None = None
-                    if fmt == "pdf":
-                        chunk_pdf_page = s.get("page_start", 0) or 1
-
-                    for text in splitter.split_text(section_text):
-                        chunk_id = str(uuid.uuid4())
-                        chunk_models.append(
-                            ChunkModel(
-                                id=chunk_id,
-                                document_id=doc_id,
-                                section_id=section_model.id,
-                                text=text,
-                                token_count=len(text.split()),
-                                page_number=s.get("page_start", 0),
-                                speaker=None,
-                                chunk_index=chunk_idx,
-                                pdf_page_number=chunk_pdf_page,
-                            )
-                        )
-                        chunks.append(
-                            {
-                                "id": chunk_id,
-                                "document_id": doc_id,
-                                "text": text,
-                                "index": chunk_idx,
-                            }
-                        )
-                        chunk_idx += 1
-                session.add_all(chunk_models)
-                await session.commit()
-            logger.info(
-                "Chunked document",
-                extra={"doc_id": doc_id, "num_chunks": len(chunks)},
-            )
-            return {**state, "chunks": chunks, "status": "embedding"}
+            return await _chunk_generic(state, pd, doc_id, content_type)
         except Exception as exc:
             logger.error("chunk_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}
+
+
+async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
+    """Research-paper chunking: captions atomic, figure internals and reference
+    lists kept out of the index, prose split sentence-aware.
+
+    Falls back to generic chunking when the document does not present recognisable
+    paper structure, or on any failure -- a paper that ingests imperfectly beats
+    one that does not ingest at all.
+    """
+    from app.services.paper_chunker import (  # noqa: PLC0415
+        chunk_paper_section,
+        is_references_heading,
+        looks_like_paper,
+    )
+
+    raw_sections = (pd["sections"] if pd else []) or []
+    if not looks_like_paper(raw_sections):
+        logger.info(
+            "Paper structure not recognised; using generic chunking",
+            extra={"doc_id": doc_id, "num_sections": len(raw_sections)},
+        )
+        return await _chunk_generic(state, pd, doc_id, "paper")
+
+    try:
+        cfg = CHUNK_CONFIGS["paper"]
+        chunks: list[dict] = []
+        async with get_session_factory()() as session:
+            doc_result = await session.execute(
+                select(DocumentModel.title).where(DocumentModel.id == doc_id)
+            )
+            paper_title = doc_result.scalar_one_or_none() or "Unknown Paper"
+
+            section_models: list[SectionModel] = []
+            for s_idx, s in enumerate(raw_sections):
+                section_model = SectionModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                    level=s.get("level", 1),
+                    page_start=s.get("page_start", 0),
+                    page_end=s.get("page_end", 0),
+                    section_order=s_idx,
+                    preview=s.get("text", "")[:10000],
+                )
+                session.add(section_model)
+                section_models.append(section_model)
+            await session.flush()
+
+            chunk_models: list[ChunkModel] = []
+            chunk_idx = 0
+            is_pdf = state.get("format", "").lower() == "pdf"
+            skipped_reference_sections = 0
+
+            for section_model, s in zip(section_models, raw_sections, strict=False):
+                section_text = s.get("text", "")
+                if not section_text.strip():
+                    continue
+
+                # Reference lists stay readable as a section but are not indexed:
+                # they are author/venue strings that dilute both vector and BM25
+                # results without ever being the answer to a question.
+                if is_references_heading(section_model.heading):
+                    skipped_reference_sections += 1
+                    continue
+
+                context_header = f"[{paper_title} > {section_model.heading}]"
+                chunk_pdf_page = (s.get("page_start", 0) or 1) if is_pdf else None
+
+                for text in chunk_paper_section(
+                    section_text, cfg["chunk_size"], cfg["chunk_overlap"]
+                ):
+                    chunk_id = str(uuid.uuid4())
+                    chunk_models.append(
+                        ChunkModel(
+                            id=chunk_id,
+                            document_id=doc_id,
+                            section_id=section_model.id,
+                            text=text,
+                            token_count=len(text.split()),
+                            page_number=s.get("page_start", 0),
+                            speaker=None,
+                            chunk_index=chunk_idx,
+                            pdf_page_number=chunk_pdf_page,
+                            context_header=context_header,
+                        )
+                    )
+                    chunks.append(
+                        {
+                            "id": chunk_id,
+                            "document_id": doc_id,
+                            "text": text,
+                            "index": chunk_idx,
+                        }
+                    )
+                    chunk_idx += 1
+
+            session.add_all(chunk_models)
+            await session.commit()
+
+        logger.info(
+            "Paper chunking complete",
+            extra={
+                "doc_id": doc_id,
+                "num_chunks": len(chunks),
+                "num_sections": len(section_models),
+                "skipped_reference_sections": skipped_reference_sections,
+            },
+        )
+        return {**state, "chunks": chunks, "status": "embedding"}
+    except Exception as exc:
+        logger.warning(
+            "Paper chunking failed; falling back to generic chunking",
+            exc_info=exc,
+            extra={"doc_id": doc_id},
+        )
+        return await _chunk_generic(state, pd, doc_id, "paper")
+
+
+async def _chunk_generic(
+    state: IngestionState, pd: dict | None, doc_id: str, content_type: str
+) -> IngestionState:
+    """Section-aware chunking with the default splitter.
+
+    Also the fallback for content types with a specialised chunker, so an
+    unrecognised or malformed document still ingests instead of failing.
+    """
+    cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
+    )
+    chunks = []
+    async with get_session_factory()() as session:
+        raw_sections = pd["sections"] if pd else []
+        if not raw_sections:
+            raw_text = pd["raw_text"] if pd else ""
+            raw_sections = [
+                {
+                    "heading": "Full Text",
+                    "level": 1,
+                    "text": raw_text,
+                    "page_start": 0,
+                    "page_end": 0,
+                }
+            ]
+
+        section_models: list[SectionModel] = []
+        for s_idx, s in enumerate(raw_sections):
+            section_model = SectionModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                level=s.get("level", 1),
+                page_start=s.get("page_start", 0),
+                page_end=s.get("page_end", 0),
+                section_order=s_idx,
+                preview=s.get("text", "")[:10000],
+            )
+            session.add(section_model)
+            section_models.append(section_model)
+        await session.flush()
+
+        chunk_models: list[ChunkModel] = []
+        chunk_idx = 0
+        fmt = state.get("format", "").lower()
+
+        for section_model, s in zip(section_models, raw_sections, strict=False):
+            section_text = s.get("text", "")
+            if not section_text.strip():
+                continue
+
+            chunk_pdf_page: int | None = None
+            if fmt == "pdf":
+                chunk_pdf_page = s.get("page_start", 0) or 1
+
+            for text in splitter.split_text(section_text):
+                chunk_id = str(uuid.uuid4())
+                chunk_models.append(
+                    ChunkModel(
+                        id=chunk_id,
+                        document_id=doc_id,
+                        section_id=section_model.id,
+                        text=text,
+                        token_count=len(text.split()),
+                        page_number=s.get("page_start", 0),
+                        speaker=None,
+                        chunk_index=chunk_idx,
+                        pdf_page_number=chunk_pdf_page,
+                    )
+                )
+                chunks.append(
+                    {
+                        "id": chunk_id,
+                        "document_id": doc_id,
+                        "text": text,
+                        "index": chunk_idx,
+                    }
+                )
+                chunk_idx += 1
+        session.add_all(chunk_models)
+        await session.commit()
+    logger.info(
+        "Chunked document",
+        extra={"doc_id": doc_id, "num_chunks": len(chunks)},
+    )
+    return {**state, "chunks": chunks, "status": "embedding"}
 
 

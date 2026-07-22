@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, Send, Settings, Sparkles, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 import { ChatSessionList } from "@/components/chat/ChatSessionList"
+import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import {
   appendChatMessage,
   createChatSession,
@@ -93,30 +94,33 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
 
   if (isInitialLoading) {
     return (
-      <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-        <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
-        <div className="h-7 w-40 animate-pulse rounded-full bg-muted" />
+      <div className="mx-auto flex w-full max-w-3xl flex-wrap gap-2 px-6 py-3">
+        <div className="h-8 w-44 animate-pulse rounded-full bg-muted" />
+        <div className="h-8 w-56 animate-pulse rounded-full bg-muted" />
       </div>
     )
   }
   if (!hasSuggestions) return null
 
   return (
-    <div className="flex flex-wrap gap-2 border-t border-border px-6 py-3">
-      {data.suggestions.map((s) => (
-        <button
-          key={s.id || s.text}
-          onClick={() => {
-            if (s.id) {
-              fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
-            }
-            onSuggest(s.text)
-          }}
-          className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
-        >
-          {s.text}
-        </button>
-      ))}
+    <div className="mx-auto w-full max-w-3xl px-6 py-3">
+      <p className="lum-eyebrow mb-2">Try asking</p>
+      <div className="flex flex-wrap gap-2">
+        {data.suggestions.map((s) => (
+          <button
+            key={s.id || s.text}
+            onClick={() => {
+              if (s.id) {
+                fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
+              }
+              onSuggest(s.text)
+            }}
+            className="rounded-full border border-primary/25 bg-primary/5 px-3.5 py-2 text-xs text-primary transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/10 hover:shadow-[var(--shadow-md)]"
+          >
+            {s.text}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -190,6 +194,9 @@ interface ChatMessage {
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
   transparency?: TransparencyInfo       // S158: retrieval transparency panel
+  notice?: string                       // offline/routing notice, shown above the answer
+  error?: string                        // this turn failed; message shown with a Retry button
+  failedQuestion?: string               // question to re-send on Retry
 }
 
 interface SessionPlanItem {
@@ -462,6 +469,23 @@ function DocumentScopeCombobox({ docList, selectedDocId, onSelect }: DocumentSco
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ChatEmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <div className="lum-halo absolute inset-0 rounded-full bg-gradient-to-br from-primary/25 to-purple-500/20 blur-xl" />
+        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 to-purple-500/10">
+          <LuminaryGlyph size={30} />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <h2 className="lum-h3">{title}</h2>
+        <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">{body}</p>
+      </div>
     </div>
   )
 }
@@ -759,7 +783,7 @@ export default function Chat() {
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
   }
 
-  async function sendMessage(question: string) {
+  async function sendMessage(question: string, opts?: { reuseUserTurn?: boolean }) {
     if (!question.trim() || isStreaming) return
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
@@ -795,13 +819,19 @@ export default function Chat() {
       }
     }
 
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
     const assistantId = crypto.randomUUID()
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", text: "", isStreaming: true }
-    setMessages((m) => [...m, userMsg, assistantMsg])
+    // On retry the user turn is already in the thread and already persisted, so
+    // reuse it -- re-adding would duplicate the question on the backend session.
+    if (opts?.reuseUserTurn) {
+      setMessages((m) => [...m, assistantMsg])
+    } else {
+      const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", text: question }
+      setMessages((m) => [...m, userMsg, assistantMsg])
+    }
     setIsStreaming(true)
 
-    if (sessionId) {
+    if (sessionId && !opts?.reuseUserTurn) {
       void appendChatMessage(sessionId, { role: "user", content: question }).catch(() => {})
     }
 
@@ -868,6 +898,16 @@ export default function Chat() {
               )
             }
 
+            // Offline / routing notice — non-fatal, shown inline above the answer.
+            if (payload["type"] === "notice" && typeof payload["message"] === "string") {
+              const noticeText = payload["message"] as string
+              setMessages((m) =>
+                m.map((msg) =>
+                  msg.id === assistantId ? { ...msg, notice: noticeText } : msg,
+                ),
+              )
+            }
+
             // S158: transparency event arrives before 'done' — silently omit if malformed
             if (payload["type"] === "transparency") {
               try {
@@ -889,7 +929,7 @@ export default function Chat() {
               }
             }
 
-            // SSE error event — end streaming, remove placeholder, show banner
+            // SSE error event — mark this turn failed so it can be retried inline.
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
@@ -902,8 +942,13 @@ export default function Chat() {
                     ? "No relevant content found. Make sure at least one document has been ingested."
                     : fallbackMsg
               setIsStreaming(false)
-              setMessages((m) => m.filter((msg) => msg.id !== assistantId))
-              setQaError(errorMsg)
+              setMessages((m) =>
+                m.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, isStreaming: false, text: "", error: errorMsg, failedQuestion: question }
+                    : msg,
+                ),
+              )
               break
             }
 
@@ -983,14 +1028,27 @@ export default function Chat() {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error("[Chat] fetch failed", { endpoint: "/qa", error: errMsg })
-      setQaError(
+      const shown =
         errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError")
           ? "Cannot reach the server. Is the backend running on port 7820?"
           : `Could not get a response: ${errMsg}`
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, isStreaming: false, text: "", error: shown, failedQuestion: question }
+            : msg,
+        ),
       )
-      setMessages((m) => m.filter((msg) => msg.id !== assistantId))
       setIsStreaming(false)
     }
+  }
+
+  // Re-send a failed turn. The user turn stays (already shown and persisted); we
+  // drop only the errored assistant bubble and stream a fresh answer for it.
+  function retryMessage(assistantId: string, question: string) {
+    if (isStreaming || !question.trim()) return
+    setMessages((m) => m.filter((msg) => msg.id !== assistantId))
+    void sendMessage(question, { reuseUserTurn: true })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1036,7 +1094,7 @@ export default function Chat() {
       )}
       <div className="flex h-full flex-col flex-1 min-w-0">
       {/* Header controls */}
-      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/80 px-6 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
         {canGoBack && (
           <button
             onClick={goBack}
@@ -1090,50 +1148,54 @@ export default function Chat() {
           />
         )}
 
-        {/* Creative mode -- primary per-question toggle (grounded generative answers) */}
-        <button
-          onClick={() => setCreativeEnabled((prev) => !prev)}
-          aria-pressed={creativeEnabled}
-          title={
-            creativeEnabled
-              ? "Creative mode is on: imaginative answers grounded in your material. Click for strict, cited answers."
-              : "Creative mode: turn answers into stories, poems, and analogies grounded in your own material."
-          }
-          className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
-            creativeEnabled
-              ? "border-purple-300 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300"
-              : "border-border text-muted-foreground hover:bg-accent"
-          }`}
-        >
-          <Sparkles size={14} />
-          Creative
-        </button>
-
-        {/* Web call counter -- shown when web is enabled and conversation is active */}
-        {webEnabled && messages.length > 0 && (
-          <span className="text-xs text-muted-foreground">Web: {webCallsUsed}/3</span>
-        )}
-
-        {/* Clear conversation button -- only shown when there are messages */}
-        {messages.length > 0 && !isStreaming && (
+        <div className="ml-auto flex items-center gap-2">
+          {/* Creative mode -- primary per-question toggle (grounded generative answers) */}
           <button
-            onClick={clearConversation}
-            className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-            title="Clear conversation"
+            onClick={() => setCreativeEnabled((prev) => !prev)}
+            aria-pressed={creativeEnabled}
+            title={
+              creativeEnabled
+                ? "Creative mode is on: imaginative answers grounded in your material. Click for strict, cited answers."
+                : "Creative mode: turn answers into stories, poems, and analogies grounded in your own material."
+            }
+            className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+              creativeEnabled
+                ? "border-purple-300 bg-purple-50 text-purple-700 shadow-[0_0_0_3px_rgba(168,85,247,0.12)] dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300"
+                : "border-border text-muted-foreground hover:border-purple-200 hover:bg-accent hover:text-foreground"
+            }`}
           >
-            <Trash2 size={13} />
-            Clear
+            <Sparkles size={13} className={creativeEnabled ? "text-purple-500" : ""} />
+            Creative
           </button>
-        )}
 
-        {/* Settings gear icon -- opens ChatSettingsDrawer */}
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className={`${messages.length > 0 && !isStreaming ? "" : "ml-auto"} rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors`}
-          title="Chat settings"
-        >
-          <Settings size={15} />
-        </button>
+          {/* Web call counter -- shown when web is enabled and conversation is active */}
+          {webEnabled && messages.length > 0 && (
+            <span className="rounded-full bg-muted px-2 py-1 text-xs tabular-nums text-muted-foreground">
+              Web {webCallsUsed}/3
+            </span>
+          )}
+
+          {/* Clear conversation button -- only shown when there are messages */}
+          {messages.length > 0 && !isStreaming && (
+            <button
+              onClick={clearConversation}
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              title="Clear conversation"
+            >
+              <Trash2 size={13} />
+              Clear
+            </button>
+          )}
+
+          {/* Settings gear icon -- opens ChatSettingsDrawer */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            title="Chat settings"
+          >
+            <Settings size={15} />
+          </button>
+        </div>
       </div>
 
       {/* Chat settings drawer -- model selector, web toggle */}
@@ -1167,49 +1229,63 @@ export default function Chat() {
       )}
 
       {/* Message list */}
-      <div className="flex-1 overflow-auto px-6 py-4">
+      <div className="flex-1 overflow-auto px-6 py-6">
         {llmLoading ? (
-          <div className="flex flex-col gap-3 py-4">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 py-4">
             <Skeleton className="h-10 w-3/4 self-end" />
             <Skeleton className="h-16 w-2/3" />
             <Skeleton className="h-10 w-1/2 self-end" />
           </div>
         ) : noDocumentSelected ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              Open a document in the Learning tab to ask questions about it.
-            </p>
-          </div>
+          <ChatEmptyState
+            title="Pick something to study"
+            body="Open a document in the Learning tab, then come back here to ask questions about it."
+          />
         ) : messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4">
-            {hasDocuments === false ? (
-              <p className="max-w-xs text-center text-sm text-muted-foreground">
-                Upload a document in the Learning tab to start chatting about it.
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">Ask a question to get started.</p>
-            )}
-          </div>
+          hasDocuments === false ? (
+            <ChatEmptyState
+              title="Your library is empty"
+              body="Upload a document in the Learning tab and Luminary will answer from it, with citations."
+            />
+          ) : (
+            <ChatEmptyState
+              title="Ask anything about your material"
+              body="Every answer is grounded in your own documents and cites where it came from."
+            />
+          )
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
             {messages.map((msg) => (
               msg.type === "divider" ? (
                 <div key={msg.id} className="flex items-center gap-3 py-1">
-                  <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-muted-foreground">{msg.text}</span>
-                  <div className="h-px flex-1 bg-border" />
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent to-border" />
+                  <span className="rounded-full border border-border bg-muted/50 px-2.5 py-0.5 text-xs text-muted-foreground">
+                    {msg.text}
+                  </span>
+                  <div className="h-px flex-1 bg-gradient-to-l from-transparent to-border" />
                 </div>
               ) : (
                 <div
                   key={msg.id}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                  className={`lum-msg-enter flex items-start gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
+                  {msg.role !== "user" && (
+                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-gradient-to-br from-primary/15 to-purple-500/10">
+                      <LuminaryGlyph size={16} />
+                    </div>
+                  )}
                   <div
-                    className={`max-w-[80%] rounded-lg px-4 py-3 ${msg.role === "user"
-                        ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
-                        : "border border-border bg-card text-card-foreground shadow-sm"
+                    className={`max-w-[80%] px-4 py-3 transition-shadow ${msg.role === "user"
+                        ? "rounded-2xl rounded-br-md bg-primary text-primary-foreground shadow-[var(--shadow-md)]"
+                        : "rounded-2xl rounded-tl-md border border-border bg-card text-card-foreground shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)]"
                       }`}
                   >
+                    {msg.notice && msg.role === "assistant" && (
+                      <div className="mb-2 flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                        <WifiOff size={12} className="shrink-0" />
+                        <span>{msg.notice}</span>
+                      </div>
+                    )}
                     {msg.type === "card" && msg.cardData !== undefined ? (
                       msg.cardData.type === "quiz_question" ? (
                         <QuizQuestionCard
@@ -1226,6 +1302,21 @@ export default function Chat() {
                       ) : (
                         <p className="text-xs text-muted-foreground">Unknown card type</p>
                       )
+                    ) : msg.error ? (
+                      <div className="space-y-2">
+                        <p className="flex items-start gap-1.5 text-sm text-destructive">
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                          <span>{msg.error}</span>
+                        </p>
+                        <button
+                          onClick={() => retryMessage(msg.id, msg.failedQuestion ?? "")}
+                          disabled={isStreaming || !msg.failedQuestion}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} />
+                          Retry
+                        </button>
+                      </div>
                     ) : msg.not_found ? (
                       <p className="text-sm text-blue-600">
                         This information was not found in the selected content.
@@ -1233,12 +1324,12 @@ export default function Chat() {
                     ) : msg.role === "user" ? (
                       <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
                     ) : msg.isStreaming && msg.text === "" ? (
-                      // Skeleton shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
+                      // Shown while waiting for a card SSE event (e.g. quiz, teach-back, gap)
                       // or before the first token of a streamed text response arrives.
-                      <div className="flex flex-col gap-2">
-                        <Skeleton className="h-4 w-48" />
-                        <Skeleton className="h-4 w-64" />
-                        <Skeleton className="h-4 w-40" />
+                      <div className="flex items-center gap-1.5 py-1" role="status" aria-label="Thinking">
+                        <span className="lum-typing-dot h-2 w-2 rounded-full bg-primary" />
+                        <span className="lum-typing-dot h-2 w-2 rounded-full bg-primary" />
+                        <span className="lum-typing-dot h-2 w-2 rounded-full bg-primary" />
                       </div>
                     ) : (
                       <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
@@ -1250,7 +1341,9 @@ export default function Chat() {
                       [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
                       [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
                         <MarkdownRenderer>{msg.text}</MarkdownRenderer>
-                        {msg.isStreaming && <span className="animate-pulse">▍</span>}
+                        {msg.isStreaming && (
+                          <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse rounded-full bg-primary align-text-bottom" />
+                        )}
                       </div>
                     )}
 
@@ -1419,30 +1512,35 @@ export default function Chat() {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-border px-6 py-4">
-        <div className="flex items-end gap-3">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value)
-              autoResize()
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={noDocumentSelected ? "Select a document first..." : "Ask a question..."}
-            disabled={noDocumentSelected || isStreaming}
-            rows={1}
-            className="flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-          />
-          <button
-            onClick={() => void sendMessage(input)}
-            disabled={!input.trim() || isStreaming || noDocumentSelected}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Send size={14} />
-          </button>
+      <div className="border-t border-border bg-background px-6 py-4">
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="lum-composer flex items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-[var(--shadow-sm)]">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value)
+                autoResize()
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={noDocumentSelected ? "Select a document first..." : "Ask a question about your material..."}
+              disabled={noDocumentSelected || isStreaming}
+              rows={1}
+              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+            />
+            <button
+              onClick={() => void sendMessage(input)}
+              disabled={!input.trim() || isStreaming || noDocumentSelected}
+              aria-label="Send message"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-[var(--shadow-sm)] transition-all duration-200 hover:bg-primary/90 hover:shadow-[var(--shadow-md)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:bg-primary"
+            >
+              <Send size={15} />
+            </button>
+          </div>
+          <p className="mt-2 text-center text-xs text-muted-foreground/70">
+            Enter to send · Shift+Enter for newline
+          </p>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">Enter to send · Shift+Enter for newline</p>
       </div>
       </div>
     </div>

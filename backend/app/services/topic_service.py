@@ -242,6 +242,7 @@ class TopicService:
                 ],
                 temperature=0.2,
                 response_format={"type": "json_object"},
+                background=True,
             )
             data = json.loads(re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", raw.strip()))
             items = data.get("topics") if isinstance(data, dict) else None

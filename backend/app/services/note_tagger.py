@@ -56,6 +56,7 @@ class NoteTaggerService:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,
+                background=True,
             )
             return _parse_tag_list(raw)
         except Exception as exc:

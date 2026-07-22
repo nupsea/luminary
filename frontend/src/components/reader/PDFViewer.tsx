@@ -3,8 +3,9 @@ import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
-import { ChevronLeft, ChevronRight, Search, ZoomIn } from "lucide-react"
+import { ChevronLeft, ChevronRight, Moon, Search, Sun, ZoomIn } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
+import { useIsDark } from "@/hooks/useIsDark"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionItem } from "./types"
 import {
@@ -229,6 +230,17 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading")
     const [pageInput, setPageInput] = useState("1")
 
+    // The PDF renders to a raster canvas, so it ignores the app theme. In dark
+    // mode we invert the canvas to a dark page by default; the user can toggle it
+    // off for figure-heavy pages, where inversion turns photos into negatives.
+    const isDark = useIsDark()
+    const [darkPage, setDarkPage] = useState(isDark)
+    useEffect(() => setDarkPage(isDark), [isDark])
+    // Softened invert (not a full 1.0) so the page is dark-gray on light-gray
+    // rather than harsh #000/#fff; hue-rotate keeps colored links roughly right.
+    const canvasFilter = darkPage ? "invert(0.9) hue-rotate(180deg)" : undefined
+
+    const pageCommitTimer = useRef<number | null>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const textLayerRef = useRef<HTMLDivElement>(null)
     const highlightOverlayRef = useRef<HTMLDivElement>(null)
@@ -595,6 +607,23 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (!isNaN(n)) goToPage(n)
     }
 
+    // The page field only committed on blur/Enter, so the spinner arrows (and any
+    // edit) changed the number without turning the page. Commit on change too,
+    // debounced so typing "38" navigates once to 38 rather than to 3 then 38.
+    function handlePageInputChange(value: string) {
+      setPageInput(value)
+      if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
+      const n = parseInt(value, 10)
+      if (isNaN(n)) return
+      pageCommitTimer.current = window.setTimeout(() => {
+        setCurrentPage(Math.max(1, Math.min(n, totalPages)))
+      }, 250)
+    }
+    function commitPageInputNow() {
+      if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
+      commitPageInput()
+    }
+
     // ── Search helpers ────────────────────────────────────────────────
 
     /** Extract text from a single PDF page and cache it. */
@@ -869,8 +898,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           {/* Canvas scroll area */}
           <div ref={scrollAreaRef} className="flex-1 overflow-auto p-4">
             <div className="relative" style={{ width: "fit-content", marginInline: "auto" }}>
-              {/* Canvas: pointer-events:none so the text layer receives all mouse events */}
-              <canvas ref={canvasRef} className="shadow-md block" style={{ pointerEvents: "none" }} />
+              {/* Canvas: pointer-events:none so the text layer receives all mouse events.
+                  The filter lives on the canvas alone -- putting it on the parent would
+                  invert the highlight/annotation overlays too. */}
+              <canvas
+                ref={canvasRef}
+                className="shadow-md block"
+                style={{ pointerEvents: "none", filter: canvasFilter }}
+              />
               {/* Highlight overlay: absolutely-positioned colored divs between canvas and text layer.
                   z-index 5 sits above canvas (0) but below text layer (10), so text selection works
                   through the overlay while highlights are visible underneath. */}
@@ -893,7 +928,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage <= 1}
-              title="Previous page"
+              title="Previous page (←)"
               aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -904,9 +939,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               value={pageInput}
               min={1}
               max={totalPages}
-              onChange={(e) => setPageInput(e.target.value)}
-              onBlur={commitPageInput}
-              onKeyDown={(e) => { if (e.key === "Enter") commitPageInput() }}
+              onChange={(e) => handlePageInputChange(e.target.value)}
+              onBlur={commitPageInputNow}
+              onKeyDown={(e) => { if (e.key === "Enter") commitPageInputNow() }}
               aria-label="Current page"
             />
             <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
@@ -914,7 +949,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
-              title="Next page"
+              title="Next page (→)"
               aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
@@ -926,6 +961,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               aria-label="Search in PDF"
             >
               <Search className="h-4 w-4" />
+            </button>
+            <button
+              className="p-1 rounded hover:bg-accent"
+              onClick={() => setDarkPage((v) => !v)}
+              title={darkPage ? "Show original page colors" : "Dark page (invert)"}
+              aria-label="Toggle dark page"
+              aria-pressed={darkPage}
+            >
+              {darkPage ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             <div className="ml-auto relative" ref={zoomPopoverRef}>
               <button

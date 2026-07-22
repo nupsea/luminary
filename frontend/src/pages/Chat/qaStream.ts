@@ -37,6 +37,7 @@ export interface QaStreamHandlers {
   onCard: (card: AnyCardData) => void
   onToken: (token: string) => void
   onTransparency: (transparency: TransparencyInfo) => void
+  onNotice?: (message: string) => void
   onError: (errorCode: string, fallback: string) => void
   onDone: (done: QaDoneEvent) => void
 }
@@ -74,6 +75,11 @@ export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers)
 
         if (typeof payload["token"] === "string") {
           handlers.onToken(payload["token"] as string)
+        }
+
+        // Offline / routing notice — non-fatal, shown inline above the answer.
+        if (payload["type"] === "notice" && typeof payload["message"] === "string") {
+          handlers.onNotice?.(payload["message"] as string)
         }
 
         // transparency event arrives before 'done' — silently omit if malformed

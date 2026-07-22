@@ -1,7 +1,8 @@
 """Tests for ImageEnricherService (S134).
 
 Unit tests use in-memory SQLite + mocked LiteDB and LiteLLM.
-Integration test (requires ollama llava) is guarded with pytest.mark.skipif.
+The integration test calls a real vision model; it is marked e2e (excluded by
+default) and additionally skipped unless the configured VISION_MODEL is pulled.
 """
 
 import asyncio
@@ -675,32 +676,43 @@ async def test_image_analyze_handler_no_qualifying_images_skips_enqueue(
     assert len(jobs) == 0
 
 
-# Integration test — requires ollama with llava model
+# Integration test — requires ollama with the configured VISION_MODEL pulled
 
 
-def _ollama_has_llava() -> bool:
-    """Return True if ollama is in PATH and llava model is listed."""
+def _configured_vision_model() -> str:
+    """The vision model the app would actually use, without the provider prefix."""
+    from app.config import get_settings  # noqa: PLC0415
+
+    return get_settings().VISION_MODEL.removeprefix("ollama/")
+
+
+def _ollama_has_vision_model() -> bool:
+    """Return True if ollama is in PATH and the configured vision model is pulled."""
     if not shutil.which("ollama"):
         return False
     import subprocess  # noqa: PLC0415
 
     try:
         result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
-        return "llava:7b" in result.stdout
+        return _configured_vision_model() in result.stdout
     except Exception:
         return False
 
 
-_HAS_OLLAMA = _ollama_has_llava()
+_HAS_OLLAMA = _ollama_has_vision_model()
 
 
+@pytest.mark.e2e
 @pytest.mark.skipif(not _HAS_OLLAMA, reason="ollama not available in this environment")
 @pytest.mark.asyncio
 async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     """Integration: enrich() calls real vision LLM and stores description.
 
-    Requires: ollama running with llava:13b pulled.
-    Skipped automatically if ollama is not in PATH.
+    Requires ollama running with the configured VISION_MODEL pulled, and marked
+    e2e because of it: a real inference in the default suite can overrun the 120s
+    global timeout, which kills the whole session and blames whichever test
+    happened to be running. The skipif alone is not enough -- it passes on any
+    developer machine that has the model.
     """
     from app.services.image_enricher import ImageEnricherService  # noqa: PLC0415
 
@@ -757,6 +769,10 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     mock_embedder = MagicMock()
     mock_embedder.encode.return_value = [[0.1] * 384]
 
+    # Resolve before patching: inside the context get_settings is a MagicMock,
+    # so reading VISION_MODEL there yields a mock rather than the real name.
+    vision_model = _configured_vision_model()
+
     with (
         patch("app.database.get_session_factory", return_value=sf),
         patch("app.config.get_settings") as mock_settings,
@@ -765,7 +781,10 @@ async def test_integration_vision_analysis_real_image(tmp_path: Path) -> None:
     ):
         settings = MagicMock()
         settings.DATA_DIR = str(tmp_path)
-        settings.VISION_MODEL = "ollama/llava:7b"
+        # Exercise the model the app is actually configured to use. This test
+        # makes a real call, so a pinned literal would validate a model that is
+        # no longer in the pipeline.
+        settings.VISION_MODEL = f"ollama/{vision_model}"
         settings.OLLAMA_URL = "http://localhost:11434"
         settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
         mock_settings.return_value = settings

@@ -5,7 +5,9 @@ All LLM completions in the codebase MUST go through this module so that telemetr
 litellm.acompletion in services/routers bypass observability.
 """
 
+import asyncio
 import logging
+import socket
 import warnings
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -53,6 +55,37 @@ LLMUnavailableError: tuple[type[BaseException], ...] = (
     LLMTimeoutError,
     ConnectionRefusedError,
 )
+
+# The subset meaning "could not reach the provider" -- the offline case. Auth,
+# rate-limit and not-found are deliberately excluded: they are configuration
+# faults, and silently answering from a different model would hide them.
+LLMUnreachableError: tuple[type[BaseException], ...] = (
+    LLMServiceUnavailableError,
+    LLMAPIConnectionError,
+    LLMTimeoutError,
+    ConnectionRefusedError,
+)
+
+# litellm maps a connection failure to InternalServerError ("OpenAIException -
+# Connection error"), NOT APIConnectionError, so isinstance alone misses the very
+# case this exists for. Walk the cause chain for the underlying socket/DNS error
+# instead. InternalServerError from a genuine provider 500 has no such cause and
+# is correctly left to propagate.
+def _is_offline_error(exc: BaseException) -> bool:
+    if isinstance(exc, LLMUnreachableError):
+        return True
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, LLMUnreachableError):
+            return True
+        if isinstance(cur, (socket.gaierror, ConnectionError)):
+            return True
+        if isinstance(cur, OSError) and "Connect" in type(cur).__name__:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 # Langfuse — optional LLM call observability
 
@@ -150,6 +183,72 @@ class LLMService:
             kwargs["api_key"] = settings.GOOGLE_API_KEY
         return kwargs
 
+    def _offline_fallback_kwargs(
+        self,
+        requested_model: str | None,
+        effective_model: str,
+        kwargs: dict,
+        settings: Settings,
+        *,
+        num_ctx: int | None = None,
+    ) -> dict | None:
+        """Rebuild kwargs against the local model, or None when not applicable.
+
+        Keeps the app usable with no internet: a cloud call that cannot reach its
+        provider is retried on Ollama. Only for calls whose model came from
+        routing -- an explicitly pinned model is honoured or allowed to fail, so
+        evals and per-request overrides stay reproducible rather than silently
+        answering from a different model.
+        """
+        if requested_model is not None:
+            return None
+        if effective_model.startswith("ollama/"):
+            return None
+
+        local_model = settings.LITELLM_DEFAULT_MODEL
+        if not local_model.startswith("ollama/"):
+            local_model = f"ollama/{local_model}"
+
+        retry = self._build_kwargs(
+            local_model,
+            kwargs["messages"],
+            settings,
+            override_key=None,
+            timeout=kwargs.get("timeout"),
+            num_ctx=num_ctx,
+        )
+        for key in ("temperature", "max_tokens", "response_format", "stream"):
+            if key in kwargs:
+                retry[key] = kwargs[key]
+        return retry
+
+    async def _reroute_if_offline(
+        self, requested_model: str | None, effective_model: str, settings: Settings
+    ) -> tuple[str, str | None, bool]:
+        """Swap a routed cloud model for the local one when the provider is
+        unreachable, before any call is attempted.
+
+        Returns (model, override_key, rerouted). Skipped for pinned models so
+        evals and overrides stay reproducible. Doing this up front avoids the
+        SDK's multi-retry stall on a dead connection.
+        """
+        from app.services.connectivity import is_cloud_model, provider_reachable  # noqa: PLC0415
+
+        if requested_model is not None or not is_cloud_model(effective_model):
+            return effective_model, None, False
+        if await asyncio.to_thread(provider_reachable, effective_model):
+            return effective_model, None, False
+
+        local_model = settings.LITELLM_DEFAULT_MODEL
+        if not local_model.startswith("ollama/"):
+            local_model = f"ollama/{local_model}"
+        logger.warning(
+            "%s provider unreachable; routing to local model %s",
+            effective_model,
+            local_model,
+        )
+        return local_model, None, True
+
     def _resolve_model(
         self, model: str | None, *, background: bool
     ) -> tuple[str, str | None]:
@@ -187,6 +286,9 @@ class LLMService:
         """
         settings = get_settings()
         effective_model, override_key = self._resolve_model(model, background=background)
+        effective_model, override_key, _ = await self._reroute_if_offline(
+            model, effective_model, settings
+        )
 
         kwargs = self._build_kwargs(
             effective_model, messages, settings,
@@ -204,7 +306,27 @@ class LLMService:
             kwargs.update(extra)
 
         with trace_llm_call("complete", model=effective_model) as span:
-            response = await litellm.acompletion(**kwargs)
+            try:
+                response = await litellm.acompletion(**kwargs)
+            except Exception as exc:
+                retry = (
+                    self._offline_fallback_kwargs(
+                        model, effective_model, kwargs, settings, num_ctx=num_ctx
+                    )
+                    if _is_offline_error(exc)
+                    else None
+                )
+                if retry is None:
+                    raise
+                logger.warning(
+                    "%s unreachable (%s); retrying on local model %s",
+                    effective_model,
+                    type(exc).__name__,
+                    retry["model"],
+                )
+                effective_model = retry["model"]
+                span.set_attribute("llm.offline_fallback", True)
+                response = await litellm.acompletion(**retry)
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
             prompt_tokens = 0
@@ -231,13 +353,19 @@ class LLMService:
         """Stream content deltas for the given message list."""
         settings = get_settings()
         effective_model, override_key = self._resolve_model(model, background=background)
+        effective_model, override_key, _ = await self._reroute_if_offline(
+            model, effective_model, settings
+        )
         kwargs = self._build_kwargs(
             effective_model, messages, settings,
             override_key=override_key, timeout=timeout, num_ctx=num_ctx,
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
-        return self._token_stream(kwargs)
+        fallback = self._offline_fallback_kwargs(
+            model, effective_model, kwargs, settings, num_ctx=num_ctx
+        )
+        return self._token_stream(kwargs, fallback)
 
     async def generate(
         self,
@@ -274,8 +402,22 @@ class LLMService:
             temperature=temperature,
         )
 
-    async def _token_stream(self, kwargs: dict) -> AsyncGenerator[str]:
-        response = await litellm.acompletion(stream=True, **kwargs)
+    async def _token_stream(
+        self, kwargs: dict, fallback_kwargs: dict | None = None
+    ) -> AsyncGenerator[str]:
+        try:
+            response = await litellm.acompletion(stream=True, **kwargs)
+        except Exception as exc:
+            if fallback_kwargs is None or not _is_offline_error(exc):
+                raise
+            logger.warning(
+                "%s unreachable while streaming (%s); retrying on local model %s",
+                kwargs.get("model"),
+                type(exc).__name__,
+                fallback_kwargs["model"],
+            )
+            fallback_kwargs.pop("stream", None)
+            response = await litellm.acompletion(stream=True, **fallback_kwargs)
         async for chunk in response:
             delta = chunk.choices[0].delta.content
             if delta:

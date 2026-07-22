@@ -283,9 +283,13 @@ def get_llm_error_message() -> str:
 def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     """Return (litellm_model_string, api_key_or_none).
 
-    background=True  — caller is a background/ingestion task.  In hybrid mode
-                       this forces local Ollama so cloud quota is not consumed.
-    background=False — caller is user-facing (chat, explain, flashcards).
+    background=True  — the call must stay on the machine. In hybrid mode this
+                       forces local Ollama. Two kinds of caller need it: automatic
+                       tasks (ingestion, backfills), and anything handling the
+                       user's own notes or documents, even when a click triggered
+                       it. The default is local; cloud is opt-in per call site.
+    background=False — caller is user-facing and the cloud is the point of hybrid
+                       mode (chat, explain, feynman, study, flashcard generation).
 
     Raises ValueError when cloud routing is active but the API key is missing.
     """

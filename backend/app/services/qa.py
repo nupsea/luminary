@@ -5,6 +5,7 @@ The graph handles: intent classification, query rewriting, retrieval, LLM call,
 citation enrichment.  stream_answer() remains the thin SSE streaming layer.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -431,6 +432,28 @@ class QAService:
                 store_model = model or get_effective_routing()[0]
             except Exception:
                 store_model = model or "unknown"
+
+            # Tell the user when a routed cloud answer is about to run locally
+            # because the provider is unreachable. Only for routed (model=None)
+            # cloud models; a pinned model or local routing says nothing.
+            if model is None and store_model and not store_model.startswith("ollama/"):
+                from app.services.connectivity import (  # noqa: PLC0415
+                    is_cloud_model,
+                    provider_reachable,
+                )
+
+                if is_cloud_model(store_model) and not await asyncio.to_thread(
+                    provider_reachable, store_model
+                ):
+                    notice = {
+                        "type": "notice",
+                        "level": "offline",
+                        "message": (
+                            "No internet connection — answering with the local model "
+                            "instead of the cloud provider."
+                        ),
+                    }
+                    yield f"data: {json.dumps(notice)}\n\n"
 
             with trace_chain("qa.answer", input_value=question) as root_span:
                 root_span.set_attribute("qa.scope", scope)

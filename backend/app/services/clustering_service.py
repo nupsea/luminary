@@ -191,6 +191,7 @@ class ClusteringService:
                     {"role": "user", "content": excerpts_text},
                 ],
                 temperature=0.0,
+                background=True,
             )
             name = raw.strip().split("\n")[0].strip()[:60]
             return name if name else "Notes Cluster"

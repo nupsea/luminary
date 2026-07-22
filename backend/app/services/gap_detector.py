@@ -100,6 +100,7 @@ class GapDetectorService:
                     {"role": "user", "content": user_msg},
                 ],
                 temperature=0.0,
+                background=True,
             )
         except LLMUnavailableError:
             raise

@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import httpx
+from bs4 import BeautifulSoup, NavigableString
 
 from app.config import get_settings
 from app.full_extras import require_extra
@@ -23,6 +24,17 @@ USER_AGENTS = [
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
 ]
+
+
+_BOILERPLATE_CONTAINERS = ("nav", "header", "footer", "aside")
+
+_INLINE_MARKERS = {
+    "strong": "**",
+    "b": "**",
+    "em": "*",
+    "i": "*",
+    "code": "`",
+}
 
 
 class ArticleExtractor:
@@ -65,7 +77,7 @@ class ArticleExtractor:
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
         markdown_text = trafilatura.extract(
-            html_content,
+            self._prepare_html(html_content),
             url=url,
             output_format="markdown",
             include_links=True,
@@ -100,6 +112,96 @@ class ArticleExtractor:
             sections=sections,
             raw_text=markdown_text,
         )
+
+    def _prepare_html(self, html: str) -> str:
+        """Repairs markup that trafilatura's extractor silently drops."""
+        soup = BeautifulSoup(html, "html.parser")
+        self._hydrate_lazy_images(soup)
+        self._flatten_inline_formatting(soup)
+        return str(soup)
+
+    def _hydrate_lazy_images(self, soup: BeautifulSoup) -> None:
+        """
+        Gives every <img> a real src. Lazy-loading sites ship <img> with no src at
+        all and keep the true URL in a sibling <picture><source srcset> or a data-*
+        attribute; trafilatura only reads img/@src, so those images vanish entirely.
+        """
+        for img in soup.find_all("img"):
+            if not img.get("src"):
+                url = None
+                picture = img.find_parent("picture")
+                if picture:
+                    for source in picture.find_all("source"):
+                        url = self._best_srcset_url(source.get("srcset")) or url
+                url = (
+                    url
+                    or img.get("data-src")
+                    or img.get("data-original")
+                    or img.get("data-lazy-src")
+                    or self._best_srcset_url(img.get("srcset"))
+                )
+                if not url:
+                    continue
+                img["src"] = url
+
+            if not img.get("alt"):
+                figure = img.find_parent("figure")
+                caption = figure.find("figcaption") if figure else None
+                if caption and caption.get_text().strip():
+                    img["alt"] = caption.get_text().strip()
+
+    def _flatten_inline_formatting(self, soup: BeautifulSoup) -> None:
+        """
+        Rewrites inline tags to literal markdown before extraction.
+
+        trafilatura 2.0.0's markdown serialiser mishandles any block whose first
+        child is an inline element: a <li> starting with <strong> loses its bullet
+        and merges into the previous item, and one starting with <a> is dropped
+        outright. Feeding it plain text sidesteps the bug and also preserves the
+        inter-element spacing the serialiser otherwise strips.
+
+        Anchors are flattened only inside non-boilerplate list items. Flattening
+        them everywhere hides them from trafilatura's link-density heuristic, which
+        is how it recognises navigation and ad blocks -- measured to pull sponsor
+        markup into the article body on sites whose main content is already
+        marginal. Innermost-first so nested tags are rewritten before their parent.
+        """
+        for tag in reversed(list(soup.find_all([*_INLINE_MARKERS, "a"]))):
+            if tag.find_parent("pre"):
+                continue
+            if tag.name == "a":
+                list_item = tag.find_parent("li")
+                if not list_item or list_item.find_parent(_BOILERPLATE_CONTAINERS):
+                    continue
+            text = tag.get_text()
+            if not text.strip():
+                continue
+            if tag.name == "a":
+                href = tag.get("href")
+                replacement = f"[{text}]({href})" if href else text
+            else:
+                marker = _INLINE_MARKERS[tag.name]
+                replacement = f"{marker}{text}{marker}"
+            tag.replace_with(NavigableString(replacement))
+
+    @staticmethod
+    def _best_srcset_url(srcset: str | None) -> str | None:
+        """Picks the highest-resolution candidate from a srcset attribute."""
+        if not srcset:
+            return None
+        candidates: list[tuple[int, str]] = []
+        for candidate in srcset.split(","):
+            parts = candidate.strip().split()
+            if not parts:
+                continue
+            width = 0
+            if len(parts) > 1 and parts[1].endswith("w"):
+                try:
+                    width = int(parts[1][:-1])
+                except ValueError:
+                    width = 0
+            candidates.append((width, parts[0]))
+        return max(candidates)[1] if candidates else None
 
     async def _mirror_markdown_images(self, md: str, doc_id: str, base_url: str) -> str:
         """Finds ![alt](url) in markdown, downloads them, and updates to local path."""

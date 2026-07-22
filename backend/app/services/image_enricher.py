@@ -1,7 +1,7 @@
 """Vision LLM image analysis service
 
-Processes ImageModel rows with description=null, calling a vision LLM (llava:13b)
-to classify each image and generate a text description.  Descriptions are embedded
+Processes ImageModel rows with description=null, calling the configured
+VISION_MODEL to classify each image and generate a text description.  Descriptions are embedded
 and stored in LanceDB image_vectors_v1 and indexed in the images_fts FTS5 table.
 
 Pre-filter: images with <5 unique colors (solid-color) or aspect ratio >10:1 (rule

@@ -180,7 +180,7 @@ class FlashcardAuditService:
 
             async with llm_sem:
                 llm = get_llm_service()
-                raw = await llm.generate(prompt, system=system, stream=False)
+                raw = await llm.generate(prompt, system=system, stream=False, background=True)
 
             cards_data = _parse_llm_response(raw, document_id)
             return (section_id, level, cards_data)
