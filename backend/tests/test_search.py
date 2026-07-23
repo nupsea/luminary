@@ -326,3 +326,32 @@ def test_search_result_fields():
     assert match["page"] == 1
     assert "text_excerpt" in match
     assert isinstance(match["relevance_score"], float)
+    assert match["global_rank"] == 1
+
+
+def test_search_global_rank_restores_retriever_order_across_groups():
+    """global_rank is 1-indexed retriever order, contiguous across the grouped
+    response, and skips chunks dropped for missing document metadata -- so a
+    client flattening groups can sort by it to recover the true ranking."""
+    chunks = [
+        _make_chunk("c1", "doc-a", 0.95),
+        _make_chunk("c2", "doc-b", 0.90),
+        _make_chunk("c3", "doc-ghost", 0.85),  # no metadata row -> dropped
+        _make_chunk("c4", "doc-a", 0.60),
+    ]
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=chunks)
+
+    session = _mock_session([[("doc-a", "Paper A", "paper"), ("doc-b", "Paper B", "notes")]])
+
+    app.dependency_overrides[get_db] = _db_override(session)
+    app.dependency_overrides[get_retriever] = _retriever_override(retriever)
+
+    with TestClient(app) as client:
+        resp = client.get("/search?q=test")
+
+    assert resp.status_code == 200
+    flat = [m for g in resp.json()["results"] for m in g["matches"]]
+    by_rank = sorted(flat, key=lambda m: m["global_rank"])
+    assert [m["global_rank"] for m in by_rank] == [1, 2, 3]
+    assert [m["chunk_id"] for m in by_rank] == ["c1", "c2", "c4"]

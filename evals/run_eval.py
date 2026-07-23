@@ -217,6 +217,19 @@ def search_chunks(
     if document_id:
         params["document_id"] = document_id
         params["limit"] = "20"
+    else:
+        # Unscoped calls flatten /search's per-document groups WITHOUT restoring
+        # global rank order (a top document's tail matches shadow other docs'
+        # best chunks), so ranking metrics for this row are unreliable. Reaching
+        # this branch means the golden row failed to resolve a document_id
+        # (missing source_document_id and no manifest mapping) -- fix the
+        # dataset/manifest rather than trusting this run.
+        print(
+            f"  WARNING: search_chunks has no document_id for {question[:60]!r} "
+            "-- unscoped group flattening breaks rank order; fix the golden "
+            "row's manifest/source_document_id mapping.",
+            file=sys.stderr,
+        )
     if limit is not None:
         params["limit"] = str(limit)
     if not expand_context:
@@ -241,16 +254,18 @@ def search_chunks(
         resp.raise_for_status()
         body = resp.json()
 
-        # Preserve the backend's ranking. Do NOT re-sort by relevance_score:
-        # its polarity is strategy-dependent (FTS returns raw BM25 scores where
-        # MORE NEGATIVE = MORE relevant), so a reverse=True sort silently inverts
-        # the FTS ranking and tanks HR@5. /search already returns matches ranked
-        # per document, so keep that order.
+        # Restore the retriever's global order via global_rank. Never sort by
+        # relevance_score: its polarity is strategy-dependent (FTS BM25 is
+        # MORE NEGATIVE = MORE relevant) and rrf diversification intentionally
+        # deviates from pure score order. The stable sort with an inf default
+        # degrades to the grouped flatten order against a backend without the
+        # field.
         all_matches = []
         for group in body.get("results", []):
             if document_id and group.get("document_id") != document_id:
                 continue
             all_matches.extend(group.get("matches", []))
+        all_matches.sort(key=lambda m: m.get("global_rank", float("inf")))
         return [m.get("text", "") for m in all_matches[: limit or 10]]
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)

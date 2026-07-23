@@ -84,7 +84,7 @@ def _search(
     limit: int,
     document_id: str | None = None,
 ) -> tuple[list[dict], int]:
-    """Call /search. Returns (all_matches_sorted_by_score_desc, http_status).
+    """Call /search. Returns (all_matches_in_global_rank_order, http_status).
 
     On network failure or non-2xx response, returns ([], status_code_or_0).
     """
@@ -110,7 +110,9 @@ def _search(
             m_copy = dict(m)
             m_copy["_doc_id"] = group.get("document_id")
             matches.append(m_copy)
-    matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+    # global_rank restores the retriever's order across document groups; a
+    # score sort would invert FTS (negative BM25) and undo rrf diversification.
+    matches.sort(key=lambda m: m.get("global_rank", float("inf")))
     return matches, status
 
 
