@@ -88,7 +88,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-judge",
         action="store_true",
-        help="Skip LLM hallucination judge and report no_hallucination=1.0.",
+        help="Skip LLM hallucination judge and report no_hallucination as n/a.",
     )
     args = parser.parse_args()
 
@@ -101,6 +101,7 @@ def main() -> None:
 
     manifest = load_manifest()
     scored: list[dict] = []
+    judge_failures = 0
     for row in rows:
         doc_id = ensure_ingested(args.backend_url, row["source_file"], manifest)
         if not doc_id:
@@ -109,7 +110,7 @@ def main() -> None:
         theme = compute_theme_coverage(summary, row["expected_themes"])
         concision = compute_conciseness_pct(summary, row["target_length_chars"])
         if args.skip_judge:
-            no_hallucination = 1.0
+            no_hallucination = None
         else:
             try:
                 counts = judge_hallucination_counts(
@@ -121,8 +122,11 @@ def main() -> None:
                     counts["hallucinated_count"], counts["total_claims"]
                 )
             except Exception as exc:
-                print(f"WARNING: hallucination judge skipped: {exc}", file=sys.stderr)
-                no_hallucination = 1.0
+                # A failed judge must NEVER default to a perfect score -- that
+                # hides regressions behind API timeouts. Exclude the row instead.
+                print(f"WARNING: hallucination judge failed: {exc}", file=sys.stderr)
+                judge_failures += 1
+                no_hallucination = None
         scored.append(
             {
                 "theme_coverage": theme,
@@ -131,16 +135,28 @@ def main() -> None:
             }
         )
 
+    judged = [s["no_hallucination"] for s in scored if s["no_hallucination"] is not None]
     metrics = {
         "theme_coverage": sum(s["theme_coverage"] for s in scored) / len(scored),
-        "no_hallucination": sum(s["no_hallucination"] for s in scored) / len(scored),
+        "no_hallucination": sum(judged) / len(judged) if judged else None,
         "conciseness_pct": sum(s["conciseness_pct"] or 0.0 for s in scored) / len(scored),
     }
+    if judge_failures:
+        print(
+            f"WARNING: hallucination judge failed on {judge_failures}/{len(scored)} rows; "
+            "no_hallucination is averaged over the judged rows only.",
+            file=sys.stderr,
+        )
 
     violations: list[str] = []
     if metrics["theme_coverage"] < THRESHOLDS["theme_coverage"]:
         violations.append("theme_coverage below threshold")
-    if metrics["no_hallucination"] < THRESHOLDS["no_hallucination"]:
+    if not args.skip_judge and metrics["no_hallucination"] is None:
+        violations.append("no_hallucination judge produced no scores")
+    elif (
+        metrics["no_hallucination"] is not None
+        and metrics["no_hallucination"] < THRESHOLDS["no_hallucination"]
+    ):
         violations.append("no_hallucination below threshold")
     concision = metrics["conciseness_pct"]
     if concision < 0.5 or concision > 1.5:
