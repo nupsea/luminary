@@ -230,9 +230,8 @@ class KuzuViewRepo:
                 nodes_map[eid]["mention_count"] = nodes_map[eid]["mention_count"] + (count or 1)
 
         entity_ids = set(nodes_map.keys())
-        edges: list[dict] = []
+        edges: list[dict] = self._get_co_occurrence_edges(entity_ids, document_ids)
         for doc_id in document_ids:
-            edges.extend(self._get_co_occurrence_edges(entity_ids, doc_id))
             # Include diagram-derived nodes and edges for this document
             for dnode in self._tech.get_diagram_nodes_for_document(doc_id):
                 if dnode["id"] not in nodes_map:
@@ -411,23 +410,33 @@ class KuzuViewRepo:
             logger.warning("_get_note_nodes_for_entities failed (non-fatal)", exc_info=True)
             return [], []
 
-    def _get_co_occurrence_edges(self, entity_ids: set[str], document_id: str) -> list[dict]:
-        """Return CO_OCCURS edges among the given entity IDs for a document."""
+    def _get_co_occurrence_edges(
+        self, entity_ids: set[str], document_ids: str | list[str]
+    ) -> list[dict]:
+        """Return CO_OCCURS edges among the given entity IDs for the given documents.
+
+        The entity filter is applied in Python, not in Cypher: one placeholder
+        per entity id (inlined twice) turns the all-docs graph into a
+        20k-parameter query executed once per document, which dominates the
+        request. r.document_id is the selective predicate; let Kuzu use it.
+        """
         if not entity_ids:
             return []
-        placeholders = ", ".join(f"$eid{i}" for i in range(len(entity_ids)))
-        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
-        params["did"] = document_id
+        doc_ids = [document_ids] if isinstance(document_ids, str) else list(document_ids)
+        if not doc_ids:
+            return []
+        placeholders = ", ".join(f"$did{i}" for i in range(len(doc_ids)))
+        params = {f"did{i}": did for i, did in enumerate(doc_ids)}
         result = self._conn.execute(
             f"MATCH (a:Entity)-[r:CO_OCCURS]->(b:Entity)"
-            f" WHERE a.id IN [{placeholders}] AND b.id IN [{placeholders}]"
-            f" AND r.document_id = $did"
+            f" WHERE r.document_id IN [{placeholders}]"
             f" RETURN a.id, b.id, r.weight",
             params,
         )
         edges = []
         while result.has_next():
             row = result.get_next()
-            edges.append({"source": row[0], "target": row[1], "weight": row[2]})
+            if row[0] in entity_ids and row[1] in entity_ids:
+                edges.append({"source": row[0], "target": row[1], "weight": row[2]})
         return edges
 

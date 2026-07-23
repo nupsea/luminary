@@ -93,17 +93,17 @@ export default function Viz() {
   // Entity type filter state from vizStore (persisted to localStorage)
   const { activeEntityTypes: activeTypes, toggleEntityType, selectAllEntityTypes, deselectAllEntityTypes } = useVizStore()
   const [search, setSearch] = useState("")
-  // Default to "all" when no document is pre-selected so the graph loads immediately
-  const [scope, setScope] = useState<"document" | "all">(activeDocumentId ? "document" : "all")
-
-  // If the effective active doc disappears (e.g. the readiness fallback returns
-  // null because no doc is currently ready), drop scope back to "all" so the
-  // graph loads instead of stranding the user on "No document selected".
-  useEffect(() => {
-    if (!activeDocumentId) {
-      setScope("all")
-    }
-  }, [activeDocumentId])
+  // Scope is derived, not seeded state: `activeDocumentId` resolves one render
+  // after mount (the docs query has to land first), so a useState seed always
+  // read null and stranded the page on the whole-library graph -- tens of
+  // thousands of edges -- while the sidebar highlighted a single doc. Only an
+  // explicit user choice pins it.
+  const [scopeOverride, setScopeOverride] = useState<"document" | "all" | null>(null)
+  // Falling back to "all" without an active doc keeps the graph loading rather
+  // than stranding the user on "No document selected".
+  const scope: "document" | "all" =
+    !activeDocumentId ? "all" : (scopeOverride ?? "document")
+  const setScope = setScopeOverride
   // Document picker search filter state
   const [docPickerSearch, setDocPickerSearch] = useState("")
   const [docPickerOpen, setDocPickerOpen] = useState(false)
@@ -380,7 +380,7 @@ export default function Viz() {
             docPickerSearch={docPickerSearch}
             onDocPickerSearchChange={setDocPickerSearch}
             onClearGlobalSearch={() => setSearch("")}
-            activeDocumentId={activeDocumentId}
+            selectedDocId={scope === "document" ? activeDocumentId : null}
             onDocSelect={handleDocSelect}
             filteredDocList={filteredDocList}
             showNotes={showNotes}
