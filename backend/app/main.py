@@ -382,6 +382,14 @@ async def health():
     return {"status": "ok", "version": _APP_VERSION}
 
 
+@app.get("/healthz")
+async def healthz():
+    """Lightweight liveness probe for containers and monitors (no DB)."""
+    from datetime import UTC, datetime
+
+    return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+
 @misc_router.get("/settings")
 async def read_settings(settings: Settings = Depends(get_settings)):
     def mask(value: str) -> str:
