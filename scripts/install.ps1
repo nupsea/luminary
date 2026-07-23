@@ -63,7 +63,7 @@ if (Test-CommandExists "python") {
     $pyPath = "$env:TEMP\python-3.13.0.exe"
 
     Write-Host "[install] Downloading Python installer..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath
+    Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath -UseBasicParsing
 
     Write-Host "[install] Running installer (this may take a minute)..." -ForegroundColor Gray
     Start-Process -FilePath $pyPath -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1" -Wait
@@ -158,7 +158,7 @@ if ($installNode) {
     $nodeStage = "$env:TEMP\luminary-node"
 
     Write-Host "[install] Downloading Node.js $nodeVer (per-user portable)..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip
+    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
 
     Write-Host "[install] Extracting Node.js to $nodeHome ..." -ForegroundColor Gray
     if (Test-Path $nodeStage) { Remove-Item -Recurse -Force $nodeStage }
@@ -224,12 +224,46 @@ if (Test-CommandExists "ollama") {
     $ollamaPath = "$env:TEMP\OllamaSetup.exe"
     
     Write-Host "[install] Downloading Ollama installer..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri $ollamaUrl -OutFile $ollamaPath
+    Invoke-WebRequest -Uri $ollamaUrl -OutFile $ollamaPath -UseBasicParsing
     
     Write-Host "[install] Running installer (per-user, no admin)..." -ForegroundColor Gray
-    Start-Process -FilePath $ollamaPath -ArgumentList "/silent" -Wait
+    # OllamaSetup.exe is an Inno Setup installer with two documented hang modes
+    # under a bare `-Wait`:
+    #   1. Inno's /SILENT still shows message boxes (restart prompt, "Ollama is
+    #      running"), which can open BEHIND the console and wait for a click
+    #      forever. /SUPPRESSMSGBOXES auto-answers them; /VERYSILENT hides the
+    #      progress window too.
+    #   2. Its post-install step launches the Ollama tray app, and the setup
+    #      process can stay alive as long as the tray app runs -- so waiting on
+    #      setup exit blocks forever even though the install succeeded.
+    # Therefore: bounded wait, then judge success by the binary on disk.
+    $ollamaLog = "$env:TEMP\OllamaSetup.log"
+    $ollamaExe = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"
+    $setupProc = Start-Process -FilePath $ollamaPath `
+        -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$ollamaLog`"" `
+        -PassThru
+
+    $timeoutMinutes = 10
+    if (-not $setupProc.WaitForExit($timeoutMinutes * 60 * 1000)) {
+        if (Test-Path $ollamaExe) {
+            # Files are installed; setup is only babysitting the tray app it
+            # launched. Kill the lingering setup process (not the tray app) and
+            # move on.
+            Write-Host "[install] Ollama files are installed; the setup process did not exit (it waits on the tray app). Continuing." -ForegroundColor Yellow
+            Stop-Process -Id $setupProc.Id -Force -ErrorAction SilentlyContinue
+        } else {
+            Stop-Process -Id $setupProc.Id -Force -ErrorAction SilentlyContinue
+            Write-Error "Ollama installer did not finish within $timeoutMinutes minutes and no binary was found at $ollamaExe. See the installer log at $ollamaLog, or install manually from https://ollama.com/download and re-run this script."
+        }
+    }
 
     Add-UserPath "$env:LOCALAPPDATA\Programs\Ollama"
+
+    if (Test-CommandExists "ollama") {
+        Write-Host "[install] Ollama installed successfully." -ForegroundColor Green
+    } else {
+        Write-Warning "Ollama was installed but is not yet on the PATH. Open a new PowerShell window and re-run this script."
+    }
 }
 
 # Check if port 11434 is already active
@@ -246,31 +280,33 @@ if ($portActive) {
     }
 }
 
-# Pull the chat model
-try {
-    Write-Host "[install] Pulling Llama 3.2 chat model (this can take a few minutes)..." -ForegroundColor Yellow
-    ollama pull llama3.2
-} catch {
-    Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull llama3.2' manually." -ForegroundColor Red
-}
-
-# Optional vision model (labs-gated; powers image/figure analysis). Skipped by
-# default — it's a large download. Choose via the LUMINARY_VISION_MODEL env var,
-# the prompt below, or install it later with: ollama pull llava:7b
-$visionModel = $env:LUMINARY_VISION_MODEL
-if (-not $visionModel -and [Environment]::UserInteractive) {
-    $answer = Read-Host "[install] Install the optional vision model (llava:7b, ~4.7 GB) for image/figure analysis? [y/N]"
-    if ($answer -match '^(y|yes)$') { $visionModel = "llava:7b" }
-}
-if ($visionModel) {
-    try {
-        Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
-        ollama pull $visionModel
-    } catch {
-        Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
+# Pull the chat model. llama3.2 stays the default: it beat qwen3.5:4b and
+# phi4-mini on the eval harness (HHEM faithfulness, d2l + book corpora,
+# 2026-07-23) and was the fastest of the three. Override via LUMINARY_CHAT_MODEL.
+# NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
+# exit codes do not throw -- so check $LASTEXITCODE instead.
+$chatModel = $env:LUMINARY_CHAT_MODEL
+if (-not $chatModel) { $chatModel = "llama3.2" }
+if (Test-CommandExists "ollama") {
+    Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
+    ollama pull $chatModel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARNING] Failed to pull $chatModel. If you are behind a corporate VPN/Proxy, disconnect or configure your system proxy settings, then run 'ollama pull $chatModel' manually." -ForegroundColor Red
     }
 } else {
-    Write-Host "[install] Skipping vision model. To enable image/figure analysis later, run: ollama pull llava:7b" -ForegroundColor Gray
+    Write-Warning "ollama is not on the PATH in this session. Open a new PowerShell window and run: ollama pull $chatModel"
+}
+
+# Optional vision model (powers image/figure analysis). Not prompted for — the
+# install stays non-interactive and the closing banner tells the user how to add
+# it later. Set LUMINARY_VISION_MODEL to pull one during install.
+$visionModel = $env:LUMINARY_VISION_MODEL
+if ($visionModel) {
+    Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
+    ollama pull $visionModel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -380,5 +416,6 @@ Write-Host "To start the application, run:"
 Write-Host "  .\start.ps1" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Then open http://localhost:7820 in your browser."
-Write-Host "Optional: enable image/figure analysis later with 'ollama pull llava:7b'."
+Write-Host "Optional: image/figure analysis needs a vision model (~6 GB download)."
+Write-Host "Add it any time with:  ollama pull qwen2.5vl:7b" -ForegroundColor Yellow
 Write-Host "=========================================" -ForegroundColor Green

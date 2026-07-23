@@ -152,17 +152,9 @@ fi
 # Pull models only if not already cached.
 _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
 
-# Optional vision model (labs-gated; powers image/figure analysis). Skipped by
-# default — large download. Set LUMINARY_VISION_MODEL, answer the prompt, or add
-# it later with: ollama pull llava:7b
-if [ -z "$VISION_MODEL" ] && [ -t 0 ]; then
-    printf '\033[0;36m[install]\033[0m Install the optional vision model (llava:7b, ~4.7GB) for image/figure analysis? [y/N] '
-    read -r _ans
-    case "$_ans" in
-        y|Y|yes|YES) VISION_MODEL="llava:7b" ;;
-    esac
-fi
-
+# Optional vision model (powers image/figure analysis). Not prompted for — the
+# install stays non-interactive and the closing banner tells the user how to add
+# it later. Set LUMINARY_VISION_MODEL to pull one during install.
 for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     [ -z "$model" ] && continue
     if _pulled "$model" || _pulled "${model}:latest"; then
@@ -173,7 +165,6 @@ for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     fi
 done
 
-[ -z "$VISION_MODEL" ] && _info "Skipping vision model. Enable image/figure analysis later with: ollama pull llava:7b"
 
 # ---------------------------------------------------------------------------
 # Backend deps — public profile (no labs/dev groups)
@@ -199,5 +190,8 @@ cat <<'EOF'
 
   Next:  make start
   Open:  http://localhost:7820
+
+  Optional: image/figure analysis needs a vision model (~6GB download).
+  Add it any time with:  ollama pull qwen2.5vl:7b
 
 EOF
