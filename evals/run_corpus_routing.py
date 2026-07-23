@@ -64,11 +64,18 @@ def routing_search(client: httpx.Client, backend_url: str, q: str, limit: int = 
     except Exception as exc:
         print(f"  WARNING: /search failed: {exc}", file=sys.stderr)
         return []
-    return [
-        (g.get("document_id"), m.get("text", ""))
+    # /search groups matches by document (first-appearance order), so a plain
+    # group-by-group flatten lets a top document's TAIL matches shadow another
+    # document's rank-2 chunk and understates route@5/HR@5. global_rank is the
+    # retriever's final ordering; sorting by score instead would invert FTS
+    # (negative BM25) and undo rrf diversification.
+    flat = [
+        (m.get("global_rank", float("inf")), g.get("document_id"), m.get("text", ""))
         for g in body.get("results", [])
         for m in g.get("matches", [])
     ]
+    flat.sort(key=lambda t: t[0])
+    return [(doc, text) for _, doc, text in flat]
 
 
 def resolve_rows(token: str, backend_url: str, manifest: dict):

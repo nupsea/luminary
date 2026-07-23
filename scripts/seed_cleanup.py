@@ -67,9 +67,17 @@ def _try_delete_lancedb(vectors_dir: Path, doc_id: str) -> None:
         tables = db.list_tables()
         # lancedb >=0.5 returns an object; handle both list and object
         table_names = tables.tables if hasattr(tables, "tables") else list(tables)
-        if "chunk_vectors" in table_names:
-            table = db.open_table("chunk_vectors")
-            table.delete(f"document_id = '{doc_id}'")
+        # Sweep every table keyed by document_id rather than naming one: a
+        # hardcoded "chunk_vectors" here kept deleting from the pre-v3 table
+        # after the schema moved on, stranding ghost vectors that silently
+        # shrank retrieval depth (~25% of the table by 2026-07).
+        for name in table_names:
+            try:
+                table = db.open_table(name)
+                if "document_id" in [f.name for f in table.schema]:
+                    table.delete(f"document_id = '{doc_id}'")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [warn] LanceDB cleanup failed for {name}/{doc_id}: {exc}", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] LanceDB cleanup failed for {doc_id}: {exc}", file=sys.stderr)
 

@@ -13,14 +13,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 import httpx
 
 from run_eval import (  # noqa: PLC0415 -- intentional: same-dir module
-    GOLDEN_DIR,
     _norm,
     load_golden,
     load_manifest,
@@ -44,7 +42,9 @@ def search(backend_url: str, question: str, doc_id: str | None, limit: int = 5) 
             continue
         for m in group.get("matches", []):
             matches.append(m)
-    matches.sort(key=lambda m: m.get("relevance_score", 0.0), reverse=True)
+    # global_rank restores the retriever's order across document groups; a
+    # score sort would invert FTS (negative BM25) and undo rrf diversification.
+    matches.sort(key=lambda m: m.get("global_rank", float("inf")))
     return matches[:limit]
 
 

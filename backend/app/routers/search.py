@@ -34,6 +34,12 @@ class SearchResult(BaseModel):
     text_excerpt: str  # 200-char preview for UI display
     text: str  # full chunk text (capped at 2000 chars) for eval/API consumers
     relevance_score: float
+    # 1-indexed position in the retriever's final ranking, contiguous across
+    # document groups. Grouping loses global order and relevance_score cannot
+    # restore it: its polarity is strategy-dependent (FTS BM25 is negative) and
+    # rrf diversification intentionally reorders away from pure score order.
+    # Clients that flatten groups must sort by this, never by score.
+    global_rank: int
 
 
 class DocumentGroup(BaseModel):
@@ -149,11 +155,13 @@ async def search(
 
     # Build grouped results
     groups: dict[str, list[SearchResult]] = {}
+    rank = 0
     for chunk in scored_chunks:
         doc_id = chunk.document_id
         if doc_id not in doc_map:
             continue
         title, ctype = doc_map[doc_id]
+        rank += 1
         result_item = SearchResult(
             chunk_id=chunk.chunk_id,
             document_id=doc_id,
@@ -164,6 +172,7 @@ async def search(
             text_excerpt=chunk.text[:200],
             text=chunk.text[:2000],
             relevance_score=round(chunk.score, 4),
+            global_rank=rank,
         )
         groups.setdefault(doc_id, []).append(result_item)
 
