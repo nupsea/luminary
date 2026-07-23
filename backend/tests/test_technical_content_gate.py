@@ -61,7 +61,7 @@ async def test_empty_transcript_is_undecidable():
 
 
 def test_ner_extract_honours_the_flag():
-    from app.services.ner import ENTITY_TYPES, _TECH_ENTITY_TYPES, EntityExtractor
+    from app.services.ner import _TECH_ENTITY_TYPES, ENTITY_TYPES, EntityExtractor
 
     captured: list[list[str]] = []
 
