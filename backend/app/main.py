@@ -385,9 +385,9 @@ async def health():
 @app.get("/healthz")
 async def healthz():
     """Lightweight liveness probe for containers and monitors (no DB)."""
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
 
 
 @misc_router.get("/settings")
