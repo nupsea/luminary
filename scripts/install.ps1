@@ -63,7 +63,7 @@ if (Test-CommandExists "python") {
     $pyPath = "$env:TEMP\python-3.13.0.exe"
 
     Write-Host "[install] Downloading Python installer..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath
+    Invoke-WebRequest -Uri $pyUrl -OutFile $pyPath -UseBasicParsing
 
     Write-Host "[install] Running installer (this may take a minute)..." -ForegroundColor Gray
     Start-Process -FilePath $pyPath -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1" -Wait
@@ -158,7 +158,7 @@ if ($installNode) {
     $nodeStage = "$env:TEMP\luminary-node"
 
     Write-Host "[install] Downloading Node.js $nodeVer (per-user portable)..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip
+    Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
 
     Write-Host "[install] Extracting Node.js to $nodeHome ..." -ForegroundColor Gray
     if (Test-Path $nodeStage) { Remove-Item -Recurse -Force $nodeStage }
@@ -224,12 +224,46 @@ if (Test-CommandExists "ollama") {
     $ollamaPath = "$env:TEMP\OllamaSetup.exe"
     
     Write-Host "[install] Downloading Ollama installer..." -ForegroundColor Gray
-    Invoke-WebRequest -Uri $ollamaUrl -OutFile $ollamaPath
+    Invoke-WebRequest -Uri $ollamaUrl -OutFile $ollamaPath -UseBasicParsing
     
     Write-Host "[install] Running installer (per-user, no admin)..." -ForegroundColor Gray
-    Start-Process -FilePath $ollamaPath -ArgumentList "/silent" -Wait
+    # OllamaSetup.exe is an Inno Setup installer with two documented hang modes
+    # under a bare `-Wait`:
+    #   1. Inno's /SILENT still shows message boxes (restart prompt, "Ollama is
+    #      running"), which can open BEHIND the console and wait for a click
+    #      forever. /SUPPRESSMSGBOXES auto-answers them; /VERYSILENT hides the
+    #      progress window too.
+    #   2. Its post-install step launches the Ollama tray app, and the setup
+    #      process can stay alive as long as the tray app runs -- so waiting on
+    #      setup exit blocks forever even though the install succeeded.
+    # Therefore: bounded wait, then judge success by the binary on disk.
+    $ollamaLog = "$env:TEMP\OllamaSetup.log"
+    $ollamaExe = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"
+    $setupProc = Start-Process -FilePath $ollamaPath `
+        -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$ollamaLog`"" `
+        -PassThru
+
+    $timeoutMinutes = 10
+    if (-not $setupProc.WaitForExit($timeoutMinutes * 60 * 1000)) {
+        if (Test-Path $ollamaExe) {
+            # Files are installed; setup is only babysitting the tray app it
+            # launched. Kill the lingering setup process (not the tray app) and
+            # move on.
+            Write-Host "[install] Ollama files are installed; the setup process did not exit (it waits on the tray app). Continuing." -ForegroundColor Yellow
+            Stop-Process -Id $setupProc.Id -Force -ErrorAction SilentlyContinue
+        } else {
+            Stop-Process -Id $setupProc.Id -Force -ErrorAction SilentlyContinue
+            Write-Error "Ollama installer did not finish within $timeoutMinutes minutes and no binary was found at $ollamaExe. See the installer log at $ollamaLog, or install manually from https://ollama.com/download and re-run this script."
+        }
+    }
 
     Add-UserPath "$env:LOCALAPPDATA\Programs\Ollama"
+
+    if (Test-CommandExists "ollama") {
+        Write-Host "[install] Ollama installed successfully." -ForegroundColor Green
+    } else {
+        Write-Warning "Ollama was installed but is not yet on the PATH. Open a new PowerShell window and re-run this script."
+    }
 }
 
 # Check if port 11434 is already active
