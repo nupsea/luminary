@@ -280,12 +280,21 @@ if ($portActive) {
     }
 }
 
-# Pull the chat model
-try {
-    Write-Host "[install] Pulling Llama 3.2 chat model (this can take a few minutes)..." -ForegroundColor Yellow
-    ollama pull llama3.2
-} catch {
-    Write-Host "[WARNING] Ollama failed to pull models. If you are behind a corporate VPN/Proxy, please disconnect or configure your system proxy settings and try running 'ollama pull llama3.2' manually." -ForegroundColor Red
+# Pull the chat model. llama3.2 stays the default: it beat qwen3.5:4b and
+# phi4-mini on the eval harness (HHEM faithfulness, d2l + book corpora,
+# 2026-07-23) and was the fastest of the three. Override via LUMINARY_CHAT_MODEL.
+# NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
+# exit codes do not throw -- so check $LASTEXITCODE instead.
+$chatModel = $env:LUMINARY_CHAT_MODEL
+if (-not $chatModel) { $chatModel = "llama3.2" }
+if (Test-CommandExists "ollama") {
+    Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
+    ollama pull $chatModel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARNING] Failed to pull $chatModel. If you are behind a corporate VPN/Proxy, disconnect or configure your system proxy settings, then run 'ollama pull $chatModel' manually." -ForegroundColor Red
+    }
+} else {
+    Write-Warning "ollama is not on the PATH in this session. Open a new PowerShell window and run: ollama pull $chatModel"
 }
 
 # Optional vision model (powers image/figure analysis). Not prompted for — the
@@ -293,10 +302,9 @@ try {
 # it later. Set LUMINARY_VISION_MODEL to pull one during install.
 $visionModel = $env:LUMINARY_VISION_MODEL
 if ($visionModel) {
-    try {
-        Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
-        ollama pull $visionModel
-    } catch {
+    Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
+    ollama pull $visionModel
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
     }
 }
