@@ -175,6 +175,13 @@ class LLMService:
             # Heavy tasks (e.g. flashcard generation over a section) pass a larger num_ctx.
             kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
             kwargs["num_ctx"] = num_ctx or settings.OLLAMA_NUM_CTX
+            # Thinking-capable models (qwen3+) auto-enable reasoning, which
+            # streams as reasoning_content (never surfaced) and burns the
+            # num_ctx generation budget BEFORE any answer tokens -- on real QA
+            # prompts the window dies mid-think and the answer arrives empty.
+            # Luminary's prompts are all direct-answer shaped, so thinking is
+            # disabled globally for local models.
+            kwargs["think"] = False
         elif model.startswith("openai/"):
             kwargs["api_key"] = settings.OPENAI_API_KEY
         elif model.startswith("anthropic/"):
