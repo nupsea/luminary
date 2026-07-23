@@ -290,11 +290,11 @@ try {
 
 # Optional vision model (labs-gated; powers image/figure analysis). Skipped by
 # default — it's a large download. Choose via the LUMINARY_VISION_MODEL env var,
-# the prompt below, or install it later with: ollama pull llava:7b
+# the prompt below, or install it later with: ollama pull qwen2.5vl:7b
 $visionModel = $env:LUMINARY_VISION_MODEL
 if (-not $visionModel -and [Environment]::UserInteractive) {
-    $answer = Read-Host "[install] Install the optional vision model (llava:7b, ~4.7 GB) for image/figure analysis? [y/N]"
-    if ($answer -match '^(y|yes)$') { $visionModel = "llava:7b" }
+    $answer = Read-Host "[install] Install the optional vision model (qwen2.5vl:7b, ~6 GB) for image/figure analysis? [y/N]"
+    if ($answer -match '^(y|yes)$') { $visionModel = "qwen2.5vl:7b" }
 }
 if ($visionModel) {
     try {
@@ -304,7 +304,7 @@ if ($visionModel) {
         Write-Host "[WARNING] Failed to pull vision model $visionModel. Add it later with: ollama pull $visionModel" -ForegroundColor Red
     }
 } else {
-    Write-Host "[install] Skipping vision model. To enable image/figure analysis later, run: ollama pull llava:7b" -ForegroundColor Gray
+    Write-Host "[install] Skipping vision model. To enable image/figure analysis later, run: ollama pull qwen2.5vl:7b" -ForegroundColor Gray
 }
 
 # ---------------------------------------------------------------------------
@@ -414,5 +414,5 @@ Write-Host "To start the application, run:"
 Write-Host "  .\start.ps1" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Then open http://localhost:7820 in your browser."
-Write-Host "Optional: enable image/figure analysis later with 'ollama pull llava:7b'."
+Write-Host "Optional: enable image/figure analysis later with 'ollama pull qwen2.5vl:7b'."
 Write-Host "=========================================" -ForegroundColor Green

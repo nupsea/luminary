@@ -154,12 +154,12 @@ _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
 
 # Optional vision model (labs-gated; powers image/figure analysis). Skipped by
 # default — large download. Set LUMINARY_VISION_MODEL, answer the prompt, or add
-# it later with: ollama pull llava:7b
+# it later with: ollama pull qwen2.5vl:7b
 if [ -z "$VISION_MODEL" ] && [ -t 0 ]; then
-    printf '\033[0;36m[install]\033[0m Install the optional vision model (llava:7b, ~4.7GB) for image/figure analysis? [y/N] '
+    printf '\033[0;36m[install]\033[0m Install the optional vision model (qwen2.5vl:7b, ~6GB) for image/figure analysis? [y/N] '
     read -r _ans
     case "$_ans" in
-        y|Y|yes|YES) VISION_MODEL="llava:7b" ;;
+        y|Y|yes|YES) VISION_MODEL="qwen2.5vl:7b" ;;
     esac
 fi
 
@@ -173,7 +173,7 @@ for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     fi
 done
 
-[ -z "$VISION_MODEL" ] && _info "Skipping vision model. Enable image/figure analysis later with: ollama pull llava:7b"
+[ -z "$VISION_MODEL" ] && _info "Skipping vision model. Enable image/figure analysis later with: ollama pull qwen2.5vl:7b"
 
 # ---------------------------------------------------------------------------
 # Backend deps — public profile (no labs/dev groups)

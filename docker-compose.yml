@@ -31,7 +31,7 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # Keep the text (llama3.2) and vision (llava) models resident together so
+      # Keep the text (llama3.2) and vision (qwen2.5vl) models resident together so
       # enrichment does not thrash reloading them, and let one server batch
       # concurrent requests. Defaults suit a ~16GB host; lower both to 1 on an
       # 8GB host, raise on a bigger box. See install.sh profile prompt.

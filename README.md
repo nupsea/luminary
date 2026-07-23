@@ -72,7 +72,7 @@ If you are behind a corporate proxy/VPN that blocks Docker SSL traffic:
    ```powershell
    Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
    ```
-3. The installer offers to pull the optional vision model (`llava:7b`) for image/figure analysis. You can skip it and add it later with `ollama pull llava:7b`.
+3. The installer offers to pull the optional vision model (`qwen2.5vl:7b`) for image/figure analysis. You can skip it and add it later with `ollama pull qwen2.5vl:7b`.
 
 Open **http://localhost:7820** in your browser when ready (run `.\start.ps1`).
 
@@ -202,7 +202,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 |----------|---------|-------------|
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/llava:7b` | Model for image/figure analysis (optional, full mode only) |
+| `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |
