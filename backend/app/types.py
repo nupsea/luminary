@@ -331,3 +331,22 @@ class DeckHealthReport(TypedDict):
     uncovered_sections: int
     uncovered_section_ids: list[str]
     hotspot_sections: list[HealthSection]
+
+
+# Technical-content gate
+
+
+TECHNICAL_CONTENT_TYPES = ("code", "tech_book", "tech_article")
+
+
+def is_technical_content(content_type: str | None, is_technical: bool | None) -> bool:
+    """Whether to apply technical NER types and technical relation extraction.
+
+    The persisted flag wins when set. Rows predating it fall back to content_type,
+    which is why media documents were never treated as technical: a conference talk
+    is content_type "audio", so the tech entity types (TECHNOLOGY and the six
+    tech-specific ones) were filtered out of its graph.
+    """
+    if is_technical is not None:
+        return is_technical
+    return content_type in TECHNICAL_CONTENT_TYPES

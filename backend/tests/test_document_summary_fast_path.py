@@ -25,10 +25,9 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
-from app.services.summarizer import SummarizationService
+from app.services.summarizer import SummarizationService, _input_token_budget
 
-# MAP_TOKEN_THRESHOLD from summarizer — keep in sync
-_MAP_TOKEN_THRESHOLD = 8000
+_MAP_TOKEN_THRESHOLD = _input_token_budget()
 _MAP_BATCH_TOKENS = 3_000
 
 

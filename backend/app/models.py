@@ -61,6 +61,12 @@ class DocumentModel(Base):
     # Approximate publication year parsed from document front matter (Copyright YYYY).
     # Nullable: most documents will not have explicit year information.
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Whether the content is technical, decided at classify time and persisted so
+    # reindexing reaches the same answer. content_type alone cannot carry this for
+    # media: "audio"/"video" drive timestamped chunking and the player, so a
+    # technical talk keeps its media type and sets this flag instead.
+    # Null = never classified (pre-existing rows).
+    is_technical: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

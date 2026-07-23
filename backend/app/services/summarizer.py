@@ -20,6 +20,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import delete, select
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import (
     ChunkModel,
@@ -63,11 +64,36 @@ MODE_INSTRUCTIONS: dict[str, str] = {
     ),
 }
 
-# Token threshold above which map-reduce is applied
-MAP_TOKEN_THRESHOLD = 8000
+# Tokens reserved inside the context window for the system prompt and the
+# generated summary. num_ctx bounds prompt AND generation combined, and Ollama
+# truncates the prompt from the FRONT — so an over-budget input silently drops
+# the system message and the model free-associates on a tail slice of the text.
+_SUMMARY_RESERVE_TOKENS = 2_000
 
-# Max tokens per map call — stays within mistral's 8K context with room for output
+# Rough token estimate used throughout; matches the chunker's own heuristic.
+_CHARS_PER_TOKEN = 4
+
+
+def _summary_num_ctx() -> int:
+    return get_settings().OLLAMA_GENERATION_NUM_CTX
+
+
+def _input_token_budget() -> int:
+    return max(_SUMMARY_RESERVE_TOKENS, _summary_num_ctx() - _SUMMARY_RESERVE_TOKENS)
+
+
+def _truncate_to_budget(text: str) -> str:
+    limit = _input_token_budget() * _CHARS_PER_TOKEN
+    return text if len(text) <= limit else text[:limit]
+
+
+# Max tokens per map call — stays within the generation window with room for output
 _MAP_BATCH_TOKENS = 3_000
+
+# Floor on each document's contribution to the library synthesis, so a large
+# library degrades to shallower per-document coverage rather than dropping docs.
+_MIN_LIBRARY_WORDS_PER_DOC = 60
+_WORDS_PER_TOKEN = 0.75
 
 # Cap map-reduce at this many batches to bound total LLM call time.
 # Large documents are sampled evenly rather than exhaustively processed.
@@ -183,8 +209,8 @@ class SummarizationService:
         if filtered:
             chunks = filtered
 
-        total_tokens = sum(c.token_count or len(c.text) // 4 for c in chunks)
-        if total_tokens <= MAP_TOKEN_THRESHOLD:
+        total_tokens = sum(c.token_count or len(c.text) // _CHARS_PER_TOKEN for c in chunks)
+        if total_tokens <= _input_token_budget():
             return "\n\n".join(c.text for c in chunks)
 
         # Return cached intermediate text if already computed for this document
@@ -237,6 +263,7 @@ class SummarizationService:
                 model=model,
                 timeout=_MAP_CALL_TIMEOUT,
                 background=True,
+                num_ctx=_summary_num_ctx(),
             )
             assert isinstance(s, str)
             section_summaries.append(s)
@@ -331,7 +358,13 @@ class SummarizationService:
 
             llm = get_llm_service()
             system = _build_system_prompt(mode)
-            token_stream = await llm.generate(input_text, system=system, model=model, stream=True)
+            token_stream = await llm.generate(
+                _truncate_to_budget(input_text),
+                system=system,
+                model=model,
+                stream=True,
+                num_ctx=_summary_num_ctx(),
+            )
 
             collected: list[str] = []
             async for token in token_stream:
@@ -450,7 +483,11 @@ class SummarizationService:
                 try:
                     system = _build_system_prompt(mode)
                     text = await llm.generate(
-                        input_text, system=system, model=model, background=True
+                        _truncate_to_budget(input_text),
+                        system=system,
+                        model=model,
+                        background=True,
+                        num_ctx=_summary_num_ctx(),
                     )
                     assert isinstance(text, str)
                     await self._store_summary(document_id, mode, text)
@@ -625,9 +662,13 @@ class SummarizationService:
             #      metadata/legal sections filtered out; use this as the primary source.
             #   2. Cached executive summary — fallback for pre-V2 docs without section
             #      summaries.
-            # Cap each document's contribution to MAX_WORDS_PER_DOC so the total
-            # input stays within the context budget of local Ollama models (~8 K tokens).
-            MAX_WORDS_PER_DOC = 250
+            # Cap each document's contribution so the TOTAL input stays inside the
+            # context window: a fixed per-document cap silently blows the budget once
+            # the library is large, and Ollama then truncates away the system prompt.
+            max_words_per_doc = max(
+                _MIN_LIBRARY_WORDS_PER_DOC,
+                int(_input_token_budget() * _WORDS_PER_TOKEN) // max(len(doc_ids), 1),
+            )
             ordered = sorted(doc_ids, key=lambda did: titles.get(did, ""))
             parts: list[str] = []
             for did in ordered:
@@ -635,8 +676,8 @@ class SummarizationService:
                 raw_text = section_input or exec_summaries.get(did, "")
                 words = raw_text.split()
                 doc_text = (
-                    " ".join(words[:MAX_WORDS_PER_DOC])
-                    if len(words) > MAX_WORDS_PER_DOC
+                    " ".join(words[:max_words_per_doc])
+                    if len(words) > max_words_per_doc
                     else raw_text
                 )
                 parts.append(f"## {titles.get(did, did)}\n{doc_text}")
@@ -646,11 +687,17 @@ class SummarizationService:
             if entity_names:
                 parts.append(f"## Shared themes\n{', '.join(entity_names)}")
 
-            input_text = "\n\n".join(parts)
+            input_text = _truncate_to_budget("\n\n".join(parts))
             system = LIBRARY_SYSTEM_PROMPTS.get(mode, LIBRARY_SYSTEM_PROMPTS["executive"])
 
             llm = get_llm_service()
-            token_stream = await llm.generate(input_text, system=system, model=model, stream=True)
+            token_stream = await llm.generate(
+                input_text,
+                system=system,
+                model=model,
+                stream=True,
+                num_ctx=_summary_num_ctx(),
+            )
 
             collected: list[str] = []
             async for token in token_stream:

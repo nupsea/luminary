@@ -24,7 +24,12 @@ from app.models import DocumentModel
 from app.services import (
     audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
 )
-from app.workflows.ingestion_nodes._shared import IngestionState, _update_stage
+from app.workflows.ingestion_nodes._shared import (
+    IngestionState,
+    _persist_is_technical,
+    _update_stage,
+    detect_technical_transcript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,14 +195,27 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
             )
             await session.commit()
 
+        # classify_node runs before transcription, so this is the first point at
+        # which a media document has text to judge. Decided once and persisted so
+        # entity reindexing reaches the same answer.
+        is_technical = await detect_technical_transcript(raw_text)
+        if is_technical is not None:
+            await _persist_is_technical(doc_id, is_technical)
+
         logger.info(
             "transcribe_node: done",
-            extra={"doc_id": doc_id, "segments": len(segments), "duration": duration},
+            extra={
+                "doc_id": doc_id,
+                "segments": len(segments),
+                "duration": duration,
+                "is_technical": is_technical,
+            },
         )
         return {
             **state,
             "parsed_document": parsed_document,
             "audio_duration_seconds": duration,
+            "is_technical": is_technical,
             "_audio_chunks": audio_chunks,
             "status": "chunking",
         }

@@ -127,6 +127,7 @@ class IngestionState(TypedDict):
     error: str | None
     section_summary_count: int | None
     audio_duration_seconds: float | None
+    is_technical: bool | None
     _audio_chunks: list[dict[str, Any]] | None
 
 
@@ -188,6 +189,51 @@ async def _update_stage(document_id: str, stage: str) -> None:
     async with get_session_factory()() as session:
         await session.execute(
             update(DocumentModel).where(DocumentModel.id == document_id).values(stage=stage)
+        )
+        await session.commit()
+
+
+async def detect_technical_transcript(raw_text: str) -> bool | None:
+    """Ask the LLM whether a transcript is technical content. None when undecidable.
+
+    Transcripts carry none of the structural signals resolve_technical_variant()
+    keys on (no fenced code, no numbered sections), so the decision has to come
+    from the language itself.
+    """
+    from app.services.llm import get_llm_service  # noqa: PLC0415
+
+    snippet = raw_text[:2000].strip()
+    if not snippet:
+        return None
+    prompt = (
+        "Does this transcript discuss technical subject matter — software, "
+        "engineering, science, or mathematics?\n\n"
+        f"Transcript excerpt:\n{snippet}\n\n"
+        "Reply with exactly one word: yes or no."
+    )
+    try:
+        raw = await get_llm_service().generate(prompt, background=True)
+    except Exception as exc:
+        logger.warning("technical detection failed (non-fatal): %s", exc)
+        return None
+    answer = str(raw).strip().lower()
+    if answer.startswith("yes"):
+        return True
+    if answer.startswith("no"):
+        return False
+    return None
+
+
+async def _persist_is_technical(document_id: str, is_technical: bool) -> None:
+    from sqlalchemy import update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(is_technical=is_technical)
         )
         await session.commit()
 
