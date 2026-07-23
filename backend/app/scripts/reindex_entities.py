@@ -84,7 +84,11 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
     async with get_session_factory()() as session:
         doc_row = (
             await session.execute(
-                select(DocumentModel.title, DocumentModel.content_type).where(
+                select(
+                    DocumentModel.title,
+                    DocumentModel.content_type,
+                    DocumentModel.is_technical,
+                ).where(
                     DocumentModel.id == doc_id
                 )
             )
@@ -93,6 +97,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             logger.warning("reindex_entities: doc_id not found", extra={"doc_id": doc_id})
             return metrics
         content_type = doc_row.content_type or "notes"
+        is_technical = doc_row.is_technical
 
         chunk_rows = (
             await session.execute(
@@ -138,7 +143,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         extractor = get_entity_extractor()
         loop = asyncio.get_event_loop()
         entities = await loop.run_in_executor(
-            None, extractor.extract, chunk_dicts, content_type
+            None, extractor.extract, chunk_dicts, content_type, is_technical
         )
 
         if rebuild_graph and graph is not None:
@@ -175,6 +180,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                 chunk_dicts,
                 chunk_dicts,
                 content_type,
+                is_technical,
             )
 
         per_chunk_counts: list[int] = []

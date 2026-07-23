@@ -14,11 +14,13 @@ import logging
 from pathlib import Path
 
 from app.telemetry import trace_ingestion_node
+from app.types import TECHNICAL_CONTENT_TYPES
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _classify,
     _parser,
     _persist_content_type,
+    _persist_is_technical,
     _update_stage,
     resolve_technical_variant,
 )
@@ -74,16 +76,31 @@ async def classify_node(state: IngestionState) -> IngestionState:
             pd = state.get("parsed_document")
             resolved = resolve_technical_variant(pd["raw_text"]) if pd else "tech_article"
             await _persist_content_type(state["document_id"], resolved)
+            await _persist_is_technical(state["document_id"], True)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",
                 extra={"doc_id": state["document_id"], "content_type": resolved},
             )
-            return {**state, "content_type": resolved, "status": "chunking"}
+            return {
+                **state,
+                "content_type": resolved,
+                "is_technical": True,
+                "status": "chunking",
+            }
+        if provided in ("audio", "video"):
+            # Decided from the transcript in transcribe_node.
+            logger.info(
+                "classify_node: skipping (user-provided content_type)",
+                extra={"doc_id": state["document_id"], "content_type": provided},
+            )
+            return {**state, "status": "chunking"}
+        is_technical = provided in TECHNICAL_CONTENT_TYPES
+        await _persist_is_technical(state["document_id"], is_technical)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},
         )
-        return {**state, "status": "chunking"}
+        return {**state, "is_technical": is_technical, "status": "chunking"}
     with trace_ingestion_node("classify", state):
         try:
             await _update_stage(state["document_id"], "classifying")
@@ -142,11 +159,25 @@ async def classify_node(state: IngestionState) -> IngestionState:
                         type(exc).__name__,
                     )
 
+            # Media documents are decided in transcribe_node instead — their text
+            # does not exist yet at this point.
+            is_technical = content_type in TECHNICAL_CONTENT_TYPES
+            await _persist_is_technical(state["document_id"], is_technical)
+
             logger.info(
                 "Classified document",
-                extra={"doc_id": state["document_id"], "content_type": content_type},
+                extra={
+                    "doc_id": state["document_id"],
+                    "content_type": content_type,
+                    "is_technical": is_technical,
+                },
             )
-            return {**state, "content_type": content_type, "status": "chunking"}
+            return {
+                **state,
+                "content_type": content_type,
+                "is_technical": is_technical,
+                "status": "chunking",
+            }
         except Exception as exc:
             logger.error("classify_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}

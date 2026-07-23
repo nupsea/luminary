@@ -37,6 +37,7 @@ from app.services.entity_disambiguator import (
 from app.services.prerequisite_detector import detect_prerequisites
 from app.services.tech_relation_extractor import extract_tech_relations
 from app.telemetry import trace_ingestion_node
+from app.types import is_technical_content
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _update_stage,
@@ -94,6 +95,7 @@ def write_entity_graph(
     ner_chunks: list[dict],
     chunks: list[dict],
     content_type: str,
+    is_technical: bool | None = None,
 ) -> None:
     """Write a document's entity graph to Kuzu: Entity nodes, MENTIONED_IN,
     CO_OCCURS, prerequisite/tech/version edges, and the code call graph.
@@ -152,7 +154,7 @@ def write_entity_graph(
 
     # Tech relationship extraction: IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON
     # Only run for tech-relevant content types to avoid false edges in prose.
-    if content_type in ("code", "tech_book", "tech_article"):
+    if is_technical_content(content_type, is_technical):
         try:
             canonical_name_to_id_tech: dict[str, str] = {
                 ent["name"]: ent["id"] for ent in canonical_entities
@@ -252,8 +254,11 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
             # Timeout guards against GLiNER hanging on pathological chunk text.
             loop = _asyncio.get_event_loop()
             content_type = state.get("content_type") or "unknown"
+            is_technical = state.get("is_technical")
             entities = await _asyncio.wait_for(
-                loop.run_in_executor(None, extractor.extract, ner_chunks, content_type),
+                loop.run_in_executor(
+                    None, extractor.extract, ner_chunks, content_type, is_technical
+                ),
                 timeout=300.0,
             )
             entity_count = len(entities)
@@ -319,6 +324,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 ner_chunks,
                 chunks,
                 state.get("content_type") or "",
+                is_technical,
             )
         except MemoryError as exc:
             logger.error(

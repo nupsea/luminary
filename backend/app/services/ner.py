@@ -25,12 +25,13 @@ Entity types (13 total):
 
 import logging
 import re
-import threading
 import uuid
 from collections import Counter
 from pathlib import Path
 
 from app.config import get_settings
+from app.services.model_loading import MODEL_LOAD_LOCK
+from app.types import is_technical_content
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +397,6 @@ def get_entity_extractor() -> "EntityExtractor":
     return _extractor
 
 
-_ner_lock = threading.Lock()
 
 
 class EntityExtractor:
@@ -409,42 +409,45 @@ class EntityExtractor:
 
     def _load_model(self):
         """Lazy-load GLiNER model, caching to DATA_DIR/models/gliner/."""
-        with _ner_lock:
+        # The lock must span the construction itself, not just the None check --
+        # see app/services/model_loading.py.
+        with MODEL_LOAD_LOCK:
             if self._model is not None:
                 return self._model
 
             from gliner import GLiNER  # noqa: PLC0415
 
-        logger.info("Loading GLiNER model", extra={"model_dir": str(self._model_dir)})
-        # Try loading locally first to prevent blocking name resolution attempts offline
-        try:
-            self._model = GLiNER.from_pretrained(
-                "urchade/gliner_multi_pii-v1",
-                cache_dir=str(self._model_dir),
-                local_files_only=True,
-            )
-            logger.info("Loaded GLiNER model (local cache)")
-        except Exception as local_exc:
-            logger.debug(
-                "GLiNER local load failed (local_files_only=True), trying online download: %s",
-                local_exc,
-            )
+            logger.info("Loading GLiNER model", extra={"model_dir": str(self._model_dir)})
+            # Try loading locally first to prevent blocking name resolution attempts offline
             try:
                 self._model = GLiNER.from_pretrained(
                     "urchade/gliner_multi_pii-v1",
                     cache_dir=str(self._model_dir),
-                    local_files_only=False,
+                    local_files_only=True,
                 )
-                logger.info("GLiNER model loaded (downloaded)")
-            except Exception as exc:
-                logger.error("Failed to load GLiNER model: %s", exc)
-                raise
-        return self._model
+                logger.info("Loaded GLiNER model (local cache)")
+            except Exception as local_exc:
+                logger.debug(
+                    "GLiNER local load failed (local_files_only=True), trying online download: %s",
+                    local_exc,
+                )
+                try:
+                    self._model = GLiNER.from_pretrained(
+                        "urchade/gliner_multi_pii-v1",
+                        cache_dir=str(self._model_dir),
+                        local_files_only=False,
+                    )
+                    logger.info("GLiNER model loaded (downloaded)")
+                except Exception as exc:
+                    logger.error("Failed to load GLiNER model: %s", exc)
+                    raise
+            return self._model
 
     def extract(
         self,
         chunks: list[dict],
         content_type: str = "unknown",
+        is_technical: bool | None = None,
     ) -> list[dict]:
         """Extract named entities from a list of chunk dicts.
 
@@ -453,7 +456,9 @@ class EntityExtractor:
         Args:
             chunks: Chunk dicts produced by the ingestion pipeline.
             content_type: Document content type (e.g. "code", "book", "paper").
-                TECHNOLOGY entities are only extracted for code documents.
+            is_technical: Persisted technical-content flag; decides the tech entity
+                types when set. Falls back to content_type when None, which is why a
+                technical talk stored as "audio" needs the flag to keep TECHNOLOGY.
 
         Returns:
             List of entity dicts:
@@ -467,7 +472,7 @@ class EntityExtractor:
         # For tech content, include the 6 tech-specific types alongside existing ones.
         # For non-tech documents, exclude TECHNOLOGY and all 6 tech-specific types —
         # these are almost always false positives in literary/prose text.
-        is_tech = content_type in ("code", "tech_book", "tech_article")
+        is_tech = is_technical_content(content_type, is_technical)
         _non_tech = {"TECHNOLOGY"} | _TECH_ENTITY_TYPES
         active_types = ENTITY_TYPES if is_tech else [t for t in ENTITY_TYPES if t not in _non_tech]
 

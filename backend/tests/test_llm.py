@@ -177,6 +177,31 @@ async def test_ollama_prefix_sets_api_base(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ollama_disables_thinking_mode():
+    """Thinking-capable models (qwen3+) auto-enable reasoning, which burns the
+    num_ctx generation budget before any answer tokens -- QA answers arrive
+    empty. Every Ollama call must pass think=False."""
+    svc = LLMService()
+    mock_response = _make_completion_response("ok")
+    with patch(
+        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
+    ) as mock_ac:
+        await svc.generate("hi", model="ollama/qwen3.5:4b")
+    assert mock_ac.call_args.kwargs["think"] is False
+
+
+@pytest.mark.asyncio
+async def test_cloud_models_do_not_get_think_param():
+    svc = LLMService()
+    mock_response = _make_completion_response("ok")
+    with patch(
+        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
+    ) as mock_ac:
+        await svc.generate("hi", model="openai/gpt-4o-mini")
+    assert "think" not in mock_ac.call_args.kwargs
+
+
+@pytest.mark.asyncio
 async def test_openai_prefix_sets_api_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test123")
     from app.config import get_settings

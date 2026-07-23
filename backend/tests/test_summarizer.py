@@ -21,10 +21,10 @@ from app.services.qa import QA_SYSTEM_PROMPT
 from app.services.summarizer import (
     GROUNDING_PREFIX,
     LIBRARY_SYSTEM_PROMPTS,
-    MAP_TOKEN_THRESHOLD,
     MODE_INSTRUCTIONS,
     SummarizationService,
     _build_system_prompt,
+    _input_token_budget,
 )
 
 # Shared DB fixture
@@ -221,8 +221,8 @@ async def test_small_document_passes_full_text_to_llm(test_db):
 async def test_large_document_triggers_map_reduce(test_db):
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
-    # Token count > MAP_TOKEN_THRESHOLD to trigger map-reduce
-    big_tokens = MAP_TOKEN_THRESHOLD + 1
+    # Token count over the input budget to trigger map-reduce
+    big_tokens = _input_token_budget() + 1
     await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["large text"], [big_tokens])
 
     mock_llm = _MockLLMService(response="section summary", tokens=["summary"])
