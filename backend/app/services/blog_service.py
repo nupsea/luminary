@@ -367,7 +367,10 @@ async def git_add_commit(repo: Path, files: list[Path], message: str) -> str:
     code, _, err = await _git(["add", "-A", "--", *rel], repo)
     if code != 0:
         raise RuntimeError(f"git add failed: {err}")
-    code, _, err = await _git(["commit", "-m", message], repo)
+    # Commit the pathspec, not the index: this is a public site repo the user
+    # also works in by hand, and a bare `commit -m` would sweep whatever they
+    # had staged into a Luminary commit -- which /blog/push then publishes.
+    code, _, err = await _git(["commit", "-m", message, "--", *rel], repo)
     if code != 0:
         raise RuntimeError(f"git commit failed: {err}")
     _, sha, _ = await _git(["rev-parse", "HEAD"], repo)

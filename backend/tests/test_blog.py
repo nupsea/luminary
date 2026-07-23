@@ -119,6 +119,28 @@ async def test_git_add_commit_no_push(tmp_path):
     assert remotes.strip() == ""
 
 
+async def test_git_add_commit_leaves_unrelated_staged_changes_alone(tmp_path):
+    """The site repo is one the user also works in by hand. A commit scoped to
+    the index would publish whatever they had staged."""
+    repo = _init_repo(tmp_path)
+    private = repo / "draft-notes.md"
+    private.write_text("private work in progress")
+    subprocess.run(["git", "add", "draft-notes.md"], cwd=repo, check=True)
+
+    post = repo / "src/content/blog/post.md"
+    blog_service.write_text_file(post, "hello")
+    await blog_service.git_add_commit(repo, [post], "blog: post")
+
+    committed = subprocess.run(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "src/content/blog/post.md" in committed
+    assert "draft-notes.md" not in committed
+
+
 # -- router end-to-end -----------------------------------------------------
 
 
@@ -352,3 +374,70 @@ def test_adopt_and_prune_helpers(tmp_path):
     removed = blog_service.prune_orphan_assets(asset_dir, keep)
     assert [p.name for p in removed] == ["stale.png"]
     assert (asset_dir / "photo.png").is_file()
+
+
+@pytest.fixture()
+def unconfigured_blog(monkeypatch):
+    monkeypatch.setenv("LUMINARY_BLOG_REPO_PATH", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_write_endpoints_refuse_unconfigured_repo(client, unconfigured_blog):
+    """An unset repo path resolves to Path(".") -- the backend's own working
+    directory. Every write path must refuse rather than publish into it."""
+    note_id = client.post("/notes", json={"content": "# X\n", "tags": []}).json()["id"]
+
+    publish = client.post(
+        "/blog/publish",
+        json={
+            "note_id": note_id,
+            "slug": "x",
+            "title": "X",
+            "description": "d",
+            "pub_date": "Jun 15 2026",
+            "markdown": "body",
+            "mermaid_svgs": {},
+        },
+    )
+    assert publish.status_code == 400
+    assert "not configured" in publish.json()["detail"]
+
+    assert client.delete("/blog/posts/x").status_code == 400
+    assert client.post("/blog/push").status_code == 400
+    assert (
+        client.post(
+            "/blog/preview/live",
+            json={
+                "note_id": note_id,
+                "slug": "x",
+                "title": "X",
+                "description": "d",
+                "pub_date": "Jun 15 2026",
+                "markdown": "body",
+                "mermaid_svgs": {},
+            },
+        ).status_code
+        == 400
+    )
+
+
+def test_suggest_description_keeps_note_content_local(client, monkeypatch):
+    """Hybrid mode routes interactive calls to the cloud provider. Note bodies
+    are the user's private content -- this call site must opt out."""
+    seen: dict = {}
+
+    class _FakeLLM:
+        async def complete(self, **kwargs):
+            seen.update(kwargs)
+            return "A concise description."
+
+    from app.services import llm as llm_module
+
+    monkeypatch.setattr(llm_module, "get_llm_service", lambda: _FakeLLM())
+    note_id = client.post("/notes", json={"content": "# Secret\n\nbody", "tags": []}).json()["id"]
+
+    resp = client.post("/blog/suggest-description", json={"note_id": note_id})
+    assert resp.status_code == 200
+    assert seen["background"] is True

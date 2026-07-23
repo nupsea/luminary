@@ -12,6 +12,7 @@ import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   deleteBlogPost,
+  getBlogConfig,
   listBlogPosts,
   KIND_PLURAL,
   KIND_SINGULAR,
@@ -40,6 +41,14 @@ export function BlogsPanel() {
     queryKey: ["blog-posts", kind],
     queryFn: () => listBlogPosts(kind),
   })
+
+  // Without this the panel cannot tell "your site repo has no posts" from "the
+  // backend has no idea where your site repo is" -- both list as zero posts.
+  const { data: config } = useQuery({
+    queryKey: ["blog-config", kind],
+    queryFn: () => getBlogConfig(kind),
+  })
+  const unconfigured = !!config && (!config.is_git_repo || !config.content_dir_exists)
 
   const deleteMut = useMutation({
     mutationFn: (slug: string) => deleteBlogPost(slug, kind),
@@ -70,6 +79,23 @@ export function BlogsPanel() {
         <button onClick={() => void refetch()} className="font-medium underline">
           Retry
         </button>
+      </div>
+    )
+  } else if (posts.length === 0 && unconfigured) {
+    content = (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-6 text-sm text-foreground">
+        <p className="font-medium">Site repo not configured</p>
+        <p className="mt-1 text-muted-foreground">
+          Luminary is looking for your site at{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{config?.repo_path}</code>
+          {config?.is_git_repo === false
+            ? ", which is not a git repository."
+            : `, which has no ${config?.content_subdir} directory.`}{" "}
+          Set <code className="rounded bg-muted px-1 py-0.5 text-[11px]">LUMINARY_BLOG_REPO_PATH</code>{" "}
+          (and <code className="rounded bg-muted px-1 py-0.5 text-[11px]">LUMINARY_BLOG_URL_BASE</code>)
+          in <code className="rounded bg-muted px-1 py-0.5 text-[11px]">backend/.env</code> and restart
+          the backend. Publishing is disabled until then.
+        </p>
       </div>
     )
   } else if (posts.length === 0) {

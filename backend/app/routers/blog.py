@@ -62,6 +62,18 @@ def _repo() -> Path:
     return Path(get_settings().LUMINARY_BLOG_REPO_PATH).expanduser()
 
 
+def _configured_repo() -> Path:
+    """Repo path for endpoints that WRITE. Unset config resolves to Path(".") --
+    the backend's working directory -- so every write path must refuse it rather
+    than create posts, copy assets, or rmtree inside the Luminary tree."""
+    if not get_settings().LUMINARY_BLOG_REPO_PATH.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="blog repo not configured: set LUMINARY_BLOG_REPO_PATH",
+        )
+    return _repo()
+
+
 def _content_dir(kind: str) -> Path:
     # Both collections live under the content root (src/content/<kind>); derive
     # it from the configured blog subdir so the two stay in lockstep.
@@ -161,6 +173,11 @@ async def suggest_description(
             ],
             temperature=0.4,
             max_tokens=60,
+            # The payload is the user's own note. Hybrid mode would otherwise
+            # route a click-triggered call to the cloud provider; note content
+            # stays on the machine regardless of what the user is about to
+            # publish from it.
+            background=True,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=503, detail="LLM unavailable") from exc
@@ -201,7 +218,7 @@ async def publish(
     _check_kind(kind)
     note = await repo_dep.get_or_404(req.note_id)
     settings = get_settings()
-    repo = _repo()
+    repo = _configured_repo()
 
     # Honor a user-edited destination folder, but never let it escape the repo.
     subdir = req.subdir or str(_content_dir(kind).relative_to(repo))
@@ -252,7 +269,7 @@ async def publish(
 
 def _post_path(slug: str, kind: str) -> tuple[Path, Path, str]:
     """Resolve (repo, md_path, clean_slug); 404 if the post does not exist."""
-    repo = _repo()
+    repo = _configured_repo()
     clean = blog_service.slugify(slug)
     md_path = _content_dir(kind) / f"{clean}.md"
     if not md_path.is_file():
@@ -362,7 +379,7 @@ async def get_asset(kind: str, slug: str, filename: str) -> FileResponse:
 async def push() -> BlogPushResponse:
     # Push is repo-wide (both collections live in one repo); the content dir is
     # only needed for the git-repo health check.
-    repo, content_dir = _repo(), _content_dir("blog")
+    repo, content_dir = _configured_repo(), _content_dir("blog")
     health = await blog_service.repo_health(repo, content_dir)
     if not health["is_git_repo"]:
         raise HTTPException(status_code=400, detail=f"not a git repository: {repo}")
@@ -446,7 +463,7 @@ async def live_preview(
 ) -> BlogLivePreviewResponse:
     _check_kind(kind)
     note = await repo_dep.get_or_404(req.note_id)
-    repo = _repo()
+    repo = _configured_repo()
     pslug = _preview_slug(req.slug)
     frontmatter = blog_service.render_frontmatter(
         title=req.title,
@@ -476,6 +493,7 @@ async def live_preview(
 @router.post("/preview/live/cleanup", status_code=204)
 async def live_preview_cleanup(req: BlogLivePreviewCleanupRequest, kind: str = "blog") -> None:
     _check_kind(kind)
+    _configured_repo()
     pslug = _preview_slug(req.slug)
     (_content_dir(kind) / f"{pslug}.md").unlink(missing_ok=True)
     shutil.rmtree(_asset_root(kind) / pslug, ignore_errors=True)
