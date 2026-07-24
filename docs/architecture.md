@@ -26,7 +26,7 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 | Backend language | Python 3.13 + uv (never pip/Poetry) |
 | Web framework | FastAPI + uvicorn (async-first) |
 | Workflow routing | LangGraph (not plain LangChain) |
-| Embeddings | BAAI/bge-m3 via ONNX Runtime (1024-dim) |
+| Embeddings | BAAI/bge-small-en-v1.5 via SentenceTransformer (384-dim) |
 | Vector DB | LanceDB (embedded, Apache Arrow) |
 | Keyword search | SQLite FTS5 (BM25) |
 | Graph DB | Kuzu (embedded, Cypher, Apache 2.0) |
@@ -44,7 +44,7 @@ Types --> Config --> Repo --> Service --> Runtime --> API
 ## Data Stores
 
 - **SQLite** (`~/.luminary/luminary.db`): all structured metadata -- documents, chunks, sections, summaries, flashcards, notes, Q&A history, and **concepts** (hot learning state: mastery, FSRS stability, origin, status, evidence refs). Schema is Alembic-versioned and migrated to head on boot (I-23)
-- **LanceDB**: dense embeddings for chunks (bge-small, 384-dim), notes (bge-m3, 1024-dim), and **concepts** (384-dim centroid of evidence chunks, in chunk space -- derived, for similarity/linking/dedup, never retrieval-primary)
+- **LanceDB**: dense embeddings for chunks and notes (both bge-small, 384-dim, one shared space) and **concepts** (384-dim centroid of evidence chunks, in the same space -- derived, for similarity/linking/dedup, never retrieval-primary)
 - **SQLite FTS5**: `chunks_fts` and `notes_fts` virtual tables for BM25 keyword search
 - **Kuzu**: knowledge graph -- Entity, Document, Note, **Concept** nodes + 20+ relationship types. `Concept` is the studyable atom (topology: edges/routes/prereqs, `PROMOTED_FROM` an Entity cluster); `Entity` remains the raw NER layer beneath it.
 

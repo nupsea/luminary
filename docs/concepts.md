@@ -87,8 +87,9 @@ LanceDB; this is a free vector mean, recomputed when evidence changes on re-pars
 embedded with **bge-small-en-v1.5 (384-dim)**, so concept vectors live in that same **384-dim chunk
 space** -- directly comparable to chunks and to bge-small query embeddings. A future upgrade
 synthesizes `label + gloss + top evidence` and re-embeds it with the same chunk embedder for higher
-quality (staying in one space). Notes live in a separate 1024-dim bge-m3 space, so note->concept
-matching embeds the note text with the chunk embedder (bge-small) or falls back to title/lexical.
+quality (staying in one space). Notes are embedded with the same bge-small chunk embedder, so
+note->concept matching compares directly in that shared space (falling back to title/lexical when a
+note has no vector yet).
 
 Used for: Entity->Concept dedup, note->concept link chips (degraded path), candidate-concept
 seeding, scope->concept resolution. **Never** a retrieval primary -- chunk vectors + FTS5 + graph

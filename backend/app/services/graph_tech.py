@@ -446,26 +446,36 @@ class KuzuTechRepo:
                 logger.debug("get_diagram_edges_for_document failed for %s", rel, exc_info=True)
         return edges
 
-    def _get_tech_relation_edges(self, entity_ids: set[str], document_id: str) -> list[dict]:
+    def _get_tech_relation_edges(
+        self, entity_ids: set[str], document_ids: str | list[str]
+    ) -> list[dict]:
         """Return tech relation edges (IMPLEMENTS, EXTENDS, USES, REPLACES, DEPENDS_ON)
-        among the given entity IDs for a document."""
+        among the given entity IDs for the given documents.
+
+        Entity membership is filtered in Python for the same reason as
+        GraphViewService._get_co_occurrence_edges: an entity-id IN list costs
+        one query parameter per entity, per relation type, per document.
+        """
         if not entity_ids:
             return []
-        placeholders = ", ".join(f"$eid{i}" for i in range(len(entity_ids)))
-        params = {f"eid{i}": eid for i, eid in enumerate(entity_ids)}
-        params["did"] = document_id
+        doc_ids = [document_ids] if isinstance(document_ids, str) else list(document_ids)
+        if not doc_ids:
+            return []
+        placeholders = ", ".join(f"$did{i}" for i in range(len(doc_ids)))
+        params = {f"did{i}": did for i, did in enumerate(doc_ids)}
         edges: list[dict] = []
         for rel in ("IMPLEMENTS", "EXTENDS", "USES", "REPLACES", "DEPENDS_ON"):
             try:
                 result = self._conn.execute(
                     f"MATCH (a:Entity)-[r:{rel}]->(b:Entity)"
-                    f" WHERE a.id IN [{placeholders}] AND b.id IN [{placeholders}]"
-                    f" AND r.document_id = $did"
+                    f" WHERE r.document_id IN [{placeholders}]"
                     f" RETURN a.id, b.id",
                     params,
                 )
                 while result.has_next():
                     row = result.get_next()
+                    if row[0] not in entity_ids or row[1] not in entity_ids:
+                        continue
                     edges.append(
                         {
                             "source": row[0],

@@ -378,23 +378,30 @@ $env:DATA_DIR = "$PSScriptRoot\.luminary"
 $env:LUMINARY_MODE = "public"
 $port = 7820
 
-Write-Host "Starting Luminary on http://localhost:$port ..." -ForegroundColor Cyan
+Write-Host "Starting Luminary... (first run downloads models and can take a few minutes)" -ForegroundColor Cyan
 $proc = Start-Process -FilePath "uv" `
     -ArgumentList "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
     -NoNewWindow -PassThru
 
-for ($i = 0; $i -lt 60; $i++) {
+# Poll /health so the "ready" banner reflects reality. First run downloads models,
+# so allow generous time; only claim ready when /health actually answers 200.
+$ready = $false
+for ($i = 0; $i -lt 120; $i++) {
     if ($proc.HasExited) {
-        Write-Error "Backend exited before becoming ready (exit code $($proc.ExitCode))."
+        Write-Error "Backend exited before becoming ready (exit code $($proc.ExitCode)). Scroll up for the error."
     }
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 2
-        if ($resp.StatusCode -eq 200) { break }
+        if ($resp.StatusCode -eq 200) { $ready = $true; break }
     } catch {}
     Start-Sleep -Seconds 1
 }
 
-Write-Host "  Luminary is ready  --  http://localhost:$port" -ForegroundColor Green
+if ($ready) {
+    Write-Host "  Luminary is ready  ->  open http://localhost:$port" -ForegroundColor Green
+} else {
+    Write-Warning "  Still downloading models -- leave this window open; it'll be ready at http://localhost:$port shortly."
+}
 try {
     Wait-Process -Id $proc.Id
 } finally {
@@ -409,13 +416,11 @@ Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "       Installation Complete!" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
-Write-Host "Installed per-user (no admin). If a tool is reported 'not on PATH'"
-Write-Host "above, open a NEW PowerShell window so the updated PATH takes effect."
-Write-Host ""
-Write-Host "To start the application, run:"
+Write-Host "Setup is done. To start the app (now and every time), run:"
 Write-Host "  .\start.ps1" -ForegroundColor Yellow
+Write-Host "Wait for 'Luminary is ready', then open http://localhost:7820"
 Write-Host ""
-Write-Host "Then open http://localhost:7820 in your browser."
-Write-Host "Optional: image/figure analysis needs a vision model (~6 GB download)."
-Write-Host "Add it any time with:  ollama pull qwen2.5vl:7b" -ForegroundColor Yellow
+Write-Host "If a tool was reported 'not on PATH' above, open a NEW PowerShell"
+Write-Host "window first so the updated PATH takes effect."
+Write-Host "Optional image analysis:  ollama pull qwen2.5vl:7b" -ForegroundColor Gray
 Write-Host "=========================================" -ForegroundColor Green

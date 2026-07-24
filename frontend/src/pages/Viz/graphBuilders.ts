@@ -20,6 +20,17 @@ import {
 } from "./constants"
 import type { GraphEdge, GraphNode } from "./types"
 
+/** ForceAtlas2 runs synchronously on the main thread, so its cost is frozen
+ *  UI. It scales super-linearly with order: at library scale (~11k nodes)
+ *  100 iterations is ~5s of dead page. Large graphs render as a hairball
+ *  either way, so trade iterations for responsiveness as the graph grows. */
+function layoutIterations(order: number, base: number): number {
+  if (order > 8000) return Math.min(base, 15)
+  if (order > 4000) return Math.min(base, 30)
+  if (order > 2000) return Math.min(base, 50)
+  return base
+}
+
 /** Build the main viz graph: entity + diagram + note nodes, all
  *  edge categories (CO_OCCURS / PREREQUISITE_OF / SAME_CONCEPT /
  *  WRITTEN_ABOUT / TAG_IS_CONCEPT / LINKS_TO).
@@ -135,7 +146,7 @@ export function buildGraph(nodes: GraphNode[], edges: GraphEdge[]): Graph {
 
   if (g.order > 0) {
     forceAtlas2.assign(g, {
-      iterations: 100,
+      iterations: layoutIterations(g.order, 100),
       settings: forceAtlas2.inferSettings(g),
     })
   }
@@ -229,7 +240,10 @@ export function buildClusterGraphology(
   }
 
   if (g.order > 0) {
-    forceAtlas2.assign(g, { iterations: 80, settings: forceAtlas2.inferSettings(g) })
+    forceAtlas2.assign(g, {
+      iterations: layoutIterations(g.order, 80),
+      settings: forceAtlas2.inferSettings(g),
+    })
   }
 
   return g

@@ -6,6 +6,8 @@
 
 No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any API key you supply.
 
+**[Watch the intro video](assets/video/IntroducingLuminaryLearning.mp4)** — a 3½-minute tour of Luminary.
+
 ---
 
 ## Install and run
@@ -58,32 +60,30 @@ docker compose --profile ai up   # or: make docker-run
 ```
 Then open http://localhost:7820. (Apple Silicon Macs use the native path above.)
 
-### Windows (Zero-Hassle via Docker)
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and ensure it is running.
-2. Open PowerShell in the project directory and run:
-   ```powershell
-   docker compose --profile ai up
-   ```
+### Windows — Docker
+```powershell
+docker compose --profile ai up
+```
+Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running. Open http://localhost:7820 when the log settles.
 
-### Windows (Native Fallback)
-If you are behind a corporate proxy/VPN that blocks Docker SSL traffic:
-1. Open a normal **PowerShell** window in the project directory (no Administrator rights needed — everything installs per-user).
-2. Run:
-   ```powershell
-   Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
-   ```
-3. The installer offers to pull the optional vision model (`qwen2.5vl:7b`) for image/figure analysis. You can skip it and add it later with `ollama pull qwen2.5vl:7b`.
+### Windows — native (behind a proxy/VPN that blocks Docker)
+Install once, then start whenever you want it. In a normal PowerShell window (no admin):
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time setup; creates start.ps1
+.\start.ps1                                                                # run this each time
+```
+Wait for `Luminary is ready`, then open http://localhost:7820. The first start downloads models, so give it a few minutes — the launcher tells you when it's done.
 
-Open **http://localhost:7820** in your browser when ready (run `.\start.ps1`).
+> First launch is slow because it downloads ML models. All launchers poll the server and print `Luminary is ready` only when it truly is; until then they say models are still downloading. Background `Warmup:` log lines after that are normal.
 
 ---
 
 ## Your first 5 minutes
 
-1. **Upload a document** — Library tab → Upload → select a PDF or text file
+1. **Add a source** — Library → Upload a PDF, EPUB, doc or media file, or paste a web-article or YouTube URL
 2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
-3. **Ask a question** — Ask tab → ask anything about your document; citations link back to the source section
-4. **Review flashcards** — Study tab → Start Review → grade cards; Luminary schedules the next review using FSRS
+3. **Ask a question** — Ask tab → citations link straight back to the source section
+4. **Review flashcards** — Study → Start Review → grade cards; FSRS schedules the next one
 
 That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), a references panel per section, and a prediction-calibration graph on Progress.
 
@@ -95,7 +95,7 @@ That's the core loop. Luminary adds more as you return: mastery rings on the lib
 
 Chat with every document you've uploaded. Every answer includes citations with section heading, excerpt, and page number.
 
-Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall.
+Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall. If a question fails (model busy, briefly offline), retry it inline without retyping.
 
 ### Spaced repetition — Remember what you read
 
@@ -109,7 +109,15 @@ Before flipping a card, predict your confidence (Know it / Unsure / Blank). Lumi
 
 ### Local-first reader — Read and annotate
 
-Side-by-side PDF viewer with section navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection in the reader.
+Side-by-side PDF viewer with section navigation and an optional dark-page mode for low-glare reading. Jump to a page by typing its number or with arrow-key navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection, or delete a document straight from the reader header. Web articles and papers keep their figures inline, with extracted text cleaned up on the way in.
+
+### Media & web — Learn from more than PDFs
+
+Paste a **web article** or **YouTube** URL and Luminary mirrors the content, transcribes or extracts it, and indexes it like any other source. Drop in **audio or video** files and it transcribes them; import **Kindle clippings** to turn highlights into a studyable document. Research papers get structure-aware chunking so sections and figures survive ingestion.
+
+### Works offline — No internet required
+
+With a local model (Ollama), the whole loop runs with no connection. If you go offline mid-session, Luminary keeps working and routes Ask to the local model with a clear notice instead of failing.
 
 ### References — Canonical sources per section
 
@@ -133,45 +141,28 @@ The home screen surfaces the day's highest-leverage action (review due cards, co
 
 ---
 
-## If Ollama isn't running
-
-If the app shows "Ollama is not running" / "no model is pulled," LLM features
-(chat, teach-back, flashcard generation) are unavailable. Everything else still works.
-
-- **Native (`make install`)**: start the server and pull the model on the host:
-  ```bash
-  ollama serve &        # or: brew services start ollama
-  ollama pull llama3.2
-  ```
-- **Docker (`docker compose --profile ai up`)**: the `ollama` sidecar runs the
-  server and a one-shot `ollama-pull` service downloads `llama3.2` (~2 GB) on first
-  start — give it a few minutes; the banner clears when it's ready. To check or pull
-  manually:
-  ```bash
-  docker compose exec ollama ollama list
-  docker compose exec ollama ollama pull llama3.2
-  docker compose logs ollama        # if it's not coming up
-  ```
-  (Make sure you used `--profile ai`, which starts the Ollama sidecar.)
-
 ## Models
+
+If the app warns that Ollama isn't running or no model is pulled, only the LLM features (chat, teach-back, flashcards) pause — everything else keeps working. Fix it with `ollama serve` and `ollama pull llama3.2` (Docker users: the `--profile ai` sidecar does this automatically on first start).
 
 Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
 
-| Model | Command | Best for | VRAM |
+| Model | Command | Best for | RAM/VRAM |
 |-------|---------|----------|------|
 | Llama 3.2 3B (default) | `ollama pull llama3.2` | Everyday use, lightweight laptops | ~2 GB |
-| Gemma 4 E4B | `ollama pull gemma4` | Excellent reasoning capability | ~4 GB |
-| Gemma 4 26B A4B | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
-| Llama 3.1 8B | `ollama pull llama3.1` | Lightweight alternative | ~5 GB |
+| Gemma 3 4B | `ollama pull gemma3:4b` | Strong reasoning at a small size | ~4 GB |
+| Llama 3.1 8B | `ollama pull llama3.1` | A step up in quality | ~5 GB |
+| Qwen 2.5 14B | `ollama pull qwen2.5:14b-instruct` | Highest quality, needs more memory | ~9 GB |
+
+Any Ollama-served chat model works — these are just tested starting points. `llama3.2` is the default because it was the fastest and most faithful of the small models on our eval harness.
 
 ### How to switch to other models
 
 To use a different local model:
-1. Pull the desired model via Ollama (e.g., `ollama pull gemma4`).
+1. Pull the desired model via Ollama (e.g., `ollama pull gemma3:4b`).
 2. Add or update `LITELLM_DEFAULT_MODEL` in `backend/.env` (prefixed with `ollama/`):
    ```bash
-   LITELLM_DEFAULT_MODEL=ollama/gemma4
+   LITELLM_DEFAULT_MODEL=ollama/gemma3:4b
    ```
 
 ### Switch to a cloud model (optional)
@@ -201,7 +192,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
 | `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
@@ -271,8 +262,8 @@ Types -> Config -> Repo -> Service -> Runtime -> API
 |-------|-----------|
 | Backend | Python 3.13, FastAPI, LangGraph, LiteLLM |
 | Storage | SQLite (metadata), LanceDB (vectors), Kuzu (graph), FTS5 |
-| ML | BAAI/bge-m3 embeddings (ONNX), GLiNER (zero-shot NER) |
-| Retrieval | RRF hybrid: vector + BM25 + graph traversal |
+| ML | BAAI/bge-small-en-v1.5 embeddings, GLiNER (zero-shot NER), ms-marco-MiniLM cross-encoder reranker |
+| Retrieval | RRF hybrid (vector + BM25 + graph traversal), then cross-encoder rerank |
 | Spaced rep | FSRS algorithm |
 | Frontend | React 18, TypeScript 5, Vite, shadcn/ui, Tailwind CSS |
 | Graph viz | Sigma.js v3 + Graphology |
@@ -297,12 +288,12 @@ frontend/src/
 
 ### Contributing
 
-1. Fork and create a feature branch
-2. `cd backend && uv sync` / `cd frontend && npm install`
-3. `make ci` must pass before opening a PR
-4. Follow the 6-layer import rule (no reverse imports)
-5. All LLM calls go through LiteLLM
-6. New endpoints require at least one pytest test
+Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full setup, architecture rules, and PR workflow. In short:
+
+- Fork, branch from `master`, and run `make ci` before opening a PR
+- Follow the 6-layer import rule; route all LLM calls through LiteLLM; new endpoints need a pytest test
+
+Found a bug or have an idea? **[Open an issue](https://github.com/nupsea/luminary/issues/new/choose)** — or browse [open issues](https://github.com/nupsea/luminary/issues) to pick something up.
 
 ---
 

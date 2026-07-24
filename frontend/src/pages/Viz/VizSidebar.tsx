@@ -36,7 +36,8 @@ interface VizSidebarProps {
   docPickerSearch: string
   onDocPickerSearchChange: (v: string) => void
   onClearGlobalSearch: () => void
-  activeDocumentId: string | null
+  /** Doc currently rendered on the canvas -- null while scope is "all". */
+  selectedDocId: string | null
   onDocSelect: (docId: string | null) => void
   filteredDocList: DocListItem[]
   // Notes context
@@ -75,7 +76,7 @@ export function VizSidebar(props: VizSidebarProps) {
     docPickerSearch,
     onDocPickerSearchChange,
     onClearGlobalSearch,
-    activeDocumentId,
+    selectedDocId,
     onDocSelect,
     filteredDocList,
     showNotes,
@@ -150,14 +151,14 @@ export function VizSidebar(props: VizSidebarProps) {
           <button
             onClick={() => onDocSelect(null)}
             className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] transition-colors ${
-              !activeDocumentId
+              !selectedDocId
                 ? "bg-primary/10 text-primary font-semibold"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             }`}
           >
             <BookOpen
               size={12}
-              className={!activeDocumentId ? "text-primary" : "text-muted-foreground/50"}
+              className={!selectedDocId ? "text-primary" : "text-muted-foreground/50"}
             />
             <span className="truncate">All documents</span>
           </button>
@@ -167,7 +168,7 @@ export function VizSidebar(props: VizSidebarProps) {
               key={doc.id}
               onClick={() => onDocSelect(doc.id)}
               className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-[11px] transition-colors ${
-                activeDocumentId === doc.id
+                selectedDocId === doc.id
                   ? "bg-primary/10 text-primary font-semibold"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               }`}
@@ -176,7 +177,7 @@ export function VizSidebar(props: VizSidebarProps) {
               <FileText
                 size={12}
                 className={
-                  activeDocumentId === doc.id ? "text-primary" : "text-muted-foreground/50"
+                  selectedDocId === doc.id ? "text-primary" : "text-muted-foreground/50"
                 }
               />
               <span className="truncate">{doc.title}</span>

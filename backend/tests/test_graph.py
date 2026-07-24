@@ -125,6 +125,36 @@ def test_get_graph_for_documents_merges(graph_svc: KuzuService):
     assert "e2" in node_ids
 
 
+def test_get_graph_for_documents_scopes_co_occurrence_edges(graph_svc: KuzuService):
+    """Edges must stay scoped to the requested docs and to in-scope entities.
+
+    The entity-membership filter moved from Cypher into Python (an entity-id IN
+    list cost one query parameter per entity, per document); these are the two
+    properties that filter was carrying.
+    """
+    for eid, name in (("e1", "Darwin"), ("e2", "Evolution"), ("e3", "Kepler")):
+        graph_svc.upsert_entity(eid, name, "CONCEPT")
+    graph_svc.upsert_document("d1", "Book One", "book")
+    graph_svc.upsert_document("d2", "Book Two", "book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_mention("e3", "d2")
+    graph_svc.add_co_occurrence("e1", "e2", "d1")
+    # Same doc, but e3 is only mentioned in d2 -- out of scope for a d1 request.
+    graph_svc.add_co_occurrence("e1", "e3", "d1")
+    graph_svc.add_co_occurrence("e1", "e3", "d2")
+
+    data = graph_svc.get_graph_for_documents(["d1"])
+    pairs = {(e["source"], e["target"]) for e in data["edges"]}
+    assert ("e1", "e2") in pairs
+    assert ("e1", "e3") not in pairs
+
+    both = graph_svc.get_graph_for_documents(["d1", "d2"])
+    both_pairs = {(e["source"], e["target"]) for e in both["edges"]}
+    assert ("e1", "e2") in both_pairs
+    assert ("e1", "e3") in both_pairs
+
+
 def test_delete_document(graph_svc: KuzuService):
     graph_svc.upsert_entity("e1", "Darwin", "PERSON")
     graph_svc.upsert_document("d1", "Origin", "book")
