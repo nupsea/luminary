@@ -6,7 +6,7 @@
 
 No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any API key you supply.
 
-**[Watch the intro video](assets/video/IntroducingLuminaryLearning.mp4)** — a 3½-minute tour of Luminary.
+**[Watch the intro video](https://youtu.be/semZlbJde_Q)** — a tour of Luminary.
 
 ---
 
