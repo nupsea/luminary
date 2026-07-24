@@ -29,11 +29,10 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-_info "Starting Luminary on http://localhost:${PORT} ..."
-_info "First run downloads ML models and is slower; the log below is expected."
+_info "Starting Luminary... (first run downloads models and can take a few minutes)"
 ready=0
 i=0
-while [ "$i" -lt 90 ]; do
+while [ "$i" -lt 120 ]; do
     if curl -sf --max-time 2 "http://localhost:${PORT}/health" > /dev/null 2>&1; then
         ready=1
         break
@@ -47,11 +46,9 @@ while [ "$i" -lt 90 ]; do
 done
 
 if [ "$ready" -eq 1 ]; then
-    echo -e "\033[1;32m  Luminary is ready\033[0m  --  open http://localhost:${PORT}"
-    echo -e "\033[0;90m  (ML models keep warming in the background for a few more seconds — that's normal.)\033[0m"
+    echo -e "\033[1;32m  Luminary is ready\033[0m  ->  open http://localhost:${PORT}"
 else
-    _warn "  Still starting after ${i}s — the server hasn't answered /health yet."
-    _warn "  This is usually a slow first-run model download; watch the log above, then open http://localhost:${PORT}"
+    _warn "  Still downloading models -- leave this window open; it'll be ready at http://localhost:${PORT} shortly."
 fi
 
 # Non-fatal LLM pre-flight: the moat loop (card generation, chat, teach-back) needs

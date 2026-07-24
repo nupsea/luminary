@@ -58,85 +58,30 @@ docker compose --profile ai up   # or: make docker-run
 ```
 Then open http://localhost:7820. (Apple Silicon Macs use the native path above.)
 
-### Windows (Zero-Hassle via Docker)
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and ensure it is running.
-2. Open PowerShell in the project directory and run:
-   ```powershell
-   docker compose --profile ai up
-   ```
-3. Wait for the log to settle, then open **http://localhost:7820**.
-
-### Windows (Native Fallback)
-
-Use this if you are behind a corporate proxy/VPN that blocks Docker's SSL traffic.
-It is a **two-step flow**: you install once, then start the app whenever you want it.
-
-**Step 1 — install (run once).** Open a normal **PowerShell** window in the project
-directory (no Administrator rights needed — everything installs per-user) and run:
-
+### Windows — Docker
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
+docker compose --profile ai up
 ```
+Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running. Open http://localhost:7820 when the log settles.
 
-This installs Python, Node, uv and Ollama, pulls the chat model, builds the app,
-and **creates a launcher called `start.ps1` in the project folder**. It does *not*
-leave the app running. If it reports a tool is "not on PATH", close PowerShell,
-open a new window, and re-run it — this is safe.
-
-**Step 2 — start (run every time you want to use Luminary).**
-
+### Windows — native (behind a proxy/VPN that blocks Docker)
+Install once, then start whenever you want it. In a normal PowerShell window (no admin):
 ```powershell
-.\start.ps1
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time setup; creates start.ps1
+.\start.ps1                                                                # run this each time
 ```
+Wait for `Luminary is ready`, then open http://localhost:7820. The first start downloads models, so give it a few minutes — the launcher tells you when it's done.
 
-`start.ps1` launches the server and, once it responds, prints:
-
-```
-  Luminary is ready  --  open http://localhost:7820
-```
-
-**Wait for that line before opening the browser.** The first start is slower
-because it downloads the ML models — you'll see log lines like
-`Warmup: pre-loading GLiNER model...` streaming for a bit after
-`Application startup complete`; that is normal, not a hang. If instead you see
-`Still starting -- the server hasn't answered /health yet`, the model download is
-still finishing — leave it running and try the browser again shortly. See
-[When is it ready?](#when-is-it-ready) below.
-
-Optional: image/figure analysis needs a vision model. Add it any time with
-`ollama pull qwen2.5vl:7b` (~6 GB).
-
----
-
-## When is it ready?
-
-The startup log has two distinct phases, and it's easy to mistake the second one
-for a hang:
-
-1. **The server comes up.** You'll see database migrations, then
-   `Application startup complete` and `Uvicorn running on http://…:7820`. At this
-   point `/health` answers and the UI loads — the `make start` / `start.ps1`
-   launchers poll `/health` and print **`Luminary is ready`** exactly here.
-2. **Models warm in the background.** Immediately after, lines like
-   `Warmup: pre-loading GLiNER model...` and `Warmup: interactive LLM warm in 4.5s`
-   stream for a few more seconds (longer on the **first ever run**, which also
-   downloads the models). This runs *after* the app is already usable — chat and
-   flashcard generation just need Ollama and its model, which lazy-load on first use.
-
-So: open the browser once you see **`Luminary is ready`** (or `Application startup
-complete`). If a launcher prints `Still starting — the server hasn't answered
-/health yet`, the first-run model download is still finishing; leave it running and
-retry the URL shortly. If the log stops at a `Warmup:` line, that is expected — the
-app is up.
+> First launch is slow because it downloads ML models. All launchers poll the server and print `Luminary is ready` only when it truly is; until then they say models are still downloading. Background `Warmup:` log lines after that are normal.
 
 ---
 
 ## Your first 5 minutes
 
-1. **Add a source** — Library tab → Upload. Luminary ingests PDFs, EPUBs, Word docs, Markdown/text, audio (`.mp3`/`.m4a`/`.wav`) and video (`.mp4`) files, a pasted web-article or YouTube URL, or Kindle clippings
-2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute; audio/video transcription and long books take longer)
-3. **Ask a question** — Ask tab → ask anything about your document; citations link back to the source section
-4. **Review flashcards** — Study tab → Start Review → grade cards; Luminary schedules the next review using FSRS
+1. **Add a source** — Library → Upload a PDF, EPUB, doc or media file, or paste a web-article or YouTube URL
+2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
+3. **Ask a question** — Ask tab → citations link straight back to the source section
+4. **Review flashcards** — Study → Start Review → grade cards; FSRS schedules the next one
 
 That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), a references panel per section, and a prediction-calibration graph on Progress.
 
@@ -194,28 +139,9 @@ The home screen surfaces the day's highest-leverage action (review due cards, co
 
 ---
 
-## If Ollama isn't running
-
-If the app shows "Ollama is not running" / "no model is pulled," LLM features
-(chat, teach-back, flashcard generation) are unavailable. Everything else still works.
-
-- **Native (`make install`)**: start the server and pull the model on the host:
-  ```bash
-  ollama serve &        # or: brew services start ollama
-  ollama pull llama3.2
-  ```
-- **Docker (`docker compose --profile ai up`)**: the `ollama` sidecar runs the
-  server and a one-shot `ollama-pull` service downloads `llama3.2` (~2 GB) on first
-  start — give it a few minutes; the banner clears when it's ready. To check or pull
-  manually:
-  ```bash
-  docker compose exec ollama ollama list
-  docker compose exec ollama ollama pull llama3.2
-  docker compose logs ollama        # if it's not coming up
-  ```
-  (Make sure you used `--profile ai`, which starts the Ollama sidecar.)
-
 ## Models
+
+If the app warns that Ollama isn't running or no model is pulled, only the LLM features (chat, teach-back, flashcards) pause — everything else keeps working. Fix it with `ollama serve` and `ollama pull llama3.2` (Docker users: the `--profile ai` sidecar does this automatically on first start).
 
 Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
 
