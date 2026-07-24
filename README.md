@@ -286,12 +286,12 @@ frontend/src/
 
 ### Contributing
 
-1. Fork and create a feature branch
-2. `cd backend && uv sync` / `cd frontend && npm install`
-3. `make ci` must pass before opening a PR
-4. Follow the 6-layer import rule (no reverse imports)
-5. All LLM calls go through LiteLLM
-6. New endpoints require at least one pytest test
+Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full setup, architecture rules, and PR workflow. In short:
+
+- Fork, branch from `master`, and run `make ci` before opening a PR
+- Follow the 6-layer import rule; route all LLM calls through LiteLLM; new endpoints need a pytest test
+
+Found a bug or have an idea? **[Open an issue](https://github.com/nupsea/luminary/issues/new/choose)** — or browse [open issues](https://github.com/nupsea/luminary/issues) to pick something up.
 
 ---
 
