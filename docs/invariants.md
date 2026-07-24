@@ -40,8 +40,8 @@ The frontend must replace `msg.text` with `payload.answer` on the done event. St
 
 ## Vector Dimensions
 
-**I-9. Note and chunk vectors are 1024-dimensional (bge-m3 output).**
-The LanceDB schema must declare `pa.list_(pa.float32(), 1024)`. Any table with 384-dim is from a pre-S170 bug and must be dropped and recreated.
+**I-9. Note and chunk vectors are 384-dimensional (bge-small-en-v1.5 output).**
+The LanceDB schema must declare `pa.list_(pa.float32(), 384)`. Notes and chunks share one embedder and one vector space, so a note vector is directly comparable to a chunk vector. Any table declaring a different dimension is a bug.
 
 ## Frontend
 
@@ -84,7 +84,7 @@ Check and disable any "phone home" features in libraries that handle user prompt
 The legacy `chunk.text ILIKE '%name%'` mastery computation is removed. Mastery is written by the assessment pipeline (Study Events) to `concepts.mastery`. Collection/goal numbers are computed rollups, never stored as truth. See `docs/concepts.md`.
 
 **I-20. The concept vector is derived and never a retrieval primary.**
-A concept's LanceDB vector (`concept_vectors_v1`) is the 384-dim centroid of its evidence-chunk embeddings, in **chunk space** (bge-small-en-v1.5 -- chunks are 384-dim, NOT 1024; notes are the 1024-dim bge-m3 space). Recomputed when evidence changes. Use it only for concept-to-concept and material-to-concept similarity (linking, dedup, candidate seeding, scope resolution). Chunk vectors + FTS5 + graph (RRF) remain the RAG backbone.
+A concept's LanceDB vector (`concept_vectors_v1`) is the 384-dim centroid of its evidence-chunk embeddings, in **chunk space** (bge-small-en-v1.5; chunks, notes, and concepts are all 384-dim in one shared space). Recomputed when evidence changes. Use it only for concept-to-concept and material-to-concept similarity (linking, dedup, candidate seeding, scope resolution). Chunk vectors + FTS5 + graph (RRF) remain the RAG backbone.
 
 **I-21. OKF is a projection, never a transport and never a source of truth.**
 LiteLLM carries bytes; OKF carries portable knowledge -- never couple them. OKF files are regenerated from SQLite + Kuzu. A user edit to an OKF file re-enters the system only as an `override` (re-applied after re-parse), exactly like a graph rename/merge. See `docs/okf.md`.

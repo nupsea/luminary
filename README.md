@@ -64,24 +64,77 @@ Then open http://localhost:7820. (Apple Silicon Macs use the native path above.)
    ```powershell
    docker compose --profile ai up
    ```
+3. Wait for the log to settle, then open **http://localhost:7820**.
 
 ### Windows (Native Fallback)
-If you are behind a corporate proxy/VPN that blocks Docker SSL traffic:
-1. Open a normal **PowerShell** window in the project directory (no Administrator rights needed — everything installs per-user).
-2. Run:
-   ```powershell
-   Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
-   ```
-3. The installer offers to pull the optional vision model (`qwen2.5vl:7b`) for image/figure analysis. You can skip it and add it later with `ollama pull qwen2.5vl:7b`.
 
-Open **http://localhost:7820** in your browser when ready (run `.\start.ps1`).
+Use this if you are behind a corporate proxy/VPN that blocks Docker's SSL traffic.
+It is a **two-step flow**: you install once, then start the app whenever you want it.
+
+**Step 1 — install (run once).** Open a normal **PowerShell** window in the project
+directory (no Administrator rights needed — everything installs per-user) and run:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1
+```
+
+This installs Python, Node, uv and Ollama, pulls the chat model, builds the app,
+and **creates a launcher called `start.ps1` in the project folder**. It does *not*
+leave the app running. If it reports a tool is "not on PATH", close PowerShell,
+open a new window, and re-run it — this is safe.
+
+**Step 2 — start (run every time you want to use Luminary).**
+
+```powershell
+.\start.ps1
+```
+
+`start.ps1` launches the server and, once it responds, prints:
+
+```
+  Luminary is ready  --  open http://localhost:7820
+```
+
+**Wait for that line before opening the browser.** The first start is slower
+because it downloads the ML models — you'll see log lines like
+`Warmup: pre-loading GLiNER model...` streaming for a bit after
+`Application startup complete`; that is normal, not a hang. If instead you see
+`Still starting -- the server hasn't answered /health yet`, the model download is
+still finishing — leave it running and try the browser again shortly. See
+[When is it ready?](#when-is-it-ready) below.
+
+Optional: image/figure analysis needs a vision model. Add it any time with
+`ollama pull qwen2.5vl:7b` (~6 GB).
+
+---
+
+## When is it ready?
+
+The startup log has two distinct phases, and it's easy to mistake the second one
+for a hang:
+
+1. **The server comes up.** You'll see database migrations, then
+   `Application startup complete` and `Uvicorn running on http://…:7820`. At this
+   point `/health` answers and the UI loads — the `make start` / `start.ps1`
+   launchers poll `/health` and print **`Luminary is ready`** exactly here.
+2. **Models warm in the background.** Immediately after, lines like
+   `Warmup: pre-loading GLiNER model...` and `Warmup: interactive LLM warm in 4.5s`
+   stream for a few more seconds (longer on the **first ever run**, which also
+   downloads the models). This runs *after* the app is already usable — chat and
+   flashcard generation just need Ollama and its model, which lazy-load on first use.
+
+So: open the browser once you see **`Luminary is ready`** (or `Application startup
+complete`). If a launcher prints `Still starting — the server hasn't answered
+/health yet`, the first-run model download is still finishing; leave it running and
+retry the URL shortly. If the log stops at a `Warmup:` line, that is expected — the
+app is up.
 
 ---
 
 ## Your first 5 minutes
 
-1. **Upload a document** — Library tab → Upload → select a PDF or text file
-2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
+1. **Add a source** — Library tab → Upload. Luminary ingests PDFs, EPUBs, Word docs, Markdown/text, audio (`.mp3`/`.m4a`/`.wav`) and video (`.mp4`) files, a pasted web-article or YouTube URL, or Kindle clippings
+2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute; audio/video transcription and long books take longer)
 3. **Ask a question** — Ask tab → ask anything about your document; citations link back to the source section
 4. **Review flashcards** — Study tab → Start Review → grade cards; Luminary schedules the next review using FSRS
 
@@ -95,7 +148,7 @@ That's the core loop. Luminary adds more as you return: mastery rings on the lib
 
 Chat with every document you've uploaded. Every answer includes citations with section heading, excerpt, and page number.
 
-Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall.
+Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall. If a question fails (model busy, briefly offline), retry it inline without retyping.
 
 ### Spaced repetition — Remember what you read
 
@@ -109,7 +162,15 @@ Before flipping a card, predict your confidence (Know it / Unsure / Blank). Lumi
 
 ### Local-first reader — Read and annotate
 
-Side-by-side PDF viewer with section navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection in the reader.
+Side-by-side PDF viewer with section navigation and an optional dark-page mode for low-glare reading. Jump to a page by typing its number or with arrow-key navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection, or delete a document straight from the reader header. Web articles and papers keep their figures inline, with extracted text cleaned up on the way in.
+
+### Media & web — Learn from more than PDFs
+
+Paste a **web article** or **YouTube** URL and Luminary mirrors the content, transcribes or extracts it, and indexes it like any other source. Drop in **audio or video** files and it transcribes them; import **Kindle clippings** to turn highlights into a studyable document. Research papers get structure-aware chunking so sections and figures survive ingestion.
+
+### Works offline — No internet required
+
+With a local model (Ollama), the whole loop runs with no connection. If you go offline mid-session, Luminary keeps working and routes Ask to the local model with a clear notice instead of failing.
 
 ### References — Canonical sources per section
 
@@ -158,20 +219,22 @@ If the app shows "Ollama is not running" / "no model is pulled," LLM features
 
 Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
 
-| Model | Command | Best for | VRAM |
+| Model | Command | Best for | RAM/VRAM |
 |-------|---------|----------|------|
 | Llama 3.2 3B (default) | `ollama pull llama3.2` | Everyday use, lightweight laptops | ~2 GB |
-| Gemma 4 E4B | `ollama pull gemma4` | Excellent reasoning capability | ~4 GB |
-| Gemma 4 26B A4B | `ollama pull gemma4:26b-a4b` | Balanced quality/speed | ~16 GB |
-| Llama 3.1 8B | `ollama pull llama3.1` | Lightweight alternative | ~5 GB |
+| Gemma 3 4B | `ollama pull gemma3:4b` | Strong reasoning at a small size | ~4 GB |
+| Llama 3.1 8B | `ollama pull llama3.1` | A step up in quality | ~5 GB |
+| Qwen 2.5 14B | `ollama pull qwen2.5:14b-instruct` | Highest quality, needs more memory | ~9 GB |
+
+Any Ollama-served chat model works — these are just tested starting points. `llama3.2` is the default because it was the fastest and most faithful of the small models on our eval harness.
 
 ### How to switch to other models
 
 To use a different local model:
-1. Pull the desired model via Ollama (e.g., `ollama pull gemma4`).
+1. Pull the desired model via Ollama (e.g., `ollama pull gemma3:4b`).
 2. Add or update `LITELLM_DEFAULT_MODEL` in `backend/.env` (prefixed with `ollama/`):
    ```bash
-   LITELLM_DEFAULT_MODEL=ollama/gemma4
+   LITELLM_DEFAULT_MODEL=ollama/gemma3:4b
    ```
 
 ### Switch to a cloud model (optional)
@@ -201,7 +264,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
 | `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
@@ -271,8 +334,8 @@ Types -> Config -> Repo -> Service -> Runtime -> API
 |-------|-----------|
 | Backend | Python 3.13, FastAPI, LangGraph, LiteLLM |
 | Storage | SQLite (metadata), LanceDB (vectors), Kuzu (graph), FTS5 |
-| ML | BAAI/bge-m3 embeddings (ONNX), GLiNER (zero-shot NER) |
-| Retrieval | RRF hybrid: vector + BM25 + graph traversal |
+| ML | BAAI/bge-small-en-v1.5 embeddings, GLiNER (zero-shot NER), ms-marco-MiniLM cross-encoder reranker |
+| Retrieval | RRF hybrid (vector + BM25 + graph traversal), then cross-encoder rerank |
 | Spaced rep | FSRS algorithm |
 | Frontend | React 18, TypeScript 5, Vite, shadcn/ui, Tailwind CSS |
 | Graph viz | Sigma.js v3 + Graphology |

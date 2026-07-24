@@ -1,4 +1,4 @@
-"""Note search service: FTS5 keyword + BAAI/bge-m3 semantic + RRF fusion."""
+"""Note search service: FTS5 keyword + BAAI/bge-small-en-v1.5 semantic + RRF fusion."""
 
 import json
 import logging
@@ -107,7 +107,7 @@ class NoteSearchService:
         return results
 
     def semantic_search(self, query: str, k: int = _NOTE_SEARCH_K) -> list[NoteSearchResult]:
-        """Cosine similarity search over note_vectors using BAAI/bge-m3."""
+        """Cosine similarity search over note_vectors using BAAI/bge-small-en-v1.5."""
         try:
             from app.services.embedder import get_embedding_service  # noqa: PLC0415
             from app.services.vector_store import get_lancedb_service  # noqa: PLC0415

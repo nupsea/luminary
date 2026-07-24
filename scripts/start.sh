@@ -30,18 +30,29 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 _info "Starting Luminary on http://localhost:${PORT} ..."
+_info "First run downloads ML models and is slower; the log below is expected."
+ready=0
 i=0
-until curl -sf --max-time 2 "http://localhost:${PORT}/health" > /dev/null 2>&1; do
+while [ "$i" -lt 90 ]; do
+    if curl -sf --max-time 2 "http://localhost:${PORT}/health" > /dev/null 2>&1; then
+        ready=1
+        break
+    fi
     i=$((i + 1))
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo "Backend exited before becoming ready." >&2
+        echo "Backend exited before becoming ready. Scroll up for the error." >&2
         exit 1
     fi
-    [ "$i" -ge 60 ] && { _info "Backend not ready after 60s — continuing"; break; }
     sleep 1
 done
 
-echo -e "\033[1;32m  Luminary is ready\033[0m  --  http://localhost:${PORT}"
+if [ "$ready" -eq 1 ]; then
+    echo -e "\033[1;32m  Luminary is ready\033[0m  --  open http://localhost:${PORT}"
+    echo -e "\033[0;90m  (ML models keep warming in the background for a few more seconds — that's normal.)\033[0m"
+else
+    _warn "  Still starting after ${i}s — the server hasn't answered /health yet."
+    _warn "  This is usually a slow first-run model download; watch the log above, then open http://localhost:${PORT}"
+fi
 
 # Non-fatal LLM pre-flight: the moat loop (card generation, chat, teach-back) needs
 # a local model. Warn — never block — so the app's own first-run guide stays the

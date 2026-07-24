@@ -379,22 +379,32 @@ $env:LUMINARY_MODE = "public"
 $port = 7820
 
 Write-Host "Starting Luminary on http://localhost:$port ..." -ForegroundColor Cyan
+Write-Host "First run downloads ML models and is slower; the log below is expected." -ForegroundColor Gray
 $proc = Start-Process -FilePath "uv" `
     -ArgumentList "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
     -NoNewWindow -PassThru
 
-for ($i = 0; $i -lt 60; $i++) {
+# Poll /health so the "ready" banner reflects reality. First run downloads models,
+# so allow up to 90s; only claim ready when /health actually answers 200.
+$ready = $false
+for ($i = 0; $i -lt 90; $i++) {
     if ($proc.HasExited) {
-        Write-Error "Backend exited before becoming ready (exit code $($proc.ExitCode))."
+        Write-Error "Backend exited before becoming ready (exit code $($proc.ExitCode)). Scroll up for the error."
     }
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 2
-        if ($resp.StatusCode -eq 200) { break }
+        if ($resp.StatusCode -eq 200) { $ready = $true; break }
     } catch {}
     Start-Sleep -Seconds 1
 }
 
-Write-Host "  Luminary is ready  --  http://localhost:$port" -ForegroundColor Green
+if ($ready) {
+    Write-Host "  Luminary is ready  --  open http://localhost:$port" -ForegroundColor Green
+    Write-Host "  (ML models keep warming in the background for a few more seconds -- that's normal.)" -ForegroundColor DarkGray
+} else {
+    Write-Warning "  Still starting -- the server hasn't answered /health yet."
+    Write-Warning "  This is usually a slow first-run model download; watch the log above, then open http://localhost:$port"
+}
 try {
     Wait-Process -Id $proc.Id
 } finally {
@@ -409,11 +419,18 @@ Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "       Installation Complete!" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
-Write-Host "Installed per-user (no admin). If a tool is reported 'not on PATH'"
+Write-Host "This installer runs ONCE. It set up Python, Node, uv, Ollama and the"
+Write-Host "app, and created a launcher named start.ps1 in this folder."
+Write-Host ""
+Write-Host "Installed per-user (no admin). If a tool was reported 'not on PATH'"
 Write-Host "above, open a NEW PowerShell window so the updated PATH takes effect."
 Write-Host ""
-Write-Host "To start the application, run:"
+Write-Host "STEP 2 -- start the app (run this every time you want to use Luminary):"
 Write-Host "  .\start.ps1" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "start.ps1 launches the server and prints 'Luminary is ready' once it"
+Write-Host "answers on port 7820. The FIRST start is slower -- it downloads ML"
+Write-Host "models -- so wait for that line before opening the browser."
 Write-Host ""
 Write-Host "Then open http://localhost:7820 in your browser."
 Write-Host "Optional: image/figure analysis needs a vision model (~6 GB download)."
