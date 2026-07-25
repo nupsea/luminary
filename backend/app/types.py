@@ -23,6 +23,9 @@ class ParsedDocument:
     raw_text: str = ""
     # Character offsets in raw_text where each new page begins
     page_breaks: list[int] = field(default_factory=list)
+    # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
+    # static fetch could not capture). Empty when extraction was clean.
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass

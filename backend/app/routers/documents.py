@@ -743,7 +743,7 @@ async def ingest_url(
             ),
         )
         logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
-        return {"document_id": doc_id, "status": "processing"}
+        return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
     # 2. YouTube: Existing logic
     if not _yt_module.check_ytdlp_available():

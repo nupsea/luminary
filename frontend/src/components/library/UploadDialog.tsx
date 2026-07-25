@@ -301,9 +301,14 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setDocTitle(urlValue)
     logger.info("[Upload] url start", { url: urlValue })
     try {
-      const docId = await submitUrl(urlValue)
-      track(docId, urlValue)
-      setTrackedDocId(docId)
+      const { documentId, warnings } = await submitUrl(urlValue)
+      track(documentId, urlValue)
+      setTrackedDocId(documentId)
+      // The dialog closes immediately, so any extraction notices need a long
+      // dwell to survive the transition and stay readable.
+      for (const warning of warnings) {
+        toast.warning(warning, { duration: 12000 })
+      }
       // Close the dialog immediately — progress is shown via the
       // IngestionProgressPills widget in the bottom-left corner.
       reset()

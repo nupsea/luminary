@@ -28,6 +28,29 @@ USER_AGENTS = [
 
 _BOILERPLATE_CONTAINERS = ("nav", "header", "footer", "aside")
 
+# Substrings that betray a client-hydrated JavaScript page across the common
+# SSR frameworks. Their presence means the initial HTML we fetch is a hydration
+# shell: prose is often server-rendered, but figures drawn by client-only
+# components (charts, diagrams, canvases) exist only after JS runs in a browser,
+# which a static fetch never does. Matched case-insensitively.
+_JS_HYDRATION_MARKERS = (
+    "__next_data__",
+    "self.__next_f",
+    "__nuxt__",
+    "data-server-rendered",
+    "data-reactroot",
+    "astro-island",
+    "data-sveltekit",
+    "dehydratedstate",
+    "dehydrateddata",
+    "dehydratedqueryclient",
+    "stream-barrier",
+)
+
+# Below this word count the page is not a real article, so a lack of images is
+# unremarkable and must not trigger a warning.
+_MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING = 200
+
 _INLINE_MARKERS = {
     "strong": "**",
     "b": "**",
@@ -101,6 +124,11 @@ class ArticleExtractor:
         # 5. Normalize Markdown (The "### Fix")
         markdown_text = self._normalize_markdown(markdown_text)
 
+        word_count = len(markdown_text.split())
+        warnings = self._detect_uncaptured_visuals(html_content, markdown_text, word_count)
+        for warning in warnings:
+            logger.info("ArticleExtractor notice for %s: %s", url, warning)
+
         # For Articles, we keep them as one primary "Section" to ensure unified flow in UI
         sections = [Section(heading=title, level=1, text=markdown_text, page_start=0, page_end=0)]
 
@@ -108,10 +136,36 @@ class ArticleExtractor:
             title=title,
             format="md",
             pages=1,
-            word_count=len(markdown_text.split()),
+            word_count=word_count,
             sections=sections,
             raw_text=markdown_text,
+            warnings=warnings,
         )
+
+    def _detect_uncaptured_visuals(self, html: str, markdown: str, word_count: int) -> list[str]:
+        """Warns when a page's figures were almost certainly lost to static fetching.
+
+        A static HTTP fetch cannot run JavaScript, so figures drawn by client-only
+        components (chart/diagram widgets, canvases) are absent from the HTML we
+        receive and vanish silently. We cannot see those unrendered components to
+        count them, so we infer the loss from a conservative signature: a real
+        article's worth of prose came through, yet not a single image did, on a
+        page that is a client-hydrated JS app. A plain static text-only article
+        trips none of these (no hydration markers), and any page from which we did
+        mirror an image is left alone -- keeping false positives rare.
+        """
+        if word_count < _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING:
+            return []
+        if "![" in markdown:
+            return []
+        lowered = html.lower()
+        if not any(marker in lowered for marker in _JS_HYDRATION_MARKERS):
+            return []
+        return [
+            "Some figures on this page are drawn by JavaScript in the browser and "
+            "could not be captured. The text was imported in full; interactive "
+            "charts or diagrams may be missing."
+        ]
 
     def _prepare_html(self, html: str) -> str:
         """Repairs markup that trafilatura's extractor silently drops."""
