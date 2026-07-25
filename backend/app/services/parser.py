@@ -44,6 +44,42 @@ def _norm_ws(s: str) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip()
 
 
+# A real inter-word gap is a sizeable fraction of an em; kerning between glyphs
+# of one word is near zero and frequently negative. 0.2em sits well clear of
+# both, since a space glyph is typically 0.25-0.33em.
+_SPACE_GAP_EM = 0.2
+
+
+def _join_spans(spans: list[dict]) -> str:
+    """Rebuild a line's text from its spans, inferring word gaps from geometry.
+
+    PyMuPDF opens a new span at every style change, so a PDF that alternates
+    Type3 font subsets glyph by glyph splits each word across dozens of spans.
+    Joining those on a space corrupts every word on the page; joining on nothing
+    instead welds together words that the PDF separates by position rather than
+    by a space character. Only the horizontal gap distinguishes the two cases.
+    """
+    parts: list[str] = []
+    prev_x1: float | None = None
+    prev_text = ""
+    for span in spans:
+        text = span.get("text", "")
+        if not text:
+            continue
+        x0, x1 = span["bbox"][0], span["bbox"][2]
+        if (
+            prev_x1 is not None
+            and not prev_text[-1:].isspace()
+            and not text[:1].isspace()
+            and x0 - prev_x1 > _SPACE_GAP_EM * span.get("size", 12.0)
+        ):
+            parts.append(" ")
+        parts.append(text)
+        prev_x1 = x1
+        prev_text = text
+    return "".join(parts)
+
+
 def _heading_is_prose(heading: str) -> bool:
     h = heading.strip()
     if len(h) > 100:
@@ -156,7 +192,7 @@ class DocumentParser:
                             spans = line.get("spans", [])
                             if not spans:
                                 continue
-                            line_text = " ".join(s["text"] for s in spans).strip()
+                            line_text = _join_spans(spans).strip()
                             if not line_text:
                                 continue
                             texts.append(line_text)
@@ -242,7 +278,7 @@ class DocumentParser:
                     if not spans:
                         continue
                     max_size = max(s["size"] for s in spans)
-                    line_text = " ".join(s["text"] for s in spans).strip()
+                    line_text = _join_spans(spans).strip()
                     if not line_text:
                         continue
                     if max_size >= heading_threshold and len(line_text) < 120:
