@@ -5,7 +5,9 @@ Covers:
   (b) test_suggestions_null_document_id: null document_id returns cross-document suggestions
   (c) test_suggestions_technical_document: tech doc returns concept/tradeoff suggestions
   (d) test_suggestions_video_document: video doc returns argument/evidence suggestions
-  (e) test_suggestions_empty_library: no documents returns onboarding suggestions
+  (e) test_suggestions_empty_library: no documents returns NO pills (empty state guides);
+      populated library with no shared entities returns real cross-doc suggestions;
+      missing document id returns NO pills
   (f) test_suggestions_returns_four: always returns exactly 4 suggestions
   (g) test_suggestions_not_in_history: AC11 -- returned suggestions not in recent history
   (h) test_bloom_level_decrease: AC12 -- bloom level decreases per 4 asked questions
@@ -185,7 +187,41 @@ async def test_suggestions_video_document(db_session):
 
 @pytest.mark.asyncio
 async def test_suggestions_empty_library(db_session):
-    """No cross-document entities returns onboarding suggestions."""
+    """A genuinely empty library (no documents) returns NO pills -- the chat empty
+    state provides the (non-clickable) onboarding guidance instead."""
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+        mock_graph.return_value.get_cross_document_entities.return_value = []
+
+        from app.routers.chat_meta import get_suggestions
+
+        result = await get_suggestions(document_id=None)
+
+    assert result.suggestions == []
+
+
+@pytest.mark.asyncio
+async def test_suggestions_missing_document_returns_no_pills(db_session):
+    """A stale/missing document id (e.g. deleted doc) returns NO pills, never fake
+    onboarding chips that would submit their own text as a dead question."""
+    with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
+        mock_graph.return_value.get_entities_by_type_for_document.return_value = {}
+
+        from app.routers.chat_meta import get_suggestions
+
+        result = await get_suggestions(document_id="does-not-exist")
+
+    assert result.suggestions == []
+
+
+@pytest.mark.asyncio
+async def test_suggestions_populated_library_no_shared_entities(db_session):
+    """A library WITH documents but no cross-document entity overlap must get real,
+    answerable questions -- never the onboarding "upload a document" chips."""
+    doc = _make_doc("doc-ready-1", "Some Book", "book")
+    doc.stage = "complete"
+    db_session.add(doc)
+    await db_session.commit()
+
     with patch("app.routers.chat_meta.get_graph_service") as mock_graph:
         mock_graph.return_value.get_cross_document_entities.return_value = []
 
@@ -195,7 +231,8 @@ async def test_suggestions_empty_library(db_session):
 
     assert len(result.suggestions) == 4
     all_text = " ".join(s.text for s in result.suggestions)
-    assert "Upload" in all_text or "import" in all_text.lower()
+    assert "Upload" not in all_text and "YouTube" not in all_text
+    assert "Viz tab" not in all_text
 
 
 # (f) Always returns exactly 4 suggestions
