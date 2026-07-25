@@ -229,8 +229,8 @@ def _span(text: str, x0: float, x1: float, size: float = 12.0) -> dict:
 
 class TestJoinSpans:
     def test_glyph_split_word_is_not_broken_by_spaces(self):
-        """A PDF alternating Type3 font subsets splits one word across many spans
-        with no horizontal gap; joining on a space corrupted every word."""
+        """Type3 subsets split one word across many spans with no gap between
+        them; joining on a space corrupted every word."""
         spans = [
             _span("The C", 27.750, 74.964, 16.5),
             _span("on", 74.980, 95.581, 16.5),

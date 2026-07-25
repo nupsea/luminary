@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.models import DocumentModel, NoteModel
 from app.repos.collection_repo import CollectionRepo
 
 
@@ -19,6 +20,31 @@ async def repo():
     async with factory() as session:
         yield CollectionRepo(session)
     await engine.dispose()
+
+
+async def _add_notes(repo: CollectionRepo, ids: list[str]) -> None:
+    """member_counts joins memberships to their targets, so the rows must exist."""
+    for note_id in ids:
+        repo.session.add(NoteModel(id=note_id, content=note_id, tags=[]))
+    await repo.session.commit()
+
+
+async def _add_documents(repo: CollectionRepo, ids: list[str]) -> None:
+    for doc_id in ids:
+        repo.session.add(
+            DocumentModel(
+                id=doc_id,
+                title=doc_id,
+                format="txt",
+                content_type="book",
+                word_count=1,
+                page_count=0,
+                file_path=f"/tmp/{doc_id}.txt",
+                stage="complete",
+                tags=[],
+            )
+        )
+    await repo.session.commit()
 
 
 @pytest.mark.asyncio
@@ -79,11 +105,26 @@ async def test_remove_member(repo: CollectionRepo) -> None:
 @pytest.mark.asyncio
 async def test_member_counts_groups_by_type(repo: CollectionRepo) -> None:
     col = await repo.create(name="C")
+    await _add_notes(repo, ["n1", "n2"])
+    await _add_documents(repo, ["d1"])
     await repo.add_members(col.id, ["n1", "n2"], member_type="note")
     await repo.add_members(col.id, ["d1"], member_type="document")
     counts = await repo.member_counts()
     assert counts[(col.id, "note")] == 2
     assert counts[(col.id, "document")] == 1
+
+
+@pytest.mark.asyncio
+async def test_member_counts_skips_members_that_no_longer_exist(repo: CollectionRepo) -> None:
+    """A membership whose note or document is gone must not be counted."""
+    col = await repo.create(name="C")
+    await _add_notes(repo, ["real-note"])
+    await repo.add_members(col.id, ["real-note", "deleted-note"], member_type="note")
+    await repo.add_members(col.id, ["deleted-doc"], member_type="document")
+
+    counts = await repo.member_counts()
+    assert counts[(col.id, "note")] == 1
+    assert (col.id, "document") not in counts
 
 
 @pytest.mark.asyncio

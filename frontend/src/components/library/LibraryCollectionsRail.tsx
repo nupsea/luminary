@@ -11,10 +11,8 @@ interface LibraryCollectionsRailProps {
 }
 
 /**
- * Library-side collections rail: the same CollectionTree the Notes sidebar
- * uses, wired for documents. Rows carry inline rename, delete, export and
- * health there, so they carry them here too -- the two rails only differ in
- * what a drop adds and in this header.
+ * The Notes sidebar's CollectionTree, wired for documents. The two rails differ
+ * only in what a drop adds and in this header.
  */
 export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollectionsRailProps) {
   const [formOpen, setFormOpen] = useState(false)

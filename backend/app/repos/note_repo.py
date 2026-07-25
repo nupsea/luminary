@@ -97,6 +97,14 @@ class NoteRepo:
         await self.session.commit()
 
     async def delete_by_id(self, note_id: str) -> None:
+        # SQLite cannot ALTER ADD FK, so membership is cascaded here; orphaned
+        # rows inflated every collection's note badge.
+        await self.session.execute(
+            delete(CollectionMemberModel).where(
+                CollectionMemberModel.member_id == note_id,
+                CollectionMemberModel.member_type == "note",
+            )
+        )
         await self.session.execute(delete(NoteModel).where(NoteModel.id == note_id))
         await self.session.commit()
 

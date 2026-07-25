@@ -291,12 +291,9 @@ async def get_collection_tree(
         if col is None:
             return None
         scoped = inclusive_scoped(cid)
-        # No pruning: ?contains scopes the COUNT, never the membership of the
-        # list. A collection holds documents and notes in one container, and a
-        # rail is a drop target and a management surface as well as a filter --
-        # hiding a note-only collection from the Library rail made it
-        # impossible to drop a document into it or rename it from there.
-        # Callers distinguish relevance from the returned per-type counts.
+        # ?contains scopes the count, never the list. Pruning a note-only
+        # collection made it impossible to drop a document into it, or rename
+        # it, from the Library rail. Callers read relevance off the counts.
         children: list[CollectionTreeItem] = []
         if depth < 1:
             for child_id in children_by_parent.get(cid, []):

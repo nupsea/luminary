@@ -4,9 +4,8 @@
  * Fields: name (required), description, 8-swatch color picker, parent select
  * (top-level collections only -- max 2-level nesting).
  *
- * POST /collections to create, PUT /collections/{id} to edit. Invalidates
- * ["collections-tree"] on success. The parent select is create-only: the update
- * endpoint does not accept a parent, so re-parenting is not offered.
+ * POST /collections to create, PUT /collections/{id} to edit. The parent select
+ * is create-only: the update endpoint takes no parent.
  */
 
 import { useState } from "react"
@@ -80,7 +79,6 @@ interface CreateCollectionDialogProps {
   open: boolean
   onClose: () => void
   collection?: EditableCollection | null
-  /** Pre-seeds the name field when creating. */
   defaultName?: string
   onSaved?: (collection: CreatedCollection) => void
 }
@@ -93,16 +91,14 @@ export function CreateCollectionDialog({
   onSaved,
 }: CreateCollectionDialogProps) {
   const isEdit = collection !== null
-  // Only what the user has actually typed is held in state; everything else is
-  // derived from the collection being edited. Syncing props into state via an
-  // effect would either clobber in-flight typing when the detail fetch lands or
-  // leave stale values behind when the dialog reopens on a different row.
+  // Only typed values live in state; the rest derive from `collection`. Syncing
+  // props into state via an effect would clobber typing when `detail` lands, or
+  // leave stale values when the dialog reopens on a different row.
   const [edits, setEdits] = useState<FormEdits>({})
   const qc = useQueryClient()
 
-  // Callers list collections from /collections/tree, which carries no
-  // description, so edit mode reads the full row rather than showing an empty
-  // description box for a collection that has one.
+  // /collections/tree carries no description, so edit mode reads the full row
+  // rather than showing an empty box for a collection that has one.
   const { data: detail } = useQuery({
     queryKey: ["collection-detail", collection?.id],
     queryFn: () => apiGet<EditableCollection>(`/collections/${collection?.id}`),

@@ -93,8 +93,7 @@ export const useAppStore = create<AppState>()(
       llmMode: "private",
       currentProvider: "openai",
       libraryView: "grid",
-      // Open on every app start so the Collections and Tags rails are visible
-      // rather than hidden behind a toggle. Deliberately not persisted.
+      // Open every app start so the rails are visible. Deliberately not persisted.
       libraryFiltersOpen: true,
       notesView: "grid",
       // Only "false" disables; absent key (first run) defaults to enabled.
@@ -148,8 +147,8 @@ export const useAppStore = create<AppState>()(
       name: "luminary-app-store",
       storage: createJSONStorage(() => localStorage),
       version: 1,
-      // v0 persisted libraryFiltersOpen. Hydrating that value would keep the
-      // rails hidden for anyone who had ever collapsed them, so drop the key.
+      // v0 persisted libraryFiltersOpen; hydrating it would keep the rails
+      // hidden for anyone who had ever collapsed them.
       migrate: (persisted) => {
         if (persisted && typeof persisted === "object") {
           delete (persisted as Record<string, unknown>).libraryFiltersOpen

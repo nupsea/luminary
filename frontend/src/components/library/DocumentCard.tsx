@@ -215,8 +215,6 @@ export function DocumentCard({
     }
   }
 
-  // Creating from here is only worth the interruption if the document lands in
-  // the new collection, which is the whole reason the user opened this picker.
   async function handleCollectionCreated(created: { id: string; name: string }) {
     await handleAddToCollection(created.id)
     setCollections(await fetchCollectionTree())

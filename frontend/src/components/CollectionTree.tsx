@@ -41,11 +41,9 @@ export { flattenCollectionTree }
 export type CollectionTreeContains = "document" | "note"
 export type CollectionMemberType = "document" | "note"
 
-/** dataTransfer key each surface uses when dragging one of its rows. */
 export const NOTE_DRAG_MIME = "text/plain"
 export const DOC_DRAG_MIME = "application/x-luminary-doc-id"
 
-/** The list query a membership change invalidates, per member type. */
 const MEMBER_LIST_QUERY: Record<CollectionMemberType, string> = {
   note: "notes",
   document: "documents",
@@ -205,8 +203,8 @@ function CollectionTreeItemRow({
       : item.document_count > 0
         ? `${item.document_count} document${item.document_count === 1 ? "" : "s"}`
         : `${item.note_count} note${item.note_count === 1 ? "" : "s"}`
-  // Holds nothing of the kind this rail deals in. Still a valid drop target and
-  // still manageable, so it is de-emphasised rather than hidden.
+  // Nothing of this rail's kind: de-emphasised, never hidden -- still a drop
+  // target and still manageable from here.
   const offKind = !isEmpty && (memberType === "document" ? item.document_count : item.note_count) === 0
 
   return (
@@ -285,9 +283,8 @@ function CollectionTreeItemRow({
           </span>
         )}
 
-        {/* Kind + counts. Which pills are present IS the kind: documents only,
-            notes only, or both. A zero pill is never rendered, so the row reads
-            at a glance instead of every collection showing a "0n". */}
+        {/* Which pills are present IS the kind: documents, notes, or both. A
+            zero pill is never rendered. */}
         {!renaming && (
           <div className="ml-auto flex items-center gap-1 shrink-0" title={kindLabel}>
             {item.document_count > 0 && (
@@ -431,9 +428,8 @@ function CollectionTreeItemRow({
 
 
 interface CollectionTreeProps {
-  /** Scopes each row's count badge to this member type. Every collection is
-   * still listed: a rail is a drop target and a management surface, not only a
-   * filter, so hiding a collection would make it unreachable from here. */
+  /** Scopes the count badge only. Every collection stays listed, since a rail
+   * is a drop target and management surface, not just a filter. */
   contains?: CollectionTreeContains
   /** What a drop onto a row adds, and which list query that invalidates. */
   memberType?: CollectionMemberType
@@ -477,9 +473,8 @@ export function CollectionTree({
     queryKey: ["collections-tree", contains ? `contains:${contains}` : "contains:all"],
     queryFn: () => fetchCollectionTree(contains),
     staleTime: 30_000,
-    // A collection created on another surface must be present the moment this
-    // one mounts; serving it from a still-fresh cache is what made the rail
-    // look like it needed a manual refresh.
+    // Without this, a collection created on another surface is served from the
+    // still-fresh cache and the rail looks like it needs a manual refresh.
     refetchOnMount: "always",
   })
 

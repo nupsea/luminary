@@ -44,20 +44,17 @@ def _norm_ws(s: str) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip()
 
 
-# A real inter-word gap is a sizeable fraction of an em; kerning between glyphs
-# of one word is near zero and frequently negative. 0.2em sits well clear of
-# both, since a space glyph is typically 0.25-0.33em.
+# Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
 _SPACE_GAP_EM = 0.2
 
 
 def _join_spans(spans: list[dict]) -> str:
     """Rebuild a line's text from its spans, inferring word gaps from geometry.
 
-    PyMuPDF opens a new span at every style change, so a PDF that alternates
-    Type3 font subsets glyph by glyph splits each word across dozens of spans.
-    Joining those on a space corrupts every word on the page; joining on nothing
-    instead welds together words that the PDF separates by position rather than
-    by a space character. Only the horizontal gap distinguishes the two cases.
+    PyMuPDF opens a new span at every style change, so a PDF alternating Type3
+    font subsets per glyph splits words across dozens of spans. Joining on a
+    space corrupts every word; joining on nothing welds together words a PDF
+    separates by position alone. Only the gap tells the two apart.
     """
     parts: list[str] = []
     prev_x1: float | None = None

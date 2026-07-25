@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import CollectionMemberModel, CollectionModel
+from app.models import CollectionMemberModel, CollectionModel, DocumentModel, NoteModel
 from app.services.repo_helpers import get_or_404
 
 
@@ -43,17 +43,26 @@ class CollectionRepo:
         return result.scalars().all()
 
     async def member_counts(self) -> dict[tuple[str, str], int]:
-        """Return {(collection_id, member_type): count}."""
-        result = await self.session.execute(
-            select(
-                CollectionMemberModel.collection_id,
-                CollectionMemberModel.member_type,
-                func.count(CollectionMemberModel.member_id),
-            ).group_by(
-                CollectionMemberModel.collection_id, CollectionMemberModel.member_type
+        """Return {(collection_id, member_type): count} of members that still exist.
+
+        Joins each membership back to its target: a row whose note or document
+        was deleted must not inflate the badge. The delete paths clear
+        memberships, but other writers reach this table too.
+        """
+        counts: dict[tuple[str, str], int] = {}
+        for member_type, target in (("note", NoteModel), ("document", DocumentModel)):
+            result = await self.session.execute(
+                select(
+                    CollectionMemberModel.collection_id,
+                    func.count(CollectionMemberModel.member_id),
+                )
+                .join(target, target.id == CollectionMemberModel.member_id)
+                .where(CollectionMemberModel.member_type == member_type)
+                .group_by(CollectionMemberModel.collection_id)
             )
-        )
-        return {(cid, mtype): count for cid, mtype, count in result.all()}
+            for cid, count in result.all():
+                counts[(cid, member_type)] = count
+        return counts
 
     async def child_ids(self, parent_id: str) -> list[str]:
         result = await self.session.execute(
