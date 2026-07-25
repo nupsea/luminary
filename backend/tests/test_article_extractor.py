@@ -109,6 +109,35 @@ class TestInlineFormatting:
         assert "``" not in extracted
 
 
+class TestUncapturedVisualDetection:
+    PROSE = "word " * 300  # comfortably above the article-length floor
+
+    def _detect(self, html: str, markdown: str) -> list[str]:
+        extractor = ArticleExtractor()
+        return extractor._detect_uncaptured_visuals(html, markdown, len(markdown.split()))
+
+    def test_js_app_with_prose_but_no_images_warns(self):
+        html = "<html><body><script>self.__next_f.push([])</script></body></html>"
+        assert self._detect(html, self.PROSE)
+
+    def test_dehydrated_streaming_app_warns(self):
+        html = "<html><body>...dehydratedQueryClient...stream-barrier...</body></html>"
+        assert self._detect(html, self.PROSE)
+
+    def test_static_text_only_article_does_not_warn(self):
+        html = "<html><body><article><p>plain server-rendered prose</p></article></body></html>"
+        assert self._detect(html, self.PROSE) == []
+
+    def test_js_app_that_yielded_an_image_does_not_warn(self):
+        html = "<html><body><script>self.__next_f.push([])</script></body></html>"
+        md = self.PROSE + "\n\n![](__LUMINARY_IMG__/doc/a.png)"
+        assert self._detect(html, md) == []
+
+    def test_short_page_does_not_warn(self):
+        html = "<html><body><script>self.__next_f.push([])</script></body></html>"
+        assert self._detect(html, "too short to be an article") == []
+
+
 class TestBestSrcsetUrl:
     @pytest.mark.parametrize(
         ("srcset", "expected"),

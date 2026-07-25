@@ -67,12 +67,18 @@ export async function submitKindleFile(file: File): Promise<KindleIngestResult> 
   }
 }
 
-export async function submitUrl(url: string): Promise<string> {
+export interface UrlIngestResult {
+  documentId: string
+  warnings: string[]
+}
+
+export async function submitUrl(url: string): Promise<UrlIngestResult> {
   try {
-    const data = await apiPost<{ document_id: string }>("/documents/ingest-url", {
-      url,
-    })
-    return data.document_id
+    const data = await apiPost<{ document_id: string; warnings?: string[] }>(
+      "/documents/ingest-url",
+      { url },
+    )
+    return { documentId: data.document_id, warnings: data.warnings ?? [] }
   } catch (err) {
     throw detailFromError(err, "Ingestion failed")
   }

@@ -6,7 +6,7 @@ import re
 
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, DocumentModel, SectionModel
@@ -33,13 +33,6 @@ class ExplorationSuggestion(BaseModel):
 
 
 # Template-based suggestion generation (fallback, no LLM)
-
-_ONBOARDING_SUGGESTIONS = [
-    "Upload a document in the Learning tab to get started",
-    "Try importing a PDF, EPUB, or text file",
-    "You can also paste a YouTube URL to analyze a video",
-    "Explore the Knowledge Graph in the Viz tab after uploading",
-]
 
 
 # A content_type='book' can be narrative fiction (Odyssey) OR a technical textbook
@@ -152,6 +145,17 @@ def _generic_suggestions(entities: dict[str, list[str]], headings: list[str]) ->
     return suggestions[:4]
 
 
+# Answerable all-scope questions that don't depend on any specific entity — used
+# when the library has documents but no entity is shared across 2+ of them (common
+# after entity disambiguation). These run against the corpus; onboarding chips do not.
+_GENERIC_CROSS_DOC_SUGGESTIONS = [
+    "What are the common themes across my documents?",
+    "Summarize the key ideas across my library",
+    "What questions should I be exploring in my material?",
+    "Which topics connect the documents in my library?",
+]
+
+
 def _cross_document_suggestions(shared_entities: list[str]) -> list[str]:
     """Generate suggestions for all-scope (no specific document)."""
     suggestions: list[str] = []
@@ -163,8 +167,29 @@ def _cross_document_suggestions(shared_entities: list[str]) -> list[str]:
         )
     if len(shared_entities) >= 3:
         suggestions.append(f"Summarize everything you know about {shared_entities[2]}")
-    suggestions.append("What are the common themes across my documents?")
+    for fb in _GENERIC_CROSS_DOC_SUGGESTIONS:
+        if len(suggestions) >= 4:
+            break
+        if fb not in suggestions:
+            suggestions.append(fb)
     return suggestions[:4]
+
+
+async def _library_has_ready_documents() -> bool:
+    """True when at least one document has reached a queryable stage.
+
+    Onboarding suggestions are correct only for a genuinely empty library — a
+    populated corpus with no cross-document entity overlap must NOT be told to
+    "upload a document to get started".
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(DocumentModel)
+            .where(DocumentModel.stage.in_(("complete", "enriching")))
+        )
+        return bool(count)
 
 
 def _template_to_items(suggestions: list[str]) -> list[SuggestionItem]:
@@ -240,8 +265,12 @@ async def get_suggestions(
 async def _handle_all_scope(svc) -> SuggestionResponse:  # noqa: ANN001
     """Handle cross-document (all-scope) suggestions."""
     shared = await asyncio.to_thread(get_graph_service().get_cross_document_entities, limit=10)
-    if not shared:
-        return SuggestionResponse(suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4]))
+
+    # An empty library gets NO pills — the chat empty state ("Your library is
+    # empty, upload a document...") is the correct, non-clickable guidance. Fake
+    # onboarding "questions" submit their own text to /qa and never work.
+    if not shared and not await _library_has_ready_documents():
+        return SuggestionResponse(suggestions=[])
 
     try:
         target_bloom = await svc.get_target_bloom_level(None)
@@ -278,8 +307,10 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
             await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
 
+        # Stale/missing doc id (e.g. the selected document was deleted): no pills
+        # rather than onboarding chips that submit their own text as a dead question.
         if doc is None:
-            return SuggestionResponse(suggestions=_template_to_items(_ONBOARDING_SUGGESTIONS[:4]))
+            return SuggestionResponse(suggestions=[])
 
         content_type = doc.content_type or "unknown"
 
