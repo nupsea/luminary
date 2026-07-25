@@ -19,6 +19,7 @@ import {
   MoreVertical,
   Network,
   Newspaper,
+  Plus,
   StickyNote,
   Trash2, 
   X, 
@@ -45,6 +46,8 @@ import {
 } from "./utils"
 
 import { apiPatch } from "@/lib/apiClient"
+import { toast } from "sonner"
+import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 
 function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   const r = (size - 4) / 2
@@ -156,6 +159,7 @@ export function DocumentCard({
   const [collections, setCollections] = useState<CollectionTreeItem[] | null>(null)
   const [collectionsLoading, setCollectionsLoading] = useState(false)
   const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
+  const [newCollectionOpen, setNewCollectionOpen] = useState(false)
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
@@ -209,6 +213,14 @@ export function DocumentCard({
     } catch {
       // Silent — POST is idempotent server-side; surface failure only if needed later.
     }
+  }
+
+  // Creating from here is only worth the interruption if the document lands in
+  // the new collection, which is the whole reason the user opened this picker.
+  async function handleCollectionCreated(created: { id: string; name: string }) {
+    await handleAddToCollection(created.id)
+    setCollections(await fetchCollectionTree())
+    toast.success(`Added to ${created.name}`)
   }
 
   async function handleRetag() {
@@ -396,6 +408,18 @@ export function DocumentCard({
                           })
                         )}
                       </div>
+                      {/* Outside the scroll area so it stays reachable however
+                          many collections exist -- this is the path out of the
+                          "No collections yet" dead end. */}
+                      {!collectionsLoading && collections && (
+                        <button
+                          onClick={() => setNewCollectionOpen(true)}
+                          className="mt-1 flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
+                        >
+                          <Plus size={12} className="shrink-0" />
+                          <span className="flex-1 truncate">New collection…</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -589,6 +613,15 @@ export function DocumentCard({
           <span>{Math.round(doc.objective_progress_pct)}% objectives covered</span>
         </div>
       )}
+
+      {/* Card click-through would open the document behind the dialog. */}
+      <div onClick={(e) => e.stopPropagation()}>
+        <CreateCollectionDialog
+          open={newCollectionOpen}
+          onClose={() => setNewCollectionOpen(false)}
+          onSaved={(created) => void handleCollectionCreated(created)}
+        />
+      </div>
 
       {/* Inline delete confirmation */}
       {confirmDelete && (

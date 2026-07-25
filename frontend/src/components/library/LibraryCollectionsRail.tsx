@@ -1,10 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react"
+import { ChevronDown, ChevronRight, ExternalLink, Pencil, Plus, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 
+import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
+import type { EditableCollection } from "@/components/CreateCollectionDialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { apiDelete } from "@/lib/apiClient"
 import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { cn } from "@/lib/utils"
@@ -18,6 +29,9 @@ interface LibraryCollectionsRailProps {
 
 export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollectionsRailProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<EditableCollection | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<CollectionTreeItem | null>(null)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -41,6 +55,29 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
     },
     onError: () => toast.error("Could not add to collection"),
   })
+
+  const deleteMut = useMutation({
+    mutationFn: (collectionId: string) => apiDelete(`/collections/${collectionId}`),
+    onSuccess: (_data, collectionId) => {
+      void queryClient.invalidateQueries({ queryKey: ["collections-tree"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      // Clear the filter if the collection currently narrowing the grid is gone.
+      if (selectedId === collectionId) onSelect(null)
+      setPendingDelete(null)
+      toast.success("Collection deleted")
+    },
+    onError: () => toast.error("Could not delete collection"),
+  })
+
+  function openCreate() {
+    setEditing(null)
+    setFormOpen(true)
+  }
+
+  function openEdit(item: CollectionTreeItem) {
+    setEditing({ id: item.id, name: item.name, color: item.color })
+    setFormOpen(true)
+  }
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -73,6 +110,13 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
               Clear
             </button>
           )}
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-primary hover:bg-accent"
+            title="New collection"
+          >
+            <Plus size={12} /> New
+          </button>
         </div>
       </div>
 
@@ -97,7 +141,15 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
       )}
 
       {!isLoading && !isError && (!data || data.length === 0) && (
-        <p className="py-2 text-xs text-muted-foreground">No collections yet</p>
+        <div className="flex flex-col items-start gap-1.5 py-2">
+          <p className="text-xs text-muted-foreground">No collections yet</p>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
+          >
+            <Plus size={12} /> New collection
+          </button>
+        </div>
       )}
 
       {!isLoading && !isError && data && data.length > 0 && (
@@ -112,6 +164,8 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
               selectedId={selectedId}
               onSelect={onSelect}
               onDropDoc={(docId) => dropMut.mutate({ collectionId: item.id, docId })}
+              onEdit={() => openEdit(item)}
+              onDelete={() => setPendingDelete(item)}
             >
               {expanded.has(item.id) &&
                 item.children.map((child) => (
@@ -126,12 +180,60 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
                     onDropDoc={(docId) =>
                       dropMut.mutate({ collectionId: child.id, docId })
                     }
+                    onEdit={() => openEdit(child)}
+                    onDelete={() => setPendingDelete(child)}
                   />
                 ))}
             </RailItem>
           ))}
         </div>
       )}
+
+      <CreateCollectionDialog
+        open={formOpen}
+        collection={editing}
+        onClose={() => {
+          setFormOpen(false)
+          setEditing(null)
+        }}
+      />
+
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(o) => {
+          if (!o) setPendingDelete(null)
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete &ldquo;{pendingDelete?.name}&rdquo;?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete && pendingDelete.children.length > 0
+                ? `This also deletes its ${pendingDelete.children.length} sub-collection${
+                    pendingDelete.children.length === 1 ? "" : "s"
+                  }. `
+                : ""}
+              Your documents and notes are not deleted — only the collection and its
+              membership list. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              onClick={() => setPendingDelete(null)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => pendingDelete && deleteMut.mutate(pendingDelete.id)}
+              disabled={deleteMut.isPending}
+              className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
+            >
+              {deleteMut.isPending ? "Deleting…" : "Delete"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }
@@ -144,6 +246,8 @@ interface RailItemProps {
   selectedId: string | null
   onSelect: (id: string | null) => void
   onDropDoc: (docId: string) => void
+  onEdit: () => void
+  onDelete: () => void
   children?: React.ReactNode
 }
 
@@ -155,6 +259,8 @@ function RailItem({
   selectedId,
   onSelect,
   onDropDoc,
+  onEdit,
+  onDelete,
   children,
 }: RailItemProps) {
   const [isDragOver, setIsDragOver] = useState(false)
@@ -211,12 +317,41 @@ function RailItem({
         <span className="flex-1 min-w-0 truncate">{item.name}</span>
         {item.scoped_count > 0 && (
           <span
-            className="ml-auto shrink-0 rounded-full bg-blue-100/60 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300"
+            className="ml-auto shrink-0 rounded-full bg-blue-100/60 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300 group-hover:hidden"
             title={`${item.scoped_count} document${item.scoped_count === 1 ? "" : "s"} (inclusive of subcollections)`}
           >
             {item.scoped_count}
           </span>
         )}
+        {/* role=button rather than <button>: this row is itself a button. */}
+        <span className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`Edit ${item.name}`}
+            title="Edit collection"
+            onClick={(e) => {
+              e.stopPropagation()
+              onEdit()
+            }}
+            className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            <Pencil size={11} />
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={`Delete ${item.name}`}
+            title="Delete collection"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-destructive"
+          >
+            <Trash2 size={11} />
+          </span>
+        </span>
       </button>
       {children}
     </>
