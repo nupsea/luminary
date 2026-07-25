@@ -93,7 +93,9 @@ export const useAppStore = create<AppState>()(
       llmMode: "private",
       currentProvider: "openai",
       libraryView: "grid",
-      libraryFiltersOpen: false,
+      // Open on every app start so the Collections and Tags rails are visible
+      // rather than hidden behind a toggle. Deliberately not persisted.
+      libraryFiltersOpen: true,
       notesView: "grid",
       // Only "false" disables; absent key (first run) defaults to enabled.
       reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
@@ -145,12 +147,20 @@ export const useAppStore = create<AppState>()(
     {
       name: "luminary-app-store",
       storage: createJSONStorage(() => localStorage),
+      version: 1,
+      // v0 persisted libraryFiltersOpen. Hydrating that value would keep the
+      // rails hidden for anyone who had ever collapsed them, so drop the key.
+      migrate: (persisted) => {
+        if (persisted && typeof persisted === "object") {
+          delete (persisted as Record<string, unknown>).libraryFiltersOpen
+        }
+        return persisted as AppState
+      },
       partialize: (state) => ({
         chatMessages: state.chatMessages,
         chatScope: state.chatScope,
         chatSelectedDocId: state.chatSelectedDocId,
         libraryView: state.libraryView,
-        libraryFiltersOpen: state.libraryFiltersOpen,
         notesView: state.notesView,
         reviewRemindersEnabled: state.reviewRemindersEnabled,
         studySessionId: state.studySessionId,

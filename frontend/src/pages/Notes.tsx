@@ -1206,14 +1206,6 @@ export default function NotesPage() {
             </button>
           </div>
           <CollectionTree contains="note" />
-
-          <button
-            onClick={() => setShowCreateCollection(true)}
-            className="mt-1 flex w-full items-center gap-1 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          >
-            <Plus size={11} />
-            New Collection
-          </button>
         </div>
 
         {/* Tags section */}

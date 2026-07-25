@@ -112,10 +112,10 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
           )}
           <button
             onClick={openCreate}
-            className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-primary hover:bg-accent"
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             title="New collection"
           >
-            <Plus size={12} /> New
+            <Plus size={12} />
           </button>
         </div>
       </div>
@@ -141,15 +141,7 @@ export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollecti
       )}
 
       {!isLoading && !isError && (!data || data.length === 0) && (
-        <div className="flex flex-col items-start gap-1.5 py-2">
-          <p className="text-xs text-muted-foreground">No collections yet</p>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
-          >
-            <Plus size={12} /> New collection
-          </button>
-        </div>
+        <p className="py-2 text-xs text-muted-foreground">No collections yet</p>
       )}
 
       {!isLoading && !isError && data && data.length > 0 && (
