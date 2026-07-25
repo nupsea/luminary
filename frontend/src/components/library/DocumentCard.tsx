@@ -160,6 +160,7 @@ export function DocumentCard({
   const [collectionsLoading, setCollectionsLoading] = useState(false)
   const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
   const [newCollectionOpen, setNewCollectionOpen] = useState(false)
+  const [collectionFilter, setCollectionFilter] = useState("")
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
@@ -193,8 +194,17 @@ export function DocumentCard({
     onSelect?.(doc.id, e.target.checked)
   }
 
+  const flatCollections = collections ? flattenCollectionTree(collections) : []
+  const showCollectionFilter = flatCollections.length > 7
+  const visibleCollections = collectionFilter.trim()
+    ? flatCollections.filter((c) =>
+        c.name.toLowerCase().includes(collectionFilter.trim().toLowerCase()),
+      )
+    : flatCollections
+
   async function handleOpenCollectionPicker() {
     setCollectionPickerOpen(true)
+    setCollectionFilter("")
     if (collections !== null || collectionsLoading) return
     setCollectionsLoading(true)
     try {
@@ -373,15 +383,36 @@ export function DocumentCard({
                           <X size={12} />
                         </button>
                       </div>
-                      <div className="max-h-56 overflow-y-auto">
+                      {/* Sub-collections sit under their parents, so the list is
+                          not alphabetical and a name can fall well below the
+                          fold. Filtering beats scrolling past nesting. */}
+                      {showCollectionFilter && (
+                        <input
+                          autoFocus
+                          value={collectionFilter}
+                          onChange={(e) => setCollectionFilter(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="Filter collections…"
+                          className="mx-2 mb-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      )}
+                      <div className="max-h-72 overflow-y-auto">
                         {collectionsLoading && (
                           <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
                         )}
                         {!collectionsLoading && collections && collections.length === 0 && (
                           <p className="px-2 py-1.5 text-xs text-muted-foreground">No collections yet</p>
                         )}
+                        {!collectionsLoading &&
+                          collections &&
+                          collections.length > 0 &&
+                          visibleCollections.length === 0 && (
+                            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                              No collection matches “{collectionFilter.trim()}”
+                            </p>
+                          )}
                         {!collectionsLoading && collections && collections.length > 0 && (
-                          flattenCollectionTree(collections).map((col) => {
+                          visibleCollections.map((col) => {
                             const added = addedCollectionIds.has(col.id)
                             const isChild = !collections.some((root) => root.id === col.id)
                             return (
