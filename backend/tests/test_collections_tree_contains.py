@@ -98,9 +98,14 @@ async def test_tree_unscoped_scoped_count_sums_direct_members(test_db):
 
 
 @pytest.mark.anyio
-async def test_tree_contains_document_filters_to_doc_holders(test_db):
-    """Top collection has only a note child collection that has only notes:
-    ?contains=document should prune both."""
+async def test_tree_contains_scopes_counts_without_hiding_collections(test_db):
+    """?contains scopes scoped_count; it never removes a collection from the list.
+
+    A note-only collection must still reach the Library rail: one container holds
+    both member types, and the rail is a drop target and a management surface, so
+    hiding the row would make it impossible to add a document to that collection
+    or rename it from there. Relevance is expressed by the counts, not by absence.
+    """
     _, factory = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as s:
@@ -124,10 +129,15 @@ async def test_tree_contains_document_filters_to_doc_holders(test_db):
         tree = (await c.get("/collections/tree?contains=document")).json()
         ids = {n["id"] for n in tree}
         assert docs_only in ids
-        assert notes_only not in ids
-        # scoped_count on docs_only is the doc count (1), not the note count.
+        assert notes_only in ids, "a note-only collection must stay droppable from the Library"
+
         docs_node = next(n for n in tree if n["id"] == docs_only)
         assert docs_node["scoped_count"] == 1
+        # Scoped to documents, the note-only collection reads as zero documents
+        # while still reporting the note it holds.
+        notes_node = next(n for n in tree if n["id"] == notes_only)
+        assert notes_node["scoped_count"] == 0
+        assert notes_node["note_count"] == 1
 
 
 @pytest.mark.anyio
