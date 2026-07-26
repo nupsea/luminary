@@ -8,7 +8,11 @@ export const THRESHOLDS = {
   hit_rate_5: 0.5,
   mrr: 0.35,
   ndcg_10: 0.4,
-  faithfulness: 0.65,
+  // 0.30 is a COLLAPSE DETECTOR on the dataset mean, not a quality bar: HHEM
+  // scores have no absolute meaning without labels, so only a floor is
+  // defensible. This read 0.65 -- the pre-re-baseline value -- and painted
+  // healthy runs amber against a bar that had been retired in the backend.
+  faithfulness: 0.3,
   answer_relevance: 0.5,
 } as const
 

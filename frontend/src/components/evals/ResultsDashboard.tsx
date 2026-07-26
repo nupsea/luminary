@@ -480,7 +480,7 @@ export function ResultsDashboard({ selection }: { selection: DatasetSelection | 
             label="Faithfulness"
             value={faith?.faithfulness}
             threshold={THRESHOLDS.faithfulness}
-            hint={faith ? "generated answers grounded in context" : "run with a judge — answers come from live /qa"}
+            hint={faith ? "grounded in context · collapse floor, not a quality bar" : "run with a judge — answers come from live /qa"}
             sub={
               faith
                 ? `judge ${faith.model_used.split("/").pop()} · answers ${String(
