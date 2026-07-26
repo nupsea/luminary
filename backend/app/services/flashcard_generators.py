@@ -562,7 +562,9 @@ async def generate(
 
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    _existing_qs, existing_vecs = await _fetch_existing_embeddings("default", session)
+    _existing_qs, existing_vecs = await _fetch_existing_embeddings(
+        "default", session, document_id=document_id
+    )
 
     if not candidates:
         logger.warning(
