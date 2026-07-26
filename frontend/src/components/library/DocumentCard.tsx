@@ -164,8 +164,7 @@ export function DocumentCard({
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
   const [collections, setCollections] = useState<CollectionTreeItem[] | null>(null)
   const [collectionsLoading, setCollectionsLoading] = useState(false)
-  // Optimistic overlay on doc.collections, which is the source of truth and is
-  // refetched after every change. Keyed id -> is-member.
+  // Optimistic overlay on doc.collections, which stays the source of truth.
   const [pendingMembership, setPendingMembership] = useState<Map<string, boolean>>(new Map())
   const [newCollectionOpen, setNewCollectionOpen] = useState(false)
   const [collectionFilter, setCollectionFilter] = useState("")
@@ -205,9 +204,8 @@ export function DocumentCard({
       )
     : flatCollections
 
-  // The card clips its children (overflow-hidden), so the menu is portalled to
-  // body and anchored here instead. Written straight to style: going through
-  // state would re-render the menu on every scroll frame.
+  // The card sets overflow-hidden, so the menu is portalled to body and
+  // anchored here. Styles are written directly to avoid a re-render per frame.
   useLayoutEffect(() => {
     if (!actionMenuOpen) return
     const place = () => {
@@ -273,8 +271,7 @@ export function DocumentCard({
       // The card's own chips and the rail's badges live in other queries.
       void queryClient.invalidateQueries({ queryKey: ["collections-tree"] })
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
-      // Long enough for the tick to register, then the picker closes: leaving
-      // it open read as an unsubmitted multi-select.
+      // Hold long enough for the tick to register, then close.
       window.setTimeout(() => {
         setCollectionPickerOpen(false)
         setActionMenuOpen(false)

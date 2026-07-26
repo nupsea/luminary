@@ -1,5 +1,3 @@
-// Node types are scoped to this file rather than added to tsconfig.app.json,
-// so app code still cannot reach for filesystem APIs.
 /// <reference types="node" />
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -9,7 +7,6 @@ import { describe, expect, it } from "vitest"
 import { isStale, metricColor, shippedAblationArm, THRESHOLDS, timeAgo } from "./thresholds"
 import type { EvalRunFull } from "./types"
 
-/** Parse THRESHOLDS out of evals/run_eval.py, the source of truth. */
 function backendThresholds(): Record<string, number> {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..")
   const src = readFileSync(resolve(root, "evals/run_eval.py"), "utf8")
@@ -45,10 +42,7 @@ function run(overrides: Partial<EvalRunFull>): EvalRunFull {
 }
 
 describe("THRESHOLDS", () => {
-  // Read the backend rather than restate it. The previous version asserted
-  // against copied literals, so when the backend re-baselined faithfulness to
-  // a 0.30 collapse floor this kept passing on the retired 0.65 bar and the UI
-  // painted healthy runs amber.
+  // Read the backend rather than restate it: copied literals cannot detect drift.
   it("matches the backend gates in evals/run_eval.py", () => {
     const backend = backendThresholds()
     expect(Object.keys(backend).length).toBeGreaterThan(0)

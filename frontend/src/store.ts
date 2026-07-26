@@ -147,8 +147,7 @@ export const useAppStore = create<AppState>()(
       name: "luminary-app-store",
       storage: createJSONStorage(() => localStorage),
       version: 1,
-      // v0 persisted libraryFiltersOpen; hydrating it would keep the rails
-      // hidden for anyone who had ever collapsed them.
+      // v0 persisted libraryFiltersOpen; hydrating it re-hides the rails.
       migrate: (persisted) => {
         if (persisted && typeof persisted === "object") {
           delete (persisted as Record<string, unknown>).libraryFiltersOpen

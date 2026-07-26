@@ -4,8 +4,7 @@
  * Fields: name (required), description, 8-swatch color picker, parent select
  * (top-level collections only -- max 2-level nesting).
  *
- * POST /collections to create, PUT /collections/{id} to edit. The parent select
- * is create-only: the update endpoint takes no parent.
+ * The parent select is create-only: the update endpoint takes no parent.
  */
 
 import { useState } from "react"
@@ -91,14 +90,10 @@ export function CreateCollectionDialog({
   onSaved,
 }: CreateCollectionDialogProps) {
   const isEdit = collection !== null
-  // Only typed values live in state; the rest derive from `collection`. Syncing
-  // props into state via an effect would clobber typing when `detail` lands, or
-  // leave stale values when the dialog reopens on a different row.
   const [edits, setEdits] = useState<FormEdits>({})
   const qc = useQueryClient()
 
-  // /collections/tree carries no description, so edit mode reads the full row
-  // rather than showing an empty box for a collection that has one.
+  // /collections/tree carries no description; edit mode needs the full row.
   const { data: detail } = useQuery({
     queryKey: ["collection-detail", collection?.id],
     queryFn: () => apiGet<EditableCollection>(`/collections/${collection?.id}`),

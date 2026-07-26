@@ -291,9 +291,8 @@ async def get_collection_tree(
         if col is None:
             return None
         scoped = inclusive_scoped(cid)
-        # ?contains scopes the count, never the list. Pruning a note-only
-        # collection made it impossible to drop a document into it, or rename
-        # it, from the Library rail. Callers read relevance off the counts.
+        # ?contains scopes the count, never the list: pruning a note-only
+        # collection makes it undroppable and unmanageable from the Library.
         children: list[CollectionTreeItem] = []
         if depth < 1:
             for child_id in children_by_parent.get(cid, []):

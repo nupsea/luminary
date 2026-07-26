@@ -145,12 +145,7 @@ interface Citation {
   version_mismatch?: boolean  // S142: local vs web version discrepancy
 }
 
-/** Citations the model returned with enough metadata to label a chip.
- *
- * The LLM quotes excerpts but does not always resolve them back to a document
- * and page, and a chip with neither renders as "Doc" or a bare ellipsis. The
- * source chips carry the same grounding fully labelled.
- */
+/** The model often omits document_title and page, which render as a blank chip. */
 function labelledCitations(citations: Citation[] | undefined): Citation[] {
   return (citations ?? []).filter((c) => Boolean(c.document_title?.trim()) || c.page > 0)
 }

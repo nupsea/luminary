@@ -203,8 +203,6 @@ function CollectionTreeItemRow({
       : item.document_count > 0
         ? `${item.document_count} document${item.document_count === 1 ? "" : "s"}`
         : `${item.note_count} note${item.note_count === 1 ? "" : "s"}`
-  // Nothing of this rail's kind: de-emphasised, never hidden -- still a drop
-  // target and still manageable from here.
   const offKind = !isEmpty && (memberType === "document" ? item.document_count : item.note_count) === 0
 
   return (
@@ -428,8 +426,7 @@ function CollectionTreeItemRow({
 
 
 interface CollectionTreeProps {
-  /** Scopes the count badge only. Every collection stays listed, since a rail
-   * is a drop target and management surface, not just a filter. */
+  /** Scopes the count badge only; every collection stays listed. */
   contains?: CollectionTreeContains
   /** What a drop onto a row adds, and which list query that invalidates. */
   memberType?: CollectionMemberType
@@ -473,8 +470,7 @@ export function CollectionTree({
     queryKey: ["collections-tree", contains ? `contains:${contains}` : "contains:all"],
     queryFn: () => fetchCollectionTree(contains),
     staleTime: 30_000,
-    // Without this, a collection created on another surface is served from the
-    // still-fresh cache and the rail looks like it needs a manual refresh.
+    // Else a collection created on another surface waits out the staleTime.
     refetchOnMount: "always",
   })
 

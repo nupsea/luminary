@@ -10,10 +10,6 @@ interface LibraryCollectionsRailProps {
   onSelect: (id: string | null) => void
 }
 
-/**
- * The Notes sidebar's CollectionTree, wired for documents. The two rails differ
- * only in what a drop adds and in this header.
- */
 export function LibraryCollectionsRail({ selectedId, onSelect }: LibraryCollectionsRailProps) {
   const [formOpen, setFormOpen] = useState(false)
   const navigate = useNavigate()
