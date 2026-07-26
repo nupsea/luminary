@@ -145,6 +145,16 @@ interface Citation {
   version_mismatch?: boolean  // S142: local vs web version discrepancy
 }
 
+/** Citations the model returned with enough metadata to label a chip.
+ *
+ * The LLM quotes excerpts but does not always resolve them back to a document
+ * and page, and a chip with neither renders as "Doc" or a bare ellipsis. The
+ * source chips carry the same grounding fully labelled.
+ */
+function labelledCitations(citations: Citation[] | undefined): Citation[] {
+  return (citations ?? []).filter((c) => Boolean(c.document_title?.trim()) || c.page > 0)
+}
+
 interface WebSource {
   url: string
   title: string
@@ -1347,11 +1357,16 @@ export default function Chat() {
                       </div>
                     )}
 
-                    {/* Citations and confidence — shown after streaming completes */}
-                    {!msg.isStreaming && msg.citations && msg.citations.length > 0 && (
+                    {/* Citations and confidence — shown after streaming completes.
+                        Citations the model quoted without a title or page cannot be
+                        labelled (they render as "Doc" or a bare ellipsis) and the
+                        source chips below already carry the same grounding with
+                        real titles and pages, so they are dropped rather than shown
+                        as blanks. */}
+                    {!msg.isStreaming && labelledCitations(msg.citations).length > 0 && (
                       <div className="mt-3 space-y-2">
                         <div className="flex flex-wrap gap-1.5">
-                          {msg.citations.map((c, i) => (
+                          {labelledCitations(msg.citations).map((c, i) => (
                             <span
                               key={i}
                               className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
@@ -1368,11 +1383,16 @@ export default function Chat() {
                             </span>
                           ))}
                         </div>
-                        {msg.confidence && (
-                          <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
-                            {msg.confidence} confidence
-                          </Badge>
-                        )}
+                      </div>
+                    )}
+
+                    {/* TransparencyPanel renders the same value with an
+                        explanation, so only stand in when it is absent. */}
+                    {!msg.isStreaming && msg.confidence && !msg.transparency && (
+                      <div className="mt-3">
+                        <Badge variant={CONFIDENCE_BADGE[msg.confidence]}>
+                          {msg.confidence} confidence
+                        </Badge>
                       </div>
                     )}
 
