@@ -1,3 +1,6 @@
+// Node types are scoped to this file rather than added to tsconfig.app.json,
+// so app code still cannot reach for filesystem APIs.
+/// <reference types="node" />
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
