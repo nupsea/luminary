@@ -143,6 +143,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const pageTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   
   const handlePageChange = useCallback((page: number) => {
+    pdfPageRef.current = page
     if (pageTimerRef.current) clearTimeout(pageTimerRef.current)
     pageTimerRef.current = setTimeout(() => {
       setPdfCurrentPage(page)
@@ -171,8 +172,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
+  // Saved PDF page from the position API (used for PDFViewer initialPage)
+  const [savedPdfPage, setSavedPdfPage] = useState<number | null>(null)
   // ref tracking the last section_id we POSTed so we only POST when it changes
   const lastPostedSectionRef = useRef<string | null>(null)
+  // Last PDF page included in a throttled position POST
+  const lastPostedPdfPageRef = useRef<number | null>(null)
+  // Live PDF page for position POSTs (updated immediately on page change)
+  const pdfPageRef = useRef(1)
   // throttle timer: one POST per 10 seconds max
   const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -621,7 +628,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (sessionStorage.getItem(dismissedKey)) return
     void apiGet<ReadingPosition>(`/documents/${documentId}/position`)
       .then((pos) => {
-        if (pos?.last_section_id) setResumePosition(pos)
+        if (!pos) return
+        if (pos.last_pdf_page != null) setSavedPdfPage(pos.last_pdf_page)
+        if (pos.last_section_id || pos.last_pdf_page != null) setResumePosition(pos)
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) return
@@ -642,13 +651,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
       positionThrottleRef.current = setTimeout(() => {
         const section = doc!.sections.find((s) => s.id === sectionId)
+        const pdfPage = doc!.format === "pdf" ? pdfPageRef.current : null
         void apiPost(`/documents/${documentId}/position`, {
           last_section_id: sectionId,
           last_section_heading: section?.heading ?? null,
-          last_pdf_page: null,
+          last_pdf_page: pdfPage,
           last_epub_chapter_index: null,
         }).catch(() => {})
         lastPostedSectionRef.current = sectionId
+        if (pdfPage != null) lastPostedPdfPageRef.current = pdfPage
       }, 10_000)
     }
 
@@ -679,7 +690,36 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [documentId, doc?.sections.length])
 
+  // Persist PDF page turns (same 10s throttle as section position posts)
+  useEffect(() => {
+    if (!doc || doc.format !== "pdf") return
+    if (pdfCurrentPage === lastPostedPdfPageRef.current) return
+    if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
+    positionThrottleRef.current = setTimeout(() => {
+      const sectionId = lastPostedSectionRef.current
+      const section = sectionId ? doc.sections.find((s) => s.id === sectionId) : undefined
+      void apiPost(`/documents/${documentId}/position`, {
+        last_section_id: sectionId,
+        last_section_heading: section?.heading ?? null,
+        last_pdf_page: pdfCurrentPage,
+        last_epub_chapter_index: null,
+      }).catch(() => {})
+      lastPostedPdfPageRef.current = pdfCurrentPage
+    }, 10_000)
+    return () => {
+      if (positionThrottleRef.current) clearTimeout(positionThrottleRef.current)
+    }
+  }, [documentId, doc, pdfCurrentPage])
+
   const handleResume = () => {
+    if (resumePosition?.last_pdf_page != null && doc?.format === "pdf") {
+      setPdfViewVisited(true)
+      setLeftTab("pdfview")
+      window.setTimeout(() => pdfViewerRef.current?.goToPage(resumePosition.last_pdf_page as number), 50)
+      setResumePosition(null)
+      sessionStorage.setItem(`resume-dismissed-${documentId}`, "1")
+      return
+    }
     if (!resumePosition?.last_section_id) return
     const el = document.querySelector(`[data-section-id="${CSS.escape(resumePosition.last_section_id)}"]`)
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -1169,6 +1209,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           {/* PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (() => {
             let targetPdfPage = initialPage
+            if (!targetPdfPage && savedPdfPage != null) targetPdfPage = savedPdfPage
             if (!targetPdfPage && initialSectionId) {
               const sec = doc.sections.find((s) => s.id === initialSectionId)
               if (sec && sec.page_start > 0) targetPdfPage = sec.page_start
