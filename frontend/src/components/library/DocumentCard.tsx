@@ -32,7 +32,11 @@ import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
-import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
+import {
+  addDocumentToCollection,
+  fetchCollectionTree,
+  removeDocumentFromCollection,
+} from "@/lib/notesApi"
 import { retagDocument } from "@/pages/Learning/api"
 import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
 import type { ContentType, DocumentListItem } from "./types"
@@ -160,7 +164,9 @@ export function DocumentCard({
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
   const [collections, setCollections] = useState<CollectionTreeItem[] | null>(null)
   const [collectionsLoading, setCollectionsLoading] = useState(false)
-  const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
+  // Optimistic overlay on doc.collections, which is the source of truth and is
+  // refetched after every change. Keyed id -> is-member.
+  const [pendingMembership, setPendingMembership] = useState<Map<string, boolean>>(new Map())
   const [newCollectionOpen, setNewCollectionOpen] = useState(false)
   const [collectionFilter, setCollectionFilter] = useState("")
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -251,13 +257,20 @@ export function DocumentCard({
     }
   }
 
-  async function handleAddToCollection(collectionId: string, name: string) {
-    if (addedCollectionIds.has(collectionId)) return
+  function isMember(collectionId: string): boolean {
+    const pending = pendingMembership.get(collectionId)
+    if (pending !== undefined) return pending
+    return (doc.collections ?? []).some((c) => c.id === collectionId)
+  }
+
+  async function handleToggleCollection(collectionId: string, name: string) {
+    const adding = !isMember(collectionId)
+    setPendingMembership((prev) => new Map(prev).set(collectionId, adding))
     try {
-      await addDocumentToCollection(collectionId, doc.id)
-      setAddedCollectionIds((prev) => new Set(prev).add(collectionId))
-      toast.success(`Added to ${name}`)
-      // Refresh the rail's count badges, which this menu does not own.
+      if (adding) await addDocumentToCollection(collectionId, doc.id)
+      else await removeDocumentFromCollection(collectionId, doc.id)
+      toast.success(adding ? `Added to ${name}` : `Removed from ${name}`)
+      // The card's own chips and the rail's badges live in other queries.
       void queryClient.invalidateQueries({ queryKey: ["collections-tree"] })
       void queryClient.invalidateQueries({ queryKey: ["documents"] })
       // Long enough for the tick to register, then the picker closes: leaving
@@ -267,12 +280,17 @@ export function DocumentCard({
         setActionMenuOpen(false)
       }, 450)
     } catch {
-      toast.error(`Could not add to ${name}`)
+      setPendingMembership((prev) => {
+        const next = new Map(prev)
+        next.delete(collectionId)
+        return next
+      })
+      toast.error(adding ? `Could not add to ${name}` : `Could not remove from ${name}`)
     }
   }
 
   async function handleCollectionCreated(created: { id: string; name: string }) {
-    await handleAddToCollection(created.id, created.name)
+    await handleToggleCollection(created.id, created.name)
     setCollections(await fetchCollectionTree())
   }
 
@@ -460,16 +478,15 @@ export function DocumentCard({
                           )}
                         {!collectionsLoading && collections && collections.length > 0 && (
                           visibleCollections.map((col) => {
-                            const added = addedCollectionIds.has(col.id)
+                            const member = isMember(col.id)
                             const isChild = !collections.some((root) => root.id === col.id)
                             return (
                               <button
                                 key={col.id}
-                                onClick={() => void handleAddToCollection(col.id, col.name)}
-                                disabled={added}
+                                onClick={() => void handleToggleCollection(col.id, col.name)}
+                                title={member ? `Remove from ${col.name}` : `Add to ${col.name}`}
                                 className={cn(
-                                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors",
-                                  added ? "text-muted-foreground" : "hover:bg-accent",
+                                  "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                                   isChild && "pl-5",
                                 )}
                               >
@@ -478,7 +495,18 @@ export function DocumentCard({
                                   style={{ backgroundColor: col.color }}
                                 />
                                 <span className="flex-1 truncate">{col.name}</span>
-                                {added && <Check size={12} className="shrink-0 text-primary" />}
+                                {member && (
+                                  <>
+                                    <Check
+                                      size={12}
+                                      className="shrink-0 text-primary group-hover/row:hidden"
+                                    />
+                                    <X
+                                      size={12}
+                                      className="hidden shrink-0 text-destructive group-hover/row:block"
+                                    />
+                                  </>
+                                )}
                               </button>
                             )
                           })
