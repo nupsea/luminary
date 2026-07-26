@@ -27,6 +27,7 @@ import {
 } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
@@ -164,6 +165,7 @@ export function DocumentCard({
   const [collectionFilter, setCollectionFilter] = useState("")
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
@@ -249,20 +251,29 @@ export function DocumentCard({
     }
   }
 
-  async function handleAddToCollection(collectionId: string) {
+  async function handleAddToCollection(collectionId: string, name: string) {
     if (addedCollectionIds.has(collectionId)) return
     try {
       await addDocumentToCollection(collectionId, doc.id)
       setAddedCollectionIds((prev) => new Set(prev).add(collectionId))
+      toast.success(`Added to ${name}`)
+      // Refresh the rail's count badges, which this menu does not own.
+      void queryClient.invalidateQueries({ queryKey: ["collections-tree"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      // Long enough for the tick to register, then the picker closes: leaving
+      // it open read as an unsubmitted multi-select.
+      window.setTimeout(() => {
+        setCollectionPickerOpen(false)
+        setActionMenuOpen(false)
+      }, 450)
     } catch {
-      // Silent — POST is idempotent server-side; surface failure only if needed later.
+      toast.error(`Could not add to ${name}`)
     }
   }
 
   async function handleCollectionCreated(created: { id: string; name: string }) {
-    await handleAddToCollection(created.id)
+    await handleAddToCollection(created.id, created.name)
     setCollections(await fetchCollectionTree())
-    toast.success(`Added to ${created.name}`)
   }
 
   async function handleRetag() {
@@ -454,7 +465,7 @@ export function DocumentCard({
                             return (
                               <button
                                 key={col.id}
-                                onClick={() => void handleAddToCollection(col.id)}
+                                onClick={() => void handleAddToCollection(col.id, col.name)}
                                 disabled={added}
                                 className={cn(
                                   "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors",
