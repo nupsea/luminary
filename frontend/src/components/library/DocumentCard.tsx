@@ -25,7 +25,8 @@ import {
   X, 
   Zap 
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
@@ -161,6 +162,8 @@ export function DocumentCard({
   const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
   const [newCollectionOpen, setNewCollectionOpen] = useState(false)
   const [collectionFilter, setCollectionFilter] = useState("")
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
@@ -171,7 +174,13 @@ export function DocumentCard({
       if (typePopoverOpen && popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setTypePopoverOpen(false)
       }
-      if (actionMenuOpen && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+      // The menu is portalled to body, so it is not inside actionMenuRef.
+      if (
+        actionMenuOpen &&
+        actionMenuRef.current &&
+        !actionMenuRef.current.contains(e.target as Node) &&
+        !menuRef.current?.contains(e.target as Node)
+      ) {
         setActionMenuOpen(false)
         setCollectionPickerOpen(false)
       }
@@ -179,6 +188,39 @@ export function DocumentCard({
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
   }, [typePopoverOpen, actionMenuOpen])
+
+  const flatCollections = collections ? flattenCollectionTree(collections) : []
+  const showCollectionFilter = flatCollections.length > 7
+  const visibleCollections = collectionFilter.trim()
+    ? flatCollections.filter((c) =>
+        c.name.toLowerCase().includes(collectionFilter.trim().toLowerCase()),
+      )
+    : flatCollections
+
+  // The card clips its children (overflow-hidden), so the menu is portalled to
+  // body and anchored here instead. Written straight to style: going through
+  // state would re-render the menu on every scroll frame.
+  useLayoutEffect(() => {
+    if (!actionMenuOpen) return
+    const place = () => {
+      const trigger = triggerRef.current
+      const menu = menuRef.current
+      if (!trigger || !menu) return
+      const rect = trigger.getBoundingClientRect()
+      const top = rect.bottom + 4
+      menu.style.top = `${top}px`
+      menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`
+      menu.style.maxHeight = `${Math.max(180, window.innerHeight - top - 12)}px`
+    }
+    place()
+    // Capture phase: the scroller is an ancestor, not window.
+    window.addEventListener("scroll", place, true)
+    window.addEventListener("resize", place)
+    return () => {
+      window.removeEventListener("scroll", place, true)
+      window.removeEventListener("resize", place)
+    }
+  }, [actionMenuOpen, collectionPickerOpen, showCollectionFilter])
 
   function handleCardClick(e: React.MouseEvent) {
     if (selectMode && onSelect) {
@@ -193,14 +235,6 @@ export function DocumentCard({
     e.stopPropagation()
     onSelect?.(doc.id, e.target.checked)
   }
-
-  const flatCollections = collections ? flattenCollectionTree(collections) : []
-  const showCollectionFilter = flatCollections.length > 7
-  const visibleCollections = collectionFilter.trim()
-    ? flatCollections.filter((c) =>
-        c.name.toLowerCase().includes(collectionFilter.trim().toLowerCase()),
-      )
-    : flatCollections
 
   async function handleOpenCollectionPicker() {
     setCollectionPickerOpen(true)
@@ -315,6 +349,7 @@ export function DocumentCard({
           {onAction && !selectMode && (
             <div className="relative" ref={actionMenuRef}>
               <button
+                ref={triggerRef}
                 onClick={(e) => {
                   e.stopPropagation()
                   setActionMenuOpen((v) => !v)
@@ -324,9 +359,10 @@ export function DocumentCard({
               >
                 <MoreVertical size={14} />
               </button>
-              {actionMenuOpen && (
+              {actionMenuOpen && createPortal(
                 <div
-                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-border bg-background p-1 shadow-lg"
+                  ref={menuRef}
+                  className="fixed z-50 flex w-56 flex-col overflow-hidden rounded-lg border border-border bg-background p-1 shadow-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {!collectionPickerOpen && (
@@ -372,8 +408,8 @@ export function DocumentCard({
                     </>
                   )}
                   {collectionPickerOpen && (
-                    <div className="flex flex-col">
-                      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="flex shrink-0 items-center justify-between px-2 py-1 text-xs text-muted-foreground">
                         <span>Add to collection</span>
                         <button
                           onClick={() => setCollectionPickerOpen(false)}
@@ -393,10 +429,10 @@ export function DocumentCard({
                           onChange={(e) => setCollectionFilter(e.target.value)}
                           onClick={(e) => e.stopPropagation()}
                           placeholder="Filter collections…"
-                          className="mx-2 mb-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          className="mx-2 mb-1 shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       )}
-                      <div className="max-h-72 overflow-y-auto">
+                      <div className="min-h-0 flex-1 overflow-y-auto">
                         {collectionsLoading && (
                           <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
                         )}
@@ -438,12 +474,11 @@ export function DocumentCard({
                         )}
                       </div>
                       {/* Outside the scroll area so it stays reachable however
-                          many collections exist -- this is the path out of the
-                          "No collections yet" dead end. */}
+                          many collections exist. */}
                       {!collectionsLoading && collections && (
                         <button
                           onClick={() => setNewCollectionOpen(true)}
-                          className="mt-1 flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
+                          className="mt-1 flex w-full shrink-0 items-center gap-2 border-t border-border px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
                         >
                           <Plus size={12} className="shrink-0" />
                           <span className="flex-1 truncate">New collection…</span>
@@ -451,7 +486,8 @@ export function DocumentCard({
                       )}
                     </div>
                   )}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}
