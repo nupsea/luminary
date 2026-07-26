@@ -19,7 +19,7 @@ const STAGES: { id: string; label: string; hint: string; arms: string[] }[] = [
   {
     id: "single",
     label: "1 · Single retriever",
-    hint: "one signal, no fusion — the choice of base retriever",
+    hint: "one signal, no fusion — two indexes, plus vector over an expanded query",
     arms: ["vector", "fts", "graph"],
   },
   {
@@ -39,7 +39,8 @@ const STAGES: { id: string; label: string; hint: string; arms: string[] }[] = [
 const ARM_LABEL: Record<string, string> = {
   vector: "Vector (embeddings)",
   fts: "Full-text (BM25)",
-  graph: "Graph",
+  // Not a third index: vector search over a graph-expanded query.
+  graph: "Vector + graph-expanded query",
   rrf: "RRF fusion",
   "rrf+rerank-ce": "+ Rerank (CE only)",
   "rrf+rerank": "+ Rerank (blended)",
