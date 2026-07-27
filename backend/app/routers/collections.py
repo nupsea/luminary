@@ -276,19 +276,10 @@ async def get_collection_tree(
             return note_counts.get(cid, 0)
         return note_counts.get(cid, 0) + doc_counts.get(cid, 0)
 
-    def direct_total(cid: str) -> int:
-        return note_counts.get(cid, 0) + doc_counts.get(cid, 0)
-
     def inclusive_scoped(cid: str) -> int:
         total = direct_scoped(cid)
         for child_id in children_by_parent.get(cid, []):
             total += inclusive_scoped(child_id)
-        return total
-
-    def inclusive_total(cid: str) -> int:
-        total = direct_total(cid)
-        for child_id in children_by_parent.get(cid, []):
-            total += inclusive_total(child_id)
         return total
 
     col_by_id: dict[str, CollectionModel] = {c.id: c for c in all_cols}
@@ -300,11 +291,8 @@ async def get_collection_tree(
         if col is None:
             return None
         scoped = inclusive_scoped(cid)
-        # Empty collections (no members of any type) must survive every scope
-        # filter -- otherwise a brand-new collection vanishes from the rail
-        # that created it before any members are added.
-        if contains is not None and scoped == 0 and inclusive_total(cid) > 0:
-            return None
+        # ?contains scopes the count, never the list: pruning a note-only
+        # collection makes it undroppable and unmanageable from the Library.
         children: list[CollectionTreeItem] = []
         if depth < 1:
             for child_id in children_by_parent.get(cid, []):

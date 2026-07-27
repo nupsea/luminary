@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import select, text
+from sqlalchemy import false, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -446,20 +446,55 @@ def _filter_chunks_by_classification(
     return [(chunks[i], labels[i]) for i in sorted(eligible_indices)]
 
 
-async def _fetch_existing_embeddings(
-    deck: str, session: AsyncSession
-) -> "tuple[list[str], list] | tuple[list, None]":
-    """Fetch all existing questions in *deck* and embed them in one batch.
+async def _study_scope_member_ids(document_id: str, session: AsyncSession) -> list[str]:
+    """Ids of every document and note sharing a collection with *document_id*.
 
-    Returns (questions, vectors) or ([], None) when the deck is empty or embedding fails.
+    A study session draws on a whole collection, so those cards are exactly the
+    ones a newly generated question can end up sitting beside.
+    """
+    from app.models import CollectionMemberModel  # noqa: PLC0415
+
+    owning = select(CollectionMemberModel.collection_id).where(
+        CollectionMemberModel.member_id == document_id,
+        CollectionMemberModel.member_type == "document",
+    )
+    result = await session.execute(
+        select(CollectionMemberModel.member_id).where(
+            CollectionMemberModel.collection_id.in_(owning)
+        )
+    )
+    return [row[0] for row in result.all()]
+
+
+async def _fetch_existing_embeddings(
+    deck: str, session: AsyncSession, document_id: str | None = None
+) -> "tuple[list[str], list] | tuple[list, None]":
+    """Embed the questions a new card could be a duplicate of, in one batch.
+
+    Deck alone is too narrow: note-derived cards land in a tag-named deck while
+    document-derived ones land in "default", so the two never compared even
+    though a collection session interleaves them. When *document_id* is given,
+    the scope widens to that document and everything sharing a collection with
+    it.
+
+    Returns (questions, vectors) or ([], None) when nothing to compare against
+    or embedding fails.
     """
     import numpy as np  # noqa: PLC0415
 
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    result = await session.execute(
-        select(FlashcardModel.question).where(FlashcardModel.deck == deck)
-    )
+    scope = FlashcardModel.deck == deck
+    if document_id is not None:
+        member_ids = await _study_scope_member_ids(document_id, session)
+        scope = or_(
+            scope,
+            FlashcardModel.document_id == document_id,
+            FlashcardModel.document_id.in_(member_ids) if member_ids else false(),
+            FlashcardModel.note_id.in_(member_ids) if member_ids else false(),
+        )
+
+    result = await session.execute(select(FlashcardModel.question).where(scope))
     existing_questions = [row[0] for row in result.all()]
     if not existing_questions:
         return [], None

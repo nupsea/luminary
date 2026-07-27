@@ -44,6 +44,39 @@ def _norm_ws(s: str) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip()
 
 
+# Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
+_SPACE_GAP_EM = 0.2
+
+
+def _join_spans(spans: list[dict]) -> str:
+    """Rebuild a line's text from its spans, inferring word gaps from geometry.
+
+    PyMuPDF opens a new span at every style change, so a PDF alternating Type3
+    font subsets per glyph splits words across dozens of spans. Joining on a
+    space corrupts every word; joining on nothing welds together words a PDF
+    separates by position alone. Only the gap tells the two apart.
+    """
+    parts: list[str] = []
+    prev_x1: float | None = None
+    prev_text = ""
+    for span in spans:
+        text = span.get("text", "")
+        if not text:
+            continue
+        x0, x1 = span["bbox"][0], span["bbox"][2]
+        if (
+            prev_x1 is not None
+            and not prev_text[-1:].isspace()
+            and not text[:1].isspace()
+            and x0 - prev_x1 > _SPACE_GAP_EM * span.get("size", 12.0)
+        ):
+            parts.append(" ")
+        parts.append(text)
+        prev_x1 = x1
+        prev_text = text
+    return "".join(parts)
+
+
 def _heading_is_prose(heading: str) -> bool:
     h = heading.strip()
     if len(h) > 100:
@@ -156,7 +189,7 @@ class DocumentParser:
                             spans = line.get("spans", [])
                             if not spans:
                                 continue
-                            line_text = " ".join(s["text"] for s in spans).strip()
+                            line_text = _join_spans(spans).strip()
                             if not line_text:
                                 continue
                             texts.append(line_text)
@@ -242,7 +275,7 @@ class DocumentParser:
                     if not spans:
                         continue
                     max_size = max(s["size"] for s in spans)
-                    line_text = " ".join(s["text"] for s in spans).strip()
+                    line_text = _join_spans(spans).strip()
                     if not line_text:
                         continue
                     if max_size >= heading_threshold and len(line_text) < 120:

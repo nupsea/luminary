@@ -1,10 +1,10 @@
 /**
- * CreateCollectionDialog -- dialog for creating a new collection.
+ * CreateCollectionDialog -- dialog for creating or editing a collection.
  *
  * Fields: name (required), description, 8-swatch color picker, parent select
  * (top-level collections only -- max 2-level nesting).
  *
- * POST /collections on save. Invalidates ["collections-tree"] on success.
+ * The parent select is create-only: the update endpoint takes no parent.
  */
 
 import { useState } from "react"
@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { apiGet, apiPost } from "@/lib/apiClient"
+import { apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
 import { normalizeCollectionName } from "@/lib/tagUtils"
 
@@ -42,24 +42,75 @@ async function fetchCollectionTree(): Promise<CollectionTreeItem[]> {
   }
 }
 
+export interface CreatedCollection {
+  id: string
+  name: string
+}
+
 const createCollection = (payload: {
   name: string
   description: string | null
   color: string
   parent_collection_id: string | null
-}): Promise<void> => apiPost("/collections", payload)
+}): Promise<CreatedCollection> => apiPost("/collections", payload)
+
+const updateCollection = (
+  id: string,
+  payload: { name: string; description: string | null; color: string },
+): Promise<CreatedCollection> => apiPut(`/collections/${id}`, payload)
+
+interface FormEdits {
+  name?: string
+  description?: string
+  color?: string
+  parentId?: string
+}
+
+/** An existing collection to edit. Omit to create a new one. */
+export interface EditableCollection {
+  id: string
+  name: string
+  description?: string | null
+  color: string
+}
 
 interface CreateCollectionDialogProps {
   open: boolean
   onClose: () => void
+  collection?: EditableCollection | null
+  defaultName?: string
+  onSaved?: (collection: CreatedCollection) => void
 }
 
-export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialogProps) {
-  const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
-  const [color, setColor] = useState(COLLECTION_COLORS[0])
-  const [parentId, setParentId] = useState<string>("")
+export function CreateCollectionDialog({
+  open,
+  onClose,
+  collection = null,
+  defaultName = "",
+  onSaved,
+}: CreateCollectionDialogProps) {
+  const isEdit = collection !== null
+  const [edits, setEdits] = useState<FormEdits>({})
   const qc = useQueryClient()
+
+  // /collections/tree carries no description; edit mode needs the full row.
+  const { data: detail } = useQuery({
+    queryKey: ["collection-detail", collection?.id],
+    queryFn: () => apiGet<EditableCollection>(`/collections/${collection?.id}`),
+    enabled: open && isEdit,
+    staleTime: 30_000,
+  })
+
+  const source = detail ?? collection
+  const name = edits.name ?? source?.name ?? defaultName
+  const description = edits.description ?? source?.description ?? ""
+  const color = edits.color ?? source?.color ?? COLLECTION_COLORS[0]
+  const parentId = edits.parentId ?? ""
+
+  const setName = (v: string) => setEdits((e) => ({ ...e, name: v }))
+  const setDescription = (v: string) => setEdits((e) => ({ ...e, description: v }))
+  const setColor = (v: string) => setEdits((e) => ({ ...e, color: v }))
+  const setParentId = (v: string) => setEdits((e) => ({ ...e, parentId: v }))
 
   const { data: tree = [] } = useQuery({
     queryKey: ["collections-tree"],
@@ -75,23 +126,28 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
 
   const createMut = useMutation({
     mutationFn: () =>
-      createCollection({
-        name: normalizedName,
-        description: description.trim() || null,
-        color,
-        parent_collection_id: parentId || null,
-      }),
-    onSuccess: () => {
+      isEdit
+        ? updateCollection(collection.id, {
+            name: normalizedName,
+            description: description.trim() || null,
+            color,
+          })
+        : createCollection({
+            name: normalizedName,
+            description: description.trim() || null,
+            color,
+            parent_collection_id: parentId || null,
+          }),
+    onSuccess: (saved) => {
       void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+      void qc.invalidateQueries({ queryKey: ["collection-detail"] })
+      onSaved?.(saved)
       handleClose()
     },
   })
 
   function handleClose() {
-    setName("")
-    setDescription("")
-    setColor(COLLECTION_COLORS[0])
-    setParentId("")
+    setEdits({})
     onClose()
   }
 
@@ -99,8 +155,12 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>New Collection</DialogTitle>
-          <DialogDescription>Organise notes into a named collection.</DialogDescription>
+          <DialogTitle>{isEdit ? "Edit Collection" : "New Collection"}</DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? "Rename this collection or change its colour and description."
+              : "Group documents and notes under a named collection."}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
@@ -150,25 +210,29 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
             </div>
           </div>
 
-          {/* Parent select */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-foreground">Parent collection</label>
-            <select
-              value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
-              className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">None (top-level)</option>
-              {topLevelCollections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Parent select -- create only; the update endpoint takes no parent. */}
+          {!isEdit && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-foreground">Parent collection</label>
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className="rounded border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">None (top-level)</option>
+                {topLevelCollections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {createMut.isError && (
-            <p className="text-xs text-red-600">Failed to create collection. Please try again.</p>
+            <p className="text-xs text-red-600">
+              Failed to {isEdit ? "update" : "create"} collection. Please try again.
+            </p>
           )}
         </div>
 
@@ -184,7 +248,7 @@ export function CreateCollectionDialog({ open, onClose }: CreateCollectionDialog
             disabled={!normalizedName || createMut.isPending}
             className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            Create
+            {isEdit ? "Save" : "Create"}
           </button>
         </DialogFooter>
       </DialogContent>

@@ -335,7 +335,7 @@ async def _run_eval_subprocess(
                 "eval subprocess finished OK: dataset=%s\n%s", dataset, stdout_tail
             )
             if stderr_tail.strip():
-                logger.warning(
+                logger.debug(
                     "eval subprocess (rc=0) STDERR for dataset=%s:\n%s",
                     dataset, stderr_tail,
                 )
@@ -411,7 +411,8 @@ async def _run_generated_eval_subprocess(
                 "eval subprocess finished OK: dataset_id=%s\n%s", dataset_id, stdout_tail
             )
             if stderr_tail.strip():
-                logger.warning(
+                # rc=0, so this is RAGAS/tqdm progress, not a fault.
+                logger.debug(
                     "eval subprocess (rc=0) STDERR for dataset_id=%s:\n%s",
                     dataset_id, stderr_tail,
                 )

@@ -98,9 +98,12 @@ async def test_tree_unscoped_scoped_count_sums_direct_members(test_db):
 
 
 @pytest.mark.anyio
-async def test_tree_contains_document_filters_to_doc_holders(test_db):
-    """Top collection has only a note child collection that has only notes:
-    ?contains=document should prune both."""
+async def test_tree_contains_scopes_counts_without_hiding_collections(test_db):
+    """?contains scopes scoped_count; it never removes a collection from the list.
+
+    A note-only collection must stay reachable from the Library rail, or a
+    document can never be dropped into it.
+    """
     _, factory = test_db
     doc_id = str(uuid.uuid4())
     async with factory() as s:
@@ -124,10 +127,13 @@ async def test_tree_contains_document_filters_to_doc_holders(test_db):
         tree = (await c.get("/collections/tree?contains=document")).json()
         ids = {n["id"] for n in tree}
         assert docs_only in ids
-        assert notes_only not in ids
-        # scoped_count on docs_only is the doc count (1), not the note count.
+        assert notes_only in ids, "a note-only collection must stay droppable from the Library"
+
         docs_node = next(n for n in tree if n["id"] == docs_only)
         assert docs_node["scoped_count"] == 1
+        notes_node = next(n for n in tree if n["id"] == notes_only)
+        assert notes_node["scoped_count"] == 0
+        assert notes_node["note_count"] == 1
 
 
 @pytest.mark.anyio
@@ -167,6 +173,58 @@ async def test_tree_contains_keeps_empty_collections(test_db):
         assert empty_id in ids
         node = next(n for n in tree if n["id"] == empty_id)
         assert node["scoped_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_counts_ignore_members_whose_target_was_deleted(test_db):
+    """A deleted note must leave no trace in its collection's badge.
+
+    Membership keys on (member_id, member_type), so nothing cascades to it
+    automatically. When that was missed, a 2-note collection reported five.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        col_id = await _create_collection(c, "Survivors")
+
+        note_ids = []
+        for i in range(3):
+            r = await c.post("/notes", json={"content": f"n{i}", "tags": [], "document_id": None})
+            note_ids.append(r.json()["id"])
+        await c.post(
+            f"/collections/{col_id}/members",
+            json={"member_ids": note_ids, "member_type": "note"},
+        )
+
+        node = next(n for n in (await c.get("/collections/tree")).json() if n["id"] == col_id)
+        assert node["note_count"] == 3
+
+        assert (await c.delete(f"/notes/{note_ids[0]}")).status_code in (200, 204)
+
+        node = next(n for n in (await c.get("/collections/tree")).json() if n["id"] == col_id)
+        assert node["note_count"] == 2, "deleted note still counted in the collection badge"
+
+
+@pytest.mark.anyio
+async def test_deleting_a_document_clears_its_memberships(test_db):
+    """The document delete cascade must reach collection_members too."""
+    _, factory = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(_doc(doc_id))
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        col_id = await _create_collection(c, "Docs")
+        await c.post(
+            f"/collections/{col_id}/members",
+            json={"member_ids": [doc_id], "member_type": "document"},
+        )
+        node = next(n for n in (await c.get("/collections/tree")).json() if n["id"] == col_id)
+        assert node["document_count"] == 1
+
+        assert (await c.delete(f"/documents/{doc_id}")).status_code in (200, 204)
+
+        node = next(n for n in (await c.get("/collections/tree")).json() if n["id"] == col_id)
+        assert node["document_count"] == 0
 
 
 @pytest.mark.anyio

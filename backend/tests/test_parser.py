@@ -3,6 +3,7 @@ import pytest
 from app.services.parser import (
     DocumentParser,
     _heading_is_prose,
+    _join_spans,
     _norm_ws,
     _sections_plausible,
 )
@@ -220,3 +221,53 @@ def test_pdf_preface_prose_not_mistaken_for_headings(parser, prose_trap_pdf):
 )
 def test_norm_ws(raw, expected):
     assert _norm_ws(raw) == expected
+
+
+def _span(text: str, x0: float, x1: float, size: float = 12.0) -> dict:
+    return {"text": text, "bbox": (x0, 0.0, x1, size), "size": size}
+
+
+class TestJoinSpans:
+    def test_glyph_split_word_is_not_broken_by_spaces(self):
+        """Type3 subsets split one word across many spans with no gap between
+        them; joining on a space corrupted every word."""
+        spans = [
+            _span("The C", 27.750, 74.964, 16.5),
+            _span("on", 74.980, 95.581, 16.5),
+            _span("ce", 95.424, 113.169, 16.5),
+            _span("ptu", 113.177, 141.037, 16.5),
+            _span("al F", 141.045, 169.697, 16.5),
+            _span("oun", 169.028, 200.460, 16.5),
+            _span("da", 200.303, 220.153, 16.5),
+            _span("t", 219.748, 226.282, 16.5),
+            _span("i", 226.299, 231.562, 16.5),
+            _span("ons", 231.570, 260.296, 16.5),
+        ]
+        assert _join_spans(spans) == "The Conceptual Foundations"
+
+    def test_negative_kerning_does_not_insert_a_space(self):
+        assert _join_spans([_span("Ke", 10.0, 20.0), _span("rn", 19.4, 30.0)]) == "Kern"
+
+    def test_positional_word_gap_becomes_a_space(self):
+        """Words separated by position rather than a space glyph must not weld."""
+        spans = [_span("Hello", 10.0, 40.0), _span("world", 44.0, 74.0)]
+        assert _join_spans(spans) == "Hello world"
+
+    def test_existing_space_is_not_doubled(self):
+        spans = [_span("Hello ", 10.0, 43.0), _span("world", 44.0, 74.0)]
+        assert _join_spans(spans) == "Hello world"
+
+    def test_leading_space_on_next_span_is_not_doubled(self):
+        spans = [_span("Hello", 10.0, 40.0), _span(" world", 44.0, 78.0)]
+        assert _join_spans(spans) == "Hello world"
+
+    def test_empty_spans_are_skipped(self):
+        assert _join_spans([_span("a", 10.0, 15.0), _span("", 15.0, 15.0)]) == "a"
+
+    def test_no_spans(self):
+        assert _join_spans([]) == ""
+
+    def test_gap_threshold_scales_with_font_size(self):
+        """A 3pt gap is a word break at 12pt but mere kerning at 24pt."""
+        assert _join_spans([_span("a", 0.0, 10.0, 12.0), _span("b", 13.0, 20.0, 12.0)]) == "a b"
+        assert _join_spans([_span("a", 0.0, 10.0, 24.0), _span("b", 13.0, 20.0, 24.0)]) == "ab"

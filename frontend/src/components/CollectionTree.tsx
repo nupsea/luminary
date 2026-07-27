@@ -39,6 +39,15 @@ export type { CollectionTreeItem }
 export { flattenCollectionTree }
 
 export type CollectionTreeContains = "document" | "note"
+export type CollectionMemberType = "document" | "note"
+
+export const NOTE_DRAG_MIME = "text/plain"
+export const DOC_DRAG_MIME = "application/x-luminary-doc-id"
+
+const MEMBER_LIST_QUERY: Record<CollectionMemberType, string> = {
+  note: "notes",
+  document: "documents",
+}
 
 const fetchCollectionTree = (
   contains?: CollectionTreeContains,
@@ -51,13 +60,14 @@ const renameCollection = (id: string, name: string): Promise<void> =>
 const deleteCollection = (id: string): Promise<void> =>
   apiDelete(`/collections/${id}`)
 
-const addNoteToCollection = (
+const addMemberToCollection = (
   collectionId: string,
-  noteId: string,
+  memberId: string,
+  memberType: CollectionMemberType,
 ): Promise<void> =>
   apiPost(`/collections/${collectionId}/members`, {
-    member_ids: [noteId],
-    member_type: "note",
+    member_ids: [memberId],
+    member_type: memberType,
   })
 
 // Single tree item row
@@ -69,6 +79,9 @@ interface CollectionTreeItemRowProps {
   onToggleExpand: () => void
   isActive: boolean
   onSelect: () => void
+  memberType: CollectionMemberType
+  dragMime: string
+  onDeleted: () => void
 }
 
 function CollectionTreeItemRow({
@@ -78,6 +91,9 @@ function CollectionTreeItemRow({
   onToggleExpand,
   isActive,
   onSelect,
+  memberType,
+  dragMime,
+  onDeleted,
 }: CollectionTreeItemRowProps) {
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(item.name)
@@ -88,8 +104,7 @@ function CollectionTreeItemRow({
   const [exportLoading, setExportLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
-  const activeCollectionId = useAppStore((s) => s.activeCollectionId)
-  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+  const listQueryKey = MEMBER_LIST_QUERY[memberType]
 
   const renameMut = useMutation({
     mutationFn: (name: string) => renameCollection(item.id, name),
@@ -103,19 +118,21 @@ function CollectionTreeItemRow({
   const deleteMut = useMutation({
     mutationFn: () => deleteCollection(item.id),
     onSuccess: () => {
-      if (activeCollectionId === item.id) setActiveCollectionId(null)
+      onDeleted()
       void qc.invalidateQueries({ queryKey: ["collections-tree"] })
-      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: [listQueryKey] })
       setConfirmDelete(false)
     },
   })
 
   const dropMut = useMutation({
-    mutationFn: (noteId: string) => addNoteToCollection(item.id, noteId),
+    mutationFn: (memberId: string) => addMemberToCollection(item.id, memberId, memberType),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["notes"] })
+      void qc.invalidateQueries({ queryKey: [listQueryKey] })
       void qc.invalidateQueries({ queryKey: ["collections-tree"] })
+      toast.success("Added to collection")
     },
+    onError: () => toast.error("Could not add to collection"),
   })
 
   function commitRename() {
@@ -177,6 +194,17 @@ function CollectionTreeItemRow({
   const hasChildren = item.children.length > 0
   const paddingLeft = depth * 12 + 8
 
+  const isEmpty = item.document_count === 0 && item.note_count === 0
+  const kindLabel = isEmpty
+    ? "Empty collection"
+    : item.document_count > 0 && item.note_count > 0
+      ? `${item.document_count} document${item.document_count === 1 ? "" : "s"}, ` +
+        `${item.note_count} note${item.note_count === 1 ? "" : "s"}`
+      : item.document_count > 0
+        ? `${item.document_count} document${item.document_count === 1 ? "" : "s"}`
+        : `${item.note_count} note${item.note_count === 1 ? "" : "s"}`
+  const offKind = !isEmpty && (memberType === "document" ? item.document_count : item.note_count) === 0
+
   return (
     <>
       <div
@@ -201,8 +229,8 @@ function CollectionTreeItemRow({
         onDrop={(e) => {
           e.preventDefault()
           setIsDragOver(false)
-          const noteId = e.dataTransfer.getData("text/plain")
-          if (noteId) dropMut.mutate(noteId)
+          const memberId = e.dataTransfer.getData(dragMime)
+          if (memberId) dropMut.mutate(memberId)
         }}
       >
         {/* Expand/collapse chevron */}
@@ -244,20 +272,34 @@ function CollectionTreeItemRow({
             className="flex-1 min-w-0 rounded border border-primary bg-background px-1 text-xs text-foreground focus:outline-none"
           />
         ) : (
-          <span className="flex-1 min-w-0 truncate text-sm">{item.name}</span>
+          <span
+            className={`flex-1 min-w-0 truncate text-sm ${
+              offKind && !isActive ? "opacity-60" : ""
+            }`}
+          >
+            {item.name}
+          </span>
         )}
 
-        {/* Counts pill */}
+        {/* Which pills are present IS the kind: documents, notes, or both. A
+            zero pill is never rendered. */}
         {!renaming && (
-          <div className="ml-auto flex items-center gap-1 shrink-0">
+          <div className="ml-auto flex items-center gap-1 shrink-0" title={kindLabel}>
             {item.document_count > 0 && (
-              <span className="rounded-full bg-blue-100/50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">
+              <span className="rounded-full bg-sky-100/60 dark:bg-sky-900/30 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
                 {item.document_count}d
               </span>
             )}
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {item.note_count}n
-            </span>
+            {item.note_count > 0 && (
+              <span className="rounded-full bg-amber-100/60 dark:bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                {item.note_count}n
+              </span>
+            )}
+            {isEmpty && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70">
+                empty
+              </span>
+            )}
           </div>
         )}
 
@@ -356,7 +398,8 @@ function CollectionTreeItemRow({
           <DialogHeader>
             <DialogTitle>Delete collection?</DialogTitle>
             <DialogDescription>
-              Delete &ldquo;{item.name}&rdquo;? Notes are not deleted.
+              Delete &ldquo;{item.name}&rdquo;? Your documents and notes are not deleted —
+              only the collection and its membership list.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -383,18 +426,40 @@ function CollectionTreeItemRow({
 
 
 interface CollectionTreeProps {
-  /** Restrict tree to collections containing this member type. Empty
-   * collections always survive so create-then-add still works. Defaults
-   * to undefined (unscoped) so existing call sites keep current behavior;
-   * Notes opts in to "note" to focus the sidebar. */
+  /** Scopes the count badge only; every collection stays listed. */
   contains?: CollectionTreeContains
+  /** What a drop onto a row adds, and which list query that invalidates. */
+  memberType?: CollectionMemberType
+  /** dataTransfer key carrying the dragged row's id. */
+  dragMime?: string
+  /** Controlled selection. Omit to use the global activeCollectionId. */
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
 }
 
-export function CollectionTree({ contains }: CollectionTreeProps = {}) {
+export function CollectionTree({
+  contains,
+  memberType = "note",
+  dragMime = NOTE_DRAG_MIME,
+  selectedId,
+  onSelect,
+}: CollectionTreeProps = {}) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const activeCollectionId = useAppStore((s) => s.activeCollectionId)
+  const storeCollectionId = useAppStore((s) => s.activeCollectionId)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
+
+  const isControlled = onSelect !== undefined
+  const activeCollectionId = isControlled ? (selectedId ?? null) : storeCollectionId
+
+  function select(id: string | null) {
+    if (isControlled) {
+      onSelect(id)
+      return
+    }
+    setActiveTag(null)
+    setActiveCollectionId(id)
+  }
 
   const {
     data: tree,
@@ -405,6 +470,8 @@ export function CollectionTree({ contains }: CollectionTreeProps = {}) {
     queryKey: ["collections-tree", contains ? `contains:${contains}` : "contains:all"],
     queryFn: () => fetchCollectionTree(contains),
     staleTime: 30_000,
+    // Else a collection created on another surface waits out the staleTime.
+    refetchOnMount: "always",
   })
 
   function toggleExpand(id: string) {
@@ -459,9 +526,11 @@ export function CollectionTree({ contains }: CollectionTreeProps = {}) {
             isExpanded={expanded.has(item.id)}
             onToggleExpand={() => toggleExpand(item.id)}
             isActive={activeCollectionId === item.id}
-            onSelect={() => {
-              setActiveTag(null)
-              setActiveCollectionId(activeCollectionId === item.id ? null : item.id)
+            onSelect={() => select(activeCollectionId === item.id ? null : item.id)}
+            memberType={memberType}
+            dragMime={dragMime}
+            onDeleted={() => {
+              if (activeCollectionId === item.id) select(null)
             }}
           />
           {expanded.has(item.id) &&
@@ -473,9 +542,11 @@ export function CollectionTree({ contains }: CollectionTreeProps = {}) {
                 isExpanded={false}
                 onToggleExpand={() => {}}
                 isActive={activeCollectionId === child.id}
-                onSelect={() => {
-                  setActiveTag(null)
-                  setActiveCollectionId(activeCollectionId === child.id ? null : child.id)
+                onSelect={() => select(activeCollectionId === child.id ? null : child.id)}
+                memberType={memberType}
+                dragMime={dragMime}
+                onDeleted={() => {
+                  if (activeCollectionId === child.id) select(null)
                 }}
               />
             ))}

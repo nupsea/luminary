@@ -19,17 +19,24 @@ import {
   MoreVertical,
   Network,
   Newspaper,
+  Plus,
   StickyNote,
   Trash2, 
   X, 
   Zap 
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import type { DocAction } from "@/lib/docActionUtils"
 import { DOC_ACTIONS } from "@/lib/docActionUtils"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
-import { addDocumentToCollection, fetchCollectionTree } from "@/lib/notesApi"
+import {
+  addDocumentToCollection,
+  fetchCollectionTree,
+  removeDocumentFromCollection,
+} from "@/lib/notesApi"
 import { retagDocument } from "@/pages/Learning/api"
 import { flattenCollectionTree, type CollectionTreeItem } from "@/lib/collectionUtils"
 import type { ContentType, DocumentListItem } from "./types"
@@ -45,6 +52,8 @@ import {
 } from "./utils"
 
 import { apiPatch } from "@/lib/apiClient"
+import { toast } from "sonner"
+import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 
 function ProgressRing({ pct, size = 24 }: { pct: number; size?: number }) {
   const r = (size - 4) / 2
@@ -155,7 +164,13 @@ export function DocumentCard({
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false)
   const [collections, setCollections] = useState<CollectionTreeItem[] | null>(null)
   const [collectionsLoading, setCollectionsLoading] = useState(false)
-  const [addedCollectionIds, setAddedCollectionIds] = useState<Set<string>>(new Set())
+  // Optimistic overlay on doc.collections, which stays the source of truth.
+  const [pendingMembership, setPendingMembership] = useState<Map<string, boolean>>(new Map())
+  const [newCollectionOpen, setNewCollectionOpen] = useState(false)
+  const [collectionFilter, setCollectionFilter] = useState("")
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
   const [retagState, setRetagState] = useState<"idle" | "running" | "done">("idle")
   const [retagAdded, setRetagAdded] = useState<number | null>(null)
 
@@ -166,7 +181,13 @@ export function DocumentCard({
       if (typePopoverOpen && popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setTypePopoverOpen(false)
       }
-      if (actionMenuOpen && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+      // The menu is portalled to body, so it is not inside actionMenuRef.
+      if (
+        actionMenuOpen &&
+        actionMenuRef.current &&
+        !actionMenuRef.current.contains(e.target as Node) &&
+        !menuRef.current?.contains(e.target as Node)
+      ) {
         setActionMenuOpen(false)
         setCollectionPickerOpen(false)
       }
@@ -174,6 +195,38 @@ export function DocumentCard({
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
   }, [typePopoverOpen, actionMenuOpen])
+
+  const flatCollections = collections ? flattenCollectionTree(collections) : []
+  const showCollectionFilter = flatCollections.length > 7
+  const visibleCollections = collectionFilter.trim()
+    ? flatCollections.filter((c) =>
+        c.name.toLowerCase().includes(collectionFilter.trim().toLowerCase()),
+      )
+    : flatCollections
+
+  // The card sets overflow-hidden, so the menu is portalled to body and
+  // anchored here. Styles are written directly to avoid a re-render per frame.
+  useLayoutEffect(() => {
+    if (!actionMenuOpen) return
+    const place = () => {
+      const trigger = triggerRef.current
+      const menu = menuRef.current
+      if (!trigger || !menu) return
+      const rect = trigger.getBoundingClientRect()
+      const top = rect.bottom + 4
+      menu.style.top = `${top}px`
+      menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`
+      menu.style.maxHeight = `${Math.max(180, window.innerHeight - top - 12)}px`
+    }
+    place()
+    // Capture phase: the scroller is an ancestor, not window.
+    window.addEventListener("scroll", place, true)
+    window.addEventListener("resize", place)
+    return () => {
+      window.removeEventListener("scroll", place, true)
+      window.removeEventListener("resize", place)
+    }
+  }, [actionMenuOpen, collectionPickerOpen, showCollectionFilter])
 
   function handleCardClick(e: React.MouseEvent) {
     if (selectMode && onSelect) {
@@ -191,6 +244,7 @@ export function DocumentCard({
 
   async function handleOpenCollectionPicker() {
     setCollectionPickerOpen(true)
+    setCollectionFilter("")
     if (collections !== null || collectionsLoading) return
     setCollectionsLoading(true)
     try {
@@ -201,14 +255,40 @@ export function DocumentCard({
     }
   }
 
-  async function handleAddToCollection(collectionId: string) {
-    if (addedCollectionIds.has(collectionId)) return
+  function isMember(collectionId: string): boolean {
+    const pending = pendingMembership.get(collectionId)
+    if (pending !== undefined) return pending
+    return (doc.collections ?? []).some((c) => c.id === collectionId)
+  }
+
+  async function handleToggleCollection(collectionId: string, name: string) {
+    const adding = !isMember(collectionId)
+    setPendingMembership((prev) => new Map(prev).set(collectionId, adding))
     try {
-      await addDocumentToCollection(collectionId, doc.id)
-      setAddedCollectionIds((prev) => new Set(prev).add(collectionId))
+      if (adding) await addDocumentToCollection(collectionId, doc.id)
+      else await removeDocumentFromCollection(collectionId, doc.id)
+      toast.success(adding ? `Added to ${name}` : `Removed from ${name}`)
+      // The card's own chips and the rail's badges live in other queries.
+      void queryClient.invalidateQueries({ queryKey: ["collections-tree"] })
+      void queryClient.invalidateQueries({ queryKey: ["documents"] })
+      // Hold long enough for the tick to register, then close.
+      window.setTimeout(() => {
+        setCollectionPickerOpen(false)
+        setActionMenuOpen(false)
+      }, 450)
     } catch {
-      // Silent — POST is idempotent server-side; surface failure only if needed later.
+      setPendingMembership((prev) => {
+        const next = new Map(prev)
+        next.delete(collectionId)
+        return next
+      })
+      toast.error(adding ? `Could not add to ${name}` : `Could not remove from ${name}`)
     }
+  }
+
+  async function handleCollectionCreated(created: { id: string; name: string }) {
+    await handleToggleCollection(created.id, created.name)
+    setCollections(await fetchCollectionTree())
   }
 
   async function handleRetag() {
@@ -295,6 +375,7 @@ export function DocumentCard({
           {onAction && !selectMode && (
             <div className="relative" ref={actionMenuRef}>
               <button
+                ref={triggerRef}
                 onClick={(e) => {
                   e.stopPropagation()
                   setActionMenuOpen((v) => !v)
@@ -304,9 +385,10 @@ export function DocumentCard({
               >
                 <MoreVertical size={14} />
               </button>
-              {actionMenuOpen && (
+              {actionMenuOpen && createPortal(
                 <div
-                  className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-border bg-background p-1 shadow-lg"
+                  ref={menuRef}
+                  className="fixed z-50 flex w-56 flex-col overflow-hidden rounded-lg border border-border bg-background p-1 shadow-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {!collectionPickerOpen && (
@@ -352,8 +434,8 @@ export function DocumentCard({
                     </>
                   )}
                   {collectionPickerOpen && (
-                    <div className="flex flex-col">
-                      <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="flex shrink-0 items-center justify-between px-2 py-1 text-xs text-muted-foreground">
                         <span>Add to collection</span>
                         <button
                           onClick={() => setCollectionPickerOpen(false)}
@@ -363,25 +445,45 @@ export function DocumentCard({
                           <X size={12} />
                         </button>
                       </div>
-                      <div className="max-h-56 overflow-y-auto">
+                      {/* Sub-collections sit under their parents, so the list is
+                          not alphabetical and a name can fall well below the
+                          fold. Filtering beats scrolling past nesting. */}
+                      {showCollectionFilter && (
+                        <input
+                          autoFocus
+                          value={collectionFilter}
+                          onChange={(e) => setCollectionFilter(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="Filter collections…"
+                          className="mx-2 mb-1 shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      )}
+                      <div className="min-h-0 flex-1 overflow-y-auto">
                         {collectionsLoading && (
                           <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
                         )}
                         {!collectionsLoading && collections && collections.length === 0 && (
                           <p className="px-2 py-1.5 text-xs text-muted-foreground">No collections yet</p>
                         )}
+                        {!collectionsLoading &&
+                          collections &&
+                          collections.length > 0 &&
+                          visibleCollections.length === 0 && (
+                            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                              No collection matches “{collectionFilter.trim()}”
+                            </p>
+                          )}
                         {!collectionsLoading && collections && collections.length > 0 && (
-                          flattenCollectionTree(collections).map((col) => {
-                            const added = addedCollectionIds.has(col.id)
+                          visibleCollections.map((col) => {
+                            const member = isMember(col.id)
                             const isChild = !collections.some((root) => root.id === col.id)
                             return (
                               <button
                                 key={col.id}
-                                onClick={() => void handleAddToCollection(col.id)}
-                                disabled={added}
+                                onClick={() => void handleToggleCollection(col.id, col.name)}
+                                title={member ? `Remove from ${col.name}` : `Add to ${col.name}`}
                                 className={cn(
-                                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors",
-                                  added ? "text-muted-foreground" : "hover:bg-accent",
+                                  "group/row flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                                   isChild && "pl-5",
                                 )}
                               >
@@ -390,15 +492,38 @@ export function DocumentCard({
                                   style={{ backgroundColor: col.color }}
                                 />
                                 <span className="flex-1 truncate">{col.name}</span>
-                                {added && <Check size={12} className="shrink-0 text-primary" />}
+                                {member && (
+                                  <>
+                                    <Check
+                                      size={12}
+                                      className="shrink-0 text-primary group-hover/row:hidden"
+                                    />
+                                    <X
+                                      size={12}
+                                      className="hidden shrink-0 text-destructive group-hover/row:block"
+                                    />
+                                  </>
+                                )}
                               </button>
                             )
                           })
                         )}
                       </div>
+                      {/* Outside the scroll area so it stays reachable however
+                          many collections exist. */}
+                      {!collectionsLoading && collections && (
+                        <button
+                          onClick={() => setNewCollectionOpen(true)}
+                          className="mt-1 flex w-full shrink-0 items-center gap-2 border-t border-border px-2 py-1.5 text-left text-sm text-primary hover:bg-accent"
+                        >
+                          <Plus size={12} className="shrink-0" />
+                          <span className="flex-1 truncate">New collection…</span>
+                        </button>
+                      )}
                     </div>
                   )}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}
@@ -589,6 +714,15 @@ export function DocumentCard({
           <span>{Math.round(doc.objective_progress_pct)}% objectives covered</span>
         </div>
       )}
+
+      {/* Card click-through would open the document behind the dialog. */}
+      <div onClick={(e) => e.stopPropagation()}>
+        <CreateCollectionDialog
+          open={newCollectionOpen}
+          onClose={() => setNewCollectionOpen(false)}
+          onSaved={(created) => void handleCollectionCreated(created)}
+        />
+      </div>
 
       {/* Inline delete confirmation */}
       {confirmDelete && (

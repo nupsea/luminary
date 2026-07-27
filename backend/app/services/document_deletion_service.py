@@ -30,6 +30,7 @@ from app.models import (
     ChunkModel,
     ClipModel,
     CodeSnippetModel,
+    CollectionMemberModel,
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
@@ -122,6 +123,14 @@ class DocumentDeletionService:
         await session.execute(
             delete(StudySessionModel).where(
                 StudySessionModel.document_id == document_id
+            )
+        )
+        # Keyed on (member_id, member_type), not document_id, so the loop above
+        # misses it; orphaned rows inflate every collection's badge.
+        await session.execute(
+            delete(CollectionMemberModel).where(
+                CollectionMemberModel.member_id == document_id,
+                CollectionMemberModel.member_type == "document",
             )
         )
         await session.delete(doc)

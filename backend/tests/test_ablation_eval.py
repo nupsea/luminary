@@ -90,8 +90,9 @@ async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
     assert rows[0].chunk_id == "graph-1"
 
 
-def test_run_eval_ablation_produces_five_metric_sets(monkeypatch):
+def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
     strategies_seen: list[str] = []
+    expand_flags: list[bool] = []
     history_rows: list[tuple[str, dict]] = []
     store_rows: list[tuple[str, dict]] = []
 
@@ -112,8 +113,11 @@ def test_run_eval_ablation_produces_five_metric_sets(monkeypatch):
     monkeypatch.setattr(
         run_eval,
         "search_chunks",
-        lambda *args, **kwargs: strategies_seen.append(kwargs.get("strategy", "rrf"))
-        or ["answer hint"],
+        lambda *args, **kwargs: (
+            strategies_seen.append(kwargs.get("strategy", "rrf")),
+            expand_flags.append(kwargs.get("graph_expand", True)),
+        )
+        and ["answer hint"],
     )
     monkeypatch.setattr(
         run_eval,
@@ -138,13 +142,16 @@ def test_run_eval_ablation_produces_five_metric_sets(monkeypatch):
 
     run_eval.main()
 
-    # Two rerank passes issue strategy="rrf" (rerank=True) -- rrf+rerank-ce
-    # (pure CE, blend=0) and the shipped rrf+rerank -- and the L1 pool-recall
-    # arm adds one more raw-rrf pass at the end.
-    assert strategies_seen == ["vector", "fts", "graph", "rrf", "rrf", "rrf", "rrf"]
+    # Five arms issue strategy="rrf" -- rrf, rrf-nogx, rrf+rerank-ce,
+    # rrf+rerank, rrf+rerank-nogx -- and the L1 pool-recall arm adds one more.
+    assert strategies_seen == ["vector", "fts", "graph"] + ["rrf"] * 6
+    # Only the -nogx arms switch expansion off; everything else inherits the
+    # /search default, which is what the shipped pipeline runs with.
+    assert expand_flags == [True, True, True, True, False, True, True, False, True]
     assert history_rows[0][0] == "ablation"
     assert set(history_rows[0][1]["ablation_metrics"]) == {
-        "vector", "fts", "graph", "rrf", "rrf+rerank-ce", "rrf+rerank", "rrf-pool",
+        "vector", "fts", "graph", "rrf", "rrf-nogx",
+        "rrf+rerank-ce", "rrf+rerank", "rrf+rerank-nogx", "rrf-pool",
     }
     assert history_rows[0][1]["ablation_metrics"]["rrf-pool"] == {
         "recall_50": 1.0, "recall_100": 1.0, "recall_200": 1.0,
