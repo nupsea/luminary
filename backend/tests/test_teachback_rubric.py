@@ -18,7 +18,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import FlashcardModel, TeachbackResultModel
-from app.routers.study import _parse_rubric
+from app.routers.study import _parse_rubric, _parse_teachback_response
 
 # Pure function tests for _parse_rubric
 
@@ -223,3 +223,30 @@ async def test_teachback_malformed_rubric_no_500(test_db):
     # Legacy fields still present
     assert "score" in body
     assert isinstance(body["score"], int)
+
+
+@pytest.mark.parametrize(
+    ("label", "raw", "expected"),
+    [
+        ("clean", '{"score": 45, "correct_points": []}', 45),
+        ("fenced", '```json\n{"score": 70, "correct_points": []}\n```', 70),
+        ("prose preamble", 'Here is my evaluation:\n{"score": 80}', 80),
+        ("trailing prose", '{"score": 55}\nHope this helps!', 55),
+        ("illegal escape", '{"score": 60, "evidence": "uses \\$ sign"}', 60),
+    ],
+)
+def test_parse_teachback_recovers_real_model_output(label, raw, expected):
+    """Each of these scored 0 before: the parser fenced-stripped then json.loads'd."""
+    parsed = _parse_teachback_response(raw)
+    assert parsed is not None, label
+    assert parsed["score"] == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['{"score": 40, "correct_points": ["a', '{"correct_points": []}', "The student did well."],
+)
+def test_parse_teachback_returns_none_when_unreadable(raw):
+    """Never a fabricated 0: the learner reads it as "you got nothing right",
+    it drags the session average down, and it reaches FSRS as a failed card."""
+    assert _parse_teachback_response(raw) is None

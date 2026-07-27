@@ -100,11 +100,14 @@ def test_parse_teachback_response_strips_markdown_fences():
     assert result["score"] == 80
 
 
-def test_parse_teachback_response_returns_empty_on_bad_json():
-    """_parse_teachback_response returns zero-score empty dict on unparseable input."""
-    result = _parse_teachback_response("not valid JSON at all")
-    assert result.get("score", 0) == 0
-    assert result.get("correct_points", []) == []
+def test_parse_teachback_response_returns_none_on_bad_json():
+    """Unparseable input yields None, never a zero score.
+
+    A fabricated 0 is indistinguishable from a genuinely poor explanation: the
+    learner sees "you got nothing right", it drags the session average down,
+    and _score_to_rating hands it to FSRS as a lapse.
+    """
+    assert _parse_teachback_response("not valid JSON at all") is None
 
 
 # GET /study/gaps/{document_id} tests
