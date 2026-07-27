@@ -96,6 +96,7 @@ from app.schemas.study import (
 from app.services import study_assembler
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
+from app.services.llm_json import parse_llm_json_object
 from app.services.mastery_service import get_mastery_service
 from app.services.misconceptions import (
     PASSING_TEACHBACK_SCORE,
@@ -1275,10 +1276,12 @@ async def teachback(
         answer=card.answer,
         explanation=req.user_explanation,
     )
-    raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
-
-    # Parse LLM JSON response
-    parsed = _parse_teachback_response(raw)
+    parsed = await _evaluate_teachback_llm(prompt)
+    if parsed is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The model returned an unreadable evaluation. Please try again.",
+        )
     score = parsed.get("score", 0)
     correct_points: list[str] = parsed.get("correct_points", [])
     missing_points: list[str] = parsed.get("missing_points", [])
@@ -1451,8 +1454,10 @@ async def _evaluate_teachback_bg(
         answer=card_answer,
         explanation=user_explanation,
     )
-    raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
-    parsed = _parse_teachback_response(raw)
+    parsed = await _evaluate_teachback_llm(prompt)
+    if parsed is None:
+        await _mark_teachback_error(tb_id)
+        return
     score = parsed.get("score", 0)
     correct_points: list[str] = parsed.get("correct_points", [])
     missing_points: list[str] = parsed.get("missing_points", [])
@@ -2177,17 +2182,10 @@ async def get_start_concepts(
 
 
 def _parse_rubric(raw: str) -> dict | None:
-    """Strip markdown fences and parse rubric JSON from LLM response. Returns None on failure."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
-    try:
-        parsed = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
+    """Parse rubric JSON from an LLM response. Returns None on failure."""
+    parsed = parse_llm_json_object(raw)
+    if parsed is None:
         logger.warning("Failed to parse rubric JSON: %r", raw[:200])
-        return None
-    if not isinstance(parsed, dict):
         return None
     if not {"accuracy", "completeness", "clarity"}.issubset(parsed.keys()):
         logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
@@ -2195,18 +2193,49 @@ def _parse_rubric(raw: str) -> dict | None:
     return parsed
 
 
-def _parse_teachback_response(raw: str) -> dict:
-    """Strip markdown fences and parse JSON from LLM teachback response."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
+async def _mark_teachback_error(tb_id: str) -> None:
+    """Flag a teachback row as failed so the UI offers a retry."""
     try:
-        result = json.loads(cleaned)
-        return result if isinstance(result, dict) else {}
-    except (json.JSONDecodeError, ValueError):
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(TeachbackResultModel).where(TeachbackResultModel.id == tb_id)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                row.status = "error"
+                await session.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to mark teachback %s as error", tb_id)
+
+
+async def _evaluate_teachback_llm(prompt: str) -> dict | None:
+    """Run the teachback evaluation, retrying once on an unparseable reply.
+
+    Local models drop a malformed object often enough that a single bad
+    completion should not cost the learner their score.
+    """
+    llm = get_llm_service()
+    for attempt in (1, 2):
+        raw = await llm.generate(prompt=prompt, system=_TEACHBACK_SYSTEM)
+        parsed = _parse_teachback_response(raw)
+        if parsed is not None:
+            return parsed
+        logger.warning("Teachback evaluation unparseable (attempt %d/2)", attempt)
+    return None
+
+
+def _parse_teachback_response(raw: str) -> dict | None:
+    """Parse the teachback rubric from an LLM completion. None when unparseable.
+
+    Never substitute a zero for a failed parse: the learner reads that as "you
+    got nothing right", it drags the session average down, and _score_to_rating
+    feeds it to FSRS as a failed card.
+    """
+    parsed = parse_llm_json_object(raw)
+    if parsed is None or "score" not in parsed:
         logger.warning("Failed to parse teachback JSON", extra={"raw": raw[:200]})
-        return {"score": 0, "correct_points": [], "missing_points": [], "misconceptions": []}
+        return None
+    return parsed
 
 
 async def _llm_correction_card_payload(
