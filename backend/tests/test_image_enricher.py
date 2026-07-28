@@ -830,6 +830,116 @@ def test_merge_labels_ignores_missing_or_invalid() -> None:
     assert _merge_labels({"description": "A chart.", "labels": []}) == "A chart."
 
 
+def test_merge_labels_dedupes_repeated_labels() -> None:
+    from app.services.image_enricher import _merge_labels
+
+    parsed = {
+        "description": "An encoder stack.",
+        "labels": ["Add & Norm", "Feed Forward", "Add & Norm", "Feed Forward", "Add & Norm"],
+    }
+    assert _merge_labels(parsed) == (
+        "An encoder stack. Visible labels: Add & Norm, Feed Forward."
+    )
+
+
+@pytest.mark.asyncio
+async def test_truncated_vision_response_is_salvaged(tmp_path: Path) -> None:
+    """A response cut off mid-JSON keeps the type and labels it committed to.
+
+    Storing the half-written blob verbatim is what previously left a paper's
+    flagship diagram typed 'other' with unusable JSON as its description.
+    """
+    from app.services.image_enricher import _call_vision_llm
+
+    img_path = tmp_path / "figure.png"
+    _make_varied_png(img_path)
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = (
+        '```json\n{"image_type": "architecture_diagram", '
+        '"labels": ["Softmax", "Linear", "Add & Norm"], "descrip'
+    )
+
+    with patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = mock_response
+        settings = MagicMock()
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+
+        parsed = await _call_vision_llm(img_path, settings, "")
+
+    assert parsed["image_type"] == "architecture_diagram"
+    assert parsed["labels"] == ["Softmax", "Linear", "Add & Norm"]
+    assert "description" not in parsed
+
+
+@pytest.mark.asyncio
+async def test_unsalvageable_json_response_is_not_stored_as_description(tmp_path: Path) -> None:
+    """Nothing recoverable means no description -- not a JSON blob as the body."""
+    from app.services.image_enricher import _call_vision_llm
+
+    img_path = tmp_path / "figure.png"
+    _make_varied_png(img_path)
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = '```json\n{"image_ty'
+
+    with patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = mock_response
+        settings = MagicMock()
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+
+        parsed = await _call_vision_llm(img_path, settings, "")
+
+    assert parsed == {}
+
+
+@pytest.mark.asyncio
+async def test_undescribable_image_left_null_for_retry(
+    doc_and_image, session_factory, tmp_path: Path
+) -> None:
+    """An image with no usable description stays un-described so it is retried."""
+    doc_id, image_id, img_path, data_dir = doc_and_image
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = '```json\n{"image_ty'
+
+    mock_lancedb = MagicMock()
+    mock_embedder = MagicMock()
+    mock_embedder.encode.return_value = [[0.1] * 384]
+
+    with (
+        patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm,
+        patch("app.database.get_session_factory", return_value=session_factory),
+        patch("app.config.get_settings") as mock_settings,
+        patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
+        patch("app.services.embedder.get_embedding_service", return_value=mock_embedder),
+    ):
+        mock_llm.return_value = mock_response
+        settings = MagicMock()
+        settings.DATA_DIR = str(data_dir)
+        settings.VISION_MODEL = "ollama/llava:7b"
+        settings.OLLAMA_URL = "http://localhost:11434"
+        settings.LITELLM_DEFAULT_MODEL = "ollama/gemma4"
+        mock_settings.return_value = settings
+
+        count = await ImageEnricherService().enrich(doc_id)
+
+    assert count == 0
+    mock_lancedb.upsert_image_vector.assert_not_called()
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(ImageModel).where(ImageModel.id == image_id))
+        ).scalar_one()
+        assert row.description is None, "Null description keeps the image in the retry set"
+
+
 @pytest.mark.asyncio
 async def test_vision_call_includes_context_when_given(tmp_path: Path) -> None:
     from app.services.image_enricher import _call_vision_llm

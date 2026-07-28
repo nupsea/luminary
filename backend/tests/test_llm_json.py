@@ -1,6 +1,10 @@
 """Tests for tolerant LLM JSON parsing."""
 
-from app.services.llm_json import parse_llm_json_array, parse_llm_json_object
+from app.services.llm_json import (
+    parse_llm_json_array,
+    parse_llm_json_object,
+    salvage_llm_json_object,
+)
 
 
 def test_valid_array_passes_through():
@@ -91,3 +95,30 @@ def test_object_unrecoverable_returns_none():
     assert parse_llm_json_object("no braces here") is None
     assert parse_llm_json_object('{"truncated": "mid str') is None
     assert parse_llm_json_object("[1, 2]") is None
+
+
+def test_salvage_keeps_pairs_completed_before_truncation():
+    """A vision model that loops on a dense diagram runs out of tokens mid-object."""
+    raw = '```json\n{"image_type": "architecture_diagram", "labels": ["Softmax", "Linear"], "des'
+    assert salvage_llm_json_object(raw) == {
+        "image_type": "architecture_diagram",
+        "labels": ["Softmax", "Linear"],
+    }
+
+
+def test_salvage_drops_the_partial_trailing_value():
+    raw = '{"image_type": "flowchart", "description": "a partial senten'
+    assert salvage_llm_json_object(raw) == {"image_type": "flowchart"}
+
+
+def test_salvage_returns_none_when_nothing_completed():
+    assert salvage_llm_json_object('{"image_ty') is None
+    assert salvage_llm_json_object("no braces here") is None
+    assert salvage_llm_json_object("{}") is None
+
+
+def test_salvage_repairs_illegal_escapes():
+    raw = '{"description": "plots \\sigma over time", "labels": ["x'
+    salvaged = salvage_llm_json_object(raw)
+    assert salvaged is not None
+    assert "sigma" in salvaged["description"]

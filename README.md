@@ -194,6 +194,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
 | `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
+| `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures (LaTeX papers embed no images) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |

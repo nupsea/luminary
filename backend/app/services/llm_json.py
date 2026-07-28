@@ -74,6 +74,57 @@ def parse_llm_json_object(raw: str) -> dict | None:
     return None
 
 
+def salvage_llm_json_object(raw: str) -> dict | None:
+    """Recover the complete key/value pairs of a truncated JSON object.
+
+    The object counterpart of the array salvage: decoding stops at the first pair
+    that was cut off mid-generation, keeping everything the model had already
+    committed to. Kept out of parse_llm_json_object because a partial object is a
+    lossy result its callers should opt into knowingly.
+
+    Returns None when not even one pair is recoverable.
+    """
+    text = _repair_escapes(_strip_fences(raw))
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    decoder = json.JSONDecoder()
+    i = start + 1
+    n = len(text)
+    out: dict = {}
+    while i < n:
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i >= n or text[i] == "}":
+            break
+        try:
+            key, i = decoder.raw_decode(text, i)
+        except ValueError:
+            break
+        while i < n and text[i] in " \t\r\n":
+            i += 1
+        if i >= n or text[i] != ":":
+            break
+        i += 1
+        # raw_decode does not skip leading whitespace of its own.
+        while i < n and text[i] in " \t\r\n":
+            i += 1
+        try:
+            value, i = decoder.raw_decode(text, i)
+        except ValueError:
+            # The cut landed inside the value. An array still has complete
+            # elements worth keeping -- that is where a label list gets lost.
+            if i < n and text[i] == "[":
+                salvaged = _salvage_elements(text[i:])
+                if salvaged and isinstance(key, str):
+                    out[key] = salvaged
+            break
+        if isinstance(key, str):
+            out[key] = value
+    return out or None
+
+
 def parse_llm_json_array(raw: str) -> list:
     """Extract a JSON array from an LLM completion, tolerating markdown
     fences, surrounding prose, illegal escape sequences, and truncation.

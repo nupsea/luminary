@@ -7,6 +7,7 @@ from io import BytesIO
 import pytest
 from httpx import ASGITransport, AsyncClient
 from PIL import Image as PILImage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
@@ -325,4 +326,50 @@ async def test_get_enrichment_returns_404_for_unknown_doc(test_db):
     """GET /documents/{unknown}/enrichment returns 404."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/documents/nonexistent-id/enrichment")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reextract_queues_an_image_extract_job(test_db):
+    """POST .../images/reextract lets an already-ingested document pick up
+    extraction improvements without being re-uploaded."""
+    engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Paper",
+                format="pdf",
+                content_type="paper",
+                word_count=100,
+                page_count=15,
+                file_path="/fake.pdf",
+                stage="complete",
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post(f"/documents/{doc_id}/images/reextract")
+        second = await client.post(f"/documents/{doc_id}/images/reextract")
+
+    assert first.status_code == 200
+    assert first.json()["queued"] is True
+    assert second.json() == {"job_id": first.json()["job_id"], "queued": False}
+
+    async with factory() as session:
+        result = await session.execute(
+            select(EnrichmentJobModel).where(EnrichmentJobModel.document_id == doc_id)
+        )
+        jobs = result.scalars().all()
+    assert len(jobs) == 1
+    assert jobs[0].job_type == "image_extract"
+    assert jobs[0].status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_reextract_returns_404_for_unknown_doc(test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/documents/nonexistent-id/images/reextract")
     assert resp.status_code == 404
