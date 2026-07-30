@@ -1,7 +1,7 @@
 """PDF and EPUB image extraction service.
 
-Pure extraction logic — no DB writes.
-Called by image_extract_handler (enrichment job handler).
+The extract_images_* functions are pure — they read a file and write PNGs, never
+the DB. Only image_extract_handler (the enrichment job handler) touches SQLite.
 """
 
 import asyncio
@@ -29,13 +29,7 @@ _MIN_WIDTH = 150
 _MIN_HEIGHT = 100
 _MAX_DIM = 4000
 
-# Vector-figure fallback. A LaTeX-authored paper draws its figures with path
-# operators rather than embedding raster XObjects, so page.get_images() returns
-# nothing and the document ends up with no visual layer at all. When a page has
-# no extractable raster image we cluster its drawing primitives into figure
-# regions and rasterize those instead.
-#
-# Units are PDF points (1/72 inch) unless noted.
+# Vector-figure fallback tuning, in PDF points (1/72 inch) unless noted.
 _CLUSTER_CELL_PT = 6.0  # occupancy-grid resolution
 _CLUSTER_GAP_PT = 9.0  # primitives within this distance belong to one figure
 _CLIP_PAD_PT = 12.0  # captured around the cluster so edge labels survive
@@ -48,8 +42,7 @@ _VECTOR_RENDER_DPI = 150
 # line-art figures measure well below it, so real diagrams survive.
 _BLANK_DOMINANT_FRACTION = 0.99
 _MAX_VECTOR_FIGURES_PER_PAGE = 4
-# Runaway guard only: a 500-page textbook of plots legitimately reaches into the
-# hundreds, and every figure costs a vision LLM call downstream.
+# Runaway guard only; every recovered figure costs a vision LLM call downstream.
 _MAX_VECTOR_FIGURES_PER_DOC = 300
 
 
@@ -81,9 +74,7 @@ def _cluster_drawings(page) -> list:
 
     Primitive bounding boxes are painted onto a coarse occupancy grid, inflated by
     _CLUSTER_GAP_PT so the hundreds of short strokes making up one plot join into a
-    single blob, then connected components are read back as rectangles. This handles
-    both extremes seen in the wild: one large path covering a whole diagram, and a
-    thousand hairlines making up an attention heatmap.
+    single blob, then connected components are read back as rectangles.
 
     Returns fitz.Rect regions, largest first, already filtered to plausible figures.
     """
@@ -91,6 +82,7 @@ def _cluster_drawings(page) -> list:
     if page_rect.width <= 0 or page_rect.height <= 0:
         return []
 
+    page_area = page_rect.width * page_rect.height
     rects = []
     for drawing in page.get_drawings():
         raw_rect = drawing.get("rect")
@@ -98,6 +90,11 @@ def _cluster_drawings(page) -> list:
             continue
         rect = fitz.Rect(raw_rect) & page_rect
         if rect.is_empty or rect.width <= 0 or rect.height <= 0:
+            continue
+        # A background wash or page border spans the grid and would bridge every
+        # figure on the page into one component, which the same fraction check
+        # then discards -- losing the real figures with it.
+        if rect.get_area() > _MAX_FIGURE_PAGE_FRACTION * page_area:
             continue
         rects.append(rect)
     if not rects:
@@ -117,7 +114,6 @@ def _cluster_drawings(page) -> list:
                 occupied[row_base + cell_x] = 1
 
     visited = bytearray(cols * rows)
-    page_area = page_rect.width * page_rect.height
     figures: list = []
     for seed in range(cols * rows):
         if not occupied[seed] or visited[seed]:
@@ -240,10 +236,13 @@ def _extract_vector_figures_page(
     out_dir: Path,
     doc_id: str,
     seen_hashes: set[str],
+    limit: int,
 ) -> list[ExtractedImage]:
-    """Rasterize the vector-drawn figures on one page."""
+    """Rasterize up to `limit` of the vector-drawn figures on one page."""
     results: list[ExtractedImage] = []
     for fig_idx, bbox in enumerate(_cluster_drawings(page)):
+        if len(results) >= limit:
+            break
         # Drawing bounds exclude text, so axis labels and captions sitting just
         # outside the strokes are only captured by padding the clip.
         clip = fitz.Rect(
@@ -343,10 +342,15 @@ def extract_images_pdf(
                 results.append(stored)
                 page_results += 1
 
-        if page_results or not vector_fallback or vector_count >= _MAX_VECTOR_FIGURES_PER_DOC:
+        if page_results or not vector_fallback:
+            continue
+        budget = min(_MAX_VECTOR_FIGURES_PER_PAGE, _MAX_VECTOR_FIGURES_PER_DOC - vector_count)
+        if budget <= 0:
             continue
         try:
-            figures = _extract_vector_figures_page(page, page_idx, out_dir, doc_id, seen_hashes)
+            figures = _extract_vector_figures_page(
+                page, page_idx, out_dir, doc_id, seen_hashes, budget
+            )
         except Exception as exc:
             logger.warning(
                 "Vector figure detection failed doc=%s page=%d: %s", doc_id, page_idx, exc
@@ -467,7 +471,8 @@ async def _record_job_note(job_id: str, note: str) -> None:
     """Attach a diagnostic note to the job row.
 
     The worker overwrites status but not error_message, so a degraded-but-finished
-    job keeps its explanation while still reporting 'done'.
+    job keeps its explanation while still reporting 'done'. A note on a 'done' job
+    is therefore an explanation, not a failure -- readers must check status too.
     """
     try:
         async with _database_module.get_session_factory()() as session:
@@ -478,7 +483,7 @@ async def _record_job_note(job_id: str, note: str) -> None:
             )
             await session.commit()
     except Exception as exc:
-        logger.debug("image_extract_handler: could not record job note job=%s: %s", job_id, exc)
+        logger.warning("image_extract_handler: could not record job note job=%s: %s", job_id, exc)
 
 
 async def image_extract_handler(document_id: str, job_id: str) -> None:
@@ -522,14 +527,10 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
         logger.info("image_extract_handler: format %s has no image extraction", fmt)
         return
 
-    # Extraction is best-effort: a PDF we cannot open (encrypted, truncated) leaves
-    # the rest of the document perfectly usable, so it degrades to "no images" and
-    # lets the remaining enrichment run instead of failing the job. The cause is
-    # recorded so the enrichment endpoint can explain the missing figures rather
-    # than the library just showing none.
-    #
-    # Off-loop: parsing and rasterizing a large PDF is seconds of CPU, and the
-    # worker enriches several documents concurrently on the single server loop.
+    # Best-effort: an unreadable PDF still leaves the rest of the document usable,
+    # so degrade to "no images" with a recorded cause rather than failing the job.
+    # Off-loop because rasterizing a large PDF is seconds of CPU on the single
+    # server loop the worker shares with every live request.
     note: str | None = None
     try:
         if fmt == "pdf":

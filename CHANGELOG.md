@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **PDFs whose figures are drawn rather than embedded now have a visual layer.**
+  A paper typeset from LaTeX draws its figures with path operators, so
+  `page.get_images()` returns nothing and the document previously extracted zero
+  images no matter how many figures it contained. When a page yields no raster
+  image, its drawing primitives are now clustered into figure regions on a coarse
+  occupancy grid and rasterized at 150 DPI. Primitives spanning the page (a
+  background wash, a page border) are excluded from clustering first — they would
+  otherwise bridge every figure into one whole-page region that the size guard
+  then discards, losing the real figures with it. Blank renders are dropped before
+  they cost a vision call. Off by `PDF_VECTOR_FIGURES=false`; capped at 4 figures
+  per page and 300 per document.
+- **Image extraction degrades honestly instead of failing the job.** A PDF that
+  cannot be opened (encrypted, truncated) left the document stuck mid-enrichment.
+  Extraction is now best-effort and runs off the event loop via `asyncio.to_thread`
+  — rasterizing a large PDF is seconds of CPU that the single-worker server used
+  to spend blocking every concurrent request. The reason a document has no figures
+  ("extraction failed …", "No images found") is recorded on the enrichment job
+  rather than presenting as a silently empty gallery.
+- **A truncated vision response no longer becomes the image's description.** A
+  local vision model that runs out of tokens mid-JSON used to have its half-written
+  object stored verbatim as the description text. `salvage_llm_json_object()`
+  now recovers the keys the model completed; when nothing is recoverable the
+  description is left null so the next `image_analyze` job retries the image
+  instead of indexing an unusable body. Repeated labels are deduplicated so one
+  looping block name cannot crowd out every other label.
+- **`POST /documents/{id}/images/reextract`** re-runs extraction on an
+  already-ingested document, so a library picks up extraction improvements without
+  re-uploading. Deduplicates on content hash; returns the in-flight job if one is
+  already queued.
+
 - **The Map's Tags view no longer stalls for ~7s** (and neither does anything
   else that happens to run alongside a graph query). Kuzu is synchronous, and
   the `/graph` handlers awaited it directly on the event loop; with a single
@@ -17,6 +47,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~7.1s; `/tags/graph` alongside `/graph` drops from 8.58s to 0.034s. `/graph`
   itself is still slow (~8s for 4.3k nodes) — it just no longer blocks the app.
   I-2 extended to cover Kuzu, not just LanceDB.
+
+### Security
+- **Frontend dependency advisories: 38 → 6.** `npm audit fix` cleared the
+  in-range ones — `postcss`, `vite`, `immutable`, `js-yaml` (high), plus
+  `dompurify`, `esbuild`, `mermaid` and `@babel/core`. `react-router-dom` moved
+  6 → 7.18.2, closing both open-redirect advisories (protocol-relative `//` and
+  backslash in `<Link>`/`useNavigate`); the app uses only the component and hook
+  API, which is unchanged across that major.
+
+  The 6 that remain have no non-destructive fix and are accepted knowingly:
+  - `lodash-es` (×3) and `nanoid`, reached only through
+    `@excalidraw/excalidraw` → `mermaid-to-excalidraw`. Excalidraw 0.18.1 is the
+    latest release; npm's only offered "fix" is a **downgrade** to 0.17.6.
+  - `brace-expansion` DoS under `openapi-typescript` (7.13.0, also latest; the
+    offered fix is a downgrade to 6.x). Dev-only — it runs on our own schema
+    during `make regen-api-types` and ships nothing.
+  - `react-router` RSC-mode CSRF, which arrived *with* 7.18.2 and has no fixed
+    release. It applies only to React Server Components mode; this is a static
+    SPA with `BrowserRouter` and no server runtime. Downgrading to dodge it
+    would reinstate the two open-redirects that do apply.
 
 ### Changed
 - **Chat contradiction lookup filters in Cypher instead of Python.** The

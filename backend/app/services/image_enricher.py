@@ -181,8 +181,8 @@ def _merge_labels(parsed: dict) -> str:
     description = str(parsed.get("description") or "")
     labels = parsed.get("labels")
     if isinstance(labels, list):
-        # Order-preserving dedup: a model that loops on a repetitive diagram emits
-        # the same block name dozens of times and would crowd out the rest.
+        # Order-preserving dedup: a model looping on a repetitive diagram repeats
+        # one block name until it crowds every other label out of _MAX_LABELS.
         seen: dict[str, None] = {}
         for label in labels:
             text = str(label).strip()
@@ -276,14 +276,11 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
     if parsed is not None:
         return parsed
 
-    # A local vision model that loops on a dense diagram hits the token limit
-    # mid-object. Keep the labels and type it did commit to rather than storing
-    # the half-written JSON blob verbatim as the image's description.
+    # Truncated mid-object: keep what the model committed to. The fallthrough
+    # below would otherwise store the half-written JSON as the description.
     salvaged = salvage_llm_json_object(raw)
     if salvaged is not None:
-        logger.warning(
-            "_call_vision_llm: response truncated; salvaged keys=%s", sorted(salvaged)
-        )
+        logger.warning("_call_vision_llm: response truncated; salvaged keys=%s", sorted(salvaged))
         return salvaged
 
     if raw.lstrip().startswith(("{", "[", "```")):

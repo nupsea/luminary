@@ -117,7 +117,9 @@ def test_min_size_constants():
     assert _MAX_DIM == 4000
 
 
-def _pdf_with_vector_figure(path: Path, *, with_raster: bool = False) -> Path:
+def _pdf_with_vector_figure(
+    path: Path, *, with_raster: bool = False, with_background: bool = False
+) -> Path:
     """Write a one-page PDF whose only figure is drawn with vector strokes.
 
     This is the LaTeX/TikZ shape: the figure exists but page.get_images() sees
@@ -125,6 +127,8 @@ def _pdf_with_vector_figure(path: Path, *, with_raster: bool = False) -> Path:
     """
     doc = fitz.open()
     page = doc.new_page()
+    if with_background:
+        page.draw_rect(page.rect, color=(0.95, 0.95, 0.95), fill=(0.95, 0.95, 0.95))
     page.insert_text(fitz.Point(72, 60), "Figure 1: a vector-drawn diagram")
     for row in range(12):
         for col in range(12):
@@ -147,6 +151,21 @@ def test_vector_figure_extracted_when_page_has_no_raster(tmp_path):
     assert len(results) == 1, "The vector figure should have been recovered"
     assert results[0].abs_path.exists()
     assert "_v" in results[0].abs_path.name, "Vector figures use the _v filename marker"
+
+
+def test_page_spanning_primitive_does_not_swallow_the_figure(tmp_path):
+    """A background wash must not bridge every cluster into one rejected region.
+
+    The wash spans the occupancy grid, so without excluding it up front the
+    figure merges into a whole-page component that the page-fraction guard then
+    discards -- taking the real figure with it.
+    """
+    pdf = _pdf_with_vector_figure(tmp_path / "washed.pdf", with_background=True)
+
+    results = extract_images_pdf(pdf, tmp_path / "out", "wash-doc")
+
+    assert len(results) == 1, "The figure must survive a full-page background"
+    assert "_v" in results[0].abs_path.name
 
 
 def test_vector_fallback_can_be_disabled(tmp_path):

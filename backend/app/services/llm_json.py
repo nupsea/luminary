@@ -1,4 +1,4 @@
-"""Tolerant parsing of JSON arrays out of LLM completions.
+"""Tolerant parsing of JSON objects and arrays out of LLM completions.
 
 Local models routinely wrap JSON in markdown fences or prose, emit string
 content containing backslash sequences that are not legal JSON escapes, or
@@ -28,6 +28,14 @@ def _strip_fences(text: str) -> str:
     return cleaned
 
 
+def _skip(text: str, i: int, chars: str = " \t\r\n") -> int:
+    """Advance past `chars`. raw_decode does not skip leading whitespace itself."""
+    n = len(text)
+    while i < n and text[i] in chars:
+        i += 1
+    return i
+
+
 def _salvage_elements(text: str) -> list:
     """Decode complete top-level elements from a (possibly truncated) array,
     stopping at the first element that cannot be decoded."""
@@ -39,8 +47,7 @@ def _salvage_elements(text: str) -> list:
     items: list = []
     n = len(text)
     while i < n:
-        while i < n and text[i] in " \t\r\n,":
-            i += 1
+        i = _skip(text, i, " \t\r\n,")
         if i >= n or text[i] == "]":
             break
         try:
@@ -55,9 +62,8 @@ def parse_llm_json_object(raw: str) -> dict | None:
     """Extract a JSON object from an LLM completion, tolerating markdown
     fences, surrounding prose, and illegal escape sequences.
 
-    Returns None when no object is recoverable (truncated objects are not
-    salvaged: unlike array elements, a partial object has no complete
-    sub-units to keep).
+    All-or-nothing: a truncated object returns None here. Callers willing to
+    accept a partial result opt into salvage_llm_json_object instead.
     """
     cleaned = _strip_fences(raw)
     start = cleaned.find("{")
@@ -94,22 +100,17 @@ def salvage_llm_json_object(raw: str) -> dict | None:
     n = len(text)
     out: dict = {}
     while i < n:
-        while i < n and text[i] in " \t\r\n,":
-            i += 1
+        i = _skip(text, i, " \t\r\n,")
         if i >= n or text[i] == "}":
             break
         try:
             key, i = decoder.raw_decode(text, i)
         except ValueError:
             break
-        while i < n and text[i] in " \t\r\n":
-            i += 1
+        i = _skip(text, i)
         if i >= n or text[i] != ":":
             break
-        i += 1
-        # raw_decode does not skip leading whitespace of its own.
-        while i < n and text[i] in " \t\r\n":
-            i += 1
+        i = _skip(text, i + 1)
         try:
             value, i = decoder.raw_decode(text, i)
         except ValueError:

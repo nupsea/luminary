@@ -209,6 +209,18 @@ The library database schema is versioned with Alembic, and the server applies an
 
 Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flashcard CSV.
 
+### Re-extracting figures from an existing document
+
+Extraction improvements only apply to documents ingested after them. To re-run
+figure extraction on a document already in your library, without re-uploading it:
+
+```bash
+curl -X POST http://localhost:7820/documents/<document_id>/images/reextract
+```
+
+Extraction deduplicates on content hash, so this only adds figures the previous
+run missed. `GET /documents/<document_id>/enrichment` shows the job's progress.
+
 ---
 
 ## Make commands
