@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **The notes preview now tracks the editor properly, at any zoom level.** Scroll
+  sync mapped one pane onto the other with a single global ratio
+  (`scrollTop / scrollMax`). That ratio is only correct at the very top and the
+  very bottom: the editor is monospace with one row per source line, while the
+  preview is serif prose whose block heights vary with headings, list spacing,
+  images and KaTeX — three tight source lines can render as one wrapped
+  paragraph while a five-item list expands into something far taller. Pixels per
+  source line therefore differ by region, and the preview drifted further behind
+  the more the two diverged. Browser zoom made it worse because it rewraps the
+  two panes by different amounts, and because integer `scrollHeight`/
+  `clientHeight` arithmetic rounds at fractional zoom.
+
+  Sync is now line-anchored. A rehype plugin stamps each rendered block with the
+  markdown line it came from, and a position converts between panes by
+  interpolating between the anchors bracketing it, so every region uses its own
+  measured pixels-per-line instead of a document-wide average. Offsets come from
+  `getBoundingClientRect`, which is sub-pixel and therefore zoom-correct. A
+  `ResizeObserver` re-syncs on zoom, window resize and splitter drags — none of
+  which change the note text, so the existing content-change effect never saw
+  them. Anchors are cached against a cheap signature rather than re-measured on
+  every scroll event. Notes split around diagrams keep one continuous line axis.
+  Previews without anchors (the blog dialogs, which wrap theirs in extra chrome)
+  fall back to the previous proportional behaviour.
 - **PDFs whose figures are drawn rather than embedded now have a visual layer.**
   A paper typeset from LaTeX draws its figures with path operators, so
   `page.get_images()` returns nothing and the document previously extracted zero

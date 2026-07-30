@@ -91,6 +91,7 @@ export function NoteEditor({
             content.trim() ? (
               <MarkdownRenderer
                 serif
+                trackSourceLines
                 onEditExcalidrawDiagram={openDiagramEditor}
                 onSetImageSize={(src, size) =>
                   onContentChange(setImageSizeInMarkdown(content, src, size, API_BASE))
