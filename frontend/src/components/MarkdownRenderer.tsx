@@ -6,6 +6,7 @@ import remarkMath from "remark-math"
 import rehypeHighlight from "rehype-highlight"
 import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
+import type { PluggableList } from "unified"
 import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
 import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
@@ -191,10 +192,13 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
-  const rehypePlugins = useMemo(
+  // Options go in a tuple, never applied here: unified calls every entry in this
+  // list as an attacher, so passing an already-applied transformer invokes it
+  // with no tree and throws out of <Markdown>, unmounting the app.
+  const rehypePlugins: PluggableList = useMemo(
     () =>
       trackSourceLines
-        ? [rehypeHighlight, rehypeKatex, rehypeRaw, rehypeSourceLine(sourceLineOffset)]
+        ? [rehypeHighlight, rehypeKatex, rehypeRaw, [rehypeSourceLine, sourceLineOffset]]
         : [rehypeHighlight, rehypeKatex, rehypeRaw],
     [trackSourceLines, sourceLineOffset],
   )
