@@ -33,7 +33,7 @@ from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
 from app.services.llm import LLMUnavailableError, get_llm_service
-from app.services.llm_json import parse_llm_json_object
+from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,14 @@ def _merge_labels(parsed: dict) -> str:
     description = str(parsed.get("description") or "")
     labels = parsed.get("labels")
     if isinstance(labels, list):
-        clean = [str(label).strip() for label in labels if str(label).strip()]
+        # Order-preserving dedup: a model looping on a repetitive diagram repeats
+        # one block name until it crowds every other label out of _MAX_LABELS.
+        seen: dict[str, None] = {}
+        for label in labels:
+            text = str(label).strip()
+            if text:
+                seen.setdefault(text, None)
+        clean = list(seen)
         if clean:
             description = (
                 f"{description} Visible labels: {', '.join(clean[:_MAX_LABELS])}.".strip()
@@ -268,6 +275,18 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
     parsed = parse_llm_json_object(raw)
     if parsed is not None:
         return parsed
+
+    # Truncated mid-object: keep what the model committed to. The fallthrough
+    # below would otherwise store the half-written JSON as the description.
+    salvaged = salvage_llm_json_object(raw)
+    if salvaged is not None:
+        logger.warning("_call_vision_llm: response truncated; salvaged keys=%s", sorted(salvaged))
+        return salvaged
+
+    if raw.lstrip().startswith(("{", "[", "```")):
+        logger.warning("_call_vision_llm: unparseable JSON response, no description recovered")
+        return {}
+
     logger.warning("_call_vision_llm: JSON parse failed, using raw text as description")
     return {
         "image_type": "other",
@@ -339,6 +358,16 @@ class ImageEnricherService:
                         )
                         image_type = parsed.get("image_type") or "other"
                         description = _merge_labels(parsed) or ""
+                        if not description.strip():
+                            # Leaving description null keeps the image in the
+                            # un-described set, so the next image_analyze job
+                            # retries it instead of indexing an empty body.
+                            logger.warning(
+                                "image_enricher: no usable description for image_id=%s, "
+                                "leaving it for retry",
+                                img.id,
+                            )
+                            continue
 
                     # Embed description before any DB writes so a CPU/OOM failure
                     # does not leave the SQLite row updated without an FTS5 entry.

@@ -1,9 +1,10 @@
 """Images API router — .
 
 Endpoints:
-  GET /documents/{id}/images       -- paginated image list for a document
-  GET /images/{id}/raw             -- serve raw PNG file
-  GET /documents/{id}/enrichment   -- enrichment job list for a document
+  GET  /documents/{id}/images            -- paginated image list for a document
+  GET  /images/{id}/raw                  -- serve raw PNG file
+  POST /documents/{id}/images/reextract  -- re-run image extraction for a document
+  GET  /documents/{id}/enrichment        -- enrichment job list for a document
 """
 
 import json
@@ -44,6 +45,11 @@ class ImageListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReextractResponse(BaseModel):
+    job_id: str
+    queued: bool
 
 
 class EnrichmentJobItem(BaseModel):
@@ -205,6 +211,44 @@ async def serve_local_article_image(doc_id: str, filename: str) -> FileResponse:
     else:
         media_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "image/png"
     return FileResponse(str(abs_path), media_type=media_type)
+
+
+@router.post("/documents/{document_id}/images/reextract", response_model=ReextractResponse)
+async def reextract_document_images(document_id: str) -> ReextractResponse:
+    """Queue a fresh image_extract job for a document.
+
+    Extraction dedupes on content hash, so this only adds figures the previous run
+    missed — the way an already-ingested document picks up an extraction improvement
+    without being re-uploaded. Returns the existing job when one is already queued.
+    """
+    async with get_session_factory()() as session:
+        await get_or_404(session, DocumentModel, document_id, name="Document")
+
+        existing = (
+            await session.execute(
+                select(EnrichmentJobModel)
+                .where(
+                    EnrichmentJobModel.document_id == document_id,
+                    EnrichmentJobModel.job_type == "image_extract",
+                    EnrichmentJobModel.status.in_(["pending", "running"]),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return ReextractResponse(job_id=existing.id, queued=False)
+
+        job = EnrichmentJobModel(
+            id=str(uuid.uuid4()),
+            document_id=document_id,
+            job_type="image_extract",
+            status="pending",
+        )
+        session.add(job)
+        await session.commit()
+
+    logger.info("reextract_document_images: queued job=%s doc=%s", job.id, document_id)
+    return ReextractResponse(job_id=job.id, queued=True)
 
 
 @router.get("/documents/{document_id}/enrichment", response_model=list[EnrichmentJobItem])

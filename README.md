@@ -194,6 +194,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 | `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
 | `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
+| `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures (LaTeX papers embed no images) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |
@@ -207,6 +208,18 @@ Everything — library database, vector embeddings, knowledge graph, notes — i
 The library database schema is versioned with Alembic, and the server applies any pending migrations on startup. Upgrading Luminary keeps your existing library, flashcards and review history — you never need to delete the database to take a new version.
 
 Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flashcard CSV.
+
+### Re-extracting figures from an existing document
+
+Extraction improvements only apply to documents ingested after them. To re-run
+figure extraction on a document already in your library, without re-uploading it:
+
+```bash
+curl -X POST http://localhost:7820/documents/<document_id>/images/reextract
+```
+
+Extraction deduplicates on content hash, so this only adds figures the previous
+run missed. `GET /documents/<document_id>/enrichment` shows the job's progress.
 
 ---
 

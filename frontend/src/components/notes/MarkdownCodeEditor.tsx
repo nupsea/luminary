@@ -40,6 +40,26 @@ export interface MarkdownEditorHandle {
   scrollDOM: () => HTMLElement | null
   /** Move the cursor to a 0-based line and scroll it to the top (outline nav). */
   scrollToLine: (line: number) => void
+  /** Total source lines, for the preview's terminal scroll anchor. */
+  lineCount: () => number
+  /** 1-based source line at the top of the viewport, fractional within the line. */
+  topSourceLine: () => number | null
+  /** Scroll (without moving the caret) so `line` sits at the top of the viewport. */
+  scrollToSourceLine: (line: number) => void
+}
+
+/**
+ * Height, in CodeMirror's document coordinate space, of whatever is currently at
+ * the top of the scroller.
+ *
+ * `documentTop` is the document origin in screen coordinates and already accounts
+ * for content padding, so subtracting it from the scroller's screen top converts
+ * between the two spaces without assuming anything about the theme. Both terms
+ * are sub-pixel, which is what keeps the mapping correct under browser zoom —
+ * scrollTop/scrollHeight arithmetic rounds and drifts.
+ */
+function docHeightAtViewportTop(view: EditorView): number {
+  return view.scrollDOM.getBoundingClientRect().top - view.documentTop
 }
 
 export interface MarkdownCodeEditorProps {
@@ -298,6 +318,28 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             effects: EditorView.scrollIntoView(docLine.from, { y: "start", yMargin: 8 }),
           })
           v.focus()
+        },
+        lineCount: () => viewRef.current?.state.doc.lines ?? 0,
+        topSourceLine: () => {
+          const v = viewRef.current
+          if (!v) return null
+          const height = Math.max(0, docHeightAtViewportTop(v))
+          const block = v.lineBlockAtHeight(height)
+          const line = v.state.doc.lineAt(block.from).number
+          if (block.height <= 0) return line
+          // A wrapped line is one block, so the fraction locates the visual row
+          // within it -- without this, sync quantises to whole source lines.
+          const within = Math.min(1, Math.max(0, (height - block.top) / block.height))
+          return line + within
+        },
+        scrollToSourceLine: (line) => {
+          const v = viewRef.current
+          if (!v) return
+          const clamped = Math.min(Math.max(line, 1), v.state.doc.lines)
+          const whole = Math.floor(clamped)
+          const block = v.lineBlockAt(v.state.doc.line(whole).from)
+          const target = block.top + (clamped - whole) * block.height
+          v.scrollDOM.scrollTop += target - docHeightAtViewportTop(v)
         },
       }),
       [],

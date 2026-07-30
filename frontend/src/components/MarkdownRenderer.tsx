@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useState } from "react"
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -10,6 +10,7 @@ import "katex/dist/katex.min.css"
 import { API_BASE } from "@/lib/config"
 import { findExcalidrawDiagrams, type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { resolveLuminaryAssetUrl } from "@/lib/noteAssets"
+import { SOURCE_LINE_ATTR, lineOffsetAt, rehypeSourceLine } from "@/lib/rehypeSourceLine"
 import { cn } from "@/lib/utils"
 
 export type ImageSize = "small" | "medium" | "large"
@@ -30,6 +31,12 @@ interface MarkdownRendererProps {
   /** When set, clicking an image opens a small size picker that writes the
    * |small/medium/large alt pipe back into the source markdown. */
   onSetImageSize?: (src: string, size: ImageSize) => void
+  /** Stamp rendered blocks with their markdown line so a split editor can
+   * scroll-sync against them. Off by default — only the editors need it. */
+  trackSourceLines?: boolean
+  /** Lines of the original document preceding `children`, when this body is one
+   * chunk of a note split around diagrams. */
+  sourceLineOffset?: number
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -141,13 +148,18 @@ function ExcalidrawDiagramPreview({
   diagram,
   index,
   onEdit,
+  sourceLine,
 }: {
   diagram: ExcalidrawNoteDiagramRef
   index: number
   onEdit?: (diagram: ExcalidrawNoteDiagramRef) => void
+  sourceLine?: number
 }) {
   return (
-    <figure className="not-prose my-5 overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+    <figure
+      {...(sourceLine != null ? { [SOURCE_LINE_ATTR]: String(sourceLine) } : {})}
+      className="not-prose my-5 overflow-hidden rounded-lg border border-border bg-background shadow-sm"
+    >
       <div className="flex items-center justify-between border-b border-border bg-muted/35 px-3 py-2">
         <figcaption className="text-xs font-medium text-muted-foreground">
           Diagram {index + 1}
@@ -175,9 +187,17 @@ function ExcalidrawDiagramPreview({
   )
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick, onSetImageSize }: MarkdownRendererProps) {
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0 }: MarkdownRendererProps) {
+  // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
+  const rehypePlugins = useMemo(
+    () =>
+      trackSourceLines
+        ? [rehypeHighlight, rehypeKatex, rehypeRaw, rehypeSourceLine(sourceLineOffset)]
+        : [rehypeHighlight, rehypeKatex, rehypeRaw],
+    [trackSourceLines, sourceLineOffset],
+  )
 
   return (
     <div className={cn(
@@ -195,7 +215,7 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
     )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeHighlight, rehypeKatex, rehypeRaw]}
+        rehypePlugins={rehypePlugins}
         components={{
           pre: ({ children: preChildren }) => {
             const child = Array.isArray(preChildren) ? preChildren[0] : preChildren
@@ -310,12 +330,13 @@ export function MarkdownRenderer({
   onEditExcalidrawDiagram,
   onNoteLinkClick,
   onSetImageSize,
+  trackSourceLines = false,
 }: MarkdownRendererProps) {
   const diagrams = findExcalidrawDiagrams(children)
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines}>
         {children}
       </MarkdownBody>
     )
@@ -329,7 +350,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)}>
                 {before}
               </MarkdownBody>
             )}
@@ -337,12 +358,15 @@ export function MarkdownRenderer({
               diagram={diagram}
               index={index}
               onEdit={onEditExcalidrawDiagram}
+              sourceLine={
+                trackSourceLines ? lineOffsetAt(children, diagram.start) + 1 : undefined
+              }
             />
           </div>
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}

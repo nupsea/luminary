@@ -3103,6 +3103,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/{document_id}/images/reextract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reextract Document Images
+         * @description Queue a fresh image_extract job for a document.
+         *
+         *     Extraction dedupes on content hash, so this only adds figures the previous run
+         *     missed — the way an already-ingested document picks up an extraction improvement
+         *     without being re-uploaded. Returns the existing job when one is already queued.
+         */
+        post: operations["reextract_document_images_documents__document_id__images_reextract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/enrichment": {
         parameters: {
             query?: never;
@@ -5368,6 +5392,26 @@ export interface paths {
         };
         /** Health */
         get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Healthz
+         * @description Lightweight liveness probe for containers and monitors (no DB).
+         */
+        get: operations["healthz_healthz_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8345,6 +8389,13 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** ReextractResponse */
+        ReextractResponse: {
+            /** Job Id */
+            job_id: string;
+            /** Queued */
+            queued: boolean;
+        };
         /** RegenStatus */
         RegenStatus: {
             /** Status */
@@ -8435,6 +8486,8 @@ export interface components {
             text: string;
             /** Relevance Score */
             relevance_score: number;
+            /** Global Rank */
+            global_rank: number;
         };
         /** SectionContentItem */
         SectionContentItem: {
@@ -14881,6 +14934,37 @@ export interface operations {
             };
         };
     };
+    reextract_document_images_documents__document_id__images_reextract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReextractResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_enrichment_jobs_documents__document_id__enrichment_get: {
         parameters: {
             query?: never;
@@ -18318,6 +18402,26 @@ export interface operations {
         };
     };
     health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    healthz_healthz_get: {
         parameters: {
             query?: never;
             header?: never;

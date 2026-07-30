@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
     # profile sets this: public=1, standard=2, performance=4.
     ENRICHMENT_VISION_CONCURRENCY: int = 1
+    # Rasterize vector-drawn PDF figures when a page has no embedded raster image.
+    # LaTeX-authored papers draw figures with path operators, so without this they
+    # extract zero images. Costs a vision LLM call per recovered figure — turn off
+    # on a machine where enrichment throughput matters more than figure coverage.
+    PDF_VECTOR_FIGURES: bool = True
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
     # 2D.2: seed document auto-tags with entities from the graph extraction.
     # On by default -- no extra LLM calls; uses entities already populated by

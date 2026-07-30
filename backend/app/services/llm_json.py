@@ -1,4 +1,4 @@
-"""Tolerant parsing of JSON arrays out of LLM completions.
+"""Tolerant parsing of JSON objects and arrays out of LLM completions.
 
 Local models routinely wrap JSON in markdown fences or prose, emit string
 content containing backslash sequences that are not legal JSON escapes, or
@@ -28,6 +28,14 @@ def _strip_fences(text: str) -> str:
     return cleaned
 
 
+def _skip(text: str, i: int, chars: str = " \t\r\n") -> int:
+    """Advance past `chars`. raw_decode does not skip leading whitespace itself."""
+    n = len(text)
+    while i < n and text[i] in chars:
+        i += 1
+    return i
+
+
 def _salvage_elements(text: str) -> list:
     """Decode complete top-level elements from a (possibly truncated) array,
     stopping at the first element that cannot be decoded."""
@@ -39,8 +47,7 @@ def _salvage_elements(text: str) -> list:
     items: list = []
     n = len(text)
     while i < n:
-        while i < n and text[i] in " \t\r\n,":
-            i += 1
+        i = _skip(text, i, " \t\r\n,")
         if i >= n or text[i] == "]":
             break
         try:
@@ -55,9 +62,8 @@ def parse_llm_json_object(raw: str) -> dict | None:
     """Extract a JSON object from an LLM completion, tolerating markdown
     fences, surrounding prose, and illegal escape sequences.
 
-    Returns None when no object is recoverable (truncated objects are not
-    salvaged: unlike array elements, a partial object has no complete
-    sub-units to keep).
+    All-or-nothing: a truncated object returns None here. Callers willing to
+    accept a partial result opt into salvage_llm_json_object instead.
     """
     cleaned = _strip_fences(raw)
     start = cleaned.find("{")
@@ -72,6 +78,52 @@ def parse_llm_json_object(raw: str) -> dict | None:
             continue
         return parsed if isinstance(parsed, dict) else None
     return None
+
+
+def salvage_llm_json_object(raw: str) -> dict | None:
+    """Recover the complete key/value pairs of a truncated JSON object.
+
+    The object counterpart of the array salvage: decoding stops at the first pair
+    that was cut off mid-generation, keeping everything the model had already
+    committed to. Kept out of parse_llm_json_object because a partial object is a
+    lossy result its callers should opt into knowingly.
+
+    Returns None when not even one pair is recoverable.
+    """
+    text = _repair_escapes(_strip_fences(raw))
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    decoder = json.JSONDecoder()
+    i = start + 1
+    n = len(text)
+    out: dict = {}
+    while i < n:
+        i = _skip(text, i, " \t\r\n,")
+        if i >= n or text[i] == "}":
+            break
+        try:
+            key, i = decoder.raw_decode(text, i)
+        except ValueError:
+            break
+        i = _skip(text, i)
+        if i >= n or text[i] != ":":
+            break
+        i = _skip(text, i + 1)
+        try:
+            value, i = decoder.raw_decode(text, i)
+        except ValueError:
+            # The cut landed inside the value. An array still has complete
+            # elements worth keeping -- that is where a label list gets lost.
+            if i < n and text[i] == "[":
+                salvaged = _salvage_elements(text[i:])
+                if salvaged and isinstance(key, str):
+                    out[key] = salvaged
+            break
+        if isinstance(key, str):
+            out[key] = value
+    return out or None
 
 
 def parse_llm_json_array(raw: str) -> list:
