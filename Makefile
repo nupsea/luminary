@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types install release docker-build docker-run
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run
 
 LUMINARY_PORT ?= 7820
 
@@ -208,3 +208,12 @@ endif
 
 regen-api-types:
 	cd frontend && npm run regen:api-types
+
+# Client-side routing smoke test in a real browser. Needs the app already
+# running (make luminary) -- it drives the live UI, so it is not part of `make
+# ci`. playwright-core is installed --no-save: a dev-only tool, deliberately
+# kept out of package.json so CI never pulls a browser.
+verify-router:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} LUMINARY_API=$${LUMINARY_API:-http://localhost:$(LUMINARY_PORT)} node scripts/verify-router.mjs

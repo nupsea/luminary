@@ -86,3 +86,6 @@ docs/KNOWLEDGE_UNIVERSE.md
 DATA/legal/
 DATA/plays/
 DATA/study/
+
+# router verification artifacts (make verify-router)
+frontend/.router-verify/
