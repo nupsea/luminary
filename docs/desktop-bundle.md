@@ -30,6 +30,40 @@ Everything writable lives in `~/Library/Application Support/sh.luminary.app/`:
 Nothing is ever written inside the bundle — it is read-only and code-signed, and
 a write would break the signature.
 
+## Shell
+
+`src-tauri/` is a Tauri v2 crate. It opens a window on a bundled boot page,
+starts both children, waits for the backend to accept connections, then
+navigates the window to the backend's own origin.
+
+Serving the SPA from the backend keeps it same-origin with the API, so neither
+CORS nor `TrustedHostMiddleware` needs relaxing — a webview on
+`tauri://localhost` calling `127.0.0.1` would be blocked by both.
+
+- **Ports are allocated at launch** (`bind` to `:0`, read, release). Fixed ports
+  collide with a user's own Ollama on 11434 or an older Luminary on 7820.
+- **Both children start from `env_clear()`**, so a user's `DYLD_*`, `PYTHON*` or
+  `VIRTUAL_ENV` cannot reach them. `PATH` is rebuilt to include
+  `<stage>/python/bin`, which is where `yt-dlp` lives.
+- **Both pipes are drained.** An undrained pipe fills its 64KB buffer and blocks
+  the child on its next write; uvicorn logs to stderr, so piping stderr without
+  a reader wedges the backend seconds into startup.
+- **The backend's working directory is `DATA_DIR`**, which turns the
+  CWD-relative `.env` lookup into a user-editable file in a findable place.
+- **Single instance is enforced** by `tauri-plugin-single-instance`. Kuzu takes
+  an exclusive file lock, so a second instance cannot open the library at all.
+- **Children are killed on exit** for the same reason: a survivor holds that
+  lock against the next launch.
+
+The staged payload is found via `LUMINARY_STAGE`, then `resource_dir()`, then
+`build/stage`, so the shell is runnable before there is anything to sign.
+
+`make desktop-dev` runs it against `build/stage`; `make desktop-app` produces an
+unsigned `Luminary.app`. Signing and notarization are not wired up yet.
+
+The app icon in `src-tauri/icons/` is a placeholder generated from the web
+logo and needs replacing with real artwork before release.
+
 ## Scripts
 
 | Script | Does |

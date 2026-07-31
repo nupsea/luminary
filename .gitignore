@@ -89,3 +89,7 @@ DATA/study/
 
 # router verification artifacts (make verify-router)
 frontend/.router-verify/
+
+# Tauri desktop shell
+src-tauri/target/
+src-tauri/gen/

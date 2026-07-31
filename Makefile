@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage desktop-dev desktop-app
 
 LUMINARY_PORT ?= 7820
 
@@ -46,6 +46,19 @@ stage-ollama:
 verify-stage:
 	bash scripts/macos/verify_stage.sh
 	bash scripts/macos/verify_ollama.sh
+
+# Run the shell against build/stage without bundling. Requires `make stage`.
+desktop-dev:
+	cd src-tauri && LUMINARY_STAGE="$(CURDIR)/build/stage" cargo run --release
+
+# Unsigned Luminary.app. The payload is copied in with ditto rather than Tauri's
+# resource copier, which does not preserve the interpreter's bin/python symlinks.
+DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
+
+desktop-app:
+	cd src-tauri && cargo tauri build --bundles app
+	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
+	@echo "built $(DESKTOP_APP)"
 
 build:
 	@echo "Building production SPA (public mode, /api base)..."
