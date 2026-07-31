@@ -99,7 +99,7 @@ async def test_transcribe_node_video_no_ffmpeg(test_db, tmp_path):
         "_audio_chunks": None,
     }
 
-    with patch("app.workflows.ingestion_nodes.transcribe.shutil.which", return_value=None):
+    with patch("app.workflows.ingestion_nodes.transcribe.resolve_tool", return_value=None):
         result = await transcribe_node(state)
 
     assert result["status"] == "error"
@@ -161,7 +161,7 @@ async def test_transcribe_node_video_with_ffmpeg(test_db, tmp_path):
 
     with (
         patch(
-            "app.workflows.ingestion_nodes.transcribe.shutil.which",
+            "app.workflows.ingestion_nodes.transcribe.resolve_tool",
             return_value="/usr/bin/ffmpeg",
         ),
         patch(

@@ -114,6 +114,28 @@ class IngestionJobRegistry:
             return False
         return True
 
+    async def cancel_all(self, timeout: float = DEFAULT_CANCEL_TIMEOUT_SECONDS) -> int:
+        """Cancel every in-flight ingestion, bounded. Returns how many were running.
+
+        Without this, shutdown simply abandons mid-flight ingestions and the
+        documents stay stuck in a non-terminal stage forever. The bound matters
+        more than completeness: a task blocked in a thread executor cannot
+        observe cancellation until its call returns, so waiting indefinitely
+        would mean the process never exits.
+        """
+        active = self.active_document_ids()
+        if not active:
+            return 0
+        results = await asyncio.gather(
+            *(self.cancel(did, timeout=timeout) for did in active),
+            return_exceptions=True,
+        )
+        logger.info(
+            "Cancelled in-flight ingestion tasks at shutdown",
+            extra={"requested": len(active), "cancelled": sum(r is True for r in results)},
+        )
+        return len(active)
+
     def reset(self) -> None:
         """Test helper: drop all tracked tasks without awaiting them."""
         self._tasks.clear()

@@ -65,8 +65,8 @@ def test_is_youtube_url_invalid_random():
 
 
 async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
-    """POST /documents/ingest-url returns 503 when yt-dlp is not on PATH."""
-    with patch("app.services.youtube_downloader.shutil.which", return_value=None):
+    """POST /documents/ingest-url returns 503 when yt-dlp is not installed."""
+    with patch("app.services.youtube_downloader.resolve_tool", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
@@ -77,12 +77,12 @@ async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
 
 
 async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
-    """POST /documents/ingest-url returns 503 when ffmpeg is not on PATH."""
+    """POST /documents/ingest-url returns 503 when ffmpeg is not installed."""
 
     def _mock_which(cmd):
         return "/usr/bin/yt-dlp" if cmd == "yt-dlp" else None
 
-    with patch("app.services.youtube_downloader.shutil.which", side_effect=_mock_which):
+    with patch("app.services.youtube_downloader.resolve_tool", side_effect=_mock_which):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
@@ -94,7 +94,7 @@ async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
 
 async def test_ingest_url_returns_400_for_non_youtube_url(test_db):
     """POST /documents/ingest-url returns 400 for non-YouTube URLs."""
-    with patch("app.services.youtube_downloader.shutil.which", return_value="/usr/bin/yt-dlp"):
+    with patch("app.services.youtube_downloader.resolve_tool", return_value="/usr/bin/yt-dlp"):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",

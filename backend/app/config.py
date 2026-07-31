@@ -1,14 +1,27 @@
 import functools
+import os
 from pathlib import Path
 from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
-# Anchor for relative DATA_DIR values: the repo root in a source checkout
-# (config.py lives at <root>/backend/app/), "/" in the container images
-# (which set DATA_DIR explicitly).
-_DATA_DIR_ROOT = Path(__file__).resolve().parents[2]
+from app.paths import app_root, is_packaged
+
+
+def _env_files() -> tuple[str, ...]:
+    """Env files in ascending precedence -- pydantic-settings lets the last win.
+
+    ``.env`` is resolved against the process working directory, which is a
+    landmine for any GUI-launched process (macOS hands those CWD=/). Callers
+    that cannot control the working directory should set LUMINARY_ENV_FILE to an
+    absolute path instead, which is why it sits last.
+    """
+    files = [".env", "/app/.luminary/.env"]
+    explicit = os.environ.get("LUMINARY_ENV_FILE", "").strip()
+    if explicit:
+        files.append(explicit)
+    return tuple(files)
 
 
 class Settings(BaseSettings):
@@ -139,15 +152,24 @@ class Settings(BaseSettings):
     ADMIN_KEY: str = ""
     PHOENIX_GRPC_PORT: int = 4317
 
-    model_config = {"env_file": (".env", "/app/.luminary/.env"), "env_file_encoding": "utf-8"}
+    model_config = {"env_file": _env_files(), "env_file_encoding": "utf-8"}
 
     @field_validator("DATA_DIR")
     @classmethod
     def _anchor_relative_data_dir(cls, v: str) -> str:
         p = Path(v).expanduser()
-        if p.is_absolute():
-            return str(p)
-        return str((_DATA_DIR_ROOT / p).resolve())
+        resolved = p if p.is_absolute() else (app_root() / p).resolve()
+
+        # In a packaged app the resource root is read-only, code-signed, and
+        # replaced wholesale on upgrade. A library resolving inside it would be
+        # unwritable at best and silently destroyed by the next update at worst,
+        # so refuse to start rather than take that path.
+        if is_packaged() and resolved.is_relative_to(app_root()):
+            raise ValueError(
+                f"DATA_DIR ({resolved}) resolves inside the application bundle "
+                f"({app_root()}). Set DATA_DIR to an absolute path outside it."
+            )
+        return str(resolved)
 
 
 @functools.lru_cache

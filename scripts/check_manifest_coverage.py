@@ -16,7 +16,7 @@ ROUTERS = REPO / "backend" / "app" / "routers"
 PAGES = REPO / "frontend" / "src" / "pages"
 
 # Always-on / cross-cutting routers that intentionally have no surface entry.
-ROUTER_ALLOWLIST = {"settings"}
+ROUTER_ALLOWLIST = {"settings", "setup"}
 # Legacy pages kept for compatibility; not part of any current surface.
 PAGE_ALLOWLIST = {"Evals"}
 

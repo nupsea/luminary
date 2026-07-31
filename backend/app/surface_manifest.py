@@ -1,13 +1,14 @@
 import json
 from functools import lru_cache
-from pathlib import Path
+
+from app.paths import surface_manifest_path
 
 _MODE_ORDER = {"public": 0, "full": 1}
 
 
 @lru_cache(maxsize=1)
 def _manifest() -> dict:
-    path = Path(__file__).resolve().parents[2] / "surface-manifest.json"
+    path = surface_manifest_path()
     with path.open() as f:
         data = json.load(f)
     if data.get("version") != 2:
