@@ -61,7 +61,7 @@ try:
     from app.routers.code_executor import router as code_executor_router
 except ImportError:
     code_executor_router = None
-from app.services.components import install_ollama_model, resolve_tool
+from app.services.components import activate_extras, install_ollama_model, resolve_tool
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
@@ -146,6 +146,11 @@ async def lifespan(app: FastAPI):
     (data_dir / "images").mkdir(exist_ok=True)
     (data_dir / "notes").mkdir(exist_ok=True)
     (data_dir / "audio").mkdir(exist_ok=True)
+
+    # Components the user installed after the app itself. Must happen before
+    # anything tries to import them.
+    if activate_extras():
+        logger.info("Activated user-installed extras", extra={"path": str(data_dir / "extras")})
 
     # Startup health check (Ollama) — only warn when private/hybrid mode needs it
     try:

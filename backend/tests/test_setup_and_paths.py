@@ -163,8 +163,71 @@ def test_resolve_tool_prefers_the_app_managed_directory(tmp_path, monkeypatch):
         get_settings.cache_clear()
 
 
-def test_install_never_spawns_a_subprocess(monkeypatch):
-    """Pulls go over Ollama's HTTP API.
+def test_transcription_is_kept_out_of_the_bundle_dependency_set():
+    """faster-whisper pulls PyAV, whose wheels carry libx264/libx265 (GPL).
+
+    Luminary is Apache-2.0, so it must not sit in a group the installer
+    installs. The bundle builds `--no-default-groups --group full`; this is the
+    guard that keeps `media` separate.
+    """
+    import tomllib
+
+    from app.paths import pyproject_path
+
+    with pyproject_path().open("rb") as fh:
+        groups = tomllib.load(fh)["dependency-groups"]
+
+    full = " ".join(groups["full"])
+    media = " ".join(groups["media"])
+    assert "faster-whisper" in media
+    assert "faster-whisper" not in full, "GPL-carrying deps must not ship in the installer"
+
+
+def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):
+    """Extras go to DATA_DIR, never into the read-only, code-signed bundle."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    captured: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = None
+
+        async def wait(self):
+            return 0
+
+    async def _fake_exec(*cmd, **kwargs):
+        captured.append(list(cmd))
+        proc = _Proc()
+
+        async def _empty():
+            return
+            yield  # pragma: no cover
+
+        proc.stdout = _empty()
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    async def _run():
+        return [e async for e in components_module.install_component("transcription")]
+
+    try:
+        asyncio.run(_run())
+    finally:
+        get_settings.cache_clear()
+
+    assert captured, "expected an install to be attempted"
+    cmd = captured[0]
+    assert "pip" in cmd and "install" in cmd
+    target = cmd[cmd.index("--target") + 1]
+    assert target.startswith(str(tmp_path)), f"extras must land in DATA_DIR, got {target}"
+
+
+def test_tool_install_never_spawns_a_subprocess(monkeypatch):
+    """Ollama pulls and tool checks go over HTTP or the filesystem.
 
     The subprocess route needed the `ollama` binary on PATH, which a
     GUI-launched process does not get -- the installer only worked around that

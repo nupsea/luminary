@@ -119,7 +119,8 @@ _step "Pruning dependencies"
 # Every entry here is dead weight at runtime. Guarded by verify_stage.sh, which
 # imports the full native surface after this runs.
 rm -rf "$SITE/torch/include"                                      # C++ headers
-rm -rf "$SITE"/{pip,pip-*.dist-info}                              # never used at runtime
+# pip stays: it is how the user installs post-install components (speech-to-text
+# and anything else kept out of the installer for licensing reasons).
 rm -rf "$SITE/onnxruntime"/{transformers,quantization,tools}      # export/training helpers
 # NOT litellm/proxy (27MB): litellm_logging imports integrations.gcs_bucket at
 # module scope, which imports litellm.proxy._types, so plain `import litellm`

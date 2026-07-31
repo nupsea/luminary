@@ -1725,7 +1725,6 @@ dev = [
 ]
 full = [
     { name = "cloudscraper" },
-    { name = "faster-whisper" },
     { name = "trafilatura" },
     { name = "tree-sitter" },
     { name = "tree-sitter-go" },
@@ -1734,6 +1733,9 @@ full = [
     { name = "tree-sitter-rust" },
     { name = "tree-sitter-typescript" },
     { name = "yt-dlp" },
+]
+media = [
+    { name = "faster-whisper" },
 ]
 
 [package.metadata]
@@ -1791,7 +1793,6 @@ dev = [
 ]
 full = [
     { name = "cloudscraper", specifier = ">=1.2.71" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "trafilatura", specifier = ">=2.0.0" },
     { name = "tree-sitter", specifier = ">=0.25.2" },
     { name = "tree-sitter-go", specifier = ">=0.25.0" },
@@ -1801,6 +1802,7 @@ full = [
     { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
     { name = "yt-dlp", specifier = ">=2026.3.13" },
 ]
+media = [{ name = "faster-whisper", specifier = ">=1.2.1" }]
 
 [[package]]
 name = "lxml"

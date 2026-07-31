@@ -19,9 +19,13 @@ consistent.
 """
 
 import asyncio
+import importlib
+import importlib.util
 import json
 import logging
 import shutil
+import site
+import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,8 +48,11 @@ class Component:
     # Approximate download size, for the UI to set expectations before starting.
     size_bytes: int
     licence: str
-    # Identifier in the component's own namespace (an Ollama model tag, ...).
+    # Identifier in the component's own namespace: an Ollama model tag, an
+    # executable name, or the module a python_extra makes importable.
     ref: str = ""
+    # For python_extra: the requirements to install.
+    packages: tuple[str, ...] = field(default_factory=tuple)
     default: bool = False
     enables: tuple[str, ...] = field(default_factory=tuple)
 
@@ -76,6 +83,20 @@ CATALOGUE: tuple[Component, ...] = (
         enables=("Figure captioning", "Diagram understanding"),
     ),
     Component(
+        id="transcription",
+        label="Speech to text",
+        description="Transcribes audio and video into searchable, studyable text.",
+        kind="python_extra",
+        ref="faster_whisper",
+        packages=("faster-whisper>=1.2.1",),
+        size_bytes=350 * _MB,
+        # faster-whisper pulls PyAV, whose wheels bundle libx264 and libx265.
+        # Apache-2.0 Luminary cannot ship those, so this is fetched from PyPI
+        # on request instead of travelling inside the installer.
+        licence="GPL-2.0-or-later components (not distributed with Luminary)",
+        enables=("Audio ingestion", "Video ingestion", "YouTube transcription"),
+    ),
+    Component(
         id="ffmpeg",
         label="Audio and video support",
         description="Required to ingest MP4 video and to transcribe YouTube audio.",
@@ -99,6 +120,29 @@ def get_component(component_id: str) -> Component | None:
 def tool_bin_dir() -> Path:
     """Where user-installed executables live: writable, and outside the bundle."""
     return Path(get_settings().DATA_DIR).expanduser() / "bin"
+
+
+def extras_dir() -> Path:
+    """Where user-installed Python packages live.
+
+    Outside the bundle, which is read-only and code-signed -- writing into it
+    would break the signature even if the permissions allowed it.
+    """
+    return Path(get_settings().DATA_DIR).expanduser() / "extras"
+
+
+def activate_extras() -> bool:
+    """Put user-installed packages on sys.path. Safe to call more than once."""
+    target = extras_dir()
+    if not target.is_dir():
+        return False
+    path = str(target)
+    if path not in sys.path:
+        site.addsitedir(path)
+        # addsitedir appends, so a stale copy of something already bundled
+        # cannot shadow it -- extras only ever add, never override.
+        importlib.invalidate_caches()
+    return True
 
 
 def resolve_tool(name: str) -> str | None:
@@ -134,6 +178,9 @@ async def component_status() -> list[dict]:
             # Ollama reports tags as "name:tag"; a bare ref means ":latest".
             ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
             installed = ref in installed_models or comp.ref in installed_models
+        elif comp.kind == "python_extra":
+            activate_extras()
+            installed = importlib.util.find_spec(comp.ref) is not None
         else:
             installed = resolve_tool(comp.ref) is not None
 
@@ -205,6 +252,46 @@ async def remove_ollama_model(model: str) -> None:
         resp.raise_for_status()
 
 
+async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
+    """Install packages into the extras directory using the bundled interpreter.
+
+    ``--target`` rather than the bundle's own site-packages: that tree is
+    read-only and code-signed, and writing to it would invalidate the signature.
+    """
+    target = extras_dir()
+    target.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "pip", "install",
+        "--upgrade", "--target", str(target), "--no-input", "--disable-pip-version-check",
+        *comp.packages,
+    ]
+    yield {"state": "downloading", "detail": f"Installing {', '.join(comp.packages)}"}
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    tail: list[str] = []
+    assert proc.stdout is not None
+    async for raw in proc.stdout:
+        line = raw.decode(errors="replace").rstrip()
+        if not line:
+            continue
+        tail = [*tail[-4:], line]
+        yield {"state": "downloading", "detail": line[:160]}
+    await proc.wait()
+
+    if proc.returncode != 0:
+        yield {"state": "failed", "detail": " / ".join(tail)[:400] or "pip failed"}
+        return
+
+    activate_extras()
+    if importlib.util.find_spec(comp.ref) is None:
+        yield {"state": "failed", "detail": f"{comp.ref} still not importable after install"}
+        return
+    yield {"state": "ready", "detail": comp.label}
+
+
 async def install_component(component_id: str) -> AsyncIterator[dict]:
     comp = get_component(component_id)
     if comp is None:
@@ -213,6 +300,11 @@ async def install_component(component_id: str) -> AsyncIterator[dict]:
 
     if comp.kind == "ollama_model":
         async for event in install_ollama_model(comp.ref):
+            yield event
+        return
+
+    if comp.kind == "python_extra":
+        async for event in install_python_extra(comp):
             yield event
         return
 
@@ -234,5 +326,14 @@ async def remove_component(component_id: str) -> None:
     if comp.kind == "ollama_model":
         await remove_ollama_model(comp.ref)
         return
+    if comp.kind == "python_extra":
+        # Deliberately not implemented: pip --target has no uninstall, and
+        # working out which of the extras directory's files belong to this
+        # component means parsing every RECORD. Removing the whole directory
+        # would take unrelated components with it.
+        raise ValueError(
+            f"{comp.label} cannot be removed automatically. "
+            f"Delete {extras_dir()} to remove all installed extras."
+        )
     path = tool_bin_dir() / comp.ref
     await asyncio.to_thread(path.unlink, True)
