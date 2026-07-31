@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage
 
 LUMINARY_PORT ?= 7820
 
@@ -27,6 +27,25 @@ frontend:
 
 install:
 	bash scripts/install.sh
+
+# --- macOS desktop bundle -----------------------------------------------
+# Stage the payload, the relocatable Python runtime and the bundled inference
+# server into build/stage, which becomes Contents/Resources in the .app.
+
+stage: stage-payload stage-python stage-ollama
+
+stage-payload:
+	bash scripts/macos/stage_payload.sh
+
+stage-python:
+	bash scripts/macos/stage_python.sh
+
+stage-ollama:
+	bash scripts/macos/stage_ollama.sh
+
+verify-stage:
+	bash scripts/macos/verify_stage.sh
+	bash scripts/macos/verify_ollama.sh
 
 build:
 	@echo "Building production SPA (public mode, /api base)..."
