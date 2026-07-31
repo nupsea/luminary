@@ -70,6 +70,67 @@ page can use IPC. Any desktop-only affordance in the SPA — revealing the
 library in Finder, for instance — needs a capability granting IPC to that
 origin first.
 
+## Release
+
+`make stage` → `make desktop-app` → sign → verify → DMG → notarize → publish,
+driven by `.github/workflows/release-macos-app.yml` on a `macos-14` runner.
+`make desktop-adhoc` runs the same chain locally with the ad-hoc identity, which
+exercises everything except notarization.
+
+Signing is **inside-out**: every nested Mach-O first, then the interpreter and
+the inference binaries with pinned identifiers, then the bundle itself. Binaries
+are enumerated by content (`file --mime-type`), not by extension — `python3.13`,
+`ollama` and `llama-server` have none. Tauri's own signer is unused because it
+runs `codesign --deep`, which would apply one entitlement set to everything.
+
+Two entitlement sets:
+
+| Binary | Entitlements | Why |
+|---|---|---|
+| Outer app | `allow-jit` | WebKit runs JS out of process so it is not strictly needed; granted because any in-process `wry` evaluation path would need it. **No** `disable-library-validation` — this process loads only system frameworks and stays hard. |
+| Interpreter and everything under it | `disable-library-validation`, `allow-jit` | We re-sign all ~350 nested binaries, so validation would nominally pass — but one miss turns an unsigned `.so` from a failed import into an app that will not launch, and `pip` installs user-chosen packages into `DATA_DIR/extras` that nobody has signed. `allow-jit` covers `libffi`'s `MAP_JIT` pages for `ctypes` callbacks, reachable via kuzu, pymupdf and keyring, whose failure mode is a SIGKILL with no traceback. |
+
+Omitted deliberately: `allow-unsigned-executable-memory` (strictly weaker than
+`allow-jit`) and `allow-dyld-environment-variables` (both children are spawned
+with a cleared environment).
+
+Entitlement plists must contain **no XML comments** — AMFI's parser rejects them
+with a syntax error at sign time.
+
+`--identifier sh.luminary.app.python` is **frozen**. Keychain ACLs bind to the
+designated requirement, which embeds it; `settings_service` stores API keys
+through `keyring`, so rotating the identifier makes every user's stored keys
+unreachable.
+
+One notarization round covers both artifacts: the ticket includes every nested
+cdhash, so the DMG is submitted and then both DMG and `.app` are stapled — the
+app so it still validates offline once dragged out. `notarytool submit --wait`
+does not reliably exit non-zero on rejection, so `notarize.sh` asserts
+`status == "Accepted"` and prints the log's issues.
+
+`latest.json` advertises **`darwin-aarch64` only**. Publishing an Intel target
+would hand those users an update that cannot run.
+
+### Credentials
+
+| Secret | Contents |
+|---|---|
+| `APPLE_CERTIFICATE` | base64 of the Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | its export password |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: <name> (<team>)` |
+| `KEYCHAIN_PASSWORD` | any value; for the ephemeral CI keychain |
+| `APPLE_API_KEY` | base64 of the App Store Connect `AuthKey_*.p8` |
+| `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, `APPLE_TEAM_ID` | from App Store Connect |
+| `TAURI_SIGNING_PRIVATE_KEY` | `tauri signer generate` output; **not** in the repo |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+
+The updater keypair must be generated once and kept: losing the private key
+means no existing install can ever be updated again.
+
+### Sizes
+
+1.6 GB `.app` → 698 MB DMG (ULFO/LZFSE), measured at 0.2.8.
+
 ## Scripts
 
 | Script | Does |
@@ -79,6 +140,10 @@ origin first.
 | `stage_ollama.sh` | Bundled inference server, thinned to arm64. |
 | `verify_stage.sh` | Relocatability + import + real boot of the staged backend. |
 | `verify_ollama.sh` | Structure + a real pull and generation. |
+| `sign.sh` | Inside-out signing. `--adhoc` for a run without a certificate. |
+| `verify_signed.sh` | Signature, arch, attribution and seal-intact gates. |
+| `dmg.sh` | Compressed disk image via `hdiutil`. |
+| `notarize.sh` | Notarize, staple both artifacts, emit `latest.json` and the signed update. |
 
 `make stage` runs all three staging steps; `make verify-stage` runs both verifiers.
 

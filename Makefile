@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage desktop-dev desktop-app
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage desktop-dev desktop-app desktop-adhoc
 
 LUMINARY_PORT ?= 7820
 
@@ -55,10 +55,20 @@ desktop-dev:
 # resource copier, which does not preserve the interpreter's bin/python symlinks.
 DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
 
+TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
+
 desktop-app:
-	cd src-tauri && cargo tauri build --bundles app
+	cd src-tauri && $(TAURI) build --bundles app --config tauri.conf.json
 	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
 	@echo "built $(DESKTOP_APP)"
+
+# Sign and package locally with the ad-hoc identity. Exercises enumeration,
+# ordering and every gate; the result is not notarizable and Gatekeeper rejects
+# it, so it proves the pipeline rather than producing a release.
+desktop-adhoc: desktop-app
+	bash scripts/macos/sign.sh $(DESKTOP_APP) --adhoc
+	bash scripts/macos/verify_signed.sh $(DESKTOP_APP) --adhoc
+	bash scripts/macos/dmg.sh $(DESKTOP_APP) $(shell sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1) --adhoc
 
 build:
 	@echo "Building production SPA (public mode, /api base)..."
