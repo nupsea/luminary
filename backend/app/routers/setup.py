@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.services.components import (
+    capabilities,
     component_status,
     get_component,
     install_component,
@@ -26,6 +27,12 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 @router.get("/components")
 async def list_components() -> dict:
     return {"components": await component_status()}
+
+
+@router.get("/capabilities")
+async def list_capabilities() -> dict:
+    """What the UI may offer. Keeps it from advertising what this build cannot do."""
+    return await capabilities()
 
 
 @router.post("/components/{component_id}/install")

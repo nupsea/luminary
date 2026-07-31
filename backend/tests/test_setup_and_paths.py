@@ -255,6 +255,62 @@ def test_tool_install_never_spawns_a_subprocess(monkeypatch):
     assert "no automatic installer" in events[-1]["detail"]
 
 
+def test_capabilities_require_every_component_a_feature_depends_on(monkeypatch):
+    """Video needs a transcriber AND ffmpeg; reporting either alone as enough
+    sends the user through an upload that fails at the transcription step."""
+
+    async def _fake_status():
+        return [
+            {"id": "transcription", "installed": True},
+            {"id": "ffmpeg", "installed": False},
+            {"id": "chat_model", "installed": True},
+            {"id": "vision_model", "installed": False},
+        ]
+
+    monkeypatch.setattr(components_module, "component_status", _fake_status)
+    caps = asyncio.run(components_module.capabilities())
+
+    assert caps["audio_ingest"]["available"] is True
+    assert caps["video_ingest"]["available"] is False
+    assert "ffmpeg" in caps["video_ingest"]["requires"]
+    assert caps["youtube_ingest"]["available"] is False
+    assert caps["vision"]["available"] is False
+    assert caps["vision"]["requires"] == ["vision_model"]
+    assert caps["chat"]["available"] is True
+    assert caps["chat"]["requires"] == []
+
+
+def test_capabilities_endpoint_reports_every_key():
+    async def _run():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/setup/capabilities")
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+    assert set(resp.json()) == {
+        "audio_ingest",
+        "video_ingest",
+        "youtube_ingest",
+        "web_ingest",
+        "vision",
+        "chat",
+    }
+
+
+def test_media_surfaces_ship_in_public_mode():
+    """The desktop build is public mode; these were full-only while the upload
+    dialog offered them unconditionally."""
+    import json
+
+    from app.paths import surface_manifest_path
+
+    manifest = json.loads(surface_manifest_path().read_text())
+    modes = {s["id"]: s["mode"] for s in manifest["surfaces"]}
+    for surface in ("web_ingest", "youtube_ingest", "audio_transcribe", "image_enrichment"):
+        assert modes[surface] == "public", f"{surface} is stripped from the shipped build"
+
+
 def test_unknown_component_is_reported_not_raised():
     async def _run():
         return [e async for e in components_module.install_component("nope")]

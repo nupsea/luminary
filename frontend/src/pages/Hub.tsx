@@ -17,6 +17,7 @@ import {
   FileText,
   FolderPlus,
   Hourglass,
+  Loader2,
   Pencil,
   RefreshCw,
   Sparkles,
@@ -30,6 +31,7 @@ import { Link, useNavigate } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { FirstRunGuide } from "@/components/FirstRunGuide"
+import { useStartupStatus } from "@/hooks/useSetup"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
@@ -966,6 +968,23 @@ function RetentionBar({ pct }: { pct: number }) {
 }
 
 function HubError({ onRetry }: { onRetry: () => void }) {
+  // A backend that is still starting looks identical to a failed request from
+  // here, and on a cold install it is by far the likelier of the two. Ask what
+  // startup actually says before calling it an error.
+  const { data: startup } = useStartupStatus()
+  const starting = startup !== undefined && !startup.usable
+
+  if (starting) {
+    return (
+      <PageSurface>
+        <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
+          <Loader2 size={15} className="animate-spin" />
+          Luminary is still starting up.
+        </div>
+      </PageSurface>
+    )
+  }
+
   return (
     <PageSurface>
       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">

@@ -64,6 +64,12 @@ unsigned `Luminary.app`. Signing and notarization are not wired up yet.
 The app icon in `src-tauri/icons/` is a placeholder generated from the web
 logo and needs replacing with real artwork before release.
 
+The SPA is served from `http://127.0.0.1:<port>`, which Tauri treats as a
+remote URL, so `window.__TAURI__` is **not** injected into it. Only the boot
+page can use IPC. Any desktop-only affordance in the SPA — revealing the
+library in Finder, for instance — needs a capability granting IPC to that
+origin first.
+
 ## Scripts
 
 | Script | Does |
@@ -185,6 +191,14 @@ not distributed, and that `faster-whisper` stays out of `full`.
 `activate_extras()` adds `DATA_DIR/extras` to `sys.path` during startup, before
 anything imports from it. A GUI-launched process gets a minimal environment and
 cannot rely on a user's shell.
+
+**What the UI may offer.** `GET /setup/capabilities` reports what this install
+can actually ingest, so the frontend does not encode which component enables
+which feature — video needs both a transcriber and ffmpeg, and a YouTube URL
+needs yt-dlp on top of those. `UploadDialog` hides the Web URL tab, the
+audio/video content types and the media file extensions accordingly. Two mode
+axes apply: `surface-manifest.json` decides what is built, capabilities decide
+what is offered at runtime.
 
 **Installation.** `python_extra` components use the bundled `pip` with
 `--target`, never the bundle's own `site-packages` — that tree is read-only and

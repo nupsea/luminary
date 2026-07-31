@@ -14,6 +14,7 @@ import { Link } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { UploadDialog } from "@/components/library/UploadDialog"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { apiGet } from "@/lib/apiClient"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import { launchStudy } from "@/lib/studyLauncher"
@@ -148,22 +149,16 @@ export function FirstRunGuide() {
               ) : ollamaDown ? (
                 <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
                   <AlertTriangle size={12} className="shrink-0" />
-                  Start Ollama (<code className="font-mono font-semibold">ollama serve</code>) to
-                  generate cards, or{" "}
-                  <Link to="/study" className="underline underline-offset-2">
-                    do it in Study
-                  </Link>
-                  .
+                  The local model server is not responding. Reopening Luminary usually
+                  restarts it.
                 </span>
               ) : modelMissing ? (
-                <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-                  <AlertTriangle size={12} className="shrink-0" />
-                  Ollama is running but no model is pulled. Run{" "}
-                  <code className="font-mono font-semibold">ollama pull llama3.2</code>, or{" "}
-                  <Link to="/study" className="underline underline-offset-2">
-                    do it in Study
-                  </Link>
-                  .
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-amber-700 dark:text-amber-400">
+                  <span className="flex items-center gap-1.5">
+                    <AlertTriangle size={12} className="shrink-0" />
+                    Generating cards needs a local model.
+                  </span>
+                  <InstallComponentButton componentId="chat_model" />
                 </span>
               ) : genState === "generating" ? (
                 <span className="flex items-center gap-1.5">

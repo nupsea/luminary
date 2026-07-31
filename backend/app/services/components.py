@@ -201,6 +201,36 @@ async def component_status() -> list[dict]:
     return out
 
 
+async def capabilities() -> dict:
+    """What this install can actually ingest right now.
+
+    Derived here rather than in the UI so that the mapping from component to
+    feature lives in one place: video needs both a transcriber and ffmpeg, a
+    YouTube URL needs yt-dlp on top of those, and none of that is obvious from
+    a component list.
+    """
+    status = {c["id"]: c["installed"] for c in await component_status()}
+    transcribe = status.get("transcription", False)
+    ffmpeg = status.get("ffmpeg", False)
+    ytdlp = resolve_tool("yt-dlp") is not None
+    article = importlib.util.find_spec("trafilatura") is not None
+
+    def cap(available: bool, needs: tuple[str, ...]) -> dict:
+        return {"available": available, "requires": list(needs) if not available else []}
+
+    missing_media = tuple(
+        name for name, ok in (("transcription", transcribe), ("ffmpeg", ffmpeg)) if not ok
+    )
+    return {
+        "audio_ingest": cap(transcribe, ("transcription",)),
+        "video_ingest": cap(transcribe and ffmpeg, missing_media),
+        "youtube_ingest": cap(transcribe and ffmpeg and ytdlp, missing_media),
+        "web_ingest": cap(article, ()),
+        "vision": cap(status.get("vision_model", False), ("vision_model",)),
+        "chat": cap(status.get("chat_model", False), ("chat_model",)),
+    }
+
+
 async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     """Pull a model, yielding progress events.
 
