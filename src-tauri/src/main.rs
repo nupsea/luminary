@@ -55,7 +55,7 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
         Err(e) => return emit(&app, "stage", e, true),
     };
 
-    emit(&app, "engine", "Starting the local model server", false);
+    emit(&app, "engine", "Warming up the engine", false);
     let ollama_port = match supervisor::free_port() {
         Ok(p) => p,
         Err(e) => return emit(&app, "engine", e, true),

@@ -28,6 +28,8 @@ export interface StartupStatus {
   ready: boolean
   /** The library opens and browsing works; model-backed features may not. */
   usable: boolean
+  /** Whether the user should be held on the setup screen. Optional downloads never block. */
+  blocking: boolean
   failed: string[]
   elapsed_seconds: number
   phases: StartupPhase[]

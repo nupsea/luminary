@@ -11,7 +11,15 @@ Pure functions only; the ingestion node owns persistence.
 
 import re
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+def _splitter_cls():
+    """Import lazily: `langchain_text_splitters` pulls in sentence-transformers
+    and therefore torch at module scope, which cost 5.4s of every cold start
+    for something only used once a document is being chunked."""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
+
+    return RecursiveCharacterTextSplitter
+
 
 PAPER_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
@@ -182,7 +190,7 @@ def chunk_paper_section(section_text: str, chunk_size: int, chunk_overlap: int) 
     A caption longer than chunk_size is still emitted whole -- splitting it would
     strip the "Figure N" anchor from the half that describes the figure.
     """
-    splitter = RecursiveCharacterTextSplitter(
+    splitter = _splitter_cls()(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=PAPER_SEPARATORS,

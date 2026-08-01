@@ -230,7 +230,37 @@ nesting is Homebrew-specific.
 Model pulls use `POST /api/pull` over HTTP, so nothing needs an `ollama` binary
 on `PATH` — which is what makes provisioning work from a GUI-launched process.
 
-## Post-install components
+## Startup cost
+
+Measured on the packaged app, Apple Silicon:
+
+| | Backend answering | App usable |
+|---|---|---|
+| First ever launch | ~21 s | ~45 s |
+| Every launch after | ~3.8 s | immediately after |
+
+Two things keep it there, and both are easy to undo by accident.
+
+**Nothing heavy is imported at module scope.** `langchain_text_splitters`
+imports sentence-transformers, and therefore torch, when it loads — 5.4 s of
+every cold start for something not needed until a document is chunked. It is
+imported inside `_splitter_cls()` in `chunk.py`, `tech_book_chunker.py` and
+`paper_chunker.py` instead. Removing that alone took cold start from 9.0 s to
+3.1 s. `litellm` still costs 1.6 s at import; its exception classes are
+module-level constants referenced in 64 places, so deferring it is a larger
+change than the saving justifies.
+
+Check before adding a dependency to an import path that runs at boot:
+
+```
+python -X importtime -c "import app.main" 2>&1 | sort -t'|' -k2 -rn | head
+```
+
+**Only required phases block the user.** `startup_status` marks `db` and
+`embedder` required; the entity model (1.1 GB), reranker and chat model are
+not. `SetupGate` gates on `blocking`, so optional downloads continue behind a
+pill in a working app. Marking a new phase required means every user waits for
+it on first run.
 
 Optional pieces are installed after the app, from the catalogue in
 `app/services/components.py`, via `GET|POST|DELETE /setup/components`. That

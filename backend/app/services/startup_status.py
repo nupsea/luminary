@@ -16,16 +16,20 @@ from typing import Literal
 
 State = Literal["pending", "downloading", "loading", "ready", "failed", "skipped"]
 
-# A phase that is not `required` may fail without holding back overall
-# readiness: cloud LLM routing works with no local model at all, and the user
-# can turn reranking off.
+# `required` decides what the user waits for. Everything else finishes in the
+# background while they use the app: the entity model alone is 1.1GB, and
+# holding a setup screen open for it means minutes of staring at a progress bar
+# before a library that would already have worked.
+#
+# Labels are what a person reads on the setup screen, so they name the outcome
+# rather than the artifact.
 _PHASES: tuple[tuple[str, str, bool], ...] = (
-    ("db", "Library database", True),
-    ("ollama_server", "Local model server", False),
-    ("chat_model", "Chat model", False),
-    ("embedder", "Embedding model", True),
-    ("ner", "Entity model", False),
-    ("reranker", "Reranking model", False),
+    ("db", "Preparing your library", True),
+    ("embedder", "Learning to read your documents", True),
+    ("ollama_server", "Starting the local engine", False),
+    ("chat_model", "Chat and flashcard model", False),
+    ("ner", "Concept extraction", False),
+    ("reranker", "Answer ranking", False),
 )
 
 _SATISFIED = ("ready", "skipped")
@@ -119,6 +123,9 @@ class StartupStatus:
             "ready": required_ready and not failed,
             # The library opens and browsing works; model-backed features may not.
             "usable": db_ready,
+            # Whether the user should be held on the setup screen at all. Only
+            # required phases count, so optional downloads never block the app.
+            "blocking": not required_ready,
             "failed": failed,
             "elapsed_seconds": round(elapsed, 1),
             "phases": phases,

@@ -18,7 +18,6 @@ import asyncio
 import logging
 import uuid
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import select
 from sqlalchemy import update as _update
 
@@ -42,6 +41,15 @@ from app.workflows.ingestion_nodes._shared import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _splitter_cls():
+    """Import lazily: `langchain_text_splitters` pulls in sentence-transformers
+    and therefore torch at module scope, which cost 5.4s of every cold start
+    for something only used once a document is being chunked."""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
+
+    return RecursiveCharacterTextSplitter
+
 
 
 async def _run_objective_extraction(doc_id: str, sections: list[tuple[str, str, str]]) -> None:
@@ -107,7 +115,7 @@ def _chunk_code_file(raw_text: str, file_path: str, doc_id: str) -> tuple[list[d
 
     # Fallback: if no definitions parsed, use text splitter
     if not chunks:
-        splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=75)
+        splitter = _splitter_cls()(chunk_size=300, chunk_overlap=75)
         for idx, t in enumerate(splitter.split_text(raw_text)):
             chunk_id = str(uuid.uuid4())
             chunks.append({"id": chunk_id, "text": t, "index": idx})
@@ -126,7 +134,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
     """
     cfg = CHUNK_CONFIGS["book"]
     # Smart splitting: try paragraphs, then sentences, then words.
-    splitter = RecursiveCharacterTextSplitter(
+    splitter = _splitter_cls()(
         chunk_size=cfg["chunk_size"],
         chunk_overlap=cfg["chunk_overlap"],
         separators=["\n\n", "\n", ". ", " ", ""],
@@ -509,7 +517,7 @@ async def _chunk_conversation(
         else:
             # Fallback: plain text splitter (no speaker detection)
             cfg = CHUNK_CONFIGS["conversation"]
-            splitter = RecursiveCharacterTextSplitter(
+            splitter = _splitter_cls()(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
             )
             all_texts = [s["text"] for s in raw_sections if s["text"]]
@@ -785,7 +793,7 @@ async def _chunk_generic(
     unrecognised or malformed document still ingests instead of failing.
     """
     cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
-    splitter = RecursiveCharacterTextSplitter(
+    splitter = _splitter_cls()(
         chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
     )
     chunks = []

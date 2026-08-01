@@ -65,17 +65,56 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
   )
 }
 
+/**
+ * Ambient progress for setup that is still running behind the app.
+ *
+ * Sits bottom-left, above the ingestion pills, and disappears on its own. It
+ * exists so background downloads are visible without being in the way -- the
+ * previous behaviour was either a blocking screen or silence.
+ */
+function SetupPill() {
+  const { data } = useStartupStatus()
+  if (!data || data.ready) return null
+
+  const busy = data.phases.filter(
+    (p) => p.state === "downloading" || p.state === "loading",
+  )
+  if (busy.length === 0) return null
+
+  const current = busy[0]
+  const pct = current.percent
+
+  return (
+    <div className="pointer-events-none fixed bottom-4 left-4 z-40 flex items-center gap-2.5 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs shadow-sm backdrop-blur">
+      <Loader2 size={13} className="animate-spin text-muted-foreground" />
+      <span className="text-foreground">{current.label}</span>
+      {pct !== null && (
+        <span className="tabular-nums text-muted-foreground">{Math.round(pct)}%</span>
+      )}
+      {busy.length > 1 && (
+        <span className="text-muted-foreground">+{busy.length - 1}</span>
+      )}
+    </div>
+  )
+}
+
 export function SetupGate({ children }: { children: ReactNode }) {
   const { data, isError } = useStartupStatus()
   const [dismissed, setDismissed] = useState(false)
 
-  // Hold only while the app genuinely cannot be used, or while first-run
-  // downloads are actively moving. A settled install that is merely missing an
-  // optional model is not blocked here -- the banner offers to install it, and
-  // trapping the user behind a setup screen they cannot clear would be worse
-  // than the error box this replaced.
-  const blocking = !data ? isError : !data.usable || data.status === "provisioning"
-  if (!blocking || (dismissed && data?.usable)) return <>{children}</>
+  // Hold only for work the app cannot run without. Optional models -- the
+  // entity extractor alone is 1.1GB -- finish in the background behind the
+  // pill, because waiting minutes for something the library does not need is
+  // the whole problem this screen was meant to solve.
+  const blocking = !data ? isError : data.blocking
+  if (!blocking || (dismissed && data?.usable)) {
+    return (
+      <>
+        {children}
+        <SetupPill />
+      </>
+    )
+  }
 
   const usable = data?.usable ?? false
   const starting = !data || data.status === "starting"
@@ -89,12 +128,12 @@ export function SetupGate({ children }: { children: ReactNode }) {
         </div>
 
         <h2 className="text-xl font-medium tracking-tight">
-          {starting ? "Starting up" : "Setting up your library"}
+          {starting ? "Warming up the engine" : "Getting your library ready"}
         </h2>
         <p className="mt-1.5 text-sm text-muted-foreground">
           {starting
-            ? "This takes a moment on first launch."
-            : "Luminary is downloading the models it runs on. This happens once, and everything stays on this machine."}
+            ? "A few seconds while everything comes online."
+            : "Downloading what Luminary needs to read your documents. This happens once, and nothing leaves this machine."}
         </p>
 
         {data && (

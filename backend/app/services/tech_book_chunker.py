@@ -9,9 +9,16 @@ import ast
 import logging
 import re
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 logger = logging.getLogger(__name__)
+
+def _splitter_cls():
+    """Import lazily: `langchain_text_splitters` pulls in sentence-transformers
+    and therefore torch at module scope, which cost 5.4s of every cold start
+    for something only used once a document is being chunked."""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
+
+    return RecursiveCharacterTextSplitter
+
 
 # Guard against pathological fenced blocks: skip any block whose body exceeds
 # this limit (treat as malformed document with unclosed fence).
@@ -181,7 +188,7 @@ def chunk_mixed_content(
         }
     """
     code_blocks = extract_code_blocks(section_text)
-    splitter = RecursiveCharacterTextSplitter(
+    splitter = _splitter_cls()(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
