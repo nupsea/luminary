@@ -82,7 +82,8 @@ release:
 	if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Working tree is dirty — commit before tagging."; exit 1; \
 	fi; \
-	echo "Tagging v$$v — this triggers .github/workflows/release.yml"; \
+	echo "Tagging v$$v — triggers release.yml (source tarball) and"; \
+	echo "release-macos-app.yml (signed, notarized DMG). Both attach to the same release."; \
 	git tag -a "v$$v" -m "Luminary $$v" && git push origin "v$$v"
 
 docker-build:

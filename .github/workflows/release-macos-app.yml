@@ -131,9 +131,15 @@ jobs:
           path: build/dist/notary*.json
           if-no-files-found: ignore
 
+      # Two workflows fire on the same tag -- this one and release.yml, which
+      # builds the source tarball for headless installs. Whichever finishes
+      # first creates the release; the other adds its assets. Creating
+      # unconditionally made the slower job fail on an existing tag.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}
         run: |
-          gh release create "v${{ steps.version.outputs.version }}" --generate-notes \
-            build/dist/*.dmg
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --generate-notes
+          gh release upload "$TAG" build/dist/*.dmg --clobber
