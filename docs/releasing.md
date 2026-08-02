@@ -90,10 +90,20 @@ Nothing is lost, and almost nothing is re-downloaded.
 The user drags the new `Luminary.app` over the old one. Everything under
 `~/Library/Application Support/sh.luminary.app/` is theirs and survives.
 
-**Schema migrations are one-way.** Once a release with a new migration has
-started, an older build cannot open that library — Alembic has no downgrade
-path here. If a release has to be pulled, users who already ran it must move
-forward, not back. Treat any release carrying a migration as a commitment.
+**A newer library cannot be opened by an older build.** Startup only ever runs
+`upgrade head`. Every revision does implement `downgrade`, but nothing invokes
+it, so once a user has launched a release carrying a migration, going back
+means the app refuses to start:
+
+```
+CommandError: Can't locate revision identified by '<newer revision>'
+```
+
+Recovering means running `alembic downgrade` by hand from the newer checkout,
+and one existing revision drops tables outright — its own comment says to
+export first. So in practice, treat any release carrying a migration as a
+commitment: if it has to be pulled, users who already ran it move forward, not
+back. Say so in the release notes.
 
 ## Before tagging
 
