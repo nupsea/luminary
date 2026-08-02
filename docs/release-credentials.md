@@ -3,9 +3,8 @@
 What to obtain before a signed, notarized build is possible, and where each
 piece goes. One-time setup, apart from the certificate's annual renewal.
 
-Two independent systems are involved. Apple's credentials make macOS trust the
-app; the Tauri key makes an installed copy trust an update. Neither substitutes
-for the other.
+Everything here is Apple's, and its only job is making macOS trust a downloaded
+app. Luminary has no auto-updater, so no signing key of our own is involved.
 
 ## 1. Apple Developer Program
 
@@ -51,23 +50,16 @@ the Notary API.
 4. Record the **Key ID** (in the filename and the table) and the **Issuer ID**
    (shown above the key list, a UUID).
 
-## 4. Tauri updater key
+## 4. Not needed yet: the updater key
 
-Unrelated to Apple. It signs update artifacts so an installed copy will only
-accept updates from you.
+Luminary ships as a downloaded DMG with no auto-updater, so nothing here
+requires a Tauri signing key.
 
-```bash
-cd frontend
-node_modules/.bin/tauri signer generate -w ~/.tauri/luminary.key
-```
-
-Writes `~/.tauri/luminary.key` (private, password-protected) and
-`~/.tauri/luminary.key.pub`. The public key goes into `src-tauri/tauri.conf.json`
-under `plugins.updater.pubkey` and is committed; the private key is a CI secret
-and is never committed.
-
-**Back up the private key.** Losing it means no existing install can be updated
-again — a new key is a new identity, and shipped copies will reject it.
+If you add one later, generate it once with
+`node_modules/.bin/tauri signer generate -w ~/.tauri/luminary.key`, commit the
+public key to `tauri.conf.json`, and keep the private key as a CI secret.
+**Back it up**: losing it means no installed copy can ever be updated, since a
+new key is a new identity that shipped copies will reject.
 
 ## 5. Test locally before touching CI
 
@@ -79,9 +71,6 @@ export APPLE_TEAM_ID=ABCDE12345
 export APPLE_API_KEY_PATH=~/private_keys/AuthKey_XXXXXXXXXX.p8
 export APPLE_API_KEY_ID=XXXXXXXXXX
 export APPLE_API_ISSUER=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export TAURI_SIGNING_PRIVATE_KEY=~/.tauri/luminary.key
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='...'
-
 APP=src-tauri/target/release/bundle/macos/Luminary.app
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1)
 
@@ -90,7 +79,7 @@ make desktop-app
 bash scripts/macos/sign.sh          "$APP"
 bash scripts/macos/verify_signed.sh "$APP"
 bash scripts/macos/dmg.sh           "$APP" "$VERSION"
-bash scripts/macos/notarize.sh "build/dist/Luminary_${VERSION}_aarch64.dmg" "$APP" "$VERSION"
+bash scripts/macos/notarize.sh "build/dist/Luminary_${VERSION}_aarch64.dmg" "$APP"
 ```
 
 Expect the notary submission to take 10–30 minutes; it scales with file count
@@ -116,8 +105,6 @@ gh secret set APPLE_TEAM_ID
 gh secret set APPLE_API_KEY_ID
 gh secret set APPLE_API_ISSUER
 gh secret set KEYCHAIN_PASSWORD                 # any random string
-gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/luminary.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
 Then tag a release; `.github/workflows/release-macos-app.yml` does the rest.

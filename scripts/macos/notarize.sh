@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Notarize a DMG, staple it and the app, then emit the updater artifacts.
+# Notarize a DMG and staple both it and the app.
 #
-#   scripts/macos/notarize.sh <dmg> <app> <version>
+#   scripts/macos/notarize.sh <dmg> <app>
 #
 # Requires an App Store Connect API key (APPLE_API_KEY_PATH, APPLE_API_KEY_ID,
 # APPLE_API_ISSUER) rather than an app-specific password, which expires and
 # cannot be scoped.
+#
+# Distribution is a downloaded DMG. There is no auto-updater: the plugin is not
+# a dependency and no public key is configured, so publishing update artifacts
+# would ship something nothing can consume.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-DMG="${1:?usage: notarize.sh <dmg> <app> <version>}"
-APP="${2:?usage: notarize.sh <dmg> <app> <version>}"
-VERSION="${3:?usage: notarize.sh <dmg> <app> <version>}"
+DMG="${1:?usage: notarize.sh <dmg> <app>}"
+APP="${2:?usage: notarize.sh <dmg> <app>}"
 DIST="${DIST:-$BUILD_DIR/dist}"
 
 : "${APPLE_API_KEY_PATH:?}" "${APPLE_API_KEY_ID:?}" "${APPLE_API_ISSUER:?}"
@@ -50,43 +53,11 @@ _step "Stapling"
 xcrun stapler staple "$DMG"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
+
+_step "Gatekeeper assessment"
+# The end state that matters: what a user's Mac will conclude about a fresh
+# download. Anything other than "Notarized Developer ID" means they still see a
+# warning.
 spctl --assess --type exec --verbose=4 "$APP"
 
-_step "Updater artifacts"
-# The tarball must contain the STAPLED app, or an updated install stops
-# validating offline.
-TARBALL="$DIST/Luminary_${VERSION}_aarch64.app.tar.gz"
-tar -czf "$TARBALL" -C "$(dirname "$APP")" "$(basename "$APP")"
-
-: "${TAURI_SIGNING_PRIVATE_KEY:?}"
-"$REPO_ROOT/frontend/node_modules/.bin/tauri" signer sign \
-    -f "$TAURI_SIGNING_PRIVATE_KEY" \
-    -p "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" "$TARBALL"
-
-python3 - "$VERSION" "$TARBALL" "$DIST/latest.json" "${GITHUB_REPOSITORY:-nupsea/luminary}" <<'PY'
-import datetime, json, sys
-
-version, tarball, out, repo = sys.argv[1:5]
-signature = open(f"{tarball}.sig").read().strip()
-# darwin-aarch64 only. lancedb publishes no macOS x86_64 wheel, so advertising
-# an Intel target would hand those users a broken update.
-json.dump(
-    {
-        "version": version,
-        "notes": "See CHANGELOG.md",
-        "pub_date": datetime.datetime.now(datetime.UTC).isoformat(),
-        "platforms": {
-            "darwin-aarch64": {
-                "signature": signature,
-                "url": f"https://github.com/{repo}/releases/download/v{version}/"
-                       f"{tarball.rsplit('/', 1)[-1]}",
-            }
-        },
-    },
-    open(out, "w"),
-    indent=2,
-)
-print(f"wrote {out}")
-PY
-
-_info "release artifacts in $DIST"
+_info "notarized and stapled: $DMG"

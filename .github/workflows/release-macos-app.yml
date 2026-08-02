@@ -112,19 +112,15 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: bash scripts/macos/dmg.sh src-tauri/target/release/bundle/macos/Luminary.app "${{ steps.version.outputs.version }}"
 
-      - name: Notarize, staple and sign the update
+      - name: Notarize and staple
         env:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           bash scripts/macos/notarize.sh \
             "build/dist/Luminary_${{ steps.version.outputs.version }}_aarch64.dmg" \
-            src-tauri/target/release/bundle/macos/Luminary.app \
-            "${{ steps.version.outputs.version }}"
+            src-tauri/target/release/bundle/macos/Luminary.app
 
       # Notary logs are the only way to see why a submission was rejected, so
       # keep them even when the job fails.
@@ -140,4 +136,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "v${{ steps.version.outputs.version }}" --generate-notes \
-            build/dist/*.dmg build/dist/*.app.tar.gz build/dist/*.sig build/dist/latest.json
+            build/dist/*.dmg

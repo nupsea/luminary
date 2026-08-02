@@ -72,25 +72,38 @@ done < <(find "$STAGE" -type l)
 
 _step "4. Native imports (unsigned surface)"
 "$PY" -I - <<'PYEOF'
-import importlib, sys
-mods = ["numpy", "scipy", "sklearn", "torch", "onnxruntime", "transformers",
-        "sentence_transformers", "gliner", "optimum", "lancedb", "pyarrow",
-        "kuzu", "fitz", "PIL", "litellm", "langgraph", "keyring",
-        "fastapi", "uvicorn", "alembic", "sqlalchemy", "aiosqlite",
-        "faster_whisper", "ctranslate2", "av", "yt_dlp", "trafilatura",
-        "tree_sitter", "cloudscraper"]
+import importlib, importlib.util, sys
+
+# Everything the shipped bundle must be able to import.
+required = ["numpy", "scipy", "sklearn", "torch", "onnxruntime", "transformers",
+            "sentence_transformers", "gliner", "lancedb", "pyarrow",
+            "kuzu", "fitz", "PIL", "litellm", "langgraph", "keyring",
+            "fastapi", "uvicorn", "alembic", "sqlalchemy", "aiosqlite",
+            "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip"]
+
+# Packages that must NOT be here. `av` and its dependants carry libx264/libx265
+# (GPL-2.0-or-later) inside their wheels, and Luminary ships Apache-2.0 -- they
+# are installed after the fact as the `transcription` component, never bundled.
+# `optimum`/`onnx` are simply unused; they cost ~49MB when they crept in.
+forbidden = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx"]
+
 bad = []
-for m in mods:
+for m in required:
     try:
         importlib.import_module(m)
     except Exception as e:
-        bad.append(f"{m}: {type(e).__name__}: {e}")
-print(f"    imported {len(mods) - len(bad)}/{len(mods)}")
+        bad.append(f"missing {m}: {type(e).__name__}: {e}")
+for m in forbidden:
+    if importlib.util.find_spec(m) is not None:
+        bad.append(f"{m} must not ship in the bundle")
+
+print(f"    {len(required) - len([b for b in bad if b.startswith('missing')])}"
+      f"/{len(required)} required present, {len(forbidden)} excluded")
 if bad:
     print("\n".join("    " + b for b in bad), file=sys.stderr)
     sys.exit(1)
 PYEOF
-[ $? -eq 0 ] && _pass "all native packages import" || _fail "native import failure"
+[ $? -eq 0 ] && _pass "dependency set is exactly as shipped" || _fail "dependency set is wrong"
 
 _step "5. Backend imports through the .pth"
 # This single import transitively proves: _luminary.pth resolved, the backend

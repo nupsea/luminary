@@ -108,8 +108,14 @@ app so it still validates offline once dragged out. `notarytool submit --wait`
 does not reliably exit non-zero on rejection, so `notarize.sh` asserts
 `status == "Accepted"` and prints the log's issues.
 
-`latest.json` advertises **`darwin-aarch64` only**. Publishing an Intel target
-would hand those users an update that cannot run.
+**There is no auto-updater.** Distribution is a downloaded DMG. The plugin is
+not a dependency and no signing key is configured, so publishing update
+artifacts would ship something nothing can consume. Wiring it later means adding
+`tauri-plugin-updater`, generating a keypair with `tauri signer generate`, and
+putting the public key in `tauri.conf.json`. Two things to decide first: macOS
+has no binary diffing, so every update is the full ~700 MB; and the updater
+writes over the installed `.app`, which fails silently for a non-admin user.
+Models live in `DATA_DIR` and are never re-downloaded by an update.
 
 ### Credentials
 
