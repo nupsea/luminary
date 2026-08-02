@@ -1,6 +1,6 @@
 // setupApi — /setup/* : startup progress, installable components, capabilities
 
-import { apiDelete, apiGet } from "@/lib/apiClient"
+import { apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 
 export type PhaseState =
@@ -76,6 +76,12 @@ export async function fetchComponents(): Promise<Component[]> {
 
 export function fetchCapabilities(): Promise<Capabilities> {
   return apiGet<Capabilities>("/setup/capabilities")
+}
+
+/** Re-run whatever failed at startup. Without it a transient network problem
+ *  leaves the install degraded until the app is restarted. */
+export function retrySetup(): Promise<{ retried: string[] }> {
+  return apiPost<{ retried: string[] }>("/setup/retry")
 }
 
 export function uninstallComponent(id: string): Promise<{ removed: string }> {

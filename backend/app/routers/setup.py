@@ -18,6 +18,7 @@ from app.services.components import (
     remove_component,
 )
 from app.services.startup_status import get_startup_status
+from app.services.warmup import retry_failed
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,17 @@ async def list_components() -> dict:
 async def list_capabilities() -> dict:
     """What the UI may offer. Keeps it from advertising what this build cannot do."""
     return await capabilities()
+
+
+@router.post("/retry")
+async def retry() -> dict:
+    """Re-run whatever failed during startup.
+
+    Without this a transient network problem on first run left the install
+    permanently degraded, recoverable only by quitting and relaunching.
+    """
+    retried = await retry_failed()
+    return {"retried": retried}
 
 
 @router.post("/components/{component_id}/install")

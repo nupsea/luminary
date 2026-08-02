@@ -29,7 +29,6 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.60b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
     "opentelemetry-sdk>=1.39.1",
-    "optimum[onnxruntime]>=2.1.0",
     "pydantic-settings>=2.13.1",
     "pillow>=11.0.0",
     "pymupdf>=1.27.1",

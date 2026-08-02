@@ -122,6 +122,157 @@ async def test_setup_status_endpoint_is_served():
     assert {p["key"] for p in body["phases"]} >= {"db", "embedder", "chat_model"}
 
 
+def test_required_phases_are_exactly_these():
+    """This set decides what every user waits for on a first run.
+
+    Marking a new phase required is a product decision, not a detail -- the
+    entity model alone is 1.1GB, and requiring it would put that download in
+    front of a library that works without it.
+    """
+    from app.services.startup_status import _PHASES
+
+    required = {key for key, _label, req in _PHASES if req}
+    assert required == {"db", "embedder"}
+
+
+def test_blocking_ignores_optional_phases():
+    status = StartupStatus()
+    status.set_state("db", "ready")
+    status.set_state("embedder", "ready")
+    status.set_state("ner", "downloading")
+    assert status.snapshot()["blocking"] is False, "optional work must not gate the app"
+
+    status.set_state("embedder", "failed", "network")
+    assert status.snapshot()["blocking"] is True
+
+
+# --- model prefetch --------------------------------------------------------
+
+
+def test_prefetch_specs_cover_every_downloaded_phase():
+    """A phase that downloads but has no spec would never be pre-fetched, and
+    would silently fall back to serialized download inside the load lock."""
+    from app.services import model_prefetch
+
+    assert {s.key for s in model_prefetch.specs()} == {"embedder", "reranker", "ner"}
+    for spec in model_prefetch.specs():
+        assert spec.repo_id and spec.slug and spec.size_bytes > 0
+
+
+def test_prefetch_cache_layout_matches_the_loaders(tmp_path, monkeypatch):
+    """is_cached must agree with where the loaders actually look.
+
+    They pass this directory as HuggingFace's cache root, so the marker is
+    models--org--name/snapshots/<rev>. If these ever diverge, every start
+    re-downloads and nothing reports it.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.config import get_settings
+    from app.services import model_prefetch
+
+    get_settings.cache_clear()
+    try:
+        spec = model_prefetch.spec_for("embedder")
+        assert spec is not None
+        assert model_prefetch.is_cached(spec) is False
+
+        snapshot = (
+            model_prefetch.cache_dir(spec)
+            / f"models--{spec.repo_id.replace('/', '--')}"
+            / "snapshots"
+            / "abc123"
+        )
+        snapshot.mkdir(parents=True)
+        assert model_prefetch.is_cached(spec) is False, "an empty snapshot is not cached"
+
+        (snapshot / "config.json").write_text("{}")
+        assert model_prefetch.is_cached(spec) is True
+    finally:
+        get_settings.cache_clear()
+
+
+def test_prefetch_skips_alternate_frameworks_but_never_the_only_weights():
+    """snapshot_download takes a whole repo; from_pretrained takes what it needs.
+
+    The cross-encoder repo publishes 1.2GB of ONNX, OpenVINO and Flax variants
+    beside a 127MB torch checkpoint, so pre-fetching without filters doubled the
+    download. The filter is load-bearing in the other direction too: GLiNER
+    ships only pytorch_model.bin, and excluding it would leave nothing to load.
+    """
+    from app.services import model_prefetch
+
+    by_key = {s.key: s for s in model_prefetch.specs()}
+
+    for key in ("embedder", "reranker", "ner"):
+        assert "onnx/*" in by_key[key].ignore
+        assert "openvino/*" in by_key[key].ignore
+
+    assert "pytorch_model.bin" in by_key["embedder"].ignore
+    assert "pytorch_model.bin" in by_key["reranker"].ignore
+    assert "pytorch_model.bin" not in by_key["ner"].ignore, (
+        "GLiNER publishes no safetensors; excluding the torch checkpoint "
+        "would leave nothing to load"
+    )
+
+
+def test_hub_unreachable_when_offline_env_is_set(monkeypatch):
+    """The offline check must not spend five seconds on a socket to say no."""
+    from app.services import model_prefetch
+
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    assert model_prefetch.hub_reachable(timeout=0.1) is False
+
+
+def test_offline_first_run_fails_fast_with_an_actionable_message(monkeypatch):
+    """Previously this surfaced as ~75s of spinner, then a stuck setup screen."""
+    from app.services import model_prefetch, warmup
+    from app.services.startup_status import get_startup_status
+
+    monkeypatch.setattr(model_prefetch, "is_cached", lambda spec: False)
+    monkeypatch.setattr(model_prefetch, "hub_reachable", lambda *a, **k: False)
+
+    called: list = []
+    monkeypatch.setattr(
+        model_prefetch, "prefetch", lambda *a, **k: called.append(a) or {}
+    )
+    for name in ("_load_embedder", "_load_ner", "_load_reranker", "_warm_llm"):
+        async def _noop():
+            return None
+
+        monkeypatch.setattr(warmup, name, _noop)
+
+    asyncio.run(warmup.run_warmup())
+
+    assert not called, "must not attempt downloads when the hub is unreachable"
+    phases = {p["key"]: p for p in get_startup_status().snapshot()["phases"]}
+    assert phases["embedder"]["state"] == "failed"
+    assert "internet" in phases["embedder"]["detail"].lower()
+
+
+def test_retry_reruns_only_failed_phases(monkeypatch):
+    from app.services import warmup
+    from app.services.startup_status import get_startup_status
+
+    status = get_startup_status()
+    status.set_state("embedder", "failed", "boom")
+    status.set_state("db", "ready")
+    status.set_state("ner", "ready")
+    status.set_state("reranker", "ready")
+    status.set_state("chat_model", "ready")
+    status.set_state("ollama_server", "ready")
+
+    seen: list = []
+
+    async def _fake(only=None):
+        seen.append(only)
+
+    monkeypatch.setattr(warmup, "run_warmup", _fake)
+    retried = asyncio.run(warmup.retry_failed())
+
+    assert retried == ["embedder"]
+    assert seen == [{"embedder"}]
+
+
 # --- components ------------------------------------------------------------
 
 

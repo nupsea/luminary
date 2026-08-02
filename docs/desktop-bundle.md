@@ -236,8 +236,9 @@ Measured on the packaged app, Apple Silicon:
 
 | | Backend answering | App usable |
 |---|---|---|
-| First ever launch | ~21 s | ~45 s |
+| First ever launch | ~21 s | ~28 s |
 | Every launch after | ~3.8 s | immediately after |
+| First launch, no network | — | fails in ~5 s with a retry |
 
 Two things keep it there, and both are easy to undo by accident.
 
@@ -260,7 +261,46 @@ python -X importtime -c "import app.main" 2>&1 | sort -t'|' -k2 -rn | head
 `embedder` required; the entity model (1.1 GB), reranker and chat model are
 not. `SetupGate` gates on `blocking`, so optional downloads continue behind a
 pill in a working app. Marking a new phase required means every user waits for
-it on first run.
+it on first run, which is why a test pins that set.
+
+## Model provisioning
+
+`warmup.py` runs one task per model: fetch if absent, then construct. Downloads
+overlap; construction still serialises on the single-worker executor and
+`MODEL_LOAD_LOCK`, whose invariant — `from_pretrained` mutates process-global
+torch state — is unchanged.
+
+The split exists because `from_pretrained` downloads *and* builds in one call,
+so the load lock was also serialising ~1.4 GB of network-bound work. Two
+constraints fell out of doing it properly:
+
+- **Per model, not batched.** Fetching everything before constructing anything
+  made the 128 MB embedder wait on the 1.1 GB entity model, pushing time-to-
+  usable from 45 s to 62 s. Per-model tasks bring it to 28 s.
+- **`ignore_patterns` is mandatory.** `snapshot_download` takes a whole repo
+  where `from_pretrained` takes what it needs. The cross-encoder repo publishes
+  1.2 GB of ONNX, OpenVINO and Flax variants beside a 127 MB torch checkpoint,
+  so unfiltered pre-fetching downloaded 2.7 GB instead of 1.4 GB. The filter
+  cuts the other way too: GLiNER ships only `pytorch_model.bin`, so excluding
+  torch checkpoints there would leave nothing to load.
+
+Concurrent `snapshot_download` also races on tqdm's class-level lock
+(`type object 'tqdm' has no attribute '_lock'`), so hub progress bars are
+disabled — progress is reported from cache directory size instead.
+
+**Offline first run** is caught by a reachability probe before any download, so
+it fails in ~5 s with "No internet connection" rather than letting each loader
+rediscover it over ~75 s. Models that could not be fetched are not then handed
+to a constructor that would fail more slowly and overwrite the message.
+`POST /setup/retry` re-runs only the failed phases.
+
+## Working on the staged tree
+
+`.pyc` files are compiled with `unchecked-hash`, so Python **never checks
+whether the source changed**. Copying edited files into `build/stage` does
+nothing — the stale bytecode still runs. Re-run `make stage-payload`, which
+clears `__pycache__` first. This is silent and costs a confusing measurement
+every time it is forgotten.
 
 Optional pieces are installed after the app, from the catalogue in
 `app/services/components.py`, via `GET|POST|DELETE /setup/components`. That

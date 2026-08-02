@@ -9,11 +9,12 @@
 // the remaining downloads move to a small status pill.
 
 import { useState, type ReactNode } from "react"
-import { AlertTriangle, Check, Loader2 } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { AlertTriangle, Check, Loader2, RotateCw } from "lucide-react"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { useStartupStatus } from "@/hooks/useSetup"
-import { formatBytes, type StartupPhase } from "@/lib/setupApi"
+import { formatBytes, retrySetup, type StartupPhase } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
 
 function PhaseRow({ phase }: { phase: StartupPhase }) {
@@ -100,7 +101,25 @@ function SetupPill() {
 
 export function SetupGate({ children }: { children: ReactNode }) {
   const { data, isError } = useStartupStatus()
+  const queryClient = useQueryClient()
   const [dismissed, setDismissed] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+
+  const failedPhases = data?.phases.filter((p) => p.state === "failed") ?? []
+  const hasFailure = failedPhases.length > 0
+  // Distinguish "no network" from a genuine error: the wording and the odds of
+  // a retry succeeding are completely different.
+  const offline = failedPhases.some((p) => /internet|connect/i.test(p.detail))
+
+  async function retry() {
+    setRetrying(true)
+    try {
+      await retrySetup()
+      await queryClient.invalidateQueries({ queryKey: ["setup"] })
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   // Hold only for work the app cannot run without. Optional models -- the
   // entity extractor alone is 1.1GB -- finish in the background behind the
@@ -150,13 +169,32 @@ export function SetupGate({ children }: { children: ReactNode }) {
           </p>
         )}
 
+        {hasFailure && (
+          <div className="mt-6 flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              {offline
+                ? "Luminary needs the internet once, to download the models it runs on."
+                : "Some of the setup did not finish."}
+            </p>
+            <button
+              type="button"
+              onClick={() => void retry()}
+              disabled={retrying}
+              className="inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-60"
+            >
+              {retrying ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+              {retrying ? "Retrying" : "Try again"}
+            </button>
+          </div>
+        )}
+
         {usable && (
           <button
             type="button"
             onClick={() => setDismissed(true)}
-            className="mt-6 text-sm font-medium text-primary underline-offset-4 hover:underline"
+            className="mt-6 block text-sm font-medium text-primary underline-offset-4 hover:underline"
           >
-            Start exploring while this finishes
+            Continue without it
           </button>
         )}
       </div>

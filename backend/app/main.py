@@ -65,7 +65,7 @@ from app.services.components import activate_extras, install_ollama_model, resol
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
-from app.services.executors import get_model_executor, shutdown_model_executor
+from app.services.executors import shutdown_model_executor
 from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
 from app.services.ingestion_jobs import get_ingestion_jobs
@@ -74,6 +74,7 @@ from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
 from app.services.startup_status import get_startup_status
+from app.services.warmup import run_warmup
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
 
@@ -212,101 +213,7 @@ async def lifespan(app: FastAPI):
 
     if "pytest" not in sys.modules:
 
-        async def warmup_models():
-            loop = asyncio.get_running_loop()
-            _model_pool = get_model_executor()
-
-            async def load_embedder():
-                try:
-                    logger.info("Warmup: pre-loading Embedding model in the background...")
-                    status.set_state("embedder", "loading")
-                    from app.services.embedder import get_embedding_service
-                    await loop.run_in_executor(_model_pool, get_embedding_service()._load_model)
-                    status.set_state("embedder", "ready")
-                    logger.info("Warmup: Embedding model pre-loaded.")
-                except Exception as exc:
-                    status.set_state("embedder", "failed", str(exc))
-                    logger.warning("Warmup: failed to pre-load embedding model: %s", exc)
-
-            async def load_ner():
-                if not settings.GLINER_ENABLED:
-                    status.set_state("ner", "skipped", "Disabled by configuration")
-                    return
-                try:
-                    logger.info("Warmup: pre-loading GLiNER model in the background...")
-                    status.set_state("ner", "loading")
-                    from app.services.ner import get_entity_extractor
-                    await loop.run_in_executor(_model_pool, get_entity_extractor()._load_model)
-                    status.set_state("ner", "ready")
-                    logger.info("Warmup: GLiNER model pre-loaded.")
-                except Exception as exc:
-                    status.set_state("ner", "failed", str(exc))
-                    logger.warning("Warmup: failed to pre-load GLiNER model: %s", exc)
-
-            async def load_reranker():
-                # Pre-load the cross-encoder so the first chat question doesn't
-                # pay the model-load stall now that L3 rerank runs in the chat
-                # path. Skipped when the user has toggled reranking off.
-                try:
-                    from app.database import get_session_factory
-                    from app.services.settings_service import get_rerank_enabled
-                    async with get_session_factory()() as session:
-                        if not await get_rerank_enabled(session):
-                            status.set_state("reranker", "skipped", "Reranking is turned off")
-                            return
-                    logger.info("Warmup: pre-loading cross-encoder reranker in the background...")
-                    status.set_state("reranker", "loading")
-                    from app.services.retriever_strategies import _get_reranker
-                    await loop.run_in_executor(_model_pool, _get_reranker()._load)
-                    status.set_state("reranker", "ready")
-                    logger.info("Warmup: cross-encoder reranker pre-loaded.")
-                except Exception as exc:
-                    status.set_state("reranker", "failed", str(exc))
-                    logger.warning("Warmup: failed to pre-load reranker: %s", exc)
-
-            async def load_llm():
-                # Fire a tiny generation so the first user query doesn't pay the
-                # cold-start cost: for Ollama this loads the model into memory,
-                # for cloud it warms the connection / validates routing. Fails
-                # soft — a missing key or offline model must not block startup.
-                import time as _time
-
-                from app.services.llm import get_llm_service
-
-                async def _warm_one(model: str | None, label: str) -> None:
-                    try:
-                        t0 = _time.perf_counter()
-                        logger.info("Warmup: warming %s LLM...", label)
-                        if label == "interactive":
-                            status.set_state("chat_model", "loading", model or "")
-                        await get_llm_service().generate(
-                            "ping", model=model, timeout=60.0
-                        )
-                        if label == "interactive":
-                            status.set_state("chat_model", "ready", model or "")
-                        logger.info(
-                            "Warmup: %s LLM warm in %.2fs", label, _time.perf_counter() - t0
-                        )
-                    except Exception as exc:
-                        if label == "interactive":
-                            status.set_state("chat_model", "failed", str(exc))
-                        logger.warning("Warmup: failed to warm %s LLM: %s", label, exc)
-
-                # Resolve the interactive (foreground) and background models; warm
-                # each distinct one. In hybrid mode these differ (cloud vs Ollama).
-                try:
-                    from app.services.settings_service import get_effective_routing
-                    fg = get_effective_routing(background=False)[0]
-                    bg = get_effective_routing(background=True)[0]
-                except Exception:
-                    fg, bg = None, None
-                await _warm_one(None, "interactive")
-                if bg and bg != fg:
-                    await _warm_one(bg, "background")
-
-            await asyncio.gather(load_embedder(), load_ner(), load_reranker(), load_llm())
-
-        _background_tasks.add(asyncio.create_task(warmup_models()))
+        _background_tasks.add(asyncio.create_task(run_warmup()))
 
         # One-time-ish backfill: summarise notes created before card descriptions
         # existed. Runs after a short delay so it doesn't compete with model
