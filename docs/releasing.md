@@ -75,6 +75,24 @@ credentials. It exercises every step and gate, but the result is **not**
 distributable: Gatekeeper rejects ad-hoc signatures on any machine that did not
 build them.
 
+## Testing a rebuilt DMG
+
+**Unmount the previous one first.** A mounted disk image keeps serving the inode
+it opened, so rebuilding a DMG at the same path leaves `/Volumes/Luminary`
+showing the old contents indefinitely — and anything dragged to `/Applications`
+from that stale mount is old too, with nothing to indicate it.
+
+```bash
+hdiutil detach /Volumes/Luminary
+open build/dist/Luminary_<version>_aarch64.dmg
+```
+
+Confirm what you are actually running before drawing conclusions from it:
+
+```bash
+ls /Applications/Luminary.app/Contents/Resources/backend/app/services/model_prefetch.py
+```
+
 ## What an update does to a user's data
 
 Nothing is lost, and almost nothing is re-downloaded.
