@@ -14,7 +14,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal
 
-State = Literal["pending", "downloading", "loading", "ready", "failed", "skipped"]
+# "missing" is not a failure: the component simply has not been installed yet,
+# and there is an action for it. Reporting that as failed put a warning icon and
+# a raw exception in front of a user whose install was working correctly.
+State = Literal[
+    "pending", "downloading", "loading", "ready", "failed", "skipped", "missing"
+]
 
 # `required` decides what the user waits for. Everything else finishes in the
 # background while they use the app: the entity model alone is 1.1GB, and
@@ -72,6 +77,17 @@ class StartupStatus:
             for key, label, required in _PHASES
         }
         self._started_at = time.time()
+        self._offline = False
+
+    def set_offline(self, offline: bool) -> None:
+        """Record that the hub was unreachable.
+
+        An explicit flag, because inferring it from message text matched
+        "APIConnectionError" and told users with working internet that they had
+        none.
+        """
+        with self._lock:
+            self._offline = offline
 
     def set_state(self, key: str, state: State, detail: str = "") -> None:
         with self._lock:
@@ -102,13 +118,18 @@ class StartupStatus:
             required_ready = all(
                 p.state in _SATISFIED for p in self._phases.values() if p.required
             )
-            all_ready = all(p.state in _SATISFIED for p in self._phases.values())
             failed = [p.key for p in self._phases.values() if p.state == "failed"]
+            missing = [p.key for p in self._phases.values() if p.state == "missing"]
+            # Nothing left in flight, even if optional pieces are uninstalled.
+            settled = all(
+                p.state in (*_SATISFIED, "missing") for p in self._phases.values()
+            )
             busy = any(p.state in ("downloading", "loading") for p in self._phases.values())
             db_ready = self._phases["db"].state in _SATISFIED
+            offline = self._offline
             elapsed = time.time() - self._started_at
 
-        if all_ready and not failed:
+        if settled and not failed:
             status = "ready"
         elif failed and required_ready:
             status = "degraded"
@@ -127,6 +148,9 @@ class StartupStatus:
             # required phases count, so optional downloads never block the app.
             "blocking": not required_ready,
             "failed": failed,
+            # Installable, not broken. The UI offers an action rather than an error.
+            "missing": missing,
+            "offline": offline,
             "elapsed_seconds": round(elapsed, 1),
             "phases": phases,
         }

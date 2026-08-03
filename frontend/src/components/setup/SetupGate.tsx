@@ -10,17 +10,24 @@
 
 import { useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, Check, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, Check, Download, Loader2, RotateCw } from "lucide-react"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { useStartupStatus } from "@/hooks/useSetup"
 import { formatBytes, retrySetup, type StartupPhase } from "@/lib/setupApi"
+import { principleOfTheDay } from "@/lib/studyPrinciples"
 import { cn } from "@/lib/utils"
+
+// Which optional component installs a given phase, when one is missing.
+const PHASE_COMPONENT: Record<string, string> = { chat_model: "chat_model" }
 
 function PhaseRow({ phase }: { phase: StartupPhase }) {
   const done = phase.state === "ready" || phase.state === "skipped"
   const failed = phase.state === "failed"
+  const missing = phase.state === "missing"
   const busy = phase.state === "downloading" || phase.state === "loading"
+  const componentId = PHASE_COMPONENT[phase.key]
 
   return (
     <li className="flex items-start gap-3 py-2">
@@ -29,6 +36,8 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
           <Check size={16} className="text-emerald-600 dark:text-emerald-500" />
         ) : failed ? (
           <AlertTriangle size={16} className="text-amber-600 dark:text-amber-500" />
+        ) : missing ? (
+          <Download size={16} className="text-muted-foreground" />
         ) : busy ? (
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         ) : (
@@ -47,6 +56,9 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
           {phase.state === "skipped" && (
             <span className="shrink-0 text-xs text-muted-foreground">Not needed</span>
           )}
+          {missing && (
+            <span className="shrink-0 text-xs text-muted-foreground">Optional</span>
+          )}
         </span>
 
         {phase.percent !== null && !done && (
@@ -60,6 +72,12 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
 
         {failed && phase.detail && (
           <span className="mt-1 block text-xs text-muted-foreground">{phase.detail}</span>
+        )}
+
+        {missing && componentId && (
+          <span className="mt-1.5 block">
+            <InstallComponentButton componentId={componentId} />
+          </span>
         )}
       </span>
     </li>
@@ -104,12 +122,13 @@ export function SetupGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [dismissed, setDismissed] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [principle] = useState(() => principleOfTheDay())
 
-  const failedPhases = data?.phases.filter((p) => p.state === "failed") ?? []
-  const hasFailure = failedPhases.length > 0
-  // Distinguish "no network" from a genuine error: the wording and the odds of
-  // a retry succeeding are completely different.
-  const offline = failedPhases.some((p) => /internet|connect/i.test(p.detail))
+  const hasFailure = (data?.failed.length ?? 0) > 0
+  // Reported by the backend. Matching on message text put "you have no
+  // internet" in front of users whose only problem was an uninstalled model,
+  // because litellm calls it an APIConnectionError.
+  const offline = data?.offline ?? false
 
   async function retry() {
     setRetrying(true)
@@ -146,13 +165,24 @@ export function SetupGate({ children }: { children: ReactNode }) {
           <h1 className="text-lg font-semibold tracking-tight">Luminary</h1>
         </div>
 
-        <h2 className="text-xl font-medium tracking-tight">
-          {starting ? "Warming up the engine" : "Getting your library ready"}
+        {/* The wait is the cheapest place to teach the idea the product is
+            built on, and it beats watching a spinner. */}
+        <figure className="mb-7 border-l-2 border-primary/40 pl-4">
+          <blockquote className="text-[15px] leading-relaxed text-foreground">
+            {principle}
+          </blockquote>
+          <figcaption className="mt-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+            How learning works
+          </figcaption>
+        </figure>
+
+        <h2 className="text-base font-medium tracking-tight">
+          {starting ? "Warming up" : "Getting your library ready"}
         </h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground">
           {starting
             ? "A few seconds while everything comes online."
-            : "Downloading what Luminary needs to read your documents. This happens once, and nothing leaves this machine."}
+            : "A one-time download. Nothing leaves this machine."}
         </p>
 
         {data && (

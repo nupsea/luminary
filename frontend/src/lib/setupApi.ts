@@ -9,6 +9,8 @@ export type PhaseState =
   | "loading"
   | "ready"
   | "failed"
+  /** Not installed yet, and there is an action for it. Not an error. */
+  | "missing"
   | "skipped"
 
 export interface StartupPhase {
@@ -31,6 +33,10 @@ export interface StartupStatus {
   /** Whether the user should be held on the setup screen. Optional downloads never block. */
   blocking: boolean
   failed: string[]
+  /** Phase keys that are simply not installed yet. */
+  missing: string[]
+  /** The model hub was unreachable. Reported, not inferred from message text. */
+  offline: boolean
   elapsed_seconds: number
   phases: StartupPhase[]
   version: string

@@ -104,6 +104,50 @@ def test_required_phase_failure_is_not_ready():
     assert snap["usable"] is False
 
 
+def test_uninstalled_chat_model_is_missing_not_failed():
+    """A fresh install has no chat model. Reporting that as a failure put a
+    warning icon and a raw litellm traceback in front of a working install."""
+    status = StartupStatus()
+    for key in ("db", "embedder", "ollama_server", "reranker"):
+        status.set_state(key, "ready")
+    status.set_state("ner", "skipped")
+    status.set_state("chat_model", "missing", "llama3.2")
+
+    snap = status.snapshot()
+    assert snap["status"] == "ready", "an uninstalled optional model is not a degraded app"
+    assert snap["failed"] == []
+    assert snap["missing"] == ["chat_model"]
+    assert snap["blocking"] is False
+
+
+def test_offline_is_reported_not_inferred():
+    """`litellm.APIConnectionError` contains the word "connection", so matching
+    on message text told users with working internet that they had none."""
+    status = StartupStatus()
+    assert status.snapshot()["offline"] is False
+
+    status.set_state("chat_model", "failed", "APIConnectionError: model not found")
+    assert status.snapshot()["offline"] is False, "an API error is not an offline signal"
+
+    status.set_offline(True)
+    assert status.snapshot()["offline"] is True
+
+
+def test_ollama_missing_model_is_classified_as_not_installed():
+    from app.services.warmup import _friendly, _model_not_installed
+
+    not_pulled = Exception(
+        'litellm.APIConnectionError: OllamaException - {"error":"model \'llama3.2\' not found"}'
+    )
+    assert _model_not_installed(not_pulled) is True
+
+    unreachable = Exception("APIConnectionError: [Errno 61] Connection refused")
+    assert _model_not_installed(unreachable) is False
+    # And whatever we do show a user is a sentence, not a traceback.
+    assert "Errno" not in _friendly(unreachable)
+    assert _friendly(unreachable).endswith(".")
+
+
 def test_download_progress_reports_percent():
     status = StartupStatus()
     status.set_progress("chat_model", 512, 2048, "pulling")

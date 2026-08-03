@@ -33,7 +33,7 @@ async def _construct(key: str, label: str, build) -> None:
         status.set_state(key, "ready")
         logger.info("Warmup: %s ready", label)
     except Exception as exc:
-        status.set_state(key, "failed", str(exc))
+        status.set_state(key, "failed", _friendly(exc))
         logger.warning("Warmup: %s failed: %s", label, exc)
 
 
@@ -72,6 +72,26 @@ async def _load_reranker() -> None:
     await _construct("reranker", "reranker", _get_reranker()._load)
 
 
+def _model_not_installed(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "not found" in text and "model" in text
+
+
+def _friendly(exc: Exception) -> str:
+    """A sentence for a person, not a traceback.
+
+    Raw exception text reached the setup screen and read as a crash;
+    the detail is still logged in full.
+    """
+    text = str(exc)
+    lowered = text.lower()
+    if "connection" in lowered or "connect" in lowered:
+        return "Could not reach the local model server."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "Timed out while starting."
+    return text.split("\n", 1)[0][:160]
+
+
 async def _warm_llm() -> None:
     """Fire a tiny generation so the first real question does not pay the load.
 
@@ -93,7 +113,14 @@ async def _warm_llm() -> None:
             logger.info("Warmup: %s LLM warm in %.2fs", label, time.perf_counter() - t0)
         except Exception as exc:
             if interactive:
-                status.set_state("chat_model", "failed", str(exc))
+                # A model that was never pulled is not a fault -- it is the
+                # normal state of a fresh install, and the fix is an install
+                # button. Ollama reports it inside a connection error, so the
+                # distinction has to be read out of the message.
+                if _model_not_installed(exc):
+                    status.set_state("chat_model", "missing", model or "")
+                else:
+                    status.set_state("chat_model", "failed", _friendly(exc))
             logger.warning("Warmup: failed to warm %s LLM: %s", label, exc)
 
     try:
@@ -127,6 +154,7 @@ async def run_warmup(only: set[str] | None = None) -> None:
         if missing:
             loop = asyncio.get_running_loop()
             reachable = await loop.run_in_executor(None, model_prefetch.hub_reachable)
+            status.set_offline(not reachable)
             if not reachable:
                 logger.warning("Model prefetch skipped: hub unreachable")
 
@@ -155,7 +183,7 @@ async def run_warmup(only: set[str] | None = None) -> None:
                     None, model_prefetch.prefetch, [spec], status
                 )
                 if key in errors:
-                    status.set_state(key, "failed", errors[key])
+                    status.set_state(key, "failed", _friendly(Exception(errors[key])))
                     return
             await load()
 
