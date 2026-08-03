@@ -111,6 +111,18 @@ Then tag a release; `.github/workflows/release-macos-app.yml` does the rest.
 
 ## Renewal
 
-The Developer ID certificate expires after five years, the Apple Developer
-Program membership annually. An expired membership does not invalidate already
-notarized builds, but no new ones can be produced until it is renewed.
+Apple issues Developer ID certificates for a term of up to five years, but a
+much shorter one is possible. Read the expiry off the certificate rather than
+assuming it:
+
+```bash
+security find-certificate -c "Developer ID Application" -p login.keychain \
+  | openssl x509 -noout -enddate
+```
+
+Renewing means a new certificate, so `APPLE_CERTIFICATE` and
+`APPLE_CERTIFICATE_PASSWORD` must be re-exported and re-set.
+
+The Apple Developer Program membership renews annually. An expired membership
+does not invalidate already notarized builds, but no new ones can be produced
+until it is renewed.
