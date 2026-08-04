@@ -12,13 +12,18 @@ on:
 permissions:
   contents: write
 
+# Build and notarization are separate jobs on purpose. Apple's queue can stall
+# for hours without acknowledging it, and a blocking wait inside the build job
+# threw away a finished signed bundle every time it happened. Split, a stall
+# costs a re-run of `notarize` alone -- the ~25 minute build is not repeated.
 jobs:
-  app:
+  build:
     # macos-14 is Apple Silicon. macos-13 is Intel, and lancedb publishes no
     # macOS x86_64 wheel, so it cannot build this at all.
     runs-on: macos-14
-    # Apple's notary scan scales with file count, and this bundle has ~55k.
-    timeout-minutes: 180
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -67,23 +72,7 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KC="$RUNNER_TEMP/build.keychain"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
-          security set-keychain-settings -lut 21600 "$KC"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KC"
-          security list-keychain -d user -s "$KC" login.keychain
-          security find-identity -v -p codesigning "$KC"
-          rm -f "$RUNNER_TEMP/cert.p12"
-
-      - name: Write notary API key
-        run: echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+        run: bash scripts/macos/ci_keychain.sh
 
       - run: cd frontend && npm ci
 
@@ -107,6 +96,60 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/macos/verify_signed.sh src-tauri/target/release/bundle/macos/Luminary.app
 
+      # ditto, not upload-artifact's own zipping: that does not preserve
+      # symlinks, permissions or resource forks, and a bundle that loses them
+      # arrives with a broken signature.
+      - name: Archive the signed app
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            src-tauri/target/release/bundle/macos/Luminary.app \
+            "$RUNNER_TEMP/Luminary-signed.zip"
+          ls -lh "$RUNNER_TEMP/Luminary-signed.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-app
+          path: ${{ runner.temp }}/Luminary-signed.zip
+          retention-days: 7
+          compression-level: 0
+
+  notarize:
+    needs: build
+    runs-on: macos-14
+    # Apple's scan scales with file count and this bundle has ~55k, twice over:
+    # once for the app, once for the DMG.
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: bash scripts/macos/ci_keychain.sh
+
+      - name: Write notary API key
+        run: echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-app
+          path: ${{ runner.temp }}/incoming
+
+      - name: Restore the signed app
+        run: |
+          set -euo pipefail
+          mkdir -p src-tauri/target/release/bundle/macos
+          ditto -x -k "$RUNNER_TEMP/incoming/Luminary-signed.zip" \
+            src-tauri/target/release/bundle/macos
+          # Transport must not have damaged the signature; catching it here
+          # costs seconds, catching it at Apple costs a round trip.
+          codesign --verify --deep --strict --verbose=2 \
+            src-tauri/target/release/bundle/macos/Luminary.app
+
       # Before the DMG is built: a ticket only attaches to the artifact that was
       # submitted, so an app packaged first ships without one and needs a
       # network round trip to Apple on first launch.
@@ -120,14 +163,14 @@ jobs:
       - name: Build the DMG
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: bash scripts/macos/dmg.sh src-tauri/target/release/bundle/macos/Luminary.app "${{ steps.version.outputs.version }}"
+        run: bash scripts/macos/dmg.sh src-tauri/target/release/bundle/macos/Luminary.app "${{ needs.build.outputs.version }}"
 
       - name: Notarize and staple the DMG
         env:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: bash scripts/macos/notarize.sh "build/dist/Luminary_${{ steps.version.outputs.version }}_aarch64.dmg"
+        run: bash scripts/macos/notarize.sh "build/dist/Luminary_${{ needs.build.outputs.version }}_aarch64.dmg"
 
       # Notary logs are the only way to see why a submission was rejected, so
       # keep them even when the job fails.
@@ -145,7 +188,7 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v${{ steps.version.outputs.version }}
+          TAG: v${{ needs.build.outputs.version }}
         run: |
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --generate-notes
