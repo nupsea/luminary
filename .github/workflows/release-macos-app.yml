@@ -18,7 +18,7 @@ jobs:
     # macOS x86_64 wheel, so it cannot build this at all.
     runs-on: macos-14
     # Apple's notary scan scales with file count, and this bundle has ~55k.
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - uses: actions/checkout@v4
