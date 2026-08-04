@@ -55,6 +55,23 @@ gh release view v0.3.0
 The DMG must be present before you tell anyone. If notarization fails, the run
 uploads `notary-logs` as an artifact — that is where the reason is.
 
+### When notarization stalls
+
+Apple's queue can sit `In Progress` for hours without any acknowledgement on the
+developer system status page, and submissions cannot be cancelled. Check whether
+it is you or the service:
+
+```bash
+xcrun notarytool history --key "$APPLE_API_KEY_PATH" \
+  --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+```
+
+If recent submissions are all `In Progress` while older ones were accepted, the
+service is behind — resubmitting will not jump the queue and only adds load.
+Wait for one to resolve, then **re-run the `notarize` job alone** from the run
+page. The build job's signed bundle is kept as the `signed-app` artifact for
+seven days, so a retry skips the ~25 minute rebuild entirely.
+
 ## Building a DMG without releasing
 
 For testing a change, or handing a build to someone directly:
