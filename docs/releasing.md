@@ -67,9 +67,8 @@ APP=src-tauri/target/release/bundle/macos/Luminary.app
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1)
 bash scripts/macos/sign.sh          "$APP"          # or --adhoc, see below
 bash scripts/macos/verify_signed.sh "$APP"
-bash scripts/macos/notarize.sh      "$APP"          # before packaging
 bash scripts/macos/dmg.sh           "$APP" "$VERSION"
-bash scripts/macos/notarize.sh      "build/dist/Luminary_${VERSION}_aarch64.dmg"
+bash scripts/macos/notarize.sh "build/dist/Luminary_${VERSION}_aarch64.dmg" "$APP"
 ```
 
 `make desktop-adhoc` runs the same chain with the ad-hoc identity and no
