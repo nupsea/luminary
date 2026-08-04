@@ -32,22 +32,25 @@ SLUG="${NAME%.*}"
 JSON="$DIST/notary-${SLUG}.json"
 LOG="$DIST/notary-log-${SLUG}.json"
 
-# notarytool takes a zip, dmg or pkg, never a bare bundle.
+# notarytool takes a zip, dmg or pkg, never a bare bundle. A compressed image
+# rather than `ditto -c -k`: the same payload as a zip ran past 45 minutes at
+# Apple and was still In Progress at 60, while the image form completes in ~20.
 SUBMIT="$TARGET"
-TMPDIR_ZIP=""
+TMPDIR_PKG=""
 if [ -d "$TARGET" ]; then
-    TMPDIR_ZIP="$(mktemp -d)"
-    SUBMIT="$TMPDIR_ZIP/${NAME}.zip"
-    ditto -c -k --keepParent "$TARGET" "$SUBMIT"
+    TMPDIR_PKG="$(mktemp -d)"
+    SUBMIT="$TMPDIR_PKG/${SLUG}-notarize.dmg"
+    hdiutil create -volname "$SLUG" -srcfolder "$TARGET" \
+        -ov -format ULFO -quiet "$SUBMIT"
 fi
 
 _step "Submitting $NAME to the notary service"
 # Apple's scan time scales with file count, and this bundle has ~55k files.
 xcrun notarytool submit "$SUBMIT" "${KEY_ARGS[@]}" \
-    --wait --timeout 45m --output-format json | tee "$JSON"
+    --wait --timeout 90m --output-format json | tee "$JSON"
 
-if [ -n "$TMPDIR_ZIP" ]; then
-    rm -rf "$TMPDIR_ZIP"
+if [ -n "$TMPDIR_PKG" ]; then
+    rm -rf "$TMPDIR_PKG"
 fi
 
 SUBMISSION="$(python3 -c "import json;print(json.load(open('$JSON'))['id'])")"
