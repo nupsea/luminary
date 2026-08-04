@@ -52,14 +52,64 @@ CORS nor `TrustedHostMiddleware` needs relaxing — a webview on
   CWD-relative `.env` lookup into a user-editable file in a findable place.
 - **Single instance is enforced** by `tauri-plugin-single-instance`. Kuzu takes
   an exclusive file lock, so a second instance cannot open the library at all.
+  `RunEvent::Reopen` handles the macOS case that plugin does not cover —
+  Spotlight or the Dock reactivating an app that is already running — by
+  unminimizing and focusing the existing window.
 - **Children are killed on exit** for the same reason: a survivor holds that
   lock against the next launch.
 
+### Nothing survives the shell
+
+A crash or force-quit never delivers `RunEvent::Exit`, so "killed on exit" alone
+is not enough. Four mechanisms overlap, because no single one covers every way a
+process can end:
+
+1. Both children are spawned with `process_group(0)` and signalled as a group,
+   which also catches Ollama's model runners — its own children, which used to
+   survive a kill of their parent.
+2. Shutdown is SIGTERM, a grace period, then SIGKILL. SIGKILL alone leaves
+   SQLite's WAL unmerged.
+3. The backend watches `LUMINARY_PARENT_PID` (`backend/app/parent_watch.py`) and
+   stops itself if the shell disappears. This is the only mechanism that works
+   when the shell had no chance to run code at all.
+4. Whatever still slips through is reaped on the next launch from `.runtime.json`
+   in the library directory — **matched by executable path, not pid alone**, so a
+   recycled pid can never cause an unrelated process to be killed, including the
+   user's own `ollama serve`.
+
+### Startup failures are visible
+
+`boot()` reports each step to the splash. Two properties make that trustworthy:
+
+- The last event is retained and exposed as a `boot_state` command. `emit`
+  reaches whoever is listening at the time, and `boot` can fail in microseconds —
+  before the splash has parsed its own script. Pulling closes that race.
+- `withGlobalTauri` must stay enabled. The splash has no bundler and reaches IPC
+  through `window.__TAURI__`; without it the page throws on its first line and
+  freezes on "Starting up" forever.
+
+Waiting for the backend watches for the port, **for the child exiting**, and for
+the deadline. uvicorn runs lifespan startup before binding a socket, so a failed
+migration or a bad `DATA_DIR` means the port never opens — which as a pure TCP
+poll looked identical to a slow start for three minutes and then reported
+nothing useful.
+
+Everything goes to `~/Library/Logs/Luminary/luminary.log` (rotated, 3 kept),
+deliberately not under `DATA_DIR`: an unwritable library is itself a failure
+worth logging. The failure screen offers a redacted diagnostic report and a
+pre-filled GitHub issue, opened from Rust so no window is granted the ability to
+open arbitrary URLs. Redaction is tested in `src-tauri/src/report.rs`.
+
 The staged payload is found via `LUMINARY_STAGE`, then `resource_dir()`, then
-`build/stage`, so the shell is runnable before there is anything to sign.
+`build/stage`, so the shell is runnable before there is anything to sign. Before
+spawning anything the shell checks the pieces it needs are actually present; a
+partial payload otherwise fails much later as a path-shaped error that reads like
+a bug rather than a damaged install.
 
 `make desktop-dev` runs it against `build/stage`; `make desktop-app` produces an
-unsigned `Luminary.app`. Signing and notarization are not wired up yet.
+unsigned `Luminary.app` and refuses to run against an incomplete stage.
+`make desktop-test` runs the crate's tests and clippy, which CI also does on
+`macos-14` — ordinary `make ci` is ubuntu-only and cannot build this crate.
 
 The app icon in `src-tauri/icons/` is a placeholder generated from the web
 logo and needs replacing with real artwork before release.
@@ -150,8 +200,15 @@ means no existing install can ever be updated again.
 | `verify_signed.sh` | Signature, arch, attribution and seal-intact gates. |
 | `dmg.sh` | Compressed disk image via `hdiutil`. |
 | `notarize.sh` | Notarize and staple one artifact. Run on the `.app` before `dmg.sh`, then on the DMG. |
+| `uninstall.sh` | Removes the app, logs and caches. Asks separately before the library, and keeps it by default. |
 
 `make stage` runs all three staging steps; `make verify-stage` runs both verifiers.
+
+`uninstall.sh` is for the DMG install only. A `bootstrap.sh` install is removed
+with `luminary uninstall`, which also unregisters the login agent — and its
+library is a different tree (`~/.luminary`, not Application Support). A user who
+has run both has two independent libraries and two Ollama model stores; nothing
+detects or reconciles that today.
 
 ## Python runtime
 

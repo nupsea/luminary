@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage desktop-dev desktop-app desktop-adhoc
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 LUMINARY_PORT ?= 7820
 
@@ -47,6 +47,11 @@ verify-stage:
 	bash scripts/macos/verify_stage.sh
 	bash scripts/macos/verify_ollama.sh
 
+# The desktop shell's own tests. Needs macOS: the crate does not build anywhere
+# else, which is why ordinary `make ci` (ubuntu) cannot cover it.
+desktop-test:
+	cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings
+
 # Run the shell against build/stage without bundling. Requires `make stage`.
 desktop-dev:
 	cd src-tauri && LUMINARY_STAGE="$(CURDIR)/build/stage" cargo run --release
@@ -57,7 +62,34 @@ DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
 
 TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
 
-desktop-app:
+# Everything the shell refuses to start without. Kept in step with REQUIRED in
+# src-tauri/src/stage.rs, which checks the same list at runtime.
+STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama
+
+# `ditto` copies a partial stage without complaint, producing an .app that
+# launches and then cannot start. Note this gate cannot catch the other route to
+# the same broken bundle -- running `tauri build` directly, which skips the ditto
+# below entirely. The shell checks the same list at runtime for that reason.
+check-stage:
+	@missing=""; \
+	for piece in $(STAGE_REQUIRED); do \
+	    [ -e "build/stage/$$piece" ] || missing="$$missing $$piece"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	    echo "build/stage is incomplete, missing:$$missing"; \
+	    echo "run 'make stage' first"; \
+	    exit 1; \
+	fi
+	@stale="$$(find backend/app frontend/dist -newer build/stage/surface-manifest.json -type f 2>/dev/null | head -3)"; \
+	if [ -n "$$stale" ]; then \
+	    echo "build/stage is older than your source, e.g.:"; \
+	    echo "$$stale" | sed 's/^/    /'; \
+	    echo "run 'make stage-payload' first, or the bundle ships the previous code"; \
+	    exit 1; \
+	fi
+	@echo "stage complete and current"
+
+desktop-app: check-stage
 	cd src-tauri && $(TAURI) build --bundles app --config tauri.conf.json
 	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
 	@echo "built $(DESKTOP_APP)"

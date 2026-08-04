@@ -28,6 +28,19 @@ The app keeps its data in `~/Library/Application Support/sh.luminary.app/`. Note
 this is a **separate** library from the one a source install uses at `~/.luminary`
 — the app does not adopt it.
 
+If it does not start, the startup screen shows what failed and offers to open a
+pre-filled bug report; nothing is sent until you review it and press Submit on
+GitHub. The log is at `~/Library/Logs/Luminary/luminary.log`.
+
+To remove it:
+
+```bash
+bash scripts/macos/uninstall.sh
+```
+
+It deletes the app, logs and caches, and asks separately before touching your
+library — declining keeps every document, note and card.
+
 ### macOS (Apple Silicon) — one command
 
 Prefer this if you want Luminary running as a background service with a CLI, or

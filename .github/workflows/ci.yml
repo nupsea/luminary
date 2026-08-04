@@ -53,6 +53,27 @@ jobs:
       - name: Run CI checks
         run: make ci
 
+  # The desktop shell supervises the bundled backend and Ollama, and a defect
+  # here bricks startup for every DMG user. It cannot be built on ubuntu, so
+  # without this job it had no automated coverage at all.
+  desktop-shell:
+    runs-on: macos-14
+    timeout-minutes: 20
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Check formatting
+        run: cd src-tauri && cargo fmt --check
+      - name: Test and lint the desktop shell
+        run: make desktop-test
+
   powershell-syntax:
     runs-on: ubuntu-latest
     needs: [branch-check]
