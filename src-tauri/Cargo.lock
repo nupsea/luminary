@@ -460,8 +460,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -1926,6 +1928,10 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "luminary-desktop"
 version = "0.3.3"
 dependencies = [
+ "chrono",
+ "libc",
+ "percent-encoding",
+ "regex",
  "serde",
  "serde_json",
  "tauri",
