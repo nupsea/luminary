@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Notarize one artifact and staple its ticket.
+# Notarize a DMG and staple both it and the app.
 #
-#   scripts/macos/notarize.sh <app-or-dmg>
-#
-# Run it twice per release: on the .app before dmg.sh packages it, then on the
-# DMG. A ticket only attaches to the artifact that was submitted, so an app
-# packaged before it is stapled reaches users without one and needs a network
-# round trip to Apple on first launch.
+#   scripts/macos/notarize.sh <dmg> <app>
 #
 # Requires an App Store Connect API key (APPLE_API_KEY_PATH, APPLE_API_KEY_ID,
 # APPLE_API_ISSUER) rather than an app-specific password, which expires and
@@ -18,47 +13,24 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-TARGET="${1:?usage: notarize.sh <app-or-dmg>}"
+DMG="${1:?usage: notarize.sh <dmg> <app>}"
+APP="${2:?usage: notarize.sh <dmg> <app>}"
 DIST="${DIST:-$BUILD_DIR/dist}"
-
-[ -e "$TARGET" ] || _die "no artifact at $TARGET"
-mkdir -p "$DIST"
 
 : "${APPLE_API_KEY_PATH:?}" "${APPLE_API_KEY_ID:?}" "${APPLE_API_ISSUER:?}"
 KEY_ARGS=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
 
-NAME="$(basename "$TARGET")"
-SLUG="${NAME%.*}"
-JSON="$DIST/notary-${SLUG}.json"
-LOG="$DIST/notary-log-${SLUG}.json"
-
-# notarytool takes a zip, dmg or pkg, never a bare bundle. A compressed image
-# rather than `ditto -c -k`: the same payload as a zip ran past 45 minutes at
-# Apple and was still In Progress at 60, while the image form completes in ~20.
-SUBMIT="$TARGET"
-TMPDIR_PKG=""
-if [ -d "$TARGET" ]; then
-    TMPDIR_PKG="$(mktemp -d)"
-    SUBMIT="$TMPDIR_PKG/${SLUG}-notarize.dmg"
-    hdiutil create -volname "$SLUG" -srcfolder "$TARGET" \
-        -ov -format ULFO -quiet "$SUBMIT"
-fi
-
-_step "Submitting $NAME to the notary service"
+_step "Submitting to the notary service"
 # Apple's scan time scales with file count, and this bundle has ~55k files.
-xcrun notarytool submit "$SUBMIT" "${KEY_ARGS[@]}" \
-    --wait --timeout 90m --output-format json | tee "$JSON"
+xcrun notarytool submit "$DMG" "${KEY_ARGS[@]}" \
+    --wait --timeout 45m --output-format json | tee "$DIST/notary.json"
 
-if [ -n "$TMPDIR_PKG" ]; then
-    rm -rf "$TMPDIR_PKG"
-fi
-
-SUBMISSION="$(python3 -c "import json;print(json.load(open('$JSON'))['id'])")"
-xcrun notarytool log "$SUBMISSION" "${KEY_ARGS[@]}" "$LOG" || true
+SUBMISSION="$(python3 -c "import json;print(json.load(open('$DIST/notary.json'))['id'])")"
+xcrun notarytool log "$SUBMISSION" "${KEY_ARGS[@]}" "$DIST/notary-log.json" || true
 
 # `notarytool submit --wait` does not reliably exit non-zero on Invalid, so the
 # status is asserted explicitly and the log is captured either way.
-python3 - "$JSON" "$LOG" <<'PY'
+python3 - "$DIST/notary.json" "$DIST/notary-log.json" <<'PY'
 import json, sys
 
 status = json.load(open(sys.argv[1])).get("status")
@@ -75,17 +47,17 @@ print("notarization accepted")
 PY
 
 _step "Stapling"
-xcrun stapler staple "$TARGET"
-xcrun stapler validate "$TARGET"
+# Both: the DMG so a download validates, and the app so it still validates
+# offline once dragged out of the DMG. The ticket covers every nested cdhash,
+# so one submission serves both.
+xcrun stapler staple "$DMG"
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
 
 _step "Gatekeeper assessment"
 # The end state that matters: what a user's Mac will conclude about a fresh
 # download. Anything other than "Notarized Developer ID" means they still see a
 # warning.
-if [ -d "$TARGET" ]; then
-    spctl --assess --type exec --verbose=4 "$TARGET"
-else
-    spctl --assess --type open --context context:primary-signature --verbose=4 "$TARGET"
-fi
+spctl --assess --type exec --verbose=4 "$APP"
 
-_info "notarized and stapled: $TARGET"
+_info "notarized and stapled: $DMG"
