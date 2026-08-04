@@ -149,7 +149,7 @@ means no existing install can ever be updated again.
 | `sign.sh` | Inside-out signing. `--adhoc` for a run without a certificate. |
 | `verify_signed.sh` | Signature, arch, attribution and seal-intact gates. |
 | `dmg.sh` | Compressed disk image via `hdiutil`. |
-| `notarize.sh` | Notarize, staple both artifacts, emit `latest.json` and the signed update. |
+| `notarize.sh` | Notarize and staple one artifact. Run on the `.app` before `dmg.sh`, then on the DMG. |
 
 `make stage` runs all three staging steps; `make verify-stage` runs both verifiers.
 
