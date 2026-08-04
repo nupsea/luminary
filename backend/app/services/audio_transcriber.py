@@ -8,11 +8,17 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
+from app.full_extras import require_extra
+
 logger = logging.getLogger(__name__)
 
 
 class AudioTranscriber:
     def __init__(self, model_size: str = "base") -> None:
+        # Absent from the distributed bundle for licensing reasons; the user
+        # installs it as the "transcription" component. See docs/desktop-bundle.md.
+        require_extra("faster_whisper", "Audio transcription", group="media")
+
         from faster_whisper import WhisperModel  # noqa: PLC0415
 
         from app.config import get_settings  # noqa: PLC0415

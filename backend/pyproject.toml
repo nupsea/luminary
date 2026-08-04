@@ -29,7 +29,6 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.60b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b1",
     "opentelemetry-sdk>=1.39.1",
-    "optimum[onnxruntime]>=2.1.0",
     "pydantic-settings>=2.13.1",
     "pillow>=11.0.0",
     "pymupdf>=1.27.1",
@@ -87,8 +86,17 @@ markers = [
 ]
 
 [dependency-groups]
-full = [
+# Speech-to-text, kept OUT of `full` on purpose. faster-whisper pulls PyAV,
+# whose wheels bundle libx264 and libx265 (GPL-2.0-or-later). Luminary is
+# Apache-2.0, so those cannot travel inside a distributed installer. The
+# desktop bundle therefore installs `full` without this group, and offers
+# transcription as a component the user installs afterwards -- at which point
+# the GPL code comes from upstream, to their own machine, by their own action.
+# See docs/desktop-bundle.md.
+media = [
     "faster-whisper>=1.2.1",
+]
+full = [
     "yt-dlp>=2026.3.13",
     "tree-sitter>=0.25.2",
     "tree-sitter-go>=0.25.0",
@@ -113,4 +121,5 @@ dev = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "full"]
+# Developers and CI get everything; only the distributed bundle omits `media`.
+default-groups = ["dev", "full", "media"]

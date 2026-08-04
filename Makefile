@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage desktop-dev desktop-app desktop-adhoc
 
 LUMINARY_PORT ?= 7820
 
@@ -28,6 +28,48 @@ frontend:
 install:
 	bash scripts/install.sh
 
+# --- macOS desktop bundle -----------------------------------------------
+# Stage the payload, the relocatable Python runtime and the bundled inference
+# server into build/stage, which becomes Contents/Resources in the .app.
+
+stage: stage-payload stage-python stage-ollama
+
+stage-payload:
+	bash scripts/macos/stage_payload.sh
+
+stage-python:
+	bash scripts/macos/stage_python.sh
+
+stage-ollama:
+	bash scripts/macos/stage_ollama.sh
+
+verify-stage:
+	bash scripts/macos/verify_stage.sh
+	bash scripts/macos/verify_ollama.sh
+
+# Run the shell against build/stage without bundling. Requires `make stage`.
+desktop-dev:
+	cd src-tauri && LUMINARY_STAGE="$(CURDIR)/build/stage" cargo run --release
+
+# Unsigned Luminary.app. The payload is copied in with ditto rather than Tauri's
+# resource copier, which does not preserve the interpreter's bin/python symlinks.
+DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
+
+TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
+
+desktop-app:
+	cd src-tauri && $(TAURI) build --bundles app --config tauri.conf.json
+	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
+	@echo "built $(DESKTOP_APP)"
+
+# Sign and package locally with the ad-hoc identity. Exercises enumeration,
+# ordering and every gate; the result is not notarizable and Gatekeeper rejects
+# it, so it proves the pipeline rather than producing a release.
+desktop-adhoc: desktop-app
+	bash scripts/macos/sign.sh $(DESKTOP_APP) --adhoc
+	bash scripts/macos/verify_signed.sh $(DESKTOP_APP) --adhoc
+	bash scripts/macos/dmg.sh $(DESKTOP_APP) $(shell sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1) --adhoc
+
 build:
 	@echo "Building production SPA (public mode, /api base)..."
 	cd frontend && VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
@@ -40,7 +82,8 @@ release:
 	if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Working tree is dirty — commit before tagging."; exit 1; \
 	fi; \
-	echo "Tagging v$$v — this triggers .github/workflows/release.yml"; \
+	echo "Tagging v$$v — triggers release.yml (source tarball) and"; \
+	echo "release-macos-app.yml (signed, notarized DMG). Both attach to the same release."; \
 	git tag -a "v$$v" -m "Luminary $$v" && git push origin "v$$v"
 
 docker-build:

@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -50,6 +49,7 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
     TagMergeSuggestionModel,
     WebReferenceModel,
 )
+from app.paths import alembic_ini
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def alembic_include_name(name: str | None, type_: str, parent_names: dict) -> bo
     return True
 
 
-_ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
+_ALEMBIC_INI = alembic_ini()
 
 # Any table that only ever exists once the ORM schema has been created. Used to tell a
 # pre-Alembic database apart from an empty one.

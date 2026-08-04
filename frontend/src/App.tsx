@@ -17,6 +17,8 @@ import { getHomeRedirectTarget } from "./lib/homeRedirect"
 import { isTypingTarget } from "./lib/keyboard"
 import { toggleTheme } from "./lib/theme"
 import { useAppStore } from "./store"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
+import { SetupGate } from "@/components/setup/SetupGate"
 import { LUMINARY_MODE, navTabs, routedSurfaces, isSurfaceVisible } from "./lib/surfaceManifest"
 import type { Surface } from "./lib/surfaceManifest"
 import { logger } from "./lib/logger"
@@ -539,11 +541,17 @@ function AppShell() {
         {ollamaUnavailable && !ollamaWarningDismissed && (
           <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle size={14} className="shrink-0" />
-            <span className="flex-1">
+            <span className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
               {ollamaModelMissing ? (
-                <>Ollama is running but no model is pulled. LLM features (chat, teach-back, flashcard generation) need one — pull it with: <code className="font-mono font-semibold">ollama pull llama3.2</code></>
+                <>
+                  <span>Chat, teach-back and flashcard generation need a local model.</span>
+                  <InstallComponentButton componentId="chat_model" />
+                </>
               ) : (
-                <>Ollama is not running. LLM features (chat, teach-back, flashcard generation) are unavailable. Start it with: <code className="font-mono font-semibold">ollama serve</code></>
+                <span>
+                  The local model server is not responding, so chat, teach-back and flashcard
+                  generation are unavailable. Reopening Luminary usually restarts it.
+                </span>
               )}
             </span>
             <button onClick={() => setOllamaWarningDismissed(true)} className="shrink-0 hover:text-amber-900 dark:hover:text-amber-100" aria-label="Dismiss">
@@ -612,14 +620,18 @@ function AppShell() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <IngestionTrackerProvider>
-        <GlobalLoadingBar />
-        <BrowserRouter>
-          <AppShell />
-        </BrowserRouter>
-        <IngestionProgressPills />
-        <Toaster position="bottom-right" richColors />
-      </IngestionTrackerProvider>
+      {/* Above the router: on a cold install the backend is still coming up, and
+          the shell would otherwise render against an API that cannot answer. */}
+      <SetupGate>
+        <IngestionTrackerProvider>
+          <GlobalLoadingBar />
+          <BrowserRouter>
+            <AppShell />
+          </BrowserRouter>
+          <IngestionProgressPills />
+          <Toaster position="bottom-right" richColors />
+        </IngestionTrackerProvider>
+      </SetupGate>
     </QueryClientProvider>
   )
 }

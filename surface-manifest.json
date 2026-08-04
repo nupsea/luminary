@@ -259,7 +259,7 @@
     },
     {
       "id": "image_enrichment",
-      "mode": "full",
+      "mode": "public",
       "kind": "service",
       "backend": {
         "routers": [
@@ -277,7 +277,7 @@
     },
     {
       "id": "concept_linker",
-      "mode": "full",
+      "mode": "public",
       "kind": "service",
       "backend": {
         "routers": [
@@ -294,7 +294,7 @@
     },
     {
       "id": "web_ingest",
-      "mode": "full",
+      "mode": "public",
       "kind": "service",
       "backend": {
         "services": [
@@ -309,7 +309,7 @@
     },
     {
       "id": "youtube_ingest",
-      "mode": "full",
+      "mode": "public",
       "kind": "service",
       "backend": {
         "services": [
@@ -323,7 +323,7 @@
     },
     {
       "id": "audio_transcribe",
-      "mode": "full",
+      "mode": "public",
       "kind": "service",
       "backend": {
         "services": [

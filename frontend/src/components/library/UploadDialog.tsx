@@ -16,8 +16,12 @@ import {
   submitUrl,
 } from "@/lib/ingestionApi"
 import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
+import { capabilityOf, useCapabilities } from "@/hooks/useSetup"
+import type { CapabilityKey } from "@/lib/setupApi"
 
-const ACCEPTED_TYPES = [".pdf", ".docx", ".txt", ".md", ".mp3", ".m4a", ".wav", ".mp4", ".epub"]
+const TEXT_TYPES = [".pdf", ".docx", ".txt", ".md", ".epub"]
+const AUDIO_TYPES = [".mp3", ".m4a", ".wav"]
+const VIDEO_TYPES = [".mp4"]
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document...",
@@ -41,6 +45,12 @@ const CONTENT_TYPE_OPTIONS = [
   { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
   { value: "video" as const, label: "Video", description: "For lecture recordings, screen captures, video talks (MP4)" },
 ]
+
+// Content types whose ingestion depends on an optional component.
+const CONTENT_TYPE_CAPABILITY: Partial<Record<string, CapabilityKey>> = {
+  audio: "audio_ingest",
+  video: "video_ingest",
+}
 
 type DialogTab = "upload" | "paste" | "url"
 // "uploading"  = synchronous HTTP POST in flight (blocks close, brief)
@@ -74,6 +84,23 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const { track } = useIngestionTracker()
 
   const [tab, setTab] = useState<DialogTab>("upload")
+  // What this install can actually ingest. Offering a format we cannot process
+  // sends the user through an upload that only fails at the transcription step.
+  const { data: caps } = useCapabilities()
+  const canAudio = capabilityOf(caps, "audio_ingest").available
+  const canVideo = capabilityOf(caps, "video_ingest").available
+  const canUrl =
+    capabilityOf(caps, "web_ingest").available || capabilityOf(caps, "youtube_ingest").available
+  const acceptedTypes = [
+    ...TEXT_TYPES,
+    ...(canAudio ? AUDIO_TYPES : []),
+    ...(canVideo ? VIDEO_TYPES : []),
+  ]
+  const contentTypeOptions = CONTENT_TYPE_OPTIONS.filter((o) => {
+    const cap = CONTENT_TYPE_CAPABILITY[o.value]
+    return !cap || capabilityOf(caps, cap).available
+  })
+  const availableTabs: DialogTab[] = canUrl ? ["upload", "paste", "url"] : ["upload", "paste"]
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
@@ -174,7 +201,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   }
 
   function isAccepted(file: File): boolean {
-    return ACCEPTED_TYPES.some((ext) => file.name.toLowerCase().endsWith(ext))
+    return acceptedTypes.some((ext) => file.name.toLowerCase().endsWith(ext))
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -356,7 +383,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           <span className="font-normal text-muted-foreground">— auto-detected, change if needed</span>
         </label>
         <div className="space-y-1.5">
-          {CONTENT_TYPE_OPTIONS.map((opt) => (
+          {contentTypeOptions.map((opt) => (
             <label
               key={opt.value}
               className={cn(
@@ -469,7 +496,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
         {mode === "idle" && (
           <>
             <div className="mb-4 flex gap-1 rounded-md bg-muted p-1">
-              {(["upload", "paste", "url"] as const).map((t) => (
+              {availableTabs.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -595,13 +622,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   ) : (
                     <div className="text-sm text-muted-foreground">
                       <p>Drag & drop or click to select</p>
-                      <p className="mt-1 text-xs">{ACCEPTED_TYPES.join(", ")}</p>
+                      <p className="mt-1 text-xs">{acceptedTypes.join(", ")}</p>
                     </div>
                   )}
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept={ACCEPTED_TYPES.join(",")}
+                    accept={acceptedTypes.join(",")}
                     className="hidden"
                     onChange={handleFileChange}
                   />

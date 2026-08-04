@@ -13,7 +13,6 @@ transcript to DocumentModel.
 
 import asyncio
 import logging
-import shutil
 import uuid as _uuid
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from app.models import DocumentModel
 from app.services import (
     audio_transcriber as _audio_transcriber_module,  # indirect: get_audio_transcriber is patched
 )
+from app.services.components import resolve_tool
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _persist_is_technical,
@@ -104,18 +104,19 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         # For video: extract audio with ffmpeg before passing to Whisper
         wav_path: Path | None = None
         if content_type == "video":
-            if not shutil.which("ffmpeg"):
+            ffmpeg = resolve_tool("ffmpeg")
+            if not ffmpeg:
                 return {
                     **state,
                     "status": "error",
                     "error": (
-                        "ffmpeg is not installed. Install ffmpeg to ingest video files. "
-                        "On macOS: brew install ffmpeg  On Linux: apt install ffmpeg"
+                        "Audio and video support (ffmpeg) is not installed. "
+                        "Add it from Settings to ingest video files."
                     ),
                 }
             wav_path = Path(f"/tmp/{doc_id}_audio.wav")
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg",
+                ffmpeg,
                 "-y",
                 "-i",
                 str(fp),

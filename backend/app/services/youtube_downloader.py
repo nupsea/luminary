@@ -7,8 +7,9 @@ for system tools (see: ffmpeg use in ingestion.py).
 import asyncio
 import json
 import logging
-import shutil
 from pathlib import Path
+
+from app.services.components import resolve_tool
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,17 @@ def is_youtube_url(url: str) -> bool:
     return any(url.startswith(p) for p in _YOUTUBE_URL_PREFIXES)
 
 
+def _ytdlp() -> str:
+    """Absolute path to yt-dlp, since the bundled app runs with a minimal PATH."""
+    return resolve_tool("yt-dlp") or "yt-dlp"
+
+
 def check_ytdlp_available() -> bool:
-    """Return True if the yt-dlp binary is available on PATH."""
-    return shutil.which("yt-dlp") is not None
+    return resolve_tool("yt-dlp") is not None
 
 
 def check_ffmpeg_available() -> bool:
-    """Return True if the ffmpeg binary is available on PATH."""
-    return shutil.which("ffmpeg") is not None
+    return resolve_tool("ffmpeg") is not None
 
 
 async def fetch_metadata(url: str) -> dict:
@@ -42,7 +46,7 @@ async def fetch_metadata(url: str) -> dict:
     Raises RuntimeError on non-zero exit or invalid JSON.
     """
     proc = await asyncio.create_subprocess_exec(
-        "yt-dlp",
+        _ytdlp(),
         "--dump-json",
         "--no-download",
         url,
@@ -64,7 +68,7 @@ async def download_audio(url: str, dest_stem: Path) -> None:
     Raises RuntimeError on non-zero exit.
     """
     proc = await asyncio.create_subprocess_exec(
-        "yt-dlp",
+        _ytdlp(),
         "-x",
         "--audio-format",
         "wav",

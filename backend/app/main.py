@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import logging.config
-import shutil
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +19,7 @@ from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
 from app.db_init import init_database
 from app.models import SettingsModel
+from app.paths import pyproject_path, spa_dist
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.blog import router as blog_router
@@ -48,6 +48,7 @@ from app.routers.references import router as references_router
 from app.routers.search import router as search_router
 from app.routers.sections import router as sections_router
 from app.routers.settings import router as settings_router
+from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
@@ -60,15 +61,20 @@ try:
     from app.routers.code_executor import router as code_executor_router
 except ImportError:
     code_executor_router = None
+from app.services.components import activate_extras, install_ollama_model, resolve_tool
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
+from app.services.executors import shutdown_model_executor
 from app.services.image_enricher import image_analyze_handler
 from app.services.image_extractor import image_extract_handler
+from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.prereq_extractor import prereq_extract_handler
 from app.services.reference_enricher import web_refs_handler
 from app.services.settings_service import _cache as _llm_cache
 from app.services.settings_service import load_llm_settings
+from app.services.startup_status import get_startup_status
+from app.services.warmup import run_warmup
 from app.surface_manifest import enabled_routers
 from app.telemetry import setup_tracing
 
@@ -91,14 +97,18 @@ def _read_app_version() -> str:
     try:
         import tomllib
 
-        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
-        with pyproject.open("rb") as fh:
+        with pyproject_path().open("rb") as fh:
             return tomllib.load(fh)["project"]["version"]
     except Exception:
         return "0.0.0"
 
 
 _APP_VERSION = _read_app_version()
+
+# Warmup and the description backfill were fire-and-forget, so nothing cancelled
+# them at shutdown and nothing held a reference against garbage collection.
+_background_tasks: set[asyncio.Task] = set()
+_SHUTDOWN_GRACE_S = 5.0
 
 
 @asynccontextmanager
@@ -107,8 +117,15 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_LEVEL)
 
     # Initial DB setup
+    status = get_startup_status()
+    status.set_state("db", "loading", "Applying migrations")
     engine = get_engine()
-    await init_database(engine)
+    try:
+        await init_database(engine)
+    except Exception as exc:
+        status.set_state("db", "failed", str(exc))
+        raise
+    status.set_state("db", "ready")
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts
@@ -131,13 +148,22 @@ async def lifespan(app: FastAPI):
     (data_dir / "notes").mkdir(exist_ok=True)
     (data_dir / "audio").mkdir(exist_ok=True)
 
+    # Components the user installed after the app itself. Must happen before
+    # anything tries to import them.
+    if activate_extras():
+        logger.info("Activated user-installed extras", extra={"path": str(data_dir / "extras")})
+
     # Startup health check (Ollama) — only warn when private/hybrid mode needs it
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.OLLAMA_URL}/api/tags")
             if resp.status_code == 200:
                 logger.info("Ollama reachable at %s", settings.OLLAMA_URL)
+                status.set_state("ollama_server", "ready", settings.OLLAMA_URL)
     except Exception:
+        status.set_state(
+            "ollama_server", "failed", f"No local model server at {settings.OLLAMA_URL}"
+        )
 
         _mode = _llm_cache.get("llm_mode", "private")
         if _mode in ("private", "hybrid"):
@@ -151,11 +177,11 @@ async def lifespan(app: FastAPI):
             logger.debug("Ollama not reachable at startup (mode=%s, not needed)", _mode)
 
     # ffmpeg check — required for video (MP4) ingestion.
-    _ffmpeg_path = shutil.which("ffmpeg")
+    _ffmpeg_path = resolve_tool("ffmpeg")
     if _ffmpeg_path is None:
         logger.warning(
             "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. "
-            "Install with: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
+            "Add audio and video support from Settings."
         )
     else:
         logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})
@@ -187,81 +213,7 @@ async def lifespan(app: FastAPI):
 
     if "pytest" not in sys.modules:
 
-        async def warmup_models():
-            loop = asyncio.get_running_loop()
-
-            async def load_embedder():
-                try:
-                    logger.info("Warmup: pre-loading Embedding model in the background...")
-                    from app.services.embedder import get_embedding_service
-                    await loop.run_in_executor(None, get_embedding_service()._load_model)
-                    logger.info("Warmup: Embedding model pre-loaded.")
-                except Exception as exc:
-                    logger.warning("Warmup: failed to pre-load embedding model: %s", exc)
-
-            async def load_ner():
-                try:
-                    logger.info("Warmup: pre-loading GLiNER model in the background...")
-                    from app.services.ner import get_entity_extractor
-                    await loop.run_in_executor(None, get_entity_extractor()._load_model)
-                    logger.info("Warmup: GLiNER model pre-loaded.")
-                except Exception as exc:
-                    logger.warning("Warmup: failed to pre-load GLiNER model: %s", exc)
-
-            async def load_reranker():
-                # Pre-load the cross-encoder so the first chat question doesn't
-                # pay the model-load stall now that L3 rerank runs in the chat
-                # path. Skipped when the user has toggled reranking off.
-                try:
-                    from app.database import get_session_factory
-                    from app.services.settings_service import get_rerank_enabled
-                    async with get_session_factory()() as session:
-                        if not await get_rerank_enabled(session):
-                            return
-                    logger.info("Warmup: pre-loading cross-encoder reranker in the background...")
-                    from app.services.retriever_strategies import _get_reranker
-                    await loop.run_in_executor(None, _get_reranker()._load)
-                    logger.info("Warmup: cross-encoder reranker pre-loaded.")
-                except Exception as exc:
-                    logger.warning("Warmup: failed to pre-load reranker: %s", exc)
-
-            async def load_llm():
-                # Fire a tiny generation so the first user query doesn't pay the
-                # cold-start cost: for Ollama this loads the model into memory,
-                # for cloud it warms the connection / validates routing. Fails
-                # soft — a missing key or offline model must not block startup.
-                import time as _time
-
-                from app.services.llm import get_llm_service
-
-                async def _warm_one(model: str | None, label: str) -> None:
-                    try:
-                        t0 = _time.perf_counter()
-                        logger.info("Warmup: warming %s LLM...", label)
-                        await get_llm_service().generate(
-                            "ping", model=model, timeout=60.0
-                        )
-                        logger.info(
-                            "Warmup: %s LLM warm in %.2fs", label, _time.perf_counter() - t0
-                        )
-                    except Exception as exc:
-                        logger.warning("Warmup: failed to warm %s LLM: %s", label, exc)
-
-                # Resolve the interactive (foreground) and background models; warm
-                # each distinct one. In hybrid mode these differ (cloud vs Ollama).
-                try:
-                    from app.services.settings_service import get_effective_routing
-                    fg = get_effective_routing(background=False)[0]
-                    bg = get_effective_routing(background=True)[0]
-                except Exception:
-                    fg, bg = None, None
-                await _warm_one(None, "interactive")
-                if bg and bg != fg:
-                    await _warm_one(bg, "background")
-
-            await asyncio.gather(load_embedder(), load_ner(), load_reranker(), load_llm())
-
-        asyncio.create_task(warmup_models())
+        _background_tasks.add(asyncio.create_task(run_warmup()))
 
         # One-time-ish backfill: summarise notes created before card descriptions
         # existed. Runs after a short delay so it doesn't compete with model
@@ -274,13 +226,25 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 logger.warning("Description backfill failed (non-fatal): %s", exc)
 
-        asyncio.create_task(backfill_descriptions())
+        _background_tasks.add(asyncio.create_task(backfill_descriptions()))
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
 
+    # Every step here is bounded. A desktop app that takes minutes to quit reads
+    # as a hang, and a supervisor that gives up and SIGKILLs can leave the Kuzu
+    # lock held against the next launch.
     await get_enrichment_worker().stop()
+    await get_ingestion_jobs().cancel_all()
+
+    for task in list(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.wait(_background_tasks, timeout=_SHUTDOWN_GRACE_S)
+        _background_tasks.clear()
+
+    shutdown_model_executor()
 
 
 def _restrict_permissions(data_dir: Path) -> None:
@@ -360,6 +324,7 @@ ROUTER_REGISTRY = {
     "search": search_router,
     "sections": sections_router,
     "settings": settings_router,
+    "setup": setup_router,
     "mastery": mastery_router,
     "study": study_router,
     **({"code_executor": code_executor_router} if code_executor_router else {}),
@@ -367,8 +332,9 @@ ROUTER_REGISTRY = {
     "tags": tags_router,
 }
 
-# settings is always registered: the Settings drawer needs it in both modes.
-_enabled = enabled_routers(_mode) | {"settings"}
+# settings and setup are always registered: the Settings drawer needs one, and
+# the other is what a user with an incomplete install has to reach.
+_enabled = enabled_routers(_mode) | {"settings", "setup"}
 for _name, _router in ROUTER_REGISTRY.items():
     if _name in _enabled:
         app.include_router(_router, prefix=_API_PREFIX)
@@ -376,18 +342,33 @@ for _name, _router in ROUTER_REGISTRY.items():
 # Misc app-level endpoints that live alongside the routers (root in dev, /api in prod).
 misc_router = APIRouter()
 
+# Probes are registered at BOTH the root and the API prefix. Process supervisors,
+# container health checks and the desktop shell all probe before any SPA exists
+# and know nothing about /api; the SPA calls them through its own /api base. When
+# these lived only at the root, the About dialog's version request for
+# /api/health hit serve_spa's 404-for-api/ guard in every shipped build.
+probe_router = APIRouter()
 
-@app.get("/health")
+
+@probe_router.get("/health")
 async def health():
     return {"status": "ok", "version": _APP_VERSION}
 
 
-@app.get("/healthz")
+@probe_router.get("/healthz")
 async def healthz():
     """Lightweight liveness probe for containers and monitors (no DB)."""
     from datetime import UTC, datetime
 
     return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+
+@probe_router.get("/setup/status")
+async def setup_status():
+    """What startup has actually finished, as opposed to /health's 200."""
+    snapshot = get_startup_status().snapshot()
+    snapshot["version"] = _APP_VERSION
+    return snapshot
 
 
 @misc_router.get("/settings")
@@ -440,17 +421,15 @@ async def pull_ollama_model(request: OllamaPullRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="model is required")
 
     async def _stream():
-        proc = await asyncio.create_subprocess_exec(
-            "ollama",
-            "pull",
-            model,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        assert proc.stdout is not None
-        async for line in proc.stdout:
-            yield f"data: {line.decode().rstrip()}\n\n"
-        await proc.wait()
+        # Ollama's HTTP API, not `ollama pull`. Spawning the binary required it
+        # on PATH, which a GUI-launched process does not have, and it yielded
+        # text lines instead of byte counts.
+        async for event in install_ollama_model(model):
+            if event["state"] == "failed":
+                yield f"data: error: {event['detail']}\n\n"
+                return
+            if detail := event.get("detail"):
+                yield f"data: {detail}\n\n"
         yield "data: done\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
@@ -478,6 +457,9 @@ async def read_storage(settings: Settings = Depends(get_settings)) -> dict:
 
 
 app.include_router(misc_router, prefix=_API_PREFIX)
+app.include_router(probe_router, prefix=_API_PREFIX)
+if _API_PREFIX:
+    app.include_router(probe_router, include_in_schema=False)
 
 
 def resolve_spa_asset(dist: Path, full_path: str) -> Path | None:
@@ -499,7 +481,7 @@ def resolve_spa_asset(dist: Path, full_path: str) -> Path | None:
 # In public mode, serve the built SPA. The API is under /api, so everything else
 # falls back to index.html for client-side routing (real files are served directly).
 if _mode == "public":
-    _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    _DIST = spa_dist()
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str) -> FileResponse:
