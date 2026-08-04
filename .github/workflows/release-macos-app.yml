@@ -107,20 +107,27 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/macos/verify_signed.sh src-tauri/target/release/bundle/macos/Luminary.app
 
+      # Before the DMG is built: a ticket only attaches to the artifact that was
+      # submitted, so an app packaged first ships without one and needs a
+      # network round trip to Apple on first launch.
+      - name: Notarize and staple the app
+        env:
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bash scripts/macos/notarize.sh src-tauri/target/release/bundle/macos/Luminary.app
+
       - name: Build the DMG
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: bash scripts/macos/dmg.sh src-tauri/target/release/bundle/macos/Luminary.app "${{ steps.version.outputs.version }}"
 
-      - name: Notarize and staple
+      - name: Notarize and staple the DMG
         env:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          bash scripts/macos/notarize.sh \
-            "build/dist/Luminary_${{ steps.version.outputs.version }}_aarch64.dmg" \
-            src-tauri/target/release/bundle/macos/Luminary.app
+        run: bash scripts/macos/notarize.sh "build/dist/Luminary_${{ steps.version.outputs.version }}_aarch64.dmg"
 
       # Notary logs are the only way to see why a submission was rejected, so
       # keep them even when the job fails.

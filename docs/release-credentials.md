@@ -78,13 +78,17 @@ make stage
 make desktop-app
 bash scripts/macos/sign.sh          "$APP"
 bash scripts/macos/verify_signed.sh "$APP"
+bash scripts/macos/notarize.sh      "$APP"
 bash scripts/macos/dmg.sh           "$APP" "$VERSION"
-bash scripts/macos/notarize.sh "build/dist/Luminary_${VERSION}_aarch64.dmg" "$APP"
+bash scripts/macos/notarize.sh      "build/dist/Luminary_${VERSION}_aarch64.dmg"
 ```
 
-Expect the notary submission to take 10–30 minutes; it scales with file count
-and this bundle holds ~55k files. On rejection, `build/dist/notary-log.json`
-names the offending path.
+Each notary submission takes 10–30 minutes; it scales with file count and this
+bundle holds ~55k files. There are two of them, because a ticket only attaches
+to the artifact that was submitted: the app is stapled before packaging so it
+still validates offline once dragged out of the DMG, and the DMG is stapled so
+the download itself validates. On rejection,
+`build/dist/notary-log-<artifact>.json` names the offending path.
 
 The end state to check:
 
