@@ -12,7 +12,26 @@ No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any A
 
 ## Install and run
 
+### macOS (Apple Silicon) — download the app
+
+Grab `Luminary_<version>_aarch64.dmg` from the
+[latest release](https://github.com/nupsea/luminary/releases/latest), open it and
+drag Luminary to Applications. It is signed and notarized with a Developer ID, so
+it opens without a Gatekeeper warning.
+
+Everything is bundled — Python runtime, dependencies and the inference server. No
+terminal, Homebrew, Node or separate Ollama install. Requires macOS 14 (Sonoma) or
+newer, Apple Silicon only. The download is ~700 MB, and the first run fetches
+models, which takes a while on any connection.
+
+The app keeps its data in `~/Library/Application Support/sh.luminary.app/`. Note
+this is a **separate** library from the one a source install uses at `~/.luminary`
+— the app does not adopt it.
+
 ### macOS (Apple Silicon) — one command
+
+Prefer this if you want Luminary running as a background service with a CLI, or
+want it to adopt an existing `~/.luminary` library.
 
 > **Beta.** This installer is new and has not yet been tested across a wide range
 > of Macs. If it fails, use the source install below and please
