@@ -78,21 +78,22 @@ make stage
 make desktop-app
 bash scripts/macos/sign.sh          "$APP"
 bash scripts/macos/verify_signed.sh "$APP"
+bash scripts/macos/notarize.sh      "$APP"
 bash scripts/macos/dmg.sh           "$APP" "$VERSION"
-bash scripts/macos/notarize.sh "build/dist/Luminary_${VERSION}_aarch64.dmg" "$APP"
+bash scripts/macos/notarize.sh      "build/dist/Luminary_${VERSION}_aarch64.dmg"
 ```
 
-Expect the notary submission to take 10–30 minutes; it scales with file count
-and this bundle holds ~55k files. On rejection, `build/dist/notary-log.json`
-names the offending path.
+Two submissions, and each takes 10-30 minutes when the service is healthy; it
+scales with file count and this bundle holds ~55k files. A ticket only attaches
+to the artifact that was submitted, so the app is notarized and stapled before
+`dmg.sh` packages it -- otherwise a copy dragged to `/Applications` carries no
+ticket and its first launch needs a network round trip. The DMG is then
+notarized so the download itself validates. On rejection,
+`build/dist/notary-log-<artifact>.json` names the offending path.
 
-One submission, of the signed DMG. Submitting the `.app` separately so its own
-ticket is stapled before packaging — which would let a copy dragged to
-`/Applications` validate offline — was tried and reverted: both an unsigned zip
-and an unsigned image of the same bundle sat `In Progress` at Apple for over two
-hours, while every signed-DMG submission has been accepted in about twenty
-minutes. Until that is understood, the app inside the DMG carries no ticket and
-its first launch needs a network round trip.
+Apple's queue can stall for hours without appearing on the developer system
+status page; submissions cannot be cancelled. `xcrun notarytool history` shows
+whether yours is `In Progress` or the service is simply behind.
 
 The end state to check:
 
