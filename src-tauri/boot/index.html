@@ -82,7 +82,10 @@
         0% { transform: translateX(-100%); }
         100% { transform: translateX(385%); }
       }
-      .error {
+      /* Both panels are revealed by a class on <body>, so both must start
+         hidden -- an omission here shows a bug report on a healthy startup. */
+      .error,
+      .consent {
         display: none;
         margin-top: 1.5rem;
         text-align: left;

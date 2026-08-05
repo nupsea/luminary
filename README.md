@@ -12,39 +12,41 @@ No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any A
 
 ## Install and run
 
-### macOS (Apple Silicon) — download the app
+### macOS (Apple Silicon) — download the app (recommended)
 
-Grab `Luminary_<version>_aarch64.dmg` from the
-[latest release](https://github.com/nupsea/luminary/releases/latest), open it and
-drag Luminary to Applications. It is signed and notarized with a Developer ID, so
-it opens without a Gatekeeper warning.
+The simplest way in. Download `Luminary_<version>_aarch64.dmg` from the
+[latest release](https://github.com/nupsea/luminary/releases/latest), open it, and
+drag Luminary to your Applications folder.
 
-Everything is bundled — Python runtime, dependencies and the inference server. No
-terminal, Homebrew, Node or separate Ollama install. Requires macOS 14 (Sonoma) or
-newer, Apple Silicon only. The download is ~700 MB, and the first run fetches
-models, which takes a while on any connection.
+There is nothing else to install. The Python runtime, every dependency and the
+local inference server all live inside the app — no terminal, Homebrew, Node or
+separate Ollama. Requires macOS 14 (Sonoma) or newer on Apple Silicon.
 
-The app keeps its data in `~/Library/Application Support/sh.luminary.app/`. Note
-this is a **separate** library from the one a source install uses at `~/.luminary`
-— the app does not adopt it.
+The download is about 700 MB. First launch fetches roughly 1.4 GB of models; your
+library opens after about 20 seconds and the rest finishes in the background,
+typically inside two minutes. A chat model is a separate ~2 GB download that the
+app offers when you first need one — everything else works without it.
 
-If it does not start, the startup screen shows what failed and offers to open a
-pre-filled bug report; nothing is sent until you review it and press Submit on
-GitHub. The log is at `~/Library/Logs/Luminary/luminary.log`.
+Your library is kept in `~/Library/Application Support/sh.luminary.app/`.
 
-To remove it:
+**If it will not start,** the startup screen says what went wrong and can open a
+pre-filled bug report. Nothing is sent anywhere until you have read it and
+submitted it yourself. There is also a log at
+`~/Library/Logs/Luminary/luminary.log`.
 
-```bash
-bash scripts/macos/uninstall.sh
-```
-
-It deletes the app, logs and caches, and asks separately before touching your
-library — declining keeps every document, note and card.
+**To remove it,** drag Luminary from Applications to the Trash. That leaves your
+library untouched; if you want that gone too, delete
+`~/Library/Application Support/sh.luminary.app/` as well.
 
 ### macOS (Apple Silicon) — one command
 
-Prefer this if you want Luminary running as a background service with a CLI, or
-want it to adopt an existing `~/.luminary` library.
+Choose this instead if you want Luminary running as a background service with a
+command-line tool, or if you already have a `~/.luminary` library from a source
+install and want to keep using it.
+
+The two installs are independent. They keep separate libraries — the app's under
+Application Support, this one at `~/.luminary` — and neither reads the other's, so
+pick one rather than running both.
 
 > **Beta.** This installer is new and has not yet been tested across a wide range
 > of Macs. If it fails, use the source install below and please
@@ -58,9 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/boot
 Starts Luminary at login and opens it in your browser. No Homebrew, Node, git or
 Xcode tools required.
 
-The application installs to `~/Library/Application Support/Luminary`; your library
-stays at `~/.luminary`. The two are separate trees, so upgrades never touch your
-data — and an existing `~/.luminary` from a source install is adopted as-is.
+The application installs to `~/Library/Application Support/Luminary` while your
+library stays at `~/.luminary`, so upgrades never touch your data.
 
 Requires macOS 14 (Sonoma) or newer. The first install downloads roughly 5GB of
 models and takes 15-25 minutes.
