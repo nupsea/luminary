@@ -9,6 +9,7 @@ import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
+import { ReportIssue } from "@/components/settings/ReportIssue"
 
 // Types
 
@@ -443,7 +444,7 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
             {localMode === "cloud" && (
               <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 text-xs text-amber-800 dark:text-amber-300">
-                <span className="font-semibold block mb-0.5">⚠️ Cloud Cost Warning</span>
+                <span className="font-semibold block mb-0.5">Cloud Cost Warning</span>
                 All LLM functionalities (chat, summarization, tags, references, teach-back, etc.) will consume your cloud API quota and incur costs from your configured cloud provider.
               </div>
             )}
@@ -588,6 +589,17 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                 await queryClient.invalidateQueries({ queryKey: ["setup"] })
               }}
             />
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Section 1.6: Reporting */}
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Report an issue</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              These are the details a maintainer needs to reproduce a problem.
+            </p>
+            <ReportIssue />
           </section>
 
           <div className="border-t border-border" />
