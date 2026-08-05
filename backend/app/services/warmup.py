@@ -143,6 +143,7 @@ async def _check_vision_model() -> None:
     figure it would read. The tag list answers the only question here.
     """
     from app.services.components import component_status  # noqa: PLC0415
+    from app.services.settings_service import get_vision_model  # noqa: PLC0415
 
     status = get_startup_status()
     try:
@@ -152,9 +153,9 @@ async def _check_vision_model() -> None:
         return
 
     if installed.get("vision_model"):
-        status.set_state("vision_model", "ready", get_settings().VISION_MODEL)
+        status.set_state("vision_model", "ready", get_vision_model())
     else:
-        status.set_state("vision_model", "missing", get_settings().VISION_MODEL)
+        status.set_state("vision_model", "missing", get_vision_model())
 
 
 async def run_warmup(only: set[str] | None = None) -> None:

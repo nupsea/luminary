@@ -8,6 +8,7 @@ import { useAppStore } from "@/store"
 import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
+import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 
 // Types
 
@@ -23,6 +24,11 @@ interface LLMSettings {
   processing_mode: string
   active_model: string
   available_local_models: string[]
+  // The on-device models actually routed to, resolved from the stored choice
+  // or the configured default.
+  local_chat_model: string
+  vision_model: string
+  ollama_reachable: boolean
 }
 
 interface ModelOption {
@@ -49,6 +55,8 @@ const patchLLMSettings = (updates: {
   mode?: string
   provider?: string
   model?: string
+  local_chat_model?: string
+  vision_model?: string
   openai_api_key?: string | null
   anthropic_api_key?: string | null
   google_api_key?: string | null
@@ -334,7 +342,10 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
 
-      <div className="relative z-10 flex h-full w-[400px] flex-col border-l border-border bg-background shadow-xl">
+      {/* Wider than the original 400px: the component catalogue carries a
+          description, size, licence and an action per row, which wrapped to
+          four lines each at the old width. */}
+      <div className="relative z-10 flex h-full w-full max-w-[560px] flex-col border-l border-border bg-background shadow-xl sm:w-[92vw]">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold text-foreground">Settings</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -558,6 +569,25 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             >
               {isSaving ? "Saving..." : "Save"}
             </button>
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Section 1.5: Models and optional components */}
+          <section>
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Models & components</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Install what this machine needs, and choose which model each job uses. Downloads
+              run in the background and can be removed again here.
+            </p>
+            <ModelsAndComponents
+              llm={llm}
+              onSave={async (updates) => {
+                await patchLLMSettings(updates)
+                await queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
+                await queryClient.invalidateQueries({ queryKey: ["setup"] })
+              }}
+            />
           </section>
 
           <div className="border-t border-border" />

@@ -29,6 +29,9 @@ class LLMSettingsResponse(BaseModel):
     mode: str
     provider: str
     model: str
+    # The on-device models, resolved: the stored choice or the configured default.
+    local_chat_model: str = ""
+    vision_model: str = ""
     has_openai_key: bool
     has_anthropic_key: bool
     has_google_key: bool
@@ -50,6 +53,9 @@ class LLMSettingsPatch(BaseModel):
     mode: str | None = None
     provider: str | None = None
     model: str | None = None
+    # "" clears the override and falls back to the configured default.
+    local_chat_model: str | None = None
+    vision_model: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
@@ -87,14 +93,13 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
     ]
 
     # active_model is what Chat.tsx sends as the model parameter to /qa.
-    # For private mode: the first available Ollama model (or the config default).
     # For cloud mode: "" so Chat sends model=null and the backend uses
     # get_effective_routing() which reads the DB-stored key correctly.
-    cfg = get_settings()
     if data["mode"] == "private":
-        active_model = (
-            available_local_models[0] if available_local_models else cfg.LITELLM_DEFAULT_MODEL
-        )
+        # The model actually routed to, not the first one Ollama happens to
+        # list -- those disagreed, so the UI reported a model the backend was
+        # not using.
+        active_model = data["local_chat_model"]
     else:
         # cloud and hybrid: backend decides routing via get_effective_routing()
         active_model = ""
@@ -103,6 +108,8 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
         mode=data["mode"],
         provider=data["provider"],
         model=data["model"],
+        local_chat_model=data["local_chat_model"],
+        vision_model=data["vision_model"],
         has_openai_key=data["has_openai_key"],
         has_anthropic_key=data["has_anthropic_key"],
         has_google_key=data["has_google_key"],
@@ -135,6 +142,8 @@ async def patch_llm_settings(
         mode=req.mode,
         provider=req.provider,
         model=req.model,
+        local_chat_model=req.local_chat_model,
+        vision_model=req.vision_model,
         openai_api_key=req.openai_api_key,
         anthropic_api_key=req.anthropic_api_key,
         google_api_key=req.google_api_key,

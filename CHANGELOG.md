@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Models and optional components are managed from Settings.** The catalogue was
+  rendered only by the first-run setup screen, so after that first pass there was
+  no way to install the vision model, speech-to-text or ffmpeg — and no way to
+  remove one. Settings now lists every component with its size, licence and what
+  it enables, and installs or removes it in place. The local chat model and the
+  vision model are also settable there: both were read from config with no UI, so
+  a model the user installed could not be put to use without editing `.env`. An
+  empty choice means "use the configured default". The drawer widened from 400px
+  to accommodate the catalogue rows.
+
+  This also closes a disagreement in what the app reported: `active_model` for
+  private mode was the *first* model Ollama happened to list, while
+  `get_effective_routing()` used `LITELLM_DEFAULT_MODEL`. Both now resolve
+  through the same setting.
+
 ### Fixed
 - **The hub now shows the documents you have added.** Every document-driven
   section of `/home/overview` — recent items, continue reading, fading, the
