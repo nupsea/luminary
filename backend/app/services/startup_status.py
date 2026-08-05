@@ -33,6 +33,9 @@ _PHASES: tuple[tuple[str, str, bool], ...] = (
     ("embedder", "Learning to read your documents", True),
     ("ollama_server", "Starting the local engine", False),
     ("chat_model", "Chat and flashcard model", False),
+    # Not a default (6GB). Listed so "not installed" is said once with an
+    # install action, not discovered later as a failed enrichment.
+    ("vision_model", "Figure and diagram reading", False),
     ("ner", "Concept extraction", False),
     ("reranker", "Answer ranking", False),
 )
@@ -88,6 +91,9 @@ class StartupStatus:
         """
         with self._lock:
             self._offline = offline
+
+    def has_phase(self, key: str) -> bool:
+        return key in self._phases
 
     def set_state(self, key: str, state: State, detail: str = "") -> None:
         with self._lock:

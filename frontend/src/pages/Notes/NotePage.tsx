@@ -535,7 +535,7 @@ export default function NotePage() {
             <div ref={proseRef} className="mx-auto max-w-3xl px-8 py-6">
               {editContent.trim() ? (
                 <MarkdownRenderer
-                  serif
+                  reading
                   onNoteLinkClick={(id) => void handleOpenLinkedNote(id)}
                   onSetImageSize={(src, size) =>
                     setEditContent(setImageSizeInMarkdown(editContent, src, size, API_BASE))

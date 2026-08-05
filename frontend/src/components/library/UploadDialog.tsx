@@ -19,9 +19,15 @@ import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCo
 import { capabilityOf, useCapabilities } from "@/hooks/useSetup"
 import type { CapabilityKey } from "@/lib/setupApi"
 
-const TEXT_TYPES = [".pdf", ".docx", ".txt", ".md", ".epub"]
-const AUDIO_TYPES = [".mp3", ".m4a", ".wav"]
-const VIDEO_TYPES = [".mp4"]
+import {
+  type Rejection,
+  acceptedExtensions,
+  describeRejection,
+  detectContentType,
+  isKindleClippings,
+} from "@/lib/uploadFileTypes"
+import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
+import { useAppStore } from "@/store"
 
 const STAGE_LABELS: Record<string, string> = {
   parsing: "Parsing document...",
@@ -64,20 +70,6 @@ interface UploadDialogProps {
   onClose: () => void
 }
 
-function isKindleClippings(filename: string): boolean {
-  return /clippings/i.test(filename)
-}
-
-// A best-effort default content type from the file so the type choice is never a
-// hard gate -- the radio stays visible for the user to correct.
-function detectContentType(filename: string): ContentTypeValue {
-  const f = filename.toLowerCase()
-  if (f.endsWith(".epub")) return "book"
-  if (/\.(mp3|m4a|wav)$/.test(f)) return "audio"
-  if (f.endsWith(".mp4")) return "video"
-  return "book"
-}
-
 export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -91,11 +83,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const canVideo = capabilityOf(caps, "video_ingest").available
   const canUrl =
     capabilityOf(caps, "web_ingest").available || capabilityOf(caps, "youtube_ingest").available
-  const acceptedTypes = [
-    ...TEXT_TYPES,
-    ...(canAudio ? AUDIO_TYPES : []),
-    ...(canVideo ? VIDEO_TYPES : []),
-  ]
+  const acceptedTypes = acceptedExtensions({ canAudio, canVideo })
   const contentTypeOptions = CONTENT_TYPE_OPTIONS.filter((o) => {
     const cap = CONTENT_TYPE_CAPABILITY[o.value]
     return !cap || capabilityOf(caps, cap).available
@@ -103,6 +91,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const availableTabs: DialogTab[] = canUrl ? ["upload", "paste", "url"] : ["upload", "paste"]
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [rejection, setRejection] = useState<Rejection | null>(null)
   const [uploadType, setUploadType] = useState<ContentTypeValue | null>(null)
   // True once the user has explicitly picked a type; auto-detection from the
   // filename must never override an explicit choice.
@@ -171,9 +160,23 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   useEffect(() => () => clearAutoClose(), [])
 
+  // A file dropped on the window arrives here already vetted by WindowDropZone.
+  // Cleared on pickup so reopening the dialog does not resurrect it.
+  const pendingUpload = useAppStore((s) => s.pendingUpload)
+  const clearPendingUpload = useAppStore((s) => s.clearPendingUpload)
+  useEffect(() => {
+    if (!open || !pendingUpload) return
+    setTab("upload")
+    setSelectedFile(pendingUpload)
+    setRejection(null)
+    if (!typeTouchedRef.current) setUploadType(detectContentType(pendingUpload.name))
+    clearPendingUpload()
+  }, [open, pendingUpload, clearPendingUpload])
+
   function reset() {
     clearAutoClose()
     setSelectedFile(null)
+    setRejection(null)
     setUploadType(null)
     typeTouchedRef.current = false
     setPasteLabel("")
@@ -200,26 +203,29 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     onClose()
   }
 
-  function isAccepted(file: File): boolean {
-    return acceptedTypes.some((ext) => file.name.toLowerCase().endsWith(ext))
+  // Accept, or say why not. Silently discarding the file read as a dead app,
+  // especially for audio, which is refused only because a component is missing.
+  function acceptFile(file: File) {
+    const rejection = describeRejection(file.name, { canAudio, canVideo })
+    if (rejection) {
+      setRejection(rejection)
+      return
+    }
+    setRejection(null)
+    setSelectedFile(file)
+    if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setIsDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file && isAccepted(file)) {
-      setSelectedFile(file)
-      if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
-    }
+    if (file) acceptFile(file)
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file && isAccepted(file)) {
-      setSelectedFile(file)
-      if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
-    }
+    if (file) acceptFile(file)
   }
 
   const progress = mode === "success" ? 100 : trackedJob?.progressPct ?? 0
@@ -633,6 +639,15 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     onChange={handleFileChange}
                   />
                 </div>
+
+                {rejection && (
+                  <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                    <span>{rejection.message}</span>
+                    {rejection.componentId && (
+                      <InstallComponentButton componentId={rejection.componentId} />
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={() => void handleUploadSubmit()}

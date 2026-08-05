@@ -22,6 +22,7 @@ REPO="${LUMINARY_REPO:-nupsea/luminary}"
 VERSION="${LUMINARY_VERSION:-latest}"
 CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
 PROFILE="${LUMINARY_PROFILE:-}"
+BOOT_TIMEOUT="${LUMINARY_BOOT_TIMEOUT:-300}"
 
 APP_DIR="$PREFIX/app"
 RUNTIME_DIR="$PREFIX/runtime"
@@ -38,6 +39,63 @@ _info()  { printf '       %s\n' "$*"; }
 _warn()  { printf '\033[0;33m  warn\033[0m %s\n' "$*"; }
 _die()   { printf '\n\033[0;31m  error\033[0m %s\n\n' "$*" >&2; exit 1; }
 _have()  { command -v "$1" >/dev/null 2>&1; }
+_quote() { sed 's/^/       | /'; }
+
+# Run a command with a wall-clock bound. macOS ships no `timeout`, and an
+# unbounded diagnostic that hangs is worse than the failure it is diagnosing.
+# Returns 124 when the bound is hit, otherwise the command's own status.
+_bounded() {
+    local secs="$1"; shift
+    "$@" & local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$secs" ]; do
+        sleep 1; waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        return 124
+    fi
+    wait "$pid"
+}
+
+# "Logs: <path>" is useless advice when the failure is that the file was never
+# created -- which is what happens when the process dies during import, before
+# uvicorn writes its first line. So import the backend here instead, where the
+# traceback has somewhere to go.
+_boot_report() {
+    _info "launchd:"
+    if launchctl print "gui/$(id -u)/$LABEL" >"$TMPDIR_BOOT/lc.txt" 2>/dev/null; then
+        # grep -E, not sed: BSD sed has no \| alternation, so the pattern this
+        # replaces matched nothing and printed an empty launchd section.
+        grep -E '^[[:space:]]*(state|pid|last exit code|last exit status) =' \
+            "$TMPDIR_BOOT/lc.txt" | sed 's/^[[:space:]]*//' | _quote \
+            || printf '       | registered, but reported no state\n'
+    else
+        printf '       | service is not registered\n'
+    fi
+
+    if [ -s "$LOG_DIR/luminary.log" ]; then
+        _info "last 20 lines of $LOG_DIR/luminary.log:"
+        tail -n 20 "$LOG_DIR/luminary.log" | _quote
+        return
+    fi
+
+    _info "No log was written, so the server never reached startup."
+    _info "Importing the backend directly to surface the error:"
+    # Same working directory as the service: config.py reads a CWD-relative
+    # .env, so importing from anywhere else would exercise a different config.
+    if _bounded 180 bash -c \
+        'cd "$1" && PYTHONPATH="$1" DATA_DIR="$2" "$3" -c "import app.main"' \
+        _ "$APP_DIR/backend" "$DATA_DIR" "$VENV_DIR/bin/python" \
+        >"$TMPDIR_BOOT/import.txt" 2>&1; then
+        _info "The backend imports cleanly, so this is a slow start, not a crash."
+        _info "Re-run with LUMINARY_BOOT_TIMEOUT=600, or run: $BIN_DIR/luminary start"
+    else
+        [ -s "$TMPDIR_BOOT/import.txt" ] \
+            && tail -n 30 "$TMPDIR_BOOT/import.txt" | _quote \
+            || printf '       | the import produced no output and did not finish\n'
+    fi
+}
 
 TMPDIR_BOOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BOOT"' EXIT
@@ -135,11 +193,13 @@ fi
 _info "uv $("$UV" --version 2>/dev/null | awk '{print $2}')"
 
 _info "Installing dependencies (this pulls Python 3.13 and ~1.6GB of packages)..."
-# --no-default-groups is load-bearing: pyproject sets default-groups=[dev,full],
-# which would drag in Phoenix, pytest, whisper and roughly double the install.
+# Both flags are load-bearing. --no-default-groups drops dev/media (Phoenix,
+# pytest, whisper); --group full adds back trafilatura, cloudscraper, yt-dlp and
+# tree-sitter, without which the install refuses every URL. Keep in step with
+# scripts/macos/stage_python.sh, which builds the same profile.
 (
     cd "$APP_DIR/backend"
-    UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV" sync --no-default-groups --quiet
+    UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV" sync --no-default-groups --group full --quiet
 ) || _die "Dependency install failed. See above."
 _info "Runtime ready at $VENV_DIR"
 
@@ -361,17 +421,33 @@ fi
 # ---------------------------------------------------------------------------
 _step "Starting Luminary"
 
+# uvicorn logs nothing until app.main finishes importing torch, lancedb and the
+# NER model, so an empty log is expected for the first minutes, not a symptom.
+# 90s was under that on a cold machine and failed installs that were starting.
+_info "First start imports the model stack and can take a few minutes."
+
 READY=0
-for i in $(seq 1 90); do
+DEADLINE=$(( $(date +%s) + BOOT_TIMEOUT ))
+NEXT_TICK=$(( $(date +%s) + 30 ))
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     if curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
         READY=1; break
     fi
-    sleep 1
+    if [ "$(date +%s)" -ge "$NEXT_TICK" ]; then
+        _info "still starting... ($(( $(date +%s) - DEADLINE + BOOT_TIMEOUT ))s)"
+        NEXT_TICK=$(( $(date +%s) + 30 ))
+    fi
+    sleep 2
 done
 
 if [ "$READY" -ne 1 ]; then
-    _die "Luminary did not come up on port $PORT.
-       Logs: $LOG_DIR/luminary.log"
+    printf '\n'
+    _warn "Luminary did not answer on port $PORT within ${BOOT_TIMEOUT}s."
+    _boot_report
+    _die "Luminary did not come up. The report above says why.
+       Raise the wait with LUMINARY_BOOT_TIMEOUT=600 and re-run if this
+       machine is simply slow, or open an issue with the report attached:
+       https://github.com/$REPO/issues"
 fi
 
 open "http://127.0.0.1:$PORT" 2>/dev/null || true

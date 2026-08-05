@@ -8,6 +8,7 @@ set -euo pipefail
 PREFIX="${LUMINARY_PREFIX:-$HOME/Library/Application Support/Luminary}"
 DATA_DIR="${LUMINARY_DATA_DIR:-$HOME/.luminary}"
 PORT="${LUMINARY_PORT:-7820}"
+OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 LABEL="sh.luminary.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 APP_DIR="$PREFIX/app"
@@ -64,6 +65,8 @@ cmd_stop() {
 
 cmd_restart() { cmd_stop; cmd_start; }
 
+# Everything a maintainer needs to rebuild the reporter's setup, so an issue
+# can be answered without a round trip asking for it. Paste-ready by design.
 cmd_status() {
     if [ -f "$APP_DIR/VERSION" ]; then
         _info "version   $(cat "$APP_DIR/VERSION")"
@@ -78,11 +81,35 @@ cmd_status() {
     else
         _info "state     not responding on port $PORT"
     fi
-    if curl -sf --max-time 2 "http://127.0.0.1:11434/api/version" >/dev/null 2>&1; then
-        _info "ollama    running"
+
+    _info "os        macOS $(sw_vers -productVersion) (build $(sw_vers -buildVersion))"
+    _info "kernel    $(uname -s) $(uname -r) $(uname -m)"
+
+    local ver
+    if ver="$(curl -sf --max-time 2 "$OLLAMA_URL/api/version" 2>/dev/null)"; then
+        _info "ollama    running — $(_json_field "$ver" version)"
+        _ollama_models | sed 's/^/          /'
     else
         _info "ollama    not running (start the Ollama app)"
     fi
+}
+
+# The models Ollama has, one per line. Read over HTTP rather than by running
+# `ollama list`: the desktop app ships its own binary that is not on PATH.
+_ollama_models() {
+    local tags
+    tags="$(curl -sf --max-time 3 "$OLLAMA_URL/api/tags" 2>/dev/null)" || return 0
+    local names
+    names="$(printf '%s' "$tags" | sed 's/"name":"/\n&/g' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+    if [ -z "$names" ]; then
+        printf 'no models installed\n'
+    else
+        printf '%s\n' "$names"
+    fi
+}
+
+_json_field() {
+    printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"
 }
 
 cmd_open() {

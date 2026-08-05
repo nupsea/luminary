@@ -136,6 +136,28 @@ async def _warm_llm() -> None:
         await _one(bg, "background")
 
 
+async def _check_vision_model() -> None:
+    """Report whether the vision model is installed, without loading it.
+
+    Not warmed: 6GB into memory at every startup costs more than the first
+    figure it would read. The tag list answers the only question here.
+    """
+    from app.services.components import component_status  # noqa: PLC0415
+    from app.services.settings_service import get_vision_model  # noqa: PLC0415
+
+    status = get_startup_status()
+    try:
+        installed = {c["id"]: c["installed"] for c in await component_status()}
+    except Exception as exc:
+        status.set_state("vision_model", "failed", _friendly(exc))
+        return
+
+    if installed.get("vision_model"):
+        status.set_state("vision_model", "ready", get_vision_model())
+    else:
+        status.set_state("vision_model", "missing", get_vision_model())
+
+
 async def run_warmup(only: set[str] | None = None) -> None:
     """Fetch and load the local models. Safe to call again to retry failures."""
     status = get_startup_status()
@@ -197,6 +219,8 @@ async def run_warmup(only: set[str] | None = None) -> None:
         # The chat model lives in Ollama, not the HuggingFace cache.
         if only is None or "chat_model" in only:
             tasks.append(_warm_llm())
+        if only is None or "vision_model" in only:
+            tasks.append(_check_vision_model())
 
         await asyncio.gather(*tasks)
 

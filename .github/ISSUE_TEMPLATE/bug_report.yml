@@ -1,4 +1,4 @@
-name: "🐛 Bug Report"
+name: "Bug Report"
 description: "Report a bug or crash in Luminary"
 title: "[Bug]: "
 labels: ["bug", "status/needs-triage"]
@@ -15,19 +15,41 @@ body:
         2. Open Study page...
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: env_info
     attributes:
       label: "Environment Details"
-      description: "Mention your OS, Ollama model, and app version."
-      placeholder: "e.g., macOS M1, Llama 3.2 3B, Native install (make install)"
+      description: |
+        Paste the whole block — it saves a round trip asking for it.
+
+        **Desktop app:** Settings → Report an issue fills this in for you (it
+        redacts paths and keys first). From the startup screen, use "Report a
+        problem".
+
+        **Command-line install:** run `luminary status`.
+
+        **From a checkout, or if neither works:** paste the output of
+        `sw_vers && uname -srm && ollama --version && ollama list`, plus how you
+        installed Luminary and which version.
+      render: text
+      placeholder: |
+        version   0.3.3
+        os        macOS 26.4.1 (build 25E253)
+        kernel    Darwin 25.4.0 arm64
+        ollama    running — 0.32.3
+                  llama3.2:latest
+                  qwen2.5vl:7b
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: "Error Logs or Screenshots"
-      description: "Paste terminal logs from 'make dev' or drag-and-drop screenshots here."
+      description: |
+        Desktop app: `~/Library/Logs/Luminary/luminary.log`, or Settings →
+        Report an issue, which attaches the tail for you.
+        Command-line install: `luminary logs`.
+        From a checkout: the terminal output of `make dev`.
       placeholder: "Paste backend/frontend log outputs..."
     validations:
       required: false

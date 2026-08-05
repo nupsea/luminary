@@ -317,7 +317,9 @@ $RepoRoot = (Get-Item -Path $PSScriptRoot).Parent.FullName
 # Backend sync
 Write-Host "[install] Installing backend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\backend"
-uv sync --no-default-groups
+# `full` carries trafilatura, cloudscraper, yt-dlp and tree-sitter. Without it
+# the install comes up but refuses every URL the UI offers to ingest.
+uv sync --no-default-groups --group full
 
 # Frontend build
 Write-Host "[install] Installing frontend dependencies..." -ForegroundColor Yellow

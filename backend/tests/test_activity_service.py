@@ -57,6 +57,30 @@ async def test_first_call_writes_row(factory):
 
 
 @pytest.mark.asyncio
+async def test_adding_a_document_records_activity(factory):
+    """Without this the hub renders empty over a library full of documents."""
+    doc_id = str(uuid.uuid4())
+    async with factory() as s:
+        assert await ActivityService(s).record_document_added(doc_id) is True
+        assert (await _last_at(s, "document", doc_id)) is not None
+
+
+@pytest.mark.asyncio
+async def test_document_added_is_not_debounced(factory):
+    """Adding is deliberate, so it always wins over an older read timestamp."""
+    doc_id = str(uuid.uuid4())
+    async with factory() as s:
+        await ActivityService(s).record_doc_read(doc_id)
+        first = await _last_at(s, "document", doc_id)
+
+    await asyncio.sleep(0.01)
+
+    async with factory() as s:
+        assert await ActivityService(s).record_document_added(doc_id) is True
+        assert (await _last_at(s, "document", doc_id)) > first
+
+
+@pytest.mark.asyncio
 async def test_doc_read_debounced_within_5s(factory):
     doc_id = str(uuid.uuid4())
     async with factory() as s:

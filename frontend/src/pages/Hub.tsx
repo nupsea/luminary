@@ -1,9 +1,9 @@
 // Luminary home hub -- dashboard shape.
 //
-// One fetch against /home/overview drives everything. A full-width hero anchors
-// the page; below it a two-column magazine layout splits "act now" (primary
-// column: recommendations, continue reading, decay debt) from ambient context
-// (rail: this-week stats, active projects, fading items, tags).
+// One fetch against /home/overview drives everything. The quote takes the
+// full-width gradient at the top; below it a two-column magazine layout splits
+// "act now" (primary column: today's focus, recommendations, continue reading,
+// decay debt) from ambient context (rail: stats, projects, fading, tags).
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -19,6 +19,7 @@ import {
   Hourglass,
   Loader2,
   Pencil,
+  Quote,
   RefreshCw,
   Sparkles,
   StickyNote,
@@ -35,6 +36,7 @@ import { useStartupStatus } from "@/hooks/useSetup"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
+import { quoteOfTheDay } from "@/lib/quotes"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
 import type { components } from "@/types/api"
@@ -73,11 +75,13 @@ export default function Hub() {
   if (isLoading) return <HubLoading />
   if (isError || !data) return <HubError onRetry={() => void refetch()} />
 
+  // recent_tags is deliberately not counted: the auto-tagger tags every
+  // ingested document, so including it made this false forever and replaced the
+  // first-run guide with a page of empty sections.
   const isEmpty =
     !data.today_action &&
     data.recent_items.length === 0 &&
     data.active_collections.length === 0 &&
-    data.recent_tags.length === 0 &&
     (data.continue_reading?.length ?? 0) === 0 &&
     (data.fading_items?.length ?? 0) === 0
 
@@ -91,11 +95,12 @@ export default function Hub() {
     <PageSurface>
       <HubHeader />
 
-      {data.today_action && <TodayHero action={data.today_action} />}
+      <DailyQuote />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Primary column: things to act on now */}
         <div className="flex flex-col gap-6 lg:col-span-2">
+          {data.today_action && <TodayHero action={data.today_action} />}
           {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
           {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
           <DecayDebtWidget />
@@ -127,6 +132,43 @@ export default function Hub() {
         </aside>
       </div>
     </PageSurface>
+  )
+}
+
+// Offset so the hub and the setup screen never show the same line on one day.
+const HUB_QUOTE_OFFSET = 7
+
+function DailyQuote() {
+  const [quote] = useState(() => quoteOfTheDay(new Date(), HUB_QUOTE_OFFSET))
+
+  // Set in the app's own typeface throughout. What makes it read as a quote is
+  // the scale and the surface, not a second font family -- which would have to
+  // survive macOS, Windows and Linux without a bundled file.
+  return (
+    <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-7 shadow-lg shadow-primary/20">
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
+
+      <div className="relative z-10 flex flex-col gap-4">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
+            <Quote size={13} className="text-primary-foreground" />
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+            Thought for the day
+          </span>
+        </div>
+
+        <blockquote className="max-w-3xl text-xl font-medium leading-snug tracking-[-0.015em] text-gray-200 sm:text-2xl">
+          &ldquo;{quote.text}&rdquo;
+        </blockquote>
+
+        <figcaption className="text-xs text-primary-foreground/70">
+          <span className="font-semibold text-primary-foreground/85">{quote.author}</span>
+          <span> · {quote.source}</span>
+        </figcaption>
+      </div>
+    </figure>
   )
 }
 
@@ -265,23 +307,21 @@ function TodayHero({ action }: { action: TodayAction }) {
   return (
     <button
       onClick={onClick}
-      className="group relative flex w-full cursor-pointer select-none flex-col gap-2.5 overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-6 text-left text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:shadow-xl hover:shadow-primary/25"
+      className="group flex w-full cursor-pointer select-none flex-col gap-2 rounded-2xl border border-primary/15 bg-primary/[0.06] px-6 py-5 text-left transition-colors hover:bg-primary/[0.09]"
     >
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
-      <div className="relative z-10 flex items-center gap-2.5">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
-          <Icon size={14} />
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+          <Icon size={13} className="text-primary" />
         </span>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
           Today
         </span>
       </div>
-      <div className="relative z-10 flex items-center justify-between gap-3 pt-0.5">
-        <span className="truncate text-xl font-semibold sm:text-2xl">{action.label}</span>
-        <ArrowRight size={22} className="shrink-0 text-primary-foreground/85 transition-transform group-hover:translate-x-0.5" />
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate text-lg font-semibold text-foreground sm:text-xl">{action.label}</span>
+        <ArrowRight size={20} className="shrink-0 text-primary transition-transform group-hover:translate-x-0.5" />
       </div>
-      <p className="relative z-10 max-w-2xl text-sm text-primary-foreground/75">{reason}</p>
+      <p className="max-w-2xl text-sm text-muted-foreground">{reason}</p>
     </button>
   )
 }
@@ -300,17 +340,14 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
   const overflow = total - focusCount
 
   return (
-    <div className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-6 shadow-lg shadow-primary/20">
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
-
-      <div className="relative z-10 flex flex-col gap-3">
+    <div className="group rounded-2xl border border-primary/15 bg-primary/[0.06] px-6 py-5">
+      <div className="flex flex-col gap-3">
         {/* label row */}
         <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
-            <Zap size={14} />
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
+            <Zap size={13} className="text-primary" />
           </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
             Today's focus
           </span>
         </div>
@@ -327,20 +364,20 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
                       style={{ backgroundColor: action.collection_color }}
                     />
                   )}
-                  <h2 className="text-xl font-bold tracking-tight text-primary-foreground sm:text-2xl">
+                  <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
                     {action.collection_name}
                   </h2>
                 </div>
-                <p className="text-sm text-primary-foreground/80">
+                <p className="text-sm text-muted-foreground">
                   {focusCount} card{focusCount !== 1 ? "s" : ""} due from this project
                 </p>
               </>
             ) : (
               <>
-                <h2 className="text-xl font-bold text-primary-foreground sm:text-2xl">
+                <h2 className="text-lg font-bold text-foreground sm:text-xl">
                   Your daily review
                 </h2>
-                <p className="text-sm text-primary-foreground/80">
+                <p className="text-sm text-muted-foreground">
                   {total} card{total !== 1 ? "s" : ""} ready to review
                 </p>
               </>
@@ -366,18 +403,18 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
                   : { type: "daily", label: "Today's pick" },
               )
             }}
-            className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2 text-sm font-semibold text-primary-foreground ring-1 ring-white/25 transition-all hover:bg-white/30"
+            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
           >
             Start {sessionSize}-card session
             <ArrowRight size={14} />
           </button>
-          <span className="text-xs text-primary-foreground/70">
+          <span className="text-xs text-muted-foreground">
             ~{estimatedMin} min
           </span>
         </div>
 
         {action.reasons?.[0]?.detail && (
-          <p className="text-xs text-primary-foreground/60">{action.reasons[0].detail}</p>
+          <p className="text-xs text-muted-foreground">{action.reasons[0].detail}</p>
         )}
 
         {/* overflow footnote */}
@@ -388,7 +425,7 @@ function ReviewFocusHero({ action }: { action: TodayAction }) {
               setActiveCollectionId(null)
               navigate("/study", { state: { from: "/" } })
             }}
-            className="self-start text-xs text-primary-foreground/60 underline-offset-2 hover:text-primary-foreground/90 hover:underline"
+            className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             +{overflow} more cards across your library
           </button>

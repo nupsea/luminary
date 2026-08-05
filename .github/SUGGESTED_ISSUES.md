@@ -1,10 +1,10 @@
-# 💡 Suggested Issues for Contributors
+# Suggested Issues for Contributors
 
 These issues represent exciting problems, enhancements, and bugs for the Luminary project. Maintainers can copy-paste these descriptions directly into the GitHub Issue tracker to open them for community contributions.
 
 ---
 
-## 1. 🟢 [Good First Issue][Frontend]: Keyboard Shortcuts for Spaced Repetition Review
+## 1. [Good First Issue][Frontend]: Keyboard Shortcuts for Spaced Repetition Review
 * **Difficulty**: `difficulty/good-first-issue`
 * **Area**: `area/frontend`
 * **Target Files**:
@@ -30,7 +30,7 @@ Add global keyboard event listeners that listen for keypresses when a study sess
 
 ---
 
-## 2. 🟡 [Medium][Frontend]: Invert PDF colors in Dark Mode
+## 2. [Medium][Frontend]: Invert PDF colors in Dark Mode
 * **Difficulty**: `difficulty/medium`
 * **Area**: `area/frontend`
 * **Target Files**:
@@ -51,7 +51,7 @@ Provide an option to invert the PDF page colors in dark mode:
 
 ---
 
-## 3. 🟡 [Medium][Backend]: Check Ollama Reachability on Server Startup
+## 3. [Medium][Backend]: Check Ollama Reachability on Server Startup
 * **Difficulty**: `difficulty/medium`
 * **Area**: `area/backend`
 * **Target Files**:
@@ -70,7 +70,7 @@ Add a lightweight configuration check and network ping to Ollama during FastAPI 
 
 ---
 
-## 4. 🔴 [Challenging][Backend]: Dynamic Context Budget Scaling for Chat History
+## 4. [Challenging][Backend]: Dynamic Context Budget Scaling for Chat History
 * **Difficulty**: `difficulty/challenging`
 * **Area**: `area/backend`
 * **Target Files**:
@@ -89,7 +89,7 @@ Implement a dynamic context allocator in the synthesis stage:
 
 ---
 
-## 5. 🔴 [Challenging][Deployment]: GPU Detection and Auto-tuning in Installer Scripts
+## 5. [Challenging][Deployment]: GPU Detection and Auto-tuning in Installer Scripts
 * **Difficulty**: `difficulty/challenging`
 * **Area**: `area/deployment`
 * **Target Files**:

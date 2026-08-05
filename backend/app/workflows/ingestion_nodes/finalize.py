@@ -21,6 +21,7 @@ from sqlalchemy import update as _update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
+from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
 from app.services.section_summarizer import get_section_summarizer_service
@@ -208,6 +209,19 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # were created earlier, _dispatch_pending would race with this write for the
     # SQLite write lock and intermittently fail (leaving stage='indexing').
     await _update_stage(doc_id, "complete")
+
+    # The hub reads content_activity and nothing else, so without this a library
+    # full of documents renders empty. On completion, not on upload: a failed
+    # ingest must not surface as something to pick up.
+    try:
+        async with get_session_factory()() as session:
+            await ActivityService(session).record_document_added(doc_id)
+    except Exception as exc:
+        logger.warning(
+            "enrichment_enqueue_node: activity record failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
 
     # Phase 3: schedule all background tasks (no await between here and return,
     # so they do not start until after this node returns to LangGraph and the

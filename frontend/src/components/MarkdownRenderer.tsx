@@ -23,9 +23,9 @@ interface MarkdownRendererProps {
   validNoteIds?: Set<string>
   /** Cap width applied to rendered <img>. Defaults to "medium" so large pasted images don't blow up the page. */
   imageSize?: ImageSize
-  /** Reading variant: serif body + roomier spacing (notes/long-form). Default is
+  /** Reading variant: roomier spacing for notes and long-form. Default is
    * the compact sans body used in chat answers so they match the UI chrome. */
-  serif?: boolean
+  reading?: boolean
   onEditExcalidrawDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
   /** When set, [[id|text]] note links become navigable buttons. */
   onNoteLinkClick?: (noteId: string) => void
@@ -188,7 +188,7 @@ function ExcalidrawDiagramPreview({
   )
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", serif = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0 }: MarkdownRendererProps) {
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", reading = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0 }: MarkdownRendererProps) {
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
@@ -205,13 +205,12 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
 
   return (
     <div className={cn(
-      // Two body modes: a compact sans body for chat answers (matches the UI
-      // chrome), and a roomy serif reading body for notes/long-form. The serif
-      // mode keeps prose's generous default spacing so it doesn't read crowded.
-      "prose prose-base dark:prose-invert max-w-none leading-relaxed text-foreground/90",
-      serif ? "font-serif" : "font-sans",
+      // One typeface throughout, as everywhere else in the app; the two body
+      // modes differ by rhythm. Reading mode keeps prose's generous default
+      // spacing, chat tightens it so an answer does not sprawl.
+      "prose prose-base dark:prose-invert max-w-none font-sans leading-relaxed text-foreground/90",
       "prose-headings:font-sans prose-headings:font-semibold prose-headings:tracking-tight",
-      serif ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
+      reading ? "" : "prose-p:my-3 prose-li:my-1 prose-ul:my-4 prose-ol:my-4",
       "prose-img:rounded-lg prose-img:shadow-md prose-img:mx-auto",
       "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
       IMAGE_SIZE_CLASS[imageSize],
@@ -330,7 +329,7 @@ export function MarkdownRenderer({
   className,
   validNoteIds,
   imageSize = "medium",
-  serif = false,
+  reading = false,
   onEditExcalidrawDiagram,
   onNoteLinkClick,
   onSetImageSize,
@@ -340,7 +339,7 @@ export function MarkdownRenderer({
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines}>
         {children}
       </MarkdownBody>
     )
@@ -354,7 +353,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)}>
                 {before}
               </MarkdownBody>
             )}
@@ -370,7 +369,7 @@ export function MarkdownRenderer({
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} serif={serif} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}

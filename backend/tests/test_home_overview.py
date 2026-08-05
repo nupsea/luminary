@@ -75,6 +75,33 @@ async def test_overview_empty_state(test_db):
 
 
 @pytest.mark.anyio
+async def test_a_freshly_added_document_reaches_the_hub(test_db):
+    """The reported bug: three documents ingested, hub showed none of them.
+
+    Every document-driven section reads content_activity, so recording the add
+    is what makes a new library look like a library.
+    """
+    _, factory = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(_doc(doc_id, "Just Added"))
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/home/overview")).json()["recent_items"] == []
+
+        async with factory() as s:
+            await ActivityService(s).record_document_added(doc_id)
+
+        body = (await c.get("/home/overview")).json()
+
+    assert [i["member_id"] for i in body["recent_items"]] == [doc_id]
+    assert body["recent_items"][0]["title"] == "Just Added"
+    # An unread document is something to pick up, so the hub offers it.
+    assert body["today_action"] is not None
+
+
+@pytest.mark.anyio
 async def test_recent_items_interleave_docs_and_notes_by_activity(test_db):
     _, factory = test_db
     d1, d2 = str(uuid.uuid4()), str(uuid.uuid4())

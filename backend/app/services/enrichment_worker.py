@@ -16,7 +16,8 @@ from sqlalchemy import case, or_, select, update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
-from app.services.llm import LLMUnavailableError
+from app.services.components import component_for_model
+from app.services.llm import LLMUnavailableError, missing_model_from
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +70,18 @@ class EnrichmentQueueWorker:
 
         On startup, reset any stale 'running' jobs back to 'pending' so they
         get retried -- these were interrupted by a previous shutdown.
+
+        'skipped' is reset too: a restart is the likeliest moment for a missing
+        component to have arrived, and the re-check costs one refused call.
         """
         async with get_session_factory()() as session:
-            # Reset stale 'running' and 'failed' jobs to 'pending' for retry
             result = await session.execute(
                 update(EnrichmentJobModel)
                 .where(
                     or_(
                         EnrichmentJobModel.status == "running",
                         EnrichmentJobModel.status == "failed",
+                        EnrichmentJobModel.status == "skipped",
                     )
                 )
                 .values(status="pending", started_at=None, error_message=None)
@@ -195,7 +199,10 @@ class EnrichmentQueueWorker:
             try:
                 await handler(document_id, job_id)
                 return
-            except LLMUnavailableError:
+            except LLMUnavailableError as exc:
+                # A model that was never pulled cannot appear mid-backoff.
+                if missing_model_from(exc) is not None:
+                    raise
                 attempt += 1
                 if attempt >= _LLM_RETRY_MAX_ATTEMPTS:
                     raise
@@ -260,24 +267,45 @@ class EnrichmentQueueWorker:
                 await session.commit()
             logger.info("EnrichmentQueueWorker: job done job_id=%s doc=%s", job_id, document_id)
         except LLMUnavailableError as exc:
-            # Exhausted backoff retries -- Ollama genuinely offline for the whole
-            # window. Record the failure (re-queued to pending on next startup).
-            logger.info(
-                "EnrichmentQueueWorker: job skipped (LLM unavailable) "
-                "job_id=%s doc=%s job_type=%s: %s",
-                job_id,
-                document_id,
-                job_type,
-                exc.__class__.__name__,
-            )
+            # Same exception type, two situations: a model the user never
+            # installed is skipped (the fix is an install button); Ollama down
+            # for the whole backoff window is a failure.
+            missing = missing_model_from(exc)
+            if missing is not None:
+                comp = component_for_model(missing)
+                status = "skipped"
+                message = (
+                    f"Needs the {comp.label.lower()} ({comp.ref}), which is not installed."
+                    if comp is not None
+                    else f"Needs the model {missing}, which is not installed."
+                )
+                logger.info(
+                    "EnrichmentQueueWorker: job skipped (model not installed) "
+                    "job_id=%s doc=%s job_type=%s model=%s",
+                    job_id,
+                    document_id,
+                    job_type,
+                    missing,
+                )
+            else:
+                status = "failed"
+                message = f"LLM unavailable: {exc.__class__.__name__}"
+                logger.info(
+                    "EnrichmentQueueWorker: job failed (LLM unavailable) "
+                    "job_id=%s doc=%s job_type=%s: %s",
+                    job_id,
+                    document_id,
+                    job_type,
+                    exc.__class__.__name__,
+                )
             async with get_session_factory()() as session:
                 await session.execute(
                     update(EnrichmentJobModel)
                     .where(EnrichmentJobModel.id == job_id)
                     .values(
-                        status="failed",
+                        status=status,
                         completed_at=datetime.now(UTC),
-                        error_message=f"LLM unavailable: {exc.__class__.__name__}",
+                        error_message=message,
                     )
                 )
                 await session.commit()
@@ -301,6 +329,26 @@ class EnrichmentQueueWorker:
                     )
                 )
                 await session.commit()
+
+
+async def requeue_skipped_jobs() -> int:
+    """Re-queue work that was skipped for want of a component. Returns the count.
+
+    Called when a component finishes installing: without it, documents already
+    in the library wait for a restart, which reads as the install having failed.
+    """
+    async with get_session_factory()() as session:
+        result = await session.execute(
+            update(EnrichmentJobModel)
+            .where(EnrichmentJobModel.status == "skipped")
+            .values(status="pending", started_at=None, completed_at=None, error_message=None)
+            .returning(EnrichmentJobModel.id)
+        )
+        requeued = [row[0] for row in result.all()]
+        if requeued:
+            await session.commit()
+            logger.info("EnrichmentQueueWorker: re-queued %d skipped jobs", len(requeued))
+    return len(requeued)
 
 
 # Singleton worker instance (started in lifespan)

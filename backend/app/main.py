@@ -20,7 +20,7 @@ from app.database import get_db, get_engine, get_session_factory
 from app.db_init import init_database
 from app.models import SettingsModel
 from app.parent_watch import watch_parent
-from app.paths import pyproject_path, spa_dist
+from app.paths import app_version, spa_dist
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
 from app.routers.blog import router as blog_router
@@ -94,17 +94,7 @@ def configure_logging(log_level: str = "INFO") -> None:
 logger = logging.getLogger(__name__)
 
 
-def _read_app_version() -> str:
-    try:
-        import tomllib
-
-        with pyproject_path().open("rb") as fh:
-            return tomllib.load(fh)["project"]["version"]
-    except Exception:
-        return "0.0.0"
-
-
-_APP_VERSION = _read_app_version()
+_APP_VERSION = app_version()
 
 # Warmup and the description backfill were fire-and-forget, so nothing cancelled
 # them at shutdown and nothing held a reference against garbage collection.

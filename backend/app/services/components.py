@@ -117,6 +117,31 @@ def get_component(component_id: str) -> Component | None:
     return _BY_ID.get(component_id)
 
 
+def _bare_model_name(model: str) -> str:
+    """Strip the LiteLLM provider prefix and a `:latest` tag."""
+    name = model.split("/", 1)[-1].strip()
+    return name[: -len(":latest")] if name.endswith(":latest") else name
+
+
+def component_for_model(model: str) -> Component | None:
+    """The catalogue entry a model name belongs to, if the user can install it.
+
+    Turns a failure that names a model into the action that fixes it.
+    """
+    wanted = _bare_model_name(model)
+    if not wanted:
+        return None
+    for comp in CATALOGUE:
+        if comp.kind != "ollama_model":
+            continue
+        ref = _bare_model_name(comp.ref)
+        # Untagged matches tagged: Ollama reports a missing `qwen2.5vl:7b` as
+        # `qwen2.5vl`.
+        if wanted == ref or ref.startswith(f"{wanted}:") or wanted.startswith(f"{ref}:"):
+            return comp
+    return None
+
+
 def tool_bin_dir() -> Path:
     """Where user-installed executables live: writable, and outside the bundle."""
     return Path(get_settings().DATA_DIR).expanduser() / "bin"

@@ -28,6 +28,10 @@ pub struct Report {
     pub message: String,
     pub detail: String,
     pub log: Vec<String>,
+    /// Port the bundled Ollama was started on, 0 when it never started. Its
+    /// HTTP API is asked for the version and model list rather than the `ollama`
+    /// binary: the bundled one is not on PATH and answers on a private port.
+    pub ollama_port: u16,
 }
 
 fn rx(slot: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
@@ -117,15 +121,63 @@ pub fn fingerprint(step: &str, message: &str) -> String {
     format!("{hash:016x}")[..8].to_string()
 }
 
+fn run(bin: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(bin).args(args).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
 pub fn os_version() -> String {
-    let product = std::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into());
+    let product = run("/usr/bin/sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".into());
     format!("macOS {product} ({})", std::env::consts::ARCH)
+}
+
+/// macOS build and kernel, which distinguish two machines reporting the same
+/// product version -- the pair asked for in nupsea/luminary#41.
+fn os_detail() -> String {
+    let build = run("/usr/bin/sw_vers", &["-buildVersion"]).unwrap_or_else(|| "unknown".into());
+    let kernel = run("/usr/bin/uname", &["-r"]).unwrap_or_else(|| "unknown".into());
+    format!("build {build}, Darwin {kernel}")
+}
+
+/// Blocking, and deliberately so: a report is assembled on demand, not on a hot
+/// path, and a short timeout beats an async runtime here.
+fn ollama_get(port: u16, path: &str) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    let url = format!("http://127.0.0.1:{port}{path}");
+    run("/usr/bin/curl", &["-sf", "--max-time", "3", &url])
+}
+
+fn json_strings(body: &str, key: &str) -> Vec<String> {
+    let needle = format!("\"{key}\":\"");
+    body.match_indices(&needle)
+        .filter_map(|(at, _)| {
+            let rest = &body[at + needle.len()..];
+            rest.find('"').map(|end| rest[..end].to_string())
+        })
+        .collect()
+}
+
+/// Version and installed models, as issue #41 asked for. Absent rather than
+/// guessed when Ollama is not answering -- "unknown" here is itself a useful
+/// fact in a bug report.
+fn ollama_summary(port: u16) -> String {
+    let version = ollama_get(port, "/api/version")
+        .and_then(|body| json_strings(&body, "version").into_iter().next())
+        .unwrap_or_else(|| "not answering".into());
+
+    let models = ollama_get(port, "/api/tags")
+        .map(|body| json_strings(&body, "name"))
+        .unwrap_or_default();
+
+    let listed = if models.is_empty() {
+        "no models installed".to_string()
+    } else {
+        models.join(", ")
+    };
+    format!("Ollama {version} -- {listed}")
 }
 
 pub fn app_version() -> &'static str {
@@ -133,22 +185,31 @@ pub fn app_version() -> &'static str {
 }
 
 impl Report {
+    /// Everything needed to reproduce, on its own lines.
+    ///
+    /// One line was not enough once this had to carry the OS build, the kernel
+    /// and the model list, so the issue form's field is a textarea.
     pub fn environment(&self) -> String {
         format!(
-            "Luminary {} (DMG), {}, failed at step '{}'",
+            "Luminary {} (desktop app)\n{}, {}\n{}\nLast boot step: {}",
             app_version(),
             os_version(),
-            self.step
+            os_detail(),
+            ollama_summary(self.ollama_port),
+            self.step,
         )
     }
 
     pub fn what_happened(&self) -> String {
+        let opening = if self.failed() {
+            "Luminary did not finish starting up."
+        } else {
+            "Reported from a running Luminary."
+        };
         format!(
-            "Luminary did not finish starting up.\n\n\
-             What the app reported: {}\n\n\
-             Details: {}\n\n\
-             (Reported from the startup screen. Anything else you can add about \
-             what you did just before this is helpful.)",
+            "{}\n\nWhat the app reported: {}\n\nDetails: {}\n\n\
+             (Please add what you were doing just before this.)",
+            opening,
             self.message,
             if self.detail.is_empty() {
                 "none"
@@ -156,6 +217,12 @@ impl Report {
                 &self.detail
             },
         )
+    }
+
+    /// A report raised from Settings while everything works is a feature request
+    /// or a non-fatal bug, not a startup failure, and must not claim to be one.
+    fn failed(&self) -> bool {
+        !self.message.is_empty() && self.step != "ready"
     }
 
     /// The whole thing as plain text, for the clipboard.
@@ -173,11 +240,15 @@ impl Report {
     ///
     /// Field names are the `id`s in `.github/ISSUE_TEMPLATE/bug_report.yml`.
     pub fn issue_url(&self) -> String {
-        let title = format!(
-            "[Bug]: startup failed at '{}' ({})",
-            self.step,
-            fingerprint(&self.step, &self.message)
-        );
+        let title = if self.failed() {
+            format!(
+                "[Bug]: startup failed at '{}' ({})",
+                self.step,
+                fingerprint(&self.step, &self.message)
+            )
+        } else {
+            "[Bug]: ".to_string()
+        };
         let desc = redact(&self.what_happened());
         let env = redact(&self.environment());
 
@@ -215,6 +286,8 @@ mod tests {
             message: "Luminary's engine stopped during startup".into(),
             detail: detail.into(),
             log: vec!["line one".into(), "line two".into()],
+            // 0 = never started, so no request is made from a test.
+            ollama_port: 0,
         }
     }
 
@@ -303,6 +376,43 @@ mod tests {
             assert!(url.contains(field), "missing {field}");
         }
         assert!(!url.contains(' '), "unencoded space in {url}");
+    }
+
+    #[test]
+    fn the_environment_carries_what_reproducing_needs() {
+        // nupsea/luminary#41: a version and an OS name were not enough to
+        // rebuild someone's setup.
+        let env = report("boom").environment();
+        for expected in ["Luminary ", "macOS ", "build ", "Darwin ", "Ollama "] {
+            assert!(env.contains(expected), "missing {expected:?} in {env}");
+        }
+        assert!(env.lines().count() >= 4, "collapsed to one line: {env}");
+    }
+
+    #[test]
+    fn an_unreachable_ollama_says_so_rather_than_guessing() {
+        assert!(ollama_summary(0).contains("not answering"));
+    }
+
+    #[test]
+    fn model_names_are_read_out_of_the_tags_response() {
+        let body = r#"{"models":[{"name":"llama3.2:latest","size":2019393189},
+                       {"name":"qwen2.5vl:7b","size":6000000000}]}"#;
+        assert_eq!(
+            json_strings(body, "name"),
+            vec!["llama3.2:latest", "qwen2.5vl:7b"]
+        );
+    }
+
+    #[test]
+    fn a_report_from_a_running_app_is_not_dressed_as_a_crash() {
+        let mut r = report("");
+        r.step = "ready".into();
+        r.message = "".into();
+
+        assert!(!r.what_happened().contains("did not finish starting up"));
+        // No fingerprint in the title: there is no failure to deduplicate.
+        assert!(r.issue_url().contains("title=%5BBug%5D%3A%20"));
     }
 
     #[test]

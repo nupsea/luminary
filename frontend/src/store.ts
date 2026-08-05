@@ -72,6 +72,13 @@ interface AppState {
   setStudySectionFilter: (filter: StudySectionFilter | null) => void
   setChatPreload: (preload: { text: string; documentId: string | null; autoSubmit?: boolean }) => void
   clearChatPreload: () => void
+  // The Add Content dialog is app-wide state, not the library page's, because a
+  // file can be dropped on any surface. Transient: a File cannot be persisted.
+  uploadDialogOpen: boolean
+  pendingUpload: File | null
+  openUploadDialog: (file?: File) => void
+  closeUploadDialog: () => void
+  clearPendingUpload: () => void
   setActiveCollectionId: (id: string | null) => void
   setActiveTag: (tag: string | null) => void
   // Transient (not persisted): set before navigating to the reader from a
@@ -136,6 +143,11 @@ export const useAppStore = create<AppState>()(
       setStudySectionFilter: (filter) => set({ studySectionFilter: filter }),
       setChatPreload: (preload) => set({ chatPreload: preload }),
       clearChatPreload: () => set({ chatPreload: null }),
+      uploadDialogOpen: false,
+      pendingUpload: null,
+      openUploadDialog: (file) => set({ uploadDialogOpen: true, pendingUpload: file ?? null }),
+      closeUploadDialog: () => set({ uploadDialogOpen: false, pendingUpload: null }),
+      clearPendingUpload: () => set({ pendingUpload: null }),
       setActiveCollectionId: (id) => set({ activeCollectionId: id }),
       setActiveTag: (tag) => set({ activeTag: tag }),
       pendingStudyResume: null,

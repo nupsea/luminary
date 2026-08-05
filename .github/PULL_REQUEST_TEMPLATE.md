@@ -22,13 +22,13 @@ Please check the options that apply:
 
 Describe the tests or steps you ran to verify your changes. If this is a UI change, please include **screenshots** or a **GIF** showing the before/after behavior.
 
-### 🧪 Local Tests Run
+### Local Tests Run
 - [ ] **Backend Tests**: Run `make test` and ensure all tests pass.
 - [ ] **Linting & Formatting Check**: Run `make lint` (runs `ruff` and checks schema coverage).
 - [ ] **Frontend Build & Types**: Run `make build` and verify `cd frontend && npx tsc --noEmit` passes.
 - [ ] **Full Integration Suite**: Run `make ci` (runs all checks together).
 
-### 🗄️ Database Changes (If applicable)
+### Database Changes (If applicable)
 *If you modified `backend/app/models.py`:*
 - [ ] I ran `make db-revision m="description"` to generate the migration file.
 - [ ] I inspected the generated revision under `backend/alembic/versions/` to verify it matches my intention (no destructive auto-drops).

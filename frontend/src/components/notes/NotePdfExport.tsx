@@ -44,7 +44,7 @@ export function NotePdfExport({ title, content, onDone }: NotePdfExportProps) {
   return (
     <div aria-hidden className="pointer-events-none fixed left-[-10000px] top-0 w-[794px]">
       <div ref={hostRef}>
-        <MarkdownRenderer serif>{content}</MarkdownRenderer>
+        <MarkdownRenderer reading>{content}</MarkdownRenderer>
       </div>
     </div>
   )

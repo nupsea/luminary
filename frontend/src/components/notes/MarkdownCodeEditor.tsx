@@ -81,7 +81,7 @@ export interface MarkdownCodeEditorProps {
 const editorTheme = EditorView.theme({
   "&": { height: "100%", fontSize: "13.5px", backgroundColor: "transparent" },
   ".cm-scroller": {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    fontFamily: "var(--font-mono)",
     lineHeight: "1.65",
     overflow: "auto",
   },

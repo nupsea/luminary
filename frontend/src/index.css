@@ -69,7 +69,10 @@
       "Helvetica Neue", Arial, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
       "Liberation Mono", "Courier New", monospace;
-    --font-serif: ui-serif, Georgia, "Source Serif 4", "Times New Roman", serif;
+    /* ui-serif first so macOS gets New York rather than Georgia; Times New
+       Roman is the last resort, never the second choice. */
+    --font-serif: ui-serif, "Source Serif 4", "Iowan Old Style", Charter, Georgia,
+      "Times New Roman", serif;
 
     --text-eyebrow: 0.625rem;
     --text-caption: 0.75rem;
@@ -129,7 +132,7 @@
   body {
     @apply bg-background text-foreground;
     margin: 0;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
   }
 }
 

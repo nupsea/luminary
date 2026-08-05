@@ -6,7 +6,7 @@ mod stage;
 mod supervisor;
 
 use std::os::unix::process::ExitStatusExt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,9 @@ struct BootEvent {
 struct BootState {
     last: Mutex<Option<BootEvent>>,
     running: AtomicBool,
+    /// Where the bundled Ollama is listening, so a report can ask it for its
+    /// version and model list. 0 until it starts.
+    ollama_port: AtomicU16,
 }
 
 fn publish(app: &AppHandle, event: BootEvent) {
@@ -203,6 +206,9 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
             )
         }
     };
+    if let Some(state) = app.try_state::<BootState>() {
+        state.ollama_port.store(ollama_port, Ordering::Relaxed);
+    }
     // Non-fatal: the library, search and cloud routing all work without it.
     if let Err(e) = supervisor::spawn_ollama(&sup, &stage, &data_dir, ollama_port) {
         logging::write("shell", &format!("local model server unavailable: {e}"));
@@ -269,11 +275,17 @@ fn build_report(app: &AppHandle) -> report::Report {
         .and_then(|s| s.last.lock().ok().and_then(|l| l.clone()))
         .unwrap_or_default();
 
+    let ollama_port = app
+        .try_state::<BootState>()
+        .map(|s| s.ollama_port.load(Ordering::Relaxed))
+        .unwrap_or(0);
+
     report::Report {
         step: last.step.to_string(),
         message: last.message,
         detail: last.detail,
         log: logging::tail(REPORT_LOG_LINES),
+        ollama_port,
     }
 }
 
@@ -356,6 +368,10 @@ fn main() {
                 .title("Luminary")
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(900.0, 600.0)
+                // On by default, and it swallows the OS drop before the webview
+                // sees it -- so the app's HTML5 drop handlers never fired and
+                // dragging a file in did nothing at all.
+                .disable_drag_drop_handler()
                 .build()?;
 
             start_boot(app.handle().clone(), for_setup.clone());

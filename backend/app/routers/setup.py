@@ -17,6 +17,8 @@ from app.services.components import (
     install_component,
     remove_component,
 )
+from app.services.diagnostics import environment_report
+from app.services.enrichment_worker import requeue_skipped_jobs
 from app.services.startup_status import get_startup_status
 from app.services.warmup import retry_failed
 
@@ -28,6 +30,12 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 @router.get("/components")
 async def list_components() -> dict:
     return {"components": await component_status()}
+
+
+@router.get("/report")
+async def environment_report_endpoint() -> dict:
+    """The environment block for a bug report, scrubbed of the account name."""
+    return {"environment": await environment_report()}
 
 
 @router.get("/capabilities")
@@ -55,20 +63,25 @@ async def install(component_id: str) -> StreamingResponse:
 
     async def _stream():
         status = get_startup_status()
+        # Mirror installs into the startup registry so the setup screen and the
+        # boot progress agree. Keyed off the phase registry, so a new component
+        # reports progress without another branch here.
+        phase = component_id if status.has_phase(component_id) else None
         try:
             async for event in install_component(component_id):
-                # Mirror model installs into the startup registry so the setup
-                # screen and the boot progress show one consistent picture.
-                if component_id == "chat_model":
+                if phase is not None:
                     if event["state"] == "downloading":
                         status.set_progress(
-                            "chat_model",
+                            phase,
                             event.get("completed_bytes", 0),
                             event.get("total_bytes", 0),
                             event.get("detail", ""),
                         )
                     else:
-                        status.set_state("chat_model", event["state"], event.get("detail", ""))
+                        status.set_state(phase, event["state"], event.get("detail", ""))
+                if event["state"] == "ready":
+                    # Work that was skipped for want of this component can run now.
+                    await requeue_skipped_jobs()
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as exc:
             logger.exception("component install failed: %s", component_id)

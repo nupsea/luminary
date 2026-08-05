@@ -26,6 +26,10 @@ _LLM_SETTING_KEYS = (
     "llm_mode",
     "cloud_provider",
     "cloud_model",
+    # Empty means "whatever config says". Kept settable because a user who
+    # installs a model has no other way to start using it.
+    "local_chat_model",
+    "vision_model",
     "openai_api_key",
     "anthropic_api_key",
     "google_api_key",
@@ -37,6 +41,8 @@ _DEFAULTS: dict[str, str] = {
     "llm_mode": "private",
     "cloud_provider": "openai",
     "cloud_model": "gpt-4o-mini",
+    "local_chat_model": "",
+    "vision_model": "",
     "openai_api_key": "",
     "anthropic_api_key": "",
     "google_api_key": "",
@@ -170,10 +176,31 @@ async def get_llm_settings(db: AsyncSession) -> dict:
         "mode": _cache["llm_mode"],
         "provider": _cache["cloud_provider"],
         "model": _cache["cloud_model"],
+        "local_chat_model": get_local_chat_model(),
+        "vision_model": get_vision_model(),
         "has_openai_key": bool(_cache["openai_api_key"]),
         "has_anthropic_key": bool(_cache["anthropic_api_key"]),
         "has_google_key": bool(_cache["google_api_key"]),
     }
+
+
+def _with_ollama_prefix(model: str) -> str:
+    return model if "/" in model else f"ollama/{model}"
+
+
+def get_local_chat_model() -> str:
+    """The on-device chat model, as chosen in Settings or configured."""
+    from app.config import get_settings  # noqa: PLC0415
+
+    return _with_ollama_prefix(_cache["local_chat_model"] or get_settings().LITELLM_DEFAULT_MODEL)
+
+
+def get_vision_model() -> str:
+    """The model that reads figures, as chosen in Settings or configured."""
+    from app.config import get_settings  # noqa: PLC0415
+
+    chosen = _cache["vision_model"]
+    return _with_ollama_prefix(chosen) if chosen else get_settings().VISION_MODEL
 
 
 async def update_llm_settings(
@@ -182,6 +209,8 @@ async def update_llm_settings(
     mode: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    local_chat_model: str | None = None,
+    vision_model: str | None = None,
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
     google_api_key: str | None = None,
@@ -206,6 +235,14 @@ async def update_llm_settings(
     if model is not None:
         updates_db["cloud_model"] = model
         updates_cache["cloud_model"] = model
+    # Empty string is meaningful here: it clears the override and falls back to
+    # the configured default, so it must not be treated as "do not change".
+    if local_chat_model is not None:
+        updates_db["local_chat_model"] = local_chat_model
+        updates_cache["local_chat_model"] = local_chat_model
+    if vision_model is not None:
+        updates_db["vision_model"] = vision_model
+        updates_cache["vision_model"] = vision_model
 
     key_args = {
         "openai_api_key": openai_api_key,
@@ -302,12 +339,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
         effective_mode = mode
 
     if effective_mode == "private":
-        from app.config import get_settings  # noqa: PLC0415
-
-        ollama_model = get_settings().LITELLM_DEFAULT_MODEL
-        if not ollama_model.startswith("ollama/"):
-            ollama_model = f"ollama/{ollama_model}"
-        return ollama_model, None
+        return get_local_chat_model(), None
 
     provider = _cache["cloud_provider"]
     cloud_model = _cache["cloud_model"]

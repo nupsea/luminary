@@ -133,6 +133,62 @@ async def test_patch_llm_settings_persists_mode(test_db):
     assert svc_module._cache["cloud_provider"] == "anthropic"
 
 
+async def test_local_models_default_to_config_and_are_settable(test_db, monkeypatch):
+    """Installing a model you cannot then select is not a setting.
+
+    Both were config-only, so the vision model a user installed could never be
+    put to use without editing .env.
+    """
+    import unittest.mock
+
+    from app.config import get_settings
+    from app.services.settings_service import get_local_chat_model, get_vision_model
+
+    assert get_local_chat_model() == get_settings().LITELLM_DEFAULT_MODEL
+    assert get_vision_model() == get_settings().VISION_MODEL
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models",
+            return_value=(True, ["ollama/qwen3:8b", "ollama/qwen2.5vl:7b"]),
+        ):
+            resp = await client.patch(
+                "/settings/llm",
+                json={"local_chat_model": "ollama/qwen3:8b", "vision_model": "qwen2.5vl:7b"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["local_chat_model"] == "ollama/qwen3:8b"
+    # A bare name is stored as given and normalised on read.
+    assert data["vision_model"] == "ollama/qwen2.5vl:7b"
+    assert get_vision_model() == "ollama/qwen2.5vl:7b"
+
+    # The chat routing follows the choice, not the config default.
+    assert get_effective_routing()[0] == "ollama/qwen3:8b"
+    # And what the UI reports as active is what routing uses -- those disagreed.
+    assert data["active_model"] == "ollama/qwen3:8b"
+
+
+async def test_clearing_a_model_choice_falls_back_to_config(test_db):
+    """Empty means 'use the configured default', not 'leave unchanged'."""
+    import unittest.mock
+
+    from app.config import get_settings
+    from app.services.settings_service import get_vision_model
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            await client.patch("/settings/llm", json={"vision_model": "ollama/other-vl:3b"})
+            assert get_vision_model() == "ollama/other-vl:3b"
+
+            await client.patch("/settings/llm", json={"vision_model": ""})
+
+    assert get_vision_model() == get_settings().VISION_MODEL
+
+
 async def test_patch_llm_settings_rejects_unknown_fields(test_db):
     """PATCH /settings/llm returns 422 for unknown field names (extra='forbid')."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
