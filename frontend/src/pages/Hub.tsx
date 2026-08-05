@@ -159,13 +159,11 @@ function DailyQuote() {
           </span>
         </div>
 
-        <blockquote className="max-w-3xl text-xl font-medium italic leading-snug tracking-[-0.015em] text-primary-foreground sm:text-2xl">
-          {quote.text}
+        <blockquote className="max-w-3xl text-xl font-medium leading-snug tracking-[-0.015em] text-gray-200 sm:text-2xl">
+          &ldquo;{quote.text}&rdquo;
         </blockquote>
 
-        {/* Upright, so the attribution reads as metadata rather than as part
-            of the quotation. */}
-        <figcaption className="text-xs not-italic text-primary-foreground/70">
+        <figcaption className="text-xs text-primary-foreground/70">
           <span className="font-semibold text-primary-foreground/85">{quote.author}</span>
           <span> · {quote.source}</span>
         </figcaption>
