@@ -20,7 +20,6 @@ import { LibraryTagRail } from "@/components/library/LibraryTagRail"
 import { IngestingPlaceholder } from "@/components/library/IngestingPlaceholder"
 import { SearchBar } from "@/components/library/SearchBar"
 import { SortSelect } from "@/components/library/SortSelect"
-import { UploadDialog } from "@/components/library/UploadDialog"
 import { ViewToggle } from "@/components/library/ViewToggle"
 import type { ContentType, SortOption } from "@/components/library/types"
 import { DocumentReader } from "@/components/reader/DocumentReader"
@@ -129,7 +128,9 @@ export default function Learning() {
     if (incomingCollectionId) clearActiveCollectionId(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const [uploadOpen, setUploadOpen] = useState(false)
+  // App-wide: a file can be dropped on any surface, so the dialog is mounted
+  // once in App and opened through the store.
+  const setUploadOpen = useAppStore((st) => st.openUploadDialog)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -414,7 +415,7 @@ export default function Learning() {
           Select
         </button>
         <button
-          onClick={() => setUploadOpen(true)}
+          onClick={() => setUploadOpen()}
           className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Plus size={14} />
@@ -514,7 +515,7 @@ export default function Learning() {
           {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
           ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 && !selectedCollectionId ? (
-            <EmptyState onAdd={() => setUploadOpen(true)} />
+            <EmptyState onAdd={() => setUploadOpen()} />
           ) : (
             <>
               {/* Bulk select header */}
@@ -693,7 +694,6 @@ export default function Learning() {
         </DialogContent>
       </Dialog>
 
-      <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   )
 }

@@ -13,13 +13,13 @@ import { AlertTriangle, ArrowRight, BookPlus, CheckCircle2, Loader2 } from "luci
 import { Link } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
-import { UploadDialog } from "@/components/library/UploadDialog"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { apiGet } from "@/lib/apiClient"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import { launchStudy } from "@/lib/studyLauncher"
 import { generateFlashcards } from "@/pages/Study/api"
 import { cn } from "@/lib/utils"
+import { useAppStore } from "@/store"
 
 interface FirstRunDoc {
   id: string
@@ -35,7 +35,7 @@ interface DocsPage {
 type GenState = "idle" | "generating" | "done" | "error"
 
 export function FirstRunGuide() {
-  const [uploadOpen, setUploadOpen] = useState(false)
+  const setUploadOpen = useAppStore((st) => st.openUploadDialog)
   const [genState, setGenState] = useState<GenState>("idle")
   const [genCount, setGenCount] = useState(0)
 
@@ -123,7 +123,7 @@ export function FirstRunGuide() {
             action={
               !step1Done && (
                 <button
-                  onClick={() => setUploadOpen(true)}
+                  onClick={() => setUploadOpen()}
                   className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                 >
                   <BookPlus size={14} />
@@ -211,7 +211,6 @@ export function FirstRunGuide() {
         </div>
       </div>
 
-      <UploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </>
   )
 }

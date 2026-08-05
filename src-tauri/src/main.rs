@@ -356,6 +356,10 @@ fn main() {
                 .title("Luminary")
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(900.0, 600.0)
+                // On by default, and it swallows the OS drop before the webview
+                // sees it -- so the app's HTML5 drop handlers never fired and
+                // dragging a file in did nothing at all.
+                .disable_drag_drop_handler()
                 .build()?;
 
             start_boot(app.handle().clone(), for_setup.clone());

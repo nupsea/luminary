@@ -9,6 +9,9 @@ import {
 import type { QueryKey } from "@tanstack/react-query"
 import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary"
+import { UploadDialog } from "@/components/library/UploadDialog"
+import { WindowDropZone } from "@/components/library/WindowDropZone"
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { Toaster } from "sonner"
@@ -359,9 +362,11 @@ function HomeRoute() {
   const target = getHomeRedirectTarget(search)
   if (target) return <Navigate to={target} replace />
   return (
-    <Suspense fallback={<PageSkeleton />}>
-      <Hub />
-    </Suspense>
+    <RouteErrorBoundary>
+      <Suspense fallback={<PageSkeleton />}>
+        <Hub />
+      </Suspense>
+    </RouteErrorBoundary>
   )
 }
 
@@ -382,6 +387,8 @@ function NotFoundRedirect() {
 
 function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
+  const uploadDialogOpen = useAppStore((s) => s.uploadDialogOpen)
+  const closeUploadDialog = useAppStore((s) => s.closeUploadDialog)
   const [ollamaWarningDismissed, setOllamaWarningDismissed] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -578,7 +585,11 @@ function AppShell() {
               <Route
                 key={s.id}
                 path={route}
-                element={<Suspense fallback={<PageSkeleton />}><Comp /></Suspense>}
+                element={
+                  <RouteErrorBoundary>
+                    <Suspense fallback={<PageSkeleton />}><Comp /></Suspense>
+                  </RouteErrorBoundary>
+                }
               />
             )
           })}
@@ -613,6 +624,10 @@ function AppShell() {
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
       <StudyLauncher />
+      {/* Mounted once, above every page: a file can be dropped on any surface,
+          and the dialog it opens must exist wherever that happens. */}
+      <WindowDropZone />
+      <UploadDialog open={uploadDialogOpen} onClose={closeUploadDialog} />
     </div>
   )
 }
