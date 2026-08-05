@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
@@ -156,6 +156,75 @@ async def test_finalize_persists_word_and_page_count(test_db, monkeypatch):
         doc = await session.get(DocumentModel, doc_id)
         assert doc.word_count == state["parsed_document"]["word_count"] > 0
         assert doc.page_count == 5
+
+
+async def test_finalize_records_document_activity(test_db, monkeypatch):
+    """content_activity is the hub's only source, and nothing wrote to it on
+    ingest -- so a library full of documents rendered an empty hub."""
+    import app.workflows.ingestion_nodes.finalize as fin
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    async def _noop(*_a, **_k):
+        return None
+
+    class _Worker:
+        async def _dispatch_pending(self):
+            return None
+
+    monkeypatch.setattr(fin, "_run_pregenerate", _noop)
+    monkeypatch.setattr(fin, "enrich_document_tags", _noop)
+    monkeypatch.setattr(fin, "get_enrichment_worker", lambda: _Worker())
+
+    await fin.enrichment_enqueue_node(_make_state(doc_id, _make_pdf_sections(2), format="pdf"))
+
+    async with factory() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT member_id FROM content_activity "
+                    "WHERE member_type = 'document' AND member_id = :d"
+                ),
+                {"d": doc_id},
+            )
+        ).first()
+    assert row is not None
+
+
+async def test_finalize_survives_an_activity_write_failure(test_db, monkeypatch):
+    """A hub feed must never be able to fail an ingestion."""
+    import app.workflows.ingestion_nodes.finalize as fin
+
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    async def _noop(*_a, **_k):
+        return None
+
+    async def _boom(self, document_id):
+        raise RuntimeError("activity table is on fire")
+
+    class _Worker:
+        async def _dispatch_pending(self):
+            return None
+
+    monkeypatch.setattr(fin, "_run_pregenerate", _noop)
+    monkeypatch.setattr(fin, "enrich_document_tags", _noop)
+    monkeypatch.setattr(fin, "get_enrichment_worker", lambda: _Worker())
+    monkeypatch.setattr(fin.ActivityService, "record_document_added", _boom)
+
+    await fin.enrichment_enqueue_node(_make_state(doc_id, _make_pdf_sections(2), format="pdf"))
+
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+    assert doc.stage == "complete"
 
 
 async def test_txt_chunks_have_null_page_numbers(test_db):

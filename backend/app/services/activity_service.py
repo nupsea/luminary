@@ -33,6 +33,17 @@ class ActivityService:
             "document", document_id, self.DOC_READ_DEBOUNCE
         )
 
+    async def record_document_added(self, document_id: str) -> bool:
+        """Bump when a document finishes ingesting.
+
+        The exception to the no-clicks rule above: adding a document is content
+        intent, not navigation. Without it the hub's recent/continue/fading
+        feeds stay empty after an ingest, because this table is their only
+        source, and a fresh library looks broken.
+        """
+        await self._bump_unconditional("document", document_id)
+        return True
+
     async def record_note_edit(self, note_id: str) -> bool:
         """Bump on a meaningful note edit (content change, not a pure open)."""
         return await self._bump_if_stale("note", note_id, self.NOTE_EDIT_DEBOUNCE)

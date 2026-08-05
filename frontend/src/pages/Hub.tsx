@@ -73,11 +73,13 @@ export default function Hub() {
   if (isLoading) return <HubLoading />
   if (isError || !data) return <HubError onRetry={() => void refetch()} />
 
+  // recent_tags is deliberately not counted: the auto-tagger tags every
+  // ingested document, so including it made this false forever and replaced the
+  // first-run guide with a page of empty sections.
   const isEmpty =
     !data.today_action &&
     data.recent_items.length === 0 &&
     data.active_collections.length === 0 &&
-    data.recent_tags.length === 0 &&
     (data.continue_reading?.length ?? 0) === 0 &&
     (data.fading_items?.length ?? 0) === 0
 
