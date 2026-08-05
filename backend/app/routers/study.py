@@ -1025,7 +1025,7 @@ async def get_collection_study_dashboard(
                 )
             )
         ).all()
-        child_name_map = {cid: name for cid, name in name_rows}
+        child_name_map = dict(name_rows)
 
     sub_collections: list[CollectionSubCollection] = []
     for child_id in direct_children:
@@ -1997,7 +1997,7 @@ async def get_decay_debt(
     # Group at-risk cards by document.
     from collections import defaultdict
     doc_cards: dict[str, list[tuple[float, int]]] = defaultdict(list)
-    for card_id, doc_id, stability, due_date in cards:
+    for _card_id, doc_id, stability, due_date in cards:
         # days elapsed since the scheduled due date (positive = overdue)
         due_aware = due_date.replace(tzinfo=UTC) if due_date.tzinfo is None else due_date
         days_since_due = (now - due_aware).total_seconds() / 86400

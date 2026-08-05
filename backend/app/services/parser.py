@@ -230,7 +230,7 @@ class DocumentParser:
                         all_sizes.append(max(s["size"] for s in spans))
 
         # Distinct sizes above body threshold, sorted largest first.
-        heading_sizes = sorted(set(s for s in all_sizes if s >= heading_threshold), reverse=True)
+        heading_sizes = sorted({s for s in all_sizes if s >= heading_threshold}, reverse=True)
         # Level-1 = the top distinct size group; level-2 = the rest above threshold.
         h1_min = heading_sizes[0] if heading_sizes else heading_threshold
         logger.info(

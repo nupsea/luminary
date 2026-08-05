@@ -50,7 +50,7 @@ target-version = "py313"
 extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "PL"]
+select = ["E", "F", "I", "UP", "PL", "B", "ASYNC", "S", "SIM", "RUF", "C4", "TRY", "PERF"]
 ignore = [
     "PLC0415",   # import-outside-toplevel: lazy-loading pattern is intentional (embedder)
     "PLR0911",   # too-many-return-statements: acceptable for complex service methods
@@ -59,11 +59,36 @@ ignore = [
     "PLR0915",   # too-many-statements: acceptable for complex async generators (stream_answer)
     "PLR2004",   # magic-value-comparison: HTTP status codes (200, 400, etc.) are well-known
     "PLW0603",   # global-statement: lazy singleton pattern for engine/session_factory
+    "B008",      # the FastAPI Depends()/Query() idiom
+    "RUF100",    # `# noqa: PLC0415` marks a deliberate lazy import (I-5); PLC0415 is
+                 # ignored above, so RUF100 would strip all 152 of those markers
+    "RUF001",
+    "RUF003",
+    "TRY003",
+    "TRY300",
+    "ASYNC109",  # timeout is passed through to LiteLLM/httpx, which owns it
+    # Deferred; remove the line when its WP lands. See docs/refactor-quality-plan.md.
+    "ASYNC240",  # WP4
+    "S110",      # WP3
+    "S112",      # WP3
+    "SIM105",    # WP3
+    "TRY400",    # WP3
+    "TRY004",    # WP3
+    "TRY203",    # WP3
+    "TRY301",    # WP3
+    "B904",      # WP3
+    "PERF401",   # WP5
+    "PERF403",   # WP5
+    "RUF059",    # WP5
+    "SIM102",    # WP5
+    "SIM108",    # WP5
+    "SIM117",    # WP5
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PL"]
-"tools/**" = ["PL"]
+"tests/**" = ["PL", "S", "B", "TRY", "PERF", "SIM", "RUF", "C4", "ASYNC"]
+"tools/**" = ["PL", "S"]
+"app/scripts/**" = ["S"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

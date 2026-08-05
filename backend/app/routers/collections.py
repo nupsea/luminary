@@ -189,10 +189,7 @@ def _make_collection_name(title: str, content_type: str) -> str:
     key_words: list[str] = []
     for w in words:
         # Always keep all-caps / acronyms (DDIA, AI, LLM)
-        if w.isupper() and len(w) >= 2:
-            key_words.append(w)
-        # Keep capitalized words that aren't filler
-        elif w[0].isupper() and w.lower() not in filler:
+        if (w.isupper() and len(w) >= 2) or (w[0].isupper() and w.lower() not in filler):
             key_words.append(w)
 
     # Fallback: if we filtered too aggressively, take first 3 significant words

@@ -292,7 +292,7 @@ def find_canonical(name: str, entity_type: str, existing_names: list[str]) -> st
 
 
 class _Cluster:
-    __slots__ = ("rep_tokens", "members", "pool_name", "etype")
+    __slots__ = ("etype", "members", "pool_name", "rep_tokens")
 
     def __init__(
         self,

@@ -57,7 +57,7 @@ def _percentile(values: list[int], pct: float) -> int:
     lo = int(rank)
     hi = min(lo + 1, len(s) - 1)
     frac = rank - lo
-    return int(round(s[lo] * (1 - frac) + s[hi] * frac))
+    return round(s[lo] * (1 - frac) + s[hi] * frac)
 
 
 async def _list_document_ids() -> list[str]:
@@ -162,7 +162,9 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
         chunk_to_entities: dict[str, set[str]] = {}
         alias_map: dict[str, list[str]] = {}
         canonical_entities: list[dict] = []
-        for (canonical, canonical_type, original), ent in zip(canonical_triples, entities):
+        for (canonical, canonical_type, original), ent in zip(
+            canonical_triples, entities, strict=True
+        ):
             chunk_to_entities.setdefault(ent["chunk_id"], set()).add(canonical)
             canonical_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{doc_id}:{canonical}"))
             if original != canonical:

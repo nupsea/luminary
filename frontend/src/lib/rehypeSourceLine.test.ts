@@ -43,8 +43,9 @@ describe("rehypeSourceLine", () => {
 
   it("leaves existing properties intact", () => {
     const tree: Root = { type: "root", children: [element("p", 2)] }
-    tree.children[0].type === "element" &&
-      (tree.children[0].properties = { className: ["keep"] })
+    if (tree.children[0].type === "element") {
+      tree.children[0].properties = { className: ["keep"] }
+    }
     rehypeSourceLine()(tree)
     const node = tree.children[0]
     expect(node.type === "element" && node.properties).toEqual({

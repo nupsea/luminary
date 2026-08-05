@@ -7,6 +7,7 @@ Endpoints:
   GET  /documents/{id}/enrichment        -- enrichment job list for a document
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -107,8 +108,7 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
                 raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
             if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
                 raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
-        with open(target_path, "wb") as f:
-            f.write(content)
+        await asyncio.to_thread(target_path.write_bytes, content)
     except HTTPException:
         raise
     except Exception as e:

@@ -45,7 +45,6 @@ export function FloatingToolbar({ containerRef, onExplain, onHighlight }: Floati
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const nonNullContainer = container!
 
     function handleMouseUp(e: MouseEvent) {

@@ -14,21 +14,42 @@ from pathlib import Path
 
 LAYER_ORDER: dict[str, int] = {
     "types": 0,
+    "schema": 0,
     "config": 1,
     "database": 1,
     "models": 1,
+    "paths": 1,
     "repo": 2,
     "service": 3,
     "workflow": 3,
+    "runtime": 3,
     "router": 4,
     "main": 5,
 }
 
 # Map subdirectory names to layer keys
 SUBDIR_MAP: dict[str, str] = {
+    "repos": "repo",
+    "schemas": "schema",
     "services": "service",
     "routers": "router",
     "workflows": "workflow",
+    "runtime": "runtime",
+}
+
+# Predates enforcement; may only shrink. See docs/refactor-quality-plan.md.
+KNOWN_VIOLATIONS: set[tuple[str, str]] = {
+    # WP2
+    ("repos/annotation_repo.py", "app.services.repo_helpers"),
+    ("repos/clip_repo.py", "app.services.repo_helpers"),
+    ("repos/collection_repo.py", "app.services.repo_helpers"),
+    ("repos/document_repo.py", "app.services.repo_helpers"),
+    ("repos/flashcard_repo.py", "app.services.repo_helpers"),
+    ("repos/note_repo.py", "app.services.repo_helpers"),
+    ("repos/study_repo.py", "app.services.repo_helpers"),
+    ("repos/tag_repo.py", "app.services.repo_helpers"),
+    ("schemas/documents.py", "app.workflows.ingestion"),
+    ("services/qa.py", "app.runtime.chat_graph"),
 }
 
 APP_DIR = Path(__file__).parent.parent / "app"
@@ -86,6 +107,8 @@ def check_file(filepath: Path) -> list[str]:
         for module in modules:
             target_layer = get_layer_for_module(module)
             if target_layer is not None and source_layer < target_layer:
+                if (relative.as_posix(), module) in KNOWN_VIOLATIONS:
+                    continue
                 violations.append(
                     f"Layer violation in app/{relative}: "
                     f"layer {source_layer} cannot import from layer {target_layer} "

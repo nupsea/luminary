@@ -11,6 +11,7 @@ evidence_json for downstream generation/mastery. No-ops on a dry run.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import uuid
@@ -33,7 +34,7 @@ logger = logging.getLogger("concepts.pipeline")
 def _sig_slug(entities: list[str]) -> str:
     """Stable identity: concept prefix + hash of the sorted member-entity signature."""
     sig = "".join(sorted(entities)).encode("utf-8")
-    return f"c-{hashlib.sha1(sig).hexdigest()[:12]}"
+    return f"c-{hashlib.sha1(sig, usedforsecurity=False).hexdigest()[:12]}"
 
 
 async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
@@ -116,10 +117,8 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
 
         # lateral RELATED_TO concept edges
         for a, b, w in state.get("lateral_edges", []):
-            try:
+            with contextlib.suppress(Exception):
                 graph.add_concept_relation(concept_ids[a], concept_ids[b], float(w), "proposed")
-            except Exception:
-                pass
 
         # --- re-map cards to the rebuilt concepts by STABLE slug, then re-derive mastery, so a
         # rebuild keeps the learner's record instead of orphaning it. ---

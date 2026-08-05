@@ -266,34 +266,34 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     settings = get_settings()
     payload = {"model": model, "stream": True}
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream(
-            "POST", f"{settings.OLLAMA_URL}/api/pull", json=payload
-        ) as resp:
-            if resp.status_code != 200:
-                body = (await resp.aread()).decode(errors="replace")[:200]
-                yield {"state": "failed", "detail": f"{resp.status_code}: {body}"}
+    timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
+        "POST", f"{settings.OLLAMA_URL}/api/pull", json=payload
+    ) as resp:
+        if resp.status_code != 200:
+            body = (await resp.aread()).decode(errors="replace")[:200]
+            yield {"state": "failed", "detail": f"{resp.status_code}: {body}"}
+            return
+
+        async for raw in resp.aiter_lines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+
+            if error := event.get("error"):
+                yield {"state": "failed", "detail": error}
                 return
 
-            async for raw in resp.aiter_lines():
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-
-                if error := event.get("error"):
-                    yield {"state": "failed", "detail": error}
-                    return
-
-                yield {
-                    "state": "downloading",
-                    "detail": event.get("status", ""),
-                    "completed_bytes": int(event.get("completed") or 0),
-                    "total_bytes": int(event.get("total") or 0),
-                }
+            yield {
+                "state": "downloading",
+                "detail": event.get("status", ""),
+                "completed_bytes": int(event.get("completed") or 0),
+                "total_bytes": int(event.get("total") or 0),
+            }
 
     yield {"state": "ready", "detail": model}
 
@@ -327,7 +327,7 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
     )
     tail: list[str] = []
-    assert proc.stdout is not None
+    assert proc.stdout is not None  # noqa: S101
     async for raw in proc.stdout:
         line = raw.decode(errors="replace").rstrip()
         if not line:

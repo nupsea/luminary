@@ -210,7 +210,7 @@ class EnrichmentQueueWorker:
                     _LLM_RETRY_BASE_DELAY_S * 2 ** (attempt - 1),
                     _LLM_RETRY_MAX_DELAY_S,
                 )
-                delay += random.uniform(0, delay * 0.25)
+                delay += random.uniform(0, delay * 0.25)  # noqa: S311
                 logger.info(
                     "EnrichmentQueueWorker: LLM unavailable, retry %d/%d in %.1fs "
                     "job_id=%s doc=%s",

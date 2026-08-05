@@ -99,7 +99,6 @@ export default class NodeHexagonProgram extends (NodeCircleProgram as any) {
   static ANGLE_3 = (4 * Math.PI) / 3
 
   getDefinition() {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- base class dynamic
     const base = super.getDefinition() as Record<string, unknown>
     return {
       ...base,

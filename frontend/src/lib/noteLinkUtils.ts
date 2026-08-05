@@ -39,7 +39,7 @@ export function parseLinkMarkers(content: string): LinkMarker[] {
  */
 export function buildLinkMarker(id: string, text: string): string {
   // Truncate preview to 60 chars to keep markers compact
-  const safeText = text.slice(0, 60).replace(/[\[\]|]/g, "")
+  const safeText = text.slice(0, 60).replace(/[[\]|]/g, "")
   return `[[${id}|${safeText}]]`
 }
 

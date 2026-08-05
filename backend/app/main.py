@@ -53,15 +53,6 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
-
-# Kept out of the sorted import block above: this one is conditional. The module
-# executes attacker-controllable code as the desktop user with full filesystem
-# and network access -- it is not a sandbox despite its docstring. Distribution
-# builds omit it entirely; source checkouts keep it.
-try:
-    from app.routers.code_executor import router as code_executor_router
-except ImportError:
-    code_executor_router = None
 from app.services.components import activate_extras, install_ollama_model, resolve_tool
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
@@ -323,7 +314,6 @@ ROUTER_REGISTRY = {
     "setup": setup_router,
     "mastery": mastery_router,
     "study": study_router,
-    **({"code_executor": code_executor_router} if code_executor_router else {}),
     "summarize": summarize_router,
     "tags": tags_router,
 }

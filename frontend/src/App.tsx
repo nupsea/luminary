@@ -566,7 +566,7 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* global focus timer pill -- full-mode surface, only when pomodoro is visible */}
+        {/* Focus timer pill (app-wide) -- full-mode surface, only when pomodoro is visible */}
         {pomodoroVisible && (
           <div className="flex items-center justify-end gap-2 px-4 pt-3">
             <FocusTimerPill />

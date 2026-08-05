@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
@@ -111,7 +111,7 @@ def _round_robin(
 
     # Visit groups in order of their highest-scoring chunk (most relevant first).
     ordered_groups = sorted(buckets, key=lambda v: buckets[v][0].score, reverse=True)
-    indices: dict[str, int] = {v: 0 for v in ordered_groups}
+    indices: dict[str, int] = dict.fromkeys(ordered_groups, 0)
 
     result: list[ScoredChunk] = []
     while len(result) < k:
@@ -208,11 +208,10 @@ async def _expand_context(
     async with get_session_factory()() as session:
         # Fetch content_type per document
         ct_result = await session.execute(
-            text(
-                "SELECT id, content_type FROM documents WHERE id IN ("
-                + ", ".join(f"'{did}'" for did in doc_ids)
-                + ")"
-            )
+            text("SELECT id, content_type FROM documents WHERE id IN :doc_ids").bindparams(
+                bindparam("doc_ids", expanding=True)
+            ),
+            {"doc_ids": doc_ids},
         )
         content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
 

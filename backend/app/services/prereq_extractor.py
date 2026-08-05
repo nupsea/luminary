@@ -214,7 +214,7 @@ class PrereqExtractorService:
         # Chain depth per entity: BFS from roots (no outgoing prereq edges) in reverse
         has_prereqs = set(adj.keys())
         roots = all_nodes - has_prereqs
-        depth_map: dict[str, int] = {n: 0 for n in roots}
+        depth_map: dict[str, int] = dict.fromkeys(roots, 0)
 
         reverse_adj: dict[str, list[str]] = {}
         for from_id, neighbors in adj.items():

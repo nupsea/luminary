@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 
 class TagResponse(BaseModel):
     id: str
@@ -231,7 +233,7 @@ async def get_tag_tree(
         rows = (
             await session.execute(
                 sa_text(
-                    f"SELECT tag_full, COUNT(DISTINCT {member_col}) "
+                    f"SELECT tag_full, COUNT(DISTINCT {member_col}) "  # noqa: S608
                     f"FROM {table} GROUP BY tag_full"
                 )
             )
@@ -313,7 +315,7 @@ async def list_tags(
         rows = (
             await session.execute(
                 sa_text(
-                    "SELECT t.id, t.display_name, t.parent_tag, t.usage_count, "
+                    "SELECT t.id, t.display_name, t.parent_tag, t.usage_count, "  # noqa: S608
                     "t.created_at, "
                     f"(SELECT COUNT(DISTINCT idx.{member_col}) FROM {table} idx "
                     "  WHERE idx.tag_full = t.id) AS scoped_count "
@@ -462,7 +464,9 @@ async def scan_for_normalization(
             except Exception:
                 logger.exception("Background tag normalization scan failed")
 
-    asyncio.create_task(_run_scan())
+    task = asyncio.create_task(_run_scan())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return NormalizationScanResponse(queued=True)
 
 

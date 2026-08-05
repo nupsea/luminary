@@ -134,7 +134,7 @@ async def ask_grounded(
                 select(ConceptModel.id, ConceptModel.label).where(ConceptModel.id.in_(concept_ids))
             )
         ).all()
-        label_of = {cid: label for cid, label in rows}
+        label_of = dict(rows)
         concepts = [
             GroundedConcept(id=cid, label=label_of[cid]) for cid in concept_ids if cid in label_of
         ]

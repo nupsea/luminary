@@ -241,23 +241,6 @@
       "description": "Socratic explanation sessions graded against source material."
     },
     {
-      "id": "code_executor",
-      "mode": "full",
-      "kind": "feature",
-      "backend": {
-        "routers": [
-          "code_executor"
-        ],
-        "services": [
-          "code_executor"
-        ]
-      },
-      "labels": {
-        "en": "Code executor"
-      },
-      "description": "Run code snippets extracted from technical documents in a sandbox."
-    },
-    {
       "id": "image_enrichment",
       "mode": "public",
       "kind": "service",

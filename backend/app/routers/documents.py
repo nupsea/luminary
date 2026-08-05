@@ -504,7 +504,7 @@ async def ingest_document(
                 # background task was GC'd before completing all modes).
 
                 async with get_session_factory()() as _s:
-                    existing_modes = set(
+                    existing_modes = {
                         row[0]
                         for row in (
                             await _s.execute(
@@ -513,7 +513,7 @@ async def ingest_document(
                                 )
                             )
                         ).all()
-                    )
+                    }
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
 

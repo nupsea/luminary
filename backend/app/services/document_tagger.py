@@ -244,9 +244,7 @@ def is_acceptable_auto_tag(slug: str, min_length: int) -> bool:
         return False
     if leaf.isdigit():
         return False
-    if leaf in TAG_STOPLIST:
-        return False
-    return True
+    return leaf not in TAG_STOPLIST
 
 
 def _normalize_dedupe(
@@ -486,16 +484,13 @@ async def prune_auto_entity_tags() -> dict[str, int]:
         # tags as stale and strip them right back out.
         chunk_count_by_doc: dict[str, int] = {}
         if docs_with_entity_rows:
-            chunk_count_by_doc = {
-                d: n
-                for d, n in (
+            chunk_count_by_doc = dict((
                     await session.execute(
                         select(ChunkModel.document_id, func.count(ChunkModel.id))
                         .where(ChunkModel.document_id.in_(docs_with_entity_rows))
                         .group_by(ChunkModel.document_id)
                     )
-                ).all()
-            }
+                ).all())
 
         # Per-doc set of slugs the CURRENT entity query would produce. Any
         # entity-1 index row for a slug NOT in this set is now stale.

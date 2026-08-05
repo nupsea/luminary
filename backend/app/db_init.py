@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 from sqlalchemy import inspect, text
@@ -117,9 +118,7 @@ def alembic_include_name(name: str | None, type_: str, parent_names: dict) -> bo
     # Base.metadata, so unfiltered autogenerate emits drop_table() for every one --
     # taking the search index and the c0/c1/c2 shadow contract (I-4) with it.
     # Shared by alembic/env.py and the drift test so the two cannot diverge.
-    if type_ == "table" and name and "_fts" in name:
-        return False
-    return True
+    return not (type_ == "table" and name and "_fts" in name)
 
 
 _ALEMBIC_INI = alembic_ini()
@@ -399,7 +398,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # One-time backfill of the card->concept slug binding for already-mapped cards, so the
         # first rebuild after this migration can re-map them by slug. Idempotent (fills NULLs only).
-        try:
+        with contextlib.suppress(Exception):
             await conn.execute(
                 text(
                     "UPDATE flashcards SET concept_slug = "
@@ -407,8 +406,6 @@ async def create_all_tables(engine: AsyncEngine) -> None:
                     "WHERE flashcards.concept_id IS NOT NULL AND flashcards.concept_slug IS NULL"
                 )
             )
-        except Exception:
-            pass
 
         # learning_goals.document_id was originally created NOT NULL.
         # Drop the constraint via table-rebuild (SQLite has no ALTER COLUMN).

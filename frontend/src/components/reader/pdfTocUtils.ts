@@ -30,7 +30,6 @@ export interface OutlineEntry {
  */
 export async function resolveDestPage(
   doc: PDFDocumentProxy,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rawDest: string | Array<unknown>,
 ): Promise<number> {
   const dest: Array<unknown> | null =

@@ -282,7 +282,7 @@ class KuzuPrereqRepo:
                         subgraph_nodes.add(neighbor_id)
                         queue.append(neighbor_id)
 
-            in_degree: dict[str, int] = {n: 0 for n in subgraph_nodes}
+            in_degree: dict[str, int] = dict.fromkeys(subgraph_nodes, 0)
             sub_adj: dict[str, list[str]] = {n: [] for n in subgraph_nodes}
             for from_id, to_id, _ in subgraph_edges:
                 if from_id in subgraph_nodes and to_id in subgraph_nodes:

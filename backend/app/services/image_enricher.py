@@ -270,7 +270,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
             logger.debug("_call_vision_llm: model %s unavailable (%s), trying next", model, exc)
             continue
     else:
-        assert last_exc is not None
+        assert last_exc is not None  # noqa: S101
         raise last_exc
 
     parsed = parse_llm_json_object(raw)

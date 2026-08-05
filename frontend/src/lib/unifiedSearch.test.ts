@@ -13,7 +13,6 @@ import {
 describe("adaptDocumentResults", () => {
   it("flattens DocumentGroup matches into UnifiedSearchResult rows", () => {
     const out = adaptDocumentResults({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       results: [
         {
           document_id: "doc-1",
@@ -56,7 +55,6 @@ describe("adaptDocumentResults", () => {
 describe("adaptNoteResults", () => {
   it("derives a title from the first non-markdown line and trims snippet", () => {
     const out = adaptNoteResults({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       results: [
         {
           note_id: "n1",
@@ -89,7 +87,6 @@ describe("adaptNoteResults", () => {
 describe("adaptFlashcardResults", () => {
   it("maps question/answer into title/snippet and uses a default score", () => {
     const out = adaptFlashcardResults({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       items: [
         {
           id: "f1",

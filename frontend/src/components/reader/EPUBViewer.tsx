@@ -171,7 +171,6 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
             <div
               className="prose prose-sm dark:prose-invert max-w-none px-6 py-4"
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
-              // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: chapter.html }}
             />
           </div>

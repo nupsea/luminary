@@ -31,10 +31,6 @@ cp -R "$REPO_ROOT/backend/app" "$STAGE/backend/app"
 cp -R "$REPO_ROOT/backend/alembic" "$STAGE/backend/alembic"
 cp "$REPO_ROOT/backend/alembic.ini" "$REPO_ROOT/backend/pyproject.toml" "$STAGE/backend/"
 
-# The code executor runs arbitrary code as the desktop user with full filesystem
-# and network access. It must never reach an end user's machine.
-rm -f "$STAGE/backend/app/routers/code_executor.py" "$STAGE/backend/app/services/code_executor.py"
-
 find "$STAGE/backend" "$STAGE/frontend" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$STAGE/backend" "$STAGE/frontend" \( -name '*.pyc' -o -name '*.db' -o -name '.DS_Store' \) -delete
 
@@ -55,6 +51,9 @@ for f in surface-manifest.json frontend/dist/index.html backend/app/main.py \
     [ -e "$STAGE/$f" ] || _die "missing from stage: $f"
 done
 [ -d "$STAGE/backend/alembic/versions" ] || _die "missing alembic/versions"
+# The code executor was deleted from the repo -- it ran arbitrary code as the
+# desktop user with full filesystem and network access. This guard fails the
+# build if it is ever reintroduced, rather than shipping it to an end user.
 ! [ -e "$STAGE/backend/app/routers/code_executor.py" ] || _die "code_executor leaked into the payload"
 ! grep -rq "/Users/$(whoami)" "$STAGE/backend/app" || _die "personal path in payload"
 

@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import Depends
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import bindparam, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -241,21 +241,17 @@ class CollectionRepo:
             return {}
         # Raw SQL bypasses any SQLAlchemy from-clause auto-detection quirks
         # that have surfaced in cross-test runs; the query is simple enough.
-        placeholders = ",".join(f":m{i}" for i in range(len(member_ids)))
-        params: dict[str, str] = {"member_type": member_type}
-        for i, mid in enumerate(member_ids):
-            params[f"m{i}"] = mid
         rows = (
             await self.session.execute(
                 text(
                     "SELECT cm.member_id, c.id, c.name, c.color "
                     "FROM collection_members cm "
                     "JOIN collections c ON c.id = cm.collection_id "
-                    f"WHERE cm.member_id IN ({placeholders}) "
+                    "WHERE cm.member_id IN :member_ids "
                     "AND cm.member_type = :member_type "
                     "ORDER BY c.sort_order, c.name"
-                ),
-                params,
+                ).bindparams(bindparam("member_ids", expanding=True)),
+                {"member_type": member_type, "member_ids": list(member_ids)},
             )
         ).all()
         out: dict[str, list[tuple[str, str, str]]] = {}

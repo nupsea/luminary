@@ -88,8 +88,10 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 
 _FRONT_BACK_MATTER = frozenset(
-    "foreword preface acknowledgments acknowledgement dedication copyright isbn"
-    " publisher colophon bibliography index glossary".split()
+    [
+        "foreword", "preface", "acknowledgments", "acknowledgement", "dedication",
+        "copyright", "isbn", "publisher", "colophon", "bibliography", "index", "glossary"
+    ]
 )
 
 
@@ -124,10 +126,14 @@ def is_structural_chunk(text: str) -> bool:
 
 
 _STOPWORDS = frozenset(
-    "a an the is are was were be been being have has had do does did will would could should "
-    "may might shall can of in on at to for with by from as into through during about above "
-    "between but and or nor not if then that this these those it its we our they their i my "
-    "what which who when where how".split()
+    [
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has",
+        "had", "do", "does", "did", "will", "would", "could", "should", "may", "might",
+        "shall", "can", "of", "in", "on", "at", "to", "for", "with", "by", "from", "as",
+        "into", "through", "during", "about", "above", "between", "but", "and", "or", "nor",
+        "not", "if", "then", "that", "this", "these", "those", "it", "its", "we", "our",
+        "they", "their", "i", "my", "what", "which", "who", "when", "where", "how"
+    ]
 )
 
 

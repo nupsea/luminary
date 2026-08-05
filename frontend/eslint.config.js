@@ -25,6 +25,19 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      // Warn, not off: `npm run lint` pins --max-warnings so the backlog can
+      // shrink but never grow. Re-raise to error as each WP lands.
+      '@typescript-eslint/no-explicit-any': 'warn', // WP5
+      'react-hooks/refs': 'warn', // WP5
+      'react-hooks/set-state-in-effect': 'warn', // WP5
+      'react-hooks/static-components': 'warn', // WP5
+      'react-refresh/only-export-components': 'warn', // WP5
+    },
   },
   {
     // Forbid raw fetch() outside src/lib/**. Migrations under audit #12
@@ -32,7 +45,7 @@ export default defineConfig([
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/lib/**'],
     rules: {
-      'no-restricted-syntax': ['error', NO_RAW_FETCH],
+      'no-restricted-syntax': ['warn', NO_RAW_FETCH], // WP5
     },
   },
 ])

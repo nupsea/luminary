@@ -3,7 +3,7 @@ import logging
 from datetime import date
 from typing import Literal
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
@@ -218,14 +218,15 @@ class HybridRetriever:
         k: int,
     ) -> list[ScoredChunk]:
         """Run one FTS5 MATCH and hydrate ScoredChunks (BM25 order preserved)."""
+        params: dict[str, object] = {"query": fts_query, "k": k}
         if document_ids:
-            id_list = ", ".join(f"'{did}'" for did in document_ids)
             sql = text(
                 "SELECT chunk_id, document_id, text, bm25(chunks_fts) AS score "
                 "FROM chunks_fts "
-                f"WHERE chunks_fts MATCH :query AND document_id IN ({id_list}) "
+                "WHERE chunks_fts MATCH :query AND document_id IN :doc_ids "
                 "ORDER BY score LIMIT :k"
-            )
+            ).bindparams(bindparam("doc_ids", expanding=True))
+            params["doc_ids"] = list(document_ids)
         else:
             sql = text(
                 "SELECT chunk_id, document_id, text, bm25(chunks_fts) AS score "
@@ -233,17 +234,16 @@ class HybridRetriever:
                 "WHERE chunks_fts MATCH :query "
                 "ORDER BY score LIMIT :k"
             )
-        result = await session.execute(sql, {"query": fts_query, "k": k})
+        result = await session.execute(sql, params)
         fts_rows = result.fetchall()
         if not fts_rows:
             return []
         fts_ids = [row.chunk_id for row in fts_rows]
         meta_result = await session.execute(
-            text(
-                "SELECT id, speaker, chunk_index FROM chunks WHERE id IN ("
-                + ", ".join(f"'{cid}'" for cid in fts_ids)
-                + ")"
-            )
+            text("SELECT id, speaker, chunk_index FROM chunks WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)
+            ),
+            {"ids": fts_ids},
         )
         meta_map: dict[str, tuple[str | None, int]] = {
             row[0]: (row[1] or None, row[2] or 0) for row in meta_result.fetchall()
@@ -367,11 +367,13 @@ class HybridRetriever:
         if not results:
             return results
         ids = [c.chunk_id for c in results]
-        id_list = ", ".join(f"'{i}'" for i in ids)
         async with get_session_factory()() as session:
             rows = (
                 await session.execute(
-                    text(f"SELECT id, entry_date FROM chunks WHERE id IN ({id_list})")
+                    text("SELECT id, entry_date FROM chunks WHERE id IN :ids").bindparams(
+                        bindparam("ids", expanding=True)
+                    ),
+                    {"ids": ids},
                 )
             ).fetchall()
         dmap: dict[str, date] = {}
@@ -607,19 +609,20 @@ class HybridRetriever:
         if not safe_query:
             return []
 
+        params: dict[str, object] = {"query": safe_query, "k": k}
         if document_ids:
-            id_list = ", ".join(f"'{did}'" for did in document_ids)
             sql = text(
                 "SELECT image_id FROM images_fts "
-                f"WHERE images_fts MATCH :query AND document_id IN ({id_list}) "
+                "WHERE images_fts MATCH :query AND document_id IN :doc_ids "
                 "LIMIT :k"
-            )
+            ).bindparams(bindparam("doc_ids", expanding=True))
+            params["doc_ids"] = list(document_ids)
         else:
             sql = text("SELECT image_id FROM images_fts WHERE images_fts MATCH :query LIMIT :k")
 
         try:
             async with get_session_factory()() as session:
-                result = await session.execute(sql, {"query": safe_query, "k": k})
+                result = await session.execute(sql, params)
                 return [row[0] for row in result.fetchall() if row[0]]
         except Exception as exc:
             logger.warning("_image_keyword_search failed: %s", exc)

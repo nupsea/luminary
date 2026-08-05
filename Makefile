@@ -146,6 +146,7 @@ stop:
 lint:
 	cd backend && uv run ruff check .
 	cd frontend && npx tsc --noEmit
+	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
 	bash scripts/check_powershell.sh
