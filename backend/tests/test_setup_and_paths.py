@@ -71,7 +71,7 @@ def test_status_starts_unready_and_reports_usable_once_db_is_up():
 
 def test_status_reaches_ready_and_counts_skipped_as_satisfied():
     status = StartupStatus()
-    for key in ("db", "ollama_server", "chat_model", "embedder", "ner"):
+    for key in ("db", "ollama_server", "chat_model", "vision_model", "embedder", "ner"):
         status.set_state(key, "ready")
     status.set_state("reranker", "skipped", "Reranking is turned off")
 
@@ -112,11 +112,12 @@ def test_uninstalled_chat_model_is_missing_not_failed():
         status.set_state(key, "ready")
     status.set_state("ner", "skipped")
     status.set_state("chat_model", "missing", "llama3.2")
+    status.set_state("vision_model", "missing", "qwen2.5vl:7b")
 
     snap = status.snapshot()
     assert snap["status"] == "ready", "an uninstalled optional model is not a degraded app"
     assert snap["failed"] == []
-    assert snap["missing"] == ["chat_model"]
+    assert sorted(snap["missing"]) == ["chat_model", "vision_model"]
     assert snap["blocking"] is False
 
 
@@ -376,6 +377,65 @@ def test_transcription_is_kept_out_of_the_bundle_dependency_set():
     media = " ".join(groups["media"])
     assert "faster-whisper" in media
     assert "faster-whisper" not in full, "GPL-carrying deps must not ship in the installer"
+
+
+@pytest.mark.parametrize(
+    "reported,expected",
+    [
+        # What settings hold.
+        ("ollama/qwen2.5vl:7b", "vision_model"),
+        # What the catalogue holds.
+        ("qwen2.5vl:7b", "vision_model"),
+        # What Ollama echoes back in the error -- it drops the tag.
+        ("qwen2.5vl", "vision_model"),
+        ("llama3.2", "chat_model"),
+        ("llama3.2:latest", "chat_model"),
+        ("ollama/llama3.2", "chat_model"),
+        # Not ours to install.
+        ("gpt-4o", None),
+        ("", None),
+    ],
+)
+def test_a_model_name_resolves_to_the_component_that_installs_it(reported, expected):
+    """The name arrives three ways: with a provider prefix, with a tag, neither."""
+    from app.services.components import component_for_model
+
+    comp = component_for_model(reported)
+    assert (comp.id if comp else None) == expected
+
+
+def test_the_vision_model_is_a_startup_phase_users_can_act_on():
+    """It installs from nowhere otherwise: not a default, and never warmed."""
+    from app.services.startup_status import StartupStatus
+
+    snapshot = StartupStatus().snapshot()
+    phases = {p["key"]: p for p in snapshot["phases"]}
+    assert "vision_model" in phases
+    assert phases["vision_model"]["required"] is False, "6GB must never block the app"
+
+
+def test_every_installer_resolves_the_full_dependency_group():
+    """Both halves, on every install path.
+
+    `--no-default-groups` alone drops trafilatura/cloudscraper/yt-dlp and the
+    app refuses every URL; `--group full` alone re-resolves `dev`, whose
+    arize-phoenix pulls a source-built sqlean-py that fails to build.
+    """
+    import re
+
+    from app.paths import app_root
+
+    # bootstrap.sh invokes uv through "$UV", the others by name.
+    invocation = re.compile(r'uv"?\s+sync\b', re.IGNORECASE)
+
+    installers = ("bootstrap.sh", "install.sh", "install.ps1")
+    for name in installers:
+        body = (app_root() / "scripts" / name).read_text()
+        syncs = [line for line in body.splitlines() if invocation.search(line)]
+        assert syncs, f"{name}: no `uv sync` found -- has the installer moved?"
+        for line in syncs:
+            assert "--no-default-groups" in line, f"{name}: {line.strip()}"
+            assert "--group full" in line, f"{name}: {line.strip()}"
 
 
 def test_python_extra_installs_outside_the_bundle(tmp_path, monkeypatch):

@@ -170,7 +170,9 @@ done
 # Backend deps — public profile (no labs/dev groups)
 # ---------------------------------------------------------------------------
 _info "Syncing backend deps (public profile)..."
-(cd backend && uv sync --no-default-groups)
+# `full` carries trafilatura, cloudscraper, yt-dlp and tree-sitter. Without it
+# the install comes up but refuses every URL the UI offers to ingest.
+(cd backend && uv sync --no-default-groups --group full)
 
 # ---------------------------------------------------------------------------
 # Frontend build — public tier, /api base
