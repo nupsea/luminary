@@ -103,6 +103,7 @@ export default function Hub() {
           {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
           {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
           <DecayDebtWidget />
+          <DailyQuote />
         </div>
 
         {/* Rail: ambient context */}
@@ -128,8 +129,6 @@ export default function Hub() {
               <TagCloud tags={data.recent_tags} />
             </Section>
           )}
-
-          <DailyQuote />
         </aside>
       </div>
     </PageSurface>
@@ -144,12 +143,12 @@ function DailyQuote() {
 
   return (
     <Section icon={Quote} title="Thought for the day">
-      <figure className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 px-4 py-3">
-        <blockquote className="text-sm leading-relaxed text-foreground/90">
+      <figure className="flex flex-col gap-3 rounded-xl border border-border bg-card/40 px-6 py-5">
+        <blockquote className="text-base leading-relaxed text-foreground/90 sm:text-lg">
           {quote.text}
         </blockquote>
         <figcaption className="text-xs text-muted-foreground">
-          {quote.author}
+          <span className="font-medium text-foreground/70">{quote.author}</span>
           <span className="text-muted-foreground/70"> · {quote.source}</span>
         </figcaption>
       </figure>
