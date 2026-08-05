@@ -32,7 +32,7 @@ from app.services import embedder as _embedder_module  # indirect: get_embedding
 from app.services import (
     vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
 )
-from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.llm import LLMUnavailableError, get_llm_service, missing_model_from
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
 
 logger = logging.getLogger(__name__)
@@ -400,15 +400,25 @@ class ImageEnricherService:
                     processed += 1
                     logger.info("image_enricher: analyzed image_id=%s type=%s", img.id, image_type)
 
-                except LLMUnavailableError:
-                    logger.warning(
-                        "image_enricher: vision model(s) unreachable for image_id=%s "
-                        "(VISION_MODEL=%s). In cloud mode, set VISION_MODEL to a "
-                        "cloud vision model (e.g. anthropic/claude-3-5-sonnet-20241022) "
-                        "or leave Ollama running locally.",
-                        img.id,
-                        settings.VISION_MODEL,
-                    )
+                except LLMUnavailableError as exc:
+                    # An unpulled model arrives as a connection error, so saying
+                    # "unreachable" sent users after a server that was fine.
+                    missing = missing_model_from(exc)
+                    if missing is not None:
+                        logger.warning(
+                            "image_enricher: vision model %s is not installed "
+                            "(VISION_MODEL=%s); install it to read figures",
+                            missing,
+                            settings.VISION_MODEL,
+                        )
+                    else:
+                        logger.warning(
+                            "image_enricher: vision model(s) unreachable for image_id=%s "
+                            "(VISION_MODEL=%s). In cloud mode, set VISION_MODEL to a "
+                            "cloud vision model, or leave Ollama running locally.",
+                            img.id,
+                            settings.VISION_MODEL,
+                        )
                     raise
                 except Exception as exc:
                     logger.warning("image_enricher: failed to analyze image_id=%s: %s", img.id, exc)

@@ -243,6 +243,141 @@ async def test_worker_exhausts_backoff_then_fails(test_db, monkeypatch):
     assert "LLM unavailable" in (j.error_message or "")
 
 
+def _model_missing(model: str) -> LLMAPIConnectionError:
+    """What Ollama returns for an unpulled model: a 404 litellm wraps as a
+    connection error, distinguishable from a dead server only by this text."""
+    return LLMAPIConnectionError(
+        message=f'OllamaException - {{"error":"model \'{model}\' not found"}}',
+        llm_provider="ollama",
+        model=model,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_uninstalled_model_skips_the_job_rather_than_failing_it(test_db, monkeypatch):
+    """The user saw "Enrichment failed" for a capability they never installed."""
+    _engine, factory, _tmp = test_db
+    monkeypatch.setattr(ew, "_LLM_RETRY_BASE_DELAY_S", 0.0)
+    monkeypatch.setattr(ew, "_LLM_RETRY_MAX_DELAY_S", 0.0)
+
+    doc_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _seed_job(factory, doc_id, job_id, "vision")
+
+    calls = {"n": 0}
+
+    async def needs_vision(document_id: str, j_id: str) -> None:
+        calls["n"] += 1
+        raise _model_missing("qwen2.5vl:7b")
+
+    worker = EnrichmentQueueWorker(poll_interval_s=0.1)
+    worker.register("vision", needs_vision)
+    await worker._dispatch_pending()
+    await asyncio.sleep(0.5)
+    await worker.stop()
+
+    async with factory() as session:
+        j = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+
+    assert j.status == "skipped"
+    assert calls["n"] == 1, "a model that is not installed cannot appear during a backoff"
+    assert "vision model" in (j.error_message or "").lower()
+    assert "qwen2.5vl:7b" in (j.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_a_missing_model_outside_the_catalogue_still_names_itself(test_db, monkeypatch):
+    _engine, factory, _tmp = test_db
+    monkeypatch.setattr(ew, "_LLM_RETRY_BASE_DELAY_S", 0.0)
+    monkeypatch.setattr(ew, "_LLM_RETRY_MAX_DELAY_S", 0.0)
+
+    doc_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _seed_job(factory, doc_id, job_id, "exotic")
+
+    async def needs_exotic(document_id: str, j_id: str) -> None:
+        raise _model_missing("some-model-we-do-not-ship")
+
+    worker = EnrichmentQueueWorker(poll_interval_s=0.1)
+    worker.register("exotic", needs_exotic)
+    await worker._dispatch_pending()
+    await asyncio.sleep(0.5)
+    await worker.stop()
+
+    async with factory() as session:
+        j = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+
+    assert j.status == "skipped"
+    assert "some-model-we-do-not-ship" in (j.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_skipped_jobs_are_requeued_when_a_component_arrives(test_db):
+    _engine, factory, _tmp = test_db
+    doc_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _seed_job(factory, doc_id, job_id, "vision")
+
+    async with factory() as session:
+        job = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+        job.status = "skipped"
+        job.error_message = "Needs the vision model"
+        job.completed_at = datetime.now(UTC)
+        await session.commit()
+
+    assert await ew.requeue_skipped_jobs() == 1
+
+    async with factory() as session:
+        j = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+
+    assert j.status == "pending"
+    assert j.error_message is None
+    assert j.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_startup_reclaims_skipped_jobs(test_db):
+    """A restart is the likeliest moment for a missing component to have arrived."""
+    _engine, factory, _tmp = test_db
+    doc_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _seed_job(factory, doc_id, job_id, "vision")
+
+    async with factory() as session:
+        job = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+        job.status = "skipped"
+        await session.commit()
+
+    worker = EnrichmentQueueWorker(poll_interval_s=60.0)
+    await worker.start()
+    await worker.stop()
+
+    async with factory() as session:
+        j = (
+            await session.execute(
+                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+
+    assert j.status == "pending"
+
+
 @pytest.mark.asyncio
 async def test_worker_skips_already_active_document(test_db):
     """A document already being processed should not spawn a second task."""

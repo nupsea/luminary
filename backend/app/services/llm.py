@@ -7,6 +7,7 @@ litellm.acompletion in services/routers bypass observability.
 
 import asyncio
 import logging
+import re
 import socket
 import warnings
 from collections.abc import AsyncGenerator
@@ -71,6 +72,31 @@ LLMUnreachableError: tuple[type[BaseException], ...] = (
 # case this exists for. Walk the cause chain for the underlying socket/DNS error
 # instead. InternalServerError from a genuine provider 500 has no such cause and
 # is correctly left to propagate.
+# Ollama reports a model it never pulled as 404 {"error":"model 'X' not found"},
+# which litellm wraps as APIConnectionError -- by type, indistinguishable from
+# the server being down. The message is the only signal.
+_MODEL_NOT_FOUND_RE = re.compile(
+    r"model\s+[\"']?([A-Za-z0-9._:/-]+?)[\"']?\s+not\s+found", re.IGNORECASE
+)
+
+
+def missing_model_from(exc: BaseException) -> str | None:
+    """The model name a provider said it does not have, or None.
+
+    Walks the cause chain: litellm re-wraps provider errors, so the text is
+    often only on an inner exception.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        match = _MODEL_NOT_FOUND_RE.search(str(cur))
+        if match:
+            return match.group(1)
+        cur = cur.__cause__ or cur.__context__
+    return None
+
+
 def _is_offline_error(exc: BaseException) -> bool:
     if isinstance(exc, LLMUnreachableError):
         return True

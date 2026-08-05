@@ -49,6 +49,9 @@ export function DocumentRow({ doc, onClick }: DocumentRowProps) {
       {doc.enrichment_status === "failed" && (
         <span className="hidden text-xs text-orange-600 sm:block">Enrichment failed</span>
       )}
+      {doc.enrichment_status === "skipped" && (
+        <span className="hidden text-xs text-muted-foreground sm:block">Figures not analyzed</span>
+      )}
       <Badge variant={STATUS_VARIANTS[doc.learning_status]}>
         {STATUS_LABELS[doc.learning_status]}
       </Badge>

@@ -606,12 +606,16 @@ export function DocumentCard({
           (doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "animate-pulse bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300",
           doc.enrichment_status === "done" && "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
           doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+          doc.enrichment_status === "skipped" && "bg-muted text-muted-foreground",
         )}>
           {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
           {doc.enrichment_status === "done" && (
             (doc.format === "pdf" || doc.format === "epub" || doc.format === "md" || doc.format === "markdown") ? "Images ready" : "Analysis complete"
           )}
           {doc.enrichment_status === "failed" && "Enrichment failed"}
+          {/* An uninstalled optional component. Nothing failed, so this must
+              not wear the failure colour. */}
+          {doc.enrichment_status === "skipped" && "Figures not analyzed"}
         </span>
       )}
 

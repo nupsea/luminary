@@ -19,8 +19,12 @@ import { formatBytes, retrySetup, type StartupPhase } from "@/lib/setupApi"
 import { principleOfTheDay } from "@/lib/studyPrinciples"
 import { cn } from "@/lib/utils"
 
-// Which optional component installs a given phase, when one is missing.
-const PHASE_COMPONENT: Record<string, string> = { chat_model: "chat_model" }
+// Which optional component installs a given phase, when one is missing. The
+// vision model is here because it was otherwise installable from nowhere.
+const PHASE_COMPONENT: Record<string, string> = {
+  chat_model: "chat_model",
+  vision_model: "vision_model",
+}
 
 function PhaseRow({ phase }: { phase: StartupPhase }) {
   const done = phase.state === "ready" || phase.state === "skipped"
