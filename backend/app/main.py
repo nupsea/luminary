@@ -19,6 +19,7 @@ from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
 from app.db_init import init_database
 from app.models import SettingsModel
+from app.parent_watch import watch_parent
 from app.paths import pyproject_path, spa_dist
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
@@ -115,6 +116,11 @@ _SHUTDOWN_GRACE_S = 5.0
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL)
+
+    # Before the migration below: if the desktop shell dies while we are still
+    # starting, nothing else would ever stop us, and the Kuzu lock we go on to
+    # take would block the user's next launch.
+    watch_parent()
 
     # Initial DB setup
     status = get_startup_status()

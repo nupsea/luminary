@@ -1,84 +1,243 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod logging;
+mod report;
 mod stage;
 mod supervisor;
 
-use std::sync::Arc;
+use std::os::unix::process::ExitStatusExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use supervisor::Supervisor;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 
-/// How long the backend may take to answer before we show the user an error.
-/// A cold first run pays migrations and heavy imports; the model downloads that
-/// follow are reported by the app itself, not waited on here.
+/// The ceiling for a backend that is alive but slow -- a cold first run pays
+/// migrations and heavy imports. A backend that *dies* is reported the moment
+/// it does, so this timeout is now only reached by a genuine hang.
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 
-#[derive(Clone, Serialize)]
+/// How much of the log travels with a report.
+const REPORT_LOG_LINES: usize = 200;
+
+#[derive(Clone, Default, Serialize)]
 struct BootEvent {
     step: &'static str,
+    /// Plain English, for the person looking at the screen.
     message: String,
+    /// Technical cause, shown behind a disclosure and sent with a report.
+    detail: String,
     failed: bool,
 }
 
-fn emit(app: &AppHandle, step: &'static str, message: impl Into<String>, failed: bool) {
-    let _ = app.emit(
-        "boot",
+/// The last thing `boot` reported.
+///
+/// `boot` starts as soon as the window is built and can fail before the splash
+/// has parsed its own script, and `emit` reaches whoever is listening at the
+/// time -- nobody, that early. Keeping the state lets the splash ask for it
+/// once it is ready, so an instant failure is as visible as a slow one.
+#[derive(Default)]
+struct BootState {
+    last: Mutex<Option<BootEvent>>,
+    running: AtomicBool,
+}
+
+fn publish(app: &AppHandle, event: BootEvent) {
+    if event.failed {
+        logging::write(
+            "shell",
+            &format!(
+                "FAILED at {}: {} | {}",
+                event.step, event.message, event.detail
+            ),
+        );
+    } else {
+        logging::write("shell", &format!("{}: {}", event.step, event.message));
+    }
+
+    if let Some(state) = app.try_state::<BootState>() {
+        if let Ok(mut last) = state.last.lock() {
+            *last = Some(event.clone());
+        }
+    }
+    let _ = app.emit("boot", event);
+}
+
+fn progress(app: &AppHandle, step: &'static str, message: &str) {
+    publish(
+        app,
         BootEvent {
             step,
             message: message.into(),
-            failed,
+            ..Default::default()
         },
     );
 }
 
-fn wait_for_backend(port: u16) -> Result<(), String> {
+fn fail(app: &AppHandle, step: &'static str, message: &str, detail: &str) {
+    publish(
+        app,
+        BootEvent {
+            step,
+            message: message.into(),
+            detail: detail.into(),
+            failed: true,
+        },
+    );
+}
+
+/// A note that does not stop startup, shown alongside the progress line.
+fn warn(app: &AppHandle, message: &str) {
+    logging::write("shell", &format!("warning: {message}"));
+    let _ = app.emit("boot-warning", message.to_string());
+}
+
+fn describe(status: std::process::ExitStatus) -> String {
+    match (status.code(), status.signal()) {
+        (Some(code), _) => format!("exit code {code}"),
+        (None, Some(signal)) => format!("killed by signal {signal}"),
+        _ => "an unknown status".into(),
+    }
+}
+
+/// Wait for the backend to answer, for it to die, or for the deadline.
+///
+/// Watching only the port was the single worst diagnostic in the app: uvicorn
+/// runs lifespan startup *before* binding a socket, so any exception during
+/// startup -- a failed migration, a bad DATA_DIR -- means the port never opens
+/// at all. That produced three minutes of silence followed by "did not answer",
+/// while the traceback that explained it was discarded.
+fn wait_for_backend(sup: &Supervisor, port: u16) -> Result<(), (String, String)> {
     let deadline = Instant::now() + READY_TIMEOUT;
     let addr = format!("127.0.0.1:{port}");
-    while Instant::now() < deadline {
+
+    loop {
         if std::net::TcpStream::connect(&addr).is_ok() {
             return Ok(());
         }
+        if let Some(status) = sup.exited("backend") {
+            return Err((
+                "Luminary's engine stopped unexpectedly while starting up.".into(),
+                format!(
+                    "backend exited with {} before opening {addr}\n\n{}",
+                    describe(status),
+                    sup.tail("backend").join("\n")
+                ),
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err((
+                "Luminary's engine is taking longer than expected and has stopped responding."
+                    .into(),
+                format!(
+                    "no response on {addr} within {}s\n\n{}",
+                    READY_TIMEOUT.as_secs(),
+                    sup.tail("backend").join("\n")
+                ),
+            ));
+        }
         std::thread::sleep(Duration::from_millis(250));
     }
-    Err(format!("backend did not answer on {addr} within {READY_TIMEOUT:?}"))
 }
 
 fn boot(app: AppHandle, sup: Arc<Supervisor>) {
+    progress(&app, "stage", "Starting up");
+
     let stage = match stage::stage_dir(&app) {
         Ok(p) => p,
-        Err(e) => return emit(&app, "stage", e, true),
-    };
-    let data_dir = match stage::data_dir(&app) {
-        Ok(p) => p,
-        Err(e) => return emit(&app, "stage", e, true),
+        Err(e) => {
+            return fail(
+                &app,
+                "stage",
+                "Luminary could not find its program files. If you just installed it, \
+                 try dragging Luminary to your Applications folder again from the disk image.",
+                &e,
+            )
+        }
     };
 
-    emit(&app, "engine", "Warming up the engine", false);
+    let missing = stage::missing_pieces(&stage);
+    if !missing.is_empty() {
+        return fail(
+            &app,
+            "stage",
+            "This copy of Luminary looks incomplete. Downloading it again and \
+             replacing the copy in Applications should fix it.",
+            &format!("missing from {}: {}", stage.display(), missing.join(", ")),
+        );
+    }
+
+    let data_dir = match stage::data_dir(&app) {
+        Ok(p) => p,
+        Err(e) => {
+            return fail(
+                &app,
+                "library",
+                "Luminary could not open the folder where your library is kept.",
+                &e,
+            )
+        }
+    };
+
+    // Before anything opens the library: Kuzu takes an exclusive lock, so a
+    // process stranded by a previous crash blocks this launch outright.
+    sup.set_runtime_file(&data_dir);
+    supervisor::reap_leftovers(&data_dir);
+
+    if let Some(warning) = stage::space_warning(&data_dir) {
+        warn(&app, &warning);
+    }
+
+    progress(&app, "engine", "Warming up the engine");
     let ollama_port = match supervisor::free_port() {
         Ok(p) => p,
-        Err(e) => return emit(&app, "engine", e, true),
+        Err(e) => {
+            return fail(
+                &app,
+                "engine",
+                "Luminary could not reserve a local port.",
+                &e,
+            )
+        }
     };
     // Non-fatal: the library, search and cloud routing all work without it.
     if let Err(e) = supervisor::spawn_ollama(&sup, &stage, &data_dir, ollama_port) {
-        eprintln!("[shell] local model server unavailable: {e}");
+        logging::write("shell", &format!("local model server unavailable: {e}"));
+        warn(
+            &app,
+            "The local AI engine did not start. Your library will open, but chat may be unavailable.",
+        );
     }
 
-    emit(&app, "backend", "Opening your library", false);
+    progress(&app, "backend", "Opening your library");
     let port = match supervisor::free_port() {
         Ok(p) => p,
-        Err(e) => return emit(&app, "backend", e, true),
+        Err(e) => {
+            return fail(
+                &app,
+                "backend",
+                "Luminary could not reserve a local port.",
+                &e,
+            )
+        }
     };
     if let Err(e) = supervisor::spawn_backend(&sup, &stage, &data_dir, port, ollama_port) {
-        return emit(&app, "backend", e, true);
+        return fail(
+            &app,
+            "backend",
+            "Luminary's engine could not be started.",
+            &e,
+        );
     }
 
-    if let Err(e) = wait_for_backend(port) {
-        return emit(&app, "backend", e, true);
+    if let Err((message, detail)) = wait_for_backend(&sup, port) {
+        return fail(&app, "backend", &message, &detail);
     }
 
-    emit(&app, "ready", "Ready", false);
+    progress(&app, "ready", "Ready");
     if let Some(window) = app.get_webview_window("main") {
         let url = format!("http://127.0.0.1:{port}");
         // Navigating to the backend's own origin keeps the SPA and the API
@@ -89,7 +248,89 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
     }
 }
 
+/// Run `boot` on its own thread, at most once at a time.
+fn start_boot(app: AppHandle, sup: Arc<Supervisor>) {
+    if let Some(state) = app.try_state::<BootState>() {
+        if state.running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+    }
+    std::thread::spawn(move || {
+        boot(app.clone(), sup);
+        if let Some(state) = app.try_state::<BootState>() {
+            state.running.store(false, Ordering::SeqCst);
+        }
+    });
+}
+
+fn build_report(app: &AppHandle) -> report::Report {
+    let last = app
+        .try_state::<BootState>()
+        .and_then(|s| s.last.lock().ok().and_then(|l| l.clone()))
+        .unwrap_or_default();
+
+    report::Report {
+        step: last.step.to_string(),
+        message: last.message,
+        detail: last.detail,
+        log: logging::tail(REPORT_LOG_LINES),
+    }
+}
+
+#[tauri::command]
+fn boot_state(state: State<'_, BootState>) -> Option<BootEvent> {
+    state.last.lock().map_or(None, |last| last.clone())
+}
+
+/// The exact text that a report would carry, redacted. Shown to the user before
+/// anything leaves the machine, and used by the copy button.
+#[tauri::command]
+fn diagnostics(app: AppHandle) -> String {
+    build_report(&app).to_text()
+}
+
+/// Open a prefilled issue form in the browser.
+///
+/// Opened from Rust rather than handed to the webview, so the splash never gets
+/// the ability to open arbitrary URLs. Nothing is submitted by this -- the user
+/// still reviews the form and presses Submit on GitHub.
+#[tauri::command]
+fn report_issue(app: AppHandle) -> Result<(), String> {
+    let url = build_report(&app).issue_url();
+    logging::write("shell", "opening a prefilled issue form in the browser");
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reveal_log(app: AppHandle) -> Result<(), String> {
+    let path = logging::path().ok_or("there is no log file")?;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn retry_boot(app: AppHandle, sup: State<'_, Arc<Supervisor>>) {
+    logging::write("shell", "retrying startup at the user's request");
+    sup.shutdown();
+    start_boot(app.clone(), sup.inner().clone());
+}
+
+/// Bring the existing window forward. `set_focus` alone leaves a hidden or
+/// minimized window where it is, which reads as nothing having happened.
+fn activate(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
+    logging::init();
+
     let supervisor = Arc::new(Supervisor::new());
     let for_setup = supervisor.clone();
     let for_exit = supervisor.clone();
@@ -98,11 +339,18 @@ fn main() {
         // Kuzu takes an exclusive file lock, so a second instance cannot open
         // the library at all.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-            }
+            activate(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .manage(BootState::default())
+        .manage(supervisor.clone())
+        .invoke_handler(tauri::generate_handler![
+            boot_state,
+            diagnostics,
+            report_issue,
+            reveal_log,
+            retry_boot
+        ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Luminary")
@@ -110,16 +358,17 @@ fn main() {
                 .min_inner_size(900.0, 600.0)
                 .build()?;
 
-            let handle = app.handle().clone();
-            let sup = for_setup.clone();
-            std::thread::spawn(move || boot(handle, sup));
+            start_boot(app.handle().clone(), for_setup.clone());
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("failed to start Luminary")
-        .run(move |_app, event| {
-            if let tauri::RunEvent::Exit = event {
-                for_exit.shutdown();
-            }
+        .run(move |app, event| match event {
+            RunEvent::Exit => for_exit.shutdown(),
+            // macOS reactivation: Spotlight, the Dock, or `open -a` on an app
+            // that is already running. Without this the click does nothing
+            // visible and the user launches again, or gives up.
+            RunEvent::Reopen { .. } => activate(app),
+            _ => {}
         });
 }

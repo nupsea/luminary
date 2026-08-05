@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Boot screen listens for progress events; the app opens paths in Finder.",
+  "description": "The boot screen listens for progress events and calls the shell's own commands. Opening the browser and Finder is done from Rust, so no window is granted the ability to open arbitrary URLs.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default", "opener:default"]
+  "permissions": ["core:default", "core:event:default"]
 }

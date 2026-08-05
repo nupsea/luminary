@@ -148,6 +148,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the markdown toolbar (image-spec buttons + mermaid quick-insert/cheat sheet),
   and the orphaned `LinkAutocomplete`/`NoteReaderSheet` components.
 
+## [0.3.3] - 2026-08-05
+
+The macOS app now explains itself when it cannot start, and no longer leaves
+processes behind. Nothing about the library or its contents changes, and this
+release carries no database migration.
+
+### Fixed
+- **A failed startup is visible instead of a frozen screen.** Three defects
+  combined into one symptom: `withGlobalTauri` was absent so the splash threw
+  before registering any listener and no boot event had ever reached it; boot
+  events were fire-and-forget, so a failure occurring before the page finished
+  parsing reached nobody; and nothing was written to disk. The splash now also
+  pulls the last state on load, and any error in the page lands in the failure
+  state rather than freezing it.
+- **The engine dying is reported immediately, with its own output.** uvicorn runs
+  application startup before it binds a socket, so a failed migration or a bad
+  data directory meant the port never opened — indistinguishable from a slow
+  start for three minutes, after which the message named only the timeout. The
+  shell now watches for the port, for the process exiting, and for the deadline,
+  and reports the exit status with the tail of what the process printed. A dead
+  backend surfaces in well under a second.
+- **Nothing is stranded when the app crashes or is force-quit**, which never
+  delivers an exit event. Both children are spawned into their own process groups
+  and signalled as a group (catching Ollama's model runners), shutdown is
+  SIGTERM then SIGKILL so SQLite can checkpoint, the backend stops itself if the
+  shell disappears, and anything still left is reaped on the next launch. Reaping
+  matches on executable path rather than pid alone, so a recycled pid can never
+  cause an unrelated process to be killed — including your own `ollama serve`.
+- **Launching an already-running Luminary brings it forward.** Spotlight and the
+  Dock now unminimize and focus the existing window instead of appearing to do
+  nothing.
+
+### Added
+- **A log at `~/Library/Logs/Luminary/luminary.log`**, rotated, carrying both the
+  shell and the bundled processes. Deliberately outside the library, so an
+  unwritable library is itself something that can be logged.
+- **A one-click bug report from the startup screen.** It opens a pre-filled
+  GitHub issue in the browser; the full text is shown first and nothing is sent
+  until you submit it yourself. Home directory paths, account names, e-mail
+  addresses and anything shaped like an API key are removed first, which is
+  covered by tests.
+- **Startup checks before anything is launched:** the installation is verified as
+  complete, and low disk space is called out rather than failing partway through
+  a model download.
+- **`scripts/macos/uninstall.sh`**, which the app install never had. It asks
+  separately before touching your library and keeps it unless you confirm.
+
+### Changed
+- The webview is no longer permitted to open URLs at all; the browser and Finder
+  are opened from the shell itself.
+- `make desktop-app` refuses to build against an incomplete or stale payload, and
+  CI now builds, lints and tests the desktop shell on macOS — it previously had
+  no automated coverage of any kind.
+
 ## [0.2.2] - 2026-06-30
 
 ### Fixed

@@ -82,7 +82,10 @@
         0% { transform: translateX(-100%); }
         100% { transform: translateX(385%); }
       }
-      .error {
+      /* Both panels are revealed by a class on <body>, so both must start
+         hidden -- an omission here shows a bug report on a healthy startup. */
+      .error,
+      .consent {
         display: none;
         margin-top: 1.5rem;
         text-align: left;
@@ -91,8 +94,9 @@
         padding: 0.85rem 0.95rem;
         background: color-mix(in srgb, var(--bg) 80%, var(--fg) 4%);
       }
-      .error strong { display: block; margin-bottom: 0.35rem; font-size: 0.9rem; }
-      .error code {
+      .panel strong { display: block; margin-bottom: 0.35rem; font-size: 0.9rem; color: var(--fg); }
+      .panel p { margin: 0 0 0.6rem; font-size: 0.85rem; min-height: 0; }
+      .panel code {
         display: block;
         font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
         color: var(--muted);
@@ -103,6 +107,20 @@
         -webkit-user-select: text;
         user-select: text;
       }
+      summary {
+        font-size: 0.8rem;
+        color: var(--muted);
+        cursor: pointer;
+        margin-bottom: 0.4rem;
+      }
+      .warning {
+        display: none;
+        margin-top: 0.6rem;
+        font-size: 0.8rem;
+        color: var(--accent);
+      }
+      .warning:not(:empty) { display: block; }
+      .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
       button {
         margin-top: 0.75rem;
         font: inherit;
@@ -114,8 +132,12 @@
         color: var(--fg);
         cursor: pointer;
       }
-      body.failed .bar { display: none; }
+      button.primary { border-color: var(--accent); color: var(--accent); }
+      body.failed .bar,
+      body.failed .warning { display: none; }
       body.failed .error { display: block; }
+      body.consenting .error { display: none; }
+      body.consenting .consent { display: block; }
     </style>
   </head>
   <body>
@@ -135,11 +157,36 @@
       </figure>
 
       <p id="message">Starting up</p>
+      <p class="warning" id="warning"></p>
       <div class="bar"><span></span></div>
-      <div class="error">
+
+      <div class="error panel">
         <strong>Luminary could not start</strong>
-        <code id="detail"></code>
-        <button id="copy">Copy details</button>
+        <p id="plain"></p>
+        <details>
+          <summary>Technical details</summary>
+          <code id="detail"></code>
+        </details>
+        <div class="actions">
+          <button id="retry" class="primary">Try again</button>
+          <button id="report">Report this problem</button>
+          <button id="copy">Copy details</button>
+          <button id="reveal">Show log</button>
+        </div>
+      </div>
+
+      <div class="consent panel">
+        <strong>Report this to the Luminary developers?</strong>
+        <p>
+          Your browser will open a new GitHub issue with the text below already
+          filled in. <strong>Nothing is sent until you press Submit there.</strong>
+          File paths and any keys have been removed.
+        </p>
+        <code id="preview"></code>
+        <div class="actions">
+          <button id="consent-open" class="primary">Open GitHub</button>
+          <button id="consent-cancel">Cancel</button>
+        </div>
       </div>
     </main>
     <script type="module">
@@ -160,20 +207,98 @@
         })
         .catch(() => {});
 
-      const { listen } = window.__TAURI__.event;
-      listen("boot", ({ payload }) => {
+      const plain = document.getElementById("plain");
+      const warning = document.getElementById("warning");
+      const preview = document.getElementById("preview");
+      const api = window.__TAURI__;
+
+      const invoke = (cmd) =>
+        api ? api.core.invoke(cmd) : Promise.reject(new Error("no boot API"));
+
+      function fail(text, technical) {
+        document.body.classList.add("failed");
+        message.textContent = "Something went wrong";
+        plain.textContent = text;
+        detail.textContent = technical ?? text;
+      }
+
+      function render(payload) {
+        if (!payload) return;
         if (payload.failed) {
-          document.body.classList.add("failed");
-          message.textContent = "Something went wrong";
-          detail.textContent = `${payload.step}: ${payload.message}`;
+          fail(payload.message, `${payload.step}: ${payload.detail || payload.message}`);
           return;
         }
         message.textContent = payload.message;
+      }
+
+      document.getElementById("retry").addEventListener("click", () => {
+        document.body.classList.remove("failed");
+        warning.textContent = "";
+        message.textContent = "Trying again";
+        invoke("retry_boot").catch((e) => fail("Luminary could not restart.", String(e)));
       });
 
-      document.getElementById("copy").addEventListener("click", () => {
-        navigator.clipboard.writeText(detail.textContent ?? "");
+      document.getElementById("copy").addEventListener("click", (event) => {
+        // The redacted report, not the raw detail: this text gets pasted into
+        // issues and chat windows.
+        invoke("diagnostics")
+          .then((text) => navigator.clipboard.writeText(text))
+          .then(() => {
+            event.target.textContent = "Copied";
+          })
+          .catch(() => navigator.clipboard.writeText(detail.textContent ?? ""));
       });
+
+      document.getElementById("reveal").addEventListener("click", () => {
+        invoke("reveal_log").catch((e) => fail("The log file could not be shown.", String(e)));
+      });
+
+      // Two steps on purpose. Nothing leaves the machine until the user has
+      // seen exactly what would be sent and asked for it to be opened.
+      document.getElementById("report").addEventListener("click", () => {
+        invoke("diagnostics").then((text) => {
+          preview.textContent = text;
+          document.body.classList.add("consenting");
+        });
+      });
+
+      document.getElementById("consent-cancel").addEventListener("click", () => {
+        document.body.classList.remove("consenting");
+      });
+
+      document.getElementById("consent-open").addEventListener("click", () => {
+        document.body.classList.remove("consenting");
+        invoke("report_issue").catch((e) =>
+          fail("The browser could not be opened. Use Copy details instead.", String(e))
+        );
+      });
+
+      // Anything thrown here would leave the splash sitting on its first line
+      // forever, which is indistinguishable from a slow start.
+      if (!api) {
+        fail(
+          "Luminary could not start, and could not determine why.",
+          "the boot API is unavailable to this window"
+        );
+      } else {
+        let pushed = false;
+        api.event.listen("boot", ({ payload }) => {
+          pushed = true;
+          render(payload);
+        });
+        api.event.listen("boot-warning", ({ payload }) => {
+          warning.textContent = payload;
+        });
+        // Covers the boot steps that ran before the listener above existed.
+        api.core
+          .invoke("boot_state")
+          .then((payload) => {
+            if (!pushed) render(payload);
+          })
+          .catch((e) =>
+            fail("Luminary could not start, and could not determine why.", String(e))
+          );
+      }
     </script>
   </body>
 </html>
