@@ -1,4 +1,4 @@
-# Contributing to Luminary 🌟
+# Contributing to Luminary
 
 First off, thank you for considering contributing to Luminary! It is people like you who make Luminary a premium, local-first learning cockpit.
 
@@ -6,7 +6,7 @@ By participating in this project, you agree to abide by our **Code of Conduct** 
 
 ---
 
-## 🗺️ Contribution Paths
+## Contribution Paths
 
 We welcome all kinds of contributions! Whether you write code, refine search evals, polish CSS, or edit documentation, there is a place for you:
 
@@ -19,7 +19,7 @@ We welcome all kinds of contributions! Whether you write code, refine search eva
 
 ---
 
-## 🚀 Quickstart Local Setup
+## Quickstart Local Setup
 
 Before getting started, make sure you have:
 1. **Python 3.13** installed (with `uv` package manager recommended).
@@ -56,7 +56,7 @@ Before getting started, make sure you have:
 
 ---
 
-## 📐 Architecture & Key Concepts
+## Architecture & Key Concepts
 
 To keep our codebase clean and maintainable, we enforce a set of strict architectural boundaries. Please review these files before writing code:
 
@@ -67,7 +67,7 @@ To keep our codebase clean and maintainable, we enforce a set of strict architec
 
 ---
 
-## 🛠️ Database Schema Changes & Alembic
+## Database Schema Changes & Alembic
 
 `backend/app/models.py` is the source of truth for the relational metadata database. Schema changes are versioned using Alembic.
 
@@ -78,13 +78,13 @@ To keep our codebase clean and maintainable, we enforce a set of strict architec
 3. **Review Migration**: Open the generated file in `backend/alembic/versions/` and inspect the DDL. Ensure it doesn't contain destructive `drop_table`/`drop_column` commands due to misread schema differences.
 4. **Apply Migration**: Run `make db-migrate`.
 
-### ⚠️ FTS5 SQLite Virtual Tables Invariant
+### FTS5 SQLite Virtual Tables Invariant
 The five FTS5 virtual tables are defined in raw SQL in `db_init.py`. Alembic is configured to ignore them via `alembic_include_name`. 
 *   **Column Order is a Contract**: SQLite references shadow-table columns positionally (e.g., `c0`, `c1`, `c2`). If you reorder columns in `db_init.py`, SQLite queries will return incorrect columns instead of raising errors. See invariant **I-4** in [invariants.md](docs/invariants.md).
 
 ---
 
-## 📋 The Triage & Contribution Process
+## The Triage & Contribution Process
 
 ```mermaid
 stateDiagram-v2
@@ -98,8 +98,8 @@ stateDiagram-v2
 
 ### 1. Reporting a Bug or Requesting a Feature
 Found something broken, or have an idea? **[Open an issue](https://github.com/nupsea/luminary/issues/new/choose)** from the repository's **Issues** tab. Pick a template:
-*   **🐛 Bug Report** — something crashed or behaved wrong. Include steps to reproduce, your OS, and the model/mode you were running.
-*   **💡 Feature Request** — an enhancement or new capability, and the learning problem it solves.
+*   **Bug Report** — something crashed or behaved wrong. Include steps to reproduce, your OS, and the model/mode you were running.
+*   **Feature Request** — an enhancement or new capability, and the learning problem it solves.
 
 Search [existing issues](https://github.com/nupsea/luminary/issues) first to avoid duplicates. For setup troubleshooting or general questions, use [Discussions](https://github.com/nupsea/luminary/discussions) rather than an issue.
 

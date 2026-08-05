@@ -90,7 +90,7 @@ export function NoteEditor({
           preview={
             content.trim() ? (
               <MarkdownRenderer
-                serif
+                reading
                 trackSourceLines
                 onEditExcalidrawDiagram={openDiagramEditor}
                 onSetImageSize={(src, size) =>
