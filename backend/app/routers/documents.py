@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import case, func, select, text
@@ -96,6 +97,12 @@ from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
 from app.services.parser import DocumentParser
+from app.services.remote_source import (
+    RemoteDocument,
+    RemoteDocumentTooLarge,
+    UningestibleRemoteContent,
+    fetch_remote_document,
+)
 from app.services.repo_helpers import get_or_404
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
@@ -672,17 +679,69 @@ async def ingest_kindle(
     return KindleIngestResponse(document_ids=document_ids, book_count=len(document_ids))
 
 
+async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Settings) -> dict:
+    """Store a PDF fetched from a URL and put it through the upload pipeline.
+
+    Identical to an uploaded PDF from here on. content_type is 'technical'
+    because nothing yet knows whether it is a paper or a book; classify_node
+    reads the parsed text and resolves it.
+    """
+    raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    dest = raw_dir / f"{doc_id}.pdf"
+    dest.write_bytes(remote.content)
+
+    async with get_session_factory()() as session:
+        doc = DocumentModel(
+            id=doc_id,
+            title=remote.filename,
+            format="pdf",
+            content_type="technical",
+            word_count=0,
+            page_count=0,
+            file_path=str(dest),
+            file_hash=hashlib.sha256(remote.content).hexdigest(),
+            stage="parsing",
+            source_url=remote.url,
+        )
+        # Document row must exist in SQLite before the background ingestion job starts.
+        session.add(doc)
+        await session.commit()
+
+    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), "pdf", "technical"))
+    logger.info(
+        "Linked PDF ingestion started",
+        extra={"doc_id": doc_id, "url": remote.url, "size_bytes": len(remote.content)},
+    )
+    return {"document_id": doc_id, "status": "processing"}
+
+
 @router.post("/ingest-url")
 async def ingest_url(
     body: UrlIngestRequest,
     settings: Settings = Depends(get_settings),
 ):
-    """Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura)."""
+    """Ingest a YouTube URL (yt-dlp), a linked PDF, or a web article (Trafilatura)."""
 
-    # 1. Non-YouTube: Ingest as a web article using ArticleExtractor
+    # 1. Non-YouTube: a linked file if the URL resolves to one, else a web article
     if not is_youtube_url(body.url):
 
         doc_id = str(uuid.uuid4())
+        try:
+            remote = await fetch_remote_document(body.url)
+        except UningestibleRemoteContent as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except RemoteDocumentTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            logger.warning("Could not reach %s: %s", body.url, exc)
+            raise HTTPException(
+                status_code=400, detail=f"Could not fetch that URL: {exc}"
+            ) from exc
+
+        if remote is not None:
+            return await _ingest_remote_pdf(doc_id, remote, settings)
+
         try:
             extractor = get_article_extractor()
             parsed = await extractor.extract(body.url, doc_id=doc_id)
