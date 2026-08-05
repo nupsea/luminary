@@ -19,6 +19,7 @@ import {
   Hourglass,
   Loader2,
   Pencil,
+  Quote,
   RefreshCw,
   Sparkles,
   StickyNote,
@@ -35,6 +36,7 @@ import { useStartupStatus } from "@/hooks/useSetup"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
 import { launchStudy } from "@/lib/studyLauncher"
+import { quoteOfTheDay } from "@/lib/quotes"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
 import type { components } from "@/types/api"
@@ -126,9 +128,32 @@ export default function Hub() {
               <TagCloud tags={data.recent_tags} />
             </Section>
           )}
+
+          <DailyQuote />
         </aside>
       </div>
     </PageSurface>
+  )
+}
+
+// Offset so the hub and the setup screen never show the same line on one day.
+const HUB_QUOTE_OFFSET = 7
+
+function DailyQuote() {
+  const [quote] = useState(() => quoteOfTheDay(new Date(), HUB_QUOTE_OFFSET))
+
+  return (
+    <Section icon={Quote} title="Thought for the day">
+      <figure className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 px-4 py-3">
+        <blockquote className="text-sm leading-relaxed text-foreground/90">
+          {quote.text}
+        </blockquote>
+        <figcaption className="text-xs text-muted-foreground">
+          {quote.author}
+          <span className="text-muted-foreground/70"> · {quote.source}</span>
+        </figcaption>
+      </figure>
+    </Section>
   )
 }
 
