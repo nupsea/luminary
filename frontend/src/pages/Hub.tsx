@@ -144,14 +144,13 @@ function DailyQuote() {
   return (
     <Section icon={Quote} title="Thought for the day">
       <figure className="flex flex-col gap-3 rounded-xl border border-border bg-card/40 px-6 py-5">
-        {/* The one place a serif italic earns its keep: it marks the line as
-            quoted rather than written by the app, which sans alone cannot do. */}
-        <blockquote className="font-serif text-lg italic leading-relaxed text-foreground/90 sm:text-xl">
-          <span aria-hidden className="mr-0.5 text-muted-foreground/40">&ldquo;</span>
+        {/* Same typeface as every other page. A quote reads as quoted from the
+            rule and the weight, which cost nothing in legibility or platform
+            coverage the way a second font family would. */}
+        <blockquote className="border-l-2 border-primary/30 pl-4 text-lg font-normal leading-relaxed tracking-[-0.01em] text-foreground/90">
           {quote.text}
-          <span aria-hidden className="ml-0.5 text-muted-foreground/40">&rdquo;</span>
         </blockquote>
-        <figcaption className="font-sans text-xs not-italic text-muted-foreground">
+        <figcaption className="pl-4 text-xs text-muted-foreground">
           <span className="font-medium text-foreground/70">{quote.author}</span>
           <span className="text-muted-foreground/70"> · {quote.source}</span>
         </figcaption>

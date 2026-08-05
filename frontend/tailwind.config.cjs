@@ -9,6 +9,15 @@ module.exports = {
       screens: { "2xl": "1400px" },
     },
     extend: {
+      // Without this, `font-sans` resolves to Tailwind's own default stack
+      // while the semantic role classes in index.css use --font-sans, so the
+      // app had two near-identical but different sans faces depending on which
+      // one a component reached for. One definition, one place.
+      fontFamily: {
+        sans: "var(--font-sans)",
+        serif: "var(--font-serif)",
+        mono: "var(--font-mono)",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
