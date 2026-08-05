@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **The hub now shows the documents you have added.** Every document-driven
+  section of `/home/overview` — recent items, continue reading, fading, the
+  today action, and the recommender's stalled-reading candidate — reads
+  `content_activity`, and nothing wrote a row when a document was ingested. The
+  table was only ever written on a read past 10%, a note edit, or a flashcard
+  event, so a library of freshly added documents produced an empty hub. Ingestion
+  now records the add on reaching `stage='complete'` (not on upload — a failed
+  ingest must not surface as something to pick up), and a data-only Alembic
+  revision backfills existing libraries from `documents.created_at`. Separately,
+  the hub's own emptiness check counted `recent_tags`, which the auto-tagger
+  populates for every document — so the first-run guide became unreachable the
+  moment anything was ingested and the page rendered its full layout with every
+  section empty. Tags no longer count as something to act on.
+- **Dropping a file on the window adds it.** Tauri's `dragDropEnabled` defaults
+  to true and was never disabled, so the native window layer captured the OS
+  drop before it could become a DOM event: the HTML5 drop handler could not fire
+  in the packaged app at all, and nothing bridged the native event back to the
+  webview. `disable_drag_drop_handler()` on the window builder lets the drop
+  through. The only drop target also lived inside the Add Content dialog, so
+  dropping on the app was never wired up either; the dialog is now mounted once
+  app-wide and opened by a window-level drop zone with the file staged and its
+  type pre-detected. A file that cannot be read says so instead of vanishing —
+  including audio and video, which were refused silently when the transcription
+  component was not installed, and which now offer the install.
+- **A failed page render is legible instead of blank.** Pages are `lazy()` behind
+  `Suspense` with no error boundary above them, so a render throw or a chunk that
+  failed to load unmounted the tree to a white screen with nothing logged. Routes
+  are now wrapped in a boundary that shows the error and offers a reload.
+- **The shell installers now install the `full` dependency group, so URL
+  ingestion works.** `bootstrap.sh`, `install.sh` and `install.ps1` synced
+  `--no-default-groups` alone, which drops `full` — trafilatura, cloudscraper,
+  yt-dlp and tree-sitter. The result was an install that came up healthy and
+  refused every URL with "URL article extraction requires the 'full' dependency
+  group" (issue #40). Only the macOS bundle was correct, because
+  `stage_python.sh` already built `--no-default-groups --group full`. Both flags
+  are load-bearing and are now pinned together by
+  `test_every_installer_resolves_the_full_dependency_group`: `--group full`
+  alone re-resolves `dev`, whose arize-phoenix pulls a source-built sqlean-py
+  that fails against any interpreter the lockfile was not resolved for — which
+  is what the error message itself used to recommend.
+- **A link to a PDF is now ingested as that PDF.** `/ingest-url` sent every
+  non-YouTube URL to the article extractor, which fetches HTML and strips
+  boilerplate. Pointed at a PDF on a code host — a URL that serves a file
+  *viewer* — it could not fail loudly: it stored the page chrome (navigation,
+  sign-in prompts, product blurbs) as a document with a plausible title and none
+  of the file's content, and reported success. `remote_source` now rewrites
+  GitHub and GitLab `blob` URLs to their raw form, then decides from the
+  response what was actually served: `%PDF-` magic bytes rather than the
+  declared type, because hosts serve PDFs as `application/octet-stream`. A PDF
+  goes down the same path as an uploaded one (same format, same content hash,
+  same parser, `content_type='technical'` for `classify_node` to resolve).
+  Markup is left to the article extractor, and a recognised file type that
+  cannot be ingested from a link is refused with 415 instead of being parsed as
+  HTML. The body is read once — `aiter_bytes()` is not restartable — and the
+  verdict is taken from the first 8KB so a payload that will be rejected is
+  never downloaded whole.
+- **An uninstalled model no longer reports as failed enrichment.** Ollama
+  answers a request for a model it does not have with 404 and
+  `{"error":"model 'X' not found"}`, which litellm wraps as
+  `APIConnectionError` — the same type as the server being down. Documents
+  containing figures therefore showed "Enrichment failed" on a fresh install,
+  after three pointless backoff retries, with a log line telling the user to
+  check that Ollama was running; it was, and the vision model had simply never
+  been pulled. `missing_model_from()` reads the model name out of the message,
+  `component_for_model()` maps it to the component that installs it, and such a
+  job is now `skipped` with an actionable message and no retries. The vision
+  model is also a startup phase, so the setup screen offers an install button
+  for it — previously it was a non-default component reachable from nowhere in
+  the UI. Skipped jobs are re-queued when a component finishes installing and
+  again on the next restart.
+- **`bootstrap.sh` reports why startup failed.** The wait was 90 seconds, which
+  is under a cold first boot: uvicorn writes nothing until `app.main` finishes
+  importing torch, lancedb and the NER model, so the installer declared failure
+  for an install that was still starting and pointed at a log file launchd had
+  not created (issue #39). The wait is now 300s (`LUMINARY_BOOT_TIMEOUT`) with
+  progress every 30s, and on failure it prints launchd's state, the log tail if
+  there is one, and — when there is not — imports the backend in the foreground
+  so the traceback has somewhere to go.
 - **The notes preview now tracks the editor properly, at any zoom level.** Scroll
   sync mapped one pane onto the other with a single global ratio
   (`scrollTop / scrollMax`). That ratio is only correct at the very top and the
