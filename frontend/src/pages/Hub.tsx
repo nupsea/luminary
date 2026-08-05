@@ -100,10 +100,10 @@ export default function Hub() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Primary column: things to act on now */}
         <div className="flex flex-col gap-6 lg:col-span-2">
+          <DailyQuote />
           {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
           {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
           <DecayDebtWidget />
-          <DailyQuote />
         </div>
 
         {/* Rail: ambient context */}
