@@ -190,6 +190,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ needs.build.outputs.version }}
         run: |
+          set -euo pipefail
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --generate-notes
-          gh release upload "$TAG" build/dist/*.dmg --clobber
+          # Same reason as the notary submission: a 600MB+ upload is the last
+          # step of an 80-minute job, and losing it to a transient means
+          # rebuilding everything. --clobber makes each attempt idempotent.
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" build/dist/*.dmg --clobber; then
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] || break
+            echo "upload attempt $attempt failed; retrying in $((attempt * 30))s" >&2
+            sleep $((attempt * 30))
+          done
+          echo "release upload failed after 3 attempts" >&2
+          exit 1

@@ -43,8 +43,28 @@ fi
 
 _step "Submitting $NAME to the notary service"
 # Apple's scan time scales with file count, and this bundle has ~55k files.
-xcrun notarytool submit "$SUBMIT" "${KEY_ARGS[@]}" \
-    --wait --timeout 120m --output-format json | tee "$JSON"
+#
+# Retried because the upload is the fragile part: Apple's storage answers
+# "503 SlowDown -- please reduce your request rate" under load, and that failed
+# v0.4.0 after the app was already notarized and the DMG built, losing 45
+# minutes to a transient. Backoff is generous for the same reason -- an
+# immediate retry is what it just asked us not to do.
+#
+# A non-zero exit here is always transport or tooling: `--wait` returns 0 even
+# for a rejected submission, and that status is asserted separately below. So
+# this can never retry a genuine rejection into a pass.
+for attempt in 1 2 3; do
+    if xcrun notarytool submit "$SUBMIT" "${KEY_ARGS[@]}" \
+        --wait --timeout 120m --output-format json | tee "$JSON"; then
+        break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+        _die "notary submission failed after $attempt attempts"
+    fi
+    delay=$((attempt * 90))
+    _warn "notary submission attempt $attempt failed; retrying in ${delay}s"
+    sleep "$delay"
+done
 
 if [ -n "$TMPDIR_ZIP" ]; then
     rm -rf "$TMPDIR_ZIP"
