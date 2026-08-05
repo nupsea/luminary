@@ -48,3 +48,16 @@ def alembic_ini() -> Path:
 
 def pyproject_path() -> Path:
     return backend_root() / "pyproject.toml"
+
+
+@functools.lru_cache(maxsize=1)
+def app_version() -> str:
+    """The shipped version. Lives here, below every layer, because both the API
+    and the diagnostics service need it and a service must not import main."""
+    try:
+        import tomllib  # noqa: PLC0415
+
+        with pyproject_path().open("rb") as fh:
+            return tomllib.load(fh)["project"]["version"]
+    except Exception:
+        return "0.0.0"

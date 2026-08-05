@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 
 from app.config import get_settings
-from app.paths import is_packaged
+from app.paths import app_version, is_packaged
 from app.services.settings_service import get_local_chat_model, get_vision_model
 
 
@@ -73,11 +73,10 @@ async def _ollama() -> list[str]:
 
 async def environment_report() -> str:
     """A paste-ready block for an issue. Every line is one a maintainer uses."""
-    from app.main import _APP_VERSION  # noqa: PLC0415  (circular at module scope)
-
     settings = get_settings()
+    install = "desktop app" if is_packaged() else "source or CLI install"
     lines = [
-        f"version   {_APP_VERSION} ({'desktop app' if is_packaged() else 'source or CLI install'})",
+        f"version   {app_version()} ({install})",
         f"library   {_scrub(str(Path(settings.DATA_DIR).expanduser()))}",
         f"os        {_os_name()}",
         f"kernel    {_kernel()}",
