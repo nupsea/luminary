@@ -67,8 +67,11 @@ ignore = [
     "TRY003",
     "TRY300",
     "ASYNC109",  # timeout is passed through to LiteLLM/httpx, which owns it
+    "ASYNC240",  # all 22 sites are .expanduser()/.exists()/.resolve() -- path arithmetic
+                 # and single stat() calls on local disk. to_thread costs more than it
+                 # saves. ASYNC230 still guards blocking open(); content reads/writes in
+                 # async functions are wrapped by hand.
     # Deferred; remove the line when its WP lands. See docs/refactor-quality-plan.md.
-    "ASYNC240",  # WP4
     "PERF401",   # WP5
     "PERF403",   # WP5
     "RUF059",    # WP5

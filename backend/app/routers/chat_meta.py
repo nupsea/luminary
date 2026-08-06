@@ -392,7 +392,9 @@ async def get_explorations(
     document_id: str = Query(..., description="Document ID to derive entity-pair suggestions for"),
 ) -> list[ExplorationSuggestion]:
     """Return up to 5 proactive exploration suggestions from Kuzu RELATED_TO entity pairs."""
-    pairs = get_graph_service().get_related_entity_pairs_for_document(document_id, limit=5)
+    pairs = await asyncio.to_thread(
+        get_graph_service().get_related_entity_pairs_for_document, document_id, limit=5
+    )
     suggestions: list[ExplorationSuggestion] = []
     for name_a, name_b, label, _conf in pairs:
         display_a = name_a.title()

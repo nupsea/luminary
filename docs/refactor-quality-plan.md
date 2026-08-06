@@ -107,7 +107,8 @@ on ruff, pytest, tsc and eslint (I-13 order).
 | **WP1 -- Security** | DONE. See below. | Low |
 | **WP2 -- Interfaces** | DONE. See below. | Medium |
 | **WP3 -- Error handling** | DONE. See below. | Medium |
-| **WP4 -- Performance** | P1 (single grouped query for the heatmap), P2 (`to_thread` the file-serving paths), P3, P4, P6 audit. Measure P1 and P2 before and after; record the numbers here. | Medium |
+| **WP4 -- Performance** | DONE. See below. | Medium |
+| **WP6 -- I-2 sweep** | 44 sync Kuzu/LanceDB calls still run on the event loop in services and workflow nodes. `tests/test_async_store_calls.py` pins the count. | Medium |
 | **WP5 -- Cleanup** | C1, C2 (extract shared helpers -- `_sanitize_fts_query` first), C3, C4. C5 is split out: `study.py` -> extract the 15 private functions into `services/teachback_service.py` and `services/study_session_service.py`. | Medium |
 
 C5's frontend half (`Chat.tsx`, `DocumentReader.tsx`, `Notes.tsx`) is deliberately
@@ -202,6 +203,46 @@ still fail-soft -- but a broken store now says so.
 
 `gap_detector.py` had `except LLMUnavailableError: raise` with no broader handler
 after it: a no-op. Removed.
+
+## Shipped in WP4
+
+**P1, the heatmap.** `get_heatmap` issued one chunk-id query per section, then
+three queries per (section, concept) cell. Measured on a seeded 20-section x
+20-concept grid (`_MAX_HEATMAP_*` caps, 8 chunks/section, one card per chunk):
+
+| | SQL round trips | cells with cards | summed card_count |
+|---|---|---|---|
+| before | 861 | 220 | 340 |
+| after | 4 | 220 | 340 |
+
+Three grouped reads (chunks, flashcards, prediction-error counts) now feed an
+in-memory join. The flashcard and error queries use a scalar subquery rather
+than a materialised id list, because a long document can hold more chunks than
+SQLite allows bound variables in one statement.
+
+One behaviour change: concept matching moved from SQL `LIKE '%concept%'` to a
+Python substring test. `LIKE` treats `_` and `%` inside a concept name as
+wildcards, so a concept like `snake_case_term` used to over-match.
+
+**P2 was wrong, and is withdrawn.** The plan claimed 22 blocking `pathlib`
+calls in async handlers stalled every concurrent request. All 22 are
+`.expanduser()`, `.exists()`, `.is_dir()` or `.resolve()` -- path arithmetic and
+single `stat()` calls, 14 of which touch the filesystem not at all.
+`asyncio.to_thread` costs more than it saves at that size, so `ASYNC240` is now
+permanently ignored with that reasoning recorded in `pyproject.toml`.
+
+The real blocking I/O was elsewhere and no rule caught it: `ASYNC230` only flags
+`open()`, so five `Path.write_bytes`/`write_text` calls inside async functions
+went unnoticed -- including `ingest_document` writing an entire uploaded file.
+Those are now wrapped.
+
+**P4.** `_sync_note_sources` issued one `INSERT OR IGNORE` per document; now one
+executemany.
+
+**P6 becomes WP6.** An AST audit found 57 sync Kuzu/LanceDB calls on the event
+loop. 13 router-level ones are wrapped. The remaining 44 sit in services and
+workflow nodes and need per-site care; `tests/test_async_store_calls.py` pins
+the count so it cannot grow.
 
 **Correctness found while fixing.** `zip()` calls gained `strict=True` rather
 than ruff's suggested `strict=False`, which surfaced a NER test whose mock

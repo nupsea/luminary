@@ -251,10 +251,14 @@ async def get_entity_pairs(document_id: str) -> EntityPairsResponse:
     """
 
     graph = _graph_module.get_graph_service()
-    raw_pairs = graph.get_related_entity_pairs_for_document(document_id, limit=10)
+    raw_pairs = await asyncio.to_thread(
+        graph.get_related_entity_pairs_for_document, document_id, limit=10
+    )
 
     if not raw_pairs:
-        co_pairs = graph.get_co_occurring_pairs_for_document(document_id, limit=10)
+        co_pairs = await asyncio.to_thread(
+            graph.get_co_occurring_pairs_for_document, document_id, limit=10
+        )
         # CO_OCCURS weight is a raw co-occurrence count (1.0, 2.0, …), not a probability.
         # Normalise to [0.0, 1.0] so the frontend percentage display is meaningful.
         max_weight = max((w for _, _, w in co_pairs), default=1.0) or 1.0

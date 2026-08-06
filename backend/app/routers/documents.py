@@ -563,7 +563,7 @@ async def ingest_document(
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.{ext}"
 
-        dest.write_bytes(content)
+        await asyncio.to_thread(dest.write_bytes, content)
 
         logger.info(
             "File received",
@@ -639,7 +639,7 @@ async def ingest_kindle(
         doc_id = str(uuid.uuid4())
         # Write each book's highlights as a plain text file
         dest = raw_dir / f"{doc_id}.txt"
-        dest.write_text(parsed_doc.raw_text, encoding="utf-8")
+        await asyncio.to_thread(dest.write_text, parsed_doc.raw_text, encoding="utf-8")
 
         async with get_session_factory()() as session:
             doc = DocumentModel(
@@ -689,7 +689,7 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
     raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest = raw_dir / f"{doc_id}.pdf"
-    dest.write_bytes(remote.content)
+    await asyncio.to_thread(dest.write_bytes, remote.content)
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
@@ -753,7 +753,7 @@ async def ingest_url(
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.md"
-        dest.write_text(parsed.raw_text, encoding="utf-8")
+        await asyncio.to_thread(dest.write_text, parsed.raw_text, encoding="utf-8")
 
         async with get_session_factory()() as session:
             doc = DocumentModel(
@@ -1198,8 +1198,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 continue
             await svc.delete_sqlite_cascade(session, doc)
             await session.commit()
-        svc.delete_lancedb_vectors(document_id)
-        svc.delete_kuzu_nodes(document_id)
+        await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+        await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
         svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
@@ -1321,8 +1321,8 @@ async def delete_document(document_id: str):
         await svc.delete_sqlite_cascade(session, doc)
         await session.commit()  # cascade service took the session; commit completes the transaction
 
-    svc.delete_lancedb_vectors(document_id)
-    svc.delete_kuzu_nodes(document_id)
+    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
 
@@ -1371,14 +1371,18 @@ async def get_document_diagnostics(document_id: str):
 
     # LanceDB vector count (0 if store unavailable)
     try:
-        vector_count = get_lancedb_service().count_for_document(document_id)
+        vector_count = await asyncio.to_thread(
+            get_lancedb_service().count_for_document, document_id
+        )
     except Exception:
         vector_count = 0
 
     # Kuzu entity and edge counts (0 if graph unavailable)
     try:
 
-        entity_count, edge_count = _graph_module.get_graph_service().count_for_document(document_id)
+        entity_count, edge_count = await asyncio.to_thread(
+            _graph_module.get_graph_service().count_for_document, document_id
+        )
     except Exception:
         entity_count = 0
         edge_count = 0

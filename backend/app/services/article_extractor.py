@@ -287,7 +287,7 @@ class ArticleExtractor:
                     scraper = cloudscraper.create_scraper()
                     resp = await asyncio.to_thread(scraper.get, url, timeout=300.0)
                     if resp.status_code == 200:
-                        dest_path.write_bytes(resp.content)
+                        await asyncio.to_thread(dest_path.write_bytes, resp.content)
 
                 return f"![{alt}](__LUMINARY_IMG__/{doc_id}/{filename})"
             except Exception as e:
