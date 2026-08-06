@@ -5,6 +5,7 @@ Endpoints:
   GET  /images/{id}/raw                  -- serve raw PNG file
   POST /documents/{id}/images/reextract  -- re-run image extraction for a document
   GET  /documents/{id}/enrichment        -- enrichment job list for a document
+  GET  /enrichment/queue                 -- library-wide enrichment backlog
 """
 
 import asyncio
@@ -16,7 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.database import get_session_factory
@@ -67,6 +68,15 @@ class EnrichmentJobItem(BaseModel):
 class UploadResponse(BaseModel):
     path: str
     filename: str
+
+
+class EnrichmentQueueSummary(BaseModel):
+    pending: int
+    running: int
+    skipped: int
+    failed: int
+    documents_active: int
+    active: bool
 
 
 @router.post("/images/notes", response_model=UploadResponse)
@@ -253,6 +263,38 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
 
     logger.info("reextract_document_images: queued job=%s doc=%s", job.id, document_id)
     return ReextractResponse(job_id=job.id, queued=True)
+
+
+@router.get("/enrichment/queue", response_model=EnrichmentQueueSummary)
+async def get_enrichment_queue() -> EnrichmentQueueSummary:
+    """Library-wide enrichment backlog, so background model work is visible.
+
+    Installing a component re-queues every job that was skipped for want of it,
+    which can be minutes of vision inference per document with nothing in the
+    UI to say so.
+    """
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(
+                    EnrichmentJobModel.status,
+                    func.count(),
+                    func.count(func.distinct(EnrichmentJobModel.document_id)),
+                ).group_by(EnrichmentJobModel.status)
+            )
+        ).all()
+
+    by_status = {status: (jobs, docs) for status, jobs, docs in rows}
+    pending, pending_docs = by_status.get("pending", (0, 0))
+    running, running_docs = by_status.get("running", (0, 0))
+    return EnrichmentQueueSummary(
+        pending=pending,
+        running=running,
+        skipped=by_status.get("skipped", (0, 0))[0],
+        failed=by_status.get("failed", (0, 0))[0],
+        documents_active=max(pending_docs, running_docs),
+        active=bool(pending or running),
+    )
 
 
 @router.get("/documents/{document_id}/enrichment", response_model=list[EnrichmentJobItem])

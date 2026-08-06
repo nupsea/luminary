@@ -425,3 +425,80 @@ async def test_worker_skips_already_active_document(test_db):
 
     # Handler should not have been called since doc was already active
     assert call_count[0] == 0
+
+
+async def _seed_boot_job(factory, *, status: str, attempts: int, doc_id: str = "doc-boot") -> str:
+    job_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="t",
+                format="pdf",
+                content_type="book",
+                word_count=10,
+                page_count=1,
+                file_path="/fake.pdf",
+                stage="enriching",
+            )
+        )
+        session.add(
+            EnrichmentJobModel(
+                id=job_id,
+                document_id=doc_id,
+                job_type="image_analyze",
+                status=status,
+                attempts=attempts,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+    return job_id
+
+
+async def _boot_status_of(factory, job_id: str) -> str:
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(EnrichmentJobModel.status).where(EnrichmentJobModel.id == job_id)
+            )
+        ).scalar_one()
+    return row
+
+
+@pytest.mark.asyncio
+async def test_boot_requeues_failed_job_under_attempt_limit(test_db):
+    _engine, factory, _tmp = test_db
+    job_id = await _seed_boot_job(factory, status="failed", attempts=ew._MAX_BOOT_ATTEMPTS - 1)
+
+    worker = EnrichmentQueueWorker(poll_interval_s=60)
+    await worker.start()
+    await worker.stop()
+
+    assert await _boot_status_of(factory, job_id) == "pending"
+
+
+@pytest.mark.asyncio
+async def test_boot_leaves_exhausted_failed_job_alone(test_db):
+    """A deterministically-failing job must not re-run its model every launch."""
+    _engine, factory, _tmp = test_db
+    job_id = await _seed_boot_job(factory, status="failed", attempts=ew._MAX_BOOT_ATTEMPTS)
+
+    worker = EnrichmentQueueWorker(poll_interval_s=60)
+    await worker.start()
+    await worker.stop()
+
+    assert await _boot_status_of(factory, job_id) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_boot_always_requeues_skipped_regardless_of_attempts(test_db):
+    """Skipping costs a refused call, not model work, so it never exhausts retries."""
+    _engine, factory, _tmp = test_db
+    job_id = await _seed_boot_job(factory, status="skipped", attempts=ew._MAX_BOOT_ATTEMPTS + 5)
+
+    worker = EnrichmentQueueWorker(poll_interval_s=60)
+    await worker.start()
+    await worker.stop()
+
+    assert await _boot_status_of(factory, job_id) == "pending"
