@@ -56,24 +56,56 @@ fi
 # ---------------------------------------------------------------------------
 # Node — required for the frontend build
 # ---------------------------------------------------------------------------
-if _have node; then
-    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-    if [ "$NODE_MAJOR" -lt 20 ]; then
-        _warn "Node $NODE_MAJOR detected; frontend build needs >=20. Upgrade with your version manager (fnm/nvm/asdf) or 'brew upgrade node'."
-        exit 1
+NODE_MIN=20
+
+# Ubuntu's apt only carries Node 18, so "install Node yourself" was a dead end
+# on the platform the from-source path targets. Fetch the official LTS build
+# into ~/.local, the way uv installs itself -- no sudo, no apt repo, no
+# version manager.
+_install_node_linux() {
+    local arch tarball url dest
+    case "$ARCH" in
+        x86_64)          arch="x64" ;;
+        aarch64|arm64)   arch="arm64" ;;
+        *) _err "No official Node build for $ARCH. Install Node $NODE_MIN+ manually and re-run."; return 1 ;;
+    esac
+    tarball="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
+        | grep -oE "node-v[0-9.]+-linux-${arch}\.tar\.gz" | head -1)" || true
+    if [ -z "$tarball" ]; then
+        _err "Could not resolve a Node LTS download. Install Node $NODE_MIN+ manually and re-run."
+        return 1
     fi
+    url="https://nodejs.org/dist/latest-v22.x/${tarball}"
+    dest="$HOME/.local/share/luminary/node"
+    _info "Installing ${tarball%-linux-*} to $dest ..."
+    mkdir -p "$dest" "$HOME/.local/bin"
+    curl -fsSL "$url" | tar -xz -C "$dest" --strip-components=1
+    ln -sf "$dest/bin/node" "$HOME/.local/bin/node"
+    ln -sf "$dest/bin/npm" "$HOME/.local/bin/npm"
+    ln -sf "$dest/bin/npx" "$HOME/.local/bin/npx"
+    export PATH="$HOME/.local/bin:$PATH"
+    _have node || { _err "Node installed to $dest but not on PATH."; return 1; }
+}
+
+_node_too_old() {
+    [ "$(node -p 'process.versions.node.split(".")[0]')" -lt "$NODE_MIN" ]
+}
+
+if _have node && ! _node_too_old; then
     _info "node present: $(node --version)"
+elif [ "$OS" = "Darwin" ] && _have brew; then
+    _info "Installing node via brew..."
+    brew install node
+elif _have fnm; then
+    _info "Installing node $NODE_MIN via fnm..."
+    fnm install "$NODE_MIN" && fnm use "$NODE_MIN"
+elif [ "$OS" = "Linux" ]; then
+    _have node && _warn "Node $(node --version) is older than $NODE_MIN; installing a private LTS build."
+    _install_node_linux || exit 1
+    _info "node ready: $(node --version)"
 else
-    if [ "$OS" = "Darwin" ] && _have brew; then
-        _info "Installing node via brew..."
-        brew install node
-    elif _have fnm; then
-        _info "Installing node 20 via fnm..."
-        fnm install 20 && fnm use 20
-    else
-        _err "Node not found and no brew/fnm available. Install Node 20+ (https://nodejs.org/) and re-run."
-        exit 1
-    fi
+    _err "Node not found and no brew/fnm available. Install Node $NODE_MIN+ (https://nodejs.org/) and re-run."
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -86,6 +118,31 @@ else
         _info "Installing ollama via brew..."
         brew install ollama
     elif [ "$OS" = "Linux" ]; then
+        # Ollama's installer extracts a zstd archive, and a stock Ubuntu image
+        # has no zstd -- it fails with "requires zstd for extraction" after the
+        # download. Get it in place first.
+        if ! _have zstd; then
+            _info "Installing zstd (required by the ollama installer)..."
+            if [ "$(id -u)" = "0" ]; then
+                _SUDO=""
+            elif _have sudo; then
+                _SUDO="sudo"
+            else
+                _err "zstd is missing and neither root nor sudo is available."
+                _err "Install it, then re-run:  apt-get install -y zstd   (or your package manager's equivalent)"
+                exit 1
+            fi
+            if _have apt-get; then
+                $_SUDO apt-get update -qq && $_SUDO apt-get install -y -qq zstd
+            elif _have dnf; then
+                $_SUDO dnf install -y zstd
+            elif _have pacman; then
+                $_SUDO pacman -S --noconfirm zstd
+            else
+                _err "Could not install zstd automatically. Install it and re-run."
+                exit 1
+            fi
+        fi
         _info "Installing ollama via official script..."
         curl -fsSL https://ollama.com/install.sh | sh
     else

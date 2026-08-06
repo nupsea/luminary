@@ -76,12 +76,19 @@ luminary uninstall   # remove the app; asks before touching your library
 ```
 
 ### Linux & WSL — from source
+A stock Ubuntu image ships none of `git`, `make` or `curl`, so install those first:
 ```bash
+sudo apt-get update && sudo apt-get install -y git make curl
 git clone https://github.com/nupsea/luminary.git
 cd luminary
 make install   # Installs uv, Node, Ollama; pulls models; builds the app
 make start     # Starts the production server on http://localhost:7820
 ```
+`make install` needs `sudo` once, for Ollama and for the `zstd` its installer
+requires. Node is fetched into `~/.local` — apt only carries Node 18 and the
+build needs 20+, so the installer does not use apt for it.
+
+Verified end to end on a clean `ubuntu:24.04` container (arm64).
 
 ### macOS (Intel / x86_64) — via Docker
 Intel Macs have no native `lancedb` wheel, so the native `make install` can't run there.
