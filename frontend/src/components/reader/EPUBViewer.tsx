@@ -10,13 +10,15 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react"
+import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet } from "@/lib/apiClient"
 
 import type { components } from "@/types/api"
+import { useResizablePanel } from "@/hooks/useResizablePanel"
+import { PanelResizer } from "./PanelResizer"
 
 type EpubTocItem = components["schemas"]["EpubChapterTocItem"]
 type EpubChapter = components["schemas"]["EpubChapterResponse"]
@@ -39,6 +41,13 @@ interface EPUBViewerProps {
 }
 
 export function EPUBViewer({ documentId }: EPUBViewerProps) {
+  const tocPanel = useResizablePanel({
+    storageKey: "luminary-epub-toc",
+    defaultWidth: 224,
+    minWidth: 160,
+    maxWidth: 480,
+    side: "right",
+  })
   const [activeChapter, setActiveChapter] = useState(0)
 
   // Fetch TOC — long stale time since EPUB structure never changes
@@ -79,11 +88,34 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left: TOC panel */}
-      <div className="w-56 shrink-0 border-r border-border flex flex-col overflow-hidden">
-        <div className="px-3 py-2 border-b border-border">
+      {tocPanel.collapsed ? (
+        <button
+          type="button"
+          onClick={tocPanel.toggle}
+          aria-label="Show chapters"
+          title="Show chapters"
+          className="flex h-full w-8 shrink-0 items-start justify-center border-r border-border pt-3 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      ) : (
+      <div
+        className="shrink-0 border-r border-border flex flex-col overflow-hidden"
+        style={{ width: tocPanel.width }}
+      >
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border">
           <span className="lum-eyebrow">
             Chapters
           </span>
+          <button
+            type="button"
+            onClick={tocPanel.toggle}
+            aria-label="Hide chapters"
+            title="Hide chapters"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <PanelLeftClose size={14} />
+          </button>
         </div>
 
         {tocLoading && (
@@ -135,6 +167,14 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
           </div>
         )}
       </div>
+      )}
+      {!tocPanel.collapsed && (
+        <PanelResizer
+          onPointerDown={tocPanel.onPointerDown}
+          dragging={tocPanel.dragging}
+          label="Resize chapters panel"
+        />
+      )}
 
       {/* Right: Chapter content */}
       <div className="flex flex-1 flex-col overflow-hidden">

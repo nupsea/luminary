@@ -18,7 +18,7 @@ import {
   resolveOutline,
   shouldUseOutline,
 } from "./pdfTocUtils"
-import { sectionTitle } from "./sectionTitle"
+import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
 import { type PageMatch, buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
@@ -269,10 +269,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     highlightsVisibleRef.current = highlightsVisible
     // Relabel rather than drop: an anchor-id heading still navigates, and
     // filtering these out emptied the contents panel entirely.
-    const tocSections = useMemo(
-      () => sections.map(s => ({ ...s, heading: sectionTitle(s) })),
-      [sections],
-    )
+    const tocSections = useMemo(() => usableSections(sections), [sections])
     const sectionsRef = useRef(sections)
     sectionsRef.current = sections
 

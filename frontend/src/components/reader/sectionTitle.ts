@@ -33,3 +33,19 @@ function derivedFromPreview(preview: string): string {
   if (!trimmed) return ""
   return trimmed.length < clean.length ? `${trimmed}…` : trimmed
 }
+
+/**
+ * Relabel sections, then drop the ones still unreadable.
+ *
+ * Neither half works alone: dropping everything empties the panel when a whole
+ * document has anchor-id headings, and relabelling alone leaves a textbook's
+ * stray glyphs ("c", "g", "our move{") in the contents. Falls back to the
+ * relabelled list when filtering would leave nothing to navigate with.
+ */
+export function usableSections<T extends { heading?: string | null; preview?: string | null; content?: string | null }>(
+  sections: T[],
+): (T & { heading: string })[] {
+  const relabelled = sections.map(s => ({ ...s, heading: sectionTitle(s) }))
+  const kept = relabelled.filter(s => looksLikeHeading(s.heading))
+  return kept.length > 0 ? kept : relabelled
+}
