@@ -708,8 +708,8 @@ async def trigger_cluster(
             async with get_session_factory()() as new_session:
                 count = await get_clustering_service().cluster_notes(new_session)
                 logger.info("Background clustering finished: %d suggestions", count)
-        except Exception as exc:
-            logger.error("Background clustering task failed: %s", exc)
+        except Exception:
+            logger.exception("Background clustering task failed")
 
     task = asyncio.create_task(_run_clustering())
     _background_tasks.add(task)

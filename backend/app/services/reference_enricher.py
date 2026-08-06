@@ -322,7 +322,7 @@ class ReferenceEnricherService:
                         if resp.status_code < 400:
                             is_llm_suggested = False
                     except Exception:
-                        pass  # unreachable -- keep is_llm_suggested=True
+                        logger.debug("reference HEAD failed: %s", url, exc_info=True)
                 verified.append({**ref, "is_llm_suggested": is_llm_suggested})
         return verified
 

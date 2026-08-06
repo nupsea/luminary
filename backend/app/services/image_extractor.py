@@ -326,6 +326,7 @@ def extract_images_pdf(
             try:
                 img_pil = PILImage.open(BytesIO(raw_bytes))
             except Exception:
+                logger.debug("undecodable embedded image, skipped", exc_info=True)
                 continue
 
             stored = _store_png(
@@ -399,6 +400,7 @@ def extract_images_epub(
         try:
             img_pil = PILImage.open(BytesIO(raw_bytes))
         except Exception:
+            logger.debug("undecodable EPUB image, skipped", exc_info=True)
             continue
 
         stored = _store_png(

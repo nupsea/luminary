@@ -126,7 +126,7 @@ async def run_ingestion(
         except Exception as exc:
             root_span.set_attribute("error", True)
             root_span.set_attribute("error.message", str(exc))
-            logger.error(
+            logger.exception(
                 "Ingestion task failed",
                 extra={"document_id": document_id},
                 exc_info=exc,

@@ -101,6 +101,7 @@ class LanceDBService:
             table = self._get_table()
             return table.count_rows(f"document_id = '{document_id}'")
         except Exception:
+            logger.warning("row count failed for %s; reporting 0", document_id, exc_info=True)
             return 0
 
     def delete_document(self, document_id: str) -> None:

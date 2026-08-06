@@ -176,6 +176,7 @@ class HybridRetriever:
                     table = svc._get_table()
                     total = table.count_rows()
                 except Exception:
+                    logger.warning("LanceDB count_rows failed; treating as empty", exc_info=True)
                     total = 0
                 if total == 0:
                     logger.debug("vector_search: LanceDB table empty, returning []")

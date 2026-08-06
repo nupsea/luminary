@@ -108,7 +108,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
                 for did in node.get("document_ids", []):
                     graph.add_extracted_from(cid, did)
             except Exception:
-                pass
+                logger.warning("persist: Kuzu concept write failed for %s", slug, exc_info=True)
             if node.get("centroid"):
                 await asyncio.to_thread(lance.upsert_concept_vector, cid, node["centroid"])
             return cid
@@ -169,7 +169,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
             await get_concept_service().apply_overrides(session)
             await session.commit()
         except Exception:
-            pass
+            logger.warning("persist: re-applying user overrides failed", exc_info=True)
 
     record(
         state,

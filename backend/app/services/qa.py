@@ -828,7 +828,7 @@ class QAService:
             )
 
         except Exception as exc:
-            logger.error("stream_answer: unhandled error", exc_info=exc)
+            logger.exception("stream_answer: unhandled error", exc_info=exc)
             payload = {"error": "internal", "message": str(exc), "done": True}
             yield f"data: {json.dumps(payload)}\n\n"
 

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import database as _database_module  # indirect: get_session_factory is patched
 from app.models import NoteModel
 from app.services import retriever as _retriever_module  # indirect: get_retriever is patched
-from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.llm import get_llm_service
 from app.services.mastery_service import get_mastery_service
 from app.types import GapReport
 
@@ -93,18 +93,14 @@ class GapDetectorService:
 
         user_msg = f"NOTES:\n{notes_text}\n\nBOOK PASSAGES:\n{book_context}"
 
-        try:
-            raw = await get_llm_service().complete(
-                messages=[
-                    {"role": "system", "content": _ANALYSIS_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ],
-                temperature=0.0,
-                background=True,
-            )
-        except LLMUnavailableError:
-            raise
-
+        raw = await get_llm_service().complete(
+            messages=[
+                {"role": "system", "content": _ANALYSIS_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.0,
+            background=True,
+        )
         parsed = _extract_json(raw.strip())
         if not parsed or "gaps" not in parsed or "covered" not in parsed:
             logger.warning("detect_gaps: unexpected LLM JSON shape, raw=%r", raw[:200])

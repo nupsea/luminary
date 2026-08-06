@@ -265,6 +265,7 @@ class MasteryService:
                         if name:
                             members.append(name)
             except Exception:
+                logger.warning("cluster member lookup failed", exc_info=True)
                 members = []
             for m in members:
                 cluster_members.add(m)
@@ -322,6 +323,7 @@ class MasteryService:
             graph = get_graph_service()
             by_type = graph.get_entities_by_type_for_document(document_id)
         except Exception:
+            logger.warning("entity-by-type lookup failed for %s", document_id, exc_info=True)
             by_type = {}
 
         all_entity_names: list[str] = []

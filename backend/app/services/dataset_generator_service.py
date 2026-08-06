@@ -61,7 +61,7 @@ async def _generate_questions_for_chunk(
     parsed = extract_json_object(content)
     items = parsed.get("questions", [])
     if not isinstance(items, list):
-        raise ValueError("LLM JSON did not include a questions array")
+        raise ValueError("LLM JSON did not include a questions array")  # noqa: TRY004
     return [q for q in items if isinstance(q, dict)]
 
 

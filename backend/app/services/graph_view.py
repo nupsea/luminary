@@ -135,7 +135,7 @@ class KuzuViewRepo:
                     names.append(row[0])
             return names
         except Exception:
-            logger.debug("get_cross_document_entities failed", exc_info=True)
+            logger.warning("get_cross_document_entities failed", exc_info=True)
             return []
 
     # -------------------------------------------------------------------------

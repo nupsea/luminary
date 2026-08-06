@@ -329,7 +329,7 @@ async def entity_extract_node(state: IngestionState) -> IngestionState:
                 is_technical,
             )
         except MemoryError as exc:
-            logger.error(
+            logger.exception(
                 "entity_extract_node: OOM loading GLiNER model -- "
                 "set GLINER_ENABLED=false in .env to skip NER on low-memory machines",
                 extra={"doc_id": doc_id},

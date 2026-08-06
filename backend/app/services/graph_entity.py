@@ -92,7 +92,7 @@ class KuzuEntityRepo:
                     )
             return out
         except Exception:
-            logger.debug("get_entities_detailed_for_document failed", exc_info=True)
+            logger.warning("get_entities_detailed_for_document failed", exc_info=True)
             return []
 
     def get_entities_by_type_for_document(self, document_id: str) -> dict[str, list[str]]:
@@ -305,5 +305,5 @@ class KuzuEntityRepo:
                     return eid
             return None
         except Exception:
-            logger.debug("match_entity_by_name failed", exc_info=True)
+            logger.warning("match_entity_by_name failed", exc_info=True)
             return None

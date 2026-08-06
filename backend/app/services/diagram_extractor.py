@@ -111,7 +111,7 @@ def _parse_llm_response(raw: str) -> dict:
         raise ValueError(f"LLM response is not valid JSON: {exc}") from exc
 
     if not isinstance(parsed, dict):
-        raise ValueError(f"Expected JSON object, got {type(parsed).__name__}")
+        raise ValueError(f"Expected JSON object, got {type(parsed).__name__}")  # noqa: TRY004
 
     # Normalize to always have nodes and edges keys
     parsed.setdefault("nodes", [])

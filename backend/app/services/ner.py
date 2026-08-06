@@ -438,8 +438,8 @@ class EntityExtractor:
                         local_files_only=False,
                     )
                     logger.info("GLiNER model loaded (downloaded)")
-                except Exception as exc:
-                    logger.error("Failed to load GLiNER model: %s", exc)
+                except Exception:
+                    logger.exception("Failed to load GLiNER model")
                     raise
             return self._model
 

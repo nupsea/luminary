@@ -152,7 +152,7 @@ async def _swallow_cancel(task: asyncio.Task[None]) -> None:
         await task
     except asyncio.CancelledError:
         pass
-    except Exception:  # noqa: BLE001 -- intentional broad catch, see docstring
+    except Exception:  # noqa: BLE001,S110 -- already logged by _on_done, see docstring
         pass
 
 

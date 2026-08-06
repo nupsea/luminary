@@ -114,6 +114,6 @@ def _parse_objectives(raw: str) -> list[str]:
         data = json.loads(match.group(0))
         if isinstance(data, list):
             return [str(item) for item in data if item]
-    except Exception:  # noqa: BLE001
-        pass
+    except (ValueError, TypeError):
+        logger.debug("objective JSON parse failed", exc_info=True)
     return []

@@ -62,7 +62,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
                 "status": "classifying",
             }
         except Exception as exc:
-            logger.error("parse_node failed", exc_info=exc)
+            logger.exception("parse_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}
 
 
@@ -179,5 +179,5 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 "status": "chunking",
             }
         except Exception as exc:
-            logger.error("classify_node failed", exc_info=exc)
+            logger.exception("classify_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}

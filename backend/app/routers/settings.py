@@ -71,7 +71,7 @@ async def _fetch_ollama_models(ollama_url: str) -> tuple[bool, list[str]]:
                 data = resp.json()
                 return True, [f"ollama/{m['name']}" for m in data.get("models", [])]
     except Exception:
-        pass
+        logger.debug("Ollama probe failed at %s", ollama_url, exc_info=True)
     return False, []
 
 

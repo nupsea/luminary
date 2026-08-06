@@ -104,16 +104,20 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
         if is_excalidraw_scene:
             try:
                 scene = json.loads(content)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=400, detail="Invalid Excalidraw JSON scene"
+                ) from exc
             if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
-                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+                raise HTTPException(  # noqa: TRY301
+                    status_code=400, detail="Invalid Excalidraw JSON scene"
+                )
         await asyncio.to_thread(target_path.write_bytes, content)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to save note image: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to save image file")
+    except Exception as exc:
+        logger.exception("Failed to save note image")
+        raise HTTPException(status_code=500, detail="Failed to save image file") from exc
 
     # Returns the pseudo-path that MarkdownRenderer.tsx resolves to API_BASE
     return UploadResponse(

@@ -62,7 +62,7 @@ async def notes_node(state: ChatState) -> dict:
                     entity_names = ", ".join(e["name"] for e in entities[:5])
                     line += f" [Entities: {entity_names}]"
             except Exception:
-                pass  # Entity enrichment is non-blocking
+                logger.debug("note entity enrichment failed", exc_info=True)
         note_lines.append(line)
 
     section_context = "\n\n".join(note_lines)

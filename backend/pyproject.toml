@@ -69,14 +69,6 @@ ignore = [
     "ASYNC109",  # timeout is passed through to LiteLLM/httpx, which owns it
     # Deferred; remove the line when its WP lands. See docs/refactor-quality-plan.md.
     "ASYNC240",  # WP4
-    "S110",      # WP3
-    "S112",      # WP3
-    "SIM105",    # WP3
-    "TRY400",    # WP3
-    "TRY004",    # WP3
-    "TRY203",    # WP3
-    "TRY301",    # WP3
-    "B904",      # WP3
     "PERF401",   # WP5
     "PERF403",   # WP5
     "RUF059",    # WP5

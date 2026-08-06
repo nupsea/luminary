@@ -192,7 +192,7 @@ class KuzuTechRepo:
                 )
             return entities
         except Exception:
-            logger.debug("get_entities_by_type failed", exc_info=True)
+            logger.warning("get_entities_by_type failed", exc_info=True)
             return []
 
     def _get_diagram_nodes_by_type(self, document_id: str, node_type: str) -> list[dict]:
@@ -221,7 +221,7 @@ class KuzuTechRepo:
                 )
             return nodes
         except Exception:
-            logger.debug("_get_diagram_nodes_by_type failed", exc_info=True)
+            logger.warning("_get_diagram_nodes_by_type failed", exc_info=True)
             return []
 
     # -------------------------------------------------------------------------
@@ -406,7 +406,7 @@ class KuzuTechRepo:
                 )
             return nodes
         except Exception:
-            logger.debug("get_diagram_nodes_for_document failed", exc_info=True)
+            logger.warning("get_diagram_nodes_for_document failed", exc_info=True)
             return []
 
     def get_diagram_edges_for_document(self, document_id: str) -> list[dict]:

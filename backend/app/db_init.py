@@ -2,6 +2,7 @@ import contextlib
 import logging
 
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base
@@ -53,6 +54,21 @@ from app.models import (  # noqa: F401 — imported to register ORM models with 
 from app.paths import alembic_ini
 
 logger = logging.getLogger(__name__)
+
+
+async def _apply_legacy_ddl(conn, ddl: str) -> None:
+    """Run one statement from the frozen pre-Alembic bridge, tolerating re-runs.
+
+    Re-applying an `ADD COLUMN`/`RENAME` raises OperationalError once the
+    schema already has it, which is the expected path for every database past
+    the baseline. Anything that is not an OperationalError (a locked file, a
+    typo in the DDL) propagates instead of being swallowed on the boot path.
+    """
+    try:
+        await conn.execute(text(ddl))
+    except OperationalError as exc:
+        logger.debug("legacy DDL already applied: %s (%s)", ddl, exc)
+
 
 FTS5_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
@@ -240,10 +256,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         # SQLite does not support RENAME TABLE if there are dependent views or triggers
         # in some versions, but usually it's fine. We'll use the table-rebuild idiom
         # to ensure the new table name is set correctly in metadata.
-        try:
-            await conn.execute(text("ALTER TABLE note_collections RENAME TO collections"))
-        except Exception:
-            pass  # Already renamed or doesn't exist
+        await _apply_legacy_ddl(conn, "ALTER TABLE note_collections RENAME TO collections")
 
         # Create collection_members and migrate from note_collection_members.
         # We check if collection_members exists; if not, create and migrate.
@@ -391,10 +404,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE misconceptions ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
             "ALTER TABLE misconceptions ADD COLUMN resolved_at DATETIME",
         ]:
-            try:
-                await conn.execute(text(ddl))
-            except Exception:
-                pass  # column already exists
+            await _apply_legacy_ddl(conn, ddl)
 
         # One-time backfill of the card->concept slug binding for already-mapped cards, so the
         # first rebuild after this migration can re-map them by slug. Idempotent (fills NULLs only).
@@ -660,20 +670,14 @@ async def create_all_tables(engine: AsyncEngine) -> None:
 
         # source_content_hash column for incremental collection-based flashcard generation.
         # ALTER TABLE is idempotent -- column is silently ignored if it already exists.
-        try:
-            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT"))
-        except Exception:
-            pass  # Column already exists (idempotent)
+        await _apply_legacy_ddl(conn, "ALTER TABLE flashcards ADD COLUMN source_content_hash TEXT")
 
         # archived flag on notes; note_id FK on flashcards for per-note coverage tracking.
         for ddl in [
             "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE flashcards ADD COLUMN note_id TEXT",
         ]:
-            try:
-                await conn.execute(text(ddl))
-            except Exception:
-                pass  # Column already exists (idempotent)
+            await _apply_legacy_ddl(conn, ddl)
 
         # note_sources pivot table for multi-document source linkage.
         # Base.metadata.create_all above creates note_sources if absent.
@@ -690,22 +694,13 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         )
 
         # chunk_classification label for pre-generation classifier.
-        try:
-            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT"))
-        except Exception:
-            pass  # Column already exists (idempotent)
+        await _apply_legacy_ddl(conn, "ALTER TABLE flashcards ADD COLUMN chunk_classification TEXT")
 
         # section_heading for source grounding display on flashcards.
-        try:
-            await conn.execute(text("ALTER TABLE flashcards ADD COLUMN section_heading TEXT"))
-        except Exception:
-            pass  # Column already exists (idempotent)
+        await _apply_legacy_ddl(conn, "ALTER TABLE flashcards ADD COLUMN section_heading TEXT")
 
         # content_hash on notes for dedup.
-        try:
-            await conn.execute(text("ALTER TABLE notes ADD COLUMN content_hash TEXT"))
-        except Exception:
-            pass  # Column already exists (idempotent)
+        await _apply_legacy_ddl(conn, "ALTER TABLE notes ADD COLUMN content_hash TEXT")
 
         # flashcards.document_id must be nullable for note-sourced cards.
         # Old databases have NOT NULL on this column. Use table-rebuild idiom since
@@ -771,10 +766,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE flashcards ADD COLUMN source_scope TEXT",
             "ALTER TABLE flashcards ADD COLUMN mapping_status TEXT NOT NULL DEFAULT 'mapped'",
         ]:
-            try:
-                await conn.execute(text(ddl))
-            except Exception:
-                pass  # Column already exists (idempotent)
+            await _apply_legacy_ddl(conn, ddl)
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_flashcards_concept_id ON flashcards(concept_id)")
         )
@@ -785,10 +777,7 @@ async def create_all_tables(engine: AsyncEngine) -> None:
             "ALTER TABLE concepts ADD COLUMN level INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE concepts ADD COLUMN salience REAL NOT NULL DEFAULT 0",
         ]:
-            try:
-                await conn.execute(text(ddl))
-            except Exception:
-                pass  # Column already exists (idempotent)
+            await _apply_legacy_ddl(conn, ddl)
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_concepts_parent_id ON concepts(parent_id)")
         )

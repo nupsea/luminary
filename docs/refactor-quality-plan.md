@@ -106,7 +106,7 @@ on ruff, pytest, tsc and eslint (I-13 order).
 | **WP0 -- Guardrails** | DONE. See below. | Low |
 | **WP1 -- Security** | DONE. See below. | Low |
 | **WP2 -- Interfaces** | DONE. See below. | Medium |
-| **WP3 -- Error handling** | E1 triage: every `except Exception` gets narrowed, re-raised, or logged with `logger.exception` and a reason. E4, E5, E6. Start with `image_extractor.py`, `db_init.py`, `vector_store.py` (33 of 309). | Medium |
+| **WP3 -- Error handling** | DONE. See below. | Medium |
 | **WP4 -- Performance** | P1 (single grouped query for the heatmap), P2 (`to_thread` the file-serving paths), P3, P4, P6 audit. Measure P1 and P2 before and after; record the numbers here. | Medium |
 | **WP5 -- Cleanup** | C1, C2 (extract shared helpers -- `_sanitize_fts_query` first), C3, C4. C5 is split out: `study.py` -> extract the 15 private functions into `services/teachback_service.py` and `services/study_session_service.py`. | Medium |
 
@@ -168,6 +168,40 @@ corrected ordering exactly one violation remains (`services/qa.py` ->
 `runtime.chat_graph`); the fix is relocating `stream_answer` into `runtime/`.
 
 Nine of the ten allowlisted violations are cleared.
+
+## Shipped in WP3
+
+`S110`, `S112`, `SIM105`, `TRY400`, `TRY004`, `TRY203`, `TRY301` and `B904` are
+off the deferred list and enforced. Only `ASYNC240` (WP4) and `PERF401` (WP5)
+remain deferred.
+
+Silent broad excepts went from 32 to 25 (measured by an AST scan for a handler
+whose body neither logs nor re-raises). The 25 that remain are genuine
+fallbacks -- an optional probe, a documented schema fallback -- not hidden
+failures.
+
+`db_init.py`'s nine `except Exception: pass` blocks around the frozen
+pre-Alembic bridge collapse into `_apply_legacy_ddl`, which catches
+`OperationalError` only. Re-applying an `ADD COLUMN` still passes silently; a
+locked file or a typo'd statement now propagates instead of being swallowed on
+the boot path.
+
+18 `logger.error` calls inside `except` became `logger.exception`, so the
+traceback survives.
+
+Graph services downgraded 24 Kuzu failures to `logger.debug`, which is invisible
+at the default INFO level -- a dead graph leg was indistinguishable from an empty
+one, which is what [[feedback_verify_integrity_never_claim_artifacts]] exists to
+prevent. 18 are now `logger.warning`. The two inside per-relation loops stay at
+debug: a relation type absent from the schema would log on every call.
+
+The same reasoning applied to seven silent zero-value fallbacks (`graph.py`
+counts, `vector_store.count_rows`, `retriever` total, two `mastery_service`
+lookups, `graph_prereq`, `paths.app_version`). Control flow is unchanged --
+still fail-soft -- but a broken store now says so.
+
+`gap_detector.py` had `except LLMUnavailableError: raise` with no broader handler
+after it: a no-op. Removed.
 
 **Correctness found while fixing.** `zip()` calls gained `strict=True` rather
 than ruff's suggested `strict=False`, which surfaced a NER test whose mock

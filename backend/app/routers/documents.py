@@ -746,7 +746,7 @@ async def ingest_url(
             extractor = get_article_extractor()
             parsed = await extractor.extract(body.url, doc_id=doc_id)
         except Exception as exc:
-            logger.error("Article extraction failed for %s: %s", body.url, exc)
+            logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         data_dir = Path(settings.DATA_DIR).expanduser()
@@ -841,7 +841,7 @@ async def ingest_url(
     try:
         await _yt_module.download_audio(body.url, dest_stem)
     except RuntimeError as exc:
-        logger.error("yt-dlp download failed: %s", exc)
+        logger.exception("yt-dlp download failed")
         raise HTTPException(
             status_code=500,
             detail=f"Audio download failed: {exc}",
@@ -1106,7 +1106,7 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     try:
         chapters = await get_toc_async(str(fp))
     except Exception as exc:
-        logger.error("EPUB TOC extraction failed for %s: %s", document_id, exc)
+        logger.exception("EPUB TOC extraction failed for %s", document_id)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to read EPUB table of contents: {exc}",
@@ -1166,7 +1166,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("EPUB chapter %d render failed for %s: %s", chapter_index, document_id, exc)
+        logger.exception("EPUB chapter %d render failed for %s", chapter_index, document_id)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to render chapter {chapter_index}: {exc}",
