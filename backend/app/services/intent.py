@@ -22,6 +22,22 @@ _VALID_INTENTS: frozenset[str] = frozenset(
     }
 )
 
+# Intents the LLM classifier may not choose. Each of these switches the chat out
+# of question-answering and into an interactive mode: teach_back grades the
+# message as a learner's explanation, socratic answers with a question, and the
+# notes modes read personal notes instead of the document. A mode is only right
+# when the user's own phrasing asks for it -- which the heuristic already detects
+# at 0.95 and returns without ever consulting the LLM. So by construction the LLM
+# is only asked about questions that are NOT a mode request, and any mode answer
+# it gives is a misfire: a plain question ("To what extent can Lloyd's algorithm
+# ...") came back as teach_back and was graded as an explanation the user never
+# wrote, producing an empty "what you got right / misconceptions / gaps" card.
+_MODE_INTENTS: frozenset[str] = frozenset(
+    {"teach_back", "socratic", "notes", "notes_gap"}
+)
+
+_LLM_SELECTABLE_INTENTS: frozenset[str] = _VALID_INTENTS - _MODE_INTENTS
+
 # Keyword sets — order matters: checked top to bottom, first match wins.
 # These are hints only; the LLM classifier handles ambiguous cases (threshold < 0.9).
 _TEACH_BACK_KWS: frozenset[str] = frozenset(
@@ -317,9 +333,10 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
 async def _llm_classify_fallback(question: str, default: str, scope: str = "all") -> str:
     """Call LiteLLM to classify intent when heuristic confidence < 0.7.
 
-    The model is asked to reply with exactly one of the five intent words.
-    Falls back to 'factual' (not `default`) when the LLM is offline or
-    returns an unrecognised token — because factual is the safest retrieval mode.
+    Chooses only among the retrieval intents; see _MODE_INTENTS for why the
+    interactive modes are the heuristic's alone to pick. Falls back to 'factual'
+    (not `default`) when the LLM is offline or returns anything unrecognised or
+    out of bounds — because factual is the safest retrieval mode.
 
     Args:
         question: raw user question
@@ -327,7 +344,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
         scope: 'single' (one document) or 'all' (entire library)
 
     Returns:
-        intent string (one of the five valid intents)
+        one of _LLM_SELECTABLE_INTENTS
     """
     from app.services.llm import get_llm_service  # noqa: PLC0415
 
@@ -349,14 +366,9 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                     "role": "system",
                     "content": (
                         f"{scope_hint} "
-                        "Classify the question. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, "
-                        "exploratory, notes, notes_gap, socratic, or teach_back. "
-                        "Use 'teach_back' for first-person explanations (user is explaining). "
-                        "Use 'socratic' for requests to be quizzed or tested. "
-                        "Use 'notes_gap' for questions asking to compare notes against "
-                        "a book or find gaps. "
-                        "Use 'notes' for questions about the user's personal notes or annotations. "
+                        "The user has asked a question about their documents. Decide how to "
+                        "look the answer up. Reply with exactly one word: "
+                        "summary, factual, relational, comparative, or exploratory. "
                         "Use 'summary' ONLY when the user explicitly asks to summarize, or "
                         "for an overview of a whole body of work. Breadth of scope is not a "
                         "request for a summary. "
@@ -370,12 +382,19 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
             ],
             temperature=0.0,
         )
-        result = content.strip().lower()
-        if result in _VALID_INTENTS:
+        result = content.strip().lower().strip("\"'`.,:;!?*")
+        if result in _LLM_SELECTABLE_INTENTS:
             logger.debug(
                 "intent LLM: %r → %s (heuristic default was %s)", question[:60], result, default
             )
             return result
+        if result in _MODE_INTENTS:
+            logger.info(
+                "intent LLM chose the interactive mode %r for a plain question; "
+                "modes are keyword-gated, using 'factual'",
+                result,
+            )
+            return "factual"
         logger.debug("intent LLM returned unrecognised %r, falling back to 'factual'", result)
         return "factual"
     except Exception:

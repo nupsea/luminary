@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Ask answers the question instead of grading you.** A question phrased for
+  analysis rather than lookup ("To what extent can Lloyd's algorithm be
+  effective when...") reached the intent classifier's LLM fallback, which
+  labelled it `teach_back` — the mode that treats the message as a learner's
+  explanation of what they understand. The question was graded as an
+  explanation nobody wrote, so the reply was an empty "what you got right /
+  misconceptions / gaps" card. The interactive modes (teach back, socratic,
+  the two notes modes) are only ever correct when the user's own phrasing asks
+  for them, and that phrasing is already matched by keyword ahead of any LLM
+  call, so the LLM no longer gets to choose them at all: it picks among the
+  retrieval strategies, and anything else falls back to a plain lookup.
+- **The local model stops reloading itself mid-conversation.** Ollama keys a
+  loaded runner on its context window, so a call asking for a different one
+  unloads llama-server and loads it again. Luminary asked for three different
+  windows — 2048 by default, 4096 for the chat answer, 8192 for summaries and
+  flashcards — which made a single chat turn reload the model twice, and a
+  question asked while a document was still being enriched reload it
+  repeatedly. Measured at ~1s per reload on an idle machine, and far worse
+  under the GPU contention of an active ingest, where intent classification
+  alone was observed taking 16s. There is now one window for every local call.
+- **The transparency panel names the strategy that actually ran.** The routing
+  table was written out twice and the copies had drifted, so a notes-gap
+  question was reported as "search" while the notes-gap path answered it.
+
 ## [0.4.0] - 2026-08-05
 
 ### Added

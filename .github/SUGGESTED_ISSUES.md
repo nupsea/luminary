@@ -78,13 +78,13 @@ Add a lightweight configuration check and network ping to Ollama during FastAPI 
   * [chat_graph.py](file:///Users/sethurama/DEV/LM/learning-mate/backend/app/runtime/chat_graph.py)
 
 ### Problem Statement
-Luminary feeds retrieved text chunks up to `QA_CONTEXT_TOKEN_BUDGET` (default 1500 tokens) into the local LLM. However, local models like Llama 3.2 3B have a default context window of `2048` tokens (`OLLAMA_NUM_CTX`). When a user engages in a long conversation, the chat history size grows and eventually exceeds the remaining token budget, causing Ollama to silently truncate older history or the retrieval context itself.
+Luminary feeds retrieved text chunks up to `QA_CONTEXT_TOKEN_BUDGET` (default 1500 tokens) into the local LLM, inside a fixed `OLLAMA_NUM_CTX` window shared by every local call. When a user engages in a long conversation, the chat history size grows and eventually exceeds the remaining token budget, causing Ollama to silently truncate older history or the retrieval context itself.
 
 ### Proposed Solution
 Implement a dynamic context allocator in the synthesis stage:
 1. Count the exact number of tokens in the prompt template, system prompt, and active conversation history.
 2. Dynamically adjust `QA_CONTEXT_TOKEN_BUDGET` for that request:
-   `available_retrieval_budget = QA_NUM_CTX - (history_tokens + system_prompt_tokens + safety_buffer)`
+   `available_retrieval_budget = OLLAMA_NUM_CTX - (history_tokens + system_prompt_tokens + safety_buffer)`
 3. If `available_retrieval_budget` is too low (e.g. less than 500 tokens), compress/summarize the oldest chat history turns using a sliding window to free up space, ensuring grounding context is never completely starved.
 
 ---

@@ -198,7 +198,9 @@ class LLMService:
             kwargs["api_base"] = settings.OLLAMA_URL
             # Keep the model resident across requests and set the context window
             # explicitly (Ollama defaults to 2048 and silently truncates beyond it).
-            # Heavy tasks (e.g. flashcard generation over a section) pass a larger num_ctx.
+            # num_ctx is a per-model property here, not a per-call one: overriding
+            # it forces Ollama to unload and reload the runner, so leave it unset
+            # unless a call genuinely needs a different model instance.
             kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
             kwargs["num_ctx"] = num_ctx or settings.OLLAMA_NUM_CTX
             # Thinking-capable models (qwen3+) auto-enable reasoning, which
