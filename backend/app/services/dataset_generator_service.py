@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services.background import fire_and_forget
 from app.services.golden_quality import (
     build_generation_prompt,
     extract_json_object,
@@ -34,17 +35,17 @@ DEFAULT_GENERATOR_MODEL = "openai/gpt-4.1"
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    fire_and_forget(coro, _background_tasks, label="dataset generator task")
+
+
+
+
 def target_count_for(size: str, document_count: int) -> int:
     if size not in SIZE_CONFIG:
         raise ValueError(f"invalid dataset size: {size}")
     questions_per_chunk, chunks_per_doc = SIZE_CONFIG[size]
     return min(MAX_QUESTIONS_PER_DATASET, questions_per_chunk * chunks_per_doc * document_count)
-
-
-def _fire_and_forget(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 async def _generate_questions_for_chunk(

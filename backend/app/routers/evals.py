@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services.background import fire_and_forget
 from app.services.dataset_generator_service import (
     count_questions,
     create_dataset,
@@ -43,6 +44,12 @@ _EVALS_DIR = REPO_ROOT / "evals"
 
 # Strong references to background tasks — prevents GC before they complete.
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
+    fire_and_forget(coro, _background_tasks, label="background eval task")
+
+
 
 # In-flight + recently-completed eval run tracker.
 # Key: dataset key (file-backed -> dataset name, db-backed -> dataset id).
@@ -264,21 +271,6 @@ class GeneratedRunResponse(BaseModel):
     status: str
     run_id: str
     dataset_id: str
-
-
-def _fire_and_forget(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-
-    def _on_done(t: asyncio.Task) -> None:
-        _background_tasks.discard(t)
-        if t.cancelled():
-            return
-        exc = t.exception()
-        if exc is not None:
-            logger.exception("background eval task crashed", exc_info=exc)
-
-    task.add_done_callback(_on_done)
 
 
 async def _run_eval_subprocess(

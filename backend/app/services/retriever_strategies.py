@@ -8,7 +8,6 @@ Kept separate so retriever.py stays focused on the orchestration logic.
 
 import asyncio
 import logging
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -21,6 +20,9 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
 from app.services.entity_disambiguator import find_canonical
+from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
+    sanitize_fts_query as _sanitize_fts_query,
+)
 from app.services.model_loading import MODEL_LOAD_LOCK
 from app.types import ScoredChunk
 
@@ -161,23 +163,6 @@ def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
     if section_result is not None:
         return section_result
     return candidates[:k]
-
-
-def _sanitize_fts_query(query: str) -> str:
-    """Sanitize a natural-language query for safe use in an FTS5 MATCH expression.
-
-    FTS5 interprets punctuation (?, *, ^, (, ), ", +) and bare keywords
-    AND/OR/NOT as query operators, causing syntax errors on ordinary questions.
-    Strip everything except word characters and spaces, then remove FTS5 boolean
-    operators so the query is treated as a plain term search.
-    """
-    # Remove all characters that are not word chars or whitespace
-    cleaned = re.sub(r"[^\w\s]", " ", query)
-    # Remove bare AND / OR / NOT (FTS5 boolean operators, case-insensitive)
-    cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
-    # Space-joined = FTS5 implicit AND (all terms required). keyword_search runs
-    # this precise form first and backfills with an OR pass when it's too strict.
-    return " ".join(cleaned.split())
 
 
 async def _expand_context(

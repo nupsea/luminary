@@ -109,7 +109,7 @@ on ruff, pytest, tsc and eslint (I-13 order).
 | **WP3 -- Error handling** | DONE. See below. | Medium |
 | **WP4 -- Performance** | DONE. See below. | Medium |
 | **WP6 -- I-2 sweep** | 44 sync Kuzu/LanceDB calls still run on the event loop in services and workflow nodes. `tests/test_async_store_calls.py` pins the count. | Medium |
-| **WP5 -- Cleanup** | C1, C2 (extract shared helpers -- `_sanitize_fts_query` first), C3, C4. C5 is split out: `study.py` -> extract the 15 private functions into `services/teachback_service.py` and `services/study_session_service.py`. | Medium |
+| **WP5 -- Cleanup** | C1 and C2 done, see below. C4 (125 frontend warnings) and C5 (`study.py` split) still open. | Medium |
 
 C5's frontend half (`Chat.tsx`, `DocumentReader.tsx`, `Notes.tsx`) is deliberately
 not in this plan. Splitting three 1.4k-line components is its own branch with its
@@ -252,6 +252,33 @@ could be garbage-collected mid-scan; a blocking `open()` write in the image
 upload handler now goes through `asyncio.to_thread`; `_extract_docstring_python`
 used `.strip('\"\"\"')`, which strips a character set and ate quote characters
 belonging to the docstring text.
+
+## Shipped in WP5
+
+C1: `study.py` carried the same 14-line block twice -- `_background_tasks`,
+`_teachback_eval_sem` and `_fire_and_forget` each declared two ways up.
+
+C2: `_sanitize_fts_query` existed in three copies written three different ways
+(`retriever_strategies`, `note_search`, `document_search`). Its behaviour is
+documented in `patterns.md`, so three copies were three chances to drift. Now
+`services/fts_query.sanitize_fts_query`, verified to produce identical output
+at all four call sites.
+
+`_fire_and_forget` existed in four copies, three of which discarded a crashed
+task's exception -- the swallow class WP3 exists to close. All four now
+delegate to `services/background.fire_and_forget`, which logs the crash. Each
+module keeps its own registry because `evals.py` counts its in-flight tasks to
+build run ids.
+
+**C5 not attempted.** The teachback helpers are not contiguous:
+`_evaluate_teachback_bg` sits at line 1419, eleven unrelated endpoints follow,
+and the rest of the cluster starts at 2171. Extracting means moving code across
+a ~750-line span and repointing three `app.routers.study.get_llm_service` patch
+targets, for a purely organisational gain -- no bug is fixed by it. Worth doing
+deliberately rather than as the tail of a long session.
+
+**C4 not attempted.** 125 frontend lint warnings remain, pinned by
+`--max-warnings 125`.
 
 ## Background resource use (adopter report, 0.4.0)
 

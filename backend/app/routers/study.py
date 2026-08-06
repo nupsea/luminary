@@ -94,6 +94,7 @@ from app.schemas.study import (
     TopicItem,
 )
 from app.services import study_assembler
+from app.services.background import fire_and_forget
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.llm_json import parse_llm_json_object
@@ -136,30 +137,16 @@ router = APIRouter(prefix="/study", tags=["study"])
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
-# Serialize background teachback evaluations to avoid SQLite "database is locked"
-# when multiple concurrent tasks try to write (invariant I-1).
-_teachback_eval_sem = asyncio.Semaphore(1)
-
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
-    """Schedule coroutine as fire-and-forget background task with strong ref."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    fire_and_forget(coro, _background_tasks, label="study background task")
 
-# Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
-_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 
 # Serialize background teachback evaluations to avoid SQLite "database is locked"
 # when multiple concurrent tasks try to write (invariant I-1).
 _teachback_eval_sem = asyncio.Semaphore(1)
 
-
-def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
-    """Schedule coroutine as fire-and-forget background task with strong ref."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 _TEACHBACK_SYSTEM = (
     "You are a Socratic tutor evaluating a student's explanation. "

@@ -10,6 +10,8 @@ import json
 import logging
 import re
 
+from app.services.background import fire_and_forget
+
 logger = logging.getLogger(__name__)
 
 _FEYNMAN_SYSTEM_TMPL = (
@@ -73,10 +75,9 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
-    """Schedule a coroutine as a fire-and-forget background task with strong ref."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    fire_and_forget(coro, _background_tasks, label="feynman background task")
+
+
 
 
 def _parse_gaps(raw: str) -> list[str]:
