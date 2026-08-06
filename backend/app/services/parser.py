@@ -44,6 +44,28 @@ def _norm_ws(s: str) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip()
 
 
+# Google Docs PDF exports name every bookmark after its HTML anchor, so the
+# TOC reads `_r9szt46p8rxa` instead of the heading the reader sees.
+_RE_ANCHOR_ID = re.compile(r"^_[a-z0-9]{5,}$", re.IGNORECASE)
+_DERIVED_HEADING_MAX = 64
+
+
+def _usable_heading(title: str, body: str) -> str:
+    """The bookmark title, or a heading derived from the section's own text.
+
+    An anchor id navigates correctly but tells the reader nothing, and dropping
+    the entry would leave the contents panel empty.
+    """
+    clean = _norm_ws(title)
+    if clean and not _RE_ANCHOR_ID.match(clean):
+        return clean
+    first_line = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    if not first_line:
+        return clean
+    derived = _norm_ws(first_line)[:_DERIVED_HEADING_MAX].strip()
+    return derived or clean
+
+
 # Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
 _SPACE_GAP_EM = 0.2
 
@@ -198,7 +220,7 @@ class DocumentParser:
                 raw_parts.append(text)
                 sections.append(
                     Section(
-                        heading=_norm_ws(ti),
+                        heading=_usable_heading(ti, text),
                         level=lv,
                         text=text,
                         page_start=pg,

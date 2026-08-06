@@ -9,6 +9,7 @@ import { formatMmSs, parseAudioStartTime } from "./mediaUtils"
 import { PredictPanel, hasCodeFence } from "./PredictPanel"
 import type { components } from "@/types/api"
 import type { AnnotationItem, SectionItem } from "./types"
+import { sectionTitle } from "./sectionTitle"
 
 export type SectionHeatmapItem = components["schemas"]["SectionHeatmapItem"]
 
@@ -147,7 +148,7 @@ export const SectionListItem = memo(({
 
   const tooltipText = heatmapItem?.fragility_score != null
     ? `Fragility: ${Math.round(heatmapItem.fragility_score * 100)}% | Due: ${heatmapItem.due_card_count}`
-    : section.heading
+    : sectionTitle(section)
 
   const mediaStartTime = (isAudio || isVideo || isYouTube) ? parseAudioStartTime(section.heading) : null
 
@@ -161,7 +162,7 @@ export const SectionListItem = memo(({
           {section.admonition_type}
         </span>
       )}
-      {section.heading || "(Untitled section)"}
+      {sectionTitle(section)}
     </span>
   )
 

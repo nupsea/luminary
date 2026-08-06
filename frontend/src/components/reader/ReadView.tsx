@@ -7,6 +7,7 @@ import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
+import { sectionTitle } from "./sectionTitle"
 import type { AnnotationItem, SectionContentItem } from "./types"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -37,9 +38,9 @@ const TocItem = memo(({
         )}
         style={{ paddingLeft: `${(section.level - 1) * 8 + 8}px` }}
         onClick={() => onClick(section.section_id)}
-        title={section.heading}
+        title={sectionTitle(section)}
       >
-        {section.heading || "(Untitled)"}
+        {sectionTitle(section)}
       </button>
     </li>
   )
@@ -122,7 +123,7 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
       className="mb-10 pb-8 border-b border-border last:border-b-0 min-h-[100px]"
     >
       <Tag className="mb-3 font-semibold text-foreground text-xl">
-        {section.heading || "(Untitled section)"}
+        {sectionTitle(section)}
       </Tag>
       {isVisible ? (
         <div className="leading-relaxed anim-fade-in">
