@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
@@ -14,6 +14,7 @@ import {
   type OutlineEntry,
   buildFontTOC,
   flattenOutline,
+  looksLikeHeading,
   resolveOutline,
   shouldUseOutline,
 } from "./pdfTocUtils"
@@ -265,6 +266,11 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     annotationsRef.current = annotations
     const highlightsVisibleRef = useRef(highlightsVisible)
     highlightsVisibleRef.current = highlightsVisible
+    // Display-only: navigation still uses the unfiltered `sections`.
+    const tocSections = useMemo(
+      () => sections.filter(s => looksLikeHeading(s.heading)),
+      [sections],
+    )
     const sectionsRef = useRef(sections)
     sectionsRef.current = sections
 
@@ -351,7 +357,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               if (rawOutline && rawOutline.length > 0 && !cancelled) {
                 const resolved = await resolveOutline(doc, rawOutline, 1)
                 if (!cancelled) {
-                  const flat = flattenOutline(resolved)
+                  const flat = flattenOutline(resolved).filter(e => looksLikeHeading(e.title))
                   const navigable = flat.filter(e => e.page > 0).sort((a, b) => a.page - b.page)
                   const unresolved = flat.filter(e => e.page === 0)
                   setPdfOutline([...navigable, ...unresolved])
@@ -815,7 +821,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       )
     }
 
-    const useOutline = shouldUseOutline(pdfOutline.length, sections.length)
+    const useOutline = shouldUseOutline(pdfOutline.length, tocSections.length)
 
     return (
       <div className="flex h-full">
@@ -881,26 +887,26 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 )
               })}
             </ul>
-          ) : sections.length === 0 ? (
+          ) : tocSections.length === 0 ? (
             <p className="text-xs text-muted-foreground px-1">No sections</p>
           ) : (() => {
-            const hasPageNums = sections.some((s) => s.page_start > 0)
+            const hasPageNums = tocSections.some((s) => s.page_start > 0)
             // Normalize levels: shift so the minimum level present = 1.
             // This prevents all-L2 sections (from the backend parser) from
             // appearing indented with no L1 parents.
-            const minLevel = Math.min(...sections.map(s => s.level))
+            const minLevel = Math.min(...tocSections.map(s => s.level))
             return (
               <ul className="space-y-0.5">
-                {sections.map((sec, idx) => {
+                {tocSections.map((sec, idx) => {
                   const displayLevel = sec.level - minLevel + 1
                   const targetPage = hasPageNums
                     ? sec.page_start
-                    : Math.max(1, Math.round(((idx + 1) / sections.length) * totalPages))
+                    : Math.max(1, Math.round(((idx + 1) / tocSections.length) * totalPages))
                   const isActive =
                     targetPage <= currentPage &&
                     (hasPageNums
                       ? sec.page_end === 0 || currentPage <= sec.page_end
-                      : idx === sections.length - 1 || Math.max(1, Math.round(((idx + 2) / sections.length) * totalPages)) > currentPage)
+                      : idx === tocSections.length - 1 || Math.max(1, Math.round(((idx + 2) / tocSections.length) * totalPages)) > currentPage)
                   return (
                     <li key={sec.id}>
                       <button

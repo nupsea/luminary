@@ -15,6 +15,31 @@ export interface OutlineEntry {
   children: OutlineEntry[]
 }
 
+/** Anchor names a Google Docs PDF export uses in place of readable titles. */
+const ANCHOR_ID_RE = /^_[a-z0-9]{5,}$/i
+/** Braces betray a LaTeX or figure fragment picked up by the font-size scan. */
+const FRAGMENT_RE = /[{}\\]/
+/** Below this share of letters the string is an equation or diagram label. */
+const MIN_LETTER_RATIO = 0.6
+
+/**
+ * Whether a candidate string reads as a section heading.
+ *
+ * The font-size scan keys on size alone, so a textbook's equations, game
+ * diagrams and bare part numbers ("27", "our move{", "•g*", "ε-greedy ε = 0.1")
+ * arrive looking exactly like headings. Google Docs PDF exports bring the other
+ * shape: bookmark titles that are anchor ids.
+ */
+export function looksLikeHeading(raw: string): boolean {
+  const text = raw.trim()
+  if (text.length < 2 || text.length > 120) return false
+  if (ANCHOR_ID_RE.test(text)) return false
+  if (FRAGMENT_RE.test(text)) return false
+  const letters = (text.match(/\p{L}/gu) ?? []).length
+  if (letters < 2) return false
+  return letters / text.length >= MIN_LETTER_RATIO
+}
+
 // resolveDestPage
 
 /**
@@ -158,7 +183,7 @@ export async function buildFontTOC(
   const headingThreshold = bodyMedian * 1.15
 
   const candidates = rawItems.filter(
-    i => i.size >= headingThreshold && i.text.length >= 2 && i.text.length < 120,
+    i => i.size >= headingThreshold && looksLikeHeading(i.text),
   )
   if (candidates.length === 0) return []
 
