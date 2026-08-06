@@ -18,13 +18,14 @@ LAYER_ORDER: dict[str, int] = {
     "config": 1,
     "database": 1,
     "models": 1,
+    "exceptions": 0,
     "paths": 1,
     "repo": 2,
     "service": 3,
-    "workflow": 3,
-    "runtime": 3,
-    "router": 4,
-    "main": 5,
+    "workflow": 4,
+    "runtime": 4,
+    "router": 5,
+    "main": 6,
 }
 
 # Map subdirectory names to layer keys
@@ -39,16 +40,7 @@ SUBDIR_MAP: dict[str, str] = {
 
 # Predates enforcement; may only shrink. See docs/refactor-quality-plan.md.
 KNOWN_VIOLATIONS: set[tuple[str, str]] = {
-    # WP2
-    ("repos/annotation_repo.py", "app.services.repo_helpers"),
-    ("repos/clip_repo.py", "app.services.repo_helpers"),
-    ("repos/collection_repo.py", "app.services.repo_helpers"),
-    ("repos/document_repo.py", "app.services.repo_helpers"),
-    ("repos/flashcard_repo.py", "app.services.repo_helpers"),
-    ("repos/note_repo.py", "app.services.repo_helpers"),
-    ("repos/study_repo.py", "app.services.repo_helpers"),
-    ("repos/tag_repo.py", "app.services.repo_helpers"),
-    ("schemas/documents.py", "app.workflows.ingestion"),
+    # stream_answer drives the chat graph, so it belongs in runtime/, not services/.
     ("services/qa.py", "app.runtime.chat_graph"),
 }
 

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.repos.annotation_repo import AnnotationRepo
 
 
@@ -62,6 +62,6 @@ async def test_delete_then_list_empty(repo: AnnotationRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_delete_missing_raises_404(repo: AnnotationRepo) -> None:
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.delete("nope")
     assert excinfo.value.status_code == 404

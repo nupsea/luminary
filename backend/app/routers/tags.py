@@ -23,10 +23,10 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db, get_session_factory
 from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel
+from app.repos._helpers import get_or_404
 from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.routers.notes import _sync_tag_index
 from app.services.naming import normalize_tag_slug
-from app.services.repo_helpers import get_or_404
 from app.services.tag_graph import build_tag_graph, invalidate_tag_graph_cache
 from app.services.tag_merge_service import get_tag_merge_service
 from app.services.tag_normalizer import get_tag_normalizer_service

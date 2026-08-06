@@ -25,7 +25,7 @@ from app.models import (
     NoteModel,
     NoteSourceModel,
 )
-from app.services.repo_helpers import get_or_404
+from app.repos._helpers import get_or_404
 
 
 class NoteLinkWithContent(NamedTuple):

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.models import DocumentModel, NoteModel
 from app.repos.collection_repo import CollectionRepo
 
@@ -56,7 +56,7 @@ async def test_create_and_get(repo: CollectionRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_404_missing_raises(repo: CollectionRepo) -> None:
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.get_or_404("nope")
     assert excinfo.value.status_code == 404
 
@@ -136,9 +136,9 @@ async def test_delete_with_children_cascades(repo: CollectionRepo) -> None:
 
     await repo.delete_with_children(parent.id)
 
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFound):
         await repo.get_or_404(parent.id)
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFound):
         await repo.get_or_404(child.id)
     assert await repo.count_members(parent.id) == 0
     assert await repo.count_members(child.id) == 0

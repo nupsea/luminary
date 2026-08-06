@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.models import NoteModel, NoteTagIndexModel, TagAliasModel
 from app.repos.tag_repo import TagRepo
 
@@ -37,7 +37,7 @@ async def test_find_missing_returns_none(repo: TagRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_404_raises(repo: TagRepo) -> None:
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.get_or_404("nope")
     assert excinfo.value.status_code == 404
 

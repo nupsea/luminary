@@ -28,7 +28,7 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
-from app.services.repo_helpers import get_or_404
+from app.repos._helpers import get_or_404
 
 # Gap-detection thresholds. Defined here so the repo is the single
 # source of truth for "what counts as a weak card". `routers/study.py`

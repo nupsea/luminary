@@ -4,20 +4,26 @@ description: Luminary architecture overview -- always loaded. Read before making
 
 # Luminary Architecture
 
-## Six-Layer Import Rule (mechanically enforced)
+## Six-Layer Import Rule
 
 ```
 Types --> Config --> Repo --> Service --> Runtime --> API
 ```
 
-- **Types** (`schemas/`, `types.py`, Pydantic models, enums): zero I/O, zero imports from other layers
+- **Types** (`schemas/`, `types.py`, `exceptions.py`, Pydantic models, enums): zero I/O, zero imports from other layers
 - **Config** (`config.py`): singleton `Settings` via `@lru_cache`, reads `.env`
 - **Repo**: SQLAlchemy async queries, LanceDB ops, Kuzu Cypher. Reads/writes only.
 - **Service**: business logic, orchestrates repos + ML models, implements domain rules
-- **Runtime**: LangGraph state machines, background workers, lifespan hooks
+- **Runtime** (`runtime/`, `workflows/`): LangGraph state machines, background workers, lifespan hooks
 - **API** (`routers/`): thin FastAPI handlers -- validate input (Pydantic), call service, return response
 
 **Never import backwards.** A Repo importing a Service is a build failure. A Router containing business logic is a review failure.
+
+Enforced by `backend/tools/layer_linter.py`, which `make ci` runs and which
+exits 1 on any violation. `LAYER_ORDER`/`SUBDIR_MAP` must name every directory:
+an unlisted one resolves to `None`, which the checker skips as unclassified, so
+a missing entry silently exempts a whole layer rather than failing loudly.
+`KNOWN_VIOLATIONS` carries pre-existing debt and may only shrink.
 
 ## Tech Stack
 

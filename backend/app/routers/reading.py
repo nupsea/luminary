@@ -12,8 +12,8 @@ from pydantic import BaseModel
 
 from app.database import get_session_factory
 from app.models import DocumentModel
+from app.repos._helpers import get_or_404
 from app.repos.document_repo import DocumentRepo
-from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 

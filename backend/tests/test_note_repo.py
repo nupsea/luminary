@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.models import (
     CollectionMemberModel,
     NoteModel,
@@ -60,7 +60,7 @@ async def test_stage_and_commit_persists(repo: NoteRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_404_missing(repo: NoteRepo) -> None:
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFound) as ei:
         await repo.get_or_404("nope")
     assert ei.value.status_code == 404
 
@@ -119,7 +119,7 @@ async def test_delete_by_id(repo: NoteRepo) -> None:
     repo.stage(_make_note(id="n1"))
     await repo.commit()
     await repo.delete_by_id("n1")
-    with pytest.raises(HTTPException):
+    with pytest.raises(NotFound):
         await repo.get_or_404("n1")
 
 

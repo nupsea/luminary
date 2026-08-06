@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
@@ -18,6 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
 from app.db_init import init_database
+from app.exceptions import LuminaryError
 from app.models import SettingsModel
 from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
@@ -251,6 +252,14 @@ def _restrict_permissions(data_dir: Path) -> None:
 
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
+
+
+@app.exception_handler(LuminaryError)
+async def _domain_error_handler(_request: Request, exc: LuminaryError) -> JSONResponse:
+    body: dict[str, object] = {"detail": exc.detail}
+    body.update(exc.extra)
+    return JSONResponse(status_code=exc.status_code, content=body)
+
 
 _mode = get_settings().LUMINARY_MODE
 

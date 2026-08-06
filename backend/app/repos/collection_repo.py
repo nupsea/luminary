@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import CollectionMemberModel, CollectionModel, DocumentModel, NoteModel
-from app.services.repo_helpers import get_or_404
+from app.repos._helpers import get_or_404
 
 
 class CollectionRepo:

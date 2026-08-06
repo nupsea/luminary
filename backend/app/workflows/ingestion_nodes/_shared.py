@@ -18,10 +18,11 @@ existing test imports.
 import asyncio
 import logging
 import re
-from typing import Any, Literal, TypedDict
+from typing import Any, TypedDict
 
 from app.database import get_session_factory
 from app.services.parser import DocumentParser
+from app.types import ContentType  # noqa: F401  re-exported via app.workflows.ingestion
 
 # Module-level set holding fire-and-forget background tasks (objective
 # extraction, pregenerate, etc.). All ingestion nodes share this so the
@@ -33,21 +34,6 @@ _background_tasks: set[asyncio.Task] = set()
 logger = logging.getLogger(__name__)
 
 
-ContentType = Literal[
-    "book",
-    "conversation",
-    "notes",
-    "paper",
-    "audio",
-    "video",
-    "epub",
-    "kindle_clippings",
-    "tech_book",
-    "tech_article",
-    # Merged upload choice; classify_node resolves it to tech_book or
-    # tech_article from the parsed text and persists the resolved value.
-    "technical",
-]
 
 _parser = DocumentParser()
 

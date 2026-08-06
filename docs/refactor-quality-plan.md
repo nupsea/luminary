@@ -105,7 +105,7 @@ on ruff, pytest, tsc and eslint (I-13 order).
 |---|---|---|
 | **WP0 -- Guardrails** | DONE. See below. | Low |
 | **WP1 -- Security** | DONE. See below. | Low |
-| **WP2 -- Interfaces** | I1: move `repo_helpers` under `repos/`, drop `HTTPException` from it. E2/E3: add `app/exceptions.py` + one handler in `main.py`; convert the three ad-hoc hierarchies. Document I3 in `patterns.md`. Correct or enforce the "mechanically enforced" claim in `architecture.md`. | Medium |
+| **WP2 -- Interfaces** | DONE. See below. | Medium |
 | **WP3 -- Error handling** | E1 triage: every `except Exception` gets narrowed, re-raised, or logged with `logger.exception` and a reason. E4, E5, E6. Start with `image_extractor.py`, `db_init.py`, `vector_store.py` (33 of 309). | Medium |
 | **WP4 -- Performance** | P1 (single grouped query for the heatmap), P2 (`to_thread` the file-serving paths), P3, P4, P6 audit. Measure P1 and P2 before and after; record the numbers here. | Medium |
 | **WP5 -- Cleanup** | C1, C2 (extract shared helpers -- `_sanitize_fts_query` first), C3, C4. C5 is split out: `study.py` -> extract the 15 private functions into `services/teachback_service.py` and `services/study_session_service.py`. | Medium |
@@ -142,6 +142,32 @@ predictable `/tmp/{doc_id}` path to `tempfile.mkdtemp` with cleanup in a
 `finally` (the ffmpeg-failure path leaked the directory before);
 `usedforsecurity=False` on three content-addressing hashes; `code_executor`
 deleted.
+
+## Shipped in WP2
+
+`app/exceptions.py` defines `LuminaryError` (`status_code`, `detail`, `extra`)
+plus `NotFound`, `Conflict`, `InvalidInput` and `DependencyUnavailable`. One
+handler in `main.py` maps `status_code` to the response and spreads `extra` into
+the body. No service or repo imports `HTTPException` any more. `PomodoroError`
+and `GoalError` now subclass `LuminaryError` with a `status_code` per leaf; the
+routers' explicit `except` clauses still run first, so responses are unchanged
+and an unmapped domain error no longer becomes a 500.
+
+`get_or_404` moved from `services/repo_helpers.py` to `repos/_helpers.py` and
+raises `NotFound`. It keeps its name across ~90 call sites. Only repo unit tests
+changed (11, asserting `HTTPException`); no router or integration test moved,
+which is the evidence that responses are identical.
+
+`ContentType` moved from `workflows/ingestion_nodes/_shared.py` to `types.py`,
+re-exported from both former homes.
+
+`layer_linter` ordering corrected: `runtime` and `workflows` are layer 4, above
+`service` at 3, matching `architecture.md`. They were previously equal to
+`service`, so Service-to-Runtime imports could not be detected at all. Under the
+corrected ordering exactly one violation remains (`services/qa.py` ->
+`runtime.chat_graph`); the fix is relocating `stream_answer` into `runtime/`.
+
+Nine of the ten allowlisted violations are cleared.
 
 **Correctness found while fixing.** `zip()` calls gained `strict=True` rather
 than ruff's suggested `strict=False`, which surfaced a NER test whose mock

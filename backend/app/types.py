@@ -1,6 +1,22 @@
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
+ContentType = Literal[
+    "book",
+    "conversation",
+    "notes",
+    "paper",
+    "audio",
+    "video",
+    "epub",
+    "kindle_clippings",
+    "tech_book",
+    "tech_article",
+    # Merged upload choice; classify_node resolves it to tech_book or
+    # tech_article from the parsed text and persists the resolved value.
+    "technical",
+]
+
 
 @dataclass
 class Section:

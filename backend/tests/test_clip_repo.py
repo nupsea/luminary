@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.repos.clip_repo import ClipRepo
 
 
@@ -67,7 +67,7 @@ async def test_list_filters_by_document(repo: ClipRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_404_missing_raises(repo: ClipRepo) -> None:
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.get_or_404("nope")
     assert excinfo.value.status_code == 404
 
@@ -91,13 +91,13 @@ async def test_delete_then_get_404(repo: ClipRepo) -> None:
         pdf_page_number=None, selected_text="t", user_note="",
     )
     await repo.delete(clip.id)
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.get_or_404(clip.id)
     assert excinfo.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_missing_raises_404(repo: ClipRepo) -> None:
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(NotFound) as excinfo:
         await repo.delete("nope")
     assert excinfo.value.status_code == 404

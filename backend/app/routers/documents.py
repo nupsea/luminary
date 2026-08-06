@@ -30,6 +30,7 @@ from app.models import (
     StudySessionModel,
     SummaryModel,
 )
+from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
@@ -103,7 +104,6 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
-from app.services.repo_helpers import get_or_404
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
