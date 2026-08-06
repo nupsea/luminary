@@ -74,8 +74,13 @@ function PhaseRow({ phase }: { phase: StartupPhase }) {
           </span>
         )}
 
-        {failed && phase.detail && (
-          <span className="mt-1 block text-xs text-muted-foreground">{phase.detail}</span>
+        {/* detail carries the thing being fetched (model repo id, engine, URL).
+            Showing it only on failure meant a 5GB first run never said what it
+            was downloading. */}
+        {phase.detail && !done && (
+          <span className="mt-1 block truncate text-xs text-muted-foreground">
+            {phase.detail}
+          </span>
         )}
 
         {missing && componentId && (

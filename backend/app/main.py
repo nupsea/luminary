@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
 
     # Initial DB setup
     status = get_startup_status()
-    status.set_state("db", "loading", "Applying migrations")
+    status.set_state("db", "loading", "SQLite schema + LanceDB and Kuzu stores")
     engine = get_engine()
     try:
         await init_database(engine)

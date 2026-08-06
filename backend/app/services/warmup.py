@@ -28,7 +28,11 @@ async def _construct(key: str, label: str, build) -> None:
     status = get_startup_status()
     loop = asyncio.get_running_loop()
     try:
-        status.set_state(key, "loading")
+        # Name the artifact, not just the activity: a first run spends minutes
+        # here and "Concept extraction" alone does not tell the user that a
+        # 1.1GB GLiNER model is what they are waiting on.
+        spec = model_prefetch.spec_for(key)
+        status.set_state(key, "loading", spec.repo_id if spec else "")
         await loop.run_in_executor(get_model_executor(), build)
         status.set_state(key, "ready")
         logger.info("Warmup: %s ready", label)

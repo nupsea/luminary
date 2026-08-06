@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, RefreshCw, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -37,6 +37,8 @@ import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
+import { useResizablePanel } from "@/hooks/useResizablePanel"
+import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
@@ -122,6 +124,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const sectionListRef = useRef<HTMLDivElement>(null)
   const readerContainerRef = useRef<HTMLDivElement>(null)
+  const insights = useResizablePanel({
+    storageKey: "luminary-reader-insights",
+    defaultWidth: 460,
+    minWidth: 280,
+    maxWidth: 900,
+  })
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
 
   const {
@@ -1098,7 +1106,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       {/* Two-panel layout (QuickNoteComposer overlays from the right when capturing) */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
-        <div ref={readerContainerRef} className="relative flex w-3/5 flex-col overflow-hidden border-r border-border">
+        <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Document header — hidden in PDF/Book view to maximise canvas area */}
           {leftTab !== "pdfview" && leftTab !== "bookview" && leftTab !== "read" && (
             <>
@@ -1377,8 +1385,35 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </div>
         </div>
 
-        {/* Right panel — 40%, sticky */}
-        <div className="w-2/5 overflow-auto p-6">
+        <PanelResizer
+          onPointerDown={insights.onPointerDown}
+          dragging={insights.dragging}
+          label="Resize insights panel"
+        />
+
+        {insights.collapsed ? (
+          <button
+            type="button"
+            onClick={insights.toggle}
+            aria-label="Show insights"
+            title="Show insights"
+            className="flex w-8 shrink-0 items-start justify-center border-l border-border pt-4 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <PanelRightOpen size={16} />
+          </button>
+        ) : (
+        <div className="shrink-0 overflow-auto p-6" style={{ width: insights.width }}>
+          <div className="mb-2 flex justify-end">
+            <button
+              type="button"
+              onClick={insights.toggle}
+              aria-label="Hide insights"
+              title="Hide insights"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <PanelRightClose size={16} />
+            </button>
+          </div>
           {/* Video player for video documents */}
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
@@ -1394,6 +1429,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             contentType={doc.content_type}
           />
         </div>
+        )}
 
         <QuickNoteComposer
           open={selection.noteOpen || openNoteEditor !== null}
