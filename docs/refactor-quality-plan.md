@@ -253,6 +253,45 @@ upload handler now goes through `asyncio.to_thread`; `_extract_docstring_python`
 used `.strip('\"\"\"')`, which strips a character set and ate quote characters
 belonging to the docstring text.
 
+## Background resource use (adopter report, 0.4.0)
+
+"The GPU/CPU is running hot, I haven't triggered any heavy tasks."
+
+Reproduced on a 0.4.0 bundle built from this branch, ingesting a 352-page
+diagram-heavy textbook:
+
+| Job | Duration |
+|---|---|
+| `image_analyze` (112 figures) | **1305s (21.8 min)** |
+| `diagram_extract` | 95.5s |
+| `web_refs` | 11.3s |
+| `image_extract` | 2.0s |
+
+Peak model residency during that run, both loaded at once:
+
+| Model | VRAM |
+|---|---|
+| `qwen2.5vl:7b` | 6.8 GB |
+| `llama3.2` | 3.1 GB |
+
+**Why it reads as a mystery to the user.** Vision inference runs on Metal, and
+GPU time does not appear in a process's CPU time -- the backend sampled at ~1%
+CPU while the GPU was saturated for 22 minutes. Nothing in the UI reported the
+work either, which `GET /enrichment/queue` now fixes.
+
+**Why it starts unprompted.** Two paths, neither involving an upload:
+`requeue_skipped_jobs()` on a component install, and the boot-time requeue.
+The unbounded `failed` requeue is fixed (see the WP entry above); a job now
+stops after 3 attempts.
+
+**Open decision -- model residency.** `src-tauri/src/supervisor.rs:314` sets
+`OLLAMA_KEEP_ALIVE=30m` and never sets `OLLAMA_MAX_LOADED_MODELS`, so both
+models can sit resident for 30 minutes after the last call -- 9.9 GB on a
+machine the desktop bundle targets at 8-16 GB. Capping to one loaded model
+trades that for reload churn when a chat interleaves with enrichment. This
+overlaps [[project_8gb_memory_profile_plan]], which is deliberately deferred,
+so it is left as a decision rather than changed here.
+
 ## Out of scope
 
 - Adding authentication. The loopback trust boundary is the design.
