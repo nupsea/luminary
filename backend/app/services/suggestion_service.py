@@ -42,7 +42,7 @@ _SYSTEM_PROMPT = (
     "Write exactly 6 questions they could ask about it.\n"
     "{guidance}\n"
     f"{_STYLE_RULES}\n"
-    "Avoid these previously asked questions:\n{history}\n\n"
+    "These topics are already covered -- prefer different ones: {history}\n\n"
     "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
     "(integer, always {bloom_level}). No explanation, no markdown fences."
 )
@@ -58,10 +58,48 @@ _CROSS_DOC_SYSTEM = (
     "that connect ideas across the documents shown.\n"
     "{guidance}\n"
     f"{_STYLE_RULES}\n"
-    "Avoid these previously asked questions:\n{history}\n\n"
+    "These topics are already covered -- prefer different ones: {history}\n\n"
     "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
     "(integer, always {bloom_level}). No explanation, no markdown fences."
 )
+
+
+# Words that carry no subject matter. Only used to reduce past questions to the
+# topics they covered -- see _history_topics.
+_TOPIC_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "what", "when", "where", "which", "whose", "does", "define", "extent",
+        "that", "this", "these", "those", "there", "their", "them", "they",
+        "with", "from", "into", "about", "would", "could", "should", "have",
+        "been", "being", "then", "than", "some", "such", "used", "using",
+        "your", "ways", "role", "make", "makes", "made", "given", "specific",
+        "between", "within", "across", "under", "over", "more", "most", "less",
+        "other", "another", "each", "both", "also", "however", "while",
+        "explain", "describe", "discuss", "compare", "contrast", "evaluate",
+        "assess", "critique", "analyze", "analyse", "summarize", "summarise",
+        "important", "significance", "significant", "influence", "impact",
+        "advantages", "disadvantages", "effectively", "effective",
+    }
+)
+
+
+def _history_topics(history: list[str], limit: int = 20) -> list[str]:
+    """Reduce past questions to bare topic words.
+
+    The prompt used to carry the previous questions verbatim under "avoid
+    these". On a document with a long history that is dozens of in-context
+    exemplars, and a small model copies their register -- which is how exam
+    phrasing survived being removed from the instructions. Topics preserve the
+    avoid-signal and carry no phrasing to imitate.
+    """
+    topics: list[str] = []
+    for question in history:
+        for word in re.findall(r"[a-z][a-z'\-]{3,}", question.lower()):
+            if word in _TOPIC_STOPWORDS:
+                continue
+            if word not in topics:
+                topics.append(word)
+    return topics[:limit]
 
 
 def _jaccard_similarity(a: str, b: str) -> float:
@@ -307,7 +345,8 @@ class SuggestionService:
     ) -> list[dict]:
         """Call LLM to generate questions at the target depth. Returns parsed list."""
         history = await self.get_recent_history(document_id)
-        history_text = "\n".join(f"- {h}" for h in history) if history else "(none)"
+        topics = _history_topics(history)
+        history_text = ", ".join(topics) if topics else "(none)"
         guidance = _LEVEL_GUIDANCE.get(target_bloom, _LEVEL_GUIDANCE[2])
 
         if document_id is not None:

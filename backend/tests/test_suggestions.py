@@ -523,6 +523,29 @@ def test_parses_well_formed_json_array():
     assert _parse_questions(raw) == [{"question": "What is dropout?", "bloom_level": 4}]
 
 
+def test_history_reduced_to_topics_not_questions():
+    """Past questions must reach the prompt as topics, never as sentences.
+
+    Injecting them verbatim gave a small model dozens of exam-phrased exemplars
+    to copy, which reproduced the register the prompt rules had just removed.
+    """
+    from app.services.suggestion_service import _history_topics
+
+    topics = _history_topics(
+        [
+            "To what extent can Lloyd's algorithm cluster high-dimensional data?",
+            "Evaluate how spectral clustering handles graph structures.",
+        ]
+    )
+
+    joined = " ".join(topics)
+    assert "lloyd's" in joined
+    assert "spectral" in joined
+    for leaked in ("extent", "evaluate", "what"):
+        assert leaked not in topics
+    assert all(" " not in t for t in topics)
+
+
 def test_prompts_carry_no_taxonomy_verb():
     """The Bloom verb must never reach the model.
 
