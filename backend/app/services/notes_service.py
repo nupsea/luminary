@@ -296,18 +296,17 @@ async def sync_note_sources(
                 NoteSourceModel.document_id.not_in(source_document_ids),
             )
         )
-        for doc_id in source_document_ids:
-            await session.execute(
-                text(
-                    "INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)"
-                    " VALUES (:note_id, :document_id, :added_at)"
-                ),
-                {
-                    "note_id": note_id,
-                    "document_id": doc_id,
-                    "added_at": datetime.now(UTC).isoformat(),
-                },
-            )
+        now_iso = datetime.now(UTC).isoformat()
+        await session.execute(
+            text(
+                "INSERT OR IGNORE INTO note_sources (note_id, document_id, added_at)"
+                " VALUES (:note_id, :document_id, :added_at)"
+            ),
+            [
+                {"note_id": note_id, "document_id": doc_id, "added_at": now_iso}
+                for doc_id in source_document_ids
+            ],
+        )
     else:
         await session.execute(delete(NoteSourceModel).where(NoteSourceModel.note_id == note_id))
 

@@ -30,6 +30,7 @@ from app.models import (
     StudySessionModel,
     SummaryModel,
 )
+from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo
 from app.repos.document_repo import DocumentRepo
 from app.schemas.documents import (
@@ -103,7 +104,6 @@ from app.services.remote_source import (
     UningestibleRemoteContent,
     fetch_remote_document,
 )
-from app.services.repo_helpers import get_or_404
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
@@ -504,7 +504,7 @@ async def ingest_document(
                 # background task was GC'd before completing all modes).
 
                 async with get_session_factory()() as _s:
-                    existing_modes = set(
+                    existing_modes = {
                         row[0]
                         for row in (
                             await _s.execute(
@@ -513,7 +513,7 @@ async def ingest_document(
                                 )
                             )
                         ).all()
-                    )
+                    }
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
 
@@ -563,7 +563,7 @@ async def ingest_document(
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.{ext}"
 
-        dest.write_bytes(content)
+        await asyncio.to_thread(dest.write_bytes, content)
 
         logger.info(
             "File received",
@@ -639,7 +639,7 @@ async def ingest_kindle(
         doc_id = str(uuid.uuid4())
         # Write each book's highlights as a plain text file
         dest = raw_dir / f"{doc_id}.txt"
-        dest.write_text(parsed_doc.raw_text, encoding="utf-8")
+        await asyncio.to_thread(dest.write_text, parsed_doc.raw_text, encoding="utf-8")
 
         async with get_session_factory()() as session:
             doc = DocumentModel(
@@ -689,7 +689,7 @@ async def _ingest_remote_pdf(doc_id: str, remote: RemoteDocument, settings: Sett
     raw_dir = Path(settings.DATA_DIR).expanduser() / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest = raw_dir / f"{doc_id}.pdf"
-    dest.write_bytes(remote.content)
+    await asyncio.to_thread(dest.write_bytes, remote.content)
 
     async with get_session_factory()() as session:
         doc = DocumentModel(
@@ -746,14 +746,14 @@ async def ingest_url(
             extractor = get_article_extractor()
             parsed = await extractor.extract(body.url, doc_id=doc_id)
         except Exception as exc:
-            logger.error("Article extraction failed for %s: %s", body.url, exc)
+            logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         data_dir = Path(settings.DATA_DIR).expanduser()
         raw_dir = data_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         dest = raw_dir / f"{doc_id}.md"
-        dest.write_text(parsed.raw_text, encoding="utf-8")
+        await asyncio.to_thread(dest.write_text, parsed.raw_text, encoding="utf-8")
 
         async with get_session_factory()() as session:
             doc = DocumentModel(
@@ -841,7 +841,7 @@ async def ingest_url(
     try:
         await _yt_module.download_audio(body.url, dest_stem)
     except RuntimeError as exc:
-        logger.error("yt-dlp download failed: %s", exc)
+        logger.exception("yt-dlp download failed")
         raise HTTPException(
             status_code=500,
             detail=f"Audio download failed: {exc}",
@@ -1106,7 +1106,7 @@ async def get_epub_toc(document_id: str) -> EpubTocResponse:
     try:
         chapters = await get_toc_async(str(fp))
     except Exception as exc:
-        logger.error("EPUB TOC extraction failed for %s: %s", document_id, exc)
+        logger.exception("EPUB TOC extraction failed for %s", document_id)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to read EPUB table of contents: {exc}",
@@ -1166,7 +1166,7 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("EPUB chapter %d render failed for %s: %s", chapter_index, document_id, exc)
+        logger.exception("EPUB chapter %d render failed for %s", chapter_index, document_id)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to render chapter {chapter_index}: {exc}",
@@ -1198,8 +1198,8 @@ async def bulk_delete_documents(body: BulkDeleteRequest):
                 continue
             await svc.delete_sqlite_cascade(session, doc)
             await session.commit()
-        svc.delete_lancedb_vectors(document_id)
-        svc.delete_kuzu_nodes(document_id)
+        await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+        await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
         svc.delete_filesystem_assets(document_id)
         deleted.append(document_id)
     logger.info("Bulk deleted documents", extra={"count": len(deleted)})
@@ -1321,8 +1321,8 @@ async def delete_document(document_id: str):
         await svc.delete_sqlite_cascade(session, doc)
         await session.commit()  # cascade service took the session; commit completes the transaction
 
-    svc.delete_lancedb_vectors(document_id)
-    svc.delete_kuzu_nodes(document_id)
+    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
 
@@ -1371,14 +1371,18 @@ async def get_document_diagnostics(document_id: str):
 
     # LanceDB vector count (0 if store unavailable)
     try:
-        vector_count = get_lancedb_service().count_for_document(document_id)
+        vector_count = await asyncio.to_thread(
+            get_lancedb_service().count_for_document, document_id
+        )
     except Exception:
         vector_count = 0
 
     # Kuzu entity and edge counts (0 if graph unavailable)
     try:
 
-        entity_count, edge_count = _graph_module.get_graph_service().count_for_document(document_id)
+        entity_count, edge_count = await asyncio.to_thread(
+            _graph_module.get_graph_service().count_for_document, document_id
+        )
     except Exception:
         entity_count = 0
         edge_count = 0

@@ -51,8 +51,8 @@ class AudioTranscriber:
                     local_files_only=False,
                 )
                 logger.info("AudioTranscriber: loaded model_size=%s via download", model_size)
-            except Exception as exc:
-                logger.error("AudioTranscriber: failed to load Whisper model: %s", exc)
+            except Exception:
+                logger.exception("AudioTranscriber: failed to load Whisper model")
                 raise
 
     def transcribe(self, file_path: Path) -> tuple[list[dict], float]:

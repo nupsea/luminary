@@ -62,7 +62,7 @@ def _query_kuzu_for_entity(conn, name: str) -> list[str]:
             if related_name:
                 lines.append(f"{name} --co-occurs--> {related_name} (weight={weight:.1f})")
     except Exception:
-        pass
+        logger.warning("co-occurrence lookup failed for %s", name, exc_info=True)
     # RELATED_TO edges
     try:
         r = conn.execute(
@@ -76,7 +76,7 @@ def _query_kuzu_for_entity(conn, name: str) -> list[str]:
             if related_name:
                 lines.append(f"{name} --{relation or 'related'}--> {related_name}")
     except Exception:
-        pass
+        logger.warning("related-to lookup failed for %s", name, exc_info=True)
     return lines
 
 

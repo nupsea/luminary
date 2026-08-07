@@ -438,8 +438,8 @@ class EntityExtractor:
                         local_files_only=False,
                     )
                     logger.info("GLiNER model loaded (downloaded)")
-                except Exception as exc:
-                    logger.error("Failed to load GLiNER model: %s", exc)
+                except Exception:
+                    logger.exception("Failed to load GLiNER model")
                     raise
             return self._model
 
@@ -515,7 +515,7 @@ class EntityExtractor:
                 code_preds = model.batch_predict_entities(
                     code_texts, active_types, threshold=CODE_THRESHOLD
                 )
-                for (i, _), preds in zip(code_group, code_preds):
+                for (i, _), preds in zip(code_group, code_preds, strict=True):
                     batch_results[i] = preds
 
             if prose_group:
@@ -524,7 +524,7 @@ class EntityExtractor:
                 prose_preds = model.batch_predict_entities(
                     prose_texts, active_types, threshold=PROSE_THRESHOLD
                 )
-                for (i, _), preds in zip(prose_group, prose_preds):
+                for (i, _), preds in zip(prose_group, prose_preds, strict=True):
                     batch_results[i] = preds
 
             if not is_tech and code_group:
@@ -533,10 +533,10 @@ class EntityExtractor:
                 code_preds = model.batch_predict_entities(
                     code_texts, active_types, threshold=PROSE_THRESHOLD
                 )
-                for (i, _), preds in zip(code_group, code_preds):
+                for (i, _), preds in zip(code_group, code_preds, strict=True):
                     batch_results[i] = preds
 
-            for chunk, chunk_entities in zip(batch, batch_results):
+            for chunk, chunk_entities in zip(batch, batch_results, strict=True):
                 chunk_id = chunk["id"]
                 doc_id = chunk["document_id"]
 

@@ -5,8 +5,10 @@ Endpoints:
   GET  /images/{id}/raw                  -- serve raw PNG file
   POST /documents/{id}/images/reextract  -- re-run image extraction for a document
   GET  /documents/{id}/enrichment        -- enrichment job list for a document
+  GET  /enrichment/queue                 -- library-wide enrichment backlog
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -15,12 +17,12 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel, ImageModel
-from app.services.repo_helpers import get_or_404
+from app.repos._helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["images"])
@@ -68,6 +70,15 @@ class UploadResponse(BaseModel):
     filename: str
 
 
+class EnrichmentQueueSummary(BaseModel):
+    pending: int
+    running: int
+    skipped: int
+    failed: int
+    documents_active: int
+    active: bool
+
+
 @router.post("/images/notes", response_model=UploadResponse)
 async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     """Upload a note asset such as an image, SVG diagram, or Excalidraw scene.
@@ -103,17 +114,20 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
         if is_excalidraw_scene:
             try:
                 scene = json.loads(content)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=400, detail="Invalid Excalidraw JSON scene"
+                ) from exc
             if not isinstance(scene, dict) or not isinstance(scene.get("elements"), list):
-                raise HTTPException(status_code=400, detail="Invalid Excalidraw JSON scene")
-        with open(target_path, "wb") as f:
-            f.write(content)
+                raise HTTPException(  # noqa: TRY301
+                    status_code=400, detail="Invalid Excalidraw JSON scene"
+                )
+        await asyncio.to_thread(target_path.write_bytes, content)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to save note image: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to save image file")
+    except Exception as exc:
+        logger.exception("Failed to save note image")
+        raise HTTPException(status_code=500, detail="Failed to save image file") from exc
 
     # Returns the pseudo-path that MarkdownRenderer.tsx resolves to API_BASE
     return UploadResponse(
@@ -249,6 +263,38 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
 
     logger.info("reextract_document_images: queued job=%s doc=%s", job.id, document_id)
     return ReextractResponse(job_id=job.id, queued=True)
+
+
+@router.get("/enrichment/queue", response_model=EnrichmentQueueSummary)
+async def get_enrichment_queue() -> EnrichmentQueueSummary:
+    """Library-wide enrichment backlog, so background model work is visible.
+
+    Installing a component re-queues every job that was skipped for want of it,
+    which can be minutes of vision inference per document with nothing in the
+    UI to say so.
+    """
+    async with get_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(
+                    EnrichmentJobModel.status,
+                    func.count(),
+                    func.count(func.distinct(EnrichmentJobModel.document_id)),
+                ).group_by(EnrichmentJobModel.status)
+            )
+        ).all()
+
+    by_status = {status: (jobs, docs) for status, jobs, docs in rows}
+    pending, pending_docs = by_status.get("pending", (0, 0))
+    running, running_docs = by_status.get("running", (0, 0))
+    return EnrichmentQueueSummary(
+        pending=pending,
+        running=running,
+        skipped=by_status.get("skipped", (0, 0))[0],
+        failed=by_status.get("failed", (0, 0))[0],
+        documents_active=max(pending_docs, running_docs),
+        active=bool(pending or running),
+    )
 
 
 @router.get("/documents/{document_id}/enrichment", response_model=list[EnrichmentJobItem])

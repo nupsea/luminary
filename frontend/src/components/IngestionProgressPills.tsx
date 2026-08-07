@@ -61,7 +61,7 @@ export function IngestionProgressPills() {
   if (active.length === 0) return null
 
   return (
-    <div className="pointer-events-none fixed bottom-5 left-5 z-40 flex flex-col gap-3">
+    <div className="pointer-events-none flex flex-col gap-3">
       {active.map((job) => (
         <div
           key={job.docId}

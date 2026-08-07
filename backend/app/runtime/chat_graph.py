@@ -170,6 +170,34 @@ async def _resolve_targeted_document(question: str) -> str | None:
 # classify_node — intent detection + query rewriting
 
 
+def _strategy_for(intent: str, scope: str) -> str:
+    """Node an (intent, scope) pair routes to.
+
+    Shared with route_node so the strategy reported to the UI is the one that
+    actually ran: the two had drifted, and a notes_gap question was labelled
+    "search" in the transparency panel while notes_gap_node answered it.
+    """
+    if intent == "teach_back":
+        return "teach_back_node"
+    if intent == "socratic":
+        return "socratic_node"
+    if intent == "notes_gap":
+        return "notes_gap_node"
+    if intent == "notes":
+        return "notes_node"
+    if intent == "summary":
+        return "summary_node"
+    if intent == "relational":
+        return "graph_node"
+    if intent == "comparative":
+        return "comparative_node"
+    if intent == "exploratory" and scope == "all":
+        # Broad cross-doc questions need per-doc summary synthesis, not biased
+        # chunk retrieval.
+        return "summary_node"
+    return "search_node"
+
+
 async def classify_node(state: ChatState) -> dict:
     """Detect intent (heuristic + optional LLM fallback) and rewrite vague queries."""
     question = state["question"]
@@ -228,15 +256,7 @@ async def classify_node(state: ChatState) -> dict:
     except Exception:
         rewritten = question
 
-    _intent_to_strategy = {
-        "summary": "summary_node",
-        "relational": "graph_node",
-        "comparative": "comparative_node",
-        "notes": "notes_node",
-        "socratic": "socratic_node",
-        "teach_back": "teach_back_node",
-    }
-    primary_strategy = _intent_to_strategy.get(intent, "search_node")
+    primary_strategy = _strategy_for(intent, scope)
 
     return {
         "intent": intent,
@@ -251,36 +271,10 @@ async def classify_node(state: ChatState) -> dict:
 
 
 def route_node(state: ChatState) -> str:
-    """Return the next node name based on detected intent and scope.
-
-    Routing rules:
-      summary    → summary_node (fetch cached executive summaries)
-      relational → graph_node   (Kuzu entity traversal)
-      comparative → comparative_node (dual retrieval)
-      exploratory + scope=all → summary_node (broad cross-doc questions need
-                                 per-doc summary synthesis, not biased chunk retrieval)
-      factual / exploratory + scope=single → search_node (specific lookup)
-    """
+    """Return the next node name based on detected intent and scope."""
     intent = state.get("intent") or "factual"
     scope = state.get("scope", "all")
-    if intent == "teach_back":
-        node = "teach_back_node"
-    elif intent == "socratic":
-        node = "socratic_node"
-    elif intent == "notes_gap":
-        node = "notes_gap_node"
-    elif intent == "notes":
-        node = "notes_node"
-    elif intent == "summary":
-        node = "summary_node"
-    elif intent == "relational":
-        node = "graph_node"
-    elif intent == "comparative":
-        node = "comparative_node"
-    elif intent == "exploratory" and scope == "all":
-        node = "summary_node"
-    else:
-        node = "search_node"
+    node = _strategy_for(intent, scope)
     logger.info("route_node: intent=%s scope=%s → %s", intent, scope, node)
     return node
 

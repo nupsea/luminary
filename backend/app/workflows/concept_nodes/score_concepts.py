@@ -16,9 +16,12 @@ gate failure never silently empties a library.
 from __future__ import annotations
 
 import json
+import logging
 
 from app.services.llm import get_llm_service
 from app.workflows.concept_nodes._shared import ConceptPipelineState, record
+
+logger = logging.getLogger(__name__)
 
 _BATCH = 25
 _SYS = (
@@ -73,7 +76,8 @@ async def score_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
                 background=True,
             )
         except Exception:
-            continue  # fail-open: leave this batch as proposed
+            logger.warning("concept scoring batch failed; left as proposed", exc_info=True)
+            continue
         for idx in _parse_rejects(raw, len(batch)):
             batch[idx]["status"] = "candidate"
             flagged.append(batch[idx].get("label") or batch[idx].get("sun") or "")

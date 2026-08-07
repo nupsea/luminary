@@ -95,7 +95,7 @@ class ArticleExtractor:
         # Mirror images under the caller's document_id so image_extract_handler
         # (which scans images/{document_id}) finds them. Fall back to a URL hash
         # only when called outside the ingestion flow.
-        doc_id = doc_id or hashlib.md5(url.encode()).hexdigest()
+        doc_id = doc_id or hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
 
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
@@ -280,14 +280,14 @@ class ArticleExtractor:
                 ext = url.split(".")[-1].split("?")[0].lower()
                 if len(ext) > 4 or len(ext) < 2:
                     ext = "png"
-                filename = f"{hashlib.md5(url.encode()).hexdigest()}.{ext}"
+                filename = f"{hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()}.{ext}"
                 dest_path = images_dir / filename
 
                 if not dest_path.exists():
                     scraper = cloudscraper.create_scraper()
                     resp = await asyncio.to_thread(scraper.get, url, timeout=300.0)
                     if resp.status_code == 200:
-                        dest_path.write_bytes(resp.content)
+                        await asyncio.to_thread(dest_path.write_bytes, resp.content)
 
                 return f"![{alt}](__LUMINARY_IMG__/{doc_id}/{filename})"
             except Exception as e:

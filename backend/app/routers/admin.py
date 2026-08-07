@@ -58,8 +58,8 @@ async def reindex_notes(
             async with get_session_factory()() as bg_session:
                 report = await reindex_svc.reindex_notes(bg_session)
                 logger.info("Background reindex complete: %s", report)
-        except Exception as exc:
-            logger.error("Background reindex failed: %s", exc)
+        except Exception:
+            logger.exception("Background reindex failed")
 
     task = asyncio.create_task(_run_reindex())
     # Keep a reference to prevent GC

@@ -2,24 +2,17 @@
 
 import json
 import logging
-import re
 
 from sqlalchemy import text
 
 from app.database import get_session_factory
+from app.services.fts_query import sanitize_fts_query as _sanitize_fts_query
 from app.types import NoteSearchResult
 
 logger = logging.getLogger(__name__)
 
 RRF_K = 60
 _NOTE_SEARCH_K = 20  # per-arm candidate count before RRF
-
-
-def _sanitize_fts_query(query: str) -> str:
-    """Strip FTS5 operator chars from a natural-language query string."""
-    cleaned = re.sub(r"[^\w\s]", " ", query)
-    cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
-    return " ".join(cleaned.split())
 
 
 def _rrf_merge(

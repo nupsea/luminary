@@ -1,20 +1,24 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
-import { ChevronLeft, ChevronRight, Moon, Search, Sun, ZoomIn } from "lucide-react"
+import { ChevronLeft, ChevronRight, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, ZoomIn } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { useIsDark } from "@/hooks/useIsDark"
+import { useResizablePanel } from "@/hooks/useResizablePanel"
+import { PanelResizer } from "./PanelResizer"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AnnotationItem, SectionItem } from "./types"
 import {
   type OutlineEntry,
   buildFontTOC,
   flattenOutline,
+  looksLikeHeading,
   resolveOutline,
   shouldUseOutline,
 } from "./pdfTocUtils"
+import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
 import { type PageMatch, buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
@@ -234,6 +238,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // mode we invert the canvas to a dark page by default; the user can toggle it
     // off for figure-heavy pages, where inversion turns photos into negatives.
     const isDark = useIsDark()
+    const toc = useResizablePanel({
+      storageKey: "luminary-pdf-toc",
+      defaultWidth: 224,
+      minWidth: 160,
+      maxWidth: 480,
+      side: "right",
+    })
     const [darkPage, setDarkPage] = useState(isDark)
     useEffect(() => setDarkPage(isDark), [isDark])
     // Softened invert (not a full 1.0) so the page is dark-gray on light-gray
@@ -256,6 +267,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     annotationsRef.current = annotations
     const highlightsVisibleRef = useRef(highlightsVisible)
     highlightsVisibleRef.current = highlightsVisible
+    // Relabel rather than drop: an anchor-id heading still navigates, and
+    // filtering these out emptied the contents panel entirely.
+    const tocSections = useMemo(() => usableSections(sections), [sections])
     const sectionsRef = useRef(sections)
     sectionsRef.current = sections
 
@@ -342,7 +356,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               if (rawOutline && rawOutline.length > 0 && !cancelled) {
                 const resolved = await resolveOutline(doc, rawOutline, 1)
                 if (!cancelled) {
-                  const flat = flattenOutline(resolved)
+                  const flat = flattenOutline(resolved).filter(e => looksLikeHeading(e.title))
                   const navigable = flat.filter(e => e.page > 0).sort((a, b) => a.page - b.page)
                   const unresolved = flat.filter(e => e.page === 0)
                   setPdfOutline([...navigable, ...unresolved])
@@ -399,13 +413,25 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           if (cancelled) return
 
           const viewport = page.getViewport({ scale: zoom })
-          canvas.width = viewport.width
-          canvas.height = viewport.height
+
+          // The backing store must be sized in DEVICE pixels and then scaled
+          // back down via CSS, or a retina display upscales a 1x bitmap and
+          // every glyph renders soft. The text and annotation layers keep
+          // using `viewport` because they position in CSS pixels.
+          const outputScale = window.devicePixelRatio || 1
+          canvas.width = Math.floor(viewport.width * outputScale)
+          canvas.height = Math.floor(viewport.height * outputScale)
+          canvas.style.width = `${Math.floor(viewport.width)}px`
+          canvas.style.height = `${Math.floor(viewport.height)}px`
 
           const ctx = canvas.getContext("2d")
           if (!ctx || cancelled) return
 
-          const renderTask = page.render({ canvasContext: ctx, viewport })
+          const renderTask = page.render({
+            canvasContext: ctx,
+            viewport,
+            transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
+          })
           activeRenderTasks.push(renderTask)
           try {
             await renderTask.promise
@@ -794,15 +820,39 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       )
     }
 
-    const useOutline = shouldUseOutline(pdfOutline.length, sections.length)
+    const useOutline = shouldUseOutline(pdfOutline.length, tocSections.length)
 
     return (
       <div className="flex h-full">
-        {/* TOC panel -- prefer whichever source has more entries for granular navigation */}
-        <div className="w-56 flex-shrink-0 border-r overflow-y-auto p-2">
-          <p className="text-xs font-semibold uppercase text-muted-foreground mb-2 px-1">
-            Contents
-          </p>
+        {toc.collapsed ? (
+          <button
+            type="button"
+            onClick={toc.toggle}
+            aria-label="Show contents"
+            title="Show contents"
+            className="flex h-full w-8 shrink-0 items-start justify-center border-r pt-3 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        ) : (
+        <div
+          className="shrink-0 border-r overflow-y-auto p-2"
+          style={{ width: toc.width }}
+        >
+          <div className="mb-2 flex items-center justify-between px-1">
+            <p className="text-xs font-semibold uppercase text-muted-foreground">
+              Contents
+            </p>
+            <button
+              type="button"
+              onClick={toc.toggle}
+              aria-label="Hide contents"
+              title="Hide contents"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          </div>
           {useOutline ? (
             <ul className="space-y-0.5">
               {pdfOutline.map((entry, idx) => {
@@ -836,26 +886,26 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 )
               })}
             </ul>
-          ) : sections.length === 0 ? (
+          ) : tocSections.length === 0 ? (
             <p className="text-xs text-muted-foreground px-1">No sections</p>
           ) : (() => {
-            const hasPageNums = sections.some((s) => s.page_start > 0)
+            const hasPageNums = tocSections.some((s) => s.page_start > 0)
             // Normalize levels: shift so the minimum level present = 1.
             // This prevents all-L2 sections (from the backend parser) from
             // appearing indented with no L1 parents.
-            const minLevel = Math.min(...sections.map(s => s.level))
+            const minLevel = Math.min(...tocSections.map(s => s.level))
             return (
               <ul className="space-y-0.5">
-                {sections.map((sec, idx) => {
+                {tocSections.map((sec, idx) => {
                   const displayLevel = sec.level - minLevel + 1
                   const targetPage = hasPageNums
                     ? sec.page_start
-                    : Math.max(1, Math.round(((idx + 1) / sections.length) * totalPages))
+                    : Math.max(1, Math.round(((idx + 1) / tocSections.length) * totalPages))
                   const isActive =
                     targetPage <= currentPage &&
                     (hasPageNums
                       ? sec.page_end === 0 || currentPage <= sec.page_end
-                      : idx === sections.length - 1 || Math.max(1, Math.round(((idx + 2) / sections.length) * totalPages)) > currentPage)
+                      : idx === tocSections.length - 1 || Math.max(1, Math.round(((idx + 2) / tocSections.length) * totalPages)) > currentPage)
                   return (
                     <li key={sec.id}>
                       <button
@@ -877,6 +927,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             )
           })()}
         </div>
+        )}
+        {!toc.collapsed && (
+          <PanelResizer
+            onPointerDown={toc.onPointerDown}
+            dragging={toc.dragging}
+            label="Resize contents panel"
+          />
+        )}
 
         {/* Main viewer */}
         <div className="flex-1 flex flex-col overflow-hidden relative">

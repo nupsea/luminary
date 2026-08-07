@@ -15,7 +15,6 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import select
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
@@ -627,15 +626,11 @@ class QAService:
                 collected: list[str] = []
                 try:
                     t_llm = time.perf_counter()
-                    # num_ctx must cover prompt AND generation: at the Ollama
-                    # default (2048) long answers hit done_reason=length mid-way
-                    # through the trailing citations JSON and were discarded.
                     token_gen = await llm.generate(
                         llm_prompt,
                         system=system_prompt,
                         model=model,
                         stream=True,
-                        num_ctx=get_settings().QA_NUM_CTX,
                         temperature=llm_temperature,
                     )
                     ttft_logged = False
@@ -828,7 +823,7 @@ class QAService:
             )
 
         except Exception as exc:
-            logger.error("stream_answer: unhandled error", exc_info=exc)
+            logger.exception("stream_answer: unhandled error", exc_info=exc)
             payload = {"error": "internal", "message": str(exc), "done": True}
             yield f"data: {json.dumps(payload)}\n\n"
 

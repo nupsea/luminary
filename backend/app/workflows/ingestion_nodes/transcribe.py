@@ -13,6 +13,8 @@ transcript to DocumentModel.
 
 import asyncio
 import logging
+import shutil
+import tempfile
 import uuid as _uuid
 from pathlib import Path
 
@@ -96,13 +98,11 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
     await _update_stage(doc_id, "transcribing")
     logger.info("transcribe_node: start", extra={"doc_id": doc_id, "content_type": content_type})
 
+    wav_path: Path | None = None
     try:
-
-
         fp = Path(state["file_path"])
 
         # For video: extract audio with ffmpeg before passing to Whisper
-        wav_path: Path | None = None
         if content_type == "video":
             ffmpeg = resolve_tool("ffmpeg")
             if not ffmpeg:
@@ -114,7 +114,7 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
                         "Add it from Settings to ingest video files."
                     ),
                 }
-            wav_path = Path(f"/tmp/{doc_id}_audio.wav")
+            wav_path = Path(tempfile.mkdtemp(prefix="luminary-transcribe-")) / "audio.wav"
             proc = await asyncio.create_subprocess_exec(
                 ffmpeg,
                 "-y",
@@ -152,13 +152,6 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         loop = asyncio.get_running_loop()
         # CPU-bound -- run in thread pool to keep event loop free for status polls
         segments, duration = await loop.run_in_executor(None, transcriber.transcribe, transcribe_fp)
-
-        # Clean up temp wav extracted from video
-        if wav_path is not None:
-            try:
-                wav_path.unlink(missing_ok=True)
-            except OSError:
-                pass
 
         raw_text = " ".join(s["text"] for s in segments)
         audio_chunks = _chunk_audio(segments, doc_id)
@@ -221,5 +214,8 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
             "status": "chunking",
         }
     except Exception as exc:
-        logger.error("transcribe_node failed", exc_info=exc)
+        logger.exception("transcribe_node failed")
         return {**state, "status": "error", "error": str(exc)}
+    finally:
+        if wav_path is not None:
+            shutil.rmtree(wav_path.parent, ignore_errors=True)

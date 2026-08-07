@@ -30,7 +30,6 @@ export function AudioMiniPlayer({
 }: AudioMiniPlayerProps) {
   return (
     <div className="flex items-center gap-3 border-t border-border bg-background px-6 py-3">
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <audio
         ref={audioRef}
         src={audioUrl}
@@ -77,7 +76,6 @@ interface VideoPlayerProps {
 export function VideoPlayer({ videoRef, videoUrl }: VideoPlayerProps) {
   return (
     <div className="mb-4 overflow-hidden rounded-lg border border-border bg-black">
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video ref={videoRef} src={videoUrl} controls className="w-full" />
     </div>
   )

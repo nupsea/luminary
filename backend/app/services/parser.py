@@ -44,6 +44,61 @@ def _norm_ws(s: str) -> str:
     return _RE_WHITESPACE.sub(" ", s).strip()
 
 
+# Google Docs PDF exports name every bookmark after its HTML anchor, so the
+# TOC reads `_r9szt46p8rxa` instead of the heading the reader sees.
+_RE_ANCHOR_ID = re.compile(r"^_[a-z0-9]{5,}$", re.IGNORECASE)
+_DERIVED_HEADING_MAX = 80
+
+
+def _has_words(text: str) -> bool:
+    letters = sum(ch.isalpha() for ch in text)
+    return letters >= 2 and letters >= len(text) * 0.5
+
+
+def _heading_from_page(page, body_size: float) -> str:
+    """The largest heading-sized line on a page, or "".
+
+    The bookmark's destination is trustworthy even when its title is not, so the
+    real heading is on the page it points at, set larger than body text. Reading
+    the section's opening text instead returns the running header, which is the
+    same on every page of a chapter.
+    """
+    best_size = 0.0
+    best_text = ""
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            if not spans:
+                continue
+            text = _norm_ws(_join_spans(spans))
+            if not text or len(text) > _DERIVED_HEADING_MAX:
+                continue
+            # A continuation page has no heading, and its largest line is the
+            # page number. Require real words.
+            if not _has_words(text):
+                continue
+            size = max((s.get("size", 0.0) for s in spans), default=0.0)
+            if size > best_size:
+                best_size, best_text = size, text
+    return best_text if best_size > body_size * 1.1 else ""
+
+
+def _usable_heading(title: str, page, body_size: float, fallback_body: str) -> str:
+    """The bookmark title, or the heading actually printed at its destination."""
+    clean = _norm_ws(title)
+    if clean and not _RE_ANCHOR_ID.match(clean):
+        return clean
+    recovered = _heading_from_page(page, body_size)
+    if recovered:
+        return recovered
+    first_line = next(
+        (ln.strip() for ln in fallback_body.splitlines() if _has_words(ln.strip())), ""
+    )
+    return _norm_ws(first_line)[:_DERIVED_HEADING_MAX].strip() or clean
+
+
 # Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
 _SPACE_GAP_EM = 0.2
 
@@ -198,7 +253,9 @@ class DocumentParser:
                 raw_parts.append(text)
                 sections.append(
                     Section(
-                        heading=_norm_ws(ti),
+                        heading=_usable_heading(
+                            ti, doc[max(0, pg - 1)], body_avg, text
+                        ),
                         level=lv,
                         text=text,
                         page_start=pg,
@@ -230,7 +287,7 @@ class DocumentParser:
                         all_sizes.append(max(s["size"] for s in spans))
 
         # Distinct sizes above body threshold, sorted largest first.
-        heading_sizes = sorted(set(s for s in all_sizes if s >= heading_threshold), reverse=True)
+        heading_sizes = sorted({s for s in all_sizes if s >= heading_threshold}, reverse=True)
         # Level-1 = the top distinct size group; level-2 = the rest above threshold.
         h1_min = heading_sizes[0] if heading_sizes else heading_threshold
         logger.info(

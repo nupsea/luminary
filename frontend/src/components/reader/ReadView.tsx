@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
+import { useResizablePanel } from "@/hooks/useResizablePanel"
+import { PanelResizer } from "./PanelResizer"
+import { sectionTitle, usableSections } from "./sectionTitle"
 import type { AnnotationItem, SectionContentItem } from "./types"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -37,9 +40,9 @@ const TocItem = memo(({
         )}
         style={{ paddingLeft: `${(section.level - 1) * 8 + 8}px` }}
         onClick={() => onClick(section.section_id)}
-        title={section.heading}
+        title={sectionTitle(section)}
       >
-        {section.heading || "(Untitled)"}
+        {sectionTitle(section)}
       </button>
     </li>
   )
@@ -122,7 +125,7 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
       className="mb-10 pb-8 border-b border-border last:border-b-0 min-h-[100px]"
     >
       <Tag className="mb-3 font-semibold text-foreground text-xl">
-        {section.heading || "(Untitled section)"}
+        {sectionTitle(section)}
       </Tag>
       {isVisible ? (
         <div className="leading-relaxed anim-fade-in">
@@ -286,12 +289,21 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   const contentRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [listLimit, setListLimit] = useState(200)
+  const toc = useResizablePanel({
+    storageKey: "luminary-read-toc",
+    defaultWidth: 224,
+    minWidth: 160,
+    maxWidth: 480,
+    side: "right",
+  })
 
   const { data: sections, isLoading, error } = useQuery({
     queryKey: ["section-content", documentId],
     queryFn: () => fetchSectionContent(documentId),
     staleTime: 60_000,
   })
+
+  const tocEntries = useMemo(() => usableSections(sections ?? []), [sections])
 
   // Figures are supplementary: a failure here must not block the text, so this
   // query has no error branch and simply yields no images.
@@ -412,12 +424,37 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   return (
     <div className="flex h-full">
       {/* TOC sidebar */}
-      <div className="w-56 flex-shrink-0 border-r overflow-y-auto p-2 scrollbar-thin">
-        <p className="text-xs font-semibold uppercase text-muted-foreground mb-3 px-2 tracking-wider">
-          Contents
-        </p>
+      {toc.collapsed ? (
+        <button
+          type="button"
+          onClick={toc.toggle}
+          aria-label="Show contents"
+          title="Show contents"
+          className="flex h-full w-8 shrink-0 items-start justify-center border-r pt-3 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      ) : (
+      <div
+        className="shrink-0 border-r overflow-y-auto p-2 scrollbar-thin"
+        style={{ width: toc.width }}
+      >
+        <div className="mb-3 flex items-center justify-between px-2">
+          <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+            Contents
+          </p>
+          <button
+            type="button"
+            onClick={toc.toggle}
+            aria-label="Hide contents"
+            title="Hide contents"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        </div>
         <ul className="space-y-0.5">
-          {sections.slice(0, listLimit).map((sec) => (
+          {tocEntries.slice(0, listLimit).map((sec) => (
             <TocItem
               key={sec.section_id}
               section={sec}
@@ -432,6 +469,14 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
           )}
         </ul>
       </div>
+      )}
+      {!toc.collapsed && (
+        <PanelResizer
+          onPointerDown={toc.onPointerDown}
+          dragging={toc.dragging}
+          label="Resize contents panel"
+        />
+      )}
 
       {/* Reading content */}
       <div ref={contentRef} className="flex-1 overflow-auto px-8 py-6 scroll-smooth">

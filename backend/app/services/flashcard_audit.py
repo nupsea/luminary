@@ -223,9 +223,9 @@ class FlashcardAuditService:
                 flashcard_type = str(item.get("flashcard_type", "concept_explanation")).strip()
                 # Honour bloom_level from LLM but coerce to target level if absent/wrong
                 raw_bloom = item.get("bloom_level")
-                if isinstance(raw_bloom, (int, float)):
-                    card_bloom = int(raw_bloom)
-                elif isinstance(raw_bloom, str) and raw_bloom.isdigit():
+                if isinstance(raw_bloom, int | float) or (
+                    isinstance(raw_bloom, str) and raw_bloom.isdigit()
+                ):
                     card_bloom = int(raw_bloom)
                 else:
                     card_bloom = level  # fallback to target level

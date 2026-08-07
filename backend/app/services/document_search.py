@@ -4,25 +4,16 @@ Returns section-grouped results scoped to a single document_id.
 """
 
 import logging
-import re
 from collections import defaultdict
 
 from sqlalchemy import bindparam, text
 
 from app.database import get_session_factory
+from app.services.fts_query import sanitize_fts_query as _sanitize_fts_query
 
 logger = logging.getLogger(__name__)
 
 # Strip punctuation that confuses FTS5 query parser, and remove FTS5 boolean operators
-_PUNCT_RE = re.compile(r"[^\w\s]")
-_OP_RE = re.compile(r"\b(AND|OR|NOT)\b", re.IGNORECASE)
-
-
-def _sanitize_fts_query(query: str) -> str:
-    """Remove FTS5 special tokens and punctuation that cause parse errors."""
-    cleaned = _PUNCT_RE.sub(" ", query)
-    cleaned = _OP_RE.sub(" ", cleaned)
-    return " ".join(cleaned.split())
 
 
 class DocumentSearchService:

@@ -28,7 +28,7 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
-from app.services.repo_helpers import get_or_404
+from app.repos._helpers import get_or_404
 
 # Gap-detection thresholds. Defined here so the repo is the single
 # source of truth for "what counts as a weak card". `routers/study.py`
@@ -182,7 +182,7 @@ class StudyRepo:
             .where(ChunkModel.id.in_(chunk_ids))
         )
         result = await self.session.execute(stmt)
-        return {cid: heading for cid, heading in result.all()}
+        return dict(result.all())
 
     async def chunk_section_id_map(
         self, chunk_ids: Sequence[str]
@@ -196,7 +196,7 @@ class StudyRepo:
                 ChunkModel.id.in_(chunk_ids)
             )
         )
-        return {cid: sid for cid, sid in result.all()}
+        return dict(result.all())
 
 
 def get_study_repo(session: AsyncSession = Depends(get_db)) -> StudyRepo:

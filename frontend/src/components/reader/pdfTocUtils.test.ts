@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   buildFontTOC,
+  looksLikeHeading,
   flattenOutline,
   resolveDestPage,
   resolveOutline,
@@ -403,5 +404,34 @@ describe("buildFontTOC", () => {
     // Size 14 < splitSize(18) → level 2
     expect(byTitle["Small Sub-section"]).toBe(2)
     expect(byTitle["Another Sub-section"]).toBe(2)
+  })
+})
+
+describe("looksLikeHeading", () => {
+  // Strings observed in the Sutton & Barto and Google-Docs-exported PDFs whose
+  // TOC panels filled with equations, game diagrams and anchor ids.
+  it.each([
+    "27",
+    "223",
+    "O",
+    "our move{",
+    "opponent's move{",
+    "\u2022g*",
+    "\u03b5-greedy \u03b5 = 0.1",
+    "_r9szt46p8rxa",
+    "_uw3vhlxngjid",
+  ])("rejects %j", (junk) => {
+    expect(looksLikeHeading(junk)).toBe(false)
+  })
+
+  it.each([
+    "Preface",
+    "Reinforcement Learning",
+    "1.4 Limitations and Scope",
+    "2.6 Upper-Confidence-Bound Action Selection",
+    "Chapter 3: Hardware",
+    "The Agent-Environment Interface",
+  ])("keeps %j", (heading) => {
+    expect(looksLikeHeading(heading)).toBe(true)
   })
 })

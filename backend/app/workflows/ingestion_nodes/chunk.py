@@ -663,7 +663,7 @@ async def chunk_node(state: IngestionState) -> IngestionState:
 
             return await _chunk_generic(state, pd, doc_id, content_type)
         except Exception as exc:
-            logger.error("chunk_node failed", exc_info=exc)
+            logger.exception("chunk_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}
 
 

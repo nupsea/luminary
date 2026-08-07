@@ -281,7 +281,7 @@ def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
         groups[_base_heading(s.heading)].append(i)
 
     drop: set[int] = set()
-    for key, idxs in groups.items():
+    for idxs in groups.values():
         if len(idxs) <= 1:
             continue
         # Pick the longest section as the primary

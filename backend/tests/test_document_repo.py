@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import make_engine
 from app.db_init import create_all_tables
+from app.exceptions import NotFound
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -49,7 +49,7 @@ async def test_get_or_404(repo: DocumentRepo) -> None:
     await repo.session.commit()
     doc = await repo.get_or_404("d1")
     assert doc.id == "d1"
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFound) as ei:
         await repo.get_or_404("nope")
     assert ei.value.status_code == 404
 

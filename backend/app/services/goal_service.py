@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import LuminaryError
 from app.models import (
     FlashcardModel,
     LearningGoalModel,
@@ -50,24 +51,32 @@ VALID_TARGET_UNITS = {"minutes", "pages", "cards", "notes", "turns"}
 VALID_STATUSES = {"active", "paused", "completed", "archived"}
 
 
-class GoalError(Exception):
+class GoalError(LuminaryError):
     """Base for service-level goal errors."""
 
 
 class GoalNotFound(GoalError):
     """Raised when a goal id is not in the database."""
 
+    status_code = 404
+
 
 class InvalidGoalType(GoalError):
     """Raised when goal_type is not in VALID_GOAL_TYPES."""
+
+    status_code = 422
 
 
 class InvalidTargetUnit(GoalError):
     """Raised when target_unit is set but not in VALID_TARGET_UNITS."""
 
+    status_code = 422
+
 
 class SessionNotFound(GoalError):
     """Raised when a referenced pomodoro session id does not exist."""
+
+    status_code = 404
 
 
 def _now() -> datetime:

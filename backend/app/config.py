@@ -46,26 +46,24 @@ class Settings(BaseSettings):
     # query after an idle period does not re-pay the (large-model) load cost.
     # "-1" = never unload; accepts any Ollama keep_alive value (e.g. "30m").
     OLLAMA_KEEP_ALIVE: str = "30m"
-    # Ollama context window. Ollama defaults to 2048 and SILENTLY TRUNCATES
-    # longer prompts, so an unset value quietly drops retrieval context. Sized to
-    # fit the synthesis prompt budget without waste (prefill time scales with it).
-    OLLAMA_NUM_CTX: int = 2048
-    # Larger context for heavy one-shot tasks (flashcard generation feeds a whole section, up to
-    # _CHUNK_CHAR_LIMIT chars ~= 2.5k tokens, plus system + output). At 2048 these were silently
-    # truncated and the model emitted junk; generation passes this instead.
-    OLLAMA_GENERATION_NUM_CTX: int = 8192
+    # Ollama context window, and the ONLY one: this is a per-model property, not
+    # a per-call one. Ollama keys a loaded runner on num_ctx, so a call asking
+    # for a different window unloads llama-server and reloads it -- tens of
+    # seconds, on the critical path. Three call-site-specific values (2048 chat
+    # default, 4096 QA, 8192 generation) meant one chat turn reloaded the model
+    # twice, and any turn overlapping enrichment reloaded it repeatedly. Sized
+    # for the largest single prompt (flashcard generation feeds a whole section,
+    # up to _CHUNK_CHAR_LIMIT chars ~= 2.5k tokens, plus system + output);
+    # anything smaller silently truncates that prompt. Lowering this to save
+    # memory only helps if it stays one value -- per-call windows cost far more
+    # in reloads than they save in KV cache.
+    OLLAMA_NUM_CTX: int = 8192
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept
-    # under QA_NUM_CTX (with headroom for question/system/history) so the
+    # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
-    # Context window for the QA/chat streaming call. num_ctx bounds prompt AND
-    # generation combined: the QA prompt alone can reach ~1900 tokens (1500
-    # chunk budget + up to 1000-token section_context + system + history), and
-    # the answer carries a trailing citations JSON with excerpts. At 2048 the
-    # generation hit done_reason=length mid-JSON, losing answers entirely.
-    QA_NUM_CTX: int = 4096
     # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
     # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
     # recall lever L2 owns; cross-encoder latency scales linearly with it

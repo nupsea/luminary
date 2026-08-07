@@ -8,12 +8,11 @@ Kept separate so retriever.py stays focused on the orchestration logic.
 
 import asyncio
 import logging
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app.database import get_session_factory
@@ -21,6 +20,9 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import llm as _llm_module  # indirect: get_llm_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
 from app.services.entity_disambiguator import find_canonical
+from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
+    sanitize_fts_query as _sanitize_fts_query,
+)
 from app.services.model_loading import MODEL_LOAD_LOCK
 from app.types import ScoredChunk
 
@@ -111,7 +113,7 @@ def _round_robin(
 
     # Visit groups in order of their highest-scoring chunk (most relevant first).
     ordered_groups = sorted(buckets, key=lambda v: buckets[v][0].score, reverse=True)
-    indices: dict[str, int] = {v: 0 for v in ordered_groups}
+    indices: dict[str, int] = dict.fromkeys(ordered_groups, 0)
 
     result: list[ScoredChunk] = []
     while len(result) < k:
@@ -163,23 +165,6 @@ def _diversify(candidates: list[ScoredChunk], k: int) -> list[ScoredChunk]:
     return candidates[:k]
 
 
-def _sanitize_fts_query(query: str) -> str:
-    """Sanitize a natural-language query for safe use in an FTS5 MATCH expression.
-
-    FTS5 interprets punctuation (?, *, ^, (, ), ", +) and bare keywords
-    AND/OR/NOT as query operators, causing syntax errors on ordinary questions.
-    Strip everything except word characters and spaces, then remove FTS5 boolean
-    operators so the query is treated as a plain term search.
-    """
-    # Remove all characters that are not word chars or whitespace
-    cleaned = re.sub(r"[^\w\s]", " ", query)
-    # Remove bare AND / OR / NOT (FTS5 boolean operators, case-insensitive)
-    cleaned = re.sub(r"\b(AND|OR|NOT)\b", " ", cleaned, flags=re.IGNORECASE)
-    # Space-joined = FTS5 implicit AND (all terms required). keyword_search runs
-    # this precise form first and backfills with an OR pass when it's too strict.
-    return " ".join(cleaned.split())
-
-
 async def _expand_context(
     chunks: list[ScoredChunk],
     k: int,
@@ -208,11 +193,10 @@ async def _expand_context(
     async with get_session_factory()() as session:
         # Fetch content_type per document
         ct_result = await session.execute(
-            text(
-                "SELECT id, content_type FROM documents WHERE id IN ("
-                + ", ".join(f"'{did}'" for did in doc_ids)
-                + ")"
-            )
+            text("SELECT id, content_type FROM documents WHERE id IN :doc_ids").bindparams(
+                bindparam("doc_ids", expanding=True)
+            ),
+            {"doc_ids": doc_ids},
         )
         content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
 

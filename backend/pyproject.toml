@@ -1,6 +1,6 @@
 [project]
 name = "luminary-backend"
-version = "0.4.0"
+version = "0.5.0"
 description = "Luminary — local-first personal knowledge and learning assistant"
 requires-python = ">=3.13"
 dependencies = [
@@ -50,7 +50,7 @@ target-version = "py313"
 extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "PL"]
+select = ["E", "F", "I", "UP", "PL", "B", "ASYNC", "S", "SIM", "RUF", "C4", "TRY", "PERF"]
 ignore = [
     "PLC0415",   # import-outside-toplevel: lazy-loading pattern is intentional (embedder)
     "PLR0911",   # too-many-return-statements: acceptable for complex service methods
@@ -59,11 +59,31 @@ ignore = [
     "PLR0915",   # too-many-statements: acceptable for complex async generators (stream_answer)
     "PLR2004",   # magic-value-comparison: HTTP status codes (200, 400, etc.) are well-known
     "PLW0603",   # global-statement: lazy singleton pattern for engine/session_factory
+    "B008",      # the FastAPI Depends()/Query() idiom
+    "RUF100",    # `# noqa: PLC0415` marks a deliberate lazy import (I-5); PLC0415 is
+                 # ignored above, so RUF100 would strip all 152 of those markers
+    "RUF001",
+    "RUF003",
+    "TRY003",
+    "TRY300",
+    "ASYNC109",  # timeout is passed through to LiteLLM/httpx, which owns it
+    "ASYNC240",  # all 22 sites are .expanduser()/.exists()/.resolve() -- path arithmetic
+                 # and single stat() calls on local disk. to_thread costs more than it
+                 # saves. ASYNC230 still guards blocking open(); content reads/writes in
+                 # async functions are wrapped by hand.
+    # Deferred; remove the line when its WP lands. See docs/refactor-quality-plan.md.
+    "PERF401",   # WP5
+    "PERF403",   # WP5
+    "RUF059",    # WP5
+    "SIM102",    # WP5
+    "SIM108",    # WP5
+    "SIM117",    # WP5
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PL"]
-"tools/**" = ["PL"]
+"tests/**" = ["PL", "S", "B", "TRY", "PERF", "SIM", "RUF", "C4", "ASYNC"]
+"tools/**" = ["PL", "S"]
+"app/scripts/**" = ["S"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

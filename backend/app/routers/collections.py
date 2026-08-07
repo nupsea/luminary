@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import CollectionMemberModel, CollectionModel, DocumentModel
+from app.repos._helpers import get_or_404
 from app.repos.collection_repo import CollectionRepo, get_collection_repo
 from app.schemas.home import (
     CollectionOverviewResponse,
@@ -32,7 +33,6 @@ from app.schemas.home import (
 from app.services.collection_health import get_collection_health_service
 from app.services.export_service import get_export_service
 from app.services.naming import normalize_collection_name
-from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +189,7 @@ def _make_collection_name(title: str, content_type: str) -> str:
     key_words: list[str] = []
     for w in words:
         # Always keep all-caps / acronyms (DDIA, AI, LLM)
-        if w.isupper() and len(w) >= 2:
-            key_words.append(w)
-        # Keep capitalized words that aren't filler
-        elif w[0].isupper() and w.lower() not in filler:
+        if (w.isupper() and len(w) >= 2) or (w[0].isupper() and w.lower() not in filler):
             key_words.append(w)
 
     # Fallback: if we filtered too aggressively, take first 3 significant words

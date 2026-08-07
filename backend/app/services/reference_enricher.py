@@ -11,12 +11,12 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.exceptions import DependencyUnavailable
 from app.models import SectionSummaryModel, WebReferenceModel
 from app.services.llm import LLMUnavailableError, get_llm_service
 from app.services.llm_json import parse_llm_json_array
@@ -252,10 +252,7 @@ class ReferenceEnricherService:
         try:
             refs = await _extract_references(summary.content)
         except LLMUnavailableError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail=get_llm_error_message(),
-            ) from exc
+            raise DependencyUnavailable(get_llm_error_message()) from exc
 
         if not refs:
             return 0
@@ -325,7 +322,7 @@ class ReferenceEnricherService:
                         if resp.status_code < 400:
                             is_llm_suggested = False
                     except Exception:
-                        pass  # unreachable -- keep is_llm_suggested=True
+                        logger.debug("reference HEAD failed: %s", url, exc_info=True)
                 verified.append({**ref, "is_llm_suggested": is_llm_suggested})
         return verified
 

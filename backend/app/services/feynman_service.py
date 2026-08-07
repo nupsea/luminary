@@ -19,10 +19,10 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import DependencyUnavailable, NotFound
 from app.models import (
     FeynmanSessionModel,
     FeynmanTurnModel,
@@ -98,7 +98,7 @@ class FeynmanService:
     ) -> tuple[FeynmanSessionModel, str]:
         """Create a new Feynman session and return the opening tutor message.
 
-        Raises HTTPException(503) if Ollama is unreachable.
+        Raises DependencyUnavailable if Ollama is unreachable.
         """
         llm = get_llm_service()
         section_context = await self._get_section_context(document_id, section_id, session)
@@ -115,9 +115,8 @@ class FeynmanService:
                 stream=False,
             )
         except LLMUnavailableError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="LLM unavailable. Check Settings — if using Ollama, run: ollama serve",
+            raise DependencyUnavailable(
+                "LLM unavailable. Check Settings — if using Ollama, run: ollama serve"
             ) from exc
 
         # Strip any accidental gaps: block from opening message
@@ -178,7 +177,7 @@ class FeynmanService:
         )
         feynman_session = result.scalar_one_or_none()
         if feynman_session is None:
-            raise HTTPException(status_code=404, detail="Feynman session not found")
+            raise NotFound("Feynman session not found")
 
         # Load all prior turns for conversation history
         turns_result = await db_session.execute(
@@ -275,7 +274,7 @@ class FeynmanService:
         )
         feynman_session = result.scalar_one_or_none()
         if feynman_session is None:
-            raise HTTPException(status_code=404, detail="Feynman session not found")
+            raise NotFound("Feynman session not found")
 
         # Mark session complete
         feynman_session.status = "complete"

@@ -265,6 +265,7 @@ class MasteryService:
                         if name:
                             members.append(name)
             except Exception:
+                logger.warning("cluster member lookup failed", exc_info=True)
                 members = []
             for m in members:
                 cluster_members.add(m)
@@ -322,6 +323,7 @@ class MasteryService:
             graph = get_graph_service()
             by_type = graph.get_entities_by_type_for_document(document_id)
         except Exception:
+            logger.warning("entity-by-type lookup failed for %s", document_id, exc_info=True)
             by_type = {}
 
         all_entity_names: list[str] = []
@@ -338,43 +340,68 @@ class MasteryService:
                 cells=[],
             )
 
-        # For each section, get its chunk IDs
-        section_chunk_ids: dict[str, list[str]] = {}
-        for sid in section_ids:
-            result = await session.execute(
-                select(ChunkModel.id).where(
+        # Three grouped reads feed every cell. Per-cell queries made this
+        # sections x concepts x 3 round trips (861 for a 20x20 grid).
+        chunk_rows = (
+            await session.execute(
+                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.text).where(
                     ChunkModel.document_id == document_id,
-                    ChunkModel.section_id == sid,
+                    ChunkModel.section_id.in_(section_ids),
                 )
             )
-            section_chunk_ids[sid] = list(result.scalars().all())
+        ).all()
 
-        # Build heatmap cells: (chapter, concept) pairs
+        chunks_by_section: dict[str, list[tuple[str, str]]] = {}
+        for chunk_id, sid, text in chunk_rows:
+            chunks_by_section.setdefault(sid, []).append((chunk_id, (text or "").lower()))
+
+        # Subquery rather than a materialised id list: a long document can hold
+        # more chunks than SQLite allows bound variables in one statement.
+        doc_chunk_ids = (
+            select(ChunkModel.id)
+            .where(
+                ChunkModel.document_id == document_id,
+                ChunkModel.section_id.in_(section_ids),
+            )
+            .scalar_subquery()
+        )
+
+        cards_by_chunk: dict[str, list[FlashcardModel]] = {}
+        card_rows = (
+            await session.execute(
+                select(FlashcardModel).where(FlashcardModel.chunk_id.in_(doc_chunk_ids))
+            )
+        ).scalars()
+        for card in card_rows:
+            if card.chunk_id:
+                cards_by_chunk.setdefault(card.chunk_id, []).append(card)
+
+        error_rows = (
+            await session.execute(
+                select(PredictionEventModel.chunk_id, func.count())
+                .where(
+                    PredictionEventModel.chunk_id.in_(doc_chunk_ids),
+                    PredictionEventModel.correct.is_(False),
+                )
+                .group_by(PredictionEventModel.chunk_id)
+            )
+        ).all()
+        errors_by_chunk = {cid: int(n) for cid, n in error_rows}
+
+        lowered_concepts = [(c, c.lower()) for c in concept_names]
+
         cells: list[HeatmapCell] = []
         for section in sections:
-            s_chunk_ids = section_chunk_ids.get(section.id, [])
-            for concept in concept_names:
-                # Find chunk IDs for this section that mention the concept
-                if s_chunk_ids:
-                    pattern = f"%{concept.lower()}%"
-                    result = await session.execute(
-                        select(ChunkModel.id).where(
-                            ChunkModel.id.in_(s_chunk_ids),
-                            func.lower(ChunkModel.text).like(pattern),
-                        )
-                    )
-                    matching_chunk_ids = list(result.scalars().all())
-                else:
-                    matching_chunk_ids = []
+            section_chunks = chunks_by_section.get(section.id, [])
+            for concept, needle in lowered_concepts:
+                matching = [cid for cid, text in section_chunks if needle in text]
 
-                cards = await self._get_flashcards_for_chunks(matching_chunk_ids, session)
+                cards = [card for cid in matching for card in cards_by_chunk.get(cid, [])]
                 if not cards:
                     mastery_val: float | None = None
                     card_count = 0
                 else:
-                    error_count = await self._get_prediction_error_count(
-                        matching_chunk_ids, session
-                    )
+                    error_count = sum(errors_by_chunk.get(cid, 0) for cid in matching)
                     penalty = min(error_count * _PREDICTION_PENALTY, _MAX_PENALTY)
                     mastery_val = max(0.0, self._compute_weighted_mastery(cards) - penalty)
                     card_count = len(cards)

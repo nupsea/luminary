@@ -197,7 +197,7 @@ async def search_node(state: ChatState) -> dict:
         for c in chunks:
             neighbors = neighbors_map.get((c.document_id, c.chunk_index), [])
             # Sort and combine neighbors with the current chunk
-            all_parts = [(c.chunk_index, c.text)] + neighbors
+            all_parts = [(c.chunk_index, c.text), *neighbors]
             all_parts.sort(key=lambda x: x[0])
             expanded_text = "\n\n".join([p[1] for p in all_parts])
 

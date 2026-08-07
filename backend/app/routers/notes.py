@@ -468,7 +468,7 @@ async def _apply_note_update(
     # Delete stale vector synchronously so hybrid search doesn't return the
     # old embedding while the background task re-embeds the new content.
 
-    get_lancedb_service().delete_note_vector(note.id)
+    await asyncio.to_thread(get_lancedb_service().delete_note_vector, note.id)
     task = asyncio.create_task(_embed_and_store_note(note.id, note.content, note.document_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -534,7 +534,7 @@ async def delete_note(
     await get_note_graph_service().delete_note_node(note_id)
     await repo.delete_by_id(note_id)
 
-    get_lancedb_service().delete_note_vector(note_id)
+    await asyncio.to_thread(get_lancedb_service().delete_note_vector, note_id)
     logger.info("Deleted note", extra={"note_id": note_id})
 
 
@@ -708,8 +708,8 @@ async def trigger_cluster(
             async with get_session_factory()() as new_session:
                 count = await get_clustering_service().cluster_notes(new_session)
                 logger.info("Background clustering finished: %d suggestions", count)
-        except Exception as exc:
-            logger.error("Background clustering task failed: %s", exc)
+        except Exception:
+            logger.exception("Background clustering task failed")
 
     task = asyncio.create_task(_run_clustering())
     _background_tasks.add(task)

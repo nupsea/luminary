@@ -21,6 +21,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import LuminaryError
 from app.models import PomodoroSessionModel
 
 logger = logging.getLogger(__name__)
@@ -29,24 +30,33 @@ VALID_SURFACES = {"read", "recall", "write", "explore", "none"}
 ACTIVE_STATUSES = ("active", "paused")
 
 
-class PomodoroError(Exception):
+class PomodoroError(LuminaryError):
     """Base for service-level pomodoro errors."""
 
 
 class ActiveSessionExists(PomodoroError):
     """Raised by start_session when an active or paused session already exists."""
 
+    status_code = 409
+
     def __init__(self, existing_id: str) -> None:
-        super().__init__(f"active or paused session already exists: {existing_id}")
+        super().__init__(
+            f"active or paused session already exists: {existing_id}",
+            existing_id=existing_id,
+        )
         self.existing_id = existing_id
 
 
 class SessionNotFound(PomodoroError):
     """Raised when the requested session id is not in the database."""
 
+    status_code = 404
+
 
 class InvalidTransition(PomodoroError):
     """Raised when a transition is invalid for the current status."""
+
+    status_code = 409
 
     def __init__(self, session_id: str, from_status: str, action: str) -> None:
         super().__init__(

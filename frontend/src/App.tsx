@@ -33,6 +33,7 @@ import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
+import { EnrichmentStatusPill } from "./components/EnrichmentStatusPill"
 import { IngestionProgressPills } from "./components/IngestionProgressPills"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog"
 // All pages are lazy-loaded to reduce the initial bundle and improve tab-switch
@@ -566,7 +567,7 @@ function AppShell() {
             </button>
           </div>
         )}
-        {/* global focus timer pill -- full-mode surface, only when pomodoro is visible */}
+        {/* Focus timer pill (app-wide) -- full-mode surface, only when pomodoro is visible */}
         {pomodoroVisible && (
           <div className="flex items-center justify-end gap-2 px-4 pt-3">
             <FocusTimerPill />
@@ -643,7 +644,10 @@ function App() {
           <BrowserRouter>
             <AppShell />
           </BrowserRouter>
-          <IngestionProgressPills />
+          <div className="pointer-events-none fixed bottom-5 left-5 z-40 flex flex-col gap-3">
+            <IngestionProgressPills />
+            <EnrichmentStatusPill />
+          </div>
           <Toaster position="bottom-right" richColors />
         </IngestionTrackerProvider>
       </SetupGate>

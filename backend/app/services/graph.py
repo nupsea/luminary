@@ -280,6 +280,7 @@ class KuzuService:
             )
             edge_count = co_result.get_next()[0] if co_result.has_next() else 0
         except Exception:
+            logger.warning("graph counts failed for %s; reporting 0", document_id, exc_info=True)
             entity_count = 0
             edge_count = 0
         return int(entity_count), int(edge_count)

@@ -11,6 +11,7 @@ evidence_json for downstream generation/mastery. No-ops on a dry run.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import uuid
@@ -33,7 +34,7 @@ logger = logging.getLogger("concepts.pipeline")
 def _sig_slug(entities: list[str]) -> str:
     """Stable identity: concept prefix + hash of the sorted member-entity signature."""
     sig = "".join(sorted(entities)).encode("utf-8")
-    return f"c-{hashlib.sha1(sig).hexdigest()[:12]}"
+    return f"c-{hashlib.sha1(sig, usedforsecurity=False).hexdigest()[:12]}"
 
 
 async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
@@ -107,7 +108,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
                 for did in node.get("document_ids", []):
                     graph.add_extracted_from(cid, did)
             except Exception:
-                pass
+                logger.warning("persist: Kuzu concept write failed for %s", slug, exc_info=True)
             if node.get("centroid"):
                 await asyncio.to_thread(lance.upsert_concept_vector, cid, node["centroid"])
             return cid
@@ -116,10 +117,8 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
 
         # lateral RELATED_TO concept edges
         for a, b, w in state.get("lateral_edges", []):
-            try:
+            with contextlib.suppress(Exception):
                 graph.add_concept_relation(concept_ids[a], concept_ids[b], float(w), "proposed")
-            except Exception:
-                pass
 
         # --- re-map cards to the rebuilt concepts by STABLE slug, then re-derive mastery, so a
         # rebuild keeps the learner's record instead of orphaning it. ---
@@ -170,7 +169,7 @@ async def persist_concepts(state: ConceptPipelineState) -> ConceptPipelineState:
             await get_concept_service().apply_overrides(session)
             await session.commit()
         except Exception:
-            pass
+            logger.warning("persist: re-applying user overrides failed", exc_info=True)
 
     record(
         state,

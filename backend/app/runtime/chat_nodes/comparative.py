@@ -190,17 +190,17 @@ async def comparative_node(state: ChatState) -> dict:
                 return []
 
         per_side_chunks: list[list[dict]] = await asyncio.gather(
-            *[_retrieve_for_side(side, docs) for side, docs in zip(sides, resolved)]
+            *[_retrieve_for_side(side, docs) for side, docs in zip(sides, resolved, strict=True)]
         )
 
         interleaved = _round_robin(per_side_chunks)
 
         side_labels = "; ".join(
-            f"{side} ({len(docs)} doc(s))" for side, docs in zip(sides, resolved)
+            f"{side} ({len(docs)} doc(s))" for side, docs in zip(sides, resolved, strict=True)
         )
         section_context = f"Comparing: {side_labels} — topic: {topic}"
 
-        for side, docs in zip(sides, resolved):
+        for side, docs in zip(sides, resolved, strict=True):
             logger.info("comparative_node: side=%r resolved to %d doc(s)", side, len(docs))
         logger.info(
             "comparative_node: retrieving %d chunks per side, total=%d",

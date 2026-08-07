@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -174,40 +174,39 @@ async def _fetch_active_collections(session: AsyncSession) -> list[ActiveCollect
     # Flashcard counts come from a separate query so the LEFT JOIN above
     # doesn't multiply the GROUP BY rows by card count.
     col_ids = [r[0] for r in rows]
-    placeholders = ",".join(f":c{i}" for i in range(len(col_ids)))
-    params = {f"c{i}": cid for i, cid in enumerate(col_ids)}
+    params = {"col_ids": col_ids}
     fc_rows = (
         await session.execute(
             text(
-                f"""
+                """
                 SELECT cm.collection_id, COUNT(DISTINCT fc.id)
                 FROM collection_members cm
                 JOIN flashcards fc ON (
                     (cm.member_type = 'document' AND fc.document_id = cm.member_id)
                     OR (cm.member_type = 'note' AND fc.note_id = cm.member_id)
                 )
-                WHERE cm.collection_id IN ({placeholders})
+                WHERE cm.collection_id IN :col_ids
                 GROUP BY cm.collection_id
                 """
-            ),
+            ).bindparams(bindparam("col_ids", expanding=True)),
             params,
         )
     ).all()
-    fc_by_col = {cid: count for cid, count in fc_rows}
+    fc_by_col = dict(fc_rows)
     due_rows = (
         await session.execute(
             text(
-                f"""
+                """
                 SELECT cm.collection_id, COUNT(DISTINCT fc.id)
                 FROM collection_members cm
                 JOIN flashcards fc ON cm.member_type = 'document'
                                    AND fc.document_id = cm.member_id
-                WHERE cm.collection_id IN ({placeholders})
+                WHERE cm.collection_id IN :col_ids
                   AND fc.due_date IS NOT NULL
                   AND fc.due_date <= datetime('now')
                 GROUP BY cm.collection_id
                 """
-            ),
+            ).bindparams(bindparam("col_ids", expanding=True)),
             params,
         )
     ).all()
@@ -487,7 +486,7 @@ async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
         )
     ).first()
     return WeeklyStats(
-        minutes_studied=int(round(float(minutes_row[0] or 0))) if minutes_row else 0,
+        minutes_studied=round(float(minutes_row[0] or 0)) if minutes_row else 0,
         cards_reviewed=int(cards_row[0] or 0) if cards_row else 0,
         notes_written=int(notes_row[0] or 0) if notes_row else 0,
         docs_touched=int(docs_row[0] or 0) if docs_row else 0,

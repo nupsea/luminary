@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel, RootModel
 from pythonjsonlogger.json import JsonFormatter
@@ -18,6 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.config import Settings, get_settings
 from app.database import get_db, get_engine, get_session_factory
 from app.db_init import init_database
+from app.exceptions import LuminaryError
 from app.models import SettingsModel
 from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
@@ -53,15 +54,6 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
-
-# Kept out of the sorted import block above: this one is conditional. The module
-# executes attacker-controllable code as the desktop user with full filesystem
-# and network access -- it is not a sandbox despite its docstring. Distribution
-# builds omit it entirely; source checkouts keep it.
-try:
-    from app.routers.code_executor import router as code_executor_router
-except ImportError:
-    code_executor_router = None
 from app.services.components import activate_extras, install_ollama_model, resolve_tool
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
@@ -114,7 +106,7 @@ async def lifespan(app: FastAPI):
 
     # Initial DB setup
     status = get_startup_status()
-    status.set_state("db", "loading", "Applying migrations")
+    status.set_state("db", "loading", "SQLite schema + LanceDB and Kuzu stores")
     engine = get_engine()
     try:
         await init_database(engine)
@@ -261,6 +253,14 @@ def _restrict_permissions(data_dir: Path) -> None:
 
 app = FastAPI(title="Luminary", lifespan=lifespan)
 
+
+@app.exception_handler(LuminaryError)
+async def _domain_error_handler(_request: Request, exc: LuminaryError) -> JSONResponse:
+    body: dict[str, object] = {"detail": exc.detail}
+    body.update(exc.extra)
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
 _mode = get_settings().LUMINARY_MODE
 
 # Load-bearing against DNS rebinding. The server binds loopback and has no
@@ -323,7 +323,6 @@ ROUTER_REGISTRY = {
     "setup": setup_router,
     "mastery": mastery_router,
     "study": study_router,
-    **({"code_executor": code_executor_router} if code_executor_router else {}),
     "summarize": summarize_router,
     "tags": tags_router,
 }

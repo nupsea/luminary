@@ -32,7 +32,6 @@ export function SectionPreviewWithHighlights({ preview, annotations, sectionId, 
     return (
       <p
         className="mt-1 line-clamp-2 text-xs text-muted-foreground section-preview"
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: sanitizeSnippet(searchSnippet) }}
       />
     )

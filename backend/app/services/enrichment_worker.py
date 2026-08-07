@@ -12,7 +12,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel
@@ -38,6 +38,11 @@ _LLM_RETRY_MAX_DELAY_S = 30.0
 # the cancellation until that call returns, so this wait must be bounded or
 # shutdown never finishes.
 _STOP_GRACE_S = 5.0
+
+# How many times a failed job is retried across restarts before it is left
+# alone. Without a bound, a deterministically-failing job re-runs its model
+# on every launch for the life of the library.
+_MAX_BOOT_ATTEMPTS = 3
 
 
 class EnrichmentQueueWorker:
@@ -68,11 +73,17 @@ class EnrichmentQueueWorker:
     async def start(self) -> None:
         """Start the background polling loop (called from lifespan).
 
-        On startup, reset any stale 'running' jobs back to 'pending' so they
-        get retried -- these were interrupted by a previous shutdown.
+        Requeues on boot, by status:
 
-        'skipped' is reset too: a restart is the likeliest moment for a missing
-        component to have arrived, and the re-check costs one refused call.
+        - 'running' was interrupted mid-flight by a shutdown, so it never
+          finished and must be retried.
+        - 'skipped' is waiting on a component; a restart is the likeliest
+          moment for one to have arrived, and the re-check costs one refused
+          call with no model work.
+        - 'failed' is retried only while under _MAX_BOOT_ATTEMPTS. A job that
+          fails deterministically (an undecodable figure, a prompt the model
+          always rejects) otherwise re-runs its model on every single launch,
+          which is minutes of GPU per document that the user never asked for.
         """
         async with get_session_factory()() as session:
             result = await session.execute(
@@ -80,19 +91,39 @@ class EnrichmentQueueWorker:
                 .where(
                     or_(
                         EnrichmentJobModel.status == "running",
-                        EnrichmentJobModel.status == "failed",
                         EnrichmentJobModel.status == "skipped",
+                        and_(
+                            EnrichmentJobModel.status == "failed",
+                            EnrichmentJobModel.attempts < _MAX_BOOT_ATTEMPTS,
+                        ),
                     )
                 )
                 .values(status="pending", started_at=None, error_message=None)
                 .returning(EnrichmentJobModel.id)
             )
             reset_ids = [row[0] for row in result.all()]
+            exhausted = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(EnrichmentJobModel)
+                    .where(
+                        EnrichmentJobModel.status == "failed",
+                        EnrichmentJobModel.attempts >= _MAX_BOOT_ATTEMPTS,
+                    )
+                )
+            ).scalar_one()
             if reset_ids:
                 await session.commit()
                 logger.info(
-                    "EnrichmentQueueWorker: reset %d stale running jobs to pending",
+                    "EnrichmentQueueWorker: requeued %d interrupted/skipped/failed job(s)",
                     len(reset_ids),
+                )
+            if exhausted:
+                logger.info(
+                    "EnrichmentQueueWorker: %d job(s) left failed after %d attempts; "
+                    "they will not be retried automatically",
+                    exhausted,
+                    _MAX_BOOT_ATTEMPTS,
                 )
 
         self._running = True
@@ -210,7 +241,7 @@ class EnrichmentQueueWorker:
                     _LLM_RETRY_BASE_DELAY_S * 2 ** (attempt - 1),
                     _LLM_RETRY_MAX_DELAY_S,
                 )
-                delay += random.uniform(0, delay * 0.25)
+                delay += random.uniform(0, delay * 0.25)  # noqa: S311
                 logger.info(
                     "EnrichmentQueueWorker: LLM unavailable, retry %d/%d in %.1fs "
                     "job_id=%s doc=%s",
@@ -229,7 +260,11 @@ class EnrichmentQueueWorker:
             await session.execute(
                 update(EnrichmentJobModel)
                 .where(EnrichmentJobModel.id == job_id)
-                .values(status="running", started_at=datetime.now(UTC))
+                .values(
+                    status="running",
+                    started_at=datetime.now(UTC),
+                    attempts=EnrichmentJobModel.attempts + 1,
+                )
             )
             await session.commit()
 
@@ -299,14 +334,19 @@ class EnrichmentQueueWorker:
                     exc.__class__.__name__,
                 )
             async with get_session_factory()() as session:
+                values: dict[str, object] = {
+                    "status": status,
+                    "completed_at": datetime.now(UTC),
+                    "error_message": message,
+                }
+                if status == "skipped":
+                    # A refused call did no work, so it must not spend the
+                    # retry budget that bounds real attempts.
+                    values["attempts"] = EnrichmentJobModel.attempts - 1
                 await session.execute(
                     update(EnrichmentJobModel)
                     .where(EnrichmentJobModel.id == job_id)
-                    .values(
-                        status=status,
-                        completed_at=datetime.now(UTC),
-                        error_message=message,
-                    )
+                    .values(**values)
                 )
                 await session.commit()
             return

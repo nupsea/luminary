@@ -85,7 +85,7 @@ export default function Viz() {
   const navigate = useNavigate()
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const queryClient = useQueryClient()
-  const mountTime = useRef(Date.now())
+  const [mountTime] = useState(() => Date.now())
 
   // Sigma instance + WebGL lifecycle + camera handlers live in the
   // useSigma hook. canvasRef is what the host <div> spreads.
@@ -249,7 +249,7 @@ export default function Viz() {
   useEffect(() => {
     if (!isLoading && data) {
       logger.info("[Viz] loaded", {
-        duration_ms: Date.now() - mountTime.current,
+        duration_ms: Date.now() - mountTime,
         nodes: data.nodes.length,
       })
     }

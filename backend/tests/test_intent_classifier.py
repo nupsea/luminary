@@ -172,3 +172,65 @@ def test_suggestion_pills_route_correctly(pill_text: str, expected_intent: str) 
         f"Pill {pill_text!r}: expected intent={expected_intent!r}, got {intent!r}"
     )
     assert confidence >= 0.9, f"Pill {pill_text!r}: expected confidence >= 0.9, got {confidence}"
+
+
+# The LLM classifier must not switch the chat into an interactive mode.
+
+
+@pytest.mark.parametrize("mode_intent", ["teach_back", "socratic", "notes", "notes_gap"])
+@pytest.mark.asyncio
+async def test_llm_fallback_rejects_interactive_modes(mode_intent):
+    """A plain question the LLM labels as a mode falls back to 'factual'.
+
+    Reported symptom: "To what extent can Lloyd's algorithm be effective ..."
+    came back as teach_back and was graded as a learner explanation, so the
+    answer was an empty correct/misconceptions/gaps card.
+    """
+    mock_response = AsyncMock()
+    mock_response.choices = [AsyncMock()]
+    mock_response.choices[0].message.content = mode_intent
+
+    with patch("litellm.acompletion", return_value=mock_response):
+        result = await _llm_classify_fallback(
+            "To what extent can Lloyd's algorithm be effective when applied to "
+            "non-symmetric distance measures?",
+            default="exploratory",
+        )
+
+    assert result == "factual"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("comparative", "comparative"),
+        ("  Factual\n", "factual"),
+        ("relational.", "relational"),
+        ('"summary"', "summary"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_llm_fallback_accepts_retrieval_intents(raw, expected):
+    """Retrieval intents survive, including with stray casing or punctuation."""
+    mock_response = AsyncMock()
+    mock_response.choices = [AsyncMock()]
+    mock_response.choices[0].message.content = raw
+
+    with patch("litellm.acompletion", return_value=mock_response):
+        result = await _llm_classify_fallback("a vague question", default="exploratory")
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_interactive_modes_still_reachable_by_keyword():
+    """The heuristic owns the modes, and reaches them without the LLM."""
+    for question, intent in [
+        ("My understanding is that k-means minimises within-cluster variance", "teach_back"),
+        ("Quiz me on clustering", "socratic"),
+        ("What am I missing from my notes on clustering?", "notes_gap"),
+        ("What did I note about k-means?", "notes"),
+    ]:
+        got, confidence = classify_intent_heuristic(question)
+        assert got == intent, question
+        assert confidence >= 0.7, question

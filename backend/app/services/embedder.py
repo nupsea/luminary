@@ -64,8 +64,8 @@ class EmbeddingService:
                         local_files_only=False,
                     )
                     logger.info("Loaded %s via SentenceTransformer (downloaded)", MODEL_NAME)
-                except Exception as exc:
-                    logger.error("Failed to load embedding model: %s", exc)
+                except Exception:
+                    logger.exception("Failed to load embedding model")
                     raise
 
     def encode(self, texts: list[str]) -> list[list[float]]:

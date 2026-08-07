@@ -39,8 +39,9 @@ def test_input_budget_leaves_room_for_system_and_output():
     assert _input_token_budget() < _summary_num_ctx()
 
 
-def test_num_ctx_is_the_generation_window():
-    assert _summary_num_ctx() == get_settings().OLLAMA_GENERATION_NUM_CTX
+def test_num_ctx_is_the_one_local_window():
+    """One window for every local call: a differing num_ctx reloads llama-server."""
+    assert _summary_num_ctx() == get_settings().OLLAMA_NUM_CTX
 
 
 @pytest.mark.asyncio

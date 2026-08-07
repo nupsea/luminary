@@ -62,7 +62,7 @@ class KuzuConceptRepo:
                         },
                     )
                 except Exception:
-                    logger.debug("add_same_concept_edge: SET contradiction failed", exc_info=True)
+                    logger.warning("add_same_concept_edge: SET contradiction failed", exc_info=True)
             return
         try:
             self._conn.execute(
@@ -84,7 +84,7 @@ class KuzuConceptRepo:
                 },
             )
         except Exception:
-            logger.debug("add_same_concept_edge: CREATE failed", exc_info=True)
+            logger.warning("add_same_concept_edge: CREATE failed", exc_info=True)
 
     def get_same_concept_edges(self) -> list[dict]:
         """Return all SAME_CONCEPT edges across the entire graph.
@@ -122,7 +122,7 @@ class KuzuConceptRepo:
                 )
             return edges
         except Exception:
-            logger.debug("get_same_concept_edges failed", exc_info=True)
+            logger.warning("get_same_concept_edges failed", exc_info=True)
             return []
 
     def get_contradiction_edges_for_docs(self, doc_ids: list[str]) -> list[dict]:
@@ -167,7 +167,7 @@ class KuzuConceptRepo:
                 )
             return edges
         except Exception:
-            logger.debug("get_contradiction_edges_for_docs failed", exc_info=True)
+            logger.warning("get_contradiction_edges_for_docs failed", exc_info=True)
             return []
 
     def get_concept_clusters(self) -> list[dict]:
@@ -321,7 +321,7 @@ class KuzuConceptRepo:
                 out.append(result.get_next()[0])
             return out
         except Exception:
-            logger.debug("get_concept_neighbors failed for %s", concept_id, exc_info=True)
+            logger.warning("get_concept_neighbors failed for %s", concept_id, exc_info=True)
             return []
 
     def delete_concept_node(self, concept_id: str) -> None:
@@ -331,14 +331,14 @@ class KuzuConceptRepo:
                 "MATCH (c:Concept {id: $id}) DETACH DELETE c", {"id": concept_id}
             )
         except Exception:
-            logger.debug("delete_concept_node failed for %s", concept_id, exc_info=True)
+            logger.warning("delete_concept_node failed for %s", concept_id, exc_info=True)
 
     def delete_all_concepts(self) -> None:
         """Drop every Concept node + its edges (for a full regenerate). Idempotent."""
         try:
             self._conn.execute("MATCH (c:Concept) DETACH DELETE c")
         except Exception:
-            logger.debug("delete_all_concepts failed", exc_info=True)
+            logger.warning("delete_all_concepts failed", exc_info=True)
 
     def get_concept_ids_for_documents(self, document_ids: list[str]) -> list[str]:
         """Return ids of concepts EXTRACTED_FROM any of the given documents."""
@@ -355,5 +355,5 @@ class KuzuConceptRepo:
                 out.append(result.get_next()[0])
             return out
         except Exception:
-            logger.debug("get_concept_ids_for_documents failed", exc_info=True)
+            logger.warning("get_concept_ids_for_documents failed", exc_info=True)
             return []

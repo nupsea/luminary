@@ -75,7 +75,7 @@ _CHARS_PER_TOKEN = 4
 
 
 def _summary_num_ctx() -> int:
-    return get_settings().OLLAMA_GENERATION_NUM_CTX
+    return get_settings().OLLAMA_NUM_CTX
 
 
 def _input_token_budget() -> int:
@@ -265,7 +265,7 @@ class SummarizationService:
                 background=True,
                 num_ctx=_summary_num_ctx(),
             )
-            assert isinstance(s, str)
+            assert isinstance(s, str)  # noqa: S101
             section_summaries.append(s)
 
         result = "\n\n".join(section_summaries)
@@ -489,7 +489,7 @@ class SummarizationService:
                         background=True,
                         num_ctx=_summary_num_ctx(),
                     )
-                    assert isinstance(text, str)
+                    assert isinstance(text, str)  # noqa: S101
                     await self._store_summary(document_id, mode, text)
                     logger.info(
                         "pregenerate: stored mode=%s",

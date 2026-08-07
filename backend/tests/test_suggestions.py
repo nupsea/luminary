@@ -10,7 +10,7 @@ Covers:
       missing document id returns NO pills
   (f) test_suggestions_returns_four: always returns exactly 4 suggestions
   (g) test_suggestions_not_in_history: AC11 -- returned suggestions not in recent history
-  (h) test_bloom_level_decrease: AC12 -- bloom level decreases per 4 asked questions
+  (h) test_bloom_level_climbs_with_engagement: AC12 -- depth climbs per 4 asked questions
   (i) test_fallback_on_llm_unavailable: AC13 -- fallback to templates when LLM raises
   (j) test_jaccard_filter: AC14 -- near-duplicate filtered out at threshold > 0.7
 """
@@ -330,17 +330,17 @@ async def test_suggestions_not_in_history(db_session):
         assert item.id != ""
 
 
-# (h) AC12: bloom level decreases per 4 asked questions
+# (h) AC12: bloom level climbs per 4 asked questions
 
 
 @pytest.mark.asyncio
-async def test_bloom_level_decrease(db_session):
-    """Bloom level: starts at 5, decreases by 1 per 4 asked questions, floor at 2."""
+async def test_bloom_level_climbs_with_engagement(db_session):
+    """Depth starts at 2 on an unopened document, +1 per 4 asked, ceiling at 5."""
     svc = SuggestionService()
 
-    # 0 asked -> level 5
+    # 0 asked -> level 2: first contact must not open at evaluate-depth
     level = await svc.get_target_bloom_level("doc-bloom-1")
-    assert level == 5
+    assert level == 2
 
     # Seed 4 asked rows
     for i in range(4):
@@ -357,9 +357,9 @@ async def test_bloom_level_decrease(db_session):
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
-    assert level == 4
+    assert level == 3
 
-    # Seed 4 more (total 8) -> level 3
+    # Seed 4 more (total 8) -> level 4
     for i in range(4, 8):
         db_session.add(
             ChatSuggestionHistoryModel(
@@ -374,9 +374,9 @@ async def test_bloom_level_decrease(db_session):
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
-    assert level == 3
+    assert level == 4
 
-    # Seed many more to hit floor
+    # Seed many more to hit the ceiling
     for i in range(8, 20):
         db_session.add(
             ChatSuggestionHistoryModel(
@@ -391,7 +391,7 @@ async def test_bloom_level_decrease(db_session):
     await db_session.commit()
 
     level = await svc.get_target_bloom_level("doc-bloom-1")
-    assert level == 2
+    assert level == 5
 
 
 # (i) AC13: fallback to template when LLM raises ServiceUnavailableError
@@ -495,3 +495,105 @@ def test_book_is_technical_routing():
     )
     # sparse/ambiguous -> default to narrative (not technical)
     assert not _book_is_technical("Field Notes", {"PERSON": ["Alice"]})
+
+
+def test_parses_unterminated_json_array():
+    """Six good objects with no closing bracket must still yield six questions.
+
+    Local models stop mid-array often enough that treating it as a parse failure
+    silently disabled LLM suggestions and showed templates instead.
+    """
+    from app.services.suggestion_service import _parse_questions
+
+    raw = (
+        '[\n  {"question": "What is dropout?", "depth": 2},\n'
+        '  {"question": "How does batching work?", "depth": 2}'
+    )
+    parsed = _parse_questions(raw)
+
+    assert [p["question"] for p in parsed] == ["What is dropout?", "How does batching work?"]
+    assert all(p["bloom_level"] == 2 for p in parsed)
+
+
+def test_parses_well_formed_json_array():
+    """The strict path still wins when the model closes the array properly."""
+    from app.services.suggestion_service import _parse_questions
+
+    raw = '[{"question": "What is dropout?", "depth": 4}]'
+    assert _parse_questions(raw) == [{"question": "What is dropout?", "bloom_level": 4}]
+
+
+def test_history_reduced_to_topics_not_questions():
+    """Past questions must reach the prompt as topics, never as sentences.
+
+    Injecting them verbatim gave a small model dozens of exam-phrased exemplars
+    to copy, which reproduced the register the prompt rules had just removed.
+    """
+    from app.services.suggestion_service import _history_topics
+
+    topics = _history_topics(
+        [
+            "To what extent can Lloyd's algorithm cluster high-dimensional data?",
+            "Evaluate how spectral clustering handles graph structures.",
+        ]
+    )
+
+    joined = " ".join(topics)
+    assert "lloyd's" in joined
+    assert "spectral" in joined
+    for leaked in ("extent", "evaluate", "what"):
+        assert leaked not in topics
+    assert all(" " not in t for t in topics)
+
+
+def test_prompts_carry_no_taxonomy_verb():
+    """The Bloom verb must never reach the model.
+
+    Naming the taxonomy level in the prompt made a small local model emit exam
+    phrasing, which the intent classifier then read as a learner's explanation
+    and answered with an empty teach-back card.
+    """
+    from app.services.suggestion_service import (
+        _CROSS_DOC_SYSTEM,
+        _LEVEL_GUIDANCE,
+        _SYSTEM_PROMPT,
+        _USER_PROMPT,
+    )
+
+    rendered = " ".join(
+        [
+            _SYSTEM_PROMPT.format(guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"),
+            _CROSS_DOC_SYSTEM.format(guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"),
+            _USER_PROMPT.format(passages="p", entities="e"),
+        ]
+    ).lower()
+
+    for verb in ("evaluate", "analyze", "apply", "remember", "create", "bloom", "taxonomy"):
+        assert verb not in rendered, f"prompt leaks taxonomy term {verb!r}"
+
+
+@pytest.mark.asyncio
+async def test_grounding_passages_sample_across_document(db_session):
+    """Passages must span the document, not just its opening sections."""
+    from app.models import SectionSummaryModel
+
+    for i in range(20):
+        db_session.add(
+            SectionSummaryModel(
+                id=str(uuid.uuid4()),
+                document_id="doc-passages",
+                section_id=None,
+                heading=f"Section {i:02d}",
+                content=f"Body {i:02d}",
+                unit_index=i,
+            )
+        )
+    await db_session.commit()
+
+    passages = await SuggestionService().get_grounding_passages("doc-passages", limit=4)
+
+    assert len(passages) == 4
+    assert passages[0].startswith("Section 00")
+    # Taking the first N is what produced questions drawn entirely from the preface.
+    assert passages != [f"Section {i:02d}: Body {i:02d}" for i in range(4)]
+    assert passages[-1].startswith("Section 15")

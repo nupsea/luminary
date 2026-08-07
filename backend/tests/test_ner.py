@@ -215,7 +215,7 @@ def test_code_block_boost_code_chunk_uses_lower_threshold(extractor: EntityExtra
 def test_code_block_boost_prose_chunk_uses_higher_threshold(extractor: EntityExtractor):
     """Prose chunk (has_code=False) uses threshold=0.65."""
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = []
+    mock_model.batch_predict_entities.return_value = [[]]
     extractor._model = mock_model
 
     prose_chunk = _make_chunk("numpy is used here", has_code=False)
@@ -246,7 +246,7 @@ def test_non_tech_content_type_excludes_tech_types(extractor: EntityExtractor):
 def test_tech_content_type_includes_all_types(extractor: EntityExtractor):
     """For tech_book content, all 13 entity types must be active."""
     mock_model = MagicMock()
-    mock_model.batch_predict_entities.return_value = []
+    mock_model.batch_predict_entities.return_value = [[]]
     extractor._model = mock_model
 
     chunks = [_make_chunk("some tech text")]

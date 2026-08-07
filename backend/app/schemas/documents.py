@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.schemas.membership import CollectionRef
-from app.workflows.ingestion import ContentType
+from app.types import ContentType
 
 
 class DocumentListItem(BaseModel):

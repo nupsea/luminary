@@ -19,7 +19,7 @@ export async function renderMermaidSvgs(content: string): Promise<Record<string,
   mermaid.initialize({
     startOnLoad: false,
     theme: "default",
-    securityLevel: "loose",
+    securityLevel: "strict",
     // Keeps a malformed diagram from appending mermaid's error graphic to the
     // live page while we are only rendering SVGs for export.
     suppressErrorRendering: true,

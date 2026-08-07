@@ -12,8 +12,11 @@ before shipping rather than discovered at boot.
 """
 
 import functools
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,4 +63,5 @@ def app_version() -> str:
         with pyproject_path().open("rb") as fh:
             return tomllib.load(fh)["project"]["version"]
     except Exception:
+        logger.warning("could not read project version; reporting 0.0.0", exc_info=True)
         return "0.0.0"

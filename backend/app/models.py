@@ -681,6 +681,10 @@ class EnrichmentJobModel(Base):
       running  -- worker has picked this job up
       done     -- completed successfully
       failed   -- error_message contains the cause
+      skipped  -- a component it needs is not installed; re-queued when one arrives
+
+    attempts counts worker pickups and bounds boot-time retries: a job that
+    fails deterministically must not re-run its model on every launch.
 
     Note: any new delete path in documents.py must also delete these rows
     (no FK CASCADE in SQLite without FK pragma enforcement).
@@ -695,6 +699,7 @@ class EnrichmentJobModel(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

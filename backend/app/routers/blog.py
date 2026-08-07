@@ -481,7 +481,7 @@ async def live_preview(
     try:
         _write_assets(pslug, note.content, req.mermaid_svgs, kind)
     except HTTPException:
-        pass  # best-effort: a missing diagram should not block the text preview
+        logger.warning("preview asset write failed for %s", pslug, exc_info=True)
     await _ensure_astro_dev(repo)
     url = f"http://{_LIVE_PREVIEW_HOST}:{_LIVE_PREVIEW_PORT}/{kind}/{pslug}/"
     # Astro's content watcher needs a moment to register the new file as a route;

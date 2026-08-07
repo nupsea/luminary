@@ -64,8 +64,6 @@ __all__ = [
     "CLOZE_USER_TMPL",
     "FLASHCARD_SYSTEM",
     "FLASHCARD_USER_TMPL",
-    "FlashcardSearchService",
-    "FlashcardService",
     "GAP_FLASHCARD_SYSTEM",
     "GAP_FLASHCARD_USER_TMPL",
     "GRAPH_FLASHCARD_SYSTEM",
@@ -80,6 +78,8 @@ __all__ = [
     "_CLOZE_BLANK_RE",
     "_DIFFICULTY_GUIDELINES",
     "_TECH_TITLE_KEYWORDS",
+    "FlashcardSearchService",
+    "FlashcardService",
     "_build_cloze_question",
     "_build_genre_system_prompt",
     "_delete_flashcard_fts",
@@ -196,10 +196,7 @@ def _build_enriched_text(
         prefix = ""
         if c.section_id and c.section_id in section_ctx:
             heading, parent = section_ctx[c.section_id]
-            if parent:
-                prefix = f"[{parent} > {heading}]\n"
-            else:
-                prefix = f"[{heading}]\n"
+            prefix = f"[{parent} > {heading}]\n" if parent else f"[{heading}]\n"
         part = prefix + c.text
         parts.append(part)
         total += len(part)

@@ -114,7 +114,7 @@ def check_file(filepath: Path) -> list[str]:
 
 
 def main() -> int:
-    files = sorted(ROUTERS_DIR.glob("*.py")) + [MAIN_FILE]
+    files = [*sorted(ROUTERS_DIR.glob("*.py")), MAIN_FILE]
     all_warnings: list[str] = []
     for filepath in files:
         all_warnings.extend(check_file(filepath))

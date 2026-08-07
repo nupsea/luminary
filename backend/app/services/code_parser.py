@@ -92,6 +92,20 @@ def _extract_name_from_node(node, language: str) -> str:
     return "anonymous"
 
 
+def _strip_string_delimiters(raw: str) -> str:
+    """Remove the quote delimiters around a Python string literal.
+
+    `str.strip('\"\"\"')` strips a character *set*, so it also eats quote
+    characters that are part of the docstring text. Match the delimiter pair
+    instead, longest first.
+    """
+    text = raw.strip()
+    for delim in ('"""', "'''", '"', "'"):
+        if text.startswith(delim) and text.endswith(delim) and len(text) >= 2 * len(delim):
+            return text[len(delim) : -len(delim)].strip()
+    return text
+
+
 def _extract_docstring_python(node) -> str:
     """Extract a Python docstring from the first statement of a block."""
     for child in node.children:
@@ -101,7 +115,7 @@ def _extract_docstring_python(node) -> str:
                     for sub in stmt.children:
                         if sub.type in ("string", "concatenated_string"):
                             raw = sub.text.decode(errors="replace")
-                            return raw.strip('"""').strip("'''").strip()
+                            return _strip_string_delimiters(raw)
             break
     return ""
 

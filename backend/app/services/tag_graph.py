@@ -98,7 +98,7 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
     # 1. Top-200 canonical tags by usage_count
     nodes_result = await session.execute(
         text(
-            "SELECT id, display_name, parent_tag, usage_count"
+            "SELECT id, display_name, parent_tag, usage_count"  # noqa: S608
             " FROM canonical_tags"
             " ORDER BY usage_count DESC"
             f" LIMIT {MAX_NODES}"
@@ -121,7 +121,7 @@ async def build_tag_graph(session: AsyncSession) -> TagGraphOut:
     # a.tag_full < b.tag_full ensures each pair appears once (no duplicates, no self-loops)
     edges_result = await session.execute(
         text(
-            "SELECT a.tag_full AS tag_a, b.tag_full AS tag_b, COUNT(*) AS weight"
+            "SELECT a.tag_full AS tag_a, b.tag_full AS tag_b, COUNT(*) AS weight"  # noqa: S608
             " FROM note_tag_index a"
             " JOIN note_tag_index b ON a.note_id = b.note_id AND a.tag_full < b.tag_full"
             " GROUP BY a.tag_full, b.tag_full"

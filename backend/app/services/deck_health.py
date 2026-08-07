@@ -98,7 +98,7 @@ class DeckHealthService:
 
         stale_threshold = now - timedelta(days=_STALE_DAYS)
 
-        for card_id, stability, last_review, chunk_id in cards:
+        for card_id, stability, last_review, _chunk_id in cards:
             # Orphaned: has a chunk_id AND that chunk's section_id is not in valid sections
             if card_id in card_to_section:
                 s_id = card_to_section[card_id]

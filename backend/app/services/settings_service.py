@@ -1,5 +1,6 @@
 """LLM settings service — DB-backed mode/provider/key management with OS keychain storage."""
 
+import contextlib
 import hashlib
 import logging
 import socket
@@ -110,10 +111,8 @@ def _keyring_get(field: str) -> str | None:
 
 def _keyring_delete(field: str) -> None:
     """Delete a value from the OS keyring, ignoring all errors."""
-    try:
+    with contextlib.suppress(keyring.errors.PasswordDeleteError, keyring.errors.NoKeyringError):
         keyring.delete_password(_KEYCHAIN_SERVICE, field)
-    except (keyring.errors.PasswordDeleteError, keyring.errors.NoKeyringError):
-        pass
 
 
 async def load_llm_settings(db: AsyncSession) -> None:
@@ -333,10 +332,7 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     mode = _cache["llm_mode"]
 
     # Hybrid: background tasks → local Ollama; interactive → cloud
-    if mode == "hybrid":
-        effective_mode = "private" if background else "cloud"
-    else:
-        effective_mode = mode
+    effective_mode = ("private" if background else "cloud") if mode == "hybrid" else mode
 
     if effective_mode == "private":
         return get_local_chat_model(), None

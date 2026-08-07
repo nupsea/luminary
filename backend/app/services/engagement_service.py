@@ -73,7 +73,7 @@ def compute_level(total_xp: int) -> int:
     """Level = floor(sqrt(total_xp / 100)). Level 0 until 100 XP."""
     if total_xp < 100:
         return 0
-    return int(math.floor(math.sqrt(total_xp / 100)))
+    return math.floor(math.sqrt(total_xp / 100))
 
 
 def xp_for_next_level(total_xp: int) -> int:

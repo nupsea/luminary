@@ -14,6 +14,14 @@ Patterns discovered through completed stories. Read before implementing new feat
 - **Type-dispatched compute methods**: keep the dispatcher trivial -- a series of `if self.type == 'A': return await self._compute_A()` branches ending with `raise InvalidType`. Each branch is independently testable and logic stays out of the dispatcher.
 - **Subprocess backend URL constant**: When launching subprocesses from within a backend service (e.g., eval runner), they need to reach the backend API. Store the URL as a module-level constant (`_BACKEND_URL = "http://localhost:7820"`) and pass it as `--backend-url` to all subprocess invocations. Avoids hard-coded ports scattered across code.
 
+## ORM Relationships
+
+- **`models.py` declares no `relationship()`, and nothing uses `selectinload`/`joinedload`.** Every association is joined by hand. This is deliberate: under async SQLAlchemy a lazy load outside the greenlet context raises `MissingGreenlet` at runtime, so an unannotated relationship access is a production error rather than a slow query. Keep writing explicit joins. The cost is that a "fetch children for each parent" loop is easy to write and reads as normal code -- when you need one, build a single grouped query keyed by parent id, not a query per row.
+
+## Domain Exceptions
+
+- **Services and repos raise `app.exceptions.LuminaryError` subclasses, never `HTTPException`.** `main.py` registers one handler that maps `status_code` to the response and spreads `extra` into the body. `NotFound`/`Conflict`/`InvalidInput`/`DependencyUnavailable` cover the common cases; a domain hierarchy (e.g. `GoalError`) subclasses `LuminaryError` and sets `status_code` per leaf. A router may still catch a specific type to add context, but it no longer has to -- an unmapped domain error returns its own status instead of a 500. `repos/_helpers.get_or_404` keeps its name and raises `NotFound`.
+
 ## Database Migrations and Schema Evolution
 
 - **Replace model in-place with table name unchanged**: keep the SQLAlchemy class declaration as the new schema (so `create_all` generates the correct CREATE TABLE for fresh databases) and add idempotent ALTER TABLE statements in `db_init.py` for existing databases with the old schema. New columns are nullable by default; legacy NOT NULL columns in old databases are tolerated by the new model if it declares them nullable.

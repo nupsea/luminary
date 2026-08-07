@@ -18,8 +18,8 @@ from sqlalchemy import select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, EnrichmentJobModel, WebReferenceModel
+from app.repos._helpers import get_or_404
 from app.repos.reference_repo import ReferenceRepo
-from app.services.repo_helpers import get_or_404
 
 logger = logging.getLogger(__name__)
 

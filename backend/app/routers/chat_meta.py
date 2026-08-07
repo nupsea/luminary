@@ -345,12 +345,17 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     try:
         target_bloom = await svc.get_target_bloom_level(document_id)
         summary = await svc.get_executive_summary(document_id)
-        if summary and entity_names:
+        passages = await svc.get_grounding_passages(document_id)
+        # Passages are the grounding; the summary is only a fallback for documents
+        # with neither section summaries nor chunks. Requiring a summary AND
+        # entities sent every document missing either one to the templates.
+        if passages or (summary and entity_names):
             candidates = await svc.generate_suggestions(
                 document_id=document_id,
-                summary=summary,
+                summary=summary or "",
                 entity_names=entity_names,
                 target_bloom=target_bloom,
+                passages=passages,
             )
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)
@@ -392,7 +397,9 @@ async def get_explorations(
     document_id: str = Query(..., description="Document ID to derive entity-pair suggestions for"),
 ) -> list[ExplorationSuggestion]:
     """Return up to 5 proactive exploration suggestions from Kuzu RELATED_TO entity pairs."""
-    pairs = get_graph_service().get_related_entity_pairs_for_document(document_id, limit=5)
+    pairs = await asyncio.to_thread(
+        get_graph_service().get_related_entity_pairs_for_document, document_id, limit=5
+    )
     suggestions: list[ExplorationSuggestion] = []
     for name_a, name_b, label, _conf in pairs:
         display_a = name_a.title()

@@ -77,7 +77,7 @@ class KuzuPrereqRepo:
                 )
             return edges
         except Exception:
-            logger.debug("get_prerequisite_edges_for_document failed", exc_info=True)
+            logger.warning("get_prerequisite_edges_for_document failed", exc_info=True)
             return []
 
     def add_prerequisite_with_section(
@@ -139,6 +139,7 @@ class KuzuPrereqRepo:
             )
             return result.has_next()
         except Exception:
+            logger.warning("prereq existence check failed for %s", document_id, exc_info=True)
             return False
 
     def get_entry_point_concepts(self, document_id: str, limit: int = 10) -> list[str]:
@@ -185,7 +186,7 @@ class KuzuPrereqRepo:
             entry.sort(key=lambda x: x[2], reverse=True)
             return [name for _, name, _ in entry[:limit]]
         except Exception:
-            logger.debug("get_entry_point_concepts failed", exc_info=True)
+            logger.warning("get_entry_point_concepts failed", exc_info=True)
             return []
 
     def get_prerequisite_edges_for_graph(self, document_id: str) -> list[dict]:
@@ -240,7 +241,7 @@ class KuzuPrereqRepo:
                     "edges": [],
                 }
         except Exception:
-            logger.debug("get_learning_path entity lookup failed", exc_info=True)
+            logger.warning("get_learning_path entity lookup failed", exc_info=True)
             return {
                 "start_entity": start_entity_name,
                 "document_id": document_id,
@@ -282,7 +283,7 @@ class KuzuPrereqRepo:
                         subgraph_nodes.add(neighbor_id)
                         queue.append(neighbor_id)
 
-            in_degree: dict[str, int] = {n: 0 for n in subgraph_nodes}
+            in_degree: dict[str, int] = dict.fromkeys(subgraph_nodes, 0)
             sub_adj: dict[str, list[str]] = {n: [] for n in subgraph_nodes}
             for from_id, to_id, _ in subgraph_edges:
                 if from_id in subgraph_nodes and to_id in subgraph_nodes:
@@ -343,7 +344,7 @@ class KuzuPrereqRepo:
                 "edges": return_edges,
             }
         except Exception:
-            logger.debug("get_learning_path traversal failed", exc_info=True)
+            logger.warning("get_learning_path traversal failed", exc_info=True)
             return {
                 "start_entity": start_entity_name,
                 "document_id": document_id,

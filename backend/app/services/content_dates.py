@@ -70,7 +70,7 @@ async def assign_entry_dates(session, document_id: str) -> int:
     if (
         len(hits) < _MIN_DATED_CHUNKS
         or len(hits) < _MIN_DATED_FRACTION * len(rows)
-        or len({d for d in hits}) < _MIN_DISTINCT_DATES
+        or len(set(hits)) < _MIN_DISTINCT_DATES
     ):
         return 0
 

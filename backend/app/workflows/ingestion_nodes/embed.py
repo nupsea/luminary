@@ -112,7 +112,7 @@ async def embed_node(state: IngestionState) -> IngestionState:
             logger.info("Embedded %d chunks", len(chunks), extra={"doc_id": doc_id})
             return {**state, "status": "indexing"}
         except Exception as exc:
-            logger.error("embed_node failed", exc_info=exc)
+            logger.exception("embed_node failed", exc_info=exc)
             return {**state, "status": "error", "error": str(exc)}
 
 
@@ -159,6 +159,6 @@ async def keyword_index_node(state: IngestionState) -> IngestionState:
             except Exception as exc:
                 logger.warning("entry_date assignment failed (non-fatal): %s", exc)
         except Exception as exc:
-            logger.error("keyword_index_node failed", exc_info=exc)
+            logger.exception("keyword_index_node failed", exc_info=exc)
         await _update_stage(doc_id, "indexing")
     return {**state, "status": "extracting"}
