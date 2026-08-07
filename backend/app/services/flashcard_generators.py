@@ -534,9 +534,7 @@ async def generate(
         raw = await llm.generate(
             batch_prompt, system=system_prompt,
             model=_generation_model(), stream=False,
-            # force valid JSON; num_ctx: 2048 truncates the section text into junk
             response_format={"type": "json_object"},
-            num_ctx=get_settings().OLLAMA_GENERATION_NUM_CTX,
         )
         return _gate_cards(_parse_llm_response(raw, document_id))
 

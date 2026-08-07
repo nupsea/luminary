@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
@@ -123,9 +122,6 @@ class SectionSummarizerService:
             nonlocal total_inserted
             async with semaphore:
                 try:
-                    # TEXT_HARD_CAP is ~2.5 K tokens, well over the default window;
-                    # without an explicit num_ctx Ollama truncates from the front and
-                    # drops the system prompt, yielding conversational non-summaries.
                     summary_text = await get_llm_service().complete(
                         messages=[
                             {"role": "system", "content": _SYSTEM_PROMPT},
@@ -134,7 +130,6 @@ class SectionSummarizerService:
                         temperature=0.0,
                         timeout=300.0,
                         background=True,
-                        num_ctx=get_settings().OLLAMA_GENERATION_NUM_CTX,
                     )
                 except LLMUnavailableError:
                     raise

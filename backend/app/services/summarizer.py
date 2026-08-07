@@ -75,7 +75,7 @@ _CHARS_PER_TOKEN = 4
 
 
 def _summary_num_ctx() -> int:
-    return get_settings().OLLAMA_GENERATION_NUM_CTX
+    return get_settings().OLLAMA_NUM_CTX
 
 
 def _input_token_budget() -> int:
