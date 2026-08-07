@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-07
+
+### Added
+- **The reader is sharp on retina displays, and its panels move.** The PDF canvas
+  sized its backing store in CSS pixels, so a 2x display upscaled a 1x bitmap and
+  every glyph rendered soft; the backing store is now sized in device pixels. The
+  reader layout was a fixed 60/40 split with no way to resize or hide either side,
+  and both rails are now draggable and collapsible. Setup downloads are named
+  rather than arriving as opaque files.
+- **Background model work is visible.** A diagram-heavy book is roughly 22 minutes
+  of local vision inference, and because it runs on the GPU it never showed in CPU
+  time — nothing in the interface said it was happening. A status pill now reports
+  what is being enriched and how much is left, and stays silent when there is no
+  work.
+
+### Changed
+- **The mastery heatmap issues 4 queries instead of 861.** It ran one query per
+  section plus three per cell; three grouped reads now feed an in-memory join,
+  with identical output. Genuinely blocking I/O elsewhere was moved off the event
+  loop.
+- **Internal structure.** Domain exceptions and repo helpers moved into the repo
+  layer, error-handling rules are enforced rather than documented, graph failures
+  are surfaced instead of swallowed, and the duplicated FTS sanitiser and
+  fire-and-forget helper were collapsed into one each.
+
 ### Fixed
 - **Ask answers the question instead of grading you.** A question phrased for
   analysis rather than lookup ("To what extent can Lloyd's algorithm be
@@ -55,6 +80,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempts to 4 of 6 on the same document; the remaining two are the duplicate
   filter working as intended. The empty-candidate case is now logged with the
   counts that tell a parse failure apart from an exhausted question pool.
+- **The contents panel lists sections you can actually navigate to.** Equations
+  and anchor ids were being picked up as headings; unusable headings are now
+  relabelled rather than dropped, and a bookmark's real heading is recovered from
+  the page it points at.
+- **The machine stops running hot after a failed enrichment.** Startup reset every
+  failed job to pending on every launch, so a job that failed deterministically
+  re-ran its model on each boot for the life of the install. Boot-time retries are
+  now bounded.
+- **The Linux from-source install completes.** The path stopped short of a working
+  installation.
+
+### Security
+- **SQL injection closed in keyword search.** The `document_id` query parameter was
+  interpolated into an FTS5 statement unescaped; that call and four sibling `IN`
+  lists now use bound, expanding parameters. Security and async lint rules are
+  enabled in CI, the unsandboxed `code_executor` route was removed, and Mermaid
+  rendering moved from loose to strict (loose permits raw HTML in labels).
 
 ## [0.4.0] - 2026-08-05
 
