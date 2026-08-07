@@ -345,12 +345,17 @@ async def _handle_single_doc(svc, document_id: str) -> SuggestionResponse:  # no
     try:
         target_bloom = await svc.get_target_bloom_level(document_id)
         summary = await svc.get_executive_summary(document_id)
-        if summary and entity_names:
+        passages = await svc.get_grounding_passages(document_id)
+        # Passages are the grounding; the summary is only a fallback for documents
+        # with neither section summaries nor chunks. Requiring a summary AND
+        # entities sent every document missing either one to the templates.
+        if passages or (summary and entity_names):
             candidates = await svc.generate_suggestions(
                 document_id=document_id,
-                summary=summary,
+                summary=summary or "",
                 entity_names=entity_names,
                 target_bloom=target_bloom,
+                passages=passages,
             )
             if candidates:
                 items = await svc.persist_shown(candidates[:4], document_id=document_id)

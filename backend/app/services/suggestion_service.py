@@ -10,44 +10,57 @@ from functools import lru_cache
 from sqlalchemy import func, select, update
 
 from app.database import get_session_factory
-from app.models import ChatSuggestionHistoryModel, SummaryModel
+from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
 
 logger = logging.getLogger(__name__)
 
-_BLOOM_LABELS = {
-    6: "Create",
-    5: "Evaluate",
-    4: "Analyze",
-    3: "Apply",
-    2: "Understand",
-    1: "Remember",
+# Bloom levels name a depth of understanding; they are NOT phrasing instructions.
+# Putting the taxonomy verb in the prompt ("generate questions at level 5
+# (Evaluate)") made a small local model write exam papers -- "Evaluate how X's
+# reliance on Y can be advantageous", which no reader would ever type, and which
+# reads to the intent classifier as a learner's explanation awaiting a grade.
+# The level selects a description of what the question should reach for; the word
+# itself never leaves this module.
+_LEVEL_GUIDANCE = {
+    2: "Ask what the main ideas mean and how they work.",
+    3: "Ask how the ideas would play out in a specific, concrete situation.",
+    4: "Ask how the ideas relate to each other, or why the material makes the choices it does.",
+    5: "Ask where an approach breaks down, and what it is traded off against.",
 }
 
+_STYLE_RULES = (
+    "Write each question the way a curious reader would type it into a chat box: "
+    "short, plain, and specific. Do not open with a command verb and do not address "
+    "the reader -- a question asks for something, it never assigns a task. "
+    "Every question must be answerable from the material shown below; never ask about "
+    "something that is not there."
+)
+
 _SYSTEM_PROMPT = (
-    "You are an expert tutor generating study questions about a book or document. "
-    "Given a summary and key entities, generate exactly 6 questions at Bloom taxonomy "
-    "level {bloom_level} ({bloom_label}). "
+    "You are helping someone study a document they are reading. "
+    "Write exactly 6 questions they could ask about it.\n"
+    "{guidance}\n"
+    f"{_STYLE_RULES}\n"
     "Avoid these previously asked questions:\n{history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'bloom_level' (integer). "
-    'Example: [{{"question": "...", "bloom_level": 5}}]. '
-    "No explanation, no markdown fences."
+    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
+    "(integer, always {bloom_level}). No explanation, no markdown fences."
 )
 
 _USER_PROMPT = (
-    "Document summary:\n{summary}\n\n"
+    "Passages from the document:\n{passages}\n\n"
     "Key entities: {entities}\n\n"
-    "Generate 6 questions at Bloom level {bloom_level} ({bloom_label})."
+    "Write the 6 questions."
 )
 
 _CROSS_DOC_SYSTEM = (
-    "You are an expert tutor generating cross-document analytical questions. "
-    "Given summaries from multiple documents and key entities, generate exactly 6 "
-    "questions at Bloom taxonomy level {bloom_level} ({bloom_label}) that connect "
-    "ideas across documents. "
+    "You are helping someone study their own library. Write exactly 6 questions "
+    "that connect ideas across the documents shown.\n"
+    "{guidance}\n"
+    f"{_STYLE_RULES}\n"
     "Avoid these previously asked questions:\n{history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'bloom_level' (integer). "
-    "No explanation, no markdown fences."
+    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
+    "(integer, always {bloom_level}). No explanation, no markdown fences."
 )
 
 
@@ -60,47 +73,81 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
+def _depth_of(item: dict) -> int:
+    """Read the level off a parsed item.
+
+    The wire key is 'depth' so the taxonomy word never appears in the prompt;
+    'bloom_level' stays accepted because it is the column name and older models
+    still echo it.
+    """
+    raw = item.get("depth", item.get("bloom_level", 2))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 2
+
+
+def _items_from(result: object) -> list[dict]:
+    """Normalise a parsed JSON array into question records."""
+    if not isinstance(result, list):
+        return []
+    return [
+        {"question": str(item.get("question", "")), "bloom_level": _depth_of(item)}
+        for item in result
+        if isinstance(item, dict) and item.get("question")
+    ]
+
+
 def _parse_questions(raw: str) -> list[dict]:
-    """Parse LLM JSON output into list of {question, bloom_level}."""
+    """Parse LLM JSON output into list of {question, bloom_level}.
+
+    Small local models routinely emit six well-formed objects and then simply
+    stop, never closing the array. Strict parsing and the bracket-match fallback
+    both need the closing "]", so every one of those responses scored as zero
+    candidates and fell back to templates -- the suggestion feature looked like
+    it was off. The last stage salvages whole objects from an unterminated array,
+    mirroring the truncated-citations salvage in the QA path.
+    """
     if not raw:
         return []
     cleaned = re.sub(r"```[^\n]*\n?", "", raw).strip()
+
     try:
-        result = json.loads(cleaned)
-        if isinstance(result, list):
-            return [
-                {
-                    "question": str(item.get("question", "")),
-                    "bloom_level": int(item.get("bloom_level", 5)),
-                }
-                for item in result
-                if isinstance(item, dict) and item.get("question")
-            ]
+        items = _items_from(json.loads(cleaned))
+        if items:
+            return items
     except (json.JSONDecodeError, ValueError):
         pass
+
     match = re.search(r"\[.*\]", cleaned, re.DOTALL)
     if match:
         try:
-            result = json.loads(match.group(0))
-            if isinstance(result, list):
-                return [
-                    {
-                        "question": str(item.get("question", "")),
-                        "bloom_level": int(item.get("bloom_level", 5)),
-                    }
-                    for item in result
-                    if isinstance(item, dict) and item.get("question")
-                ]
+            items = _items_from(json.loads(match.group(0)))
+            if items:
+                return items
         except (json.JSONDecodeError, ValueError):
             pass
-    return []
+
+    salvaged: list[dict] = []
+    for obj in re.findall(r"\{[^{}]*\}", cleaned):
+        try:
+            parsed = json.loads(obj)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        salvaged.extend(_items_from([parsed]))
+    return salvaged
 
 
 class SuggestionService:
     """Generates Bloom-progressive, LLM-powered chat suggestions with dedup."""
 
     async def get_target_bloom_level(self, document_id: str | None) -> int:
-        """Bloom level: starts at 5, -1 per 4 asked. Floor=2."""
+        """Question depth: starts at 2, +1 per 4 asked. Ceiling=5.
+
+        The ladder used to run the other way -- a document you had never opened
+        led with level 5, so first contact with new material was a demand to
+        evaluate it. Depth is earned by engagement, so it climbs.
+        """
         factory = get_session_factory()
         async with factory() as session:
             query = (
@@ -116,8 +163,11 @@ class SuggestionService:
                 query = query.where(ChatSuggestionHistoryModel.document_id.is_(None))
             asked_count = (await session.execute(query)).scalar() or 0
 
-        level = 5 - (asked_count // 4)
-        return max(level, 2)
+        # Level 6 ("Create") is deliberately unreachable: the chat answers from
+        # the learner's own documents, and a create-level task has no grounded
+        # answer to retrieve.
+        level = 2 + (asked_count // 4)
+        return min(level, 5)
 
     async def get_recent_history(self, document_id: str | None, limit: int = 50) -> list[str]:
         """Return recent suggestion texts for dedup."""
@@ -144,6 +194,43 @@ class SuggestionService:
             )
             row = result.scalar_one_or_none()
             return row
+
+    async def get_grounding_passages(self, document_id: str, limit: int = 6) -> list[str]:
+        """Real text from across the document, for grounding question generation.
+
+        An executive summary alone gives the model a paraphrase to riff on, which
+        is how questions came to presuppose framings the document never makes.
+        Section summaries are preferred (already condensed, one per section);
+        chunks are the fallback for documents ingested before section summaries.
+
+        Sampled evenly across the document rather than taking the first N, so the
+        questions are not all drawn from the preface.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    select(SectionSummaryModel.heading, SectionSummaryModel.content)
+                    .where(SectionSummaryModel.document_id == document_id)
+                    .order_by(SectionSummaryModel.unit_index)
+                )
+            ).all()
+            passages = [f"{heading}: {content}" for heading, content in rows if content]
+
+            if not passages:
+                chunk_rows = (
+                    await session.execute(
+                        select(ChunkModel.text)
+                        .where(ChunkModel.document_id == document_id)
+                        .order_by(ChunkModel.chunk_index)
+                    )
+                ).all()
+                passages = [r[0] for r in chunk_rows if r[0]]
+
+        if len(passages) > limit:
+            step = len(passages) / limit
+            passages = [passages[int(i * step)] for i in range(limit)]
+        return [p[:800] for p in passages]
 
     async def get_multi_doc_summaries(self, limit: int = 5) -> str:
         """Fetch executive summaries from multiple documents for cross-doc context."""
@@ -216,35 +303,34 @@ class SuggestionService:
         summary: str,
         entity_names: list[str],
         target_bloom: int,
+        passages: list[str] | None = None,
     ) -> list[dict]:
-        """Call LLM to generate Bloom-level questions. Returns parsed list."""
+        """Call LLM to generate questions at the target depth. Returns parsed list."""
         history = await self.get_recent_history(document_id)
         history_text = "\n".join(f"- {h}" for h in history) if history else "(none)"
-        bloom_label = _BLOOM_LABELS.get(target_bloom, "Evaluate")
+        guidance = _LEVEL_GUIDANCE.get(target_bloom, _LEVEL_GUIDANCE[2])
 
         if document_id is not None:
+            grounding = "\n\n".join(passages) if passages else summary[:3000]
             system = _SYSTEM_PROMPT.format(
+                guidance=guidance,
                 bloom_level=target_bloom,
-                bloom_label=bloom_label,
                 history=history_text,
             )
             user = _USER_PROMPT.format(
-                summary=summary[:3000],
+                passages=grounding,
                 entities=", ".join(entity_names[:10]),
-                bloom_level=target_bloom,
-                bloom_label=bloom_label,
             )
         else:
             system = _CROSS_DOC_SYSTEM.format(
+                guidance=guidance,
                 bloom_level=target_bloom,
-                bloom_label=bloom_label,
                 history=history_text,
             )
             user = (
-                f"Document summaries:\n{summary[:4000]}\n\n"
+                f"Passages from across the documents:\n{summary[:4000]}\n\n"
                 f"Key entities: {', '.join(entity_names[:10])}\n\n"
-                f"Generate 6 cross-document questions at Bloom level "
-                f"{target_bloom} ({bloom_label})."
+                f"Write the 6 questions."
             )
 
         try:
@@ -258,6 +344,17 @@ class SuggestionService:
             )
             candidates = _parse_questions(raw)
             filtered = self.filter_near_duplicates(candidates, history)
+            # An empty return falls back to templates at the caller. That fallback
+            # was silent, so a model emitting unparseable JSON looked identical to
+            # a document with nothing to ask about.
+            if not filtered:
+                logger.info(
+                    "suggestions: no usable candidates for doc=%s "
+                    "(parsed=%d, after_dedup=0, raw_chars=%d)",
+                    document_id,
+                    len(candidates),
+                    len(raw or ""),
+                )
             return filtered[:6]
         except LLMUnavailableError:
             logger.warning("LLM unavailable for suggestion generation; falling back to templates")
