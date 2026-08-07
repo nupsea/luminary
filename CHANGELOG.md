@@ -30,6 +30,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The transparency panel names the strategy that actually ran.** The routing
   table was written out twice and the copies had drifted, so a notes-gap
   question was reported as "search" while the notes-gap path answered it.
+- **The suggested questions read like questions again.** The chips offered on a
+  document were exam prose — "To what extent can Lloyd's algorithm be effective
+  when applied to non-symmetric distance measures?" — and the phrasing was
+  manufactured by our own prompt, which named the Bloom taxonomy level it
+  wanted ("6 questions at level 5 (Evaluate)"). A small local model does not
+  infer a pedagogy from that label; it copies the register the word belongs to.
+  Those same phrasings were then what tripped the intent classifier into
+  grading them. The level now picks plain-language guidance and the taxonomy
+  word never reaches the model. Three further causes fixed alongside it: the
+  depth ladder ran backwards, opening at the hardest level on a document you
+  had never read and getting shallower as you engaged, so it now starts easy
+  and climbs; generation was grounded on a summary, which let questions
+  presuppose framings the document never makes, so it now uses real passages
+  sampled across the whole document; and previous questions were injected
+  verbatim under "avoid these", handing the model dozens of exam-phrased
+  exemplars to imitate, so they are now reduced to bare topic words.
+- **Suggested questions were mostly not being generated at all.** Local models
+  routinely emit six well-formed JSON objects and then stop without closing the
+  array. Both parse paths needed that closing bracket, so those responses
+  scored zero candidates and fell back to the canned templates — silently, and
+  often enough that the feature looked switched off. Whole objects are now
+  salvaged from an unterminated array, which took the LLM path from 0 of 6
+  attempts to 4 of 6 on the same document; the remaining two are the duplicate
+  filter working as intended. The empty-candidate case is now logged with the
+  counts that tell a parse failure apart from an exhausted question pool.
 
 ## [0.4.0] - 2026-08-05
 
