@@ -16,6 +16,55 @@ from app.types import ParsedDocument, Section
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_WHITESPACE = re.compile(r"\s+")
 
+# EPUB chapter splitting.
+#
+# A Gutenberg EPUB packs many chapters into a handful of XHTML files, so one
+# section per file gave Moby Dick 11 sections for 135 chapters -- each ~120k
+# chars and headed by whichever chapter happened to come first ("CHAPTER 9. The
+# Sermon." held chapters 9 through 21). The contents panel and the per-section
+# summaries both read as if the book skipped chapters, because the sections did.
+_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+# Block-level ends become paragraph breaks before tags are stripped. Collapsing
+# every run of whitespace without this left each chapter a single run-on line.
+_RE_EPUB_BLOCK_END = re.compile(
+    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article)\s*>|<br\s*/?>",
+    re.IGNORECASE,
+)
+_RE_BLANK_RUN = re.compile(r"\n{3,}")
+_RE_INLINE_SPACE = re.compile(r"[ \t\r\f\v]+")
+
+
+def _epub_text(fragment: str) -> str:
+    """HTML fragment to reading text, with paragraph breaks preserved."""
+    text = _RE_EPUB_BLOCK_END.sub("\n\n", fragment)
+    text = _RE_HTML_TAGS.sub(" ", text)
+    text = html.unescape(text)
+    text = _RE_INLINE_SPACE.sub(" ", text)
+    text = "\n".join(line.strip() for line in text.split("\n"))
+    return _RE_BLANK_RUN.sub("\n\n", text).strip()
+
+
+def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, str]]:
+    """Split one EPUB document into (heading, text) per heading tag it contains.
+
+    Text before the first heading is kept under `fallback_heading` so front
+    matter is not dropped. A document with no headings yields a single entry.
+    """
+    matches = list(_RE_EPUB_HEADING.finditer(raw_html))
+    if not matches:
+        return [(fallback_heading, _epub_text(raw_html))]
+
+    out: list[tuple[str, str]] = []
+    preamble = _epub_text(raw_html[: matches[0].start()])
+    if preamble:
+        out.append((fallback_heading, preamble))
+
+    for i, m in enumerate(matches):
+        heading = _epub_text(m.group(2)) or fallback_heading
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_html)
+        out.append((heading, _epub_text(raw_html[m.end() : end])))
+    return out
+
 # Kindle clippings separator
 _KINDLE_SEP = "=========="
 # Highlight/note header: "- Your Highlight on page X | Added on Date"
@@ -590,35 +639,20 @@ class DocumentParser:
                 continue
 
             raw_html = item.get_content().decode("utf-8", errors="replace")
-            # Extract heading from first h1/h2/h3 tag
-            heading_match = re.search(
-                r"<h[1-3][^>]*>(.*?)</h[1-3]>", raw_html, re.IGNORECASE | re.DOTALL
-            )
-            if heading_match:
-                heading_text = _RE_HTML_TAGS.sub("", heading_match.group(1))
-                heading_text = html.unescape(heading_text).strip()
-            else:
-                # Use the item name as a fallback heading
-                heading_text = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
-
-            # Strip all HTML tags from body
-            plain = _RE_HTML_TAGS.sub(" ", raw_html)
-            plain = html.unescape(plain)
-            plain = _RE_WHITESPACE.sub(" ", plain).strip()
-
-            if not plain or len(plain) < 50:
-                continue
-
-            sections.append(
-                Section(
-                    heading=heading_text,
-                    level=1,
-                    text=plain,
-                    page_start=0,
-                    page_end=0,
+            fallback = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
+            for heading_text, plain in _split_epub_document(raw_html, fallback):
+                if len(plain) < 50:
+                    continue
+                sections.append(
+                    Section(
+                        heading=heading_text,
+                        level=1,
+                        text=plain,
+                        page_start=0,
+                        page_end=0,
+                    )
                 )
-            )
-            raw_parts.append(plain)
+                raw_parts.append(plain)
 
         if not sections:
             # Fallback: treat entire content as one section

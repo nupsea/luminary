@@ -271,3 +271,57 @@ class TestJoinSpans:
         """A 3pt gap is a word break at 12pt but mere kerning at 24pt."""
         assert _join_spans([_span("a", 0.0, 10.0, 12.0), _span("b", 13.0, 20.0, 12.0)]) == "a b"
         assert _join_spans([_span("a", 0.0, 10.0, 24.0), _span("b", 13.0, 20.0, 24.0)]) == "ab"
+
+
+class TestEpubDocumentSplitting:
+    """A Gutenberg EPUB packs many chapters into a few XHTML files.
+
+    One section per file gave Moby Dick 11 sections for 135 chapters, each
+    headed by whichever chapter came first, and collapsing whitespace left every
+    chapter a single run-on line.
+    """
+
+    def test_each_heading_starts_its_own_section(self):
+        from app.services.parser import _split_epub_document
+
+        html_doc = (
+            "<html><body>"
+            "<h2>CHAPTER 1. Loomings.</h2><p>Call me Ishmael.</p>"
+            "<h2>CHAPTER 2. The Carpet-Bag.</h2><p>I stuffed a shirt or two.</p>"
+            "<h2>CHAPTER 3. The Spouter-Inn.</h2><p>Entering that gable-ended inn.</p>"
+            "</body></html>"
+        )
+        out = _split_epub_document(html_doc, "fallback")
+        assert [h for h, _ in out] == [
+            "CHAPTER 1. Loomings.",
+            "CHAPTER 2. The Carpet-Bag.",
+            "CHAPTER 3. The Spouter-Inn.",
+        ]
+        assert out[0][1] == "Call me Ishmael."
+
+    def test_paragraph_breaks_survive(self):
+        from app.services.parser import _epub_text
+
+        text = _epub_text("<p>First paragraph.</p><p>Second paragraph.</p>")
+        assert text == "First paragraph.\n\nSecond paragraph."
+
+    def test_no_line_is_indented_into_a_markdown_code_block(self):
+        from app.services.parser import _epub_text
+
+        verse = "<blockquote><p>    Verse line one</p><p>    Verse line two</p></blockquote>"
+        text = _epub_text(verse)
+        assert not any(line.startswith("    ") for line in text.split("\n"))
+
+    def test_front_matter_before_the_first_heading_is_kept(self):
+        from app.services.parser import _split_epub_document
+
+        doc = "<p>Front matter.</p><h1>Chapter One</h1><p>Body.</p>"
+        out = _split_epub_document(doc, "Preface")
+        assert out[0] == ("Preface", "Front matter.")
+        assert out[1] == ("Chapter One", "Body.")
+
+    def test_a_document_without_headings_yields_one_section(self):
+        from app.services.parser import _split_epub_document
+
+        out = _split_epub_document("<p>Only prose here.</p>", "Chapter File")
+        assert out == [("Chapter File", "Only prose here.")]

@@ -85,6 +85,31 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
     if (activeChapter < totalChapters - 1) setActiveChapter((c) => c + 1)
   }
 
+  /**
+   * Keep the book's own links inside the book.
+   *
+   * Chapter HTML is injected verbatim, so an EPUB's contents page carries real
+   * anchors -- `#chap01`, `chapter3.xhtml`. Left alone the browser follows them,
+   * the router sees a path it does not know, and the reader is thrown out to
+   * the library mid-book. Same-document targets scroll; anything else that is
+   * not an external link is swallowed rather than allowed to navigate away.
+   */
+  function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (e.target as HTMLElement).closest("a")
+    if (!anchor) return
+    const href = anchor.getAttribute("href")
+    if (!href) return
+    if (/^(https?:|mailto:)/i.test(href)) return // real outbound link, let it open
+
+    e.preventDefault()
+    const hash = href.startsWith("#") ? href.slice(1) : href.split("#")[1]
+    if (!hash) return
+    const target =
+      e.currentTarget.querySelector(`#${CSS.escape(hash)}`) ??
+      e.currentTarget.querySelector(`[name="${CSS.escape(hash)}"]`)
+    target?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left: TOC panel */}
@@ -212,6 +237,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
               className="prose prose-sm dark:prose-invert max-w-none px-6 py-4"
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
               dangerouslySetInnerHTML={{ __html: chapter.html }}
+              onClick={handleContentClick}
             />
           </div>
         )}
