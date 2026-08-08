@@ -1,8 +1,8 @@
 """Section-level summarization service for hierarchical ingestion pipeline.
 
-Generates 1-2 sentence summaries for each qualifying section of a document,
-grouped into at most 100 units to bound LLM call count for large books.
-These summaries feed into the document-level summarization step
+Generates a 1-2 sentence summary per qualifying section. Retrieval, suggestions,
+Feynman and concept linking all look these up per section, so a section without
+one is absent from each. Grouping is therefore only for the inline path.
 """
 
 import asyncio
@@ -30,6 +30,22 @@ MIN_PREVIEW_LEN = 200
 # manageable (100 was causing >30 min ingestion times on local hardware).
 MAX_UNITS = 30
 TEXT_HARD_CAP = 10000
+
+# Unit count alone does not bound the work; total prompt characters do. The
+# per-unit cap shrinks as a document grows, trading detail for a bounded wait.
+TOTAL_TEXT_BUDGET = 90000
+MIN_UNIT_CHARS = 1500
+
+# Above this many qualifying sections, summarisation moves off the ingestion
+# path entirely and runs after the document is readable.
+DEFER_ABOVE_SECTIONS = 40
+
+
+def unit_text_cap(unit_count: int) -> int:
+    """Per-unit character cap for a document split into `unit_count` units."""
+    if unit_count <= 0:
+        return TEXT_HARD_CAP
+    return max(MIN_UNIT_CHARS, min(TEXT_HARD_CAP, TOTAL_TEXT_BUDGET // unit_count))
 
 # Case-insensitive signals that indicate a metadata/legal section
 _METADATA_SIGNALS = [
@@ -59,8 +75,32 @@ def _is_metadata_section(heading: str, text: str) -> bool:
 
 
 class SectionSummarizerService:
-    async def generate(self, document_id: str, concurrency: int = 3) -> int:
+    async def qualifying_section_count(self, document_id: str) -> int:
+        """How many sections `generate` would summarise, without calling an LLM.
+
+        Lets the ingestion graph decide whether to defer, using the same filters
+        the run itself applies rather than a raw section count.
+        """
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(SectionModel).where(SectionModel.document_id == document_id)
+            )
+            sections = list(result.scalars().all())
+        return sum(
+            1
+            for s in sections
+            if len(s.preview) >= MIN_PREVIEW_LEN and not _is_metadata_section(s.heading, s.preview)
+        )
+
+    async def generate(
+        self, document_id: str, concurrency: int = 3, *, per_section: bool = False
+    ) -> int:
         """Generate section summaries for the given document.
+
+        `per_section` gives every qualifying section its own summary rather
+        than grouping into MAX_UNITS. Consumers look summaries up per section,
+        so grouping leaves the unsummarised ones invisible to them; background
+        callers pass True and trade time for coverage.
 
         Returns the number of SectionSummaryModel rows inserted.
         Returns 0 immediately (non-raising) if Ollama is unreachable.
@@ -106,7 +146,7 @@ class SectionSummarizerService:
             return 0
 
         # Group sections so total units <= MAX_UNITS
-        units = self._group_sections(qualifying)
+        units = self._as_units(qualifying) if per_section else self._group_sections(qualifying)
 
         logger.info(
             "section_summarizer: %d qualifying sections → %d units",
@@ -116,6 +156,8 @@ class SectionSummarizerService:
         )
 
         semaphore = asyncio.Semaphore(concurrency)
+        # The shrinking cap only bounds grouped runs on the blocking path.
+        text_cap = TEXT_HARD_CAP if per_section else unit_text_cap(len(units))
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
@@ -125,7 +167,7 @@ class SectionSummarizerService:
                     summary_text = await get_llm_service().complete(
                         messages=[
                             {"role": "system", "content": _SYSTEM_PROMPT},
-                            {"role": "user", "content": unit["text"][:TEXT_HARD_CAP]},
+                            {"role": "user", "content": unit["text"][:text_cap]},
                         ],
                         temperature=0.0,
                         timeout=300.0,
@@ -219,6 +261,12 @@ class SectionSummarizerService:
                 document_id,
                 exc,
             )
+
+    def _as_units(self, sections: list[SectionModel]) -> list[dict]:
+        """One unit per section, so every section gets its own summary."""
+        return [
+            {"heading": s.heading, "text": s.preview, "section_id": s.id} for s in sections
+        ]
 
     def _group_sections(self, sections: list[SectionModel]) -> list[dict]:
         """Group qualifying sections into at most MAX_UNITS summarization units."""

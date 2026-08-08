@@ -213,3 +213,30 @@ async def test_get_sections_endpoint_empty_for_unknown_doc(test_db):
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+class TestSummarizationBudget:
+    """The unit *count* alone does not bound the work sent to a local model.
+
+    30 units of 10 000 chars is 300 000 characters of prompt, which took 14
+    minutes on a 14B model for one 135-chapter EPUB.
+    """
+
+    def test_per_unit_cap_shrinks_as_a_document_grows(self):
+        from app.services.section_summarizer import TEXT_HARD_CAP, unit_text_cap
+
+        small = unit_text_cap(3)
+        large = unit_text_cap(30)
+        assert small == TEXT_HARD_CAP  # a short document keeps full detail
+        assert large < small
+
+    def test_total_prompt_text_stays_within_budget(self):
+        from app.services.section_summarizer import TOTAL_TEXT_BUDGET, unit_text_cap
+
+        for units in (1, 5, 12, 30):
+            assert unit_text_cap(units) * units <= max(TOTAL_TEXT_BUDGET, unit_text_cap(1))
+
+    def test_a_unit_never_shrinks_to_uselessness(self):
+        from app.services.section_summarizer import MIN_UNIT_CHARS, unit_text_cap
+
+        assert unit_text_cap(10_000) == MIN_UNIT_CHARS

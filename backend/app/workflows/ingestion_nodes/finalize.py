@@ -24,7 +24,10 @@ from app.models import DocumentModel, EnrichmentJobModel
 from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
-from app.services.section_summarizer import get_section_summarizer_service
+from app.services.section_summarizer import (
+    DEFER_ABOVE_SECTIONS,
+    get_section_summarizer_service,
+)
 from app.services.summarizer import get_summarization_service
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
@@ -54,16 +57,43 @@ async def _run_pregenerate(doc_id: str) -> None:
         await svc.invalidate_library_cache()
 
 
+async def _run_deferred_section_summaries(doc_id: str) -> None:
+    """Section summaries, then the document summary reduced from them.
+
+    Ordered, not parallel: the second reads what the first writes.
+    """
+    try:
+        count = await get_section_summarizer_service().generate(doc_id, per_section=True)
+        logger.info(
+            "deferred section summaries: %d units stored", count, extra={"doc_id": doc_id}
+        )
+    except Exception as exc:
+        logger.warning(
+            "deferred section summaries failed (non-fatal): %s", exc, extra={"doc_id": doc_id}
+        )
+    await _run_pregenerate(doc_id)
+
+
 async def section_summarize_node(state: IngestionState) -> IngestionState:
-    """Generate section-level summaries (bounded to 100 units) before document summarization.
+    """Generate section-level summaries before document summarization.
+
+    Past DEFER_ABOVE_SECTIONS the work moves behind `stage='complete'` so the
+    document is readable while its summaries fill in.
 
     Non-fatal: if Ollama is offline or summarization fails, ingestion continues.
     """
     doc_id = state["document_id"]
     logger.debug("node_start", extra={"node": "section_summarize", "doc_id": doc_id})
     try:
-
         svc = get_section_summarizer_service()
+        if await svc.qualifying_section_count(doc_id) > DEFER_ABOVE_SECTIONS:
+            logger.info(
+                "section_summarize_node: deferring summaries until after completion",
+                extra={"doc_id": doc_id},
+            )
+            return {**state, "section_summary_count": 0, "defer_section_summaries": True}
+
+        await _update_stage(doc_id, "summarizing")
         count = await svc.generate(doc_id)
         logger.info("section_summarize_node: %d units stored", count, extra={"doc_id": doc_id})
         return {**state, "section_summary_count": count}
@@ -229,7 +259,10 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # _run_pregenerate is created here (not in summarize_node) so the shared
     # StaticPool connection is free of concurrent writers when _update_stage runs.
     try:
-        pregenerate_task = asyncio.create_task(_run_pregenerate(doc_id))
+        # A deferred document owes its section summaries first.
+        deferred = state.get("defer_section_summaries")
+        coro = _run_deferred_section_summaries(doc_id) if deferred else _run_pregenerate(doc_id)
+        pregenerate_task = asyncio.create_task(coro)
         _background_tasks.add(pregenerate_task)
         pregenerate_task.add_done_callback(_background_tasks.discard)
     except Exception as exc:
