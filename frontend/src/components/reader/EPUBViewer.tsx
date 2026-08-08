@@ -86,13 +86,8 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   }
 
   /**
-   * Keep the book's own links inside the book.
-   *
-   * Chapter HTML is injected verbatim, so an EPUB's contents page carries real
-   * anchors -- `#chap01`, `chapter3.xhtml`. Left alone the browser follows them,
-   * the router sees a path it does not know, and the reader is thrown out to
-   * the library mid-book. Same-document targets scroll; anything else that is
-   * not an external link is swallowed rather than allowed to navigate away.
+   * Keep the book's own links inside the book: chapter HTML is injected
+   * verbatim, so its anchors would otherwise navigate the router away.
    */
   function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
     const anchor = (e.target as HTMLElement).closest("a")
@@ -234,7 +229,12 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
         {chapter && !chapterLoading && !chapterError && (
           <div className="flex-1 overflow-auto">
             <div
-              className="prose prose-sm dark:prose-invert max-w-none px-6 py-4"
+              className={cn(
+                "prose prose-sm dark:prose-invert max-w-none px-6 py-4",
+                // Books use <pre> for verse, not only code. Prose pairs pale
+                // `pre` text with a dark background, which does not hold here.
+                "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",
+              )}
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
               dangerouslySetInnerHTML={{ __html: chapter.html }}
               onClick={handleContentClick}
