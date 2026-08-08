@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown, Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
@@ -9,9 +9,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
-import { profileSpec, readingProfile, type ProfileSpec } from "./readingProfile"
+import { ReaderSettings } from "./ReaderSettings"
+import {
+  profileSpec,
+  readingProfile,
+  resolveReadingLayout,
+  type ResolvedLayout,
+} from "./readingProfile"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
+import { useReaderPreferences } from "./useReaderPreferences"
 import type { AnnotationItem, SectionContentItem } from "./types"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -56,7 +63,7 @@ interface LazySectionProps {
   annotations: AnnotationItem[]
   highlightsVisible: boolean
   images?: DocumentImage[]
-  spec: ProfileSpec
+  spec: ResolvedLayout
   isLast: boolean
 }
 
@@ -95,7 +102,7 @@ const HeadingTag = (level: number) => {
 
 // "opener" ignores depth on purpose: a novel has one heading level, and it
 // marks a pause rather than a rank, so every chapter title gets the same air.
-const HEADING_CLASS: Record<ProfileSpec["headingStyle"], (level: number) => string> = {
+const HEADING_CLASS: Record<ResolvedLayout["headingStyle"], (level: number) => string> = {
   opener: () => "mb-8 mt-4 text-center text-2xl font-semibold tracking-wide text-foreground",
   hierarchy: (level: number) =>
     cn(
@@ -177,7 +184,12 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
           {turns ? (
             <SpeakerTurns turns={turns} />
           ) : (
-            <MarkdownRenderer className={spec.family}>{highlighted}</MarkdownRenderer>
+            // `prose` sets an absolute font-size, so the reader's text size has
+            // to be handed to this element rather than inherited from the
+            // column -- inheriting left every paragraph at 16px.
+            <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
+              {highlighted}
+            </MarkdownRenderer>
           )}
           <SectionFigures images={images} />
         </div>
@@ -346,11 +358,18 @@ export function ReadView({
   contentType,
   structureType,
 }: ReadViewProps) {
-  const spec = useMemo(
-    () => profileSpec(readingProfile({ content_type: contentType, structure_type: structureType })),
+  const profile = useMemo(
+    () => readingProfile({ content_type: contentType, structure_type: structureType }),
     [contentType, structureType],
   )
+  const { prefs, update: updatePref, reset: resetPrefs } = useReaderPreferences()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const spec = useMemo(
+    () => resolveReadingLayout(profileSpec(profile), prefs),
+    [profile, prefs],
+  )
   const contentRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [listLimit, setListLimit] = useState(200)
   const toc = useResizablePanel({
@@ -463,6 +482,20 @@ export function ReadView({
     return () => container.removeEventListener("scroll", onScroll)
   }, [sections])
 
+  // Extend the rendered window when its tail comes into view.
+  useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setListLimit((prev) => prev + 200)
+      },
+      { rootMargin: "800px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [listLimit, sections])
+
   const scrollToSection = useCallback((sectionId: string) => {
     const el = document.getElementById(`read-sec-${sectionId}`)
     if (el) {
@@ -552,10 +585,34 @@ export function ReadView({
       )}
 
       {/* Reading content */}
-      <div ref={contentRef} className="flex-1 overflow-auto px-8 py-6 scroll-smooth">
-        {/* Measure in ch, so it tracks the profile's own typeface rather than a
-            fixed pixel width that runs to ~95 characters at base size. */}
-        <div className="mx-auto w-full" style={{ maxWidth: `${spec.measureCh}ch` }}>
+      <div
+        ref={contentRef}
+        className={cn(
+          "relative flex-1 overflow-auto px-8 py-6 scroll-smooth",
+          spec.tinted && "bg-[#faf6ec] dark:bg-[#1b1917]",
+        )}
+      >
+        <div className="sticky top-0 z-40 flex justify-end">
+          <ReaderSettings
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            profile={profile}
+            effectiveMeasureCh={spec.measureCh}
+            prefs={prefs}
+            onUpdate={updatePref}
+            onReset={resetPrefs}
+          />
+        </div>
+        {/* Measure in ch and size in em, so the line length the reader picked
+            holds at every text size rather than drifting with it. */}
+        <div
+          className="mx-auto -mt-6 w-full text-[length:var(--reader-size)] [&_p]:leading-[var(--reader-leading)]"
+          style={{
+            maxWidth: `${spec.measureCh}ch`,
+            ["--reader-size" as string]: `${spec.fontScale}rem`,
+            ["--reader-leading" as string]: spec.lineHeight,
+          }}
+        >
           {degradedCount > 0 && (
             <p className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
               {degradedCount} of {sections.length} sections were stored before Luminary kept
@@ -575,15 +632,13 @@ export function ReadView({
             />
           ))}
           
+          {/* Reaching the end of the rendered window extends it. Asking the
+              reader to press a button to keep reading is the reading app
+              equivalent of a page that stops mid-sentence; the window exists
+              only to bound the DOM, which is not the reader's problem. */}
           {sections.length > listLimit && (
-            <div className="mt-12 mb-20 flex justify-center">
-              <button
-                onClick={() => setListLimit(prev => prev + 500)}
-                className="flex items-center gap-2 rounded-md border border-border bg-background px-6 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors shadow-sm"
-              >
-                <ChevronDown size={14} className="text-muted-foreground" />
-                Load next 500 sections
-              </button>
+            <div ref={loadMoreRef} className="mb-20 mt-12 flex justify-center">
+              <Loader2 size={16} className="animate-spin text-muted-foreground" />
             </div>
           )}
         </div>

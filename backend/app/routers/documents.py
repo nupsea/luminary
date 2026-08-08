@@ -119,6 +119,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# `sections.preview` is stored at up to 10 000 chars, and DocumentDetail carries
+# one per section: opening DDIA (210 sections) sent 1.6 MB, of which 1.5 MB was
+# preview. The section list renders it under `line-clamp-2` -- two lines. The
+# cap is set well above that because PredictPanel extracts the section's first
+# fenced code block from this field, and the Feynman dialog falls back to it
+# when no cached summary exists. Reading text is never served from here (I-29);
+# it comes from GET /sections/{id}/content, uncapped.
+WIRE_PREVIEW_CHARS = 1200
+
+
+def _wire_preview(preview: str | None) -> str:
+    return (preview or "")[:WIRE_PREVIEW_CHARS]
+
 _parser = DocumentParser()
 
 _ALLOWED_EXTENSIONS = frozenset(
@@ -910,7 +923,7 @@ async def get_document(document_id: str):
                 page_start=s.page_start,
                 page_end=s.page_end,
                 section_order=s.section_order,
-                preview=s.preview,
+                preview=_wire_preview(s.preview),
                 admonition_type=s.admonition_type,
                 parent_section_id=s.parent_section_id,
             )

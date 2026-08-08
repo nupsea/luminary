@@ -206,3 +206,25 @@ async def test_short_legacy_section_reads_from_preview_not_chunks(test_db):
 
     assert item["content_source"] == "preview"
     assert item["content"] == "A short chapter."
+
+
+@pytest.mark.asyncio
+async def test_document_detail_caps_preview_but_reader_stays_uncapped(test_db):
+    """DocumentDetail ships one preview per section; the reader endpoint does not.
+
+    Opening a 210-section book sent 1.6 MB, 1.5 MB of it preview, for a field
+    the section list renders under line-clamp-2.
+    """
+    from app.routers.documents import WIRE_PREVIEW_CHARS
+
+    long_text = "The chapter continues at length. " * 400
+    doc_id = await _seed(test_db, body=long_text, preview=long_text[:10000])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        detail = await client.get(f"/documents/{doc_id}")
+        content = await client.get(f"/sections/{doc_id}/content")
+
+    assert len(detail.json()["sections"][0]["preview"]) == WIRE_PREVIEW_CHARS
+    # Reading text is untouched by the cap (I-29).
+    assert content.json()[0]["content"] == long_text

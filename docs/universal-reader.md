@@ -89,7 +89,25 @@ line against the previous `max-w-3xl`, which ran to ~95. The research consensus
 is 50–75 (66 ideal) and WCAG caps Latin text at 80; every profile's measure is
 asserted inside that band by `readingProfile.test.ts`.
 
-The profile picks the default. A reader preference (Phase 4) overrides it.
+The profile picks the default. A reader preference overrides it.
+
+## Reader preferences
+
+`useReaderPreferences` stores typeface, text size, line spacing, line width and
+background under `luminary-reader-prefs`; `resolveReadingLayout()` folds them
+over the profile's defaults.
+
+`"auto"` and a null measure mean "whatever the profile chose" and are the
+defaults, so an untouched preference keeps tracking the profile instead of
+freezing today's values into storage. Line width is clamped to 45–80
+characters.
+
+Text size reaches the text as `--reader-size` on the reading column, and is
+handed to `MarkdownRenderer` as `text-[length:var(--reader-size)]` rather than
+inherited: Tailwind's `prose` sets an absolute `font-size`, so inheritance left
+every paragraph at 16px however the slider moved. Line spacing travels the same
+way via `--reader-leading`, because `prose` also sets its own paragraph
+`line-height`.
 
 ## Speaker turns
 
@@ -143,16 +161,37 @@ richer than body text is Phase 3.
 | 1 | `sections.body`; reader stops re-joining chunks | Done |
 | 2 | `documents.structure_type`; dialogue segmentation; no invented headings | Done |
 | 3 | Profile-driven rendering; speaker turns | Done |
-| 4 | Reader preferences (family, size, line-height, measure, theme); virtualized section list | Not started |
+| 4 | Reader preferences; auto-extending section window; capped preview payload | Done |
 
 Phases 1 and 2 change what ingestion stores, so a document reads at full
-fidelity only after re-upload. Phase 3 is render-time and applies immediately.
+fidelity only after re-upload. Phases 3 and 4 are render-time and apply
+immediately.
 
-`preview` still duplicates the first 10,000 characters of `body` on every
-section row, and `DocumentDetail` ships all of it — a 210-section book sends
-megabytes of JSON on open. Slimming it to a true snippet belongs with Phase 4;
-it touches the section list, `routers/flashcards.py`, and
-`feynmanSummaryCache.ts`.
+## Section window
+
+`listLimit` bounds how many sections are in the DOM and extends by 200 when its
+tail scrolls into view. It replaced a "Load next 500 sections" button: the
+window exists to bound the DOM, which is not the reader's problem, and a book
+that stops until you press something is the thing this reader is meant not to
+be.
+
+Full virtualization was rejected. `LazySection` already defers markdown
+rendering until a section is near the viewport, so the remaining cost of an
+off-screen section is an empty div. Windowing with variable heights would have
+to take over scroll-to-section, the active-section observer that drives the
+contents panel, and highlight anchoring — for no measured gain.
+
+## Preview payload
+
+`sections.preview` is stored at up to 10,000 characters and `DocumentDetail`
+carries one per section: opening DDIA sent 1.6 MB, 1.5 MB of it preview, for a
+field the section list renders under `line-clamp-2`. `WIRE_PREVIEW_CHARS` caps
+it at 1,200 on the wire — measured, DDIA fell from 1,627 KB to 292 KB.
+
+The cap sits well above two lines because two other consumers read this field:
+`PredictPanel` extracts the section's first fenced code block from it, and the
+Feynman dialog falls back to it when no cached summary exists. Storage is
+unchanged, so server-side readers (`routers/flashcards.py`) are unaffected.
 
 ## Rejected
 

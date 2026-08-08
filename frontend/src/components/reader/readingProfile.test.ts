@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { profileSpec, readingProfile } from "@/components/reader/readingProfile"
+import { profileSpec, readingProfile, resolveReadingLayout } from "@/components/reader/readingProfile"
 
 describe("readingProfile", () => {
   it("reads a novel as prose", () => {
@@ -58,5 +58,53 @@ describe("profileSpec", () => {
     for (const profile of ["prose", "article", "paper", "technical", "script", "reference"] as const) {
       expect(profileSpec(profile).speakerTurns).toBe(false)
     }
+  })
+})
+
+describe("resolveReadingLayout", () => {
+  const auto = {
+    family: "auto" as const,
+    fontScale: 1,
+    lineHeight: 1.7,
+    measureCh: null,
+    tint: "auto" as const,
+  }
+
+  it("keeps the profile's choices when everything is left on auto", () => {
+    const layout = resolveReadingLayout(profileSpec("prose"), auto)
+    expect(layout.family).toContain("font-serif")
+    expect(layout.measureCh).toBe(66)
+    expect(layout.tinted).toBe(false)
+    // Behaviour the profile owns outright still comes through.
+    expect(layout.headingStyle).toBe("opener")
+    expect(layout.dividers).toBe(false)
+  })
+
+  it("lets the reader override the typeface and measure", () => {
+    const layout = resolveReadingLayout(profileSpec("prose"), {
+      ...auto,
+      family: "sans",
+      measureCh: 52,
+    })
+    expect(layout.family).toContain("font-sans")
+    expect(layout.family).not.toContain("font-serif")
+    expect(layout.measureCh).toBe(52)
+  })
+
+  it("overrides headings too, so a serif choice is not undone by the heading rule", () => {
+    const layout = resolveReadingLayout(profileSpec("technical"), { ...auto, family: "serif" })
+    expect(layout.family).toContain("prose-headings:font-serif")
+  })
+
+  it("carries size, spacing and tint through", () => {
+    const layout = resolveReadingLayout(profileSpec("article"), {
+      ...auto,
+      fontScale: 1.25,
+      lineHeight: 2,
+      tint: "paper",
+    })
+    expect(layout.fontScale).toBe(1.25)
+    expect(layout.lineHeight).toBe(2)
+    expect(layout.tinted).toBe(true)
   })
 })

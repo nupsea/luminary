@@ -128,3 +128,42 @@ export function readingProfile(doc: {
 export function profileSpec(profile: ReadingProfile): ProfileSpec {
   return SPECS[profile]
 }
+
+export interface ResolvedLayout extends ProfileSpec {
+  lineHeight: number
+  fontScale: number
+  tinted: boolean
+}
+
+/**
+ * Fold the reader's preferences over the profile's defaults.
+ *
+ * Anything the reader left on "auto" keeps tracking the profile, so a novel
+ * stays in a serif at 66 characters until someone says otherwise -- and if the
+ * profile's defaults change later, an untouched preference follows.
+ */
+export function resolveReadingLayout(
+  spec: ProfileSpec,
+  prefs: {
+    family: "auto" | "serif" | "sans"
+    fontScale: number
+    lineHeight: number
+    measureCh: number | null
+    tint: "auto" | "paper"
+  },
+): ResolvedLayout {
+  const family =
+    prefs.family === "auto"
+      ? spec.family
+      : prefs.family === "serif"
+        ? "font-serif prose-headings:font-serif"
+        : "font-sans prose-headings:font-sans"
+  return {
+    ...spec,
+    family,
+    measureCh: prefs.measureCh ?? spec.measureCh,
+    lineHeight: prefs.lineHeight,
+    fontScale: prefs.fontScale,
+    tinted: prefs.tint === "paper",
+  }
+}
