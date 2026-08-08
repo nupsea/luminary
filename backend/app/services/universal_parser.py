@@ -55,10 +55,8 @@ _RE_NON_SPEAKER = re.compile(
 
 
 # A heading labels a section; it is not a sentence. Terminal punctuation alone
-# does not separate the two -- "BOOK I." and "CHAPTER IV." are markers -- so
-# length carries the decision. The char bound is generous because authored
-# headings run long in technical books; the word bound applies only to
-# candidates that end like a sentence.
+# does not separate the two, so length carries the decision. The word bound
+# applies only to candidates that end like a sentence.
 _MARKER_MAX_CHARS = 90
 _MARKER_MAX_SENTENCE_WORDS = 4
 
@@ -66,16 +64,10 @@ _MARKER_MAX_SENTENCE_WORDS = 4
 def _drop_bodyless(sections: list[Section]) -> list[Section]:
     """Drop sections that carry a heading and no text.
 
-    A document's own table of contents matches the same signature as its
-    chapter openings, so every chapter is found twice: once in the contents
-    with nothing under it, once in the body. Those empty twins used to be
-    filled with the literal string "(Empty Section)" and shown to the reader --
-    23 of the 49 sections found in `the_odyssey.txt`. Every section in
-    `_segment` is level 1, so an empty one owns no subsections and dropping it
-    loses no structure.
-
-    Keeps everything when the filter would empty the document: a slide deck of
-    bare headings is still worth navigating.
+    A contents page matches the same signature as the chapter openings, so each
+    chapter is found twice, once with nothing under it. Every section here is
+    level 1, so an empty one owns no subsections. Keeps everything when the
+    filter would empty the document.
     """
     kept = [s for s in sections if s.text.strip()]
     return kept or sections
@@ -409,23 +401,16 @@ class UniversalParser:
         if not matches:
             return []
 
-        # Chat/transcript: group turns into sections, always. The generic loop
-        # below treats a matched line as a heading, and for a transcript the
-        # matched line IS the utterance -- a 40-turn transcript lost 98% of its
-        # content that way. Turn count is not a reason to fall back into that
-        # loop: a short transcript groups into a single section, which reads
-        # correctly, whereas the loop would strand every turn in a heading.
+        # Always group: the generic loop treats a matched line as a heading,
+        # and for a transcript that line is the utterance. Turn count is not a
+        # reason to fall back into it.
         if sig.doc_type == "chat":
             return self._segment_chat_grouped(text, matches)
 
         for i, m in enumerate(matches):
             heading = m.group(1).strip() if sig.id == "markdown_header" else m.group(0).strip()
-            # A match that swallowed prose is content, not a label: several
-            # signatures match a whole line, and for those the line belongs in
-            # the body. Keeping it as a heading strands the text where the
-            # reader draws an oversized heading over an empty section. The
-            # section then carries no heading, which is correct -- the source
-            # gave none, so none is invented (I-30).
+            # A match that swallowed prose is content, not a label; the section
+            # then carries no heading rather than an invented one (I-30).
             if _is_marker(heading):
                 start_pos = m.end()
             else:
@@ -494,11 +479,8 @@ class UniversalParser:
     def _segment_chat_grouped(self, text: str, matches: list[re.Match[str]]) -> list[Section]:
         """Group turns into sections so each utterance stays in the body.
 
-        The heading is left empty on purpose. A transcript has no authored
-        section titles, and the label this used to synthesise
-        ("Transcript Part 2: Carol") named whichever speaker happened to open
-        the group -- which the reader then drew as a heading over their turn.
-        The reader shows no heading for an unlabelled section (I-30).
+        The heading is left empty: a transcript has no authored section titles,
+        and the reader draws none for an unlabelled section (I-30).
         """
         sections = []
         chunk_size = 30

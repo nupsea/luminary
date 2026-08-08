@@ -24,12 +24,9 @@ export function sectionTitle(section: {
 }
 
 /**
- * Whether the source authored a heading for this section.
- *
- * `sectionTitle` always returns something so the contents panel has an entry to
- * navigate with, but a derived or placeholder label must never be drawn in the
- * reading flow -- it prints the section's own opening sentence as a heading
- * directly above itself. Only a stored heading that reads like one qualifies.
+ * Whether the source authored a heading. `sectionTitle` always returns
+ * something for the contents panel, but only an authored heading may be drawn
+ * in the reading flow.
  */
 export function hasAuthoredHeading(section: { heading?: string | null }): boolean {
   const heading = (section.heading ?? "").trim()

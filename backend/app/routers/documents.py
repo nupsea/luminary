@@ -119,13 +119,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-# `sections.preview` is stored at up to 10 000 chars, and DocumentDetail carries
-# one per section: opening DDIA (210 sections) sent 1.6 MB, of which 1.5 MB was
-# preview. The section list renders it under `line-clamp-2` -- two lines. The
-# cap is set well above that because PredictPanel extracts the section's first
-# fenced code block from this field, and the Feynman dialog falls back to it
-# when no cached summary exists. Reading text is never served from here (I-29);
-# it comes from GET /sections/{id}/content, uncapped.
+# DocumentDetail carries one preview per section, so the stored cap is far too
+# large for the wire. Set well above the two lines the section list renders,
+# because PredictPanel reads the first code fence from this field and the
+# Feynman dialog falls back to it. Reading text is never served here (I-29).
 WIRE_PREVIEW_CHARS = 1200
 
 

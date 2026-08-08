@@ -45,8 +45,7 @@ class SectionContentItem(BaseModel):
     content: str
     page_start: int = 0
     page_end: int = 0
-    # Which tier served `content`, so a degraded read is visible rather than
-    # silent. See I-29 and docs/universal-reader.md.
+    # Which tier served `content`, so a degraded read is visible (I-29).
     content_source: Literal["body", "preview", "chunks", "empty"] = "body"
 
 
@@ -109,13 +108,10 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         else:
             orphan_chunks.append(c.text)
 
-    # Reading text comes from `body`, which is uncapped (I-29). `preview` is
-    # capped at PREVIEW_CHARS and serves only sections stored before `body`
-    # existed -- past the cap it is truncated mid-sentence, so the chunk tier
-    # takes over. Chunks are the last resort and are degraded by construction:
-    # they cut mid-sentence and carry "[Title > Section] " enrichment prefixes,
-    # so re-joining them fabricates paragraph breaks. Documents on that tier
-    # need re-ingestion, which is why the tier is reported to the client.
+    # Reading text comes from `body` (I-29). `preview` serves only sections
+    # stored before it existed, and only while under the cap. Chunks are the
+    # last resort and are degraded by construction, which is why the tier is
+    # reported to the client.
     PREVIEW_LIMIT = 10000
 
     def _section_content(s: SectionModel) -> tuple[str, str]:

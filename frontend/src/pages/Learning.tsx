@@ -285,11 +285,8 @@ export default function Learning() {
     setPage(1)
   }
 
-  // `doc` names the open document and stays in the URL for as long as it is
-  // open, so a reload lands back in the reader instead of the library list.
-  // The rest of the deep-link params are one-shot: they aim the reader at a
-  // section, page or search on arrival, and are snapshotted into state and
-  // dropped so they cannot re-fire when the next document opens.
+  // `doc` stays in the URL while the document is open so a reload returns to
+  // it. The other params are one-shot: snapshotted into state, then dropped.
   useEffect(() => {
     if (!docParam || docParam === activeDocumentId) return
     const rawPage = searchParams.get("page")
@@ -311,16 +308,12 @@ export default function Learning() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docParam])
 
-  // Mirror the open document into the URL, whichever way it was opened -- a
-  // card click, a document action, or a citation from another surface. Always
-  // `replace`: opening a document is not a navigation the Back button should
-  // step through, which is what the in-reader Back control is for.
+  // Mirror the open document into the URL, however it was opened. `replace`:
+  // the in-reader Back control, not history, returns to the list.
   //
-  // Only ever writes. Clearing belongs to `returnToLibrary`, because on mount
-  // this runs before the effect above has read `doc` into the store, and a
-  // store that is merely not populated yet is indistinguishable here from one
-  // the reader has closed -- treating it as closed stripped the param off
-  // every deep link.
+  // Writes only. Clearing belongs to `returnToLibrary`: on mount this runs
+  // before `doc` is read into the store, where an unpopulated store is
+  // indistinguishable from a closed reader.
   useEffect(() => {
     if (!activeDocumentId || docParam === activeDocumentId) return
     setSearchParams((prev) => {

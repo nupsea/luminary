@@ -100,8 +100,7 @@ const HeadingTag = (level: number) => {
   return "h5"
 }
 
-// "opener" ignores depth on purpose: a novel has one heading level, and it
-// marks a pause rather than a rank, so every chapter title gets the same air.
+// "opener" ignores depth: the heading marks a pause, not a rank.
 const HEADING_CLASS: Record<ResolvedLayout["headingStyle"], (level: number) => string> = {
   opener: () => "mb-8 mt-4 text-center text-2xl font-semibold tracking-wide text-foreground",
   hierarchy: (level: number) =>
@@ -156,8 +155,7 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
     return applyHighlights(section.content, highlightsVisible ? annotations : [])
   }, [isVisible, section.content, annotations, highlightsVisible])
 
-  // Highlights are injected as <mark> HTML, which the turn splitter would show
-  // as literal tags -- so a section carrying highlights renders as markdown.
+  // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
     if (!isVisible || !spec.speakerTurns) return null
     if (highlighted !== section.content) return null
@@ -184,9 +182,8 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
           {turns ? (
             <SpeakerTurns turns={turns} />
           ) : (
-            // `prose` sets an absolute font-size, so the reader's text size has
-            // to be handed to this element rather than inherited from the
-            // column -- inheriting left every paragraph at 16px.
+            // `prose` sets an absolute font-size, so size must be handed to
+            // this element rather than inherited.
             <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
               {highlighted}
             </MarkdownRenderer>
@@ -388,10 +385,8 @@ export function ReadView({
 
   const tocEntries = useMemo(() => usableSections(sections ?? []), [sections])
 
-  // Sections stored before `sections.body` existed are served from retrieval
-  // chunks, which cut mid-sentence and fabricate paragraph breaks (I-29). The
-  // text cannot be repaired in place -- say so rather than let it read as the
-  // author's own formatting.
+  // Sections predating `sections.body` are served from chunks (I-29); the text
+  // cannot be repaired in place, so say so rather than let it pass as authored.
   const degradedCount = useMemo(
     () => (sections ?? []).filter((s) => s.content_source === "chunks").length,
     [sections],
@@ -603,8 +598,7 @@ export function ReadView({
             onReset={resetPrefs}
           />
         </div>
-        {/* Measure in ch and size in em, so the line length the reader picked
-            holds at every text size rather than drifting with it. */}
+        {/* Measure in ch so line length holds at every text size. */}
         <div
           className="mx-auto -mt-6 w-full text-[length:var(--reader-size)] [&_p]:leading-[var(--reader-leading)]"
           style={{
@@ -632,10 +626,7 @@ export function ReadView({
             />
           ))}
           
-          {/* Reaching the end of the rendered window extends it. Asking the
-              reader to press a button to keep reading is the reading app
-              equivalent of a page that stops mid-sentence; the window exists
-              only to bound the DOM, which is not the reader's problem. */}
+          {/* The window bounds the DOM only; reaching its end extends it. */}
           {sections.length > listLimit && (
             <div ref={loadMoreRef} className="mb-20 mt-12 flex justify-center">
               <Loader2 size={16} className="animate-spin text-muted-foreground" />

@@ -1,11 +1,6 @@
 /**
- * Reading profiles: how a document should be laid out for reading.
- *
- * Keyed off both axes the pipeline records (see docs/universal-reader.md).
- * `content_type` says what the document is and how it chunks; `structure_type`
- * says how it is laid out. Neither is sufficient alone -- a recorded technical
- * talk is `content_type: "audio"` and `structure_type: "chat"`, and only the
- * second one knows to render it as dialogue.
+ * Reading profiles, keyed off both axes the pipeline records.
+ * See docs/universal-reader.md.
  */
 
 export type ReadingProfile =
@@ -24,18 +19,14 @@ export interface ProfileSpec {
   family: string
   /** Rule between consecutive sections. */
   dividers: boolean
-  /**
-   * "opener" gives a chapter title air above and below and does not scale with
-   * depth -- a novel has one heading level and it marks a pause, not a rank.
-   * "hierarchy" sizes the heading by `level` so nesting is visible.
-   */
+  /** "opener" ignores depth; "hierarchy" sizes by `level`. */
   headingStyle: "opener" | "hierarchy"
   /** Split the body into speaker turns and label each one. */
   speakerTurns: boolean
 }
 
 const SPECS: Record<ReadingProfile, ProfileSpec> = {
-  // 66ch is the middle of the 50-75 research range and the classic ideal.
+  // 66ch: middle of the 50-75 readable range.
   prose: {
     measureCh: 66,
     family: "font-serif prose-headings:font-serif",
@@ -57,7 +48,7 @@ const SPECS: Record<ReadingProfile, ProfileSpec> = {
     headingStyle: "hierarchy",
     speakerTurns: false,
   },
-  // Wider: code and tables read worse when wrapped than prose does when long.
+  // Wider: code and tables suffer more from wrapping than prose does.
   technical: {
     measureCh: 78,
     family: "font-sans",
@@ -79,8 +70,7 @@ const SPECS: Record<ReadingProfile, ProfileSpec> = {
     headingStyle: "opener",
     speakerTurns: false,
   },
-  // Clippings and note dumps are lists of unrelated entries; the rule between
-  // them is the only thing separating one excerpt from the next.
+  // Unrelated entries; the rule is all that separates them.
   reference: {
     measureCh: 66,
     family: "font-sans",
@@ -105,11 +95,8 @@ const BY_CONTENT_TYPE: Record<string, ReadingProfile> = {
 }
 
 /**
- * `structure_type` overrides only where it is strictly more specific than
- * anything `content_type` can express. "chat" and "script" are layouts with no
- * content_type equivalent; "book" and "paper" duplicate one and must not
- * override it, or a technical book laid out in numbered sections would lose its
- * wider measure to the prose profile.
+ * Only layouts `content_type` cannot express. Values present on both axes must
+ * not override, or the finer content_type would lose to the coarser layout.
  */
 const BY_STRUCTURE_TYPE: Record<string, ReadingProfile> = {
   chat: "dialogue",
@@ -135,13 +122,7 @@ export interface ResolvedLayout extends ProfileSpec {
   tinted: boolean
 }
 
-/**
- * Fold the reader's preferences over the profile's defaults.
- *
- * Anything the reader left on "auto" keeps tracking the profile, so a novel
- * stays in a serif at 66 characters until someone says otherwise -- and if the
- * profile's defaults change later, an untouched preference follows.
- */
+/** Fold reader preferences over profile defaults; "auto" keeps tracking. */
 export function resolveReadingLayout(
   spec: ProfileSpec,
   prefs: {

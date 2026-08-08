@@ -42,17 +42,15 @@ from app.workflows.ingestion_nodes._shared import (
 
 logger = logging.getLogger(__name__)
 
-# `preview` feeds section lists, flashcard context and the Feynman summary
-# cache, so it stays bounded. Reading text lives in `body`, uncapped (I-29).
+# `preview` is a bounded snippet; reading text lives in `body`, uncapped (I-29).
 PREVIEW_CHARS = 10000
 
 
 def _context_header(doc_title: str, section_heading: str) -> str:
     """Retrieval breadcrumb prepended to every chunk.
 
-    Sections may legitimately carry no heading (I-30), and the parser no longer
-    invents one. Naming the document alone beats emitting "[Title > ]", whose
-    dangling separator embeds and tokenises as content.
+    A section may carry no heading (I-30); the document name alone avoids a
+    dangling separator that would tokenise as content.
     """
     heading = (section_heading or "").strip()
     return f"[{doc_title} > {heading}]" if heading else f"[{doc_title}]"

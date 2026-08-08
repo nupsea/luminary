@@ -50,9 +50,8 @@ async def parse_node(state: IngestionState) -> IngestionState:
                 }
                 for s in parsed.sections
             ]
-            # Persisted here rather than in classify_node: how a document is
-            # laid out is decided by the parser that read it, and classify_node
-            # returns early on every path where content_type was user-supplied.
+            # Persisted here, not in classify_node, which returns early
+            # whenever content_type was user-supplied.
             if parsed.structure_type:
                 await _persist_structure_type(state["document_id"], parsed.structure_type)
             return {

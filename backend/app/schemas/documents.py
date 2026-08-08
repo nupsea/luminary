@@ -90,8 +90,7 @@ class DocumentDetail(BaseModel):
     title: str
     format: str
     content_type: str
-    # Layout discovered while parsing: book|paper|script|chat. Null when the
-    # parser does not discover structure, or the document predates the column.
+    # Layout discovered while parsing: book|paper|script|chat.
     structure_type: str | None = None
     word_count: int
     page_count: int

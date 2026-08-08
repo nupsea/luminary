@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
 
 /**
- * Reading preferences, remembered across reloads.
- *
- * The reading profile (see readingProfile.ts) picks defaults from what the
- * document is; these override them. Optimal reading conditions are personal --
- * measure, size and typeface all trade against each other differently per
- * reader and per screen -- so the profile is a starting point, never a verdict.
- *
- * "auto" and null mean "whatever the profile chose", so a preference left alone
- * keeps tracking the profile instead of freezing today's default in storage.
+ * Reading preferences, remembered across reloads. They override the profile's
+ * defaults; "auto" and null mean "whatever the profile chose", so an untouched
+ * preference keeps tracking it rather than freezing today's value.
  */
 
 export type FamilyPreference = "auto" | "serif" | "sans"
@@ -28,7 +22,7 @@ export interface ReaderPreferences {
 export const READER_PREF_LIMITS = {
   fontScale: { min: 0.85, max: 1.5, step: 0.05 },
   lineHeight: { min: 1.3, max: 2.1, step: 0.1 },
-  // Below 45 characters the eye refixates too often; WCAG caps Latin text at 80.
+  // WCAG caps Latin text at 80; below 45 the eye refixates too often.
   measureCh: { min: 45, max: 80, step: 1 },
 } as const
 

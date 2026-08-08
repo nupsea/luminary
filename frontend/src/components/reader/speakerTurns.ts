@@ -1,11 +1,6 @@
 /**
- * Split transcript text into speaker turns.
- *
- * Transcripts reach the reader as "Speaker: utterance" lines in one body (I-30
- * keeps utterances out of headings). Markdown treats a single newline as a soft
- * break, so the whole exchange renders as one wall of text with the names
- * buried inside it. Splitting here lets the dialogue profile set each name as a
- * label beside its turn.
+ * Split transcript text into speaker turns so the dialogue profile can label
+ * each one. Markdown alone renders the exchange as a single block.
  */
 
 export interface SpeakerTurn {
@@ -13,9 +8,7 @@ export interface SpeakerTurn {
   text: string
 }
 
-// Mirrors the `chat_standard` signature in backend universal_parser.py. A
-// speaker name is short and starts a line; anything longer is prose that
-// happens to contain a colon.
+// Mirrors the `chat_standard` signature in backend universal_parser.py.
 const TURN_RE = /^([A-Z][\w .'-]{0,30}):[ \t]+(.*)$/
 
 /**
@@ -52,18 +45,10 @@ export function parseSpeakerTurns(text: string): SpeakerTurn[] | null {
 }
 
 /**
- * Strip speaker labels off the document's own header lines.
- *
- * A transcript usually opens with "Transcript: ...", "Date: ...",
- * "Participants: ..." -- same shape as a turn, so they were rendered as three
- * people who each spoke once. A real speaker takes more than one turn, so a
- * label that occurs once before anybody has spoken twice is metadata, not a
- * name. Deciding it by recurrence rather than by a list of known header words
- * keeps this working for transcripts in any language.
- *
- * Engages only once some speaker actually recurs. In a short exchange where
- * three people each speak once, every label is a person and demoting them all
- * would strip the section of its speakers.
+ * Strip speaker labels off the document's own header lines, which share a
+ * turn's shape. A real speaker recurs, so a label occurring once before anyone
+ * has spoken twice is metadata. Recurrence rather than a word list keeps this
+ * language-agnostic; it engages only once some speaker does recur.
  */
 function demoteLeadingMetadata(turns: SpeakerTurn[]): SpeakerTurn[] {
   const counts = new Map<string, number>()
