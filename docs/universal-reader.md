@@ -181,6 +181,22 @@ off-screen section is an empty div. Windowing with variable heights would have
 to take over scroll-to-section, the active-section observer that drives the
 contents panel, and highlight anchoring — for no measured gain.
 
+## The reader's URL
+
+`?doc=<id>` on `/library` names the open document and stays in the URL for as
+long as it is open, so a reload lands back in the reader. `returnToLibrary`
+removes it; `/library/doc/:id` is a legacy redirect that still resolves here.
+
+The mirror effect in `pages/Learning.tsx` only ever *writes* the param. On mount
+it runs before the effect that reads `doc` into the store, so a store that is
+merely unpopulated is indistinguishable from one the reader has closed —
+clearing on that basis stripped the param off every deep link. Clearing belongs
+to the explicit close.
+
+The other deep-link params (`section_id`, `chunk_id`, `page`, `search`) are
+one-shot: they aim the reader on arrival, and are snapshotted into state and
+dropped so they cannot re-fire when the next document opens.
+
 ## Preview payload
 
 `sections.preview` is stored at up to 10,000 characters and `DocumentDetail`
