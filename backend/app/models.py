@@ -67,6 +67,12 @@ class DocumentModel(Base):
     # technical talk keeps its media type and sets this flag instead.
     # Null = never classified (pre-existing rows).
     is_technical: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Layout discovered from the document's own structural markers by
+    # UniversalParser: book|paper|script|chat. The reader picks a profile from
+    # this together with content_type -- content_type knows a transcript is
+    # technical, structure_type knows it is dialogue. Null when the parser that
+    # ran does not discover structure, or the document predates the column.
+    structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -81,6 +87,12 @@ class SectionModel(Base):
     page_start: Mapped[int] = mapped_column(Integer, default=0)
     page_end: Mapped[int] = mapped_column(Integer, default=0)
     section_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Reading text: the section's original text, uncapped (I-29). `preview` is a
+    # capped snippet for lists and flashcard context, truncated mid-sentence on
+    # longer sections, and must never be served as reading text.
+    # server_default keeps raw-SQL inserts valid against a NOT NULL column and
+    # matches what the migration writes, so a created and a migrated schema agree.
+    body: Mapped[str] = mapped_column(Text, default="", server_default="")
     preview: Mapped[str] = mapped_column(Text, default="")
     # Tech section detection fields (set by tech_book/tech_article content type)
     admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)

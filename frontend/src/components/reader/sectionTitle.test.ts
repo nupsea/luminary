@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sectionTitle, usableSections } from "@/components/reader/sectionTitle"
+import { hasAuthoredHeading, sectionTitle, usableSections } from "@/components/reader/sectionTitle"
 
 describe("sectionTitle", () => {
   it("relabels a Google Docs anchor id from the section text", () => {
@@ -45,5 +45,22 @@ describe("usableSections", () => {
   it("never empties the panel, even when nothing can be relabelled", () => {
     const out = usableSections([{ heading: "c", preview: "" }, { heading: "g", preview: "" }])
     expect(out).toHaveLength(2)
+  })
+})
+
+describe("hasAuthoredHeading", () => {
+  it("accepts a heading the source wrote", () => {
+    expect(hasAuthoredHeading({ heading: "CHAPTER I. Down the Rabbit-Hole" })).toBe(true)
+  })
+
+  it("rejects an unlabelled section rather than deriving one", () => {
+    // The reading flow must draw nothing here. sectionTitle still returns a
+    // derived label for the contents panel, which needs an entry to navigate.
+    expect(hasAuthoredHeading({ heading: "" })).toBe(false)
+    expect(hasAuthoredHeading({})).toBe(false)
+  })
+
+  it("rejects anchor-id headings from Google Docs exports", () => {
+    expect(hasAuthoredHeading({ heading: "_r9szt46p8rxa" })).toBe(false)
   })
 })

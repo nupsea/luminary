@@ -54,6 +54,41 @@ _RE_NON_SPEAKER = re.compile(
 )
 
 
+# A heading labels a section; it is not a sentence. Terminal punctuation alone
+# does not separate the two -- "BOOK I." and "CHAPTER IV." are markers -- so
+# length carries the decision. The char bound is generous because authored
+# headings run long in technical books; the word bound applies only to
+# candidates that end like a sentence.
+_MARKER_MAX_CHARS = 90
+_MARKER_MAX_SENTENCE_WORDS = 4
+
+
+def _drop_bodyless(sections: list[Section]) -> list[Section]:
+    """Drop sections that carry a heading and no text.
+
+    A document's own table of contents matches the same signature as its
+    chapter openings, so every chapter is found twice: once in the contents
+    with nothing under it, once in the body. Those empty twins used to be
+    filled with the literal string "(Empty Section)" and shown to the reader --
+    23 of the 49 sections found in `the_odyssey.txt`. Every section in
+    `_segment` is level 1, so an empty one owns no subsections and dropping it
+    loses no structure.
+
+    Keeps everything when the filter would empty the document: a slide deck of
+    bare headings is still worth navigating.
+    """
+    kept = [s for s in sections if s.text.strip()]
+    return kept or sections
+
+
+def _is_marker(candidate: str) -> bool:
+    """Whether a matched line is a section label rather than a line of prose."""
+    text = candidate.strip()
+    if not text or len(text) > _MARKER_MAX_CHARS:
+        return False
+    return not (text[-1] in ".?!" and len(text.split()) > _MARKER_MAX_SENTENCE_WORDS)
+
+
 @dataclass
 class Signature:
     id: str
@@ -185,6 +220,7 @@ class UniversalParser:
                 word_count=len(clean_text.split()),
                 sections=sections,
                 raw_text=clean_text,
+                structure_type=best_sig.doc_type,
             )
         except Exception:
             logger.exception("UniversalParser failed for %s", file_path)
@@ -373,18 +409,28 @@ class UniversalParser:
         if not matches:
             return []
 
-        # Chat/transcript: group turns into chunks. The generic loop below
-        # treats each "Speaker: utterance" line as a HEADING (group 0) with an
-        # empty body, so single-line turns become "(Empty Section)" and the
-        # utterance is stranded in the heading -- a 40-turn transcript lost 98%
-        # of its content this way. Group whenever there is real turn structure;
-        # the >50 floor was far too high (missed any sub-50-turn transcript).
-        if sig.doc_type == "chat" and len(matches) >= 5:
+        # Chat/transcript: group turns into sections, always. The generic loop
+        # below treats a matched line as a heading, and for a transcript the
+        # matched line IS the utterance -- a 40-turn transcript lost 98% of its
+        # content that way. Turn count is not a reason to fall back into that
+        # loop: a short transcript groups into a single section, which reads
+        # correctly, whereas the loop would strand every turn in a heading.
+        if sig.doc_type == "chat":
             return self._segment_chat_grouped(text, matches)
 
         for i, m in enumerate(matches):
             heading = m.group(1).strip() if sig.id == "markdown_header" else m.group(0).strip()
-            start_pos = m.end()
+            # A match that swallowed prose is content, not a label: several
+            # signatures match a whole line, and for those the line belongs in
+            # the body. Keeping it as a heading strands the text where the
+            # reader draws an oversized heading over an empty section. The
+            # section then carries no heading, which is correct -- the source
+            # gave none, so none is invented (I-30).
+            if _is_marker(heading):
+                start_pos = m.end()
+            else:
+                heading = ""
+                start_pos = m.start()
             end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             body_chunk = text[start_pos:end_pos]
 
@@ -428,28 +474,32 @@ class UniversalParser:
                             body_start_line = li + 1
                         break
                 if subtitle:
-                    heading = f"{heading} — {subtitle}"
+                    heading = f"{heading} — {subtitle}" if heading else subtitle
                 body = "\n".join(lines[body_start_line:]).strip()
             else:
                 body = body_chunk.strip()
-
-            if not body and i < len(matches) - 1:
-                body = "(Empty Section)"
 
             sections.append(
                 Section(
                     heading=heading,
                     level=1,
-                    text=body or "(End of Document)",
+                    text=body,
                     page_start=0,
                     page_end=0,
                 )
             )
 
-        return sections
+        return _drop_bodyless(sections)
 
     def _segment_chat_grouped(self, text: str, matches: list[re.Match[str]]) -> list[Section]:
-        """Group chat messages into sections to avoid fragmentation."""
+        """Group turns into sections so each utterance stays in the body.
+
+        The heading is left empty on purpose. A transcript has no authored
+        section titles, and the label this used to synthesise
+        ("Transcript Part 2: Carol") named whichever speaker happened to open
+        the group -- which the reader then drew as a heading over their turn.
+        The reader shows no heading for an unlabelled section (I-30).
+        """
         sections = []
         chunk_size = 30
         for i in range(0, len(matches), chunk_size):
@@ -459,10 +509,9 @@ class UniversalParser:
             next_m = matches[m_end_idx] if m_end_idx < len(matches) else None
             end_pos = next_m.start() if next_m else len(text)
 
-            heading = f"Transcript Part {(i // chunk_size) + 1}: {m_start.group(1)}"
             body = text[m_start.start() : end_pos].strip()
 
-            sections.append(Section(heading=heading, level=1, text=body, page_start=0, page_end=0))
+            sections.append(Section(heading="", level=1, text=body, page_start=0, page_end=0))
         return sections
 
 

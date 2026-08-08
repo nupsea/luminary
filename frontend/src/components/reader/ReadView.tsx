@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { ChevronDown, Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
@@ -9,7 +9,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
-import { sectionTitle, usableSections } from "./sectionTitle"
+import { profileSpec, readingProfile, type ProfileSpec } from "./readingProfile"
+import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
+import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import type { AnnotationItem, SectionContentItem } from "./types"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -54,6 +56,8 @@ interface LazySectionProps {
   annotations: AnnotationItem[]
   highlightsVisible: boolean
   images?: DocumentImage[]
+  spec: ProfileSpec
+  isLast: boolean
 }
 
 // Figures live in the images table with a vision-generated description; the
@@ -89,9 +93,36 @@ const HeadingTag = (level: number) => {
   return "h5"
 }
 
+// "opener" ignores depth on purpose: a novel has one heading level, and it
+// marks a pause rather than a rank, so every chapter title gets the same air.
+const HEADING_CLASS: Record<ProfileSpec["headingStyle"], (level: number) => string> = {
+  opener: () => "mb-8 mt-4 text-center text-2xl font-semibold tracking-wide text-foreground",
+  hierarchy: (level: number) =>
+    cn(
+      "mb-3 font-semibold text-foreground",
+      level <= 1 ? "text-xl" : level === 2 ? "text-lg" : "text-base",
+    ),
+}
+
+const SpeakerTurns = memo(({ turns }: { turns: SpeakerTurn[] }) => (
+  <div className="space-y-4">
+    {turns.map((turn, i) => (
+      <div key={i} className="anim-fade-in">
+        {turn.speaker && (
+          <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {turn.speaker}
+          </p>
+        )}
+        <div className="whitespace-pre-line leading-relaxed text-foreground/90">{turn.text}</div>
+      </div>
+    ))}
+  </div>
+))
+SpeakerTurns.displayName = "SpeakerTurns"
+
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ section, annotations, highlightsVisible, images = [] }: LazySectionProps) => {
+const LazySection = memo(({ section, annotations, highlightsVisible, images = [], spec, isLast }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -112,24 +143,42 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
   }, [])
 
   const Tag = HeadingTag(section.level)
+  const showHeading = hasAuthoredHeading(section)
   const highlighted = useMemo(() => {
     if (!isVisible) return "" // defer processing
     return applyHighlights(section.content, highlightsVisible ? annotations : [])
   }, [isVisible, section.content, annotations, highlightsVisible])
+
+  // Highlights are injected as <mark> HTML, which the turn splitter would show
+  // as literal tags -- so a section carrying highlights renders as markdown.
+  const turns = useMemo(() => {
+    if (!isVisible || !spec.speakerTurns) return null
+    if (highlighted !== section.content) return null
+    return parseSpeakerTurns(section.content)
+  }, [isVisible, spec.speakerTurns, highlighted, section.content])
 
   return (
     <div
       ref={containerRef}
       id={`read-sec-${section.section_id}`}
       data-section-id={section.section_id}
-      className="mb-10 pb-8 border-b border-border last:border-b-0 min-h-[100px]"
+      className={cn(
+        "min-h-[100px]",
+        spec.dividers && !isLast ? "mb-10 border-b border-border pb-8" : "mb-12",
+      )}
     >
-      <Tag className="mb-3 font-semibold text-foreground text-xl">
-        {sectionTitle(section)}
-      </Tag>
+      {showHeading && (
+        <Tag className={HEADING_CLASS[spec.headingStyle](section.level)}>
+          {section.heading}
+        </Tag>
+      )}
       {isVisible ? (
         <div className="leading-relaxed anim-fade-in">
-          <MarkdownRenderer>{highlighted}</MarkdownRenderer>
+          {turns ? (
+            <SpeakerTurns turns={turns} />
+          ) : (
+            <MarkdownRenderer className={spec.family}>{highlighted}</MarkdownRenderer>
+          )}
           <SectionFigures images={images} />
         </div>
       ) : (
@@ -283,9 +332,24 @@ interface ReadViewProps {
   initialSectionId?: string | null
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
+  /** Drives the reading profile. Omitted only by callers that have no document
+   *  loaded yet, which fall back to the article profile. */
+  contentType?: string | null
+  structureType?: string | null
 }
 
-export function ReadView({ documentId, initialSectionId, annotations = [], highlightsVisible = true }: ReadViewProps) {
+export function ReadView({
+  documentId,
+  initialSectionId,
+  annotations = [],
+  highlightsVisible = true,
+  contentType,
+  structureType,
+}: ReadViewProps) {
+  const spec = useMemo(
+    () => profileSpec(readingProfile({ content_type: contentType, structure_type: structureType })),
+    [contentType, structureType],
+  )
   const contentRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [listLimit, setListLimit] = useState(200)
@@ -304,6 +368,15 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   })
 
   const tocEntries = useMemo(() => usableSections(sections ?? []), [sections])
+
+  // Sections stored before `sections.body` existed are served from retrieval
+  // chunks, which cut mid-sentence and fabricate paragraph breaks (I-29). The
+  // text cannot be repaired in place -- say so rather than let it read as the
+  // author's own formatting.
+  const degradedCount = useMemo(
+    () => (sections ?? []).filter((s) => s.content_source === "chunks").length,
+    [sections],
+  )
 
   // Figures are supplementary: a failure here must not block the text, so this
   // query has no error branch and simply yields no images.
@@ -480,14 +553,25 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
 
       {/* Reading content */}
       <div ref={contentRef} className="flex-1 overflow-auto px-8 py-6 scroll-smooth">
-        <div className="max-w-3xl mx-auto">
-          {sections.slice(0, listLimit).map((section) => (
+        {/* Measure in ch, so it tracks the profile's own typeface rather than a
+            fixed pixel width that runs to ~95 characters at base size. */}
+        <div className="mx-auto w-full" style={{ maxWidth: `${spec.measureCh}ch` }}>
+          {degradedCount > 0 && (
+            <p className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {degradedCount} of {sections.length} sections were stored before Luminary kept
+              full section text, so their paragraph breaks are approximate. Re-upload this
+              document to read it as written.
+            </p>
+          )}
+          {sections.slice(0, listLimit).map((section, i) => (
             <LazySection
               key={section.section_id}
               section={section}
               annotations={annotationsBySection.get(section.section_id) || []}
               highlightsVisible={highlightsVisible}
               images={imagesBySection.get(section.section_id)}
+              spec={spec}
+              isLast={i === Math.min(sections.length, listLimit) - 1}
             />
           ))}
           
@@ -497,7 +581,7 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
                 onClick={() => setListLimit(prev => prev + 500)}
                 className="flex items-center gap-2 rounded-md border border-border bg-background px-6 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors shadow-sm"
               >
-                <Loader2 size={14} className="animate-spin text-muted-foreground" />
+                <ChevronDown size={14} className="text-muted-foreground" />
                 Load next 500 sections
               </button>
             </div>

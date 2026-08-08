@@ -23,6 +23,19 @@ export function sectionTitle(section: {
   return heading || "(Untitled section)"
 }
 
+/**
+ * Whether the source authored a heading for this section.
+ *
+ * `sectionTitle` always returns something so the contents panel has an entry to
+ * navigate with, but a derived or placeholder label must never be drawn in the
+ * reading flow -- it prints the section's own opening sentence as a heading
+ * directly above itself. Only a stored heading that reads like one qualifies.
+ */
+export function hasAuthoredHeading(section: { heading?: string | null }): boolean {
+  const heading = (section.heading ?? "").trim()
+  return heading.length > 0 && looksLikeHeading(heading)
+}
+
 function derivedFromPreview(preview: string): string {
   const clean = preview.replace(/\s+/g, " ").trim()
   if (!clean) return ""

@@ -336,6 +336,7 @@ class BookParser:
             word_count=len(raw_no_meta.split()),
             sections=sections,
             raw_text=raw_no_meta,
+            structure_type="book",
         )
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument | None:
@@ -382,6 +383,7 @@ class BookParser:
             word_count=len(all_text.split()),
             sections=sections,
             raw_text=all_text,
+            structure_type="book",
         )
 
     def _parse_docx(self, file_path: Path) -> ParsedDocument | None:
@@ -398,6 +400,7 @@ class BookParser:
             word_count=len(full_text.split()),
             sections=sections,
             raw_text=full_text,
+            structure_type="book",
         )
 
     def _parse_md(self, file_path: Path) -> ParsedDocument | None:
@@ -451,6 +454,7 @@ class BookParser:
             word_count=len(raw_text.split()),
             sections=sections,
             raw_text=raw_text,
+            structure_type="book",
         )
 
     def _parse_html(self, file_path: Path) -> ParsedDocument | None:
@@ -466,6 +470,7 @@ class BookParser:
             word_count=len(text.split()),
             sections=sections,
             raw_text=text,
+            structure_type="book",
         )
 
     def _strip_gutenberg(self, text: str) -> tuple[str, str]:

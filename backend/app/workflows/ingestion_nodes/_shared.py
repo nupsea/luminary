@@ -114,6 +114,7 @@ class IngestionState(TypedDict):
     section_summary_count: int | None
     audio_duration_seconds: float | None
     is_technical: bool | None
+    structure_type: str | None
     _audio_chunks: list[dict[str, Any]] | None
 
 
@@ -220,6 +221,26 @@ async def _persist_is_technical(document_id: str, is_technical: bool) -> None:
             update(DocumentModel)
             .where(DocumentModel.id == document_id)
             .values(is_technical=is_technical)
+        )
+        await session.commit()
+
+
+async def _persist_structure_type(document_id: str, structure_type: str) -> None:
+    """Write the layout the parser discovered ('book'|'paper'|'script'|'chat').
+
+    The reader picks its profile from this together with content_type; neither
+    is sufficient alone, since content_type knows a transcript is technical and
+    structure_type knows it is dialogue.
+    """
+    from sqlalchemy import update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(structure_type=structure_type)
         )
         await session.commit()
 

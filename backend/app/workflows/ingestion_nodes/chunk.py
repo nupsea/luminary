@@ -42,6 +42,22 @@ from app.workflows.ingestion_nodes._shared import (
 
 logger = logging.getLogger(__name__)
 
+# `preview` feeds section lists, flashcard context and the Feynman summary
+# cache, so it stays bounded. Reading text lives in `body`, uncapped (I-29).
+PREVIEW_CHARS = 10000
+
+
+def _context_header(doc_title: str, section_heading: str) -> str:
+    """Retrieval breadcrumb prepended to every chunk.
+
+    Sections may legitimately carry no heading (I-30), and the parser no longer
+    invents one. Naming the document alone beats emitting "[Title > ]", whose
+    dangling separator embeds and tokenises as content.
+    """
+    heading = (section_heading or "").strip()
+    return f"[{doc_title} > {heading}]" if heading else f"[{doc_title}]"
+
+
 def _splitter_cls():
     """Import lazily: `langchain_text_splitters` pulls in sentence-transformers
     and therefore torch at module scope, which cost 5.4s of every cold start
@@ -165,12 +181,13 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
             section_model = SectionModel(
                 id=str(uuid.uuid4()),
                 document_id=doc_id,
-                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                heading=s.get("heading", ""),
                 level=s.get("level", 1),
                 page_start=s.get("page_start", 0),
                 page_end=s.get("page_end", 0),
                 section_order=s_idx,
-                preview=s.get("text", "")[:10000],
+                body=s.get("text", ""),
+                preview=s.get("text", "")[:PREVIEW_CHARS],
             )
             session.add(section_model)
             section_models.append(section_model)
@@ -187,7 +204,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                 continue
 
             section_heading = section_model.heading
-            context_header = f"[{book_title} > {section_heading}]"
+            context_header = _context_header(book_title, section_heading)
 
             # populate pdf_page_number for PDF-format documents (1-based page).
             # Use \f (form feed) markers inserted by book_parser to compute per-chunk
@@ -313,12 +330,13 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             section_model = SectionModel(
                 id=str(uuid.uuid4()),
                 document_id=doc_id,
-                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                heading=s.get("heading", ""),
                 level=s.get("level", 2),
                 page_start=s.get("page_start", 0),
                 page_end=s.get("page_end", 0),
                 section_order=s_idx,
-                preview=s.get("text", "")[:10000],
+                body=s.get("text", ""),
+                preview=s.get("text", "")[:PREVIEW_CHARS],
                 admonition_type=s.get("admonition_type"),
                 parent_section_id=None,  # resolved after flush below
             )
@@ -348,7 +366,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             if not section_text.strip():
                 continue
 
-            context_header = f"[{doc_title} > {section_model.heading}]"
+            context_header = _context_header(doc_title, section_model.heading)
             # pdf_page_number for this section (None for non-PDF)
             section_pdf_page: int | None = None
             if tech_fmt == "pdf":
@@ -465,12 +483,13 @@ async def _chunk_conversation(
                 section_model = SectionModel(
                     id=str(uuid.uuid4()),
                     document_id=doc_id,
-                    heading=s.get("heading", "") or f"Part {s_idx + 1}",
+                    heading=s.get("heading", ""),
                     level=s.get("level", 1),
                     page_start=s.get("page_start", 0),
                     page_end=s.get("page_end", 0),
                     section_order=s_idx,
-                    preview=s.get("text", "")[:10000],
+                    body=s.get("text", ""),
+                    preview=s.get("text", "")[:PREVIEW_CHARS],
                 )
                 session.add(section_model)
                 section_models.append(section_model)
@@ -484,7 +503,8 @@ async def _chunk_conversation(
                 page_start=0,
                 page_end=0,
                 section_order=0,
-                preview=raw_text[:10000],
+                body=raw_text,
+                preview=raw_text[:PREVIEW_CHARS],
             )
             session.add(section_model)
             section_models.append(section_model)
@@ -703,12 +723,13 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
                 section_model = SectionModel(
                     id=str(uuid.uuid4()),
                     document_id=doc_id,
-                    heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                    heading=s.get("heading", ""),
                     level=s.get("level", 1),
                     page_start=s.get("page_start", 0),
                     page_end=s.get("page_end", 0),
                     section_order=s_idx,
-                    preview=s.get("text", "")[:10000],
+                    body=s.get("text", ""),
+                    preview=s.get("text", "")[:PREVIEW_CHARS],
                 )
                 session.add(section_model)
                 section_models.append(section_model)
@@ -731,7 +752,7 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
                     skipped_reference_sections += 1
                     continue
 
-                context_header = f"[{paper_title} > {section_model.heading}]"
+                context_header = _context_header(paper_title, section_model.heading)
                 chunk_pdf_page = (s.get("page_start", 0) or 1) if is_pdf else None
 
                 for text in chunk_paper_section(
@@ -816,12 +837,13 @@ async def _chunk_generic(
             section_model = SectionModel(
                 id=str(uuid.uuid4()),
                 document_id=doc_id,
-                heading=s.get("heading", "") or f"Section {s_idx + 1}",
+                heading=s.get("heading", ""),
                 level=s.get("level", 1),
                 page_start=s.get("page_start", 0),
                 page_end=s.get("page_end", 0),
                 section_order=s_idx,
-                preview=s.get("text", "")[:10000],
+                body=s.get("text", ""),
+                preview=s.get("text", "")[:PREVIEW_CHARS],
             )
             session.add(section_model)
             section_models.append(section_model)

@@ -1032,7 +1032,7 @@ export interface paths {
         put?: never;
         /**
          * Ingest Url
-         * @description Ingest a YouTube URL (yt-dlp) or a general web article (Trafilatura).
+         * @description Ingest a YouTube URL (yt-dlp), a linked PDF, or a web article (Trafilatura).
          */
         post: operations["ingest_url_documents_ingest_url_post"];
         delete?: never;
@@ -3127,6 +3127,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/enrichment/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Enrichment Queue
+         * @description Library-wide enrichment backlog, so background model work is visible.
+         *
+         *     Installing a component re-queues every job that was skipped for want of it,
+         *     which can be minutes of vision inference per document with nothing in the
+         *     UI to say so.
+         */
+        get: operations["get_enrichment_queue_enrichment_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/enrichment": {
         parameters: {
             query?: never;
@@ -4261,6 +4285,120 @@ export interface paths {
         patch: operations["patch_retrieval_settings_settings_retrieval_patch"];
         trace?: never;
     };
+    "/setup/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Components */
+        get: operations["list_components_setup_components_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Environment Report Endpoint
+         * @description The environment block for a bug report, scrubbed of the account name.
+         */
+        get: operations["environment_report_endpoint_setup_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Capabilities
+         * @description What the UI may offer. Keeps it from advertising what this build cannot do.
+         */
+        get: operations["list_capabilities_setup_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry
+         * @description Re-run whatever failed during startup.
+         *
+         *     Without this a transient network problem on first run left the install
+         *     permanently degraded, recoverable only by quitting and relaunching.
+         */
+        post: operations["retry_setup_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/components/{component_id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install */
+        post: operations["install_setup_components__component_id__install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/components/{component_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uninstall */
+        delete: operations["uninstall_setup_components__component_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mastery/concepts": {
         parameters: {
             query?: never;
@@ -4956,33 +5094,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/code/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute Code
-         * @description Execute code in a sandboxed subprocess and compare to expected output.
-         *
-         *     Returns stdout, stderr, exit_code, elapsed_ms.
-         *     If expected_output is provided, also returns prediction_correct and prediction_diff.
-         *     prediction_correct uses strip() comparison -- trailing newlines are normalized
-         *     (expected='hello', actual='hello\n' yields prediction_correct=True).
-         *
-         *     JavaScript returns HTTP 503 if Node.js is not installed.
-         */
-        post: operations["execute_code_code_execute_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/summarize/{document_id}/sections": {
         parameters: {
             query?: never;
@@ -5383,43 +5494,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Health */
-        get: operations["health_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/healthz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Healthz
-         * @description Lightweight liveness probe for containers and monitors (no DB).
-         */
-        get: operations["healthz_healthz_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/settings": {
         parameters: {
             query?: never;
@@ -5464,6 +5538,63 @@ export interface paths {
         };
         /** Read Storage */
         get: operations["read_storage_settings_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health */
+        get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Healthz
+         * @description Lightweight liveness probe for containers and monitors (no DB).
+         */
+        get: operations["healthz_healthz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Setup Status
+         * @description What startup has actually finished, as opposed to /health's 200.
+         */
+        get: operations["setup_status_setup_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6073,42 +6204,6 @@ export interface components {
             /** Previews */
             previews: components["schemas"]["ClusterNotePreview"][];
         };
-        /** CodeExecuteRequest */
-        CodeExecuteRequest: {
-            /** Code */
-            code: string;
-            /**
-             * Language
-             * @default python
-             */
-            language: string;
-            /**
-             * Timeout Ms
-             * @default 10000
-             */
-            timeout_ms: number;
-            /** Expected Output */
-            expected_output?: string | null;
-            /** Chunk Id */
-            chunk_id?: string | null;
-            /** Document Id */
-            document_id?: string | null;
-        };
-        /** CodeExecuteResponse */
-        CodeExecuteResponse: {
-            /** Stdout */
-            stdout: string;
-            /** Stderr */
-            stderr: string;
-            /** Exit Code */
-            exit_code: number;
-            /** Elapsed Ms */
-            elapsed_ms: number;
-            /** Prediction Correct */
-            prediction_correct?: boolean | null;
-            /** Prediction Diff */
-            prediction_diff?: string | null;
-        };
         /** CodeSnippetItem */
         CodeSnippetItem: {
             /** Id */
@@ -6490,6 +6585,8 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            /** Structure Type */
+            structure_type?: string | null;
             /** Word Count */
             word_count: number;
             /** Page Count */
@@ -6705,6 +6802,21 @@ export interface components {
             error_message: string | null;
             /** Created At */
             created_at: string;
+        };
+        /** EnrichmentQueueSummary */
+        EnrichmentQueueSummary: {
+            /** Pending */
+            pending: number;
+            /** Running */
+            running: number;
+            /** Skipped */
+            skipped: number;
+            /** Failed */
+            failed: number;
+            /** Documents Active */
+            documents_active: number;
+            /** Active */
+            active: boolean;
         };
         /** EntityItem */
         EntityItem: {
@@ -7665,6 +7777,10 @@ export interface components {
             provider?: string | null;
             /** Model */
             model?: string | null;
+            /** Local Chat Model */
+            local_chat_model?: string | null;
+            /** Vision Model */
+            vision_model?: string | null;
             /** Openai Api Key */
             openai_api_key?: string | null;
             /** Anthropic Api Key */
@@ -7680,6 +7796,16 @@ export interface components {
             provider: string;
             /** Model */
             model: string;
+            /**
+             * Local Chat Model
+             * @default
+             */
+            local_chat_model: string;
+            /**
+             * Vision Model
+             * @default
+             */
+            vision_model: string;
             /** Has Openai Key */
             has_openai_key: boolean;
             /** Has Anthropic Key */
@@ -8511,6 +8637,12 @@ export interface components {
              * @default 0
              */
             page_end: number;
+            /**
+             * Content Source
+             * @default body
+             * @enum {string}
+             */
+            content_source: "body" | "preview" | "chunks" | "empty";
         };
         /** SectionHeatmapItem */
         SectionHeatmapItem: {
@@ -14965,6 +15097,26 @@ export interface operations {
             };
         };
     };
+    get_enrichment_queue_enrichment_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentQueueSummary"];
+                };
+            };
+        };
+    };
     get_enrichment_jobs_documents__document_id__enrichment_get: {
         parameters: {
             query?: never;
@@ -16755,6 +16907,158 @@ export interface operations {
             };
         };
     };
+    list_components_setup_components_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    environment_report_endpoint_setup_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_capabilities_setup_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    retry_setup_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    install_setup_components__component_id__install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                component_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uninstall_setup_components__component_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                component_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_mastery_concepts_mastery_concepts_get: {
         parameters: {
             query: {
@@ -17804,39 +18108,6 @@ export interface operations {
             };
         };
     };
-    execute_code_code_execute_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CodeExecuteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CodeExecuteResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_section_summaries_summarize__document_id__sections_get: {
         parameters: {
             query?: never;
@@ -18401,46 +18672,6 @@ export interface operations {
             };
         };
     };
-    health_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    healthz_healthz_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     read_settings_settings_get: {
         parameters: {
             query?: never;
@@ -18547,6 +18778,66 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    healthz_healthz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    setup_status_setup_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -44,6 +45,9 @@ class SectionContentItem(BaseModel):
     content: str
     page_start: int = 0
     page_end: int = 0
+    # Which tier served `content`, so a degraded read is visible rather than
+    # silent. See I-29 and docs/universal-reader.md.
+    content_source: Literal["body", "preview", "chunks", "empty"] = "body"
 
 
 class SectionResponse(BaseModel):
@@ -105,41 +109,45 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
         else:
             orphan_chunks.append(c.text)
 
-    # Prefer the original section text (preview) over chunk-reassembled text.
-    # Chunks contain enrichment prefixes like "[Title > Section] ..." that are
-    # useful for retrieval but hurt the reading experience.  The preview field
-    # stores up to 10 000 chars of the original parsed section text -- if the
-    # section is longer, the preview is truncated mid-sentence and we must fall
-    # back to chunk-assembled text (with enrichment headers stripped).
+    # Reading text comes from `body`, which is uncapped (I-29). `preview` is
+    # capped at PREVIEW_CHARS and serves only sections stored before `body`
+    # existed -- past the cap it is truncated mid-sentence, so the chunk tier
+    # takes over. Chunks are the last resort and are degraded by construction:
+    # they cut mid-sentence and carry "[Title > Section] " enrichment prefixes,
+    # so re-joining them fabricates paragraph breaks. Documents on that tier
+    # need re-ingestion, which is why the tier is reported to the client.
     PREVIEW_LIMIT = 10000
 
-    def _section_content(s: SectionModel) -> str:
-        chunk_texts = chunks_by_section.get(s.id, [])
-        # If preview exists and is NOT truncated (shorter than the storage cap),
-        # use it -- it preserves original formatting.
+    def _section_content(s: SectionModel) -> tuple[str, str]:
+        if s.body:
+            return _reader_safe(s.body), "body"
         if s.preview and len(s.preview) < PREVIEW_LIMIT:
-            return _reader_safe(s.preview)
-        # Preview was truncated or empty -- reassemble from chunks, stripping
-        # the "[Title > Section] " enrichment prefix from each chunk.
+            return _reader_safe(s.preview), "preview"
+        chunk_texts = chunks_by_section.get(s.id, [])
         if chunk_texts:
-            return _reader_safe(
-                "\n\n".join(re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts)
+            return (
+                _reader_safe("\n\n".join(re.sub(r"^\[.*?\]\s*", "", c) for c in chunk_texts)),
+                "chunks",
             )
-        # Last resort: return whatever preview we have, even if truncated
-        return _reader_safe(s.preview or "")
+        if s.preview:
+            return _reader_safe(s.preview), "preview"
+        return "", "empty"
 
-    result = [
-        SectionContentItem(
-            section_id=s.id,
-            heading=s.heading,
-            level=s.level,
-            section_order=s.section_order,
-            content=_section_content(s),
-            page_start=s.page_start or 0,
-            page_end=s.page_end or 0,
+    result = []
+    for s in sections:
+        content, source = _section_content(s)
+        result.append(
+            SectionContentItem(
+                section_id=s.id,
+                heading=s.heading,
+                level=s.level,
+                section_order=s.section_order,
+                content=content,
+                page_start=s.page_start or 0,
+                page_end=s.page_end or 0,
+                content_source=source,
+            )
         )
-        for s in sections
-    ]
 
     # If all sections ended up empty (chunks lacked section_id mapping),
     # distribute orphan chunks evenly across sections as a best-effort fallback.
@@ -151,5 +159,6 @@ async def get_section_content(document_id: str) -> list[SectionContentItem]:
             start = i * per_section
             end = start + per_section if i < len(result) - 1 else len(cleaned)
             item.content = "\n\n".join(cleaned[start:end])
+            item.content_source = "chunks"
 
     return result

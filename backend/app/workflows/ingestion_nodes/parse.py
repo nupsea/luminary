@@ -21,6 +21,7 @@ from app.workflows.ingestion_nodes._shared import (
     _parser,
     _persist_content_type,
     _persist_is_technical,
+    _persist_structure_type,
     _update_stage,
     resolve_technical_variant,
 )
@@ -49,6 +50,11 @@ async def parse_node(state: IngestionState) -> IngestionState:
                 }
                 for s in parsed.sections
             ]
+            # Persisted here rather than in classify_node: how a document is
+            # laid out is decided by the parser that read it, and classify_node
+            # returns early on every path where content_type was user-supplied.
+            if parsed.structure_type:
+                await _persist_structure_type(state["document_id"], parsed.structure_type)
             return {
                 **state,
                 "parsed_document": {
@@ -59,6 +65,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
                     "sections": sections,
                     "raw_text": parsed.raw_text,
                 },
+                "structure_type": parsed.structure_type,
                 "status": "classifying",
             }
         except Exception as exc:

@@ -895,6 +895,7 @@ async def get_document(document_id: str):
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        structure_type=doc.structure_type,
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
