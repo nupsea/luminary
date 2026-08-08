@@ -213,18 +213,34 @@ def _is_metadata(heading: str) -> bool:
     return heading.lower().strip() in _METADATA_SIGNALS
 
 
-# A chapter's first body line is only a subtitle when it reads as a title.
-# Gutenberg text is hard-wrapped at ~70 characters, so "under 100 chars and not
-# ending in a full stop" -- the old test -- matched almost every opening line of
-# prose: Frankenstein's chapters were headed "Chapter 1 — I am by birth a
-# Genevese, and my family is one of the most", and that line was cut from the
-# body as well.
-#
-# Word count separates the two on its own. Measured on the corpus, real
-# subtitles run to 6 words ("A Caucus-Race and a Long Tale") while a wrapped
-# line of prose starts at 12. Terminal punctuation is NOT a signal and must not
-# be tested: "Who Stole the Tarts?" is a chapter subtitle. ALL-CAPS lines are
-# exempt from the count for the argument lines heading each book of the Odyssey.
+def _page_text_with_paragraphs(page) -> str:
+    """Page text with a blank line between paragraphs.
+
+    A PDF text layer is hard-wrapped, so flat extraction yields no paragraph
+    boundary and the reader renders a whole chapter as one block. PyMuPDF's
+    blocks carry the layout's own grouping; joining them on a blank line
+    recovers it. Falls back to flat text when a page exposes no blocks.
+    """
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        return page.get_text()
+    if not blocks:
+        return page.get_text()
+    # (x0, y0, x1, y1, text, block_no, block_type); type 0 is text.
+    ordered = sorted(
+        (b for b in blocks if len(b) > 6 and b[6] == 0 and str(b[4]).strip()),
+        key=lambda b: (round(b[1], 1), round(b[0], 1)),
+    )
+    if not ordered:
+        return page.get_text()
+    return "\n\n".join(str(b[4]).strip() for b in ordered)
+
+
+# A chapter's first body line is a subtitle only when it reads as a title. Word
+# count is the discriminator: hard-wrapped prose runs far longer than a title.
+# Terminal punctuation is not a signal -- a subtitle may end in "?". ALL-CAPS
+# argument lines are exempt from the count.
 _SUBTITLE_MAX_WORDS = 7
 _SUBTITLE_MAX_CHARS = 100
 
@@ -369,7 +385,7 @@ class BookParser:
         if len(doc) == 0:
             return None
         # Extract per-page text to enable page number assignment after segmentation
-        page_texts = [page.get_text() for page in doc]
+        page_texts = [_page_text_with_paragraphs(page) for page in doc]
         total_pages = len(doc)
         # Join pages with \f (form feed) so we can map chunks back to physical
         # page numbers even after Gutenberg/metadata stripping alters string offsets.
@@ -623,11 +639,8 @@ class BookParser:
                     page_end=0,
                 )
             )
-        # Dropped before the chapter-count guard so the guard counts real
-        # chapters: a book's contents page matches the same pattern as its
-        # chapter openings, giving every chapter an empty twin. Ten of
-        # `time_machine.txt`'s 26 sections were its own table of contents,
-        # rendered by the reader as a heading with nothing under it (I-30).
+        # Before the chapter-count guard so it counts real chapters: a
+        # contents page matches the same pattern and yields empty twins (I-30).
         sections = _drop_bodyless(sections)
         if not sections or len(sections) < _MIN_CHAPTERS:
             return None

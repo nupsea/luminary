@@ -16,16 +16,11 @@ from app.types import ParsedDocument, Section
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_WHITESPACE = re.compile(r"\s+")
 
-# EPUB chapter splitting.
-#
-# A Gutenberg EPUB packs many chapters into a handful of XHTML files, so one
-# section per file gave Moby Dick 11 sections for 135 chapters -- each ~120k
-# chars and headed by whichever chapter happened to come first ("CHAPTER 9. The
-# Sermon." held chapters 9 through 21). The contents panel and the per-section
-# summaries both read as if the book skipped chapters, because the sections did.
+# An EPUB may pack many chapters into one document, so sections come from
+# headings rather than files.
 _RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
-# Block-level ends become paragraph breaks before tags are stripped. Collapsing
-# every run of whitespace without this left each chapter a single run-on line.
+# Block ends become paragraph breaks before tags are stripped; collapsing all
+# whitespace first would leave each chapter a single run-on line.
 _RE_EPUB_BLOCK_END = re.compile(
     r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article)\s*>|<br\s*/?>",
     re.IGNORECASE,
@@ -150,6 +145,27 @@ def _usable_heading(title: str, page, body_size: float, fallback_body: str) -> s
 
 # Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
 _SPACE_GAP_EM = 0.2
+
+
+# Running headers and footers sit in the page margins and are short. Once
+# blocks become paragraphs, each would otherwise land in the prose as one.
+_MARGIN_FRACTION = 0.1
+_FURNITURE_MAX_CHARS = 80
+
+
+def _is_page_furniture(block: dict, page_height: float) -> bool:
+    bbox = block.get("bbox")
+    if not bbox or len(bbox) < 4:
+        return False
+    top, bottom = float(bbox[1]), float(bbox[3])
+    margin = page_height * _MARGIN_FRACTION
+    in_margin = bottom <= margin or top >= page_height - margin
+    if not in_margin:
+        return False
+    text = " ".join(
+        _join_spans(line.get("spans", [])) for line in block.get("lines", [])
+    ).strip()
+    return 0 < len(text) <= _FURNITURE_MAX_CHARS
 
 
 def _join_spans(spans: list[dict]) -> str:
@@ -286,9 +302,13 @@ class DocumentParser:
 
                 for pn in range(max(0, pg - 1), page_end):  # 0-based page index
                     page_obj = doc[pn]
+                    page_height = float(page_obj.rect.height) or 1.0
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
+                        if _is_page_furniture(block, page_height):
+                            continue
+                        block_lines: list[str] = []
                         for line in block.get("lines", []):
                             spans = line.get("spans", [])
                             if not spans:
@@ -296,9 +316,14 @@ class DocumentParser:
                             line_text = _join_spans(spans).strip()
                             if not line_text:
                                 continue
-                            texts.append(line_text)
+                            block_lines.append(line_text)
+                        if block_lines:
+                            texts.append("\n".join(block_lines))
 
-                text = "\n".join(texts).strip()
+                # Blocks are the layout's own paragraphs; a PDF text layer is
+                # hard-wrapped, so joining lines alone leaves no boundary and
+                # the reader renders a whole chapter as one block.
+                text = "\n\n".join(texts).strip()
                 raw_parts.append(text)
                 sections.append(
                     Section(
