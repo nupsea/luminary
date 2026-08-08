@@ -31,6 +31,7 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services.universal_parser import _drop_bodyless
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,30 @@ _MIN_CHAPTERS = 2
 
 def _is_metadata(heading: str) -> bool:
     return heading.lower().strip() in _METADATA_SIGNALS
+
+
+# A chapter's first body line is only a subtitle when it reads as a title.
+# Gutenberg text is hard-wrapped at ~70 characters, so "under 100 chars and not
+# ending in a full stop" -- the old test -- matched almost every opening line of
+# prose: Frankenstein's chapters were headed "Chapter 1 — I am by birth a
+# Genevese, and my family is one of the most", and that line was cut from the
+# body as well.
+#
+# Word count separates the two on its own. Measured on the corpus, real
+# subtitles run to 6 words ("A Caucus-Race and a Long Tale") while a wrapped
+# line of prose starts at 12. Terminal punctuation is NOT a signal and must not
+# be tested: "Who Stole the Tarts?" is a chapter subtitle. ALL-CAPS lines are
+# exempt from the count for the argument lines heading each book of the Odyssey.
+_SUBTITLE_MAX_WORDS = 7
+_SUBTITLE_MAX_CHARS = 100
+
+
+def _is_subtitle(line: str) -> bool:
+    if line.isupper():
+        return True
+    if len(line) > _SUBTITLE_MAX_CHARS:
+        return False
+    return len(line.split()) <= _SUBTITLE_MAX_WORDS
 
 
 def _clean_heading(heading: str) -> str:
@@ -578,9 +603,7 @@ class BookParser:
             for li, line in enumerate(lines[:3]):
                 stripped = line.strip()
                 if stripped:
-                    if len(stripped) <= 100 and (
-                        len(stripped.split()) <= 5 or stripped[-1] not in ".!?"
-                    ):
+                    if _is_subtitle(stripped):
                         subtitle = stripped
                         body_offset = li + 1
                     break
@@ -600,6 +623,12 @@ class BookParser:
                     page_end=0,
                 )
             )
+        # Dropped before the chapter-count guard so the guard counts real
+        # chapters: a book's contents page matches the same pattern as its
+        # chapter openings, giving every chapter an empty twin. Ten of
+        # `time_machine.txt`'s 26 sections were its own table of contents,
+        # rendered by the reader as a heading with nothing under it (I-30).
+        sections = _drop_bodyless(sections)
         if not sections or len(sections) < _MIN_CHAPTERS:
             return None
         return _merge_duplicate_sections(sections)

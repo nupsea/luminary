@@ -378,3 +378,59 @@ def test_html_parsing(tmp_path):
     assert "CHAPTER I — Introduction" in result.sections[0].heading
     assert "CHAPTER II — The Second Part" in result.sections[1].heading
     assert result.format == "html"
+
+
+def test_wrapped_prose_is_not_promoted_into_the_heading(tmp_path):
+    """A chapter's opening line belongs in the body, not in its heading.
+
+    Gutenberg text wraps at ~70 chars, and the old subtitle test took any line
+    under 100 chars that did not end in a full stop -- so Frankenstein's
+    chapters were headed "Chapter 1 — I am by birth a Genevese, and my family
+    is one of the most", and that line was deleted from the body as well.
+    """
+    opening = "I am by birth a Genevese, and my family is one of the most"
+    text = "\n\n".join(
+        f"Chapter {n}\n\n{opening}\ndistinguished of that republic, for many years."
+        for n in range(1, 4)
+    )
+    f = tmp_path / "wrapped.txt"
+    f.write_text(text)
+
+    result = bp.parse(f, "txt")
+    assert result is not None
+    assert [s.heading for s in result.sections] == ["Chapter 1", "Chapter 2", "Chapter 3"]
+    for section in result.sections:
+        assert section.text.startswith(opening)
+
+
+def test_short_subtitle_survives_its_question_mark():
+    """Terminal punctuation is not a signal: "Who Stole the Tarts?" is a title."""
+    from app.services.book_parser import _is_subtitle
+
+    assert _is_subtitle("Who Stole the Tarts?")
+    assert _is_subtitle("Down the Rabbit-Hole")
+    assert _is_subtitle("A Caucus-Race and a Long Tale")
+    # ALL-CAPS argument lines head each book of the Odyssey and run long.
+    assert _is_subtitle("THE GODS IN COUNCIL—MINERVA'S VISIT TO ITHACA—THE CHALLENGE")
+    assert not _is_subtitle("I am by birth a Genevese, and my family is one of the most")
+    assert not _is_subtitle("At three o'clock precisely I was at Baker Street, but Holmes had")
+
+
+def test_contents_page_twins_are_dropped(tmp_path):
+    """A book's own contents page matches the same pattern as its chapters.
+
+    Ten of `time_machine.txt`'s 26 sections were its table of contents, each a
+    heading with no body, which the reader drew as an empty chapter.
+    """
+    text = (
+        "Chapter 1\nChapter 2\nChapter 3\n\n"
+        "Chapter 1\n\nThe first chapter opens here with real prose to read.\n\n"
+        "Chapter 2\n\nThe second chapter continues the story at some length.\n\n"
+        "Chapter 3\n\nThe third chapter brings the whole matter to a close.\n"
+    )
+    f = tmp_path / "twins.txt"
+    f.write_text(text)
+
+    result = bp.parse(f, "txt")
+    assert result is not None
+    assert all(s.text.strip() for s in result.sections)
