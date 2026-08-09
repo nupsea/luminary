@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-09
+
 ### Added
 - **The reader adapts to what you are reading.** A novel, a paper, a technical
   book and a transcript rendered through identical code, so no layout suited any
@@ -51,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A local model chosen in Settings was ignored when a cloud provider became
   unreachable, silently switching models while offline.
 - Opening a large document sent megabytes of duplicated section text.
+- `make eval` always reported zero: it pointed at a port nothing listens on,
+  and on failing to reach a backend it deleted entries from the committed
+  golden manifest rather than saying it could not connect.
 
 ### Note
 Documents ingested before this release keep their old structure until they are
