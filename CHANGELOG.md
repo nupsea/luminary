@@ -6,6 +6,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The reader adapts to what you are reading.** A novel, a paper, a technical
+  book and a transcript rendered through identical code, so no layout suited any
+  of them. Seven reading profiles now pick typeface, line length, heading
+  treatment and dividers from what the document is: prose sets in a serif at 66
+  characters per line, technical material runs wider for code and tables, and a
+  transcript renders its speakers as labels beside their turns.
+- **Reading preferences.** Typeface, text size, line spacing, line width and a
+  paper background, remembered across sessions. The profile picks the default;
+  the preference always wins. Left on "auto" a preference keeps tracking the
+  profile rather than freezing today's value.
+- **The reader has a URL.** The open document stays in the address bar, so a
+  reload returns to what you were reading instead of the library list.
+
+### Fixed
+- **The reader showed retrieval chunks instead of the author's text.** Sections
+  longer than a stored cap fell back to re-joining the chunks built for search.
+  Those cut mid-sentence and overlap, so the reader fabricated a paragraph break
+  every few hundred characters and duplicated text at every seam. Reading text
+  now comes from a lossless column, and the reader reports when a document
+  predates it rather than passing the damage off as formatting.
+- **Nothing invents a heading any more.** Three separate places did: whole lines
+  of prose became headings, transcript utterances were stranded in them, and
+  empty sections were filled with placeholder text. A section the source left
+  unlabelled is now rendered without a heading.
+- **Chapter openings are no longer stolen for the heading.** A chapter's first
+  line was treated as a subtitle whenever it was short enough, which matched
+  most hard-wrapped prose — and removed that line from the chapter.
+- **EPUBs are read by chapter.** A book packing many chapters into one file
+  showed a fraction of them, in both the contents panel and the summaries, and
+  its text arrived with no paragraph breaks at all. Verse and epigraph blocks
+  were near-invisible in light mode, and the book's own links navigated away
+  from the reader mid-book.
+- **PDFs have paragraphs.** Text was assembled line by line, leaving a whole
+  chapter as one block; it now follows the page layout. Running headers and
+  footers are dropped instead of appearing in the prose.
+- **A large book opens in a minute and a half rather than seventeen.** Section
+  summarisation ran on the path to readability while the progress bar reported a
+  different stage, so ingestion looked hung. It now runs after the document is
+  readable, and covers every section: summaries are looked up per section by
+  chat, suggested questions, Practice and concept linking, so the previous
+  grouping left most of a long book invisible to all of them.
+- A local model chosen in Settings was ignored when a cloud provider became
+  unreachable, silently switching models while offline.
+- Opening a large document sent megabytes of duplicated section text.
+
+### Note
+Documents ingested before this release keep their old structure until they are
+re-added; the reader marks the ones affected.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added

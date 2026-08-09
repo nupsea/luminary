@@ -85,6 +85,26 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
     if (activeChapter < totalChapters - 1) setActiveChapter((c) => c + 1)
   }
 
+  /**
+   * Keep the book's own links inside the book: chapter HTML is injected
+   * verbatim, so its anchors would otherwise navigate the router away.
+   */
+  function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (e.target as HTMLElement).closest("a")
+    if (!anchor) return
+    const href = anchor.getAttribute("href")
+    if (!href) return
+    if (/^(https?:|mailto:)/i.test(href)) return // real outbound link, let it open
+
+    e.preventDefault()
+    const hash = href.startsWith("#") ? href.slice(1) : href.split("#")[1]
+    if (!hash) return
+    const target =
+      e.currentTarget.querySelector(`#${CSS.escape(hash)}`) ??
+      e.currentTarget.querySelector(`[name="${CSS.escape(hash)}"]`)
+    target?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left: TOC panel */}
@@ -209,9 +229,15 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
         {chapter && !chapterLoading && !chapterError && (
           <div className="flex-1 overflow-auto">
             <div
-              className="prose prose-sm dark:prose-invert max-w-none px-6 py-4"
+              className={cn(
+                "prose prose-sm dark:prose-invert max-w-none px-6 py-4",
+                // Books use <pre> for verse, not only code. Prose pairs pale
+                // `pre` text with a dark background, which does not hold here.
+                "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",
+              )}
               // Safe: HTML is sanitized server-side by bleach + BeautifulSoup
               dangerouslySetInnerHTML={{ __html: chapter.html }}
+              onClick={handleContentClick}
             />
           </div>
         )}

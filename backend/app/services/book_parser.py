@@ -31,6 +31,7 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services.universal_parser import _drop_bodyless
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,46 @@ def _is_metadata(heading: str) -> bool:
     return heading.lower().strip() in _METADATA_SIGNALS
 
 
+def _page_text_with_paragraphs(page) -> str:
+    """Page text with a blank line between paragraphs.
+
+    A PDF text layer is hard-wrapped, so flat extraction yields no paragraph
+    boundary and the reader renders a whole chapter as one block. PyMuPDF's
+    blocks carry the layout's own grouping; joining them on a blank line
+    recovers it. Falls back to flat text when a page exposes no blocks.
+    """
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        return page.get_text()
+    if not blocks:
+        return page.get_text()
+    # (x0, y0, x1, y1, text, block_no, block_type); type 0 is text.
+    ordered = sorted(
+        (b for b in blocks if len(b) > 6 and b[6] == 0 and str(b[4]).strip()),
+        key=lambda b: (round(b[1], 1), round(b[0], 1)),
+    )
+    if not ordered:
+        return page.get_text()
+    return "\n\n".join(str(b[4]).strip() for b in ordered)
+
+
+# A chapter's first body line is a subtitle only when it reads as a title. Word
+# count is the discriminator: hard-wrapped prose runs far longer than a title.
+# Terminal punctuation is not a signal -- a subtitle may end in "?". ALL-CAPS
+# argument lines are exempt from the count.
+_SUBTITLE_MAX_WORDS = 7
+_SUBTITLE_MAX_CHARS = 100
+
+
+def _is_subtitle(line: str) -> bool:
+    if line.isupper():
+        return True
+    if len(line) > _SUBTITLE_MAX_CHARS:
+        return False
+    return len(line.split()) <= _SUBTITLE_MAX_WORDS
+
+
 def _clean_heading(heading: str) -> str:
     h = re.sub(r"\s+", " ", heading).strip()
     h = re.sub(r"\.\s*$", "", h).strip()
@@ -336,6 +377,7 @@ class BookParser:
             word_count=len(raw_no_meta.split()),
             sections=sections,
             raw_text=raw_no_meta,
+            structure_type="book",
         )
 
     def _parse_pdf(self, file_path: Path) -> ParsedDocument | None:
@@ -343,7 +385,7 @@ class BookParser:
         if len(doc) == 0:
             return None
         # Extract per-page text to enable page number assignment after segmentation
-        page_texts = [page.get_text() for page in doc]
+        page_texts = [_page_text_with_paragraphs(page) for page in doc]
         total_pages = len(doc)
         # Join pages with \f (form feed) so we can map chunks back to physical
         # page numbers even after Gutenberg/metadata stripping alters string offsets.
@@ -382,6 +424,7 @@ class BookParser:
             word_count=len(all_text.split()),
             sections=sections,
             raw_text=all_text,
+            structure_type="book",
         )
 
     def _parse_docx(self, file_path: Path) -> ParsedDocument | None:
@@ -398,6 +441,7 @@ class BookParser:
             word_count=len(full_text.split()),
             sections=sections,
             raw_text=full_text,
+            structure_type="book",
         )
 
     def _parse_md(self, file_path: Path) -> ParsedDocument | None:
@@ -451,6 +495,7 @@ class BookParser:
             word_count=len(raw_text.split()),
             sections=sections,
             raw_text=raw_text,
+            structure_type="book",
         )
 
     def _parse_html(self, file_path: Path) -> ParsedDocument | None:
@@ -466,6 +511,7 @@ class BookParser:
             word_count=len(text.split()),
             sections=sections,
             raw_text=text,
+            structure_type="book",
         )
 
     def _strip_gutenberg(self, text: str) -> tuple[str, str]:
@@ -573,9 +619,7 @@ class BookParser:
             for li, line in enumerate(lines[:3]):
                 stripped = line.strip()
                 if stripped:
-                    if len(stripped) <= 100 and (
-                        len(stripped.split()) <= 5 or stripped[-1] not in ".!?"
-                    ):
+                    if _is_subtitle(stripped):
                         subtitle = stripped
                         body_offset = li + 1
                     break
@@ -595,6 +639,9 @@ class BookParser:
                     page_end=0,
                 )
             )
+        # Before the chapter-count guard so it counts real chapters: a
+        # contents page matches the same pattern and yields empty twins (I-30).
+        sections = _drop_bodyless(sections)
         if not sections or len(sections) < _MIN_CHAPTERS:
             return None
         return _merge_duplicate_sections(sections)

@@ -9,7 +9,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
-import { sectionTitle, usableSections } from "./sectionTitle"
+import { ReaderSettings } from "./ReaderSettings"
+import {
+  profileSpec,
+  readingProfile,
+  resolveReadingLayout,
+  type ResolvedLayout,
+} from "./readingProfile"
+import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
+import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
+import { useReaderPreferences } from "./useReaderPreferences"
 import type { AnnotationItem, SectionContentItem } from "./types"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -54,6 +63,8 @@ interface LazySectionProps {
   annotations: AnnotationItem[]
   highlightsVisible: boolean
   images?: DocumentImage[]
+  spec: ResolvedLayout
+  isLast: boolean
 }
 
 // Figures live in the images table with a vision-generated description; the
@@ -89,9 +100,35 @@ const HeadingTag = (level: number) => {
   return "h5"
 }
 
+// "opener" ignores depth: the heading marks a pause, not a rank.
+const HEADING_CLASS: Record<ResolvedLayout["headingStyle"], (level: number) => string> = {
+  opener: () => "mb-8 mt-4 text-center text-2xl font-semibold tracking-wide text-foreground",
+  hierarchy: (level: number) =>
+    cn(
+      "mb-3 font-semibold text-foreground",
+      level <= 1 ? "text-xl" : level === 2 ? "text-lg" : "text-base",
+    ),
+}
+
+const SpeakerTurns = memo(({ turns }: { turns: SpeakerTurn[] }) => (
+  <div className="space-y-4">
+    {turns.map((turn, i) => (
+      <div key={i} className="anim-fade-in">
+        {turn.speaker && (
+          <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {turn.speaker}
+          </p>
+        )}
+        <div className="whitespace-pre-line leading-relaxed text-foreground/90">{turn.text}</div>
+      </div>
+    ))}
+  </div>
+))
+SpeakerTurns.displayName = "SpeakerTurns"
+
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ section, annotations, highlightsVisible, images = [] }: LazySectionProps) => {
+const LazySection = memo(({ section, annotations, highlightsVisible, images = [], spec, isLast }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -112,24 +149,45 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
   }, [])
 
   const Tag = HeadingTag(section.level)
+  const showHeading = hasAuthoredHeading(section)
   const highlighted = useMemo(() => {
     if (!isVisible) return "" // defer processing
     return applyHighlights(section.content, highlightsVisible ? annotations : [])
   }, [isVisible, section.content, annotations, highlightsVisible])
+
+  // Highlights are <mark> HTML the turn splitter would show as literal tags.
+  const turns = useMemo(() => {
+    if (!isVisible || !spec.speakerTurns) return null
+    if (highlighted !== section.content) return null
+    return parseSpeakerTurns(section.content)
+  }, [isVisible, spec.speakerTurns, highlighted, section.content])
 
   return (
     <div
       ref={containerRef}
       id={`read-sec-${section.section_id}`}
       data-section-id={section.section_id}
-      className="mb-10 pb-8 border-b border-border last:border-b-0 min-h-[100px]"
+      className={cn(
+        "min-h-[100px]",
+        spec.dividers && !isLast ? "mb-10 border-b border-border pb-8" : "mb-12",
+      )}
     >
-      <Tag className="mb-3 font-semibold text-foreground text-xl">
-        {sectionTitle(section)}
-      </Tag>
+      {showHeading && (
+        <Tag className={HEADING_CLASS[spec.headingStyle](section.level)}>
+          {section.heading}
+        </Tag>
+      )}
       {isVisible ? (
         <div className="leading-relaxed anim-fade-in">
-          <MarkdownRenderer>{highlighted}</MarkdownRenderer>
+          {turns ? (
+            <SpeakerTurns turns={turns} />
+          ) : (
+            // `prose` sets an absolute font-size, so size must be handed to
+            // this element rather than inherited.
+            <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
+              {highlighted}
+            </MarkdownRenderer>
+          )}
           <SectionFigures images={images} />
         </div>
       ) : (
@@ -283,10 +341,32 @@ interface ReadViewProps {
   initialSectionId?: string | null
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
+  /** Drives the reading profile. Omitted only by callers that have no document
+   *  loaded yet, which fall back to the article profile. */
+  contentType?: string | null
+  structureType?: string | null
 }
 
-export function ReadView({ documentId, initialSectionId, annotations = [], highlightsVisible = true }: ReadViewProps) {
+export function ReadView({
+  documentId,
+  initialSectionId,
+  annotations = [],
+  highlightsVisible = true,
+  contentType,
+  structureType,
+}: ReadViewProps) {
+  const profile = useMemo(
+    () => readingProfile({ content_type: contentType, structure_type: structureType }),
+    [contentType, structureType],
+  )
+  const { prefs, update: updatePref, reset: resetPrefs } = useReaderPreferences()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const spec = useMemo(
+    () => resolveReadingLayout(profileSpec(profile), prefs),
+    [profile, prefs],
+  )
   const contentRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [listLimit, setListLimit] = useState(200)
   const toc = useResizablePanel({
@@ -304,6 +384,13 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
   })
 
   const tocEntries = useMemo(() => usableSections(sections ?? []), [sections])
+
+  // Sections predating `sections.body` are served from chunks (I-29); the text
+  // cannot be repaired in place, so say so rather than let it pass as authored.
+  const degradedCount = useMemo(
+    () => (sections ?? []).filter((s) => s.content_source === "chunks").length,
+    [sections],
+  )
 
   // Figures are supplementary: a failure here must not block the text, so this
   // query has no error branch and simply yields no images.
@@ -389,6 +476,20 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
     container.addEventListener("scroll", onScroll, { passive: true })
     return () => container.removeEventListener("scroll", onScroll)
   }, [sections])
+
+  // Extend the rendered window when its tail comes into view.
+  useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setListLimit((prev) => prev + 200)
+      },
+      { rootMargin: "800px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [listLimit, sections])
 
   const scrollToSection = useCallback((sectionId: string) => {
     const el = document.getElementById(`read-sec-${sectionId}`)
@@ -479,27 +580,56 @@ export function ReadView({ documentId, initialSectionId, annotations = [], highl
       )}
 
       {/* Reading content */}
-      <div ref={contentRef} className="flex-1 overflow-auto px-8 py-6 scroll-smooth">
-        <div className="max-w-3xl mx-auto">
-          {sections.slice(0, listLimit).map((section) => (
+      <div
+        ref={contentRef}
+        className={cn(
+          "relative flex-1 overflow-auto px-8 py-6 scroll-smooth",
+          spec.tinted && "bg-[#faf6ec] dark:bg-[#1b1917]",
+        )}
+      >
+        <div className="sticky top-0 z-40 flex justify-end">
+          <ReaderSettings
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            profile={profile}
+            effectiveMeasureCh={spec.measureCh}
+            prefs={prefs}
+            onUpdate={updatePref}
+            onReset={resetPrefs}
+          />
+        </div>
+        {/* Measure in ch so line length holds at every text size. */}
+        <div
+          className="mx-auto -mt-6 w-full text-[length:var(--reader-size)] [&_p]:leading-[var(--reader-leading)]"
+          style={{
+            maxWidth: `${spec.measureCh}ch`,
+            ["--reader-size" as string]: `${spec.fontScale}rem`,
+            ["--reader-leading" as string]: spec.lineHeight,
+          }}
+        >
+          {degradedCount > 0 && (
+            <p className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {degradedCount} of {sections.length} sections were stored before Luminary kept
+              full section text, so their paragraph breaks are approximate. Re-upload this
+              document to read it as written.
+            </p>
+          )}
+          {sections.slice(0, listLimit).map((section, i) => (
             <LazySection
               key={section.section_id}
               section={section}
               annotations={annotationsBySection.get(section.section_id) || []}
               highlightsVisible={highlightsVisible}
               images={imagesBySection.get(section.section_id)}
+              spec={spec}
+              isLast={i === Math.min(sections.length, listLimit) - 1}
             />
           ))}
           
+          {/* The window bounds the DOM only; reaching its end extends it. */}
           {sections.length > listLimit && (
-            <div className="mt-12 mb-20 flex justify-center">
-              <button
-                onClick={() => setListLimit(prev => prev + 500)}
-                className="flex items-center gap-2 rounded-md border border-border bg-background px-6 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors shadow-sm"
-              >
-                <Loader2 size={14} className="animate-spin text-muted-foreground" />
-                Load next 500 sections
-              </button>
+            <div ref={loadMoreRef} className="mb-20 mt-12 flex justify-center">
+              <Loader2 size={16} className="animate-spin text-muted-foreground" />
             </div>
           )}
         </div>

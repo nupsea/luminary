@@ -1246,6 +1246,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 initialSectionId={readSectionId}
                 annotations={docAnnotations ?? []}
                 highlightsVisible={highlightsVisible}
+                contentType={doc.content_type}
+                structureType={doc.structure_type}
               />
             )}
           </div>

@@ -97,6 +97,21 @@ def missing_model_from(exc: BaseException) -> str | None:
     return None
 
 
+def _local_model(settings: Settings) -> str:
+    """The on-device model to fall back to when a cloud call cannot be made.
+
+    Reads the model chosen in Settings, not the configured default, so going
+    offline does not silently change models underneath the user.
+    """
+    try:
+        from app.services.settings_service import get_local_chat_model  # noqa: PLC0415
+
+        chosen = get_local_chat_model()
+    except Exception:
+        chosen = settings.LITELLM_DEFAULT_MODEL
+    return chosen if chosen.startswith("ollama/") else f"ollama/{chosen}"
+
+
 def _is_offline_error(exc: BaseException) -> bool:
     if isinstance(exc, LLMUnreachableError):
         return True
@@ -240,9 +255,7 @@ class LLMService:
         if effective_model.startswith("ollama/"):
             return None
 
-        local_model = settings.LITELLM_DEFAULT_MODEL
-        if not local_model.startswith("ollama/"):
-            local_model = f"ollama/{local_model}"
+        local_model = _local_model(settings)
 
         retry = self._build_kwargs(
             local_model,
@@ -274,9 +287,7 @@ class LLMService:
         if await asyncio.to_thread(provider_reachable, effective_model):
             return effective_model, None, False
 
-        local_model = settings.LITELLM_DEFAULT_MODEL
-        if not local_model.startswith("ollama/"):
-            local_model = f"ollama/{local_model}"
+        local_model = _local_model(settings)
         logger.warning(
             "%s provider unreachable; routing to local model %s",
             effective_model,

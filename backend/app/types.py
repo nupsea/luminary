@@ -42,6 +42,9 @@ class ParsedDocument:
     # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
     # static fetch could not capture). Empty when extraction was clean.
     warnings: list[str] = field(default_factory=list)
+    # Layout discovered from the document's own markers: book|paper|script|chat.
+    # None when the parser that ran does not discover structure.
+    structure_type: str | None = None
 
 
 @dataclass

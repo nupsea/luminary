@@ -3,7 +3,7 @@
 Usage::
     # Standard eval (uses /search for retrieval quality, no LLM required)
     uv run python run_eval.py --dataset book
-    uv run python run_eval.py --dataset paper --backend-url http://localhost:8000
+    uv run python run_eval.py --dataset paper --backend-url http://localhost:7820
 
     # With LLM-based RAGAS scoring
     uv run python run_eval.py --dataset book --model ollama/mistral
@@ -20,6 +20,7 @@ compatibility with audit_golden.py and existing tests.
 """
 
 import argparse
+import os
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -50,8 +51,10 @@ from evals.lib.manifest import (  # noqa: E402
     ensure_ingested,
     ingest_document,
     is_document_alive,
+    BackendUnreachableError,
     load_manifest,
     lookup_document_by_filename,
+    require_backend,
     resolve_backend_base,
     save_manifest,
 )
@@ -375,7 +378,9 @@ __all__ = [
     "ingest_document",
     "is_document_alive",
     "load_golden",
+    "BackendUnreachableError",
     "load_manifest",
+    "require_backend",
     "lookup_document_by_filename",
     "post_qa",
     "print_table",
@@ -475,7 +480,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--backend-url",
-        default="http://localhost:8000",
+        default=os.environ.get("LUMINARY_BACKEND_URL", "http://localhost:7820"),
         dest="backend_url",
         help="Luminary backend URL",
     )
@@ -622,6 +627,10 @@ def main() -> None:
     manifest = load_manifest()
     source_to_doc_id: dict[str, str | None] = {}
     unique_sources = {row.get("source_file", "") for row in rows if row.get("source_file")}
+    if unique_sources:
+        # Only where it matters: resolution reconciles the committed manifest
+        # against the backend, so it must not run against one that is absent.
+        require_backend(args.backend_url)
     for src in unique_sources:
         doc_id = ensure_ingested(args.backend_url, src, manifest)
         source_to_doc_id[src] = doc_id
@@ -1012,4 +1021,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BackendUnreachableError as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None

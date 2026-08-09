@@ -285,33 +285,44 @@ export default function Learning() {
     setPage(1)
   }
 
-  // when arriving from a citation deep-link, open the referenced document
-  // then clear doc/section_id/page params so the Back button and next doc-open work correctly
+  // `doc` stays in the URL while the document is open so a reload returns to
+  // it. The other params are one-shot: snapshotted into state, then dropped.
   useEffect(() => {
-    if (docParam) {
-      // Snapshot deep-link params into state before clearing URL
-      const sectionId = searchParams.get("section_id") ?? undefined
-      const chunkId = searchParams.get("chunk_id") ?? undefined
-      const rawPage = searchParams.get("page")
-      const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
-      setSavedSectionId(sectionId)
-      setSavedChunkId(chunkId)
-      setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
-      setSavedSearch(searchParams.get("search") ?? undefined)
+    if (!docParam || docParam === activeDocumentId) return
+    const rawPage = searchParams.get("page")
+    const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
+    setSavedSectionId(searchParams.get("section_id") ?? undefined)
+    setSavedChunkId(searchParams.get("chunk_id") ?? undefined)
+    setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
+    setSavedSearch(searchParams.get("search") ?? undefined)
 
-      setActiveDocument(docParam)
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
-        next.delete("doc")
-        next.delete("section_id")
-        next.delete("chunk_id")
-        next.delete("page")
-        next.delete("search")
-        return next
-      }, { replace: true, state: routeLocation.state })
-    }
+    setActiveDocument(docParam)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete("section_id")
+      next.delete("chunk_id")
+      next.delete("page")
+      next.delete("search")
+      return next
+    }, { replace: true, state: routeLocation.state })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docParam])
+
+  // Mirror the open document into the URL, however it was opened. `replace`:
+  // the in-reader Back control, not history, returns to the list.
+  //
+  // Writes only. Clearing belongs to `returnToLibrary`: on mount this runs
+  // before `doc` is read into the store, where an unpopulated store is
+  // indistinguishable from a closed reader.
+  useEffect(() => {
+    if (!activeDocumentId || docParam === activeDocumentId) return
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set("doc", activeDocumentId)
+      return next
+    }, { replace: true, state: routeLocation.state })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocumentId])
 
   if (activeDocumentId) {
     const allKnownDocs = [
@@ -327,6 +338,11 @@ export default function Learning() {
       setSavedChunkId(undefined)
       setSavedPage(undefined)
       setSavedSearch(undefined)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("doc")
+        return next
+      }, { replace: true, state: routeLocation.state })
     }
 
     // Gate the reader on ingestion readiness. If we know the doc from the

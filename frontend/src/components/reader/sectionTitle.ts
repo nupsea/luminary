@@ -23,6 +23,16 @@ export function sectionTitle(section: {
   return heading || "(Untitled section)"
 }
 
+/**
+ * Whether the source authored a heading. `sectionTitle` always returns
+ * something for the contents panel, but only an authored heading may be drawn
+ * in the reading flow.
+ */
+export function hasAuthoredHeading(section: { heading?: string | null }): boolean {
+  const heading = (section.heading ?? "").trim()
+  return heading.length > 0 && looksLikeHeading(heading)
+}
+
 function derivedFromPreview(preview: string): string {
   const clean = preview.replace(/\s+/g, " ").trim()
   if (!clean) return ""

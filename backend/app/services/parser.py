@@ -16,6 +16,50 @@ from app.types import ParsedDocument, Section
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_WHITESPACE = re.compile(r"\s+")
 
+# An EPUB may pack many chapters into one document, so sections come from
+# headings rather than files.
+_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+# Block ends become paragraph breaks before tags are stripped; collapsing all
+# whitespace first would leave each chapter a single run-on line.
+_RE_EPUB_BLOCK_END = re.compile(
+    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article)\s*>|<br\s*/?>",
+    re.IGNORECASE,
+)
+_RE_BLANK_RUN = re.compile(r"\n{3,}")
+_RE_INLINE_SPACE = re.compile(r"[ \t\r\f\v]+")
+
+
+def _epub_text(fragment: str) -> str:
+    """HTML fragment to reading text, with paragraph breaks preserved."""
+    text = _RE_EPUB_BLOCK_END.sub("\n\n", fragment)
+    text = _RE_HTML_TAGS.sub(" ", text)
+    text = html.unescape(text)
+    text = _RE_INLINE_SPACE.sub(" ", text)
+    text = "\n".join(line.strip() for line in text.split("\n"))
+    return _RE_BLANK_RUN.sub("\n\n", text).strip()
+
+
+def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, str]]:
+    """Split one EPUB document into (heading, text) per heading tag it contains.
+
+    Text before the first heading is kept under `fallback_heading` so front
+    matter is not dropped. A document with no headings yields a single entry.
+    """
+    matches = list(_RE_EPUB_HEADING.finditer(raw_html))
+    if not matches:
+        return [(fallback_heading, _epub_text(raw_html))]
+
+    out: list[tuple[str, str]] = []
+    preamble = _epub_text(raw_html[: matches[0].start()])
+    if preamble:
+        out.append((fallback_heading, preamble))
+
+    for i, m in enumerate(matches):
+        heading = _epub_text(m.group(2)) or fallback_heading
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_html)
+        out.append((heading, _epub_text(raw_html[m.end() : end])))
+    return out
+
 # Kindle clippings separator
 _KINDLE_SEP = "=========="
 # Highlight/note header: "- Your Highlight on page X | Added on Date"
@@ -101,6 +145,27 @@ def _usable_heading(title: str, page, body_size: float, fallback_body: str) -> s
 
 # Kerning within a word is ~0 (often negative); a space glyph is 0.25-0.33em.
 _SPACE_GAP_EM = 0.2
+
+
+# Running headers and footers sit in the page margins and are short. Once
+# blocks become paragraphs, each would otherwise land in the prose as one.
+_MARGIN_FRACTION = 0.1
+_FURNITURE_MAX_CHARS = 80
+
+
+def _is_page_furniture(block: dict, page_height: float) -> bool:
+    bbox = block.get("bbox")
+    if not bbox or len(bbox) < 4:
+        return False
+    top, bottom = float(bbox[1]), float(bbox[3])
+    margin = page_height * _MARGIN_FRACTION
+    in_margin = bottom <= margin or top >= page_height - margin
+    if not in_margin:
+        return False
+    text = " ".join(
+        _join_spans(line.get("spans", [])) for line in block.get("lines", [])
+    ).strip()
+    return 0 < len(text) <= _FURNITURE_MAX_CHARS
 
 
 def _join_spans(spans: list[dict]) -> str:
@@ -237,9 +302,13 @@ class DocumentParser:
 
                 for pn in range(max(0, pg - 1), page_end):  # 0-based page index
                     page_obj = doc[pn]
+                    page_height = float(page_obj.rect.height) or 1.0
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
+                        if _is_page_furniture(block, page_height):
+                            continue
+                        block_lines: list[str] = []
                         for line in block.get("lines", []):
                             spans = line.get("spans", [])
                             if not spans:
@@ -247,9 +316,14 @@ class DocumentParser:
                             line_text = _join_spans(spans).strip()
                             if not line_text:
                                 continue
-                            texts.append(line_text)
+                            block_lines.append(line_text)
+                        if block_lines:
+                            texts.append("\n".join(block_lines))
 
-                text = "\n".join(texts).strip()
+                # Blocks are the layout's own paragraphs; a PDF text layer is
+                # hard-wrapped, so joining lines alone leaves no boundary and
+                # the reader renders a whole chapter as one block.
+                text = "\n\n".join(texts).strip()
                 raw_parts.append(text)
                 sections.append(
                     Section(
@@ -590,35 +664,20 @@ class DocumentParser:
                 continue
 
             raw_html = item.get_content().decode("utf-8", errors="replace")
-            # Extract heading from first h1/h2/h3 tag
-            heading_match = re.search(
-                r"<h[1-3][^>]*>(.*?)</h[1-3]>", raw_html, re.IGNORECASE | re.DOTALL
-            )
-            if heading_match:
-                heading_text = _RE_HTML_TAGS.sub("", heading_match.group(1))
-                heading_text = html.unescape(heading_text).strip()
-            else:
-                # Use the item name as a fallback heading
-                heading_text = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
-
-            # Strip all HTML tags from body
-            plain = _RE_HTML_TAGS.sub(" ", raw_html)
-            plain = html.unescape(plain)
-            plain = _RE_WHITESPACE.sub(" ", plain).strip()
-
-            if not plain or len(plain) < 50:
-                continue
-
-            sections.append(
-                Section(
-                    heading=heading_text,
-                    level=1,
-                    text=plain,
-                    page_start=0,
-                    page_end=0,
+            fallback = Path(item_name).stem.replace("_", " ").replace("-", " ").title()
+            for heading_text, plain in _split_epub_document(raw_html, fallback):
+                if len(plain) < 50:
+                    continue
+                sections.append(
+                    Section(
+                        heading=heading_text,
+                        level=1,
+                        text=plain,
+                        page_start=0,
+                        page_end=0,
+                    )
                 )
-            )
-            raw_parts.append(plain)
+                raw_parts.append(plain)
 
         if not sections:
             # Fallback: treat entire content as one section

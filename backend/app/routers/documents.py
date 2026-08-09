@@ -119,6 +119,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# DocumentDetail carries one preview per section, so the stored cap is far too
+# large for the wire. Set well above the two lines the section list renders,
+# because PredictPanel reads the first code fence from this field and the
+# Feynman dialog falls back to it. Reading text is never served here (I-29).
+WIRE_PREVIEW_CHARS = 1200
+
+
+def _wire_preview(preview: str | None) -> str:
+    return (preview or "")[:WIRE_PREVIEW_CHARS]
+
 _parser = DocumentParser()
 
 _ALLOWED_EXTENSIONS = frozenset(
@@ -895,6 +905,7 @@ async def get_document(document_id: str):
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        structure_type=doc.structure_type,
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
@@ -909,7 +920,7 @@ async def get_document(document_id: str):
                 page_start=s.page_start,
                 page_end=s.page_end,
                 section_order=s.section_order,
-                preview=s.preview,
+                preview=_wire_preview(s.preview),
                 admonition_type=s.admonition_type,
                 parent_section_id=s.parent_section_id,
             )

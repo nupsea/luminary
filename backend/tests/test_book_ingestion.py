@@ -251,3 +251,46 @@ async def test_book_without_headings_gets_single_section(test_db):
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None
     assert doc.chapter_count == 1
+
+
+@pytest.mark.anyio
+async def test_long_chapter_reads_back_verbatim(test_db):
+    """A chapter past the preview cap survives ingestion and reads back unchanged.
+
+    The reader used to fall through to chunk reassembly for exactly these
+    sections, which cuts mid-sentence and duplicates the overlap (I-29).
+    """
+    engine, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        await session.commit()
+
+    # Distinct paragraphs so a fabricated break is detectable, well past 10k chars.
+    paragraphs = [f"Paragraph {i} of the long chapter. " * 12 for i in range(40)]
+    long_chapter = "\n\n".join(paragraphs)
+    assert len(long_chapter) > 10000
+
+    state = _make_state(
+        doc_id,
+        [{"heading": "Chapter 1", "level": 1, "text": long_chapter,
+          "page_start": 0, "page_end": 0}],
+    )
+    await _chunk_book(state, state["parsed_document"], doc_id)
+
+    async with factory() as session:
+        section = (
+            await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id))
+        ).scalars().one()
+    assert section.body == long_chapter
+    assert len(section.preview) == 10000
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/sections/{doc_id}/content")
+
+    assert resp.status_code == 200
+    item = resp.json()[0]
+    assert item["content_source"] == "body"
+    assert item["content"] == long_chapter
+    assert item["content"].count("\n\n") == len(paragraphs) - 1

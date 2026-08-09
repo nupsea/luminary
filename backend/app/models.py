@@ -67,6 +67,9 @@ class DocumentModel(Base):
     # technical talk keeps its media type and sets this flag instead.
     # Null = never classified (pre-existing rows).
     is_technical: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Layout discovered while parsing: book|paper|script|chat. Combined with
+    # content_type to pick a reading profile. Null when undiscovered.
+    structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -81,6 +84,9 @@ class SectionModel(Base):
     page_start: Mapped[int] = mapped_column(Integer, default=0)
     page_end: Mapped[int] = mapped_column(Integer, default=0)
     section_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Reading text, uncapped (I-29); `preview` is a capped snippet.
+    # server_default keeps raw-SQL inserts valid and matches the migration.
+    body: Mapped[str] = mapped_column(Text, default="", server_default="")
     preview: Mapped[str] = mapped_column(Text, default="")
     # Tech section detection fields (set by tech_book/tech_article content type)
     admonition_type: Mapped[str | None] = mapped_column(String(20), nullable=True)

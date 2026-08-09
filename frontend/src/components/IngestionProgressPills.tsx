@@ -7,6 +7,7 @@ const STAGE_LABELS: Record<string, string> = {
   chunking: "Chunking text",
   embedding: "Generating embeddings",
   indexing: "Building keyword index",
+  summarizing: "Summarising sections",
   entity_extract: "Extracting entities",
   enriching: "Enriching content",
   complete: "Complete",

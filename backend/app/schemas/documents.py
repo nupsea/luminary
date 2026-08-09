@@ -90,6 +90,8 @@ class DocumentDetail(BaseModel):
     title: str
     format: str
     content_type: str
+    # Layout discovered while parsing: book|paper|script|chat.
+    structure_type: str | None = None
     word_count: int
     page_count: int
     stage: str

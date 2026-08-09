@@ -55,13 +55,36 @@ def save_manifest(manifest: dict[str, str]) -> None:
         json.dump(manifest, f, indent=2)
 
 
+class BackendUnreachableError(RuntimeError):
+    """The backend could not be contacted, so nothing about it is known."""
+
+
 def is_document_alive(backend_url: str, doc_id: str) -> bool:
-    """Return True iff GET /documents/{doc_id}/status returns 2xx."""
+    """Whether the backend still has this document.
+
+    Raises BackendUnreachableError when the backend cannot be reached. The
+    caller drops manifest entries for documents the backend says are gone, and
+    the manifest is committed: treating "cannot connect" as "not there" rewrote
+    the goldens on a transient failure, after which the run scored 0.00 rather
+    than reporting that nothing had been queried.
+    """
     try:
         resp = httpx.get(f"{backend_url}/documents/{doc_id}/status", timeout=10.0)
-        return 200 <= resp.status_code < 300
-    except Exception:
-        return False
+    except Exception as exc:
+        raise BackendUnreachableError(f"{backend_url} is not reachable: {exc}") from exc
+    return 200 <= resp.status_code < 300
+
+
+def require_backend(backend_url: str) -> None:
+    """Abort before a run rather than scoring an unreachable backend as 0.00."""
+    try:
+        resp = httpx.get(f"{backend_url}/health", timeout=10.0)
+        resp.raise_for_status()
+    except Exception as exc:
+        raise BackendUnreachableError(
+            f"No backend at {backend_url}: {exc}\n"
+            "Start it with `make dev`, or pass --backend-url."
+        ) from exc
 
 
 def lookup_document_by_filename(backend_url: str, source_file: str) -> str | None:
