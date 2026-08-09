@@ -235,3 +235,30 @@ def test_audit_main_returns_one_when_a_file_is_bad(tmp_path, monkeypatch):
     monkeypatch.setattr(loader_mod, "GOLDEN_DIR", tmp_path)
 
     assert audit_mod.main() == 1
+
+
+class TestBackendReachability:
+    """The golden manifest is committed, so an unreachable backend must not
+    rewrite it. Treating "cannot connect" as "document is gone" dropped entries
+    and the run then scored 0.00 instead of reporting that it queried nothing.
+    """
+
+    def test_unreachable_backend_raises_rather_than_reporting_absence(self):
+        from evals.lib.manifest import BackendUnreachableError, is_document_alive
+
+        with pytest.raises(BackendUnreachableError):
+            is_document_alive("http://127.0.0.1:9", "any-doc-id")
+
+    def test_require_backend_aborts_before_a_run(self):
+        from evals.lib.manifest import BackendUnreachableError, require_backend
+
+        with pytest.raises(BackendUnreachableError):
+            require_backend("http://127.0.0.1:9")
+
+    def test_ensure_ingested_leaves_the_manifest_alone_when_unreachable(self):
+        from evals.lib.manifest import BackendUnreachableError, ensure_ingested
+
+        manifest = {"DATA/books/x.txt": "some-doc-id"}
+        with pytest.raises(BackendUnreachableError):
+            ensure_ingested("http://127.0.0.1:9", "DATA/books/x.txt", manifest)
+        assert manifest == {"DATA/books/x.txt": "some-doc-id"}
