@@ -245,11 +245,12 @@ OLLAMA_BIN_DIR="$(dirname "$OLLAMA_BIN")"
 # ---------------------------------------------------------------------------
 _step "Sizing for this machine"
 
+# Sized on memory: each slot costs a full KV cache, and below 24GB the second
+# competes with the 7B vision model. 'performance' is never auto-selected.
 MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 if [ -z "$PROFILE" ]; then
-    if   [ "$MEM_GB" -lt 12 ]; then PROFILE="public"
-    elif [ "$MEM_GB" -lt 24 ]; then PROFILE="standard"
-    else                            PROFILE="performance"
+    if [ "$MEM_GB" -lt 24 ]; then PROFILE="public"
+    else                          PROFILE="standard"
     fi
 fi
 case "$PROFILE" in
@@ -293,6 +294,7 @@ if [ -n "$SRC" ]; then
     sed -e "s|@@DATA_DIR@@|$DATA_DIR|g" \
         -e "s|@@LUMINARY_MODE@@|public|g" \
         -e "s|@@VISION_CONCURRENCY@@|$VISION_CONCURRENCY|g" \
+        -e "s|@@OLLAMA_NUM_PARALLEL@@|$NUM_PARALLEL|g" \
         "$SRC" > "$ENV_FILE"
 else
     cat > "$ENV_FILE" <<EOF
@@ -302,6 +304,7 @@ LOG_LEVEL=INFO
 OLLAMA_URL=http://127.0.0.1:11434
 LITELLM_DEFAULT_MODEL=ollama/$CHAT_MODEL
 ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY
+OLLAMA_NUM_PARALLEL=$NUM_PARALLEL
 GLINER_ENABLED=true
 PHOENIX_ENABLED=false
 EOF

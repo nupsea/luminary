@@ -1,12 +1,16 @@
 import functools
 import os
+import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from app.paths import app_root, is_packaged
+
+# An `.env.example` placeholder that no install script rendered.
+_PLACEHOLDER_RE = re.compile(r"@@[A-Z0-9_]+@@")
 
 
 def _env_files() -> tuple[str, ...]:
@@ -58,6 +62,10 @@ class Settings(BaseSettings):
     # memory only helps if it stays one value -- per-call windows cost far more
     # in reloads than they save in KV cache.
     OLLAMA_NUM_CTX: int = 8192
+    # Also caps the enrichment semaphores: past the slot count calls queue in
+    # Ollama rather than overlap (I-31). Costs one KV cache per slot, so 1 is
+    # the floor for an unmeasured machine; installers raise it from host RAM.
+    OLLAMA_NUM_PARALLEL: int = 1
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept
@@ -145,12 +153,37 @@ class Settings(BaseSettings):
     # but anything shorter is almost always an extraction artifact.
     AUTO_TAG_MIN_SLUG_LENGTH: int = 2
     WEB_SEARCH_PROVIDER: str = "none"  # "none" | "brave" | "tavily" | "duckduckgo"
+    # One LLM call per section, so uncapped scales with the book (DDIA's 200
+    # sections = ~50min). 0 means uncapped, not disabled.
+    WEB_REFS_MAX_SECTIONS: int = 40
     BRAVE_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
     ADMIN_KEY: str = ""
     PHOENIX_GRPC_PORT: int = 4317
 
-    model_config = {"env_file": _env_files(), "env_file_encoding": "utf-8"}
+    # extra="ignore": `.env` outlives the binary reading it. The "forbid"
+    # default makes a key from another version a refuse-to-start.
+    model_config = {
+        "env_file": _env_files(),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unrendered_placeholders(cls, values: Any) -> Any:
+        """Treat an unrendered `@@NAME@@` template value as unset.
+
+        Its placeholders land on typed fields, so a hand-copied `.env.example`
+        would otherwise refuse to start. A genuine typo still fails.
+        """
+        if not isinstance(values, dict):
+            return values
+        return {
+            k: v
+            for k, v in values.items()
+            if not (isinstance(v, str) and _PLACEHOLDER_RE.fullmatch(v.strip()))
+        }
 
     @field_validator("DATA_DIR")
     @classmethod

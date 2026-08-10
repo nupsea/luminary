@@ -153,19 +153,47 @@ fi
 
 # ---------------------------------------------------------------------------
 # Performance profile — sizes Ollama residency/parallelism + vision concurrency.
-# public=1/1/1 (~8GB), standard=2/2/2 (~16GB), performance=2/4/4 (bigger box).
+# public=1/1/1 (under 24GB), standard=2/2/2 (24GB+), performance=2/4/4 (opt-in).
 # ---------------------------------------------------------------------------
+# Physical RAM in GB, 0 when unreadable. The profile is a memory decision, so
+# an unknown box must not be guessed into "standard".
+_mem_gb() {
+    if [ "$OS" = "Darwin" ]; then
+        _b="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+        echo $(( _b / 1073741824 ))
+    elif [ -r /proc/meminfo ]; then
+        _k="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+        echo $(( _k / 1048576 ))
+    else
+        echo 0
+    fi
+}
+
+_default_profile() {
+    _gb="$(_mem_gb)"
+    if   [ "$_gb" -eq 0 ];  then echo "public"      # unknown: assume small
+    elif [ "$_gb" -lt 24 ]; then echo "public"
+    else                         echo "standard"
+    fi
+}
+
 PROFILE="${LUMINARY_PROFILE:-}"
-if [ -z "$PROFILE" ] && [ -t 0 ]; then
-    printf '\033[0;36m[install]\033[0m Performance profile? [1] public/8GB  [2] standard/16GB (default)  [3] performance : '
-    read -r _p || _p=""
-    case "$_p" in
-        1|public)      PROFILE="public" ;;
-        3|performance) PROFILE="performance" ;;
-        *)             PROFILE="standard" ;;
-    esac
+if [ -z "$PROFILE" ]; then
+    _suggested="$(_default_profile)"
+    if [ -t 0 ]; then
+        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/8-16GB  [2] standard/24GB+  [3] performance  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
+        read -r _p || _p=""
+        case "$_p" in
+            1|public)      PROFILE="public" ;;
+            2|standard)    PROFILE="standard" ;;
+            3|performance) PROFILE="performance" ;;
+            *)             PROFILE="$_suggested" ;;
+        esac
+    else
+        # Non-interactive (CI, curl | sh): size it rather than assuming.
+        PROFILE="$_suggested"
+    fi
 fi
-PROFILE="${PROFILE:-standard}"
 case "$PROFILE" in
     public)      OLLAMA_MAX_LOADED_MODELS=1; OLLAMA_NUM_PARALLEL=1; VISION_CONCURRENCY=1 ;;
     performance) OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
@@ -174,14 +202,20 @@ esac
 export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL
 _info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
 
-# Persist the app-side knob so the backend (which reads backend/.env) picks it up.
+# Persist the app-side knobs so the backend (which reads backend/.env) picks them
+# up. OLLAMA_NUM_PARALLEL goes in too, not just the server env: the backend
+# sizes its enrichment concurrency from it.
 ENV_FILE="$REPO_ROOT/backend/.env"
 touch "$ENV_FILE"
-if grep -q '^ENRICHMENT_VISION_CONCURRENCY=' "$ENV_FILE" 2>/dev/null; then
-    _tmp="$(mktemp)"
-    grep -v '^ENRICHMENT_VISION_CONCURRENCY=' "$ENV_FILE" > "$_tmp" && mv "$_tmp" "$ENV_FILE"
-fi
-printf 'ENRICHMENT_VISION_CONCURRENCY=%s\n' "$VISION_CONCURRENCY" >> "$ENV_FILE"
+_upsert_env() {
+    if grep -q "^$1=" "$ENV_FILE" 2>/dev/null; then
+        _tmp="$(mktemp)"
+        grep -v "^$1=" "$ENV_FILE" > "$_tmp" && mv "$_tmp" "$ENV_FILE"
+    fi
+    printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
+}
+_upsert_env ENRICHMENT_VISION_CONCURRENCY "$VISION_CONCURRENCY"
+_upsert_env OLLAMA_NUM_PARALLEL "$OLLAMA_NUM_PARALLEL"
 
 # Start ollama if it's not already serving.
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then

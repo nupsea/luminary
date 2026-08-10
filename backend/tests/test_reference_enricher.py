@@ -21,7 +21,21 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, SectionSummaryModel, WebReferenceModel
-from app.services.reference_enricher import ReferenceEnricherService, sort_by_quality
+from app.services.reference_enricher import (
+    _SYSTEM_PROMPT,
+    ReferenceEnricherService,
+    dedupe_by_url,
+    select_sections,
+    sort_by_quality,
+)
+
+
+class _FakeSummary:
+    """Stands in for SectionSummaryModel in the pure selection tests."""
+
+    def __init__(self, unit_index: int, content: str) -> None:
+        self.unit_index = unit_index
+        self.content = content
 
 # Shared fixture
 
@@ -359,3 +373,94 @@ async def test_get_document_references_returns_404_for_unknown_doc(test_db):
         resp = await client.get("/references/documents/nonexistent-doc-id")
 
     assert resp.status_code == 404
+
+
+# Cost control: one LLM call per section makes coverage the cost driver.
+
+
+def test_dedupe_by_url_keeps_first_term_that_claimed_a_source():
+    """One source restated under several terms collapses to one reference."""
+    refs = [
+        {"term": "DynamoDB", "url": "https://docs.aws.amazon.com/x/"},
+        {"term": "version vectors", "url": "https://docs.aws.amazon.com/x"},
+        {"term": "quorum", "url": "https://jepsen.io/consistency"},
+    ]
+    out = dedupe_by_url(refs)
+    assert [r["term"] for r in out] == ["DynamoDB", "quorum"]
+
+
+def test_dedupe_by_url_drops_urlless_entries():
+    assert dedupe_by_url([{"term": "x"}, {"term": "y", "url": ""}]) == []
+
+
+def test_select_sections_returns_document_order_when_under_the_cap():
+    summaries = [_FakeSummary(unit_index=i, content="x" * (10 - i)) for i in range(3)]
+    assert [s.unit_index for s in select_sections(summaries, 40)] == [0, 1, 2]
+
+
+def test_select_sections_keeps_the_longest_then_restores_document_order():
+    """The budget goes to the most substantial sections, not the earliest ones."""
+    summaries = [
+        _FakeSummary(unit_index=0, content="short"),
+        _FakeSummary(unit_index=1, content="x" * 500),
+        _FakeSummary(unit_index=2, content="tiny"),
+        _FakeSummary(unit_index=3, content="y" * 400),
+    ]
+    chosen = select_sections(summaries, 2)
+    assert [s.unit_index for s in chosen] == [1, 3]
+
+
+def test_select_sections_is_stable_for_equal_length_summaries():
+    summaries = [_FakeSummary(unit_index=i, content="same") for i in range(5)]
+    assert [s.unit_index for s in select_sections(summaries, 3)] == [0, 1, 2]
+
+
+def test_system_prompt_does_not_ask_for_an_excerpt():
+    """The model has not fetched the page, so a quoted excerpt is invented text
+    -- and it was the largest field in a response that is pure generation cost."""
+    assert "excerpt" not in _SYSTEM_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+async def test_enrich_stops_at_web_refs_max_sections(test_db, monkeypatch):
+    """A book with more sections than the cap costs exactly cap-many LLM calls."""
+    _engine, factory, _tmp = test_db
+    monkeypatch.setenv("WEB_REFS_MAX_SECTIONS", "3")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+    for i in range(10):
+        async with factory() as session:
+            session.add(
+                SectionSummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    section_id=str(uuid.uuid4()),
+                    heading=f"Chapter {i}",
+                    content=f"Section {i} discusses replication and partitioning at length.",
+                    unit_index=i,
+                )
+            )
+            await session.commit()
+
+    mock = AsyncMock(
+        return_value=_make_mock_llm_response(
+            [{"term": "t", "url": "https://example.com/a", "source_quality": "wiki"}]
+        )
+    )
+    with patch("app.services.llm.litellm.acompletion", mock):
+        await ReferenceEnricherService().enrich(doc_id)
+
+    assert mock.await_count == 3, f"expected 3 LLM calls, got {mock.await_count}"
+
+    async with factory() as session:
+        rows = (
+            await session.execute(
+                select(WebReferenceModel).where(WebReferenceModel.document_id == doc_id)
+            )
+        ).scalars().all()
+    assert len({r.section_id for r in rows}) == 3
+    get_settings.cache_clear()

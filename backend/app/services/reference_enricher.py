@@ -35,12 +35,16 @@ _SOURCE_QUALITY_RANK: dict[str, int] = {
     "unknown": 6,
 }
 
-_MAX_REFS_PER_SECTION = 5
+_MAX_REFS_PER_SECTION = 3
 
+# No `excerpt`: generation is the whole cost here, and it was the largest field
+# -- an invented quotation for a page the model never fetched.
 _SYSTEM_PROMPT = (
     "You are a research librarian with expertise across all domains. "
     "For each key concept or term found in the provided section summary, output a JSON array "
-    "of up to 5 canonical reference objects from the most authoritative sources for that domain. "
+    f"of up to {_MAX_REFS_PER_SECTION} canonical reference objects from the most authoritative "
+    "sources for that domain. "
+    "Give each object a different URL -- do not repeat one source across several terms. "
     "Domain guidance: philosophy/ethics -> Stanford Encyclopedia of Philosophy, PhilPapers; "
     "science/medicine -> peer-reviewed journals, PubMed, authoritative textbook publishers; "
     "history/humanities -> encyclopedias, academic publishers (OUP, Cambridge); "
@@ -49,12 +53,18 @@ _SYSTEM_PROMPT = (
     "general -> Wikipedia or trusted encyclopedias, then tutorials, then blogs. "
     "Order them: domain-specific authoritative source first, then encyclopedia/wiki, "
     "then tutorial or explainer, then blog. "
+    "Prefer a stable root or section URL you are confident exists over a deep link you are "
+    "guessing at. "
     "For each reference use this exact JSON shape: "
-    '{"term": "...", "url": "...", "title": "...", "excerpt": "...", '
+    '{"term": "...", "url": "...", "title": "...", '
     '"source_quality": "official_docs|spec|academic|encyclopedia|wiki|tutorial|blog|unknown"}. '
     "Return only the JSON array with no prose or markdown fences outside the array. "
     "If the section contains no concepts or terms worth referencing, return an empty array []."
 )
+
+# Generous: nobody waits on this, and a tight timeout only fails the call while
+# queued behind interactive work, restarting the handler from section one.
+_EXTRACT_TIMEOUT_S = 600.0
 
 
 def sort_by_quality(refs: list[dict]) -> list[dict]:
@@ -68,6 +78,36 @@ def sort_by_quality(refs: list[dict]) -> list[dict]:
     )
 
 
+def dedupe_by_url(refs: list[dict]) -> list[dict]:
+    """Drop repeats of a URL already claimed by an earlier term.
+
+    Pure function. A small model routinely answers one section's terms with one
+    source restated several times, displacing real sources before the truncate.
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for ref in refs:
+        url = str(ref.get("url", "")).rstrip("/").lower()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append(ref)
+    return out
+
+
+def select_sections(summaries: list, limit: int) -> list:
+    """The `limit` most substantial summaries, returned in document order.
+
+    One LLM call per section, so a long book is sampled rather than exhausted.
+    Longest-summary-first beats document order, which would spend the budget on
+    the preface. Ties break on unit_index so reruns pick the same sections.
+    """
+    if limit <= 0 or len(summaries) <= limit:
+        return sorted(summaries, key=lambda s: s.unit_index)
+    ranked = sorted(summaries, key=lambda s: (-len(s.content or ""), s.unit_index))
+    return sorted(ranked[:limit], key=lambda s: s.unit_index)
+
+
 async def _extract_references(section_content: str) -> list[dict]:
     """Call the LLM to extract canonical references from a section summary.
 
@@ -76,7 +116,8 @@ async def _extract_references(section_content: str) -> list[dict]:
     """
     user_prompt = (
         f"Section summary:\n{section_content}\n\n"
-        "Extract up to 5 key concepts or terms and for each provide a canonical reference."
+        f"Extract up to {_MAX_REFS_PER_SECTION} key concepts or terms and for each provide "
+        "a canonical reference."
     )
     from app.services.enrichment_concurrency import get_enrichment_llm_semaphore  # noqa: PLC0415
 
@@ -87,7 +128,7 @@ async def _extract_references(section_content: str) -> list[dict]:
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
-            timeout=180.0,
+            timeout=_EXTRACT_TIMEOUT_S,
             background=True,
         )
     refs = [r for r in parse_llm_json_array(raw) if isinstance(r, dict) and r.get("url")]
@@ -129,6 +170,17 @@ class ReferenceEnricherService:
             )
             return 0
 
+        total = len(summaries)
+        summaries = select_sections(summaries, settings.WEB_REFS_MAX_SECTIONS)
+        if len(summaries) < total:
+            logger.info(
+                "reference_enricher: doc=%s has %d sections, covering the %d most "
+                "substantial (WEB_REFS_MAX_SECTIONS)",
+                document_id,
+                total,
+                len(summaries),
+            )
+
         total_inserted = 0
 
         for summary in summaries:
@@ -159,6 +211,7 @@ class ReferenceEnricherService:
                 )
                 continue
 
+            refs = dedupe_by_url(refs)
             if not refs:
                 continue
 
@@ -254,6 +307,7 @@ class ReferenceEnricherService:
         except LLMUnavailableError as exc:
             raise DependencyUnavailable(get_llm_error_message()) from exc
 
+        refs = dedupe_by_url(refs)
         if not refs:
             return 0
 

@@ -100,7 +100,8 @@ def test_prefilter_sparse_lineart_not_decorative() -> None:
 
 
 async def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
-    """_get_enrich_sem sizes the shared semaphore from ENRICHMENT_VISION_CONCURRENCY."""
+    """_get_enrich_sem sizes the shared semaphore from ENRICHMENT_VISION_CONCURRENCY,
+    within the slots Ollama actually has to serve it."""
     import weakref
 
     import app.services.image_enricher as ie
@@ -108,6 +109,7 @@ async def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
     monkeypatch.setattr(ie, "_ENRICH_SEMS", weakref.WeakKeyDictionary())
     fake_settings = MagicMock()
     fake_settings.ENRICHMENT_VISION_CONCURRENCY = 3
+    fake_settings.OLLAMA_NUM_PARALLEL = 3
     monkeypatch.setattr(ie._config_module, "get_settings", lambda: fake_settings)
 
     sem = ie._get_enrich_sem()
@@ -1016,3 +1018,26 @@ async def test_load_image_contexts_fuses_all_sources(doc_and_image, session_fact
         assert "Figure 1: The model architecture." in contexts[image_id]
         assert "encoder is composed" in contexts[image_id]
         assert "Title: Test Doc" in contexts[image_id]
+
+
+def test_vision_concurrency_is_capped_at_the_ollama_slot_count(monkeypatch):
+    """Vision calls past the slot count queue rather than overlap, against a
+    real 300s ceiling."""
+    from app.config import get_settings
+    from app.services import image_enricher as ie
+
+    async def _width(vision: int, slots: int) -> int:
+        monkeypatch.setenv("ENRICHMENT_VISION_CONCURRENCY", str(vision))
+        monkeypatch.setenv("OLLAMA_NUM_PARALLEL", str(slots))
+        get_settings.cache_clear()
+        ie._ENRICH_SEMS.clear()
+        return ie._get_enrich_sem()._value
+
+    try:
+        assert asyncio.run(_width(4, 1)) == 1
+        assert asyncio.run(_width(4, 2)) == 2
+        assert asyncio.run(_width(1, 4)) == 1
+        assert asyncio.run(_width(2, 2)) == 2
+    finally:
+        ie._ENRICH_SEMS.clear()
+        get_settings.cache_clear()

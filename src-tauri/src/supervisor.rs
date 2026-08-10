@@ -291,6 +291,72 @@ fn stream_output(child: &mut Child, tag: &'static str) -> Arc<Mutex<VecDeque<Str
     tail
 }
 
+/// Read one key out of the library's `.env`, the same file the backend reads.
+///
+/// Ollama is spawned before the backend exists, so this cannot come from Python.
+/// Minimal on purpose; anything unparsed falls back to the caller's default.
+fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(data_dir.join(".env")).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        // Skipped, not end-of-file: `?` here would ignore every later key.
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        if k.trim() != key {
+            continue;
+        }
+        let v = v.trim();
+        let v = v
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(v);
+        let v = v
+            .strip_prefix('\'')
+            .and_then(|s| s.strip_suffix('\''))
+            .unwrap_or(v);
+        return Some(v.to_string());
+    }
+    None
+}
+
+/// Physical RAM in GB, or `None` if the kernel will not say.
+fn total_memory_gb() -> Option<u64> {
+    let mut bytes: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    let name = c"hw.memsize";
+    // SAFETY: a read-only sysctl into a stack u64 whose size we pass by value.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            (&mut bytes as *mut u64).cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (rc == 0 && bytes > 0).then_some(bytes / 1_073_741_824)
+}
+
+/// How many requests the bundled Ollama serves concurrently (I-31).
+///
+/// `.env` wins; otherwise sized from RAM, since a drag-installed DMG has no
+/// install step to ask in. Each slot costs a full KV cache, so under 24GB gets
+/// one. The auto path never exceeds 2 -- past that the win is bandwidth-bound.
+fn ollama_num_parallel(data_dir: &Path) -> u32 {
+    if let Some(n) = env_file_value(data_dir, "OLLAMA_NUM_PARALLEL").and_then(|v| v.parse().ok()) {
+        return u32::clamp(n, 1, 8);
+    }
+    match total_memory_gb() {
+        Some(gb) if gb >= 24 => 2,
+        _ => 1,
+    }
+}
+
 pub fn spawn_ollama(
     sup: &Supervisor,
     stage: &Path,
@@ -312,6 +378,10 @@ pub fn spawn_ollama(
         // The runner libs sit beside the binary in the official tarball.
         .env("OLLAMA_LIBRARY_PATH", stage.join("ollama"))
         .env("OLLAMA_KEEP_ALIVE", "30m")
+        .env(
+            "OLLAMA_NUM_PARALLEL",
+            ollama_num_parallel(data_dir).to_string(),
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Its model runners are its own children; a new group lets us take the
@@ -368,6 +438,12 @@ pub fn spawn_backend(
         .env("DATA_DIR", data_dir)
         .env("LUMINARY_MODE", "public")
         .env("OLLAMA_URL", format!("http://127.0.0.1:{ollama_port}"))
+        // Must match spawn_ollama: the backend sizes its semaphore from this,
+        // and a narrower one would leave the server's extra slots idle.
+        .env(
+            "OLLAMA_NUM_PARALLEL",
+            ollama_num_parallel(data_dir).to_string(),
+        )
         .env("PATH", bundled_path(stage))
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
@@ -447,6 +523,63 @@ mod tests {
             &r,
             Some("/Applications/Ollama.app/Contents/MacOS/ollama")
         ));
+    }
+
+    #[test]
+    fn the_library_env_overrides_the_memory_sized_default() {
+        let dir = std::env::temp_dir().join(format!("luminary-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join(".env"), b"OLLAMA_NUM_PARALLEL=2\n").unwrap();
+        assert_eq!(ollama_num_parallel(&dir), 2);
+
+        // Quoted, exported, and above anything the auto path would ever pick.
+        std::fs::write(dir.join(".env"), b"export OLLAMA_NUM_PARALLEL=\"4\"\n").unwrap();
+        assert_eq!(ollama_num_parallel(&dir), 4);
+        std::fs::write(dir.join(".env"), b"OLLAMA_NUM_PARALLEL=999\n").unwrap();
+        assert_eq!(ollama_num_parallel(&dir), 8);
+
+        // An explicit 1 pins a big machine down to one slot.
+        std::fs::write(dir.join(".env"), b"OLLAMA_NUM_PARALLEL=1\n").unwrap();
+        assert_eq!(ollama_num_parallel(&dir), 1);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unparseable_env_falls_back_to_the_memory_sized_default() {
+        let dir = std::env::temp_dir().join(format!("luminary-envbad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let auto = ollama_num_parallel(&dir); // no .env at all
+
+        for bad in [
+            &b"# comment\nVISION_MODEL=ollama/qwen2.5vl:7b\n"[..],
+            &b"OLLAMA_NUM_PARALLEL=lots\n"[..],
+            &b"OLLAMA_NUM_PARALLEL=-1\n"[..],
+        ] {
+            std::fs::write(dir.join(".env"), bad).unwrap();
+            assert_eq!(ollama_num_parallel(&dir), auto);
+        }
+
+        // A key after a malformed line is still found: that line is skipped,
+        // not treated as the end of the file.
+        std::fs::write(dir.join(".env"), b"GARBAGE\nOLLAMA_NUM_PARALLEL=3\n").unwrap();
+        assert_eq!(ollama_num_parallel(&dir), 3);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn memory_sizing_never_opts_a_small_machine_into_a_second_kv_cache() {
+        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        assert!(gb >= 4, "implausible RAM reading: {gb}GB");
+
+        let dir = std::env::temp_dir().join(format!("luminary-envmem-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The auto path is a two-way choice and never exceeds 2; more than that
+        // is opt-in through .env only.
+        assert_eq!(ollama_num_parallel(&dir), if gb >= 24 { 2 } else { 1 });
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
