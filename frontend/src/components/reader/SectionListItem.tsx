@@ -6,14 +6,15 @@ import { cn } from "@/lib/utils"
 import { ChapterProgressRing } from "./ChapterGoalsPanel"
 import { SectionPreviewWithHighlights } from "./HighlightsPanel"
 import { formatMmSs, parseAudioStartTime } from "./mediaUtils"
-import { PredictPanel, hasCodeFence } from "./PredictPanel"
+import { PredictPanel } from "./PredictPanel"
+import { hasCodeFence } from "./predictUtils"
 import type { components } from "@/types/api"
 import type { AnnotationItem, SectionItem } from "./types"
 import { sectionTitle } from "./sectionTitle"
 
 export type SectionHeatmapItem = components["schemas"]["SectionHeatmapItem"]
 
-export function fragilityBorderClass(score: number | null): string {
+function fragilityBorderClass(score: number | null): string {
   if (score === null) return ""
   if (score <= 0.3) return "border-l-4 border-l-green-500"
   if (score <= 0.6) return "border-l-4 border-l-yellow-500"

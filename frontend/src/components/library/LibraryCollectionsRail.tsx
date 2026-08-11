@@ -2,7 +2,8 @@ import { ExternalLink, Plus } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import { CollectionTree, DOC_DRAG_MIME } from "@/components/CollectionTree"
+import { CollectionTree } from "@/components/CollectionTree"
+import { DOC_DRAG_MIME } from "@/lib/collectionUtils"
 import { CreateCollectionDialog } from "@/components/CreateCollectionDialog"
 
 interface LibraryCollectionsRailProps {

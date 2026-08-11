@@ -183,7 +183,7 @@ export default function Quality() {
 
   function handleTabChange(tab: TabId) {
     setActiveTab(tab)
-    window.location.hash = tab
+    window.location.assign(`#${tab}`)
   }
 
   // Datasets query

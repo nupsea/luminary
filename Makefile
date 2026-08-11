@@ -146,9 +146,11 @@ stop:
 		echo "Stopped."; \
 	fi
 
+# The frontend typecheck needs `tsc -b`: tsconfig.json is solution-style
+# ("files": []), so a bare `tsc --noEmit` resolves zero files and always passes.
 lint:
 	cd backend && uv run ruff check .
-	cd frontend && npx tsc --noEmit
+	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
@@ -282,7 +284,7 @@ endif
 	python3 scripts/check_manifest_coverage.py
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
-	cd frontend && npx tsc --noEmit
+	cd frontend && npx tsc -b --noEmit
 	@echo "CI passed."
 
 regen-api-types:

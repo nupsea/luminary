@@ -27,6 +27,21 @@ interface LibraryTableProps {
   onRetry: () => void
 }
 
+function SortIcon({
+  col,
+  sortCol,
+  sortDir,
+}: {
+  col: TableSortCol
+  sortCol: TableSortCol | null
+  sortDir: "asc" | "desc"
+}) {
+  if (sortCol !== col) return <ChevronsUpDown size={12} className="ml-1 inline text-muted-foreground/50" />
+  return sortDir === "asc"
+    ? <ChevronUp size={12} className="ml-1 inline text-foreground" />
+    : <ChevronDown size={12} className="ml-1 inline text-foreground" />
+}
+
 export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }: LibraryTableProps) {
   const [sortCol, setSortCol] = useState<TableSortCol | null>(null)
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
@@ -38,13 +53,6 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
       setSortCol(col)
       setSortDir("asc")
     }
-  }
-
-  function SortIcon({ col }: { col: TableSortCol }) {
-    if (sortCol !== col) return <ChevronsUpDown size={12} className="ml-1 inline text-muted-foreground/50" />
-    return sortDir === "asc"
-      ? <ChevronUp size={12} className="ml-1 inline text-foreground" />
-      : <ChevronDown size={12} className="ml-1 inline text-foreground" />
   }
 
   const sorted = [...items].sort((a, b) => {
@@ -78,7 +86,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
               className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               Title
-              <SortIcon col="title" />
+              <SortIcon col="title" sortCol={sortCol} sortDir={sortDir} />
             </button>
           </TableHead>
           <TableHead>Content Type</TableHead>
@@ -89,7 +97,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
               className="flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               Ingested At
-              <SortIcon col="created_at" />
+              <SortIcon col="created_at" sortCol={sortCol} sortDir={sortDir} />
             </button>
           </TableHead>
           <TableHead className="text-right">Chunks</TableHead>

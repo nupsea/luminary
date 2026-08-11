@@ -1,10 +1,10 @@
 /**
  * Vitest unit tests for ClozeCard parsing logic
- * Tests the pure `parseClozeSegments` function exported from ClozeCard.tsx.
+ * Tests the pure `parseClozeSegments` function from @/lib/clozeUtils.
  */
 
 import { describe, expect, it } from "vitest"
-import { parseClozeSegments } from "./ClozeCard"
+import { parseClozeSegments } from "@/lib/clozeUtils"
 
 describe("parseClozeSegments", () => {
   it("parses two blanks correctly", () => {

@@ -31,18 +31,14 @@ import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { useAppStore } from "@/store"
 import type { CollectionTreeItem } from "@/lib/collectionUtils"
-import { flattenCollectionTree } from "@/lib/collectionUtils"
+import { NOTE_DRAG_MIME } from "@/lib/collectionUtils"
 import { CollectionHealthPanel } from "@/components/CollectionHealthPanel"
 
 // Re-export for consumers that only need the type.
 export type { CollectionTreeItem }
-export { flattenCollectionTree }
 
 export type CollectionTreeContains = "document" | "note"
 export type CollectionMemberType = "document" | "note"
-
-export const NOTE_DRAG_MIME = "text/plain"
-export const DOC_DRAG_MIME = "application/x-luminary-doc-id"
 
 const MEMBER_LIST_QUERY: Record<CollectionMemberType, string> = {
   note: "notes",

@@ -44,6 +44,7 @@ import type { Flashcard } from "@/lib/studyApi"
 import {
   type PrepareStudySessionOptions,
   type PreparedStudySessionOutcome,
+  type StudyFilters,
   type StudyMode,
   prepareSectionStudyFromCards,
   prepareStudySession,
@@ -176,14 +177,9 @@ export default function Study() {
     queryFn: fetchDocList,
   })
 
-  type StudyFiltersLike = {
-    tag?: string
-    document_ids?: string[]
-    note_ids?: string[]
-  }
   const startStudy = async (
     mode: StudyMode,
-    filters: StudyFiltersLike | null,
+    filters: StudyFilters | null,
     resumeId: string | null,
   ) => {
     // Guard: if we are already preparing or in a ready state, ignore the
@@ -216,12 +212,12 @@ export default function Study() {
     }
   }
 
-  const handleStartFlashcard = (filters?: StudyFiltersLike, resumeId?: string) => {
+  const handleStartFlashcard = (filters?: StudyFilters, resumeId?: string) => {
     void startStudy("flashcard", filters ?? null, resumeId ?? null)
   }
 
   const handleStartTeachback = (
-    filters?: StudyFiltersLike,
+    filters?: StudyFilters,
     resumeId?: string,
   ) => {
     void startStudy("teachback", filters ?? null, resumeId ?? null)
@@ -338,7 +334,7 @@ export default function Study() {
 
   // Walk the nested collection tree to find a name by id.
   const findCollectionName = (
-    items: any[],
+    items: CollectionNode[],
     id: string | null,
   ): string | null => {
     if (!id) return null
@@ -353,7 +349,7 @@ export default function Study() {
   }
 
   const activeDocTitle = effectiveDoc?.title ?? null
-  const activeCollectionName = findCollectionName(collections, activeCollectionId)
+  const activeCollectionName = findCollectionName(collections as CollectionNode[], activeCollectionId)
   const subjectLabel =
     activeCollectionName || activeDocTitle || null
 
@@ -537,8 +533,16 @@ export default function Study() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {(() => {
-                  const flatten = (items: any[], parentName: string | null = null): any[] => {
-                    let result: any[] = []
+                  type FlatCollection = CollectionNode & {
+                    description?: string | null
+                    _parentName: string | null
+                    _isNested: boolean
+                  }
+                  const flatten = (
+                    items: CollectionNode[],
+                    parentName: string | null = null,
+                  ): FlatCollection[] => {
+                    let result: FlatCollection[] = []
                     items.forEach((item) => {
                       result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
                       if (item.children && item.children.length > 0) {
@@ -547,7 +551,7 @@ export default function Study() {
                     })
                     return result
                   }
-                  const flatCollections = flatten(collections)
+                  const flatCollections = flatten(collections as CollectionNode[])
                   return flatCollections.map((coll, idx) => (
                     <motion.div
                       key={coll.id}
@@ -579,15 +583,15 @@ export default function Study() {
                         </p>
                       </div>
                       <div className="mt-4 flex items-center gap-3">
-                        {coll.document_count > 0 || coll.note_count > 0 ? (
+                        {(coll.document_count ?? 0) > 0 || (coll.note_count ?? 0) > 0 ? (
                           <>
-                            {coll.document_count > 0 && (
+                            {(coll.document_count ?? 0) > 0 && (
                               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <BookOpen size={12} className="text-blue-500/70" />
                                 {coll.document_count} {coll.document_count === 1 ? "doc" : "docs"}
                               </span>
                             )}
-                            {coll.note_count > 0 && (
+                            {(coll.note_count ?? 0) > 0 && (
                               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <StickyNote size={12} className="text-amber-500/70" />
                                 {coll.note_count} {coll.note_count === 1 ? "note" : "notes"}

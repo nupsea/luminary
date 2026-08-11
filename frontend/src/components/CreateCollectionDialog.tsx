@@ -23,7 +23,7 @@ import { normalizeCollectionName } from "@/lib/tagUtils"
 
 // 8 colour swatches
 
-export const COLLECTION_COLORS = [
+const COLLECTION_COLORS = [
   "#6366F1", // indigo
   "#8B5CF6", // violet
   "#EC4899", // pink

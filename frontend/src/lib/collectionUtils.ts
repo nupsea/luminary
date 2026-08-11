@@ -4,6 +4,10 @@
  * without pulling in React or the Zustand store.
  */
 
+/** Drag-and-drop payload types exchanged between the tree and the library rail. */
+export const NOTE_DRAG_MIME = "text/plain"
+export const DOC_DRAG_MIME = "application/x-luminary-doc-id"
+
 export interface CollectionTreeItem {
   id: string
   name: string

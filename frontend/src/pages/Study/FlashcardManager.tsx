@@ -21,7 +21,7 @@ import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { SessionHistory } from "@/components/study/SessionHistory"
-import { endOpenSessionsForScope } from "@/lib/studySessionService"
+import { type StudyFilters, endOpenSessionsForScope } from "@/lib/studySessionService"
 import { useAppStore } from "@/store"
 
 import {
@@ -47,8 +47,8 @@ import { WeakAreasPanel } from "./WeakAreasPanel"
 
 interface FlashcardManagerProps {
   documentId: string
-  onStartStudy: (filters?: any) => void
-  onStartTeachback: (filters?: any, resumeId?: string) => void
+  onStartStudy: (filters?: StudyFilters) => void
+  onStartTeachback: (filters?: StudyFilters, resumeId?: string) => void
 }
 
 export function FlashcardManager({
@@ -157,7 +157,8 @@ export function FlashcardManager({
 
   // Mutations for update, delete, generate
   const updateMutation = useMutation({
-    mutationFn: (args: { id: string; data: any }) => updateFlashcard(args.id, args.data),
+    mutationFn: (args: { id: string; data: { question?: string; answer?: string } }) =>
+      updateFlashcard(args.id, args.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
   })
 
@@ -385,7 +386,7 @@ export function FlashcardManager({
               {totalCards > 0 && (
                 <div className="flex gap-3">
                   <button
-                    onClick={() => onStartStudy({ document_id: documentId })}
+                    onClick={() => onStartStudy()}
                     disabled={!dueOrNew}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition-all hover:bg-blue-700 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
                   >
@@ -393,7 +394,7 @@ export function FlashcardManager({
                     {dueOrNew ? "Flashcard Review" : "Nothing Due"}
                   </button>
                   <button
-                    onClick={() => onStartTeachback({ document_id: documentId })}
+                    onClick={() => onStartTeachback()}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 py-4 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition-all hover:bg-violet-700 hover:shadow-xl active:scale-[0.98]"
                   >
                     <MessageSquare size={18} />
@@ -595,7 +596,7 @@ export function FlashcardManager({
       <SessionHistory
         scope={{ kind: "document", id: documentId }}
         onResumeTeachback={(sid) =>
-          onStartTeachback({ document_id: documentId }, sid)
+          onStartTeachback(undefined, sid)
         }
       />
     </div>

@@ -26,11 +26,8 @@ import {
   type TeachbackResultItem,
   fetchSessionTeachbackResults,
   scoreBadgeClass,
+  sessionLabel,
 } from "@/lib/studyApi"
-
-export function sessionLabel(session: StudySessionItem): string {
-  return session.collection_name || session.document_title || "Untitled session"
-}
 
 function formatStarted(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {

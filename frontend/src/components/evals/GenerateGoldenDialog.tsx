@@ -31,6 +31,34 @@ interface Props {
   onStarted: (label: string) => void
 }
 
+function ModelSelect({
+  value,
+  onChange,
+  includeNone,
+  allModels,
+}: {
+  value: string
+  onChange: (v: string) => void
+  includeNone?: boolean
+  allModels: string[]
+}) {
+  return (
+    <select
+      className="h-9 rounded-md border bg-background px-2 text-sm"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {includeNone && <option value="">None</option>}
+      {allModels.map((m) => (
+        <option key={m} value={m}>
+          {m}
+        </option>
+      ))}
+      {value && !allModels.includes(value) && <option value={value}>{value}</option>}
+    </select>
+  )
+}
+
 export function GenerateGoldenDialog({
   open,
   onOpenChange,
@@ -79,30 +107,6 @@ export function GenerateGoldenDialog({
 
   const localVerifyDown =
     /^ollama\//.test(verify2) && models.local.length === 0 && !modelsQuery.isLoading
-  const Select = ({
-    value,
-    onChange,
-    includeNone,
-  }: {
-    value: string
-    onChange: (v: string) => void
-    includeNone?: boolean
-  }) => (
-    <select
-      className="h-9 rounded-md border bg-background px-2 text-sm"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {includeNone && <option value="">None</option>}
-      {allModels.map((m) => (
-        <option key={m} value={m}>
-          {m}
-        </option>
-      ))}
-      {value && !allModels.includes(value) && <option value={value}>{value}</option>}
-    </select>
-  )
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -133,16 +137,16 @@ export function GenerateGoldenDialog({
           </label>
           <label className="grid gap-1 text-xs">
             <span className="font-medium text-muted-foreground">Generator model</span>
-            <Select value={generator} onChange={setGenerator} />
+            <ModelSelect value={generator} onChange={setGenerator} allModels={allModels} />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1 text-xs">
               <span className="font-medium text-muted-foreground">Verifier 1</span>
-              <Select value={verify1} onChange={setVerify1} includeNone />
+              <ModelSelect value={verify1} onChange={setVerify1} includeNone allModels={allModels} />
             </label>
             <label className="grid gap-1 text-xs">
               <span className="font-medium text-muted-foreground">Verifier 2</span>
-              <Select value={verify2} onChange={setVerify2} includeNone />
+              <ModelSelect value={verify2} onChange={setVerify2} includeNone allModels={allModels} />
             </label>
           </div>
           <label className="grid gap-1 text-xs">

@@ -21,7 +21,7 @@ import { LUMINARY_MODE } from "@/lib/surfaceManifest"
 import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
-import { COLOR_CLASSES } from "./HighlightsPanel"
+import { COLOR_CLASSES } from "./highlightColors"
 import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
 import { useReaderTabs } from "./hooks/useReaderTabs"
@@ -234,13 +234,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const isYouTube = isYouTubeDoc(doc ?? {})
 
   // Pre-calculate section map for O(1) lookups in highlight loops
+  const docSections = doc?.sections
   const sectionMap = useMemo(() => {
     const m = new Map<string, SectionItem>()
-    if (doc?.sections) {
-      for (const s of doc.sections) m.set(s.id, s)
+    if (docSections) {
+      for (const s of docSections) m.set(s.id, s)
     }
     return m
-  }, [doc?.sections])
+  }, [docSections])
 
   const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload })
 

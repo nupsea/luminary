@@ -702,7 +702,7 @@ export default function NotesPage() {
   const [showOrgPlan, setShowOrgPlan] = useState(false)
   const debouncedQuery = useDebounce(searchQuery, 300)
   const qc = useQueryClient()
-  const mountTime = useRef(Date.now())
+  const [mountTime] = useState(() => Date.now())
   const notesView = useAppStore((s) => s.notesView)
   const setNotesView = useAppStore((s) => s.setNotesView)
   const activeCollectionId = useAppStore((s) => s.activeCollectionId)
@@ -858,7 +858,7 @@ export default function NotesPage() {
 
   useEffect(() => {
     if (!notesLoading) {
-      const elapsed = Date.now() - mountTime.current
+      const elapsed = Date.now() - mountTime
       logger.info("[Notes] loaded", { duration_ms: elapsed, itemCount: notes?.length ?? 0 })
     }
   }, [notesLoading, notes?.length])

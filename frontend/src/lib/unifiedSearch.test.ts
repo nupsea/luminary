@@ -4,11 +4,17 @@
 
 import { describe, expect, it } from "vitest"
 
+import type { components } from "@/types/api"
+
 import {
   adaptDocumentResults,
   adaptFlashcardResults,
   adaptNoteResults,
 } from "./unifiedSearch"
+
+type SearchResponse = components["schemas"]["SearchResponse"]
+type NoteSearchResponse = components["schemas"]["NoteSearchResponse"]
+type FlashcardSearchResponse = components["schemas"]["FlashcardSearchResponse"]
 
 describe("adaptDocumentResults", () => {
   it("flattens DocumentGroup matches into UnifiedSearchResult rows", () => {
@@ -36,9 +42,9 @@ describe("adaptDocumentResults", () => {
               score: 0.4,
             },
           ],
-        } as any,
+        },
       ],
-    } as any)
+    } as unknown as SearchResponse)
     expect(out).toHaveLength(2)
     expect(out[0]).toMatchObject({
       kind: "document",
@@ -64,9 +70,9 @@ describe("adaptNoteResults", () => {
           document_id: "doc-1",
           score: 0.8,
           source: "fts",
-        } as any,
+        },
       ],
-    } as any)
+    } as unknown as NoteSearchResponse)
     expect(out[0].kind).toBe("note")
     expect(out[0].title).toBe("A heading")
     expect(out[0].context).toBe("ml, python")
@@ -76,10 +82,9 @@ describe("adaptNoteResults", () => {
   it("falls back to 'Untitled note' on empty content", () => {
     const out = adaptNoteResults({
       results: [
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { note_id: "n2", content: "", tags: [], group_name: null, document_id: null, score: 0.1, source: "fts" } as any,
+        { note_id: "n2", content: "", tags: [], group_name: null, document_id: null, score: 0.1, source: "fts" },
       ],
-    } as any)
+    } as unknown as NoteSearchResponse)
     expect(out[0].title).toBe("Untitled note")
   })
 })
@@ -94,12 +99,12 @@ describe("adaptFlashcardResults", () => {
           question: "What is gravity?",
           answer: "A force.",
           flashcard_type: "qa",
-        } as any,
+        },
       ],
       total: 1,
       page: 1,
       page_size: 10,
-    } as any)
+    } as unknown as FlashcardSearchResponse)
     expect(out[0]).toMatchObject({
       kind: "flashcard",
       id: "f1",

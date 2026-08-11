@@ -5,36 +5,13 @@
  * exact section/page in DocumentReader.  Chips fade in after the 'sources'
  * payload arrives in the SSE done event (i.e. when isStreaming is false).
  *
- * Exported pure helpers (deduplicateCitations) are tested in the companion
- * SourceCitationChips.test.ts file.
+ * The pure helpers live in @/lib/citationUtils and are tested there.
  */
 
 import { Badge } from "@/components/ui/badge"
+import { type SourceCitation, deduplicateCitations } from "@/lib/citationUtils"
 
-export interface SourceCitation {
-  chunk_id: string
-  document_id: string
-  document_title: string
-  section_id: string | null
-  section_heading: string
-  pdf_page_number: number | null
-  section_preview_snippet: string  // first 150 chars of chunk text
-}
-
-/**
- * Client-side deduplication by section_id.  When section_id is null, the
- * chunk_id is used as the dedup key (each unlinked chunk stays distinct).
- * Backend already deduplicates — this is a defensive second pass.
- */
-export function deduplicateCitations(citations: SourceCitation[]): SourceCitation[] {
-  const seen = new Set<string>()
-  return citations.filter((c) => {
-    const key = c.section_id ?? c.chunk_id
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
+export type { SourceCitation }
 
 interface Props {
   citations: SourceCitation[]

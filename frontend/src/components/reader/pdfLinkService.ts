@@ -11,15 +11,18 @@ export interface PdfLinkService {
   externalLinkTarget: number
   externalLinkRel: string
   externalLinkEnabled: boolean
-  getDestinationHash: (dest: any) => string // pdf.js destination type is untyped
+  getDestinationHash: (dest: unknown) => string // pdf.js destination type is untyped
   getAnchorUrl: (hash: string) => string
   setHash: (hash: string) => void
   executeNamedAction: (action: string) => void
-  cachePageRef: (ref: any, pageIndex: number) => void // pdf.js ref type is untyped
+  cachePageRef: (ref: unknown, pageIndex: number) => void // pdf.js ref type is untyped
   addLinkAttributes: (link: HTMLAnchorElement, url: string, newWindow: boolean) => void
   navigateTo: (dest: unknown) => Promise<void>
   goToDestination: (dest: unknown) => Promise<void>
 }
+
+/** pdf.js stashes the resolved destination on the anchor element itself. */
+type PdfDestLink = HTMLAnchorElement & { pdfDest?: unknown }
 
 /** Protocols that should open externally (new tab / default handler). */
 const EXTERNAL_PROTOCOLS = ["http:", "https:", "mailto:", "tel:"]
@@ -42,11 +45,11 @@ export function createLinkService(
     externalLinkTarget: 2, // BLANK
     externalLinkRel: "noopener noreferrer nofollow",
     externalLinkEnabled: true,
-    getDestinationHash: (_dest: any) => "#", // pdf.js destination type is untyped
+    getDestinationHash: (_dest: unknown) => "#", // pdf.js destination type is untyped
     getAnchorUrl: (_hash: string) => "#",
     setHash: (_hash: string) => { /* no-op: required by pdf.js link service interface */ },
     executeNamedAction: (_action: string) => { /* no-op: required by pdf.js link service interface */ },
-    cachePageRef: (_ref: any, _pageIndex: number) => { /* no-op: required by pdf.js link service interface */ }, // pdf.js ref type is untyped
+    cachePageRef: (_ref: unknown, _pageIndex: number) => { /* no-op: required by pdf.js link service interface */ }, // pdf.js ref type is untyped
 
     addLinkAttributes(link: HTMLAnchorElement, url: string, newWindow: boolean) {
       if (url) {
@@ -64,7 +67,7 @@ export function createLinkService(
         link.onclick = (e) => {
           e.preventDefault()
           // pdfjs stores the destination in the link element's data
-          const dest = (link as any).pdfDest || (link as any).dataset.pdfDest
+          const dest = (link as PdfDestLink).pdfDest || link.dataset.pdfDest
           if (dest) {
             void this.navigateTo(dest)
           }

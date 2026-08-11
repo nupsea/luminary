@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi, type Mock } from "vitest"
 import {
   buildFontTOC,
   looksLikeHeading,
@@ -9,15 +9,22 @@ import {
   type OutlineEntry,
 } from "./pdfTocUtils"
 
+/** The mocked members stay visible so tests can assert on them without casting. */
+type MockDoc = import("pdfjs-dist").PDFDocumentProxy & {
+  getDestination: Mock
+  getPageIndex: Mock
+  getPage: Mock
+}
+
 /** Minimal pdfjs PDFDocumentProxy mock. */
-function makeDoc(overrides: Record<string, unknown> = {}) {
+function makeDoc(overrides: Record<string, unknown> = {}): MockDoc {
   return {
     numPages: 100,
     getDestination: vi.fn(),
     getPageIndex: vi.fn(),
     getPage: vi.fn(),
     ...overrides,
-  } as unknown as import("pdfjs-dist").PDFDocumentProxy
+  } as unknown as MockDoc
 }
 
 /** Build a mock page whose text content contains the given items. */
@@ -121,7 +128,7 @@ describe("resolveDestPage", () => {
     // dest[0] is an integer — 0-based index 24
     const page = await resolveDestPage(doc, [24, "XYZ", 0, 800, null])
     expect(page).toBe(25) // 0-based 24 → 1-based 25
-    expect((doc as any).getPageIndex).not.toHaveBeenCalled()
+    expect(doc.getPageIndex).not.toHaveBeenCalled()
   })
 
   it("returns -1 for a null dest[0] (current-page reference)", async () => {
@@ -137,7 +144,7 @@ describe("resolveDestPage", () => {
       getPageIndex: vi.fn().mockResolvedValue(4),
     })
     const page = await resolveDestPage(doc, "chapter-1")
-    expect((doc as any).getDestination).toHaveBeenCalledWith("chapter-1")
+    expect(doc.getDestination).toHaveBeenCalledWith("chapter-1")
     expect(page).toBe(5)
   })
 
@@ -180,7 +187,7 @@ describe("resolveOutline", () => {
   })
 
   it("recurses into children and sets correct levels", async () => {
-    const doc = makeDoc({ getPageIndex: vi.fn().mockImplementation((ref: any) => ref.num) })
+    const doc = makeDoc({ getPageIndex: vi.fn().mockImplementation((ref: { num: number }) => ref.num) })
     const items = [
       {
         title: "Ch1", dest: [{ num: 4, gen: 0 }, "XYZ"], items: [
@@ -200,7 +207,7 @@ describe("resolveOutline", () => {
     const items = [{ title: "Ch1", dest: [19, "XYZ"], items: [] }]
     const result = await resolveOutline(doc, items, 1)
     expect(result[0].page).toBe(20)
-    expect((doc as any).getPageIndex).not.toHaveBeenCalled()
+    expect(doc.getPageIndex).not.toHaveBeenCalled()
   })
 
   it("keeps parent with page = 0 when its dest is null but still recurses children", async () => {
@@ -221,7 +228,7 @@ describe("resolveOutline", () => {
   })
 
   it("flattens cleanly after resolve — full book structure survives", async () => {
-    const doc = makeDoc({ getPageIndex: vi.fn().mockImplementation((ref: any) => ref.num - 1) })
+    const doc = makeDoc({ getPageIndex: vi.fn().mockImplementation((ref: { num: number }) => ref.num - 1) })
     const items = [
       {
         title: "Part I", dest: null, items: [
@@ -256,7 +263,7 @@ describe("buildFontTOC", () => {
     const doc = makeDoc({ numPages: 5 })
     const result = await buildFontTOC(doc, () => true)
     expect(result).toEqual([])
-    expect((doc as any).getPage).not.toHaveBeenCalled()
+    expect(doc.getPage).not.toHaveBeenCalled()
   })
 
   it("picks up heading-sized items and ignores body text", async () => {
