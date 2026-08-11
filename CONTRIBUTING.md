@@ -13,7 +13,7 @@ We welcome all kinds of contributions! Whether you write code, refine search eva
 | Role | Focus Areas | Key Technologies |
 | :--- | :--- | :--- |
 | **Backend Engineer** | Ingestion pipeline, LiteLLM integrations, vector database search, API design | Python 3.13, FastAPI, SQLAlchemy, LanceDB, Kuzu |
-| **Frontend Engineer** | User interface, state management, PDF rendering, graph visualizations | React 18, TypeScript 5, Tailwind CSS, Zustand, Sigma.js |
+| **Frontend Engineer** | User interface, state management, PDF rendering, graph visualizations | React, TypeScript, Tailwind CSS, Zustand, Sigma.js |
 | **Search & AI Quality** | Retrieval accuracy (HR@5/MRR/nDCG), faithfulness evaluation, golden datasets | Evals harness (`evals/`), NLI faithfulness (HHEM) |
 | **Technical Writer** | Setup guides, architecture descriptions, inline documentation | Markdown |
 
@@ -63,7 +63,8 @@ To keep our codebase clean and maintainable, we enforce a set of strict architec
 1. **Dependency Inversion**: Read [architecture.md](docs/architecture.md) to understand our **6-layer dependency rule**:
    `Types -> Config -> Repo -> Service -> Runtime -> API` (no reverse/upward imports).
 2. **Invariants**: Read [invariants.md](docs/invariants.md) to understand critical safety contracts, such as column positions and database initializers.
-3. **Redesign Spec**: Read [notes-redesign-spec.md](docs/notes-redesign-spec.md) for notes editing patterns.
+3. **Roadmap**: Read [roadmap.md](docs/roadmap.md) for what is built, what is open, and what was
+   deliberately abandoned — check it before proposing work.
 
 ---
 

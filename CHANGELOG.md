@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-11
+
+### Fixed
+- **The interface froze while a document was parsing.** Parsing ran inline on
+  the single server worker — 44.9s for a 23MB PDF. In public mode the backend
+  also serves the interface, so its lazy-loaded routes never arrived and nothing
+  could navigate while a parse was in flight: clicks did nothing while hover
+  still worked. Parsing now runs off the request path, and the same file takes
+  3.96s.
+- **Enrichment spent most of its time collecting links that did not resolve.**
+  Web references now cover the 40 longest sections rather than every section,
+  return three links deduplicated by URL, and no longer carry an excerpt that
+  was never read from the page. On Designing Data-Intensive Applications this
+  step took roughly 50 of the run's 80 minutes to produce 920 links, 836 of them
+  dead.
+- **A leftover `.env` refused to start the backend.** A key held over from
+  another version, or an unedited copy of `.env.example`, failed startup
+  outright with "Extra inputs are not permitted". Unknown keys and unrendered
+  placeholders are now ignored.
+
+### Changed
+- Local model concurrency is sized from the machine rather than guessed: under
+  24GB of memory one slot, otherwise two, with four available opt-in. Every
+  install path derives it the same way, and the desktop shell passes one value
+  to both the inference server and the backend so the two cannot disagree.
+
+### Security
+- The frontend dependency tree reports no known advisories. The notable one was
+  a high-severity code injection in `lodash-es` (GHSA-r5fr-rjxr-66jc), reachable
+  through the drawing canvas. The affected packages are pinned forward, so
+  nothing is rolled back to a worse version to obtain the fix.
+
 ## [0.6.0] - 2026-08-09
 
 ### Added
@@ -650,7 +682,12 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/nupsea/luminary/releases/tag/v0.6.1
+[0.6.0]: https://github.com/nupsea/luminary/releases/tag/v0.6.0
+[0.5.0]: https://github.com/nupsea/luminary/releases/tag/v0.5.0
+[0.4.0]: https://github.com/nupsea/luminary/releases/tag/v0.4.0
+[0.3.3]: https://github.com/nupsea/luminary/releases/tag/v0.3.3
 [0.2.2]: https://github.com/nupsea/luminary/releases/tag/v0.2.2
 [0.2.1]: https://github.com/nupsea/luminary/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nupsea/luminary/releases/tag/v0.2.0

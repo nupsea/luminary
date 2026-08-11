@@ -1,5 +1,5 @@
 ---
-description: Luminary hard invariants -- always loaded. Violations block passes=true. These rules have each been learned from a real incident or design decision.
+description: Luminary hard invariants. Each was learned from a real incident or design decision; each names the gate that enforces it.
 ---
 
 # Luminary Invariants
@@ -12,7 +12,7 @@ These are non-negotiable. Each one exists because its violation caused a real bu
 Each concurrent task needs its own session or a `Semaphore(1)` serialiser. SQLAlchemy AsyncSession is not safe for concurrent use.
 
 **I-2. Wrap all synchronous LanceDB *and Kuzu* calls with `asyncio.to_thread`.**
-Both are synchronous. Calling either directly in an async function blocks the event loop -- and because the server runs a single worker, it stalls *every* concurrent request, not just the slow one. Measured: a 2ms `/tags/graph` took 8.5s sitting behind one all-library `/graph` traversal, which is why the Map's Tags view appeared to hang. Kuzu is safe to call from a worker thread: `ThreadSafeKuzuConnection` already serializes every `execute()` under an RLock.
+Both are synchronous. Calling either directly in an async function blocks the event loop -- and because the server runs a single worker, it stalls *every* concurrent request, not just the slow one. Measured: a 2ms `/tags/graph` took 8.5s sitting behind one all-library `/graph` traversal, which is why the Map's Tags view appeared to hang. Kuzu is safe to call from a worker thread: `ThreadSafeKuzuConnection` already serializes every `execute()` under an RLock. The same rule covers any long CPU call with no `await` inside it. `parse_node` ran `DocumentParser.parse` inline and froze the loop for a measured 44.9s on a 23MB PDF (3.96s once moved to `asyncio.to_thread`). In `public` mode that is worse than a slow API: the backend also serves the SPA, so its lazy route chunks never arrive and the UI cannot navigate at all -- clicks appear dead while hover still works, because only the server side is stalled. `chunk`, `entity_extract` and `transcribe` are still inline.
 
 **I-3. Always guard Kuzu `get_next()` with `has_next()`.**
 `get_next()` raises if no rows exist. Every Kuzu result iteration must call `has_next()` first.
@@ -56,11 +56,11 @@ Block-level elements (h1, ul) inside a `<td>` break layout. Use `stripMarkdown()
 
 ## Quality Gates
 
-**I-13. Quality gates run in order: ruff -> pytest -> tsc.**
-Fix ruff before running pytest (lint errors mask test errors). Never set `passes=true` before all three pass.
+**I-13. `make ci` is the gate, and it runs in order: ruff -> layer_linter -> boundary_checker -> pytest -> frontend build -> tsc.**
+The order is load-bearing, not cosmetic: a lint error masks the test error underneath it, and a layer violation is a design fault that makes the test result meaningless. Run the cheap check first and fix what it says before moving on; running `pytest` against code `ruff` has already rejected wastes the slow step. Claiming a change is done means `make ci` exited 0 on your machine -- naming the individual commands you ran instead is not the same claim, because `make ci` also runs `check_manifest_schema.py`, `check_manifest_coverage.py` and `check_public_import.sh`, which are the ones people forget. Local green is necessary, not sufficient: GLiNER memory pressure has produced GitHub-only failures that no local run reproduces.
 
-**I-14. `passes=true` requires smoke exit 0 and reviewer returning no Critical items.**
-Tests passing is necessary but not sufficient. The smoke test verifies the backend contract the UI depends on.
+**I-14. `make ci` passing does not mean the app works. `make smoke` is the HTTP contract check.**
+`make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~230 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
 
 ## Packages
 
@@ -115,3 +115,20 @@ Chunks are sized for the embedder, not the eye: they cut mid-sentence, they over
 
 **I-30. A heading is a label the source authored. Nothing invents one.**
 The reader draws a section heading only when the stored `heading` is non-empty and reads like a label (`hasAuthoredHeading`); an unlabelled section is rendered without one. Three sites used to fabricate headings and each produced the same artifact -- an oversized `<h2>` printing text that then repeated immediately below it, or an empty section under a swallowed line. `universal_parser._segment` stored a whole matched line as the heading, which for a transcript IS the utterance (`_is_marker` now sends prose to the body); `_segment_chat_grouped` synthesised "Transcript Part 2: Carol", naming whichever speaker opened the group; and `chunk.py` substituted `f"Section {n}"` for every empty heading. An empty heading is the signal that the source gave none, so nothing downstream may fill it -- `sectionTitle()` still derives a label, but only for the contents panel, which needs an entry to navigate with. Empty-bodied sections are dropped rather than filled with placeholder text: a document's contents page matches the same signature as its chapter openings, so half the sections found in `the_odyssey.txt` (23 of 49) were empty twins that used to read "(Empty Section)". `tests/test_universal_parser.py` and `sectionTitle.test.ts` fail CI if a heading is invented. See `docs/universal-reader.md`.
+
+**I-31. Enrichment concurrency comes from `OLLAMA_NUM_PARALLEL`, and enrichment cost is call count, not concurrency.**
+Ollama serves that many requests at once and queues the rest, so a wider app-side semaphore overlaps nothing -- it moves the wait into Ollama's queue, where it counts against the caller's request timeout instead of being invisible. A `web_refs` call queued behind a 4.3k-token prompt burned its (then 180s) timeout, and the worker's backoff restarted the whole 200-section handler. `diagram_extractor` held a `Semaphore(3)` around a call in a serial `for` loop, so the 3 described nothing.
+
+Measured, M3 Pro, llama3.2, 450-token generations:
+
+| slots | 1 caller | 2 callers | 4 callers |
+|---|---|---|---|
+| 1 | 55.9 tok/s | 56.2 | 54.7 (per-call 4.5/8.9/13.5/17.8s) |
+| 2 | 55.5 tok/s | 97.7 | 99.3 |
+
+So size every semaphore *at* the slot count -- `get_enrichment_llm_semaphore()` for text, and `ENRICHMENT_VISION_CONCURRENCY` capped by it for vision. Each loaded model gets its own runner with its own slots, so text and vision do not contend.
+
+- **Default 1.** A slot costs a full `OLLAMA_NUM_CTX` KV cache (896 MiB for a 3B model), and under 24GB the second competes with the 7B vision model for residency. Every install path sizes from physical RAM; the auto path never exceeds 2, and 4 is opt-in via `LUMINARY_PROFILE=performance` or `.env`.
+- **`n_ctx_slot` stays 8192 at 2 slots** -- Ollama allocates `num_ctx * num_parallel` and divides -- so raising this does not violate I-27 and needs no `OLLAMA_CONTEXT_LENGTH`.
+- **The desktop app has no install step**, so `supervisor.rs` sizes it at launch and passes the same number to Ollama *and* the backend; if they disagree the extra slots sit idle behind a narrower semaphore.
+- **Call count is the real lever.** Prompt eval is ~0.4s against ~16s of decode, so one call per section scales with the book: `web_refs` cost ~50 of DDIA's ~80 enrichment minutes. `WEB_REFS_MAX_SECTIONS` caps coverage the way `section_summarizer.MAX_UNITS` does. Reach for fewer or cheaper calls before reaching for concurrency.

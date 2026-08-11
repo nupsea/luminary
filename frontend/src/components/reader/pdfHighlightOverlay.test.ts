@@ -1,9 +1,28 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
+/** The subset of Element the overlay utilities actually touch. */
+interface MockElement {
+  tagName: string
+  children: MockElement[]
+  childNodes: MockElement[]
+  style: Record<string, string>
+  isFragment?: boolean
+  setAttribute(k: string, v: string): void
+  getAttribute(k: string): string | null
+  appendChild(child: MockElement): MockElement
+  replaceChildren(...nodes: MockElement[]): void
+  remove(): void
+  querySelectorAll(selector: string): MockElement[]
+  querySelector(selector: string): MockElement | null
+}
+
+/** The overlay utilities only touch the MockElement subset; satisfy their DOM signature. */
+const asEl = (m: MockElement) => m as unknown as HTMLDivElement
+
 // Stub minimal DOM APIs needed by the overlay utilities
-function createMockElement(tag = "div"): any {
+function createMockElement(tag = "div"): MockElement {
   const attrs: Record<string, string> = {}
-  const children: any[] = []
+  const children: MockElement[] = []
   const style: Record<string, string> = {}
   return {
     tagName: tag.toUpperCase(),
@@ -12,7 +31,7 @@ function createMockElement(tag = "div"): any {
     style,
     setAttribute(k: string, v: string) { attrs[k] = v },
     getAttribute(k: string) { return attrs[k] ?? null },
-    appendChild(child: any) {
+    appendChild(child: MockElement) {
       // Real DOM moves a fragment's children into the parent, leaving it empty.
       if (child.isFragment) {
         children.push(...child.children)
@@ -22,14 +41,14 @@ function createMockElement(tag = "div"): any {
       children.push(child)
       return child
     },
-    replaceChildren(...nodes: any[]) { children.length = 0; children.push(...nodes) },
+    replaceChildren(...nodes: MockElement[]) { children.length = 0; children.push(...nodes) },
     remove() { /* no-op in isolation */ },
     querySelectorAll(selector: string) {
       // Simple attribute selector matching: [data-foo]
       const m = selector.match(/^\[([^\]]+)\]$/)
       if (!m) return []
       const attr = m[1]
-      return children.filter((c: any) => c.getAttribute(attr) !== null)
+      return children.filter((c: MockElement) => c.getAttribute(attr) !== null)
     },
     querySelector(selector: string) {
       const all = this.querySelectorAll(selector)
@@ -42,7 +61,7 @@ function createMockElement(tag = "div"): any {
 import { clearOverlays, renderOverlayDivs, type OverlayRect } from "./pdfHighlightOverlay"
 
 describe("renderOverlayDivs", () => {
-  let container: any
+  let container: MockElement
 
   beforeEach(() => {
     container = createMockElement("div")
@@ -66,7 +85,7 @@ describe("renderOverlayDivs", () => {
       { left: 10, top: 40, width: 80, height: 14 },
     ]
 
-    renderOverlayDivs(container, rects, "rgba(255,255,0,0.4)", "data-search-highlight")
+    renderOverlayDivs(asEl(container), rects, "rgba(255,255,0,0.4)", "data-search-highlight")
 
     expect(container.children.length).toBe(2)
 
@@ -82,7 +101,7 @@ describe("renderOverlayDivs", () => {
 
   it("sets pointer-events auto when annotationId is provided", () => {
     const rects: OverlayRect[] = [{ left: 0, top: 0, width: 50, height: 12 }]
-    renderOverlayDivs(container, rects, "yellow", "data-pdf-highlight", "ann-123")
+    renderOverlayDivs(asEl(container), rects, "yellow", "data-pdf-highlight", "ann-123")
 
     const div = container.children[0]
     expect(div.style.pointerEvents).toBe("auto")
@@ -92,7 +111,7 @@ describe("renderOverlayDivs", () => {
 
   it("marks active search match with data attribute", () => {
     const rects: OverlayRect[] = [{ left: 0, top: 0, width: 50, height: 12 }]
-    renderOverlayDivs(container, rects, "orange", "data-search-highlight", undefined, true)
+    renderOverlayDivs(asEl(container), rects, "orange", "data-search-highlight", undefined, true)
 
     const div = container.children[0]
     expect(div.getAttribute("data-active-search-match")).toBe("1")
@@ -100,20 +119,20 @@ describe("renderOverlayDivs", () => {
 
   it("does not mark non-active matches", () => {
     const rects: OverlayRect[] = [{ left: 0, top: 0, width: 50, height: 12 }]
-    renderOverlayDivs(container, rects, "yellow", "data-search-highlight", undefined, false)
+    renderOverlayDivs(asEl(container), rects, "yellow", "data-search-highlight", undefined, false)
 
     const div = container.children[0]
     expect(div.getAttribute("data-active-search-match")).toBeNull()
   })
 
   it("handles empty rects array", () => {
-    renderOverlayDivs(container, [], "yellow", "data-search-highlight")
+    renderOverlayDivs(asEl(container), [], "yellow", "data-search-highlight")
     expect(container.children.length).toBe(0)
   })
 })
 
 describe("clearOverlays", () => {
-  let container: any
+  let container: MockElement
 
   beforeEach(() => {
     container = createMockElement("div")
@@ -124,7 +143,7 @@ describe("clearOverlays", () => {
     container.appendChild(createMockElement("div"))
     expect(container.children.length).toBe(2)
 
-    clearOverlays(container)
+    clearOverlays(asEl(container))
     expect(container.children.length).toBe(0)
   })
 
@@ -146,13 +165,13 @@ describe("clearOverlays", () => {
     }
     container.appendChild(annotation)
 
-    clearOverlays(container, "data-search-highlight")
+    clearOverlays(asEl(container), "data-search-highlight")
     expect(container.children.length).toBe(1)
     expect(container.children[0].getAttribute("data-pdf-highlight")).toBe("1")
   })
 
   it("handles empty container", () => {
-    clearOverlays(container, "data-search-highlight")
+    clearOverlays(asEl(container), "data-search-highlight")
     expect(container.children.length).toBe(0)
   })
 })

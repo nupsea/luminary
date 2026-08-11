@@ -408,6 +408,10 @@ export async function generateCollectionFlashcards(
 // Helpers
 // ---------------------------------------------------------------------------
 
+export function sessionLabel(session: StudySessionItem): string {
+  return session.collection_name || session.document_title || "Untitled session"
+}
+
 export function scoreBadgeClass(score: number): string {
   if (score >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
   if (score >= 60) return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"

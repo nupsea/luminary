@@ -10,6 +10,7 @@ optional LLM reclassification for ambiguous large documents. If the
 caller pre-supplied content_type, both heuristics and LLM are skipped.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -39,7 +40,12 @@ async def parse_node(state: IngestionState) -> IngestionState:
         try:
             await _update_stage(state["document_id"], "parsing")
             fp = Path(state["file_path"])
-            parsed = _parser.parse(fp, state["format"])
+            # Off the event loop: parsing is one uninterrupted CPU call with no
+            # await inside it, so on the single worker it stalls every other
+            # request for its whole duration -- measured 44.9s on a 23MB PDF,
+            # during which the app serves neither the API nor its own SPA
+            # chunks, and the UI cannot navigate (I-2).
+            parsed = await asyncio.to_thread(_parser.parse, fp, state["format"])
             sections = [
                 {
                     "heading": s.heading,

@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { isButtonActivation, isTypingTarget } from "@/lib/keyboard"
+import { parseClozeSegments } from "@/lib/clozeUtils"
 
 type Rating = "again" | "hard" | "good" | "easy"
 
@@ -26,21 +27,6 @@ interface ClozeCardProps {
   card: FlashcardCard
   onRate: (rating: Rating) => Promise<void>
   isRating: boolean
-}
-
-type ClozeSegment =
-  | { type: "text"; content: string }
-  | { type: "blank"; term: string }
-
-/** Parse cloze_text into alternating text and blank segments. Exported for testing. */
-export function parseClozeSegments(clozeText: string): ClozeSegment[] {
-  const parts = clozeText.split(/(\{\{.+?\}\})/g)
-  return parts.map((part) => {
-    const match = /^\{\{(.+?)\}\}$/.exec(part)
-    return match
-      ? { type: "blank" as const, term: match[1] }
-      : { type: "text" as const, content: part }
-  })
 }
 
 const RATINGS: { label: string; value: Rating; className: string }[] = [

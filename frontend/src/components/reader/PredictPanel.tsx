@@ -12,11 +12,6 @@ interface CodeExecuteResult {
   prediction_diff: string | null
 }
 
-/** Section preview contains a fenced code block (newline-delimited ``` fence). */
-export function hasCodeFence(preview: string): boolean {
-  return /^```\w*/m.test(preview) && preview.includes("\n")
-}
-
 function extractCodeFromPreview(preview: string): string {
   const match = /```[\w]*\n([\s\S]*?)(?:```|$)/.exec(preview)
   const code = match ? match[1] : preview

@@ -1,14 +1,14 @@
 /**
  * Vitest unit tests for SourceCitationChips logic
- * Tests the pure `deduplicateCitations` function exported from SourceCitationChips.tsx.
+ * Tests the pure `deduplicateCitations` function from @/lib/citationUtils.
  *
  * The number of items returned by deduplicateCitations maps directly to the
  * number of Badge elements rendered by SourceCitationChips in the DOM.
  */
 
 import { describe, expect, it } from "vitest"
-import { deduplicateCitations } from "./SourceCitationChips"
-import type { SourceCitation } from "./SourceCitationChips"
+import { deduplicateCitations } from "@/lib/citationUtils"
+import type { SourceCitation } from "@/lib/citationUtils"
 
 function makeCitation(overrides: Partial<SourceCitation> & { chunk_id: string }): SourceCitation {
   return {

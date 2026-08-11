@@ -365,6 +365,56 @@ try {
 }
 
 # ---------------------------------------------------------------------------
+# 6b. Performance profile
+# ---------------------------------------------------------------------------
+# Parallelism is a memory decision: one KV cache per slot. Sized from installed
+# RAM, overridable via $env:LUMINARY_PROFILE. 'performance' is never automatic.
+Set-Location -Path $RepoRoot
+
+$MemGB = 0
+try {
+    $MemGB = [int][math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+} catch {
+    Write-Host "[install] Could not read installed RAM; assuming a small machine." -ForegroundColor Gray
+}
+
+# NOT $Profile: that is an automatic variable holding the user's profile path.
+$LumProfile = $env:LUMINARY_PROFILE
+if (-not $LumProfile) {
+    if ($MemGB -ge 24) { $LumProfile = "standard" } else { $LumProfile = "public" }
+}
+
+switch ($LumProfile) {
+    "performance" { $MaxLoaded = 2; $NumParallel = 4; $VisionConcurrency = 4 }
+    "standard"    { $MaxLoaded = 2; $NumParallel = 2; $VisionConcurrency = 2 }
+    default       { $MaxLoaded = 1; $NumParallel = 1; $VisionConcurrency = 1 }
+}
+Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALLEL=$NumParallel)" -ForegroundColor Yellow
+
+# Persist for the backend, which reads backend\.env and sizes its enrichment
+# concurrency from OLLAMA_NUM_PARALLEL.
+$EnvFile = "$RepoRoot\backend\.env"
+if (-not (Test-Path $EnvFile)) { New-Item -ItemType File -Path $EnvFile -Force | Out-Null }
+$EnvLines = @(Get-Content -Path $EnvFile -ErrorAction SilentlyContinue)
+
+function Set-EnvLine($Lines, $Key, $Value) {
+    # @() matters: Where-Object yields $null or a bare string, and `+=` on
+    # either is not an append.
+    $kept = @($Lines | Where-Object { $_ -notmatch ('^' + [regex]::Escape($Key) + '=') })
+    return $kept + "$Key=$Value"
+}
+
+$EnvLines = Set-EnvLine $EnvLines "OLLAMA_NUM_PARALLEL" $NumParallel
+$EnvLines = Set-EnvLine $EnvLines "ENRICHMENT_VISION_CONCURRENCY" $VisionConcurrency
+Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
+
+# Ollama on Windows reads its own knobs from the user environment, and the
+# already-running server does not pick them up until it restarts.
+[Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "$MaxLoaded", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "$NumParallel", "User")
+Write-Host "[install] Restart Ollama for the server-side profile to take effect." -ForegroundColor Gray
+
+# ---------------------------------------------------------------------------
 # 7. Create local startup scripts
 # ---------------------------------------------------------------------------
 Set-Location -Path $RepoRoot

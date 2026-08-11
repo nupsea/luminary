@@ -42,8 +42,8 @@ _QUALIFYING_TYPES: frozenset[str] = frozenset(
     }
 )
 
-# Semaphore: at most 3 concurrent LLM calls across all diagram extraction jobs
-_EXTRACT_SEM = asyncio.Semaphore(3)
+# Concurrency comes from the shared enrichment semaphore (sized from
+# OLLAMA_NUM_PARALLEL), not a local one around a serial loop.
 
 _PROMPTS: dict[str, str] = {
     "architecture_diagram": (
@@ -152,8 +152,14 @@ class DiagramExtractorService:
             document_id,
         )
 
-        processed = 0
-        for img in images:
+        from app.services.enrichment_concurrency import (  # noqa: PLC0415
+            get_enrichment_llm_semaphore,
+        )
+
+        semaphore = get_enrichment_llm_semaphore()
+
+        async def _extract_one(img) -> bool:  # noqa: ANN001
+            """Extract one diagram and write it to Kuzu. Returns True if written."""
             try:
                 prompt = _build_prompt(img.image_type, img.description or "")
             except KeyError:
@@ -162,9 +168,9 @@ class DiagramExtractorService:
                     img.image_type,
                     img.id,
                 )
-                continue
+                return False
 
-            async with _EXTRACT_SEM:
+            async with semaphore:
                 try:
                     raw = (
                         await get_llm_service().complete(
@@ -184,7 +190,7 @@ class DiagramExtractorService:
                     logger.warning(
                         "diagram_extractor: LLM call failed for image_id=%s: %s", img.id, exc
                     )
-                    continue
+                    return False
 
             try:
                 parsed = _parse_llm_response(raw)
@@ -192,7 +198,7 @@ class DiagramExtractorService:
                 logger.warning(
                     "diagram_extractor: JSON parse failed for image_id=%s: %s", img.id, exc
                 )
-                continue
+                return False
 
             nodes = parsed.get("nodes", [])
             edges = parsed.get("edges", [])
@@ -201,6 +207,7 @@ class DiagramExtractorService:
             if not isinstance(edges, list):
                 edges = []
 
+            # Never awaits, so concurrent callers cannot interleave one write.
             try:
                 await self._write_to_kuzu(
                     document_id=document_id,
@@ -209,18 +216,35 @@ class DiagramExtractorService:
                     nodes=nodes,
                     edges=edges,
                 )
-                processed += 1
-                logger.info(
-                    "diagram_extractor: wrote %d nodes / %d edges for image_id=%s",
-                    len(nodes),
-                    len(edges),
-                    img.id,
-                )
             except Exception as exc:
                 logger.warning(
                     "diagram_extractor: Kuzu write failed for image_id=%s: %s", img.id, exc
                 )
-                continue
+                return False
+
+            logger.info(
+                "diagram_extractor: wrote %d nodes / %d edges for image_id=%s",
+                len(nodes),
+                len(edges),
+                img.id,
+            )
+            return True
+
+        # return_exceptions so one dead image does not cancel the rest mid-write;
+        # re-raised below so the worker still fails and retries the job.
+        results = await asyncio.gather(
+            *(_extract_one(img) for img in images), return_exceptions=True
+        )
+        unavailable = next(
+            (r for r in results if isinstance(r, LLMUnavailableError)),
+            None,
+        )
+        for r in results:
+            if isinstance(r, BaseException) and not isinstance(r, LLMUnavailableError):
+                logger.warning("diagram_extractor: image task failed: %s", r)
+        if unavailable is not None:
+            raise unavailable
+        processed = sum(1 for r in results if r is True)
 
         logger.info(
             "diagram_extractor: done doc=%s processed=%d total=%d",

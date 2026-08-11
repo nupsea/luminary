@@ -1,6 +1,6 @@
 ---
 description: Python-specific Luminary patterns. Loaded when working on Python files.
-globs: ["backend/**/*.py"]
+paths: ["backend/**/*.py"]
 ---
 # Python Patterns (Backend)
 To save context tokens, the full list of python patterns lives in `docs/patterns.md`.

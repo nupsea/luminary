@@ -26,7 +26,7 @@ import {
   generateDocumentFlashcards,
 } from "@/lib/studyApi"
 import { deleteAllFlashcardsForCollection } from "@/pages/Study/api"
-import { endOpenSessionsForScope } from "@/lib/studySessionService"
+import { type StudyFilters, endOpenSessionsForScope } from "@/lib/studySessionService"
 import { SessionHistory } from "@/components/study/SessionHistory"
 import { CollectionCardManager } from "@/components/study/CollectionCardManager"
 
@@ -63,8 +63,8 @@ interface DashboardData {
 interface CollectionStudyDashboardProps {
   collectionId: string
   onBack: () => void
-  onStartStudy: (filters?: any) => void
-  onStartTeachback: (filters?: any, resumeId?: string) => void
+  onStartStudy: (filters?: StudyFilters) => void
+  onStartTeachback: (filters?: StudyFilters, resumeId?: string) => void
   onNavigateToCollection: (id: string) => void
 }
 

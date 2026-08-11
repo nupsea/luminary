@@ -22,16 +22,14 @@ import { toast } from "sonner"
 import {
   BulkActionBar,
 } from "@/components/study/SessionHistory"
-import {
-  SessionHistoryRow,
-  sessionLabel,
-} from "@/components/study/SessionHistoryRow"
+import { SessionHistoryRow } from "@/components/study/SessionHistoryRow"
 import {
   type StudySessionItem,
   type TeachbackResultItem,
   deleteStudySession,
   fetchSessionTeachbackResults,
   fetchSessions,
+  sessionLabel,
 } from "@/lib/studyApi"
 
 function formatDate(iso: string): string {

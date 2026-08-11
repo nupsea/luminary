@@ -1,12 +1,12 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint . --max-warnings 125",
+    "lint": "eslint . --max-warnings 123",
     "preview": "vite preview",
     "test": "vitest run",
     "regen:api-types": "bash scripts/regen-api-types.sh"
@@ -50,6 +50,13 @@
   },
   "overrides": {
     "tar": ">=7.5.11",
+    "lodash-es": "^4.18.1",
+    "@excalidraw/excalidraw": {
+      "nanoid": "^3.3.18",
+      "@excalidraw/mermaid-to-excalidraw": {
+        "nanoid": "^5.1.16"
+      }
+    },
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-primitive": "^2.0.0",
     "@radix-ui/react-collection": "^1.1.0",

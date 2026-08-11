@@ -68,9 +68,8 @@ _MAX_PART_CHARS = 500
 _MAX_LABELS = 40
 
 # Bounds concurrent vision LLM calls across ALL documents (avoids OOM on large
-# PDFs). Sized lazily from ENRICHMENT_VISION_CONCURRENCY so a machine/profile with
-# headroom can batch several image_analyze calls (paired with OLLAMA_NUM_PARALLEL);
-# the default of 1 preserves the original one-at-a-time behaviour.
+# PDFs). Sized from ENRICHMENT_VISION_CONCURRENCY, capped at OLLAMA_NUM_PARALLEL:
+# past the slot count calls queue, and this path has a real 300s ceiling to burn.
 # Keyed by running loop, as in enrichment_concurrency: an asyncio.Semaphore binds
 # itself to a loop the first time it has to wait, so a single process-wide instance
 # raises "bound to a different event loop" once a second loop contends for it. The
@@ -85,11 +84,16 @@ def _get_enrich_sem() -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     sem = _ENRICH_SEMS.get(loop)
     if sem is None:
+        settings = _config_module.get_settings()
         try:
-            n = int(_config_module.get_settings().ENRICHMENT_VISION_CONCURRENCY)
-        except (TypeError, ValueError):
+            n = int(settings.ENRICHMENT_VISION_CONCURRENCY)
+        except (TypeError, ValueError, AttributeError):
             n = 1
-        sem = asyncio.Semaphore(max(1, n))
+        try:
+            slots = int(settings.OLLAMA_NUM_PARALLEL)
+        except (TypeError, ValueError, AttributeError):
+            slots = 1
+        sem = asyncio.Semaphore(max(1, min(n, max(1, slots))))
         _ENRICH_SEMS[loop] = sem
     return sem
 
