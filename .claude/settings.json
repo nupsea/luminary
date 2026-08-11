@@ -1,4 +1,22 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(make lint:*)",
+      "Bash(make test:*)",
+      "Bash(make ci:*)",
+      "Bash(make smoke:*)",
+      "Bash(make regen-api-types:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run python tools/layer_linter.py)",
+      "Bash(uv run python tools/boundary_checker.py)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run lint:*)",
+      "Bash(python3 scripts/check_manifest_schema.py)",
+      "Bash(python3 scripts/check_manifest_coverage.py)",
+      "Bash(bash scripts/smoke/:*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -6,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "case \"$TOOL_INPUT\" in *pip\\ install*|*pip3\\ install*|*poetry\\ *) echo 'BLOCK: Use uv, not pip or poetry (invariant I-15). Run: uv add <package>' >&2; exit 1;; esac",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); case \"$cmd\" in *\"pip install\"*|*\"pip3 install\"*|*\"poetry add\"*|*\"poetry install\"*|*\"poetry run\"*) echo 'BLOCK: this repo is uv-only (I-15). Use: uv add <package>. Note uv pip install bypasses uv.lock and is also disallowed.' >&2; exit 2;; esac; exit 0",
             "timeout": 5000
           }
         ]
@@ -14,21 +32,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=\"$TOOL_INPUT_FILE_PATH\"; case \"$FILE\" in *.py) cd /Users/sethurama/DEV/LM/learning-mate/backend && uv run ruff check --fix \"$FILE\" 2>&1 | head -20;; esac; exit 0",
-            "timeout": 15000
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "FILE=\"$TOOL_INPUT_FILE_PATH\"; case \"$FILE\" in *.py) cd /Users/sethurama/DEV/LM/learning-mate/backend && uv run ruff check --fix \"$FILE\" 2>&1 | head -20;; esac; exit 0",
+            "command": "f=$(jq -r '.tool_input.file_path // \"\"'); case \"$f\" in *.py) cd \"$CLAUDE_PROJECT_DIR/backend\" 2>/dev/null && uv run ruff check --fix \"$f\" 2>&1 | head -20;; esac; exit 0",
             "timeout": 15000
           }
         ]

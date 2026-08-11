@@ -1,35 +1,15 @@
 ---
-description: Context efficiency rules for Claude Code agents. Read before performing any discovery or implementation task.
+description: How to spend context in this repo. Always loaded.
 ---
 
-# Context Efficiency Rules
+# Context Efficiency
 
-To minimize token usage and maximize response speed, follow these rules.
+**Read every file you will modify before writing code. Efficiency means reading smartly, not
+reading less.** Targeted line ranges, not skipped reads.
 
-**Cardinal rule: read every file you will modify before writing code. Efficiency means reading smartly, not reading less.**
-
-## Smart Discovery
-
-- **Use `Grep` to locate patterns**, then `Read` with line ranges for just the relevant section. Avoid reading 1000+ line files in full when you only need a schema or a single function.
-- **Use `Glob` to find files by name pattern** (e.g., `**/*flashcard*.py`). Do not use `find` or `ls` via Bash.
-- **Parallelize independent searches.** When looking up router + service + models, issue all `Read`/`Grep` calls in a single turn.
-- **Always read files you will modify.** The goal is to read surgically (targeted line ranges), not to skip reading entirely.
-
-## Incremental Planning
-
-- For large files (500+ lines), read the section you need with offset/limit rather than the whole file.
-
-## Schema-First, Code-Second
-
-- For database changes, start with `models.py` and `db_init.py`. Read the service only if you are modifying it or need to understand its contract.
-- For API changes, read the router's Pydantic schemas and endpoint signatures first.
-
-## Redundancy Check
-
-- Before adding a new utility, use `Grep` to search for similar patterns. This avoids codebase bloat.
-- Don't ask for clarification on things documented in `architecture.md` or `invariants.md`.
-
-## Output Discipline
-
-- Minimize code in the reasoning part of your response -- let tool calls speak for themselves.
-- Do not restate file contents in your response unless the user needs to see them.
+- **Schema first.** For a database change start at `models.py`, then the Alembic revision. For
+  an API change start at the router's Pydantic schemas and endpoint signatures.
+- **Check for a redundant helper before adding one.** Grep for the pattern; this codebase has
+  accumulated near-duplicate utilities that way.
+- Don't ask about anything already settled in `docs/architecture.md` or `docs/invariants.md`.
+- Never open `frontend/src/types/api.ts` (18k generated lines). Grep it for a type name.

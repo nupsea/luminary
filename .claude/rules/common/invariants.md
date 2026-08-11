@@ -1,7 +1,11 @@
 ---
-description: Luminary hard invariants. Violations block passes=true.
+description: Pointer to the Luminary hard invariants. Always loaded.
 ---
 # Luminary Invariants
-To save context tokens, the 18 hard invariants (e.g. AsyncSession concurrency, LanceDB sync wrappers, Kuzu get_next() guards, FTS5 shadow queries, 6-layer import rules, UI loading/error states) have been moved to `docs/invariants.md`.
 
-Before finalizing an implementation or conducting a review, you must read `docs/invariants.md` to verify compliance.
+The 31 hard invariants live in `docs/invariants.md`. Each is written as incident -> rule ->
+mechanism -> the test that guards it, and none of them is derivable from reading the code.
+
+**Read that file before finalizing any backend implementation or conducting a review.** Read it
+in full rather than grepping for a keyword: the invariant you are about to violate is rarely the
+one you would think to search for.

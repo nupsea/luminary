@@ -49,8 +49,11 @@ DATA/conversations/
 DATA/notes/
 DATA/papers/
 
-# LLM Code local config
-.claude/
+# LLM Code local config. Only the machine-local files are ignored: rules,
+# skills, agents and commands under .claude/ are shared and must be tracked.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/**/*.swp
 .antigravitycli/
 
 # OS
