@@ -318,7 +318,7 @@ Types -> Config -> Repo -> Service -> Runtime -> API
 | ML | BAAI/bge-small-en-v1.5 embeddings, GLiNER (zero-shot NER), ms-marco-MiniLM cross-encoder reranker |
 | Retrieval | RRF hybrid (vector + BM25 + graph traversal), then cross-encoder rerank |
 | Spaced rep | FSRS algorithm |
-| Frontend | React 18, TypeScript 5, Vite, shadcn/ui, Tailwind CSS |
+| Frontend | React, TypeScript, Vite, shadcn/ui, Tailwind CSS (versions in `frontend/package.json`) |
 | Graph viz | Sigma.js v3 + Graphology |
 | State | Zustand + TanStack Query |
 
@@ -338,6 +338,14 @@ frontend/src/
   lib/            Utilities, API client
   hooks/          Custom React hooks
 ```
+
+### Documentation
+
+- **[DEEP_DIVE.md](DEEP_DIVE.md)** — the long-form tour: architecture, design decisions, and the engineering philosophy behind Luminary.
+- **[docs/roadmap.md](docs/roadmap.md)** — what is built, what is open, and what was deliberately abandoned. Check it before proposing work.
+- **[docs/architecture.md](docs/architecture.md)** and **[docs/invariants.md](docs/invariants.md)** — the rules a change has to satisfy.
+
+Every other file in `docs/` describes something that already exists; `roadmap.md` is the only one that carries status.
 
 ### Contributing
 

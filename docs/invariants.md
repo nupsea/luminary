@@ -1,5 +1,5 @@
 ---
-description: Luminary hard invariants -- always loaded. Violations block passes=true. These rules have each been learned from a real incident or design decision.
+description: Luminary hard invariants. Each was learned from a real incident or design decision; each names the gate that enforces it.
 ---
 
 # Luminary Invariants
@@ -56,11 +56,11 @@ Block-level elements (h1, ul) inside a `<td>` break layout. Use `stripMarkdown()
 
 ## Quality Gates
 
-**I-13. Quality gates run in order: ruff -> pytest -> tsc.**
-Fix ruff before running pytest (lint errors mask test errors). Never set `passes=true` before all three pass.
+**I-13. `make ci` is the gate, and it runs in order: ruff -> layer_linter -> boundary_checker -> pytest -> frontend build -> tsc.**
+The order is load-bearing, not cosmetic: a lint error masks the test error underneath it, and a layer violation is a design fault that makes the test result meaningless. Run the cheap check first and fix what it says before moving on; running `pytest` against code `ruff` has already rejected wastes the slow step. Claiming a change is done means `make ci` exited 0 on your machine -- naming the individual commands you ran instead is not the same claim, because `make ci` also runs `check_manifest_schema.py`, `check_manifest_coverage.py` and `check_public_import.sh`, which are the ones people forget. Local green is necessary, not sufficient: GLiNER memory pressure has produced GitHub-only failures that no local run reproduces.
 
-**I-14. `passes=true` requires smoke exit 0 and reviewer returning no Critical items.**
-Tests passing is necessary but not sufficient. The smoke test verifies the backend contract the UI depends on.
+**I-14. `make ci` passing does not mean the app works. `make smoke` is the HTTP contract check.**
+`make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~230 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
 
 ## Packages
 

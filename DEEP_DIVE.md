@@ -53,7 +53,7 @@ Luminary avoids both traps. It runs a sophisticated multi-strategy retrieval pip
 The application is split into a Python backend (FastAPI, async-first) and a React frontend (TypeScript, Vite). They communicate over HTTP and Server-Sent Events (SSE) for streaming.
 
 ```
-                    Frontend (React 18 + TypeScript 5)
+                    Frontend (React + TypeScript + Vite)
                               |
                          HTTP / SSE
                               |

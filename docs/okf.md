@@ -1,8 +1,15 @@
 ---
-description: OKF (Open Knowledge Format) -- the portable knowledge projection layer. NOT a model connector (that's LiteLLM). Read before any export/grounding/import or blog-publish work.
+description: OKF (Open Knowledge Format) -- the portable knowledge projection layer. NOT a model connector (that's LiteLLM). Design doc; only the grounding half is built. Read before any export/grounding/import or blog-publish work.
 ---
 
 # OKF -- portable knowledge, model-agnostic grounding
+
+> **Build state.** Only the grounding half of this design exists.
+> `services/okf_context.py` (`resolve_concepts`, `build_concept_context`) is consumed by
+> `routers/qa.py`. The Markdown file projection described below -- one file per concept,
+> `index.md`, `log.md`, export and import -- **is not built**. Treat everything about files as
+> design intent, not as a contract you can call. Tracked in [roadmap.md](roadmap.md).
+> I-21 governs it when it is built.
 
 **One-line truth:** OKF is *not* a model connector -- LiteLLM already connects Lumen to Ollama /
 OpenAI / Anthropic / Gemini. OKF is the **portable knowledge layer**: a folder of Markdown files
