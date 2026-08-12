@@ -168,6 +168,47 @@ Detail lives in the plan artifact until each phase opens its branch. Summary of 
   true.
 - **8** — deletions that calibration justified.
 
+## The eval substrate
+
+Verified 2026-08-12, before using these numbers to choose an entity model.
+
+`compute_hit_rate_5`, `compute_mrr` (MRR@5) and `compute_ndcg_10` in
+`evals/lib/retrieval_metrics.py` are correct. The mechanism worth checking is hint matching —
+a hint is normalised, truncated to `HINT_NORM_LEN=80` and substring-matched, so a hint that
+is not verbatim in the corpus makes its question permanently unhittable and turns the metric
+floor into a golden artifact. It is not happening: **40/40 hints and 40/40 graded passages
+resolve in the corpus for both `book` and `paper`.**
+
+`book` is sound — 40 rows, 40 distinct hints, all graded, one source, corpus clean.
+
+**`paper` is not fit to gate on.** `art_of_unix.txt` is 2166 lines and stops being the book at
+line 1734, continuing as scraped ibiblio site chrome: a "Page not found" page, nav menus, and
+a footer. 118 of 248 chunks (48%) carry it, and **13 of 40 golden questions (33%) ask about
+it** — "page not found?", "what is ibiblio, exactly?", "terasaur?". Only 33 distinct hints
+cover the 40 questions, the most reused being the 404 message itself.
+
+Those questions inflate rather than depress `hit_rate`: `terasaur` and `ibiblio` are unique
+tokens, so BM25 finds them immediately. `paper` also carries the lowest thresholds of any
+dataset (0.45/0.30 against the 0.50/0.35 default), which suggests the bar was lowered instead
+of the data fixed. Every other corpus is clean — the odyssey 1/1588, d2l 1/952, the rest zero.
+
+Consequence for the entity-model decision: **read it off `book` only**, where the two models
+are bit-identical. The `paper` mrr difference of +0.012 is measured on the contaminated third
+and is discarded.
+
+Repair order. Six test files reference the fixture (`test_cross_domain_goldens`,
+`test_performance`, `test_book_parser`, `test_integration`, `test_integration_full`,
+`test_e2e_upload`), so truncation shifts chunk counts; nothing in `evals/` or `scripts/`
+references it by name.
+
+1. Truncate at the seam (~line 1733), checking nothing real is lost.
+2. Run the six dependent tests; fix assertions encoding the old size.
+3. Re-ingest, regenerate `paper.jsonl` with `generate_golden.py`, cross-verify with
+   `audit_golden.py`.
+4. Re-baseline the paper thresholds. Expect `hit_rate` to fall — the easy chrome questions
+   disappear, so a lower number is a real bar replacing a flattered one.
+5. Re-run the entity-model comparison against two clean datasets.
+
 ## Metric tiers
 
 Applies from Phase 6 onward.
