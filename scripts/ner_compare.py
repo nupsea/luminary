@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import os
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -75,10 +77,18 @@ def _fetch_chunks(backend: str, limit: int) -> tuple[list[dict], bool]:
     return collected, technical
 
 
-def _run_one(
+def _measure_in_process(
     model_id: str, chunks: list[dict], data_dir: str, is_technical: bool
 ) -> dict:
-    """Load one model, extract, and release it before the next is measured."""
+    """Measure one model in a process that has loaded nothing else.
+
+    Run via ``--single``, one subprocess per model. Measuring both in one
+    process cannot work: the first load also imports torch and transformers,
+    charging ~1.5GB of shared runtime to whichever model happens to go first,
+    and CPython does not return freed arenas to the OS, so the second model
+    appears to cost whatever the first one failed to give back. Measured that
+    way a 336MB model reads as larger than a 1126MB one.
+    """
     from app.services.ner import EntityExtractor  # noqa: PLC0415
 
     proc = psutil.Process()
@@ -95,23 +105,47 @@ def _run_one(
     entities = extractor.extract(chunks, "book", is_technical=is_technical)
     extract_s = time.monotonic() - t1
 
-    pairs = {(e["name"], e["type"]) for e in entities}
-    types = Counter(e["type"] for e in entities)
-
-    extractor._model = None
-    del extractor
-    gc.collect()
-
     return {
         "model": model_id,
         "load_s": round(load_s, 2),
         "extract_s": round(extract_s, 2),
-        "resident_mb": round((rss_loaded - rss_before) / MB, 1),
+        # Not weights alone: the first `from gliner import GLiNER` also drags in
+        # torch and transformers, and that import is charged here. Compare the
+        # two models on `peak_rss_mb`, which is what the app actually pays.
+        "load_delta_mb": round((rss_loaded - rss_before) / MB, 1),
+        "peak_rss_mb": round(proc.memory_info().rss / MB, 1),
         "entities": len(entities),
-        "unique": len(pairs),
-        "types": types,
-        "pairs": pairs,
+        "pairs": sorted([e["name"], e["type"]] for e in entities),
     }
+
+
+def _run_one(
+    model_id: str, chunks: list[dict], data_dir: str, is_technical: bool
+) -> dict:
+    """Measure one model in its own subprocess, then rehydrate the result."""
+    payload = json.dumps({"chunks": chunks, "is_technical": is_technical})
+    out = subprocess.run(  # noqa: S603
+        [sys.executable, str(Path(__file__).resolve()), "--single", model_id,
+         "--data-dir", data_dir],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if out.returncode != 0:
+        raise SystemExit(f"measuring {model_id} failed:\n{out.stderr[-2000:]}")
+    try:
+        result = json.loads(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise SystemExit(
+            f"measuring {model_id} produced no result:\n{out.stdout[-2000:]}"
+        ) from None
+
+    pairs = {(name, typ) for name, typ in result.pop("pairs")}
+    result["pairs"] = pairs
+    result["unique"] = len(pairs)
+    result["types"] = Counter(typ for _, typ in pairs)
+    return result
 
 
 def _report(base: dict, cand: dict, samples: int) -> None:
@@ -124,7 +158,14 @@ def _report(base: dict, cand: dict, samples: int) -> None:
     print()
     print(f"  {'':<22} {'baseline':>14} {'candidate':>14}")
     print(f"  {'model':<22} {base['model'].split('/')[-1]:>14} {cand['model'].split('/')[-1]:>14}")
-    print(f"  {'resident (MB)':<22} {base['resident_mb']:>14,.1f} {cand['resident_mb']:>14,.1f}")
+    print(
+        f"  {'process peak (MB)':<22} "
+        f"{base['peak_rss_mb']:>14,.1f} {cand['peak_rss_mb']:>14,.1f}"
+    )
+    print(
+        f"  {'load delta (MB)':<22} "
+        f"{base['load_delta_mb']:>14,.1f} {cand['load_delta_mb']:>14,.1f}"
+    )
     print(f"  {'load (s)':<22} {base['load_s']:>14.2f} {cand['load_s']:>14.2f}")
     print(f"  {'extract (s)':<22} {base['extract_s']:>14.2f} {cand['extract_s']:>14.2f}")
     print(f"  {'entities':<22} {base['entities']:>14,} {cand['entities']:>14,}")
@@ -136,7 +177,7 @@ def _report(base: dict, cand: dict, samples: int) -> None:
     print(f"  candidate only         {len(only_cand):>14,}")
 
     print()
-    print("  type distribution")
+    print("  unique (name,type) per type")
     for t in sorted(set(base["types"]) | set(cand["types"])):
         print(f"    {t:<20} {base['types'].get(t, 0):>14,} {cand['types'].get(t, 0):>14,}")
 
@@ -166,7 +207,16 @@ def main() -> int:
     ap.add_argument("--chunks", type=int, default=120)
     ap.add_argument("--samples", type=int, default=15, help="disagreements to print")
     ap.add_argument("--data-dir", default=os.environ.get("DATA_DIR", ".luminary"))
+    ap.add_argument("--single", help=argparse.SUPPRESS)  # internal: one model, one process
     args = ap.parse_args()
+
+    if args.single:
+        job = json.loads(sys.stdin.read())
+        result = _measure_in_process(
+            args.single, job["chunks"], args.data_dir, job["is_technical"]
+        )
+        print(json.dumps(result))
+        return 0
 
     backend = args.backend.rstrip("/")
     try:
