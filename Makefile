@@ -190,6 +190,18 @@ smoke:
 	@echo "Running smoke tests (requires backend on :7820)..."
 	bash scripts/smoke/all.sh
 
+# Footprint + interactive-latency baseline. FILE= ingests and samples through it;
+# without FILE it samples idle. Backend must be running.
+mem-profile:
+	@echo "Profiling footprint (requires backend on :7820)..."
+	cd backend && uv run python ../scripts/mem_profile.py $(if $(FILE),--ingest $(FILE),) $(MEM_ARGS)
+
+# Compare two GLiNER models on the live corpus before changing NER_MODEL.
+# Agreement only -- the deciding gate is `make eval` under each model.
+ner-compare:
+	@echo "Comparing entity models (requires backend on :7820)..."
+	cd backend && uv run python ../scripts/ner_compare.py $(NER_ARGS)
+
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --assert-thresholds

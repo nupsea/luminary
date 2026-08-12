@@ -260,6 +260,13 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                     temperature=0.0,
                     timeout=300.0,
                     api_base=api_base,
+                    # Release the largest resident model soon after the last
+                    # figure instead of holding it for OLLAMA_KEEP_ALIVE.
+                    extra=(
+                        {"keep_alive": settings.VISION_KEEP_ALIVE}
+                        if model.startswith("ollama/")
+                        else None
+                    ),
                 )
             ).strip()
             if model != vision_model:

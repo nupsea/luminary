@@ -357,6 +357,32 @@ fn ollama_num_parallel(data_dir: &Path) -> u32 {
     }
 }
 
+/// How many models the bundled Ollama keeps resident at once.
+///
+/// Ollama's own default is 3, which on a 16GB machine means a 3B chat model and
+/// a 7B vision model co-resident for the whole `OLLAMA_KEEP_ALIVE` window after
+/// one PDF that touches both -- roughly 9GB held for 30 minutes with nothing
+/// running. `scripts/install.sh` and `scripts/bootstrap.sh` have always capped
+/// this; the drag-installed DMG had no install step to do it in, so it inherited
+/// the default and was the only path that could reach that state.
+///
+/// Sized like `ollama_num_parallel`, from the same `.env`-then-sysctl source, so
+/// the two knobs cannot disagree about how large the machine is.
+fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
+    if let Some(n) =
+        env_file_value(data_dir, "OLLAMA_MAX_LOADED_MODELS").and_then(|v| v.parse().ok())
+    {
+        // Clamped tighter than the parallel slots: a second resident model costs
+        // its whole weight, not a KV cache, and past a handful the setting only
+        // describes swap.
+        return u32::clamp(n, 1, 4);
+    }
+    match total_memory_gb() {
+        Some(gb) if gb >= 24 => 2,
+        _ => 1,
+    }
+}
+
 pub fn spawn_ollama(
     sup: &Supervisor,
     stage: &Path,
@@ -381,6 +407,10 @@ pub fn spawn_ollama(
         .env(
             "OLLAMA_NUM_PARALLEL",
             ollama_num_parallel(data_dir).to_string(),
+        )
+        .env(
+            "OLLAMA_MAX_LOADED_MODELS",
+            ollama_max_loaded_models(data_dir).to_string(),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -565,6 +595,36 @@ mod tests {
         // not treated as the end of the file.
         std::fs::write(dir.join(".env"), b"GARBAGE\nOLLAMA_NUM_PARALLEL=3\n").unwrap();
         assert_eq!(ollama_num_parallel(&dir), 3);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_small_machine_never_holds_two_models_resident() {
+        let dir = std::env::temp_dir().join(format!("luminary-envmax-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // The whole point: never Ollama's default of 3 on an unknown machine.
+        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        assert_eq!(ollama_max_loaded_models(&dir), if gb >= 24 { 2 } else { 1 });
+
+        std::fs::write(dir.join(".env"), b"OLLAMA_MAX_LOADED_MODELS=2\n").unwrap();
+        assert_eq!(ollama_max_loaded_models(&dir), 2);
+
+        // A second resident model costs its whole weight, so the clamp is
+        // tighter than the one on parallel slots.
+        std::fs::write(dir.join(".env"), b"OLLAMA_MAX_LOADED_MODELS=99\n").unwrap();
+        assert_eq!(ollama_max_loaded_models(&dir), 4);
+
+        // Unparseable falls back to the memory-sized default rather than to
+        // Ollama's, which is the value this function exists to displace.
+        for bad in [
+            &b"OLLAMA_MAX_LOADED_MODELS=several\n"[..],
+            &b"OLLAMA_MAX_LOADED_MODELS=-2\n"[..],
+        ] {
+            std::fs::write(dir.join(".env"), bad).unwrap();
+            assert_eq!(ollama_max_loaded_models(&dir), if gb >= 24 { 2 } else { 1 });
+        }
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

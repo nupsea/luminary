@@ -64,6 +64,26 @@ def _reranker_slug() -> str:
     return get_settings().RERANK_MODEL.rsplit("/", 1)[-1].lower()
 
 
+# Download sizes for the entity models worth switching between. Used only to set
+# expectations on the setup screen, so an unknown model gets a mid-range guess
+# rather than blocking the switch.
+_NER_SIZES_MB: dict[str, int] = {
+    "urchade/gliner_multi_pii-v1": 1126,
+    "urchade/gliner_multi-v2.1": 1126,
+    "urchade/gliner_medium-v2.1": 604,
+    "urchade/gliner_small-v2.1": 336,
+}
+_NER_SIZE_DEFAULT_MB = 600
+
+
+def _ner_repo() -> str:
+    return get_settings().NER_MODEL
+
+
+def _ner_size_bytes() -> int:
+    return _NER_SIZES_MB.get(_ner_repo(), _NER_SIZE_DEFAULT_MB) * _MB
+
+
 def specs() -> tuple[ModelSpec, ...]:
     return (
         ModelSpec(
@@ -82,7 +102,7 @@ def specs() -> tuple[ModelSpec, ...]:
         ),
         # GLiNER publishes only a torch checkpoint, so excluding it would leave
         # nothing to load.
-        ModelSpec("ner", "urchade/gliner_multi_pii-v1", "gliner", 1126 * _MB),
+        ModelSpec("ner", _ner_repo(), "gliner", _ner_size_bytes()),
     )
 
 

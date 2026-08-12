@@ -122,6 +122,15 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
     VISION_MODEL: str = "ollama/qwen2.5vl:7b"
+    # How long the vision runner stays resident after its last image, overriding
+    # OLLAMA_KEEP_ALIVE for this path only. The vision model is the largest thing
+    # Luminary loads (~6GB for a 7B VLM) and it is used in bursts: a document's
+    # figures, then nothing until the next upload. Inheriting the global 30m held
+    # that 6GB for half an hour after enrichment drained, which is what put a
+    # 16GB machine into swap. Long enough to serve a run of images back to back,
+    # short enough to release soon after; "0" would unload between every image
+    # and pay the reload each time. Not a num_ctx change, so I-27 is untouched.
+    VISION_KEEP_ALIVE: str = "60s"
     # Max concurrent vision (image_analyze) LLM calls across all documents. Default
     # 1 = one-at-a-time (safe on 8GB). Raise (e.g. 2-4) on a host with headroom and
     # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
@@ -133,6 +142,20 @@ class Settings(BaseSettings):
     # on a machine where enrichment throughput matters more than figure coverage.
     PDF_VECTOR_FIGURES: bool = True
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
+    # The entity model, and the second-largest thing Luminary loads (1126MB).
+    # Turning it off is not the memory lever it looks like: `graph_expand` in
+    # retriever_strategies skips query expansion whenever this model is not
+    # resident, so an unloaded entity model silently changes retrieval rather
+    # than only freeing memory. A smaller model that stays resident is therefore
+    # worth more than a large one that does not.
+    #
+    # The default is `gliner_multi-v2.1` fine-tuned onto a synthetic PII dataset
+    # and six languages, while ENTITY_TYPES in ner.py asks for PERSON,
+    # ORGANIZATION, CONCEPT, TECHNOLOGY, ALGORITHM and friends -- none of which
+    # is PII. Whether a smaller general model is better here as well as lighter
+    # is measured by `scripts/ner_compare.py`, not assumed; the default stays put
+    # until those numbers say otherwise.
+    NER_MODEL: str = "urchade/gliner_multi_pii-v1"
     # 2D.2: seed document auto-tags with entities from the graph extraction.
     # On by default -- no extra LLM calls; uses entities already populated by
     # entity_extract_node. Requires GLINER_ENABLED at ingestion time for old docs

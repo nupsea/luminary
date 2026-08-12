@@ -103,10 +103,25 @@ needs the background work (`test_e2e_upload` does).
 Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
 marker over two causes is why this has stalled twice.
 
+### 6. Model footprint, scheduling and substitutability
+
+A 0.5.0 user reported ~16GB resident and a crash ingesting a PDF. `spawn_ollama` in
+`src-tauri/src/supervisor.rs` sets `OLLAMA_KEEP_ALIVE=30m` but never
+`OLLAMA_MAX_LOADED_MODELS`, whose Ollama default is 3, so chat and vision runners co-reside
+for half an hour. `scripts/install.sh:198` and `scripts/bootstrap.sh:257` both cap it; the
+DMG path does not.
+
+Two further problems share the fix. Deferred summaries and enrichment issue LLM calls into
+the slots an interactive Ask needs, with no scheduling priority between them. And model
+substitution (#48) does not move eval numbers, because prompts, parsers and budgets are
+sized for llama3.2 and no metric distinguishes a model that emits clean JSON from one whose
+output is repaired — there are two tolerant parsers and nothing counts a repair.
+
+Plan and phases: `model-footprint-plan.md`. Delete it when the last phase ships.
+
 ## Deferred — decided, not scheduled
 
-- **8GB low-footprint memory profile.** A profile plus model lifecycle management, explicitly
-  *not* quantization. Write-only until someone commits to it.
+Nothing currently deferred.
 
 ## Abandoned — do not restore
 
