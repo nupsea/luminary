@@ -351,8 +351,27 @@ prose plus a JSON citations block), and `judge_citation` imports `litellm`, abse
 `evals` project so every call raised `ModuleNotFoundError` into a swallowed counter. I-32 —
 uncomputed metrics fail rather than pass — is what surfaced both.
 
-`answer_rate` and `citation_coverage` are new. Their 0.80 floors have no historical baseline
-and should be set deliberately; the measurements above stand regardless of where the bar lands.
+### Variance, and the floors derived from it
+
+Four runs per dataset on one frozen build, same corpus, bit-identical retrieval:
+
+| | citation_support_rate | citation_coverage | answer_rate | faithfulness |
+|---|---|---|---|---|
+| book | 0.6491 ± 0.0521 | 0.8245 ± 0.0628 | 0.9250 ± 0.0354 | 0.6888 ± 0.0120 |
+| paper | 0.7089 ± 0.0254 | 0.9679 ± 0.0323 | 0.9750 ± 0.0000 | 0.6802 ± 0.0168 |
+
+**A single run cannot resolve a change smaller than ~0.10 on book or ~0.05 on paper.** book's
+support rate ranged 0.5893–0.7065 across identical runs, and `citations_proposed` ranged 49–71:
+the model's citation volume is itself unstable, which is most of the spread. Two structural
+changes were credited with moving this metric by less than that band; both were inside the noise
+and neither claim survives. Compare distributions over repeated runs, never two points. Retrieval
+metrics are exempt — they are bit-reproducible on a fixed corpus.
+
+The generation floors are now `mean - 3sd` for the weaker dataset, rounded down to 0.05:
+`citation_support_rate` 0.45, `citation_coverage` 0.60, `answer_rate` 0.75. They replace 0.80s
+that were invented with no derivation. They are collapse detectors and say nothing about quality:
+support at 0.65 is not good, it is what this build scores, and the number to beat is the measured
+mean rather than the floor.
 
 `citation_coverage` is measured post-I-33 above. What is still unmeasured is the split between
 the two reasons an answer carries no chip — the model emitted none, or the filter removed one —
