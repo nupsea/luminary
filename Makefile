@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -202,10 +202,25 @@ ner-compare:
 	@echo "Comparing entity models (requires backend on :7820)..."
 	cd backend && uv run python ../scripts/ner_compare.py $(NER_ARGS)
 
+# Every document kind under DATA. `thoughts` is deliberately absent: 4 rows over a
+# 7-chunk document scores 1.000 by construction, so it is measured, not gated.
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset legal --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset play --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset study --backend-url $(BACKEND_URL) --assert-thresholds
+
+# Generation quality on the shipped answering path: faithfulness (HHEM), answer
+# relevance, citation support, answer rate and citation coverage -- all asserted.
+# Slow: /qa runs sequentially because a local Ollama serves one generation at a
+# time. This is the only target that exercises answering; `make eval` is retrieval
+# only, which is why every faithfulness column in the UI read "-" before it existed.
+eval-gen:
+	@echo "Generation quality eval on book + paper (local judge, asserted -- slow)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
@@ -232,12 +247,63 @@ eval-topics:
 # Regenerate the d2l golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites d2l.jsonl.
 golden-d2l:
 	@echo "Regenerating d2l golden (GPT-5.4 generate + cross-model verify)..."
-	uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
 		--source DATA/books/d2l_dive_into_deep_learning.md \
 		--out evals/golden/d2l.jsonl \
 		--generator-model openai/gpt-5.4 \
 		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
 		--verify-axes answerable answer_correct --target 50
+
+# Regenerate the paper golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites
+# paper.jsonl. The source is a site scrape, so the generator reads it through
+# source_text.read_source_text -- the same furniture removal ingestion applies. Reading it
+# raw is how 17 of the previous 40 questions came to ask about the site's 404 page.
+golden-paper:
+	@echo "Regenerating paper golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/papers/art_of_unix.txt \
+		--out evals/golden/paper.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 40
+
+# Goldens for the document kinds that had none. `study` is the only PDF dataset,
+# so it is the only thing measuring the PDF parse path.
+golden-legal:
+	@echo "Regenerating legal golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/legal/federalist_papers.txt \
+		--out evals/golden/legal.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-play:
+	@echo "Regenerating play golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/plays/hamlet.txt \
+		--out evals/golden/play.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-study:
+	@echo "Regenerating study golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/study/sutton_barto_rl.pdf \
+		--out evals/golden/study.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-thoughts:
+	@echo "Regenerating thoughts golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/daily_thoughts_2026.txt \
+		--out evals/golden/thoughts.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 20
 
 luminary:
 	bash scripts/luminary.sh

@@ -13,8 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import chardet
-
+from app.services.source_text import read_source_text
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -92,6 +91,21 @@ class Signature:
     def __post_init__(self):
         if self.matches is None:
             self.matches = []
+
+
+def read_document_text(file_path: Path) -> str:
+    """Text of a source document, read the way ingestion reads it.
+
+    Dispatches on suffix so a caller needs no knowledge that a PDF is extracted
+    while a text file is decoded and stripped of scrape furniture. Anything
+    sampling a document to reason about what ingestion will produce -- the eval
+    golden generator above all -- must come through here: reading a PDF as bytes
+    yields `%PDF-1.5 /FlateDecode`, and a golden generated from that asks
+    questions about the container.
+    """
+    if file_path.suffix.lower() == ".pdf":
+        return UniversalParser._read_pdf_text(file_path)
+    return read_source_text(file_path).replace("\r\n", "\n")
 
 
 class UniversalParser:
@@ -219,13 +233,7 @@ class UniversalParser:
             return None
 
     def _read_text(self, file_path: Path) -> str:
-        suffix = file_path.suffix.lower()
-        if suffix == ".pdf":
-            return self._read_pdf_text(file_path)
-        raw_bytes = file_path.read_bytes()
-        detected = chardet.detect(raw_bytes)
-        encoding = detected.get("encoding") or "utf-8"
-        return raw_bytes.decode(encoding, errors="replace").replace("\r\n", "\n")
+        return read_document_text(file_path)
 
     @staticmethod
     def _read_pdf_text(file_path: Path) -> str:

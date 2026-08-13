@@ -1,6 +1,6 @@
 """Generate a golden Q&A dataset from any source document.
 
-Document-agnostic: point it at any .md/.txt file and it produces a retrieval +
+Document-agnostic: point it at any .md/.txt/.pdf file and it produces a retrieval +
 generation golden (question, ground_truth_answer, verbatim context_hint) using a
 strong generator model, then cross-verifies every pair with one or more
 independent models. Only unanimous-pass pairs are written; the rest land in a
@@ -47,6 +47,7 @@ from app.services.golden_quality import (  # noqa: E402
     is_structural_chunk,
     quality_filter,
 )
+from app.services.universal_parser import read_document_text  # noqa: E402
 from evals.lib.golden_relevance import find_graded_relevance  # noqa: E402
 from evals.lib.golden_verify import (  # noqa: E402
     build_verify_prompt,
@@ -159,7 +160,7 @@ def make_judge():
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate + cross-verify a golden Q&A dataset.")
-    ap.add_argument("--source", required=True, type=Path, help="source .md/.txt document")
+    ap.add_argument("--source", required=True, type=Path, help="source .md/.txt/.pdf document")
     ap.add_argument("--out", required=True, type=Path, help="output golden .jsonl path")
     ap.add_argument("--generator-model", default="openai/gpt-4.1", dest="generator_model")
     ap.add_argument(
@@ -185,7 +186,11 @@ def main() -> None:
                     help="value written to each row's source_file (default: --source path)")
     args = ap.parse_args()
 
-    text = strip_gutenberg_boilerplate(args.source.read_text(encoding="utf-8"))
+    # Read it the way ingestion reads it, PDFs included. A question sampled from
+    # text that never becomes a chunk -- scrape furniture, a license appendix, PDF
+    # container bytes -- is unfindable by construction, and lowers the metric floor
+    # without any retrieval defect.
+    text = strip_gutenberg_boilerplate(read_document_text(args.source))
     source_label = args.source_file_label or str(args.source)
     chunks = [c for c in chunk_source(text) if not is_structural_chunk(c)]
     # Shuffle so a candidate cap doesn't bias the golden toward early chapters.

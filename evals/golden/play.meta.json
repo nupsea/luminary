@@ -1,7 +1,7 @@
 {
-  "name": "paper",
-  "source_file": "DATA/papers/art_of_unix.txt",
-  "generated_at": "2026-08-12T10:48:04.613594+00:00",
+  "name": "play",
+  "source_file": "DATA/plays/hamlet.txt",
+  "generated_at": "2026-08-12T13:39:31.125371+00:00",
   "generator_model": "openai/gpt-5.4",
   "verify_models": [
     "openai/gpt-5.1",
@@ -18,7 +18,7 @@
     "deep_diver",
     "skeptic"
   ],
-  "target": 40,
-  "accepted": 40,
-  "flagged": 3
+  "target": 60,
+  "accepted": 60,
+  "flagged": 5
 }
