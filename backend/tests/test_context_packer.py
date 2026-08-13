@@ -12,7 +12,11 @@
 
 import tiktoken
 
-from app.services.context_packer import _token_estimate, pack_context
+from app.services.context_packer import (
+    _token_estimate,
+    pack_context,
+    pack_context_indexed,
+)
 
 # (a) test_sections_ordered_by_relevance
 
@@ -227,3 +231,57 @@ def test_token_count_accuracy_vs_tiktoken():
         f"litellm count {litellm_count} differs from tiktoken {tiktoken_count} "
         f"by {ratio:.1%} (> {tolerance:.0%})"
     )
+
+
+# (i) marker index — the map a citation resolves against
+
+
+def test_pack_context_indexed_numbers_chunks_in_emission_order():
+    """Markers must follow emission order, not input order: groups are sorted by
+    relevance, so [S1] is the first chunk the model actually sees."""
+    chunks = [
+        {"text": "Fruit was all their diet.", "section_id": "b", "score": 0.1},
+        {"text": "The machine stood in the corner.", "section_id": "a", "score": 0.9},
+    ]
+    text, emitted = pack_context_indexed(chunks)
+    assert "[S1] The machine stood in the corner." in text
+    assert "[S2] Fruit was all their diet." in text
+    assert [c["text"] for c in emitted] == [
+        "The machine stood in the corner.",
+        "Fruit was all their diet.",
+    ]
+
+
+def test_pack_context_indexed_map_excludes_dropped_chunks():
+    """A near-duplicate never reaches the prompt, so it must not consume a marker
+    number -- otherwise every later citation resolves to the wrong chunk."""
+    chunks = [
+        {"text": "The Time Machine stood in the corner.", "section_id": "a", "score": 0.9},
+        {"text": "The Time Machine stood in the corner.", "section_id": "a", "score": 0.8},
+        {"text": "Fruit was all their diet.", "section_id": "b", "score": 0.7},
+    ]
+    text, emitted = pack_context_indexed(chunks)
+    assert len(emitted) == 2
+    assert "[S2] Fruit was all their diet." in text
+    assert emitted[1]["text"] == "Fruit was all their diet."
+
+
+def test_pack_context_indexed_returns_source_dicts_not_copies():
+    """The map carries chunk_id/document_id/page, which the citation needs and the
+    packer's internal normalisation drops."""
+    src = {
+        "text": "Passage.",
+        "chunk_id": "c9",
+        "document_id": "d1",
+        "page": 4,
+        "score": 0.5,
+    }
+    _, emitted = pack_context_indexed([src])
+    assert emitted[0]["chunk_id"] == "c9"
+    assert emitted[0]["page"] == 4
+
+
+def test_pack_context_unmarked_output_is_unchanged():
+    """The plain packer keeps its old output; markers are opt-in."""
+    chunks = [{"text": "Passage.", "section_id": "a", "score": 0.5}]
+    assert "[S1]" not in pack_context(chunks)

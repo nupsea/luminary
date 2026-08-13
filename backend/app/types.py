@@ -133,6 +133,11 @@ class ChatState(TypedDict):
     # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
 
+    # chunks actually emitted into the prompt, in [S<n>] marker order, set by
+    # synthesize_node. Resolves a marker citation to the chunk it names, so the
+    # excerpt is filled from that chunk instead of retyped by the model (I-33).
+    cited_chunks: list[dict]
+
     # retrieval transparency metadata set by synthesize_node.
     # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.
     transparency: "TransparencyInfo | None"

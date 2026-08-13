@@ -147,6 +147,20 @@ def _should_use_summary(question: str) -> bool:
     return any(kw in q for kw in _SUMMARY_INTENT_KEYWORDS)
 
 
+# Every prompt that asks for citations states this. Naming a source is a pointer,
+# not a transcription: asking the model to retype the quote produced narration and
+# commentary in the excerpt field, and then telling it to copy verbatim made it
+# stop citing rather than risk it. The backend fills the excerpt from the chunk
+# the marker names, so the model never has to reproduce text (I-33).
+CITATION_RULE = (
+    "Each passage in the context is labelled with a marker like [S1]. Cite by "
+    'marker: {"source":"S1"}. Cite every passage you actually used, and only '
+    "those. Do not copy the passage text — the source text is filled in for you. "
+    'Optionally add {"quote":"..."} with a few words from the passage to point at '
+    "the relevant sentence."
+)
+
+
 QA_SYSTEM_PROMPT = (
     "You are a grounded knowledge assistant. "
     "Answer only using the provided context. "
@@ -154,8 +168,8 @@ QA_SYSTEM_PROMPT = (
     "Do not speculate. "
     "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
     "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
+    '{"citations":[{"source":"S1"}],"confidence":"high|medium|low"}\n'
+    f"{CITATION_RULE}"
 )
 
 # Creative mode: opt-in via the UI toggle. Still grounded in the learner's own
@@ -171,8 +185,8 @@ QA_CREATIVE_SYSTEM_PROMPT = (
     "the material. Write vivid, engaging Markdown prose; be playful and original while staying "
     "true to the source. "
     "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
+    '{"citations":[{"source":"S1"}],"confidence":"high|medium|low"}\n'
+    f"{CITATION_RULE}"
 )
 
 # Higher sampling temperature for creative mode. Models that reject temperature
@@ -190,8 +204,9 @@ QA_FACTUAL_SYSTEM_PROMPT = (
     f"Only respond exactly: {NOT_FOUND_SENTINEL} if you have no knowledge of the topic whatsoever. "
     "Write your answer as Markdown prose (use **bold**, bullet lists, and headings where helpful). "
     "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
+    '{"citations":[{"source":"S1"}],"confidence":"high|medium|low"}\n'
+    f"{CITATION_RULE} A part of the answer that came from your general knowledge "
+    "has no passage to cite."
 )
 
 
@@ -262,7 +277,242 @@ def _is_placeholder_citation(c: dict) -> bool:
     def _blank(v: object) -> bool:
         return not str(v or "").strip().strip(".").strip()
 
+    # A marker citation carries neither title nor excerpt by design -- both are
+    # filled in from the chunk it names -- so it must not read as a placeholder.
+    if not _blank(c.get("source")) or not _blank(c.get("chunk")):
+        return False
     return _blank(c.get("document_title")) and _blank(c.get("excerpt"))
+
+
+# A quote is only a quote if the grounding contains it. Models fill `excerpt`
+# with narration ("After the mysterious disappearance of the time machine...")
+# or with commentary about the context ("The context does not provide specific
+# details...") and both render as a source chip indistinguishable from a real
+# one. Long quotes are often stitched with ellipses or re-punctuated, so match
+# on a contiguous run of normalised tokens rather than the whole string.
+_MIN_GROUNDED_RUN_TOKENS = 8
+
+
+def _normalize_for_match(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split())
+
+
+def _excerpt_is_grounded(excerpt: str, normalized_grounding: str) -> bool:
+    tokens = _normalize_for_match(excerpt).split()
+    if not tokens or not normalized_grounding:
+        return False
+    if len(tokens) <= _MIN_GROUNDED_RUN_TOKENS:
+        return " ".join(tokens) in normalized_grounding
+    return any(
+        " ".join(tokens[i : i + _MIN_GROUNDED_RUN_TOKENS]) in normalized_grounding
+        for i in range(len(tokens) - _MIN_GROUNDED_RUN_TOKENS + 1)
+    )
+
+
+_MARKER_RE = re.compile(r"s?(\d+)", re.IGNORECASE)
+_EXCERPT_MAX_CHARS = 320
+
+# Shared with the chunk-derived source_citations in synthesize_node so both lists
+# under one answer obey one policy. Relieved of having to retype the quote, a
+# model cites freely: a 737-character answer came back with 12 chips, each a real
+# passage, and `paper` cited every answer it gave (coverage 1.0000) while under
+# half those chips supported anything. Availability is not relevance, so rank by
+# retrieval score, drop what sits far below the best, then cap.
+MAX_CITATIONS = 5
+CITATION_REL_RATIO = 0.5
+CITATION_MIN_SCORE = 0.01
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])[\"'”’)\]]*\s+")
+
+# Words carry no evidence of what a passage is about, so they must not decide
+# which sentence gets shown. Kept deliberately small and domain-neutral.
+_EXCERPT_STOPWORDS = frozenset(
+    [
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for", "from",
+        "had", "has", "have", "he", "her", "his", "i", "in", "into", "is", "it", "its",
+        "of", "on", "or", "she", "that", "the", "their", "them", "then", "there", "these",
+        "they", "this", "to", "was", "were", "what", "when", "which", "who", "will",
+        "with", "you", "your", "not", "no", "do", "does", "did", "so", "if"
+    ]
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {
+        t
+        for t in re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split()
+        if len(t) > 2 and t not in _EXCERPT_STOPWORDS
+    }
+
+
+def _excerpt_from_chunk(chunk_text: str, hint: str = "", answer: str = "") -> str:
+    """Cut the part of *chunk_text* that bears on *answer*, verbatim.
+
+    Showing the head of the chunk shows the wrong text: a chunk is sized for the
+    embedder, so the sentence that carries the claim sits anywhere in it. Measured
+    over `book` chips, 12 of 15 excerpts were head cuts, and judging the displayed
+    excerpt scored 0.5667 against 0.8667 for the same chips judged on their full
+    chunk — the citations were right and the window was wrong.
+
+    *hint* is whatever the model typed as its quote and *answer* is the prose the
+    chip sits under. Both are used only to choose which sentences to show, never
+    as content, so a paraphrased hint costs relevance and can never put words in
+    the source's mouth.
+    """
+    text = " ".join(chunk_text.split())
+    if not text or len(text) <= _EXCERPT_MAX_CHARS:
+        return text
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    if not sentences:
+        return text[:_EXCERPT_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+
+    target = _content_tokens(answer)
+    hint_tokens = _content_tokens(hint)
+    if not target and not hint_tokens:
+        best = 0
+    else:
+        def score(sentence: str) -> float:
+            tokens = _content_tokens(sentence)
+            if not tokens:
+                return 0.0
+            # Weight the model's own pointer above general answer overlap, and
+            # normalise by length so a long sentence does not win on volume.
+            overlap = len(tokens & target) + 3 * len(tokens & hint_tokens)
+            return overlap / (len(tokens) ** 0.5)
+
+        best = max(range(len(sentences)), key=lambda i: score(sentences[i]))
+
+    # Grow outward from the best sentence while the budget allows, preferring the
+    # following sentence so the excerpt reads forward.
+    lo = hi = best
+    length = len(sentences[best])
+    while True:
+        nxt = hi + 1
+        prv = lo - 1
+        grew = False
+        if nxt < len(sentences) and length + len(sentences[nxt]) + 1 <= _EXCERPT_MAX_CHARS:
+            length += len(sentences[nxt]) + 1
+            hi = nxt
+            grew = True
+        if prv >= 0 and length + len(sentences[prv]) + 1 <= _EXCERPT_MAX_CHARS:
+            length += len(sentences[prv]) + 1
+            lo = prv
+            grew = True
+        if not grew:
+            break
+
+    window = " ".join(sentences[lo : hi + 1]).strip()
+    if len(window) > _EXCERPT_MAX_CHARS:
+        window = window[:_EXCERPT_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+    return ("..." if lo > 0 else "") + window
+
+
+def _resolve_marker_citations(
+    citations: list[dict],
+    cited_chunks: list[dict],
+    doc_titles: dict[str, str],
+    answer: str = "",
+) -> tuple[list[dict], int]:
+    """Fill each marker citation in from the chunk it names.
+
+    The model names a source (`[S2]`) instead of retyping it, so the excerpt is
+    verbatim by construction and the citation carries the `chunk_id` needed to
+    deep-link. Returns (citations, unresolved_count); a marker pointing at no such
+    chunk is dropped, because the source it claims does not exist.
+    """
+    if not cited_chunks:
+        return citations, 0
+    resolved: list[dict] = []
+    seen_chunk_ids: set[str] = set()
+    unresolved = 0
+    for c in citations:
+        raw = c.get("source") if c.get("source") is not None else c.get("chunk")
+        if raw is None:
+            resolved.append(c)
+            continue
+        m = _MARKER_RE.fullmatch(str(raw).strip().strip("[]").strip())
+        idx = int(m.group(1)) if m else 0
+        if not 1 <= idx <= len(cited_chunks):
+            unresolved += 1
+            logger.warning(
+                "qa: dropped citation naming a source that does not exist: %r", raw
+            )
+            continue
+        chunk = cited_chunks[idx - 1]
+        # Two markers pointing at one chunk are one source, not two chips.
+        chunk_key = chunk.get("chunk_id") or f"_idx{idx}"
+        if chunk_key in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_key)
+        doc_id = chunk.get("document_id", "")
+        resolved.append(
+            {
+                "document_title": doc_titles.get(doc_id) or c.get("document_title"),
+                "section_heading": chunk.get("section_heading") or "",
+                "page": chunk.get("page", 0),
+                "excerpt": _excerpt_from_chunk(
+                    chunk.get("text", ""), str(c.get("quote") or ""), answer
+                ),
+                "chunk_id": chunk.get("chunk_id", ""),
+                "document_id": doc_id,
+                "_score": float(chunk.get("score") or 0.0),
+            }
+        )
+    return resolved, unresolved
+
+
+def _gate_and_rank_citations(citations: list[dict]) -> list[dict]:
+    """Rank chips by retrieval score, drop weak ones, cap the list.
+
+    The same gate `source_citations` has always applied, on the list the model
+    chose. A marker citation carries the score of the chunk it names; a legacy
+    excerpt citation carries none and cannot be ranked, so it is kept in place
+    behind the ranked ones rather than being scored as zero and dropped.
+
+    The single best source always survives: an answer that retrieved something
+    should never show zero sources because the gate was strict.
+    """
+    ranked = [c for c in citations if "_score" in c]
+    unranked = [c for c in citations if "_score" not in c]
+    if ranked:
+        ranked.sort(key=lambda c: c["_score"], reverse=True)
+        floor = max(CITATION_MIN_SCORE, ranked[0]["_score"] * CITATION_REL_RATIO)
+        kept = [ranked[0]] + [c for c in ranked[1:] if c["_score"] >= floor]
+    else:
+        kept = []
+    out = (kept + unranked)[:MAX_CITATIONS]
+    for c in out:
+        c.pop("_score", None)
+    return out
+
+
+def _drop_ungrounded_citations(
+    citations: list[dict], grounding_texts: list[str]
+) -> list[dict]:
+    """Drop citations whose excerpt does not occur in the answer's grounding.
+
+    Verified against the grounding the answer was generated from, not the whole
+    document: an excerpt the model recited from its own memory of the source is
+    still text the answer was not grounded on, and carries no chunk to link to.
+    Dropping leaves the answer with fewer chips or none; the chunk-derived
+    `source_citations` are unaffected, so the sources panel still stands.
+    """
+    if not grounding_texts:
+        return citations
+    normalized = _normalize_for_match(" ".join(grounding_texts))
+    kept: list[dict] = []
+    for c in citations:
+        excerpt = str(c.get("excerpt") or "").strip()
+        if not excerpt or _excerpt_is_grounded(excerpt, normalized):
+            kept.append(c)
+        else:
+            logger.warning(
+                "qa: dropped ungrounded citation excerpt (%d chars): %.80s",
+                len(excerpt),
+                excerpt,
+            )
+    return kept
 
 
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
@@ -571,6 +821,9 @@ class QAService:
                     return
 
                 chunks_returned = result.get("chunks") or []
+                citations_dropped = 0
+                citations_proposed = 0
+                citations_gated = 0
 
                 if result.get("not_found"):
                     if not chunks_returned:
@@ -758,6 +1011,31 @@ class QAService:
                     {c["document_id"] for c in chunks_returned if c.get("document_id")}
                 )
                 doc_titles = await self._fetch_doc_titles(chunk_doc_ids)
+
+                # Marker citations resolve against the chunks actually put in the
+                # prompt; anything still carrying a retyped excerpt falls back to
+                # verification against the grounding (I-33).
+                citations, citations_unresolved = _resolve_marker_citations(
+                    citations, result.get("cited_chunks") or [], doc_titles, answer_text
+                )
+                # Summary/graph routes ground on section_context with zero chunks,
+                # so both are the grounding an excerpt must be found in.
+                grounding_texts = [
+                    c.get("text", "") for c in chunks_returned if c.get("text")
+                ]
+                section_context_for_citations = result.get("section_context")
+                if section_context_for_citations and section_context_for_citations.strip():
+                    grounding_texts.append(section_context_for_citations)
+                before_drop = len(citations)
+                citations = _drop_ungrounded_citations(citations, grounding_texts)
+                citations_dropped = (before_drop - len(citations)) + citations_unresolved
+                # Relevance gate + cap, applied after both citation paths merge.
+                # Counted separately from citations_dropped: that is a grounding
+                # failure, this is a reference list the reader can actually use.
+                citations_proposed = len(citations)
+                citations = _gate_and_rank_citations(citations)
+                citations_gated = citations_proposed - len(citations)
+
                 citations = _enrich_citation_titles(
                     citations, scored_chunks_for_citation, doc_titles, scope
                 )
@@ -815,6 +1093,14 @@ class QAService:
                 if section_context and section_context.strip():
                     context_texts.append(section_context)
                 final["context_chunks"] = context_texts
+                # Eval-only: separates the two reasons an answer carries no source --
+                # the model named none, or the ones it named were ungrounded and
+                # removed. citation_coverage alone cannot tell those apart.
+                final["citations_dropped"] = citations_dropped
+                # How many chips the model proposed vs how many the relevance
+                # gate kept: coverage moving without this is uninterpretable.
+                final["citations_proposed"] = citations_proposed
+                final["citations_gated"] = citations_gated
             yield f"data: {json.dumps(final)}\n\n"
             logger.info(
                 "[perf] stream_answer total: %.2fs (question=%r)",

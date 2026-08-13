@@ -80,12 +80,13 @@ def _cap_per_document(chunks: list[dict], max_per_doc: int = 2) -> list[dict]:
 # pack_context — main public function
 
 
-def pack_context(
+def _pack(
     chunks: list[dict],
-    token_budget: int = 3000,
-    dedup_ratio: float = 0.8,
-    model: str = "gpt-3.5-turbo",
-) -> str:
+    token_budget: int,
+    dedup_ratio: float,
+    model: str,
+    with_markers: bool,
+) -> tuple[str, list[dict]]:
     """Assemble retrieved chunks into a context string within token_budget.
 
     Args:
@@ -100,11 +101,17 @@ def pack_context(
                      and skipped.  1.0 disables deduplication.
         model: Model name passed to litellm.token_counter for exact token counting.
 
+        with_markers: Prefix each emitted chunk with an ``[S<n>]`` marker the model
+                      can cite by. Numbering follows emission order, which is not
+                      input order: grouping, dedup and the token budget all change
+                      which chunks survive, so the marker map must come from here.
+
     Returns:
-        Assembled context string.  Empty string if chunks is empty.
+        (context string, emitted source chunk dicts in marker order). The list is
+        empty and the string is empty when chunks is empty.
     """
     if not chunks:
-        return ""
+        return "", []
 
     # 1. Normalise chunk dicts — accept 'score' as alias for 'relevance_score'
     normalised: list[dict] = []
@@ -119,6 +126,7 @@ def pack_context(
                 "section_summary": c.get("section_summary"),
                 "relevance_score": float(score),
                 "_group_key": group_key,
+                "_src": c,
             }
         )
 
@@ -142,6 +150,7 @@ def pack_context(
     # 3. Assemble output respecting token_budget and dedup_ratio
     parts: list[str] = []
     emitted_texts: list[str] = []  # track for near-duplicate detection
+    emitted_src: list[dict] = []  # source dicts in marker order
     total_tokens = 0
     budget_hit = False
 
@@ -175,7 +184,8 @@ def pack_context(
                 if any(_lcs_ratio(chunk_text, prev) >= dedup_ratio for prev in emitted_texts):
                     continue
 
-            chunk_str = f"---\n{chunk_text}\n"
+            marker = f"[S{len(emitted_src) + 1}] " if with_markers else ""
+            chunk_str = f"---\n{marker}{chunk_text}\n"
             chunk_tokens = _token_estimate(chunk_str, model=model)
 
             if total_tokens + chunk_tokens > token_budget:
@@ -185,11 +195,39 @@ def pack_context(
                     parts.append(chunk_str)
                     total_tokens += chunk_tokens
                     emitted_texts.append(chunk_text)
+                    emitted_src.append(c["_src"])
                 budget_hit = True
                 break
 
             parts.append(chunk_str)
             total_tokens += chunk_tokens
             emitted_texts.append(chunk_text)
+            emitted_src.append(c["_src"])
 
-    return "".join(parts)
+    return "".join(parts), emitted_src
+
+
+def pack_context(
+    chunks: list[dict],
+    token_budget: int = 3000,
+    dedup_ratio: float = 0.8,
+    model: str = "gpt-3.5-turbo",
+) -> str:
+    """Assemble retrieved chunks into a context string within token_budget."""
+    text, _ = _pack(chunks, token_budget, dedup_ratio, model, with_markers=False)
+    return text
+
+
+def pack_context_indexed(
+    chunks: list[dict],
+    token_budget: int = 3000,
+    dedup_ratio: float = 0.8,
+    model: str = "gpt-3.5-turbo",
+) -> tuple[str, list[dict]]:
+    """`pack_context` with an ``[S<n>]`` marker on each chunk, plus the marker map.
+
+    The returned list is what ``[S1]``..``[S<n>]`` resolve to, so a citation the
+    model writes as a marker can be filled in from the chunk it actually points at
+    rather than from text the model retypes.
+    """
+    return _pack(chunks, token_budget, dedup_ratio, model, with_markers=True)

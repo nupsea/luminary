@@ -181,33 +181,185 @@ resolve in the corpus for both `book` and `paper`.**
 
 `book` is sound — 40 rows, 40 distinct hints, all graded, one source, corpus clean.
 
-**`paper` is not fit to gate on.** `art_of_unix.txt` is 2166 lines and stops being the book at
-line 1734, continuing as scraped ibiblio site chrome: a "Page not found" page, nav menus, and
-a footer. 118 of 248 chunks (48%) carry it, and **13 of 40 golden questions (33%) ask about
-it** — "page not found?", "what is ibiblio, exactly?", "terasaur?". Only 33 distinct hints
-cover the 40 questions, the most reused being the 404 message itself.
+**`paper` was not fit to gate on, and was regenerated 2026-08-12.** `art_of_unix.txt` is a
+scrape of the ibiblio edition carrying that site's chrome interleaved with the prose — 460 of
+2166 lines, 118 of 248 chunks. 17 of 40 golden questions asked about the chrome rather than the
+book, and 18 of 40 hints matched more than one passage, 17 of them five or more, so a hit was
+credited for retrieving any of eight identical nav blocks. The floor had been lowered to
+0.45/0.30 instead of the data being fixed.
 
-Those questions inflate rather than depress `hit_rate`: `terasaur` and `ibiblio` are unique
-tokens, so BM25 finds them immediately. `paper` also carries the lowest thresholds of any
-dataset (0.45/0.30 against the 0.50/0.35 default), which suggests the bar was lowered instead
-of the data fixed. Every other corpus is clean — the odyssey 1/1588, d2l 1/952, the rest zero.
+Fixed in ingestion, not in the corpus: `app/services/source_text.py` collapses repeating
+furniture, and `generate_golden.py` reads its source through it so the generator and ingestion
+see one document. **Do not truncate** — 1105 words of real prose sit past the apparent seam at
+line 1734, including "Part III. Implementation".
 
-Consequence for the entity-model decision: **read it off `book` only**, where the two models
-are bit-identical. The `paper` mrr difference of +0.012 is measured on the contaminated third
-and is discarded.
+| | before | after |
+|---|---|---|
+| chrome-sourced questions | 17 / 40 | **0** |
+| ambiguous hints | 18 / 40 | **2** (one phrase the book prints twice) |
+| distinct hints | 32 | 39 |
+| index | 248 chunks | 146 chunks |
+| document tags | included `terasaur` | `unix-philosophy`, the Rule-of-X concepts |
+| MRR across re-runs | drifted 0.0125 | bit-identical |
 
-Repair order. Six test files reference the fixture (`test_cross_domain_goldens`,
-`test_performance`, `test_book_parser`, `test_integration`, `test_integration_full`,
-`test_e2e_upload`), so truncation shifts chunk counts; nothing in `evals/` or `scripts/`
-references it by name.
+Measured after regeneration, one library state: `paper` 0.850 / 0.703 / 0.746,
+`book` 0.575 / 0.398 / 0.507. `paper` now carries the default floor.
 
-1. Truncate at the seam (~line 1733), checking nothing real is lost.
-2. Run the six dependent tests; fix assertions encoding the old size.
-3. Re-ingest, regenerate `paper.jsonl` with `generate_golden.py`, cross-verify with
-   `audit_golden.py`.
-4. Re-baseline the paper thresholds. Expect `hit_rate` to fall — the easy chrome questions
-   disappear, so a lower number is a real bar replacing a flattered one.
-5. Re-run the entity-model comparison against two clean datasets.
+**The before and after numbers are not comparable** — different questions against a different
+index, and a 146-chunk haystack is mechanically easier than 248. What is established is that
+the dataset now measures the book, and that the measurement is reproducible.
+
+**A corpus change can re-rank an untouched document.** Re-ingesting `paper` moved `book`'s MRR
+from 0.4104 to 0.3979 with nothing about `book` touched, both values bit-reproducible on either
+side. That is the same magnitude as the entity-model difference measured on `paper`, so **that
+difference was indistinguishable from a library-state change**.
+
+The coupling is not universal and its mechanism is **not established**: ingesting three further
+documents (~4,870 chunks) moved `book` and `paper` by zero. Two candidates sit in the code and
+neither has been isolated — `bm25(chunks_fts)` scores over the whole FTS table with the
+`document_id` filter applied to matched rows (`retriever.py:225`), and graph expansion reads an
+entity graph that every ingest rewrites. The operational rule holds either way: re-run the
+baseline arm after any corpus change instead of comparing against an earlier number.
+
+Every document kind under DATA now has a golden, generated 2026-08-12 with the same
+generator/verifier/axes as the rest so provenance stays comparable. All are structurally clean:
+every hint resolves and identifies exactly one passage, every row graded.
+
+| dataset | source | rows | flagged | chunks | HR@5 / MRR / nDCG |
+|---|---|---|---|---|---|
+| legal | federalist_papers.txt | 60 | 0 | 2537 | 0.533 / 0.373 / 0.451 |
+| play | hamlet.txt | 60 | 5 | 394 | 0.650 / 0.441 / 0.526 |
+| study | sutton_barto_rl.pdf | 60 | 17 | 1939 | 0.583 / 0.414 / 0.483 |
+| thoughts | daily_thoughts_2026.txt | 4 | 0 | 7 | 1.000 / 1.000 / 1.000 |
+
+`study` is the first measurement of the **PDF parse path**, which no eval reached before —
+`generate_golden.py` read sources as bytes, so a PDF produced questions about
+`%PDF-1.5 /FlateDecode`. It now reads through `universal_parser.read_document_text`.
+
+`thoughts` reads 1.000 on every metric because top-5 retrieval over a 7-chunk document returns
+most of the document. That is a property of a 2,944-char source, not of retrieval, and it is
+why the dataset is measured but never gated. `make eval` covers the other five.
+
+## Generation quality — first measurement
+
+`make eval` never called the answering path: `--judge-model` defaults to empty, so no `/qa`
+ran, every generation metric was `None`, and the Quality UI showed `-` in those columns for
+every one of 285 recorded runs. `make eval-gen` exercises the shipped path and asserts.
+
+Measured 2026-08-12, `ollama/qwen2.5:14b-instruct` judge, one library state, 0 judge failures:
+
+| | book | paper |
+|---|---|---|
+| faithfulness (HHEM) | 0.678 | 0.626 |
+| answer_relevance | 0.706 | 0.852 |
+| **citation_support_rate** | **0.485** | **0.400** |
+| citation_coverage | 0.750 | 0.872 |
+| answer_rate | 0.900 | 0.975 |
+| declined (not_found) | 4 / 40 | 1 / 40 |
+
+0.485/0.400 is not a clean read of citation quality. Measured over the chips behind it, the
+number is two independent defects stacked, and the metric moved in both directions at once.
+
+**The product defect is fabricated quotes, not weak support.** Of 6 chips across 10 `book`
+questions on 0.6.1, 3 quoted text absent from the answer's grounding: the model's own narration,
+commentary about the retrieval ("The context does not provide specific details about..."), and
+one real passage retrieval never returned. Closed by I-33 — excerpts are verified against the
+grounding and dropped when absent, and every citation-bearing prompt now requires a verbatim
+excerpt. After the fix 5 of 5 surviving chips are verbatim, and the filter dropped exactly one
+chip across 10 questions (a paraphrase), so it is not over-dropping.
+
+**The metric mis-scored in both directions.** It judged each excerpt against the whole answer
+under a prompt demanding the citation "fully supports the claim", which no single excerpt can
+do: it scored `no` on a verbatim correct citation and `partial` on two more, while giving the
+fabricated commentary chip a `yes`. The prompt now asks whether the chip supports at least one
+claim the answer makes — 0.500 vs 0.750 on identical chips. **Scores recorded before this change
+are not comparable to scores after it.**
+
+### Post-I-33 baseline
+
+Measured 2026-08-13, same judge, 0 judge failures and 0 `/qa` failures on either dataset.
+Retrieval came back bit-identical to the recorded baselines (book 0.5750/0.3979/0.5074, paper
+0.8500/0.7025/0.7461), so the library state matches the run above and the generation-side
+comparison is meaningful.
+
+| | book | paper |
+|---|---|---|
+| faithfulness (HHEM) | 0.6446 | 0.6729 |
+| answer_relevance | 0.6326 | 0.8855 |
+| citation_support_rate | 0.7286 | 0.8061 |
+| **citation_coverage** | **0.5429** | **0.7632** |
+| answer_rate | 0.8750 | 0.9500 |
+| declined (not_found) | 5 / 40 | 2 / 40 |
+
+`make eval-gen` fails: book on citation_support_rate and citation_coverage, paper on
+citation_coverage.
+
+**Coverage fell on both datasets, and the excerpt filter is not what caused it.** It dropped 2
+citations across all 80 questions. The cause is the prompt: instructed to leave the list empty
+rather than invent an excerpt, the model now declines to cite at all on a large share of answers
+(book 27/36 answers carrying a chip before, 19/35 after). Trading a fabricated quote for no
+quote is the right direction, but trading a *findable* quote for no quote is not, and that is
+what the coverage drop mostly is.
+
+### Marker citations — the standing baseline
+
+The model no longer transcribes anything. `pack_context_indexed` labels each emitted passage
+`[S<n>]`, the model cites `{"source":"S1"}`, and the backend fills the excerpt from that chunk —
+verbatim by construction, and carrying the `chunk_id` that makes the chip deep-linkable. Chips
+are then ranked by retrieval score, gated on relevance and capped at `MAX_CITATIONS`, the same
+policy `source_citations` has always used.
+
+The excerpt shown is the part of the chunk that bears on the answer, not its head. That last
+point was worth 0.18-0.29 of citation_support_rate on its own.
+
+Measured 2026-08-13, same judge, retrieval bit-identical to every row above. **Compare future
+changes against this table.**
+
+| | book | paper |
+|---|---|---|
+| faithfulness (HHEM) | 0.6855 | 0.7012 |
+| answer_relevance | 0.6729 | 0.8527 |
+| **citation_support_rate** | **0.6754** | **0.7449** |
+| citation_coverage | 0.8571 | 0.9744 |
+| answer_rate | 0.8750 | 0.9750 |
+| citations proposed / gated / dropped | 63 / 6 / 0 | 49 / 0 / 0 |
+
+**citation_support_rate spent this whole investigation measuring the excerpt window rather than
+the citation.** The metric judges the text the chip displays, and that text was cut from the head
+of the cited chunk: 12 of 15 `book` chips were head cuts. Judged on their full chunk instead, the
+same chips scored **0.8667 against 0.5667** for the displayed excerpt, with 8 of 15 verdicts
+flipping and none flipping the other way — and **zero `no` verdicts** on the full chunks. The
+model's source selection was never the defect; it picks a passage that supports the answer ~87%
+of the time. Selecting the window against the answer instead of taking the head moved support
+0.5000 -> 0.6754 (book) and 0.4500 -> 0.7449 (paper) with retrieval, prompt and proposals
+unchanged.
+
+Two structural fixes were spent on the wrong hypothesis before this was measured. The cap almost
+never binds (~1.5 chips per answer) and the relevance gate removed 0 of 49 chips on `paper`;
+neither could have moved a number that was reporting a windowing artifact. The lesson is the
+metric's own: **judge what the product shows, and confirm the metric is scoring the object you
+think it is before optimising against it.**
+
+See
+I-33. `make eval-gen` has not yet been re-run against this design, so the numbers above remain
+the standing baseline and the floors stay untouched: one measurement per dataset is not a
+distribution, and a bar set now would be calibrated against a design that has already changed.
+
+`citation_support_rate` had never once computed, for two independent reasons that each hid the
+other: it paired claims by splitting prose on `[N]` markers the product never emits (it returns
+prose plus a JSON citations block), and `judge_citation` imports `litellm`, absent from the
+`evals` project so every call raised `ModuleNotFoundError` into a swallowed counter. I-32 —
+uncomputed metrics fail rather than pass — is what surfaced both.
+
+`answer_rate` and `citation_coverage` are new. Their 0.80 floors have no historical baseline
+and should be set deliberately; the measurements above stand regardless of where the bar lands.
+
+`citation_coverage` is measured post-I-33 above. What is still unmeasured is the split between
+the two reasons an answer carries no chip — the model emitted none, or the filter removed one —
+because the eval cannot see drops. Two runs put the filter at 2 of 80, so the split is currently
+inferred from a backend log rather than recorded. Surfacing a per-response drop count under
+`include_context`, the same eval-only precedent as `context_chunks`, makes it a number instead of
+an inference.
 
 ## Metric tiers
 

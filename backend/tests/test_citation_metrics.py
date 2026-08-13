@@ -11,26 +11,38 @@ if str(_REPO_ROOT) not in sys.path:
 
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
-    parse_claims_with_citations,
+    pair_answer_with_citations,
 )
 
 
-def test_parse_claims_with_citations_extracts_claim_index_pairs():
-    answer = (
-        "Alice found a small key on the table [1]. "
-        "The bottle said DRINK ME, and she checked it was not poison [2]. "
-        "This sentence has no citation. "
-        "The rabbit carried a watch [3][4]."
-    )
+def test_each_shown_citation_is_paired_with_the_answer():
+    """The product returns prose plus a citations list, never [N] markers.
 
-    pairs = parse_claims_with_citations(answer)
-
-    assert pairs == [
-        ("Alice found a small key on the table.", 0),
-        ("The bottle said DRINK ME, and she checked it was not poison.", 1),
-        ("The rabbit carried a watch.", 2),
-        ("The rabbit carried a watch.", 3),
+    So the measurable claim is per-citation: every source chip shown under an
+    answer should support what the answer said. The previous metric split prose
+    on [N] and scored None in all 285 recorded runs.
+    """
+    answer = "Alice found a key. The bottle said DRINK ME."
+    citations = [
+        {"excerpt": "a tiny golden key", "page": 12},
+        {"text": "the bottle was labelled DRINK ME", "page": 13},
     ]
+
+    assert pair_answer_with_citations(answer, citations) == [
+        ("Alice found a key. The bottle said DRINK ME.", "a tiny golden key"),
+        ("Alice found a key. The bottle said DRINK ME.", "the bottle was labelled DRINK ME"),
+    ]
+
+
+def test_citations_without_usable_text_are_not_paired():
+    """A placeholder chip has no excerpt to judge, so it cannot be scored."""
+    answer = "Some answer."
+
+    assert pair_answer_with_citations(answer, [{"page": 0}, {"excerpt": "   "}, "junk"]) == []
+
+
+def test_an_empty_answer_pairs_with_nothing():
+    assert pair_answer_with_citations("   ", [{"excerpt": "real text"}]) == []
 
 
 def test_compute_citation_support_rate_weights_partial_verdicts():

@@ -38,6 +38,53 @@ Implicit rollback on session close is insufficient after a generator exception. 
 **I-8. The `done` SSE event payload contains the clean `answer` field.**
 The frontend must replace `msg.text` with `payload.answer` on the done event. Streamed tokens include citation JSON fragments -- never leave raw accumulated tokens as the final displayed text.
 
+**I-33. A citation excerpt is a quote the grounding contains. Nothing invents one.**
+Measured on shipped 0.6.1 over 10 `book` questions: of 6 citation chips returned, 3 were absent
+from the chunks the answer was generated from. One was the model's own narration of events
+("After the mysterious disappearance of the time machine, everyone is silent for a moment"),
+one was commentary about the retrieval itself ("The context does not provide specific details
+about the physical layout of the dining area"), and one was real prose from the source that
+retrieval never returned — recited from the model's own memory, so no chunk links to it. All
+three render as a source chip indistinguishable from a real quote.
+
+All five citation-bearing system prompts specified the field as a bare format example,
+`"excerpt":"..."`, which states a shape and not a provenance, so the model fills it the way it
+fills any free-text field. Nothing downstream could tell a quote from a sentence the model
+wrote: `_split_response` only parses JSON, and `_enrich_citation_titles` matches on
+(section_heading, page) and never on the excerpt text. The chunk-derived `source_citations` are
+safe by construction — each carries a `chunk_id` and slices `section_preview_snippet` out of the
+chunk — so two lists with opposite trustworthiness rendered side by side under the same answer.
+The eval could not catch it either: `citation_support_rate` scored the commentary chip `yes`.
+
+**Asking the model to copy the quote instead is not the fix, and measuring it is what showed
+why.** Prompted to reproduce the passage verbatim and having its excerpt dropped when it did
+not, the model stopped citing rather than risk the attempt: `citation_coverage` fell 0.750 →
+0.5429 on `book` and 0.872 → 0.7632 on `paper` against bit-identical retrieval, while the
+verification filter itself removed only 2 citations across all 80 questions. Trading a
+fabricated quote for no quote is progress; trading a findable quote for no quote is not.
+
+So the model never reproduces source text. `pack_context_indexed` labels each passage it emits
+with an `[S<n>]` marker and returns the marker map, the model cites `{"source":"S1"}`, and
+`_resolve_marker_citations` fills the excerpt from the chunk that marker names — verbatim by
+construction, and carrying the `chunk_id` that makes the chip deep-linkable. Marker numbering
+must come from the packer, because grouping, dedup and the token budget all decide which chunks
+reach the prompt; numbering the input list instead points every citation at the wrong passage.
+A `quote` the model offers is used only to locate a sentence inside that chunk, never as content.
+**Which part of the chunk is shown is itself load-bearing.** A chunk is sized for the embedder, so
+the sentence carrying the claim sits anywhere in it, and cutting the head shows the wrong text:
+12 of 15 measured `book` chips were head cuts, and the same chips scored 0.5667 on their displayed
+excerpt against 0.8667 judged on their full chunk. `_excerpt_from_chunk` therefore selects the
+window by content overlap with the answer, weighting the model's `quote` above it. Anything that
+scores the displayed excerpt — `citation_support_rate` above all — is measuring that selection as
+much as the citation, which is why two structural fixes aimed at citation choice moved it barely
+at all.
+A marker naming no such passage is dropped. Citations still arriving as free-text excerpts (other
+prompts, other models) stay on the verification path: a contiguous run of 8 normalised tokens
+must appear in the grounding, loose enough to survive re-punctuation and ellipses, which an exact
+string test is not. `tests/test_qa.py` and `tests/test_context_packer.py` fail CI if a marker
+resolves to the wrong chunk, if an ungrounded excerpt survives, or if any of the five prompts
+stops citing by marker.
+
 ## Vector Dimensions
 
 **I-9. Note and chunk vectors share one embedding space, whose dimension is a stored property of the corpus rather than a setting.**
@@ -63,6 +110,9 @@ The order is load-bearing, not cosmetic: a lint error masks the test error under
 
 **I-14. `make ci` passing does not mean the app works. `make smoke` is the HTTP contract check.**
 `make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~230 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
+
+**I-32. An eval metric that could not be computed is a failure, never a pass.**
+`run_eval.py` scored every generation metric behind `if value is not None`, so an NLI model that failed to load, a judge that errored, or a `/qa` that timed out produced `None`, was skipped, and recorded `passed: true` for a run that measured nothing of what it was asked to measure. 166 rows in `scores_history.jsonl` were written under that rule, one of them a generation run whose faithfulness is null -- and history is what later comparisons are read against, so a pass that was never earned poisons every delta computed from it. The distinction the gate must keep is between **requested-but-uncomputed**, which fails, and **not-requested**, which is a skip: a retrieval-only run legitimately has no faithfulness, while a run that generated answers and could not score them has a hole in it. `_check()` in `run_eval.py` takes `requested=` for exactly this, and asking for generation while `/qa` returns no answers at all is itself a violation. Never paper over the gap with a default -- no `or 0.0`, no `or 1.0`, no neutral score for a missing verdict. `tests/test_eval_gate.py` fails CI if an uncomputed metric passes, or if a violation stops short of a non-zero exit. See the `eval-integrity` skill.
 
 ## Packages
 

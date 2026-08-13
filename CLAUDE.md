@@ -11,11 +11,12 @@ This file is a table of contents. The system of record is `docs/`.
 | Before you… | Read |
 |---|---|
 | proposing or scoping work | `docs/roadmap.md` — the only doc carrying status |
-| any backend change | `docs/invariants.md` (31 hard rules, each from a real incident) |
+| any backend change | `docs/invariants.md` (33 hard rules, each from a real incident) |
 | a structural change | `docs/architecture.md` (6-layer rule, stores, directories) |
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |
 | a retrieval change | `docs/retrieval-funnel.md`, then the `retrieval-change` skill |
+| an eval change, or quoting an eval number | the `eval-integrity` skill |
 | writing docs | the `project-docs` skill |
 
 Never state a dependency version in prose — point at `package.json` / `pyproject.toml`.
