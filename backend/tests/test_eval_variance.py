@@ -113,3 +113,35 @@ def test_a_series_row_is_not_one_of_its_own_runs(tmp_path, monkeypatch):
     found = run_variance._history_rows("g1")
     assert len(found) == 2
     assert [r["citation_support_rate"] for r in found] == [0.60, 0.70]
+
+
+# A judge grading its own output (asked 2026-08-15)
+
+
+def test_a_run_where_one_model_answered_and_judged_is_named():
+    from evals.lib.environment import self_judging
+
+    env = {
+        "judge_model": "ollama/qwen2.5:14b-instruct",
+        "chat_model": "ollama/qwen2.5:14b-instruct",
+        "generation_model": "ollama/qwen2.5:14b-instruct",
+    }
+    assert self_judging(env) == "ollama/qwen2.5:14b-instruct"
+
+
+def test_a_different_judge_is_not_self_judging():
+    from evals.lib.environment import self_judging
+
+    env = {
+        "judge_model": "ollama/qwen2.5:14b-instruct",
+        "chat_model": "ollama/llama3.2",
+        "generation_model": "ollama/llama3.2",
+    }
+    assert self_judging(env) is None
+
+
+def test_a_run_with_no_judge_cannot_be_self_judging():
+    """Retrieval-only runs score nothing with an LLM, so the question does not apply."""
+    from evals.lib.environment import self_judging
+
+    assert self_judging({"chat_model": "ollama/llama3.2"}) is None

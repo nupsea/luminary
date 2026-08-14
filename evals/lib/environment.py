@@ -53,6 +53,22 @@ def capture(backend_url: str, **run_args: Any) -> dict[str, Any]:
     return env
 
 
+def self_judging(env: dict[str, Any]) -> str | None:
+    """The model id when one model both answered and graded, else None.
+
+    A judge scoring its own output is not a neutral rater: it agrees with its own
+    phrasing, its own citation choices and its own refusals. The shipped answerer
+    and the judge are different models, so this is a property of a machine's
+    configuration rather than of the product -- which is exactly why it has to be
+    read from the run instead of assumed.
+    """
+    judge = env.get("judge_model")
+    if not judge:
+        return None
+    answering = {env.get("chat_model"), env.get("generation_model")}
+    return judge if judge in answering else None
+
+
 def same_conditions(a: dict[str, Any], b: dict[str, Any]) -> tuple[bool, list[str]]:
     """(comparable, differing fields) for two environment blocks.
 

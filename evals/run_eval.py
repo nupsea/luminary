@@ -43,6 +43,7 @@ from evals.lib.citation_metrics import (  # noqa: E402
     pair_answer_with_citations,
 )
 from evals.lib.environment import capture as capture_environment  # noqa: E402
+from evals.lib.environment import self_judging  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -1107,6 +1108,17 @@ def main() -> None:
         judge_model=args.judge_model or None,
         check_citations=bool(args.check_citations),
     )
+    same_model = self_judging(environment)
+    environment["self_judged"] = bool(same_model)
+    if same_model:
+        print(
+            f"  WARNING: {same_model} both answered and judged this run. A judge "
+            "scoring its own output is not a neutral rater; the judged metrics "
+            "(answer_relevance, citation_support_rate) are biased upward and are "
+            "not comparable to a run judged by a different model.",
+            file=sys.stderr,
+        )
+
     metrics["environment"] = environment
 
     _lib_append_history(
