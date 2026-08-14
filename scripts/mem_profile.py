@@ -193,9 +193,10 @@ async def _probe_ttft(
     TTFT that measures retrieval alone -- the one number this probe must not
     report as latency under load.
 
-    Scoped to the document being ingested when there is one: that is the
-    reported workflow, and it is also the only scope guaranteed to have a
-    target in this library.
+    Scope defaults to the whole library, which is what a user asks while an
+    upload runs. Scoping to the document being ingested measures something
+    else: until embedding finishes it answers `no_context` immediately without
+    calling the model at all, so it reports readiness rather than latency.
     """
     payload_body: dict[str, Any] = {"question": question}
     if doc_id:
@@ -207,6 +208,9 @@ async def _probe_ttft(
     ttfb: float | None = None
     ttft: float | None = None
     declined = False
+    no_context = False
+    saw_done = False
+    last_event: list[str] = []
     error: str | None = None
     try:
         async with client.stream("POST", f"{backend}/qa", json=payload_body, timeout=180.0) as resp:
@@ -222,9 +226,14 @@ async def _probe_ttft(
                     continue
                 if payload.get("not_found"):
                     declined = True
+                if payload.get("error") == "no_context":
+                    no_context = True
                 if payload.get("token") and ttft is None:
                     ttft = time.monotonic() - started
+                if not payload.get("token"):
+                    last_event = sorted(payload)
                 if payload.get("done"):
+                    saw_done = True
                     break
                 if ttft is not None and not declined:
                     break
@@ -232,13 +241,28 @@ async def _probe_ttft(
         error = f"{type(exc).__name__}: {exc}"
 
     if error is None and ttft is None:
-        error = "no token emitted"
+        # `no_context` is not a slow answer, it is no answer: retrieval had
+        # nothing, so the LLM was never called and there is no latency to
+        # report. A document mid-ingest answers this way to every question
+        # scoped to it, which is a readiness measurement, not a TTFT one.
+        if no_context:
+            error = "no_context: nothing retrievable yet"
+        elif not saw_done:
+            # The stream closed with neither an answer nor a done event: the
+            # user gets an empty response and no error. Recorded as its own
+            # outcome so it cannot be read as a slow answer.
+            error = f"stream ended without done, last event {last_event or 'none'}"
+        else:
+            error = "no token emitted"
 
     return {
         "at": round(started - t0, 2),
         "ttfb_s": round(ttfb, 3) if ttfb is not None else None,
         "ttft_s": round(ttft, 3) if ttft is not None else None,
         "declined": declined,
+        "no_context": no_context,
+        "saw_done": saw_done,
+        "last_event": last_event,
         "scope": "single" if doc_id else "all",
         "error": error,
     }
@@ -314,20 +338,39 @@ def _ollama_cap(procs: dict[str, list[psutil.Process]]) -> str | None:
 
 def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
     """Peak per stage, and the worst interactive latency observed."""
+
+    def _under_test(sample: dict) -> int:
+        """The server being profiled: the backend on --backend, plus its Ollama.
+
+        `desktop` is excluded. On a dev machine it is usually a *different*
+        install -- the bundled app running beside the repo backend -- and
+        summing the two reports one system's peak as another's. Profiling the
+        bundled app instead means pointing --backend at its port, which puts
+        its Python in the backend role and leaves only the Tauri shell here.
+        """
+        return sample["rss"]["backend"] + sample["rss"]["ollama"]
+
     by_stage: dict[str, int] = {}
     for s in samples:
         stage = s["stage"] or "unknown"
-        total = sum(s["rss"].values())
-        by_stage[stage] = max(by_stage.get(stage, 0), total)
+        by_stage[stage] = max(by_stage.get(stage, 0), _under_test(s))
 
-    peak = max((sum(s["rss"].values()) for s in samples), default=0)
+    peak = max((_under_test(s) for s in samples), default=0)
+    peak_backend = max((s["rss"]["backend"] for s in samples), default=0)
+    peak_desktop = max((s["rss"]["desktop"] for s in samples), default=0)
     peak_reported = max((s["ollama_reported"] for s in samples), default=0)
     max_loaded = max((s["loaded_count"] for s in samples), default=0)
     ttfts = [p["ttft_s"] for p in probes if p["ttft_s"] is not None and not p.get("declined")]
 
     return {
+        # Bumped when a field changes meaning. Schema 1 summed a second
+        # Luminary install into peak_rss_mb; rows without this key predate the
+        # fix and are not comparable to rows carrying it.
+        "schema": 2,
         **meta,
         "peak_rss_mb": round(peak / MB, 1),
+        "peak_backend_mb": round(peak_backend / MB, 1),
+        "peak_desktop_mb": round(peak_desktop / MB, 1),
         "peak_ollama_reported_mb": round(peak_reported / MB, 1),
         "max_models_loaded": max_loaded,
         "peak_by_stage_mb": {k: round(v / MB, 1) for k, v in by_stage.items()},
@@ -336,6 +379,7 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
         "probes_run": len(ttfts),
         "probes_skipped": sum(1 for p in probes if (p["error"] or "").startswith("skipped")),
         "probes_declined": sum(1 for p in probes if p.get("declined")),
+        "probes_no_context": sum(1 for p in probes if p.get("no_context")),
         "probe_failures": sum(
             1 for p in probes if p["error"] and not p["error"].startswith("skipped")
         ),
@@ -351,7 +395,9 @@ def _print_report(summary: dict, samples: list[dict]) -> None:
     print(
         f"  library                  {lib.get('documents')!s:>10} docs, {lib.get('chunks')} chunks"
     )
-    print(f"  peak resident (RSS)      {summary['peak_rss_mb']:>10,.1f} MB")
+    print(f"  peak resident (RSS)      {summary['peak_rss_mb']:>10,.1f} MB  backend + ollama")
+    print(f"    of which backend       {summary['peak_backend_mb']:>10,.1f} MB")
+    print(f"  other Luminary install   {summary['peak_desktop_mb']:>10,.1f} MB  not counted above")
     print(f"  peak Ollama reported     {summary['peak_ollama_reported_mb']:>10,.1f} MB")
     print(f"  max models loaded        {summary['max_models_loaded']:>10}")
     if summary["ttft_worst_s"] is not None:
@@ -399,6 +445,11 @@ async def run(args: argparse.Namespace) -> int:
         t0 = time.monotonic()
         samples: list[dict] = []
         probes: list[dict] = []
+        # Written as they are taken: a long ingest is exactly the run worth
+        # profiling and exactly the one an interruption would otherwise lose.
+        raw_path = _repo_path(args.out)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw = raw_path.open("w", buffering=1)
         doc_id: str | None = None
         dedup_hit = False
         ingest_error: str | None = None
@@ -422,6 +473,7 @@ async def run(args: argparse.Namespace) -> int:
                 probe_tasks.remove(task)
                 probe = task.result()
                 probes.append(probe)
+                raw.write(json.dumps({"kind": "probe", **probe}) + "\n")
                 shown = probe["ttft_s"] if probe["ttft_s"] is not None else probe["error"]
                 print(f"  probe at {probe['at']:>6.1f}s -> first token {shown}")
 
@@ -437,7 +489,9 @@ async def run(args: argparse.Namespace) -> int:
                     break
                 print(f"document {doc_id}{' (DEDUP HIT)' if dedup_hit else ''}")
 
-            samples.append(await _sample(client, backend, ollama_url, procs, doc_id, t0))
+            sample = await _sample(client, backend, ollama_url, procs, doc_id, t0)
+            samples.append(sample)
+            raw.write(json.dumps({"kind": "sample", **sample}) + "\n")
 
             # Probes run as tasks: an Ask under load takes tens of seconds, and
             # awaiting one inline stops sampling across exactly the window where
@@ -449,19 +503,31 @@ async def run(args: argparse.Namespace) -> int:
                 offset = probe_offsets.pop(0)
                 if probe_tasks:
                     probes.append(
-                        {
+                        skipped := {
                             "at": round(offset, 2),
                             "ttfb_s": None,
                             "ttft_s": None,
                             "declined": False,
+                            "no_context": False,
+                            "saw_done": False,
+                            "last_event": [],
                             "scope": None,
                             "error": "skipped: previous probe still in flight",
                         }
                     )
+                    raw.write(json.dumps({"kind": "probe", **skipped}) + "\n")
                     print(f"  probe at {offset:>6.1f}s -> skipped, previous still running")
                     continue
                 probe_tasks.append(
-                    asyncio.create_task(_probe_ttft(client, backend, args.question, t0, doc_id))
+                    asyncio.create_task(
+                        _probe_ttft(
+                            client,
+                            backend,
+                            args.question,
+                            t0,
+                            doc_id if args.probe_scope == "ingesting" else None,
+                        )
+                    )
                 )
             _harvest()
 
@@ -496,6 +562,7 @@ async def run(args: argparse.Namespace) -> int:
             ingest_task.cancel()
 
         library_after = await _library(client, backend)
+        raw.close()
 
     meta = {
         "recorded_at": datetime.now(UTC).isoformat(),
@@ -512,16 +579,9 @@ async def run(args: argparse.Namespace) -> int:
     }
     summary = _summarise(samples, probes, meta)
 
-    # Paths resolve against the repo, not the caller's directory: `make
-    # mem-profile` runs this from backend/, so a relative default would write
-    # the baseline somewhere different than an invocation from the repo root.
-    out = _repo_path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w") as fh:
-        for s in samples:
-            fh.write(json.dumps({"kind": "sample", **s}) + "\n")
-        for p in probes:
-            fh.write(json.dumps({"kind": "probe", **p}) + "\n")
+    # Samples and probes are already on disk; only the summary is appended.
+    out = raw_path
+    with out.open("a") as fh:
         fh.write(json.dumps({"kind": "summary", **summary}) + "\n")
 
     _print_report(summary, samples)
@@ -563,6 +623,13 @@ def main() -> int:
         help="seconds after start to time an Ask (comma-separated)",
     )
     ap.add_argument("--question", default="What is this document about?")
+    ap.add_argument(
+        "--probe-scope",
+        choices=["all", "ingesting"],
+        default="all",
+        help="'all' times an Ask over the library (latency under load); "
+        "'ingesting' asks the document being ingested (readiness, not latency)",
+    )
     ap.add_argument("--max-duration", type=float, default=3600.0)
     ap.add_argument("--out", default=".luminary/mem_profile/latest.jsonl")
     ap.add_argument("--summary", help="append the one-line summary to this file")

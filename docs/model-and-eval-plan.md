@@ -71,6 +71,25 @@ ingest and recording time to first token. Baseline commits as JSONL beside
 Verified by: re-runs agree within ~10% on the same machine, and the baseline reproduces the
 reported ~16GB peak on a 16GB host.
 
+**Measured 2026-08-14** on a 36GB host, `OLLAMA_MAX_LOADED_MODELS` unset, backend 0.6.1, library
+51 → 52 documents / 71,864 → 207,047 chunks. Rows in `evals/mem_profile_history.jsonl`; source is
+a 43MB PDF that produced 135,183 chunks and took 2,412s to `stage=complete`.
+
+| Arm | Peak backend + Ollama | Backend alone | Ask TTFT |
+|---|---|---|---|
+| idle | 13,026MB | — | 0.56 – 0.64s |
+| ingest | **14,619MB** (at `entity_extract`) | 4,726MB | 79.8s, 115.6s |
+| library Ask under that ingest | 13,950MB | 4,138MB | 1.3s, 75.0s, 92.6s |
+| after `complete`, enrichment running | 11,166MB | 806MB | 114.3s |
+
+Peak is `entity_extract`, not enrichment, and ~10GB of every figure is one resident
+`qwen2.5:14b-instruct` left over from eval work — D1 with a number on it. **Interactive latency
+under ingest load is 75–115s against 0.6s idle**, not the 10–20s this plan estimated from I-31's
+throughput table; P5 is the user-visible half of the problem, not an optimisation after residency.
+
+Not measured: the 16GB single-runner regime the crash came from. This host has 36GB and no
+residency cap, so it is a different regime and the ~16GB peak claim stands unreproduced.
+
 Falsifier: if peak is not dominated by the two Ollama runners, the diagnosis is wrong and P1 must
 be re-derived. Check `_VECTOR_RENDER_DPI=150` with `_MAX_DIM=4000` (`image_extractor.py`) — a
 4000×4000 RGB pixmap is ~48MB and up to 4 are taken per page — and the enrichment worker for a
@@ -80,6 +99,17 @@ A second contention channel is unmeasured and belongs in the same probe: embeddi
 are CPU-bound through `run_in_executor(None, …)` (`ingestion_nodes/embed.py:60`), so a large
 ingest slows the query embed and the ~510ms cross-encoder even when nothing is queued behind the
 LLM. Residency does not touch this.
+
+Two product defects the probe found, both open:
+
+- **An Ask over the library returns an empty stream under load.** 8 of 15 probes ended with no
+  token; manual calls under the same load answered normally, so it is intermittent rather than a
+  probe artifact. The probe now records whether a `done` event ever arrived and what the last
+  event was, which is what separates a slow answer from a stream that closes on the user with no
+  answer and no error.
+- **An Ask scoped to a document still being ingested answers `{"error": "no_context"}`
+  immediately**, without reaching the model. That is a readiness signal, not latency, and it is
+  why probes default to library scope (`--probe-scope`).
 
 ### P1 — Residency and lifecycle
 
