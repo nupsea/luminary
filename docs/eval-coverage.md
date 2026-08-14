@@ -4,8 +4,9 @@ description: What the eval suite measures, what it does not, and which gate enfo
 
 # Eval coverage
 
-What is measured, by which target, on which corpus. Read `docs/model-footprint-plan.md` for the
-numbers themselves and the `eval-integrity` skill for the rules that keep them honest.
+What is measured, by which target, on which corpus. Read `docs/model-and-eval-plan.md` for the
+numbers themselves, what the suite cannot yet decide, and the staged plan that closes it; the
+`eval-integrity` skill carries the rules that keep a number honest.
 
 The pipeline has three stages, and a number from one says nothing about the others. Retrieval
 scores what was indexed and cannot report what never arrived; generation scores answers over

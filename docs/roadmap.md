@@ -103,7 +103,7 @@ needs the background work (`test_e2e_upload` does).
 Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
 marker over two causes is why this has stalled twice.
 
-### 6. Model footprint, scheduling and substitutability
+### 6. Model footprint, scheduling, substitutability, and the eval baseline that gates them
 
 A 0.5.0 user reported ~16GB resident and a crash ingesting a PDF. `spawn_ollama` in
 `src-tauri/src/supervisor.rs` sets `OLLAMA_KEEP_ALIVE=30m` but never
@@ -117,7 +117,13 @@ substitution (#48) does not move eval numbers, because prompts, parsers and budg
 sized for llama3.2 and no metric distinguishes a model that emits clean JSON from one whose
 output is repaired — there are two tolerant parsers and nothing counts a repair.
 
-Plan and phases: `model-footprint-plan.md`. Delete it when the last phase ships.
+A fourth problem gates all three. Three independent eval audits (2026-08-14) found that no
+number in the suite survives being compared across a change: a run records nothing about the
+embedder, model or library state that produced it, one generation run cannot resolve a change
+below ~0.10, `run_summary_eval.py:38` judges summaries against 8,000 raw bytes, and every gated
+arm pins `document_id` so cross-document routing is unmeasured.
+
+Plan, six stages: `model-and-eval-plan.md`. Delete it when the last stage ships.
 
 ## Deferred — decided, not scheduled
 
