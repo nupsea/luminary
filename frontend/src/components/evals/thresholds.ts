@@ -12,6 +12,13 @@ export const THRESHOLDS = {
   // scores have no absolute meaning. Do not raise this into a target.
   faithfulness: 0.3,
   answer_relevance: 0.5,
+  // Derived from measured run-to-run variance (mean - 3sd of the weaker dataset),
+  // not chosen. Generation is noisy: citation_support_rate has sd 0.052 on book,
+  // so a single run cannot resolve a change below ~0.10. Green here means no leg
+  // of the pipeline died, never that the answer was good.
+  citation_support_rate: 0.45,
+  answer_rate: 0.75,
+  citation_coverage: 0.6,
 } as const
 
 export function metricColor(v: number | null | undefined, threshold: number): string {

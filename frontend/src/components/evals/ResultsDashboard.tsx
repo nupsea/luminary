@@ -261,7 +261,13 @@ function isRerank(r: EvalRunFull): boolean {
 
 // ndcg_10 rides in extra_metrics (no dedicated DB column).
 function ndcgOf(r: EvalRunFull): number | null {
-  const v = r.extra_metrics?.ndcg_10
+  return numericExtra(r, "ndcg_10")
+}
+
+// answer_rate, citation_coverage and the citation attribution counts have no
+// dedicated column either; store.py forwards anything outside the fixed set.
+function numericExtra(r: EvalRunFull, key: string): number | null {
+  const v = r.extra_metrics?.[key]
   return typeof v === "number" ? v : null
 }
 
@@ -426,6 +432,9 @@ export function ResultsDashboard({ selection }: { selection: DatasetSelection | 
   const faith = runs.find(
     (r) => r.faithfulness != null && typeof r.extra_metrics?.answer_model === "string",
   )
+  // Citation metrics only exist on a run that generated answers AND judged their
+  // sources (`--check-citations`), so the newest such run owns this row.
+  const cited = runs.find((r) => r.citation_support_rate != null)
   const trend = [...runs]
     .reverse()
     .map((r, i) => ({ run: i + 1, "HR@5": r.hit_rate_5, MRR: r.mrr }))
@@ -486,6 +495,44 @@ export function ResultsDashboard({ selection }: { selection: DatasetSelection | 
                 ? `judge ${faith.model_used.split("/").pop()} · answers ${String(
                     faith.extra_metrics?.answer_model,
                   )} · ${timeAgo(faith.run_at)}`
+                : null
+            }
+          />
+        </div>
+      )}
+
+      {/* Answering: what the reader actually receives. Absent until a run
+          generates answers and judges their sources. */}
+      {cited && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <MetricCard
+            label="Citation support"
+            value={cited.citation_support_rate}
+            threshold={THRESHOLDS.citation_support_rate}
+            hint="shown sources that back a claim · collapse floor, not a quality bar"
+            sub={`judge ${cited.model_used.split("/").pop()} · ${timeAgo(cited.run_at)}`}
+          />
+          <MetricCard
+            label="Citation coverage"
+            value={numericExtra(cited, "citation_coverage")}
+            threshold={THRESHOLDS.citation_coverage}
+            hint="answers carrying at least one source"
+            sub={
+              numericExtra(cited, "citations_dropped") != null
+                ? `${numericExtra(cited, "citations_proposed") ?? "—"} proposed · ${
+                    numericExtra(cited, "citations_gated") ?? 0
+                  } gated · ${numericExtra(cited, "citations_dropped") ?? 0} ungrounded`
+                : null
+            }
+          />
+          <MetricCard
+            label="Answer rate"
+            value={numericExtra(cited, "answer_rate")}
+            threshold={THRESHOLDS.answer_rate}
+            hint="golden questions answered rather than declined"
+            sub={
+              numericExtra(cited, "uncited_answers") != null
+                ? `${numericExtra(cited, "uncited_answers")} answers carried no source`
                 : null
             }
           />

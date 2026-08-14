@@ -11,9 +11,13 @@ export interface EvalRunSummary {
   answer_relevance?: number | null
   context_precision?: number | null
   context_recall?: number | null
+  citation_support_rate?: number | null
   eval_kind?: string | null
   status?: "complete" | "failed"
   error_message?: string | null
+  // answer_rate, citation_coverage and the citation attribution counts have no
+  // dedicated DB column; they ride in extra_metrics (see evals/lib/store.py).
+  extra_metrics?: Record<string, number | boolean | string> | null
 }
 
 export interface GoldenDataset {

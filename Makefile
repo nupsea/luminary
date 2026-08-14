@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-ingest eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -201,6 +201,14 @@ mem-profile:
 ner-compare:
 	@echo "Comparing entity models (requires backend on :7820)..."
 	cd backend && uv run python ../scripts/ner_compare.py $(NER_ARGS)
+
+# Intent routing: does the chat graph send each message to the right strategy?
+# The graph routes every message by intent, so a misroute makes every downstream
+# number describe a question the user did not ask (I-25, I-26). Fast -- no
+# generation, just classification.
+eval-intent:
+	@echo "Intent routing accuracy (backend must be running)..."
+	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
 
 # Ingestion fidelity: how much of each source document survives into chunks.
 # Deterministic, LLM-free, no backend needed -- it reads the dev database directly.

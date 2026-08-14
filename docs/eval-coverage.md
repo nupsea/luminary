@@ -16,7 +16,7 @@ whatever retrieval returned.
 | Ingestion | `make eval-ingest` — retention, duplication | all 12 manifest documents | yes |
 | Retrieval | `make eval` — HR@5, MRR, nDCG@10 | book, paper, legal, play, study | yes |
 | Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
-| Intent routing | `evals/run_intent_eval.py` | `golden/intents.jsonl` | **no target** |
+| Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl`, 50 rows | yes |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `evals/run_summary_eval.py` | — | **no target** |
 | Flashcards | `evals/run_flashcard_eval.py` | — | **no target** |
@@ -25,11 +25,11 @@ whatever retrieval returned.
 
 ## What is not covered
 
-- **Four eval runners have no make target**: intent, summary, flashcard, corpus routing. They
-  exist, they import cleanly, and nothing runs them. `scores_history.jsonl` has two `routing`
-  rows ever and none for the others. Intent routing is the highest-value of these: the chat graph
-  routes every message by intent, so a misroute makes each downstream number describe a question
-  the user did not ask (I-25, I-26).
+- **Three eval runners still have no make target**: summary, flashcard, corpus routing. They
+  exist, they import cleanly, and nothing runs them. Intent routing was the fourth and is now
+  gated by `make eval-intent`, which matters most of the four: the chat graph routes every
+  message by intent, so a misroute makes each downstream number describe a question the user did
+  not ask (I-25, I-26).
 - **`make eval-gen` covers 2 of 6 kinds.** All six have been measured once (see the plan doc), but
   only book and paper are wired into the target, so only they are re-measured on a change.
 - **No end-to-end task-success measure.** `make smoke` checks wire contracts, not whether the
@@ -40,6 +40,12 @@ whatever retrieval returned.
   retention.
 
 ## Reading a number without misleading yourself
+
+**Intent routing is deterministic.** Measured 0.8800 on three consecutive runs, sd 0 — the
+keyword heuristic answers most messages without an LLM and the classifier runs at temperature 0.
+So a single run is a valid measurement here and a small delta is real, unlike generation. Weakest
+route is `comparative` at 0.75 recall (precision 1.0000): comparative questions get routed
+elsewhere rather than the reverse, and `search` precision 0.8000 suggests where they land.
 
 **Generation metrics are noisy; retrieval metrics are not.** Retrieval is bit-reproducible on a
 fixed corpus — the same corpus returns the same HR@5 to four decimal places. Generation is not:

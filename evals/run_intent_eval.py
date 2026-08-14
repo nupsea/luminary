@@ -45,7 +45,7 @@ def print_table(metrics: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run chat route classification eval.")
     parser.add_argument("--dataset", default="intents")
-    parser.add_argument("--backend-url", default="http://localhost:8000")
+    parser.add_argument("--backend-url", default="http://localhost:7820")
     parser.add_argument("--assert-thresholds", action="store_true")
     args = parser.parse_args()
 
