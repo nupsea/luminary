@@ -5,6 +5,8 @@ _llm_classify_fallback    — async, calls LiteLLM when heuristic confidence < 0
 """
 
 import logging
+import re
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +161,13 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
         "ties between",
         "bond between",
         "interaction between",
-        # How-phrased relational queries
+        # How-phrased relational queries. These are question openers rather than
+        # relationship words, and they carry graph queries that name no relation
+        # word ("how are the Eloi and the Morlocks connected" is caught by
+        # "connected to", but many are not). Removing them cost graph recall
+        # 0.9231 -> 0.6154, so they stay: the defect was never that they exist,
+        # only that first-match-wins let "how do" outrank the longer, more
+        # specific "how do they differ".
         "how are",
         "how is",
         "how do",
@@ -175,13 +183,20 @@ _COMPARATIVE_KWS: frozenset[str] = frozenset(
         "comparison",
         "compare and contrast",
         "contrast",
-        # Difference
+        # Difference. The word forms are listed rather than a "differ" stem
+        # because matching is word-boundary anchored, and they are what catches a
+        # comparison of named subjects: the set previously held only the pronoun
+        # phrasings ("how do THEY differ"), so "How are Penelope and Minerva
+        # different?" matched nothing here and fell to the relational openers.
+        "differ",
+        "differs",
+        "different",
         "difference between",
         "differences between",
         "what distinguishes",
-        "how do they differ",
-        "how are they different",
         # Similarity
+        "similarity",
+        "similarities",
         "similarities between",
         "what do they have in common",
         "in common",
@@ -288,6 +303,27 @@ _FACTUAL_KWS: frozenset[str] = frozenset(
 )
 
 
+@lru_cache(maxsize=512)
+def _kw_regex(kw: str) -> re.Pattern[str]:
+    """Word-boundary matcher for one keyword.
+
+    Bare `kw in question` matches inside a longer word: "ties between" is a
+    substring of "similari|ties between", which routed every "similarities
+    between X and Y" question to relational. The boundary is only asserted on the
+    side where the keyword itself ends in a word character, so entries like
+    "vs " and "vs." keep matching what they were written to match.
+    """
+    pre = r"(?<![a-z0-9])" if kw[:1].isalnum() else ""
+    post = r"(?![a-z0-9])" if kw[-1:].isalnum() else ""
+    return re.compile(pre + re.escape(kw) + post)
+
+
+def _best_match(question: str, keywords: frozenset[str]) -> str | None:
+    """Longest keyword matching *question* on word boundaries, or None."""
+    hits = [kw for kw in keywords if _kw_regex(kw).search(question)]
+    return max(hits, key=len) if hits else None
+
+
 def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """Pure function — no imports from other app layers.
 
@@ -319,10 +355,16 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         return ("notes", 0.95)
     if any(kw in q for kw in _SUMMARY_KWS):
         return ("summary", 0.9)
-    if any(kw in q for kw in _RELATIONAL_KWS):
+    # Relational and comparative share a confidence, so set order was deciding
+    # between them: "how do" (relational) outranked "how do they differ"
+    # (comparative) purely by being checked first. The more specific keyword wins
+    # instead, which is order-independent and survives either set growing.
+    relational = _best_match(q, _RELATIONAL_KWS)
+    comparative = _best_match(q, _COMPARATIVE_KWS)
+    if relational or comparative:
+        if comparative and (relational is None or len(comparative) >= len(relational)):
+            return ("comparative", 0.85)
         return ("relational", 0.85)
-    if any(kw in q for kw in _COMPARATIVE_KWS):
-        return ("comparative", 0.85)
     if any(kw in q for kw in _FACTUAL_KWS):
         return ("factual", 0.8)
     if any(kw in q for kw in _GENERATIVE_KWS):

@@ -41,11 +41,16 @@ whatever retrieval returned.
 
 ## Reading a number without misleading yourself
 
-**Intent routing is deterministic.** Measured 0.8800 on three consecutive runs, sd 0 — the
+**Intent routing is deterministic.** Measured 0.9400 on three consecutive runs, sd 0 — the
 keyword heuristic answers most messages without an LLM and the classifier runs at temperature 0.
-So a single run is a valid measurement here and a small delta is real, unlike generation. Weakest
-route is `comparative` at 0.75 recall (precision 1.0000): comparative questions get routed
-elsewhere rather than the reverse, and `search` precision 0.8000 suggests where they land.
+So a single run is a valid measurement here and a small delta is real, unlike generation.
+
+Per route: summary 1.0000/0.8462, graph 1.0000/0.9231, comparative 1.0000/1.0000, search
+0.8000/1.0000 (precision/recall). The three remaining misroutes all land in `search`, which is
+why its precision trails: two summary phrasings ("What is this book about?", "Recap the
+document") and one graph phrasing ("What ties the White Sphinx to the Time Machine?") match no
+keyword and fall through. `recap` is a summary word in `qa.py::_SUMMARY_INTENT_KEYWORDS` but not
+in `intent.py::_SUMMARY_KWS` — two summary keyword lists that disagree.
 
 **Generation metrics are noisy; retrieval metrics are not.** Retrieval is bit-reproducible on a
 fixed corpus — the same corpus returns the same HR@5 to four decimal places. Generation is not:
