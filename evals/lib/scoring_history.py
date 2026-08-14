@@ -15,11 +15,17 @@ def append_history(
     eval_kind: str = "retrieval",
     *,
     path: Path | None = None,
+    environment: dict | None = None,
 ) -> None:
     """Append one eval run to scores_history.jsonl.
 
     *eval_kind* defaults to "retrieval" so existing callers continue working.
     *path* override is for unit testing against a tmp file.
+
+    *environment* is what produced the number -- build, resolved models, corpus
+    fingerprint -- from `evals.lib.environment.capture`. Rows written without it
+    predate the capture and cannot be compared to rows that carry it, which is
+    the point: the absence is visible rather than assumed away.
     """
     target = path if path is not None else SCORES_HISTORY_PATH
     entry = {
@@ -44,6 +50,7 @@ def append_history(
         "per_route": metrics.get("per_route"),
         "ablation_metrics": metrics.get("ablation_metrics"),
         "passed": passed,
+        "environment": environment,
     }
     # Record any additional metric keys (topic_*, concept_*, junk_rate, …) that
     # aren't in the fixed schema above, so new eval kinds persist their scores.

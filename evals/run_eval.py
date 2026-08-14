@@ -42,6 +42,7 @@ from evals.lib.citation_metrics import (  # noqa: E402
     judge_citation,
     pair_answer_with_citations,
 )
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -368,12 +369,27 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"  RAGAS evaluation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
     for key, val in metrics.items():
+        if key == "environment":
+            continue
         if val is None:
             print(f"  {key:<22}  n/a")
         elif isinstance(val, float):
             print(f"  {key:<22}  {val:.4f}")
         else:
             print(f"  {key:<22}  {val}")
+    env = metrics.get("environment")
+    if env:
+        lib = env.get("library") or {}
+        print(f"{'-' * 56}")
+        if env.get("capture_error"):
+            print(f"  environment            UNRECORDED: {env['capture_error']}")
+        else:
+            docs, chunks = lib.get("documents"), lib.get("chunks")
+            print(f"  corpus                 {docs} docs, {chunks} chunks")
+            print(f"  embedder               {env.get('embedding_model')}")
+            print(f"  reranker               {env.get('rerank_model')}")
+            print(f"  chat / generation      {env.get('chat_model')} / {env.get('generation_model')}")
+        print(f"  build                  {env.get('backend_version')} @ {env.get('eval_git_sha')}")
     print(f"{'=' * 56}\n")
 
 
@@ -1076,7 +1092,26 @@ def main() -> None:
     )
     history_model = args.model or args.judge_model or "no-llm"
 
-    _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)
+    # Captured after the run so the corpus fingerprint reflects what was
+    # measured: `ensure_ingested` can add documents before the first query.
+    environment = capture_environment(
+        args.backend_url,
+        scope="scoped",
+        rerank=bool(args.rerank),
+        hyde=bool(args.hyde),
+        judge_model=args.judge_model or None,
+        check_citations=bool(args.check_citations),
+    )
+    metrics["environment"] = environment
+
+    _lib_append_history(
+        dataset_label,
+        history_model,
+        metrics,
+        passed,
+        eval_kind=eval_kind,
+        environment=environment,
+    )
 
     print_table(dataset_label, history_model, metrics)
 

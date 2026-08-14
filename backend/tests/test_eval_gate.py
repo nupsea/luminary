@@ -74,8 +74,13 @@ def _wire(monkeypatch, history, *, qa=None, judge_scores=None, nli_score=0.95):
     monkeypatch.setattr(
         run_eval,
         "_lib_append_history",
-        lambda dataset, model, metrics, passed, eval_kind: history.append(
-            {"kind": eval_kind, "metrics": metrics, "passed": passed}
+        lambda dataset, model, metrics, passed, eval_kind, environment=None: history.append(
+            {
+                "kind": eval_kind,
+                "metrics": metrics,
+                "passed": passed,
+                "environment": environment,
+            }
         ),
     )
     monkeypatch.setattr(run_eval, "_lib_store_results", lambda *a, **k: None)
@@ -315,3 +320,45 @@ def test_drop_count_is_zero_when_qa_reports_none(monkeypatch):
     with pytest.raises(SystemExit):
         _run(monkeypatch, "--judge-model", "test/judge", "--assert-thresholds")
     assert history[-1]["metrics"]["citations_dropped"] == 0
+
+
+# What produced the number is part of the record (E5)
+
+
+def test_a_run_records_the_environment_that_produced_it(monkeypatch):
+    """Metrics alone cannot be compared across runs: re-ingesting one document has
+    moved an untouched document's MRR by as much as a model change did. The row
+    carries the build, the resolved models and the corpus fingerprint, or it
+    carries the reason it could not."""
+    history: list[dict] = []
+    _wire(monkeypatch, history)
+    monkeypatch.setattr(
+        run_eval,
+        "capture_environment",
+        lambda url, **kw: {
+            "backend_version": "9.9.9",
+            "chat_model": "ollama/test",
+            "library": {"documents": 3, "chunks": 41},
+            **kw,
+        },
+    )
+    _run(monkeypatch)
+
+    env = history[-1]["environment"]
+    assert env["library"] == {"documents": 3, "chunks": 41}
+    assert env["chat_model"] == "ollama/test"
+    # Knobs the backend cannot know, recorded by the runner itself.
+    assert env["scope"] == "scoped"
+    assert env["rerank"] is False
+
+
+def test_unreachable_backend_records_why_provenance_is_missing(monkeypatch):
+    """A failed capture states the failure. A blank would be indistinguishable
+    from a row written before provenance existed."""
+    history: list[dict] = []
+    _wire(monkeypatch, history)
+    _run(monkeypatch)
+
+    env = history[-1]["environment"]
+    assert "capture_error" in env
+    assert env.get("backend_version") is None

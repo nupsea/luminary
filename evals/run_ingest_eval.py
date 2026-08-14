@@ -36,6 +36,7 @@ if str(REPO_ROOT / "backend") not in sys.path:
 from app.services.universal_parser import read_document_text  # noqa: E402
 from evals.generate_golden import strip_gutenberg_boilerplate  # noqa: E402
 from evals.lib.manifest import GOLDEN_DIR  # noqa: E402
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 
 # Measured 2026-08-14 over the 12 manifest documents, boilerplate stripped:
@@ -70,6 +71,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default=str(REPO_ROOT / ".luminary/luminary.db"))
     parser.add_argument("--assert-thresholds", action="store_true", dest="assert_thresholds")
+    # This tool reads the DB directly and needs no backend. The URL is only for
+    # provenance; when nothing answers, the row records why rather than nothing.
+    parser.add_argument("--backend-url", default="http://localhost:7820")
     args = parser.parse_args()
 
     manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
@@ -131,7 +135,14 @@ def main() -> None:
     passed = not violations
     for key, val in metrics.items():
         print(f"  {key:<16} {val if not isinstance(val, float) else f'{val:.4f}'}")
-    append_history("corpus", "no-llm", metrics, passed, eval_kind="ingest")
+    append_history(
+        "corpus",
+        "no-llm",
+        metrics,
+        passed,
+        eval_kind="ingest",
+        environment=capture_environment(args.backend_url),
+    )
 
     if violations:
         print("\nINGESTION GATE FAILED:", file=sys.stderr)

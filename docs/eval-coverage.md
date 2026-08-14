@@ -40,6 +40,21 @@ whatever retrieval returned.
 - **Enrichment, entity extraction and the graph are unmeasured.** `eval-ingest` stops at chunk
   retention.
 
+## Every gated run records what produced it
+
+`GET /evals/environment` reports the build, the **resolved** models (a model chosen in Settings,
+not the config default; both arms of `hybrid`, which routes interactive and background to
+different models), the retrieval funnel's ids, and the corpus fingerprint. `make eval`,
+`eval-gen`, `eval-intent`, `eval-ingest` and `eval-topics` store that block in
+`scores_history.jsonl` beside their metrics, plus the eval git sha and the run's own flags.
+
+**Two rows with different `library` counts are not comparable.** Re-ingesting one document once
+moved an untouched document's MRR from 0.4104 to 0.3979 — the same magnitude as the model change
+being measured at the time. `evals.lib.environment.same_conditions` names the fields that differ.
+
+A capture that fails records `capture_error`. A row with no `environment` key at all predates
+this and cannot be compared to one that has it.
+
 ## Reading a number without misleading yourself
 
 **Intent routing is deterministic.** The keyword heuristic answers most messages without an LLM

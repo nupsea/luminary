@@ -1816,6 +1816,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eval Environment
+         * @description What produced a number: build, resolved models, and the corpus fingerprint.
+         *
+         *     Recorded with every eval run so two runs can be compared, or shown to be
+         *     incomparable, without reading a commit log.
+         */
+        get: operations["eval_environment_evals_environment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/runs": {
         parameters: {
             query?: never;
@@ -6878,6 +6901,48 @@ export interface components {
             document_id: string;
             /** Chapters */
             chapters: components["schemas"]["EpubChapterTocItem"][];
+        };
+        /**
+         * EvalEnvironmentResponse
+         * @description The build, models and corpus a run measures. See `eval_environment.py`.
+         */
+        EvalEnvironmentResponse: {
+            /** Backend Version */
+            backend_version: string;
+            /** Embedding Model */
+            embedding_model: string;
+            /** Embedding Dim */
+            embedding_dim: number;
+            /** Chunk Vector Table */
+            chunk_vector_table: string;
+            /** Rerank Model */
+            rerank_model: string;
+            /** Rerank Depth */
+            rerank_depth: number;
+            /** Rerank Blend Alpha */
+            rerank_blend_alpha: number | null;
+            /** Query Spell Correct */
+            query_spell_correct: boolean;
+            /** Llm Mode */
+            llm_mode: string;
+            /** Chat Model */
+            chat_model: string;
+            /** Background Model */
+            background_model: string;
+            /** Local Chat Model */
+            local_chat_model: string;
+            /** Generation Model */
+            generation_model: string;
+            /** Vision Model */
+            vision_model: string;
+            library: components["schemas"]["EvalLibraryFingerprint"];
+        };
+        /** EvalLibraryFingerprint */
+        EvalLibraryFingerprint: {
+            /** Documents */
+            documents: number;
+            /** Chunks */
+            chunks: number;
         };
         /** EvalResultItem */
         EvalResultItem: {
@@ -12865,6 +12930,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    eval_environment_evals_environment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalEnvironmentResponse"];
                 };
             };
         };

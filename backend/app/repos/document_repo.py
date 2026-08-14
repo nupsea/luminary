@@ -41,6 +41,16 @@ class DocumentRepo:
     async def get_or_404(self, document_id: str) -> DocumentModel:
         return await get_or_404(self.session, DocumentModel, document_id, name="Document")
 
+    async def corpus_counts(self) -> tuple[int, int]:
+        """(documents, chunks) across the whole library.
+
+        The fingerprint an eval run records: retrieval scores what is indexed,
+        so two runs taken over different corpora are not comparable.
+        """
+        documents = await self.session.execute(select(func.count(DocumentModel.id)))
+        chunks = await self.session.execute(select(func.count(ChunkModel.id)))
+        return int(documents.scalar_one() or 0), int(chunks.scalar_one() or 0)
+
     async def find_by_file_hash(self, file_hash: str) -> DocumentModel | None:
         result = await self.session.execute(
             select(DocumentModel).where(DocumentModel.file_hash == file_hash)

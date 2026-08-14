@@ -63,7 +63,7 @@ def _wire_common(monkeypatch, history):
     monkeypatch.setattr(
         run_eval,
         "_lib_append_history",
-        lambda dataset, model, metrics, passed, eval_kind: history.append(
+        lambda dataset, model, metrics, passed, eval_kind, environment=None: history.append(
             (eval_kind, model, metrics, passed)
         ),
     )

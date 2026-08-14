@@ -18,7 +18,13 @@ import app.routers.evals as evals_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.models import (
+    ChunkModel,
+    DocumentModel,
+    EvalRunModel,
+    GoldenDatasetModel,
+    GoldenQuestionModel,
+)
 
 # Shared fixture — in-memory SQLite DB
 
@@ -379,3 +385,43 @@ async def test_store_eval_run_with_null_ragas_scores(test_db):
     data = resp.json()
     assert data["faithfulness"] is None
     assert data["answer_relevance"] is None
+
+
+@pytest.mark.asyncio
+async def test_environment_reports_resolved_models_and_corpus(test_db):
+    """GET /evals/environment reports the corpus fingerprint and resolved models."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/evals/environment")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["embedding_dim"] == 384
+    assert data["embedding_model"]
+    assert data["rerank_model"]
+    assert data["chat_model"]
+    assert data["library"] == {"documents": 0, "chunks": 0}
+
+
+@pytest.mark.asyncio
+async def test_environment_counts_the_corpus_it_measures(test_db):
+    """The fingerprint tracks the library, so a run in a changed corpus is visible as changed."""
+    async with db_module.get_session_factory()() as session:
+        session.add(
+            DocumentModel(
+                id="d1",
+                title="t",
+                format="txt",
+                content_type="technical",
+                word_count=1,
+                page_count=1,
+                file_path="/tmp/x.txt",
+                stage="complete",
+            )
+        )
+        session.add(ChunkModel(id="c1", document_id="d1", text="hello", chunk_index=0))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        data = (await client.get("/evals/environment")).json()
+
+    assert data["library"] == {"documents": 1, "chunks": 1}

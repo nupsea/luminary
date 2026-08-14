@@ -186,6 +186,12 @@ neither has been isolated — `bm25(chunks_fts)` scores over the whole FTS table
 `document_id` filter applied to matched rows (`retriever.py:225`), and graph expansion reads an
 entity graph that every ingest rewrites.
 
+**Shipped 2026-08-14.** `GET /evals/environment` (`services/eval_environment.py`) reports the
+build, the resolved models and the corpus fingerprint; `evals/lib/environment.py` captures it with
+the eval git sha and the run's own flags; every gated runner stores it. Models resolve through
+`get_effective_routing`, which is what the backend would actually call — the first version read
+`llm_mode` and recorded `gpt-5-mini` for a `private`-mode backend that answers locally.
+
 **Fix**: an environment block per run, persisted in the history row and in `/evals/store`.
 
 | Field | Source | Why |

@@ -18,6 +18,7 @@ from evals.lib.intent_metrics import (  # noqa: E402
 )
 from evals.lib.loader import load_golden  # noqa: E402
 from evals.lib.schemas import IntentGoldenEntry  # noqa: E402
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 
@@ -65,7 +66,14 @@ def main() -> None:
         "per_route": compute_per_route_precision_recall(samples),
     }
     passed = metrics["routing_accuracy"] >= THRESHOLDS["routing_accuracy"]
-    append_history(args.dataset, "classifier", metrics, passed, eval_kind="routing")
+    append_history(
+        args.dataset,
+        "classifier",
+        metrics,
+        passed,
+        eval_kind="routing",
+        environment=capture_environment(args.backend_url),
+    )
     store_results(args.backend_url, args.dataset, "classifier", metrics, eval_kind="routing")
     print_table(metrics)
     if args.assert_thresholds and not passed:
