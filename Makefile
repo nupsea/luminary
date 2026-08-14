@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -239,6 +239,18 @@ eval-gen:
 	@echo "Generation quality eval on book + paper (local judge, asserted -- slow)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
+
+# Repeated generation eval: mean and sd over N runs in ONE library state, gated
+# on the mean. A single generation run cannot resolve a change below ~0.10 on
+# book or ~0.05 on paper, so this is the only honest way to A/B a change that
+# touches answering. RUNS= and COMPARE= (an earlier run_group) are optional.
+eval-variance:
+	@echo "Repeated generation eval on $(or $(DATASET),book) (slow -- N full runs)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_variance.py \
+		--dataset $(or $(DATASET),book) --runs $(or $(RUNS),4) \
+		$(if $(COMPARE),--compare-to $(COMPARE),) \
+		--backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct \
+		--check-citations --assert-thresholds
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.

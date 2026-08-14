@@ -216,6 +216,15 @@ build, so a single run cannot resolve a change below ~0.10 / ~0.05. The number i
 `run_eval.py` and `eval-coverage.md`; the tooling to act on it does not exist — no repeat flag, no
 run-group key, nothing comparing distributions.
 
+**Shipped 2026-08-14.** `make eval-variance DATASET= RUNS= [COMPARE=<run_group>]` →
+`evals/run_variance.py`. Runs the eval N times in separate processes — how the committed variance
+figures were taken — sharing one `run_group`, aggregates from the rows the runs themselves wrote,
+and gates on the **mean** rather than on any single run. `COMPARE=` reports each delta against the
+noisier of the two series' sd and prints `inside noise` below 2sd. Three refusals rather than an
+average: a series whose runs measured different systems (`same_conditions`), a comparison across
+different systems, and a series with a missing run. `hit_rate_5`/`mrr`/`ndcg_10` moving inside one
+series is reported as a corpus or funnel change, since they are bit-reproducible on a fixed corpus.
+
 **Fix**: `--runs N` against one library state, each run recorded individually under a shared
 run-group id with mean and sd; a comparison mode reporting the delta against recorded sd rather
 than against a point.

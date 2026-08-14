@@ -22,6 +22,7 @@ whatever retrieval returned.
 | Summaries | `evals/run_summary_eval.py` | — | **no target** |
 | Flashcards | `evals/run_flashcard_eval.py` | — | **no target** |
 | Corpus routing | `evals/run_corpus_routing.py` | — | **no target** |
+| Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
 | HTTP contract | `make smoke` — ~230 scripts | live backend | yes, separately |
 
 ## What is not covered
@@ -67,6 +68,9 @@ varies the subjects — invented names and objects absent from the corpus — as
 template routes one way for every subject. A keyword tuned to a corpus entity passes the golden
 and fails there. Read the golden as a regression check and the generalisation suite as the
 evidence that routing keys on how a question is asked rather than what it is about.
+
+**Never A/B a generation change on single runs** — `make eval-variance DATASET=book RUNS=4`, then
+`COMPARE=<run_group>` for the change. It gates the mean and calls a delta below 2sd `inside noise`.
 
 **Generation metrics are noisy; retrieval metrics are not.** Retrieval is bit-reproducible on a
 fixed corpus — the same corpus returns the same HR@5 to four decimal places. Generation is not:

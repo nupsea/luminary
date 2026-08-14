@@ -1094,8 +1094,13 @@ def main() -> None:
 
     # Captured after the run so the corpus fingerprint reflects what was
     # measured: `ensure_ingested` can add documents before the first query.
+    # A repeated series shares one group id so its runs can be aggregated, and
+    # so a run that landed in a different library state is visible rather than
+    # averaged in. run_variance.py sets these; a single run carries neither.
     environment = capture_environment(
         args.backend_url,
+        run_group=os.environ.get("LUMINARY_RUN_GROUP") or None,
+        run_index=int(os.environ.get("LUMINARY_RUN_INDEX", "0")) or None,
         scope="scoped",
         rerank=bool(args.rerank),
         hyde=bool(args.hyde),
