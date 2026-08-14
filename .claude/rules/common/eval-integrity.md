@@ -14,8 +14,10 @@ plan written on top of it. Three rules hold everywhere; the full procedure is th
   user library. Never clean eval data with a side script.
 
 - **Read the corpus the way ingestion reads it**, via
-  `app.services.source_text.read_source_text`. A generator reading the raw file writes
-  questions about text that never becomes a chunk.
+  `app.services.universal_parser.read_document_text` — it dispatches on format.
+  `source_text.read_source_text` only decodes and normalises bytes, so on a PDF it returns
+  `%PDF-1.5 /FlateDecode` and fails silently; `DATA/study` is a gated PDF dataset. A generator
+  reading the raw file writes questions about text that never becomes a chunk.
 
 Before quoting a number: which dataset, is it clean, was the metric computed or defaulted, and
 what is the comparison. Floors are collapse detectors, not quality bars.

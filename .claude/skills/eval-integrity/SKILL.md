@@ -36,10 +36,15 @@ The audit is in `evals/audit_golden.py` for live retrieval, but hint uniqueness 
 contamination are checkable offline against the source file — do that first, it needs no
 backend.
 
-Read the corpus through `app.services.source_text.read_source_text`, never `read_text()`.
-That is the ingestion path. **A generator that reads the raw file writes questions about text
-that never becomes a chunk** — this is exactly how 17 of 40 `paper` questions came to ask
-about a scraped 404 page.
+Read the corpus through `app.services.universal_parser.read_document_text`, never `read_text()`.
+That is the ingestion path, and it dispatches on format. **A generator that reads the raw file
+writes questions about text that never becomes a chunk** — this is exactly how 17 of 40 `paper`
+questions came to ask about a scraped 404 page.
+
+`source_text.read_source_text` is not that path: it decodes and normalises bytes and nothing
+more, so on a PDF it hands back `%PDF-1.5 /FlateDecode` without erroring. `DATA/study` is a
+gated PDF dataset, so anything comparing a source against its chunks must go through
+`read_document_text` or it measures binary against prose.
 
 ## What a metric may never do
 

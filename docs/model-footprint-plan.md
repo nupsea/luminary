@@ -351,6 +351,33 @@ prose plus a JSON citations block), and `judge_citation` imports `litellm`, abse
 `evals` project so every call raised `ModuleNotFoundError` into a swallowed counter. I-32 —
 uncomputed metrics fail rather than pass — is what surfaced both.
 
+### Every document kind, generation measured
+
+Until 2026-08-14 generation was measured on `book` and `paper` only, so four of the six kinds
+were gated on retrieval alone. Measured on the marker build, one run each (book/paper are the
+4-run means from the variance section):
+
+| dataset | HR@5 | support | coverage | answer_rate | faithfulness | answer_relevance |
+|---|---|---|---|---|---|---|
+| book | 0.5750 | 0.6491 | 0.8245 | 0.9250 | 0.6888 | 0.6729 |
+| paper | 0.8500 | 0.7089 | 0.9679 | 0.9750 | 0.6802 | 0.8527 |
+| legal | 0.5333 | 0.7476 | 0.9500 | 1.0000 | 0.7375 | 0.7376 |
+| play | 0.6500 | 0.7338 | 0.9286 | 0.9333 | 0.5660 | 0.7321 |
+| study (PDF) | 0.5833 | 0.7167 | 0.9000 | 1.0000 | 0.6145 | 0.7852 |
+| thoughts | 1.0000 | 1.0000 | 0.7500 | 1.0000 | 0.6309 | 0.8759 |
+
+Every kind clears every derived floor, and `citations_dropped` is 0 everywhere: no ungrounded
+excerpt reached a user on any corpus. **`book` is the weakest dataset, not the representative
+one** — the other five score 0.72–1.00 on citation support against book's 0.65, so the citation
+work was tuned against the hardest case. `play` carries the lowest faithfulness (0.5660): Hamlet
+is verse and dialogue while HHEM scores prose entailment, which is the same style artifact that
+already bars cross-model faithfulness comparisons. `thoughts` scores 1.000 on retrieval and
+support by construction (4 rows over a 7-chunk source) and is measured, never gated.
+
+`study` recorded `judge_failed_calls: 1` of ~90. The rate is computed over successful judgements
+and warns above 50%, so one failure does not invalidate the run — but it is not zero, and a
+number quoted from that row should say so.
+
 ### Variance, and the floors derived from it
 
 Four runs per dataset on one frozen build, same corpus, bit-identical retrieval:

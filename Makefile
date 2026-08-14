@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-ingest eval-gen eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -201,6 +201,15 @@ mem-profile:
 ner-compare:
 	@echo "Comparing entity models (requires backend on :7820)..."
 	cd backend && uv run python ../scripts/ner_compare.py $(NER_ARGS)
+
+# Ingestion fidelity: how much of each source document survives into chunks.
+# Deterministic, LLM-free, no backend needed -- it reads the dev database directly.
+# Retrieval scores what was indexed and cannot report what never arrived, so this
+# is the ceiling every downstream number sits under. Run it before trusting a
+# retrieval or generation figure on a corpus that was re-ingested.
+eval-ingest:
+	@echo "Ingestion fidelity across every manifest document..."
+	uv run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds
 
 # Every document kind under DATA. `thoughts` is deliberately absent: 4 rows over a
 # 7-chunk document scores 1.000 by construction, so it is measured, not gated.

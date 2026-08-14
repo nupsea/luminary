@@ -16,7 +16,7 @@ This file is a table of contents. The system of record is `docs/`.
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |
 | a retrieval change | `docs/retrieval-funnel.md`, then the `retrieval-change` skill |
-| an eval change, or quoting an eval number | the `eval-integrity` skill |
+| an eval change, or quoting an eval number | `docs/eval-coverage.md`, then the `eval-integrity` skill |
 | writing docs | the `project-docs` skill |
 
 Never state a dependency version in prose — point at `package.json` / `pyproject.toml`.
