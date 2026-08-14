@@ -29,15 +29,24 @@ import argparse
 import asyncio
 import json
 import platform
+import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import psutil
 
 MB = 1024 * 1024
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _repo_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else REPO_ROOT / path
+
 
 DEFAULT_BACKEND = "http://127.0.0.1:7820"
 DEFAULT_OLLAMA = "http://127.0.0.1:11434"
@@ -45,39 +54,80 @@ DEFAULT_OLLAMA = "http://127.0.0.1:11434"
 # Ollama's port is ephemeral under the bundled app, so the URL is asked for
 # rather than assumed; this is only the dev default.
 
-_PROC_ROLES = {
-    "backend": lambda name, cmd: "uvicorn" in cmd or "app.main" in cmd,
-    "ollama": lambda name, cmd: name == "ollama" or "ollama" in name,
-    "desktop": lambda name, cmd: "luminary" in name,
-}
 
-
-def _classify(proc: psutil.Process) -> str | None:
-    try:
-        name = (proc.name() or "").lower()
-        cmd = " ".join(proc.cmdline()).lower()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+def _pid_on_port(url: str) -> int | None:
+    """PID listening on this URL's port."""
+    port = urlparse(url).port
+    if port is None:
         return None
-    for role, match in _PROC_ROLES.items():
-        if match(name, cmd):
-            return role
-    return None
+    try:
+        out = subprocess.run(  # noqa: S603 -- fixed argv, port comes from urlparse
+            ["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pids = [int(p) for p in out.stdout.split() if p.strip().isdigit()]
+    return pids[0] if pids else None
 
 
-def _find_procs() -> dict[str, list[psutil.Process]]:
-    found: dict[str, list[psutil.Process]] = {"backend": [], "ollama": [], "desktop": []}
+def _tree(pid: int | None) -> list[psutil.Process]:
+    if pid is None:
+        return []
+    try:
+        proc = psutil.Process(pid)
+        return [proc, *proc.children(recursive=True)]
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return []
+
+
+def _find_procs(backend: str, ollama_url: str) -> dict[str, list[psutil.Process]]:
+    """Resolve each role from the port it serves, then take its whole tree.
+
+    Matching on process name is wrong on any machine that runs more than one
+    Luminary, which is the normal state during development: the bundled app and
+    a dev backend both answer to `uvicorn`, and both Ollamas answer to `ollama`,
+    so a name match sums two installs into one figure. It also misses what
+    holds the memory -- uvicorn's `--reload` parent binds the socket while its
+    child imports torch, and Ollama's weights live in `ollama runner` children,
+    not in `ollama serve`. The listening PID plus its descendants is the only
+    grouping that is both unambiguous and complete.
+    """
+    found = {
+        "backend": _tree(_pid_on_port(backend)),
+        "ollama": _tree(_pid_on_port(ollama_url)),
+        "desktop": [],
+    }
+    backend_pids = {p.pid for p in found["backend"]}
     for proc in psutil.process_iter(["pid", "name"]):
-        role = _classify(proc)
-        if role:
-            found[role].append(proc)
+        try:
+            name = (proc.name() or "").lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if "luminary" in name and proc.pid not in backend_pids:
+            found["desktop"].append(proc)
     return found
 
 
 def _rss(procs: list[psutil.Process]) -> int:
+    """Resident bytes for these processes and any children they have spawned.
+
+    Re-walked on every sample, never cached: Ollama's runner is a child created
+    when a model loads, so a tree resolved at startup contains none of the
+    weights and reports a server holding ~70MB while `/api/ps` reports ~10GB.
+    """
+    seen: set[int] = set()
     total = 0
-    for p in procs:
+    for proc in procs:
         try:
-            total += p.memory_info().rss
+            for p in [proc, *proc.children(recursive=True)]:
+                if p.pid in seen:
+                    continue
+                seen.add(p.pid)
+                total += p.memory_info().rss
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return total
@@ -130,25 +180,36 @@ async def _sample(
 
 
 async def _probe_ttft(
-    client: httpx.AsyncClient, backend: str, question: str, t0: float
+    client: httpx.AsyncClient, backend: str, question: str, t0: float, doc_id: str | None
 ) -> dict[str, Any]:
     """Time an Ask to its first token, as a user experiences it.
 
     Time-to-first-byte and time-to-first-token are both recorded: an early
     non-token event (a notice, a transparency payload) would otherwise be
     mistaken for the answer starting.
+
+    `not_found` is recorded because that path never reaches generation. Its
+    decline is still streamed as tokens, so it produces a fast, real-looking
+    TTFT that measures retrieval alone -- the one number this probe must not
+    report as latency under load.
+
+    Scoped to the document being ingested when there is one: that is the
+    reported workflow, and it is also the only scope guaranteed to have a
+    target in this library.
     """
+    payload_body: dict[str, Any] = {"question": question}
+    if doc_id:
+        payload_body |= {"scope": "single", "document_ids": [doc_id]}
+    else:
+        payload_body["scope"] = "all"
+
     started = time.monotonic()
     ttfb: float | None = None
     ttft: float | None = None
+    declined = False
     error: str | None = None
     try:
-        async with client.stream(
-            "POST",
-            f"{backend}/qa",
-            json={"question": question, "scope": "library"},
-            timeout=180.0,
-        ) as resp:
+        async with client.stream("POST", f"{backend}/qa", json=payload_body, timeout=180.0) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if ttfb is None:
@@ -159,23 +220,39 @@ async def _probe_ttft(
                     payload = json.loads(line[5:].strip())
                 except ValueError:
                     continue
-                if payload.get("token"):
+                if payload.get("not_found"):
+                    declined = True
+                if payload.get("token") and ttft is None:
                     ttft = time.monotonic() - started
-                    break
                 if payload.get("done"):
+                    break
+                if ttft is not None and not declined:
                     break
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         error = f"{type(exc).__name__}: {exc}"
+
+    if error is None and ttft is None:
+        error = "no token emitted"
 
     return {
         "at": round(started - t0, 2),
         "ttfb_s": round(ttfb, 3) if ttfb is not None else None,
         "ttft_s": round(ttft, 3) if ttft is not None else None,
+        "declined": declined,
+        "scope": "single" if doc_id else "all",
         "error": error,
     }
 
 
-async def _ingest(client: httpx.AsyncClient, backend: str, path: Path) -> str:
+async def _ingest(client: httpx.AsyncClient, backend: str, path: Path) -> tuple[str, bool]:
+    """Start an ingest. Returns (document_id, dedup_hit).
+
+    `/documents/ingest` deduplicates on file hash and answers `status:
+    processing` either way, so a re-run on an already-ingested file starts
+    nothing and profiles an idle backend under an ingest's name. A fresh
+    ingest cannot be `complete` within milliseconds of the POST, so the stage
+    read immediately after it is what separates the two.
+    """
     with path.open("rb") as fh:
         resp = await client.post(
             f"{backend}/documents/ingest",
@@ -188,7 +265,51 @@ async def _ingest(client: httpx.AsyncClient, backend: str, path: Path) -> str:
     doc_id = body.get("document_id") or body.get("id")
     if not doc_id:
         raise SystemExit(f"ingest returned no document id: {body}")
-    return str(doc_id)
+    return str(doc_id), await _stage(client, backend, str(doc_id)) == "complete"
+
+
+async def _library(client: httpx.AsyncClient, backend: str) -> dict[str, int | None]:
+    """Documents and chunks currently indexed.
+
+    A footprint or latency number taken in one library state is not comparable
+    to one taken in another, and the corpus grows by running this tool.
+    """
+    docs = 0
+    chunks = 0
+    page = 1
+    try:
+        while True:
+            resp = await client.get(
+                f"{backend}/documents", params={"page": page, "page_size": 100}, timeout=15.0
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            items = body.get("items", [])
+            chunks += sum(i.get("chunk_count") or 0 for i in items)
+            docs = body.get("total") or docs + len(items)
+            if len(items) < 100 or page * 100 >= docs:
+                break
+            page += 1
+    except httpx.HTTPError:
+        return {"documents": None, "chunks": None}
+    return {"documents": docs, "chunks": chunks}
+
+
+def _ollama_cap(procs: dict[str, list[psutil.Process]]) -> str | None:
+    """`OLLAMA_MAX_LOADED_MODELS` as the running server actually has it.
+
+    The bundle sets it in `spawn_ollama`; a dev Ollama started by hand may not
+    have it at all, and the two hosts are different regimes. Recording the
+    value is what makes a peak from one comparable to a peak from the other.
+    """
+    for proc in procs.get("ollama", []):
+        try:
+            env = proc.environ()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            continue
+        if "OLLAMA_MAX_LOADED_MODELS" in env:
+            return env["OLLAMA_MAX_LOADED_MODELS"]
+    return None
 
 
 def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
@@ -202,7 +323,7 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
     peak = max((sum(s["rss"].values()) for s in samples), default=0)
     peak_reported = max((s["ollama_reported"] for s in samples), default=0)
     max_loaded = max((s["loaded_count"] for s in samples), default=0)
-    ttfts = [p["ttft_s"] for p in probes if p["ttft_s"] is not None]
+    ttfts = [p["ttft_s"] for p in probes if p["ttft_s"] is not None and not p.get("declined")]
 
     return {
         **meta,
@@ -212,13 +333,24 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
         "peak_by_stage_mb": {k: round(v / MB, 1) for k, v in by_stage.items()},
         "ttft_worst_s": max(ttfts) if ttfts else None,
         "ttft_best_s": min(ttfts) if ttfts else None,
-        "probe_failures": sum(1 for p in probes if p["error"]),
+        "probes_run": len(ttfts),
+        "probes_skipped": sum(1 for p in probes if (p["error"] or "").startswith("skipped")),
+        "probes_declined": sum(1 for p in probes if p.get("declined")),
+        "probe_failures": sum(
+            1 for p in probes if p["error"] and not p["error"].startswith("skipped")
+        ),
         "samples": len(samples),
     }
 
 
 def _print_report(summary: dict, samples: list[dict]) -> None:
     print()
+    lib = summary.get("library_after") or {}
+    print(f"  host                     {summary['total_ram_mb'] / 1024:>10,.1f} GB RAM")
+    print(f"  OLLAMA_MAX_LOADED_MODELS {summary.get('ollama_max_loaded') or 'unset'!s:>10}")
+    print(
+        f"  library                  {lib.get('documents')!s:>10} docs, {lib.get('chunks')} chunks"
+    )
     print(f"  peak resident (RSS)      {summary['peak_rss_mb']:>10,.1f} MB")
     print(f"  peak Ollama reported     {summary['peak_ollama_reported_mb']:>10,.1f} MB")
     print(f"  max models loaded        {summary['max_models_loaded']:>10}")
@@ -249,19 +381,27 @@ async def run(args: argparse.Namespace) -> int:
 
     async with httpx.AsyncClient() as client:
         try:
-            (await client.get(f"{backend}/health", timeout=5.0)).raise_for_status()
+            health = await client.get(f"{backend}/health", timeout=5.0)
+            health.raise_for_status()
         except httpx.HTTPError as exc:
             print(f"backend not reachable at {backend}: {exc}")
             return 1
+        backend_version = health.json().get("version")
 
-        procs = _find_procs()
+        procs = _find_procs(backend, ollama_url)
         if not procs["backend"]:
-            print("warning: no backend process matched; RSS will under-report")
+            print(f"warning: nothing is listening on {backend}'s port; RSS will under-report")
+        if not procs["ollama"]:
+            print(f"warning: no Ollama process found at {ollama_url}; model RSS is missing")
+
+        library_before = await _library(client, backend)
 
         t0 = time.monotonic()
         samples: list[dict] = []
         probes: list[dict] = []
         doc_id: str | None = None
+        dedup_hit = False
+        ingest_error: str | None = None
         ingest_task: asyncio.Task | None = None
 
         if args.ingest:
@@ -273,24 +413,57 @@ async def run(args: argparse.Namespace) -> int:
             ingest_task = asyncio.create_task(_ingest(client, backend, path))
 
         probe_offsets = sorted(args.probe_at)
+        probe_tasks: list[asyncio.Task] = []
         deadline = t0 + args.idle if args.idle else None
         settle_until: float | None = None
+
+        def _harvest() -> None:
+            for task in [t for t in probe_tasks if t.done()]:
+                probe_tasks.remove(task)
+                probe = task.result()
+                probes.append(probe)
+                shown = probe["ttft_s"] if probe["ttft_s"] is not None else probe["error"]
+                print(f"  probe at {probe['at']:>6.1f}s -> first token {shown}")
 
         while True:
             now = time.monotonic()
 
             if ingest_task is not None and ingest_task.done() and doc_id is None:
-                doc_id = ingest_task.result()
-                print(f"document {doc_id}")
+                try:
+                    doc_id, dedup_hit = ingest_task.result()
+                except (httpx.HTTPError, SystemExit) as exc:
+                    ingest_error = f"{type(exc).__name__}: {exc}"
+                    print(f"ingest failed: {ingest_error}")
+                    break
+                print(f"document {doc_id}{' (DEDUP HIT)' if dedup_hit else ''}")
 
             samples.append(await _sample(client, backend, ollama_url, procs, doc_id, t0))
 
+            # Probes run as tasks: an Ask under load takes tens of seconds, and
+            # awaiting one inline stops sampling across exactly the window where
+            # the LLM and the ingest are both resident. At most one is ever in
+            # flight -- two overlapping probes queue behind each other in the
+            # runtime's slots, and the second then measures the profiler rather
+            # than the ingest.
             while probe_offsets and (now - t0) >= probe_offsets[0]:
-                probe_offsets.pop(0)
-                probe = await _probe_ttft(client, backend, args.question, t0)
-                probes.append(probe)
-                shown = probe["ttft_s"] if probe["ttft_s"] is not None else probe["error"]
-                print(f"  probe at {probe['at']:>6.1f}s -> first token {shown}")
+                offset = probe_offsets.pop(0)
+                if probe_tasks:
+                    probes.append(
+                        {
+                            "at": round(offset, 2),
+                            "ttfb_s": None,
+                            "ttft_s": None,
+                            "declined": False,
+                            "scope": None,
+                            "error": "skipped: previous probe still in flight",
+                        }
+                    )
+                    print(f"  probe at {offset:>6.1f}s -> skipped, previous still running")
+                    continue
+                probe_tasks.append(
+                    asyncio.create_task(_probe_ttft(client, backend, args.question, t0, doc_id))
+                )
+            _harvest()
 
             stage = samples[-1]["stage"]
             if stage == "complete" and settle_until is None:
@@ -301,11 +474,12 @@ async def run(args: argparse.Namespace) -> int:
             if stage == "error":
                 print("ingestion reported an error; stopping")
                 break
-            if settle_until is not None and now >= settle_until and not probe_offsets:
+            pending = bool(probe_offsets or probe_tasks)
+            if settle_until is not None and now >= settle_until and not pending:
                 break
-            if deadline is not None and now >= deadline:
+            if deadline is not None and now >= deadline and not pending:
                 break
-            if ingest_task is None and deadline is None and not probe_offsets:
+            if ingest_task is None and deadline is None and not pending:
                 break
             if (now - t0) >= args.max_duration:
                 # An ingest that never reaches `complete` must not leave the
@@ -315,19 +489,33 @@ async def run(args: argparse.Namespace) -> int:
 
             await asyncio.sleep(args.interval)
 
+        if probe_tasks:
+            await asyncio.gather(*probe_tasks, return_exceptions=True)
+            _harvest()
         if ingest_task is not None and not ingest_task.done():
             ingest_task.cancel()
+
+        library_after = await _library(client, backend)
 
     meta = {
         "recorded_at": datetime.now(UTC).isoformat(),
         "host": platform.node(),
         "platform": f"{platform.system()} {platform.release()} {platform.machine()}",
         "total_ram_mb": round(psutil.virtual_memory().total / MB, 1),
+        "backend_version": backend_version,
+        "ollama_max_loaded": _ollama_cap(procs),
+        "library_before": library_before,
+        "library_after": library_after,
         "source": Path(args.ingest).name if args.ingest else None,
+        "dedup_hit": dedup_hit,
+        "ingest_error": ingest_error,
     }
     summary = _summarise(samples, probes, meta)
 
-    out = Path(args.out).expanduser()
+    # Paths resolve against the repo, not the caller's directory: `make
+    # mem-profile` runs this from backend/, so a relative default would write
+    # the baseline somewhere different than an invocation from the repo root.
+    out = _repo_path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w") as fh:
         for s in samples:
@@ -340,12 +528,18 @@ async def run(args: argparse.Namespace) -> int:
     print(f"  raw samples -> {out}")
 
     if args.summary:
-        summary_path = Path(args.summary).expanduser()
+        summary_path = _repo_path(args.summary)
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with summary_path.open("a") as fh:
             fh.write(json.dumps(summary) + "\n")
         print(f"  summary appended -> {summary_path}")
 
+    # A requested measurement that did not happen is a failure, not a baseline:
+    # a dedup hit profiles an idle backend and reads as a very low peak.
+    if args.ingest and (summary["dedup_hit"] or summary["ingest_error"]):
+        reason = summary["ingest_error"] or "already ingested (file hash dedup) -- nothing ran"
+        print(f"\n  FAILED: {reason}")
+        return 1
     return 0
 
 

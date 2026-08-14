@@ -194,7 +194,8 @@ smoke:
 # without FILE it samples idle. Backend must be running.
 mem-profile:
 	@echo "Profiling footprint (requires backend on :7820)..."
-	cd backend && uv run python ../scripts/mem_profile.py $(if $(FILE),--ingest $(FILE),) $(MEM_ARGS)
+	cd backend && uv run python ../scripts/mem_profile.py $(if $(FILE),--ingest $(FILE),) \
+		--summary evals/mem_profile_history.jsonl $(MEM_ARGS)
 
 # Compare two GLiNER models on the live corpus before changing NER_MODEL.
 # Agreement only -- the deciding gate is `make eval` under each model.
