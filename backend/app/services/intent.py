@@ -141,7 +141,27 @@ _SUMMARY_KWS: frozenset[str] = frozenset(
         "what is the book about",
         "what is the document about",
         "what covers",
+        # Summary words that lived only in qa.py's parallel list. Two sets for one
+        # concept disagreed: "Recap the document" routed to search here while
+        # counting as summary intent there.
+        "recap",
+        "gist",
+        "tldr",
+        "tl;dr",
     }
+)
+
+# Some intents are a sentence shape rather than a phrase. "What is <this|the>
+# <noun> about?" is combinatorial in the determiner and in the noun -- and the
+# noun is whatever the user calls their own document, which no corpus can
+# enumerate. Matching the shape generalises to documents the goldens never saw;
+# listing the phrasings only ever fits the goldens.
+_SUMMARY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\bwhat(?:'s|s| is| are)\s+(?:this|that|the|it|these|those)\b"
+        r"[\w\s-]{0,24}\babout\b"
+    ),
+    re.compile(r"\bwhat\s+(?:is|are)\s+[\w\s-]{0,24}\b(?:mainly|broadly|generally)\s+about\b"),
 )
 
 _RELATIONAL_KWS: frozenset[str] = frozenset(
@@ -151,8 +171,15 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
         "relationship between",
         "connection between",
         "what is the relationship",
+        # "what <relation verb>" — a family, completed. The set already held
+        # connects/links while "ties" existed only as the noun "ties between", so
+        # "What ties X to Y?" matched nothing and fell through to search.
         "what connects",
         "what links",
+        "what ties",
+        "what relates",
+        "what binds",
+        "what joins",
         # "related to" / "connected to"
         "related to",
         "connected to",
@@ -318,6 +345,19 @@ def _kw_regex(kw: str) -> re.Pattern[str]:
     return re.compile(pre + re.escape(kw) + post)
 
 
+def matches_summary_request(question: str) -> bool:
+    """True when the question asks for the document as a whole.
+
+    The one predicate for "is this a summary request". `qa.py` decides whether to
+    attach the executive summary from this plus a few looser words; keeping that
+    a superset of this is what stops the two from disagreeing, as they did when
+    each carried its own list and "Recap the document" was a summary to one and a
+    search to the other.
+    """
+    q = question.lower()
+    return any(kw in q for kw in _SUMMARY_KWS) or any(p.search(q) for p in _SUMMARY_PATTERNS)
+
+
 def _best_match(question: str, keywords: frozenset[str]) -> str | None:
     """Longest keyword matching *question* on word boundaries, or None."""
     hits = [kw for kw in keywords if _kw_regex(kw).search(question)]
@@ -353,7 +393,7 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         return ("notes_gap", 0.95)
     if any(kw in q for kw in _NOTES_KWS):
         return ("notes", 0.95)
-    if any(kw in q for kw in _SUMMARY_KWS):
+    if matches_summary_request(question):
         return ("summary", 0.9)
     # Relational and comparative share a confidence, so set order was deciding
     # between them: "how do" (relational) outranked "how do they differ"

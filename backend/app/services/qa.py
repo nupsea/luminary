@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
+from app.services.intent import matches_summary_request
 from app.services.llm import (
     LLMAPIConnectionError,
     LLMAuthenticationError,
@@ -122,29 +123,21 @@ def _enrich_citation_titles(
     return citations
 
 
-_SUMMARY_INTENT_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "summarize",
-        "summary",
-        "summaries",
-        "overview",
-        "key points",
-        "what is this about",
-        "main idea",
-        "main ideas",
-        "brief",
-        "briefly",
-        "gist",
-        "outline",
-        "recap",
-    }
+# Deciding to ATTACH the executive summary is a looser judgement than routing to
+# the summary node: it only adds context, so a false positive costs prompt budget
+# rather than answering the wrong question. It must nonetheless be a superset of
+# the routing set, or the two disagree -- "Recap the document" counted as summary
+# intent here while routing sent it to search, because the lists were maintained
+# separately and drifted.
+_LOOSE_SUMMARY_KEYWORDS: frozenset[str] = frozenset(
+    {"brief", "briefly", "summaries", "main idea"}
 )
 
 
 def _should_use_summary(question: str) -> bool:
     """Return True if the question has summary-intent keywords."""
     q = question.lower()
-    return any(kw in q for kw in _SUMMARY_INTENT_KEYWORDS)
+    return matches_summary_request(question) or any(kw in q for kw in _LOOSE_SUMMARY_KEYWORDS)
 
 
 # Every prompt that asks for citations states this. Naming a source is a pointer,

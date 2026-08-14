@@ -41,16 +41,16 @@ whatever retrieval returned.
 
 ## Reading a number without misleading yourself
 
-**Intent routing is deterministic.** Measured 0.9400 on three consecutive runs, sd 0 — the
-keyword heuristic answers most messages without an LLM and the classifier runs at temperature 0.
-So a single run is a valid measurement here and a small delta is real, unlike generation.
+**Intent routing is deterministic.** The keyword heuristic answers most messages without an LLM
+and the classifier runs at temperature 0, so a single run is a valid measurement here and a small
+delta is real, unlike generation. Measured 1.0000 on all four routes.
 
-Per route: summary 1.0000/0.8462, graph 1.0000/0.9231, comparative 1.0000/1.0000, search
-0.8000/1.0000 (precision/recall). The three remaining misroutes all land in `search`, which is
-why its precision trails: two summary phrasings ("What is this book about?", "Recap the
-document") and one graph phrasing ("What ties the White Sphinx to the Time Machine?") match no
-keyword and fall through. `recap` is a summary word in `qa.py::_SUMMARY_INTENT_KEYWORDS` but not
-in `intent.py::_SUMMARY_KWS` — two summary keyword lists that disagree.
+**A perfect score on a 50-row golden proves very little**, which is why routing carries a
+generalisation suite as well (`tests/test_intent_generalisation.py`). It holds each phrasing and
+varies the subjects — invented names and objects absent from the corpus — asserting that one
+template routes one way for every subject. A keyword tuned to a corpus entity passes the golden
+and fails there. Read the golden as a regression check and the generalisation suite as the
+evidence that routing keys on how a question is asked rather than what it is about.
 
 **Generation metrics are noisy; retrieval metrics are not.** Retrieval is bit-reproducible on a
 fixed corpus — the same corpus returns the same HR@5 to four decimal places. Generation is not:
