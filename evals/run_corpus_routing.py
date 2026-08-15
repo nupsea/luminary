@@ -120,12 +120,16 @@ def main():
     args = ap.parse_args()
 
     manifest = load_manifest()
-    # One capture for the series: every dataset in this invocation is measured
-    # against the same library, and that is the fact the numbers depend on.
-    environment = capture_environment(args.backend_url, scope="unscoped", arms=",".join(
-        ["clean", "typo"] if args.typo else ["clean"]))
     tokens = [t.strip() for t in args.datasets.split(",") if t.strip()]
     arms = ["clean", "typo"] if args.typo else ["clean"]
+
+    # Captured after resolving datasets, not before: resolve_rows can ingest a
+    # missing document, and a fingerprint taken first records a smaller library
+    # than the run measured -- which then groups it with the wrong runs.
+    def _environment():
+        return capture_environment(
+            args.backend_url, scope="unscoped", arms=",".join(arms)
+        )
 
     hdr = "  ".join(f"{a} route@1/route@5/HR@5" for a in arms)
     print(f"{'dataset':<20} {hdr}")
@@ -159,7 +163,7 @@ def main():
                 store_results(args.backend_url, label, "no-llm", metrics,
                               eval_kind="corpus_routing")
                 append_history(label, "no-llm", metrics, True, eval_kind="corpus_routing",
-                               environment=environment)
+                               environment=_environment())
 
     print()
     for arm in arms:

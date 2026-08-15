@@ -37,6 +37,11 @@ class ModelChoice:
     model: str
     api_key: str | None
     profile: ModelProfile | None
+    # True only when an override names this model explicitly. A caller that
+    # pins a model tells LLMService to skip its own routing, which also skips
+    # the API key that routing supplies and the offline reroute -- so "no
+    # override configured" must stay distinguishable from "this exact model".
+    explicit: bool = False
     # Set when the resolution fell back. Reported, never swallowed: a run served
     # by a fallback measured a different system than the one asked for.
     fallback_reason: str | None = None
@@ -55,7 +60,7 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
     if role == "generation":
         override = configured_generation_override()
         if override:
-            return ModelChoice(role, override, None, profile_for(override))
+            return ModelChoice(role, override, None, profile_for(override), explicit=True)
         role_background = background
 
     else:

@@ -445,7 +445,12 @@ def _resolve_marker_citations(
                 "section_heading": chunk.get("section_heading") or "",
                 "page": chunk.get("page", 0),
                 "excerpt": _excerpt_from_chunk(
-                    chunk.get("text", ""), str(c.get("quote") or ""), answer
+                    # Never the packed `text`: that carries the generated
+                    # section summary, and an excerpt cut from it would be
+                    # presented as a quote from the document (I-33).
+                    chunk.get("source_text") or chunk.get("text", ""),
+                    str(c.get("quote") or ""),
+                    answer,
                 ),
                 "chunk_id": chunk.get("chunk_id", ""),
                 "document_id": doc_id,

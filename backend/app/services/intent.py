@@ -221,13 +221,11 @@ _COMPARATIVE_SHAPES: tuple[re.Pattern[str], ...] = (
         r"\b(?:choose|choosing|chose|decide|deciding|pick|picking|select|prefer)\b"
         r"[^?]{0,30}\bbetween\b"
     ),
-    # A polar question offering two alternatives: "Is X or Y the better fit?".
-    # Anchored at the start so a mid-sentence "or" in an ordinary question does
-    # not qualify.
-    re.compile(
-        r"^\s*(?:is|are|was|were|do|does|did|should|would|will|can|could)\b"
-        r"[^?]{0,80}\bor\b[^?]{0,80}"
-    ),
+    # A bare polar question containing "or" is NOT a shape. "Does the author
+    # mention Alice or her sister?" and "Was it built in 1895 or later?" are
+    # lookups, and a shape firing at 0.8 puts them above the LLM fallback with
+    # no recourse. Explicit choices are covered above; the ambiguous rest is
+    # exactly what the fallback is for.
     # Two subjects and a verb of (dis)agreement: "where do X and Y disagree",
     # "the points where A and B diverge". The family completed the way the
     # relation verbs were -- `differ` was already a keyword, its siblings were
@@ -239,11 +237,11 @@ _COMPARATIVE_SHAPES: tuple[re.Pattern[str], ...] = (
 )
 
 _RELATIONAL_SHAPES: tuple[re.Pattern[str], ...] = (
-    # "What sits between X and Y", "the step between X and Y" -- `between ... and`
-    # asks about what lies across two things. A comparison phrased this way
-    # ("difference between X and Y") matches a comparative keyword too, and the
-    # more specific match already wins.
-    re.compile(r"\bbetween\b[^?]{0,50}\band\b"),
+    # A verb of position before "between": "what sits between X and Y", "what
+    # lies between them". Bare `between ... and` is a range -- "how many years
+    # passed between 1895 and 1900", "the steps between installing and running"
+    # -- and claiming those at 0.8 denied them the LLM fallback.
+    re.compile(r"\b(?:sits?|lie|lies|stands?|comes?|falls?|goes)\s+between\b"),
     # The relation-verb family, extended from "what connects" to the same verbs
     # used in the middle of a sentence: "X leads into Y", "how A feeds into B".
     re.compile(
@@ -426,21 +424,25 @@ def mentions(text: str, pattern: re.Pattern[str]) -> bool:
     return any(not _is_negated_at(text, m.start()) for m in pattern.finditer(text))
 
 
-def mentions_substring(text: str, keyword: str) -> bool:
-    """`keyword in text`, minus the occurrences a negation governs.
+@lru_cache(maxsize=512)
+def _inflected_regex(keyword: str) -> re.Pattern[str]:
+    """A keyword on word boundaries, allowing its own plural.
 
-    Substring, not word-boundary: the summary keywords are written to catch
-    their own inflections -- "outline" has to match "outlines", and "central
-    theme" has to match "central themes". Tightening this to a word boundary
-    silently drops every plural, which is a matching change wearing a negation
-    fix's clothes.
+    The summary keywords are written singular and must catch the plural --
+    "outline" has to match "outlines", "central theme" has to match "central
+    themes". Plain substring matching did that and much more: `gist` is inside
+    register, registry and logistics, so "How do I register a new account?"
+    routed to summary at confidence 0.9, above the threshold where the LLM
+    would have corrected it.
     """
-    starts = []
-    at = text.find(keyword)
-    while at != -1:
-        starts.append(at)
-        at = text.find(keyword, at + 1)
-    return any(not _is_negated_at(text, start) for start in starts)
+    return re.compile(rf"\b{re.escape(keyword)}(?:e?s)?\b")
+
+
+def mentions_substring(text: str, keyword: str) -> bool:
+    """A keyword occurrence, in its own right and not negated."""
+    return any(
+        not _is_negated_at(text, m.start()) for m in _inflected_regex(keyword).finditer(text)
+    )
 
 
 @lru_cache(maxsize=512)

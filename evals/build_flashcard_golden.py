@@ -93,20 +93,17 @@ def main() -> int:
         titles = sorted(by_doc)
         rng.shuffle(titles)
         picked: list[tuple[str, str, str, str]] = []
-        round_index = 0
-        while len(picked) < args.per_kind and titles:
-            progressed = False
+        # Shuffled once per document, then consumed in order. Choosing from the
+        # whole pool each round could pick the same passage twice, which
+        # double-weights it in a dataset built to be balanced.
+        remaining = {title: rng.sample(by_doc[title], len(by_doc[title])) for title in titles}
+        while len(picked) < args.per_kind and any(remaining.values()):
             for title in titles:
-                candidates = by_doc[title]
-                if round_index >= len(candidates):
+                if not remaining[title]:
                     continue
-                picked.append(rng.choice(candidates))
-                progressed = True
+                picked.append(remaining[title].pop())
                 if len(picked) >= args.per_kind:
                     break
-            if not progressed:
-                break
-            round_index += 1
 
         for title, doc_id, path, text in picked:
             rows.append(

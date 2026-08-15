@@ -215,6 +215,11 @@ async def search_node(state: ChatState) -> dict:
                     "chunk_id": c.chunk_id,
                     "document_id": c.document_id,
                     "text": augmented_text,
+                    # The chunk as it appears in the document. `text` above is
+                    # what the model reads and carries a generated section
+                    # summary, so a citation excerpt cut from it can quote prose
+                    # the document does not contain (I-33).
+                    "source_text": expanded_text,
                     "section_heading": c.section_heading,
                     "section_summary": section_summary,
                     "page": c.page,

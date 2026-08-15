@@ -202,15 +202,24 @@ def test_summary_keywords_still_match_their_own_inflections():
 COMPARATIVE_SHAPE_TEMPLATES = [
     "Which of {a} and {b} does the author favour?",
     "Which one of {a} or {b} is stronger?",
-    "Is {a} or {b} the better fit here?",
-    "Should I use {a} or {b}?",
     "If I had to choose between {a} and {b}, which does the text argue for?",
     "Where do {a} and {b} disagree?",
     "The points where {a} and {b} diverge",
 ]
 
+# A bare polar question containing "or" reads as a choice to a person and as a
+# lookup just as often -- "Does the author mention {a} or {b}?". The heuristic
+# declines these rather than claiming them at a confidence that would deny them
+# the LLM fallback.
+AMBIGUOUS_OR_TEMPLATES = [
+    "Is {a} or {b} the better fit here?",
+    "Should I use {a} or {b}?",
+    "Does the author mention {a} or {b}?",
+]
+
 RELATIONAL_SHAPE_TEMPLATES = [
     "What sits between {a} and {b} in the chain?",
+    "What lies between {a} and {b}?",
     "What does {a} have to do with {b}?",
     "How does {a} lead into {b}?",
     "Trace the thread from {a} through to {b}",
@@ -238,10 +247,24 @@ def test_shape_routes_do_not_depend_on_their_subjects(template):
     assert len(routes) == 1, f"{template} routed {routes} depending on its subjects"
 
 
+@pytest.mark.parametrize("template", AMBIGUOUS_OR_TEMPLATES)
+def test_an_ambiguous_or_question_is_left_to_the_llm(template):
+    """Below the fallback threshold, so the chat graph asks the LLM. A shape
+    firing here at 0.8 would answer a lookup with the comparative strategy and
+    give it no recourse."""
+    for question in _instantiate(template):
+        intent, confidence = classify_intent_heuristic(question)
+        assert confidence < 0.7, f"{question} -> {intent} {confidence}"
+
+
 @pytest.mark.parametrize(
     "question",
     [
         "Show me the sections from page 5 to page 10",
+        "How many years passed between 1895 and 1900?",
+        "Can you list the steps between installing and running the app?",
+        "What are the logistics of the deployment?",
+        "Which register does the CPU use?",
         "What happened from 1920 to 1930?",
         "Which page mentions the Vantari protocol?",
         "What did Dr Halbrecht say about the copper kettle?",
@@ -249,9 +272,12 @@ def test_shape_routes_do_not_depend_on_their_subjects(template):
     ],
 )
 def test_shapes_do_not_swallow_ordinary_lookups(question):
-    """A range and a plain lookup are searches. `from X to Y` is deliberately not
-    a relational shape for this reason -- it is how pages and dates are written."""
-    assert classify_intent_heuristic(question)[0] not in {"relational", "comparative"}, question
+    """Ranges and plain lookups are searches. `from X to Y` and bare `between X
+    and Y` are deliberately not relational shapes -- that is how pages, dates and
+    step lists are written -- and a short keyword matched inside a longer word
+    ("gist" in "register") did the same to summary."""
+    intent = classify_intent_heuristic(question)[0]
+    assert intent not in {"relational", "comparative", "summary"}, question
 
 
 def test_a_keyword_outranks_a_shape_from_the_other_family():

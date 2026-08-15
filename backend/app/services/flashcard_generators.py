@@ -78,7 +78,13 @@ def _generation_model() -> str | None:
     """See `flashcard._get_generation_model`: resolved, not read from config."""
     from app.services.model_router import resolve  # noqa: PLC0415
 
-    return resolve("generation").model
+    choice = resolve("generation")
+    # None when nothing overrides: LLMService then routes it itself, which is
+    # what supplies the API key the Settings UI stores and what keeps the
+    # offline reroute available. Returning a concrete id here pins the model and
+    # loses both -- in cloud mode with the key only in Settings, every
+    # generation would fail authentication while chat kept working.
+    return choice.model if choice.explicit else None
 
 
 async def generate_technical(

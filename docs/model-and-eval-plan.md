@@ -641,10 +641,17 @@ answer — 2 proposed, 0 gated, 0 dropped. The plan entry was stale.
 Phase 6 fills it.
 
 `app/services/model_router.resolve(role, *, background)` is the one entry point, over four roles.
-Generation now follows Settings unless `LITELLM_GENERATION_MODEL` is explicitly set — which is the
-bug fix: two services read that value straight from config, so a model chosen in Settings applied
-to chat and silently did not apply to flashcard generation. Both paths returned a model, so
-nothing failed; the two answers simply disagreed.
+Generation follows Settings unless `LITELLM_GENERATION_MODEL` is explicitly set. **Corrected
+2026-08-16, the first claim here was overstated**: the original code returned `None` when no
+override was configured, and `LLMService` then routed it through Settings itself. The real defect
+was narrower — a configured override could never be superseded by Settings, and the value was read
+in two service files rather than one.
+
+The correction matters because returning a concrete id instead of `None` broke two things a
+review caught: a pinned model skips `LLMService`'s routing, which is what supplies the API key the
+Settings UI stores (so cloud mode with no key in `.env` failed every generation while chat worked)
+and what reroutes to Ollama when a provider goes offline. `ModelChoice.explicit` now distinguishes
+"pin this model" from "route normally".
 
 Six config readers migrated (`flashcard.py`, `flashcard_generators.py`, `image_enricher.py`,
 `monitoring.py`, `main.py`, `eval_environment.py`) and two more moved to registry defaults

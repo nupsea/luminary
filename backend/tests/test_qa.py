@@ -1284,3 +1284,25 @@ def test_excerpt_returns_short_chunks_whole():
 def test_excerpt_respects_the_length_budget():
     long_text = " ".join(f"Sentence number {i} about the subject." for i in range(200))
     assert len(_excerpt_from_chunk(long_text, "", "subject")) <= 340
+
+
+def test_a_citation_excerpt_never_quotes_the_generated_section_summary():
+    """I-33 says an excerpt is a quote the grounding contains. The packed `text`
+    is not the grounding: `search_node` prefixes it with a machine-written
+    section summary, so an excerpt cut from `text` can be presented to the reader
+    as a quote from their document when the document never contained it."""
+    from app.services.qa import _excerpt_from_chunk
+
+    summary = "This section argues that redundancy masks independent faults."
+    document = "The Eloi were small, and their manner was that of children."
+    packed = f"### Chapter II\n{summary}\n---\n{document}"
+
+    chunk = {"text": packed, "source_text": document}
+
+    excerpt = _excerpt_from_chunk(
+        chunk.get("source_text") or chunk.get("text", ""), "", "What were the Eloi like?"
+    )
+
+    assert excerpt
+    assert excerpt in document
+    assert "redundancy masks" not in excerpt
