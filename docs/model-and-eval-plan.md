@@ -391,6 +391,36 @@ target over `run_corpus_routing.py` on datasets clearing the 20-row floor. Recor
 Verified by: both arms on the same rows in one run, both recorded. A gap is expected; an
 *unrecorded* gap is the defect.
 
+### Retrieval by content kind
+
+Scoped, rerank off, one library state (52 documents / 207,047 chunks), measured 2026-08-15. Every
+row is a different kind of writing against the same funnel.
+
+| golden | kind | HR@5 | MRR | nDCG@10 |
+|---|---|---|---|---|
+| notes | personal notes | 1.0000 | 0.9042 | 0.9281 |
+| paper | essay / article | 0.8500 | 0.6783 | 0.7276 |
+| d2l | technical book (md) | 0.8400 | 0.6413 | 0.7240 |
+| play | script (verse dialogue) | 0.6500 | 0.4317 | 0.5082 |
+| book_alice | novel | 0.6000 | 0.4067 | 0.5118 |
+| study | technical book (PDF) | 0.5667 | 0.4186 | 0.4903 |
+| legal | legal / political essays | 0.5500 | 0.3789 | 0.4487 |
+| book | novel (Wells) | 0.5250 | 0.3792 | 0.4878 |
+| odyssey | epic verse | 0.4500 | 0.3454 | 0.4122 |
+| book_frankenstein | novel (epistolary) | 0.3500 | 0.2267 | 0.2891 |
+
+**Retrieval quality is a property of the writing, and the spread is 0.35 to 1.00 on one funnel.**
+Expository and structured text scores highest; narrative fiction is the hard class, and the four
+novels occupy four of the bottom five rows. `book` was already documented as "the hardest dataset,
+not the typical one" — the generalisation is that *fiction* is the hard kind, and Frankenstein is
+half of d2l.
+
+Two consequences for the plan. Tuning retrieval against a fiction-heavy gate optimises the worst
+case for a product whose users mostly load technical documents; and a model or funnel change that
+moves one kind may not move another, so a per-kind table is the honest unit of comparison rather
+than a mean across datasets. Nothing is gated on these except the five already in `make eval`;
+they are baselines in one state, and the fingerprint is recorded with each.
+
 ### E9 — Coverage holes that block the switch specifically
 
 **Ingestion fidelity now measured per document kind** (`make eval-ingest ALL=1` →
@@ -404,6 +434,22 @@ Verified by: both arms on the same rows in one run, both recorded. A gap is expe
 | pdf | 18 | 88.6% | 97.5% | **3.58** |
 | epub | 1 | 100.0% | 100.0% | 1.09 |
 | wav | 4 | — | — | — |
+
+By content type — the chunker and prompt path the product chose, which is a
+different partition from format:
+
+| content type | docs | min retention | mean | max duplication |
+|---|---|---|---|---|
+| book | 17 | 94.2% | 98.8% | 3.58 |
+| conversation | 4 | 97.5% | 98.9% | 1.41 |
+| paper | 4 | 91.9% | 97.4% | 2.01 |
+| tech_article | 14 | 87.2% | 97.5% | 2.68 |
+| tech_book | 8 | 88.6% | 96.7% | 3.20 |
+
+**A play, a legal corpus and a novel all arrive as `book`.** The product has six content types
+and the goldens distinguish nine kinds, so any difference between a script and a statute is
+emergent from the text, not chosen by the pipeline. That is worth knowing before attributing a
+score to a "legal path" that does not exist.
 
 Three findings the manifest-only run could not have produced:
 

@@ -35,8 +35,8 @@ if str(REPO_ROOT / "backend") not in sys.path:
 
 from app.services.universal_parser import read_document_text  # noqa: E402
 from evals.generate_golden import strip_gutenberg_boilerplate  # noqa: E402
-from evals.lib.manifest import GOLDEN_DIR  # noqa: E402
 from evals.lib.environment import capture as capture_environment  # noqa: E402
+from evals.lib.manifest import GOLDEN_DIR  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 
 # Measured 2026-08-14 over the 12 manifest documents, boilerplate stripped:
@@ -95,15 +95,23 @@ def main() -> None:
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     if args.all_documents:
         rows = con.execute(
-            "SELECT file_path, id, format, title FROM documents "
+            "SELECT file_path, id, format, content_type FROM documents "
             "WHERE stage = 'complete' AND file_path IS NOT NULL"
         ).fetchall()
         sources = {r[0]: r[1] for r in rows}
         formats = {r[0]: (r[2] or "?") for r in rows}
+        # Two axes, because they answer different questions. Format is the parse
+        # path -- a zip container fails differently from a text file. Content
+        # type is the chunker and prompt path the product chose. They are not
+        # the same partition: a play, a legal corpus and a novel all arrive as
+        # `book`, so any difference between them is emergent rather than by
+        # design, and that is only visible when both groupings are printed.
+        content_types = {r[0]: (r[3] or "?") for r in rows}
     else:
         manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
         sources = manifest
         formats = {src: Path(src).suffix.lstrip(".") or "?" for src in manifest}
+        content_types = {}
 
     print(f"{'document':<34} {'src tok':>8} {'chunks':>7} {'retention':>10} {'dup':>6}")
     print("-" * 72)
@@ -114,6 +122,7 @@ def main() -> None:
     missing: list[str] = []
 
     by_format: dict[str, list[tuple[float, float]]] = {}
+    by_content: dict[str, list[tuple[float, float]]] = {}
     unmeasurable: list[str] = []
 
     for src, doc_id in sorted(sources.items()):
@@ -146,6 +155,8 @@ def main() -> None:
         retentions.append(retention)
         dups.append(dup)
         by_format.setdefault(fmt, []).append((retention, dup))
+        if content_types:
+            by_content.setdefault(content_types.get(src, "?"), []).append((retention, dup))
         flag = ""
         if retention < THRESHOLDS["min_retention"]:
             violations.append(f"{name}: retention {retention:.1%} < {THRESHOLDS['min_retention']:.0%}")
@@ -168,6 +179,16 @@ def main() -> None:
                 f"{fmt:<10} {len(vals):>5} {min(rets):>13.1%} "
                 f"{sum(rets) / len(rets):>7.1%} {max(d for _, d in vals):>8.2f}"
             )
+    if by_content:
+        header = f"{'content type':<16} {'docs':>5} {'min retention':>14} {'mean':>8} {'max dup':>8}"
+        print(f"\n{header}")
+        for kind in sorted(by_content):
+            vals = by_content[kind]
+            rets = [r for r, _ in vals]
+            print(
+                f"{kind:<16} {len(vals):>5} {min(rets):>13.1%} "
+                f"{sum(rets) / len(rets):>7.1%} {max(d for _, d in vals):>8.2f}"
+            )
     if unmeasurable:
         # Stated, never silently dropped: a kind nothing measures is a coverage
         # gap, and an unreported skip is indistinguishable from a pass.
@@ -187,6 +208,15 @@ def main() -> None:
                 "max_duplication": max(d for _, d in v),
             }
             for fmt, v in by_format.items()
+        },
+        "content_types": {
+            kind: {
+                "documents": len(v),
+                "min_retention": min(r for r, _ in v),
+                "mean_retention": sum(r for r, _ in v) / len(v),
+                "max_duplication": max(d for _, d in v),
+            }
+            for kind, v in by_content.items()
         },
         "unmeasurable_documents": len(unmeasurable),
         "min_retention": min(retentions) if retentions else None,

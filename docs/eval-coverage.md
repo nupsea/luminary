@@ -124,3 +124,9 @@ a generation regression can come from retrieval. `eval-ingest` first, then `eval
 
 **`book` is the hardest dataset, not the typical one.** It scores lowest on citation support of
 all six kinds. Tuning against it alone overfits to the worst case.
+
+**Retrieval quality is a property of the writing.** Measured across ten goldens in one library
+state, HR@5 ranges 0.35 (Frankenstein) to 1.00 (notes) on the same funnel: expository and
+structured text scores highest, narrative fiction lowest, and the four novels take four of the
+bottom five places. Compare a change per kind — a mean across datasets hides which kind moved, and
+the gated five are fiction-heavy relative to what users actually load.
