@@ -76,6 +76,18 @@ LLM at all: retrieval, ingestion, routing, faithfulness and `summary_grounding` 
 retrieval, generation, intent, topics. Ingestion is the ceiling on retrieval and retrieval is the
 ceiling on generation, so any other order attributes a regression to the wrong stage.
 
+## Reading it in the app
+
+Quality → **By kind** is the per-kind table: latest run per dataset, weakest first, with the
+metrics this suite added — `boundary_misses`, and every metric without a dedicated column rendered
+generically, so a newly introduced one appears with no UI change. Rows carry their provenance:
+a `self-judged` chip when one model both answered and graded, and `provenance unrecorded` when the
+capture failed.
+
+**Rows are grouped by what they were measured against.** Two rows from different corpora or
+different models sit in separate groups with a warning, because ranking them together is the
+mistake the fingerprint exists to prevent.
+
 ## Every gated run records what produced it
 
 `GET /evals/environment` reports the build, the **resolved** models (a model chosen in Settings,

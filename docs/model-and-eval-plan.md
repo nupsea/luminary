@@ -421,6 +421,35 @@ moves one kind may not move another, so a per-kind table is the honest unit of c
 than a mean across datasets. Nothing is gated on these except the five already in `make eval`;
 they are baselines in one state, and the fingerprint is recorded with each.
 
+### Where the per-kind table leads: a model chosen for what someone reads
+
+Not a stage yet, and it cannot become one before P6 — but it is what the per-kind table is for,
+so it is written down where the numbers are.
+
+Retrieval scores 0.35 to 1.00 across kinds on one funnel, and the same is expected of generation
+once the matrix runs per kind rather than per dataset mean. If a candidate model is better on
+technical prose and worse on narrative, that is not a tie to be averaged away: it is a choice that
+depends on what a particular person loads. A reader whose library is manuals and papers and one
+whose library is novels are different products wearing one binary.
+
+What has to exist first, in this order:
+
+1. **P6 reports per kind**, not per dataset mean. The matrix already runs the model-sensitive
+   runners; grouping their output by kind is the difference between "model A scored 0.71" and
+   "model A is better on tech and worse on fiction".
+2. **A library profile.** The content type of what a user has actually ingested is already
+   stored, so the profile is a query, not a new model: `tech_book`/`tech_article`/`paper` against
+   `book`/`conversation`.
+3. **P3's registry carries per-kind calibration.** `ModelProfile` already holds capability; a
+   per-kind score vector is the same shape of fact, produced by the matrix rather than authored.
+4. **The recommendation is a proposal, never an automatic switch.** A model change alters every
+   answer a user has learned to expect; Settings proposes with the evidence — "your library is 80%
+   technical; candidate B scores higher there" — and the person decides.
+
+The falsifier is worth stating: **if the per-kind spread between candidate models is smaller than
+the run-to-run variance measured in E4, there is nothing to choose between them** and this whole
+direction is a dead end. Measure that gap before building any of it.
+
 ### E9 — Coverage holes that block the switch specifically
 
 **Ingestion fidelity now measured per document kind** (`make eval-ingest ALL=1` →

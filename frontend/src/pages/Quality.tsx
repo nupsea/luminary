@@ -7,6 +7,7 @@ import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
+import { KindMatrix } from "@/components/evals/KindMatrix"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
   DatasetSize,
@@ -81,10 +82,13 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "runs"
+type TabId = "datasets" | "results" | "kinds" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
+  // Retrieval scores differ by kind of writing more than by anything the funnel
+  // does, so the per-kind table is a first-class view rather than a filter.
+  { id: "kinds", label: "By kind" },
   { id: "runs", label: "Runs" },
 ]
 
@@ -559,6 +563,7 @@ export default function Quality() {
         )}
 
         {activeTab === "results" && <ResultsDashboard selection={consoleSel} />}
+        {activeTab === "kinds" && <KindMatrix />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
       </main>
 
