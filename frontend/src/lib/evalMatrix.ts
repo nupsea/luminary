@@ -65,7 +65,12 @@ export function fingerprintOf(run: EvalRunFull): string {
   const env = environmentOf(run)
   if (!env) return "unrecorded"
   const lib = env.library ?? {}
+  // Scope is part of the identity, not a detail. A scoped run asks where the
+  // passage ranks inside its own document; an unscoped one asks whether the
+  // right document was found at all. They share `eval_kind` and a column name,
+  // so without this the newer of the two silently replaces the other.
   return [
+    env.scope ?? "scoped",
     lib.documents ?? "?",
     lib.chunks ?? "?",
     env.embedding_model ?? "?",
@@ -80,7 +85,8 @@ export function describeFingerprint(run: EvalRunFull): string {
   const lib = env.library ?? {}
   const docs = lib.documents ?? "?"
   const chunks = lib.chunks == null ? "?" : lib.chunks.toLocaleString()
-  return `${docs} docs · ${chunks} chunks · ${env.embedding_model ?? "?"}`
+  const scope = env.scope === "unscoped" ? "unscoped (whole library)" : "scoped to each document"
+  return `${scope} · ${docs} docs · ${chunks} chunks · ${env.embedding_model ?? "?"}`
 }
 
 function numberOr(value: unknown): number | null {
@@ -97,7 +103,17 @@ export function latestRetrievalPerDataset(runs: EvalRunFull[]): EvalRunFull[] {
     // series row is an aggregate of runs already in this list.
     if (run.eval_kind === "ablation") continue
     if (run.eval_kind?.endsWith("-series")) continue
-    const key = run.dataset_label || run.dataset_name
+    // A corpus_routing row stores UNSCOPED hit rate in the same column as a
+    // scoped run, and they are different measurements: one asks whether the
+    // passage ranks inside its own document, the other whether the right
+    // document was found at all. Mixing them puts a dataset's routing score
+    // where its retrieval score belongs, and hides the retrieval score
+    // entirely whenever the routing run is newer.
+    if (run.eval_kind === "corpus_routing") continue
+    // Keyed by dataset AND scope: one dataset legitimately has both a scoped
+    // and an unscoped latest run, and they are two measurements, not two
+    // attempts at one.
+    const key = `${run.dataset_label || run.dataset_name}::${environmentOf(run)?.scope ?? "scoped"}`
     const seen = newest.get(key)
     if (!seen || Date.parse(run.run_at) > Date.parse(seen.run_at)) newest.set(key, run)
   }

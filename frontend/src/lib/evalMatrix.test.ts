@@ -120,3 +120,47 @@ describe("toKindRow", () => {
     expect(row.extras.map(([k]) => k)).not.toContain("ndcg_10")
   })
 })
+
+describe("scoped and unscoped are different measurements", () => {
+  it("a corpus_routing row never stands in for a scoped retrieval row", () => {
+    const rows = latestRetrievalPerDataset([
+      run({ id: "scoped", dataset_name: "book", hit_rate_5: 0.525 }),
+      run({
+        id: "routing",
+        dataset_name: "book",
+        eval_kind: "corpus_routing",
+        hit_rate_5: 0.55,
+        run_at: "2026-08-16T10:00:00+00:00",
+      }),
+    ])
+    expect(rows.map((r) => r.id)).toEqual(["scoped"])
+  })
+})
+
+describe("scope is part of a row's identity", () => {
+  const withScope = (scope: string, hr: number, at: string) =>
+    run({
+      id: scope,
+      dataset_name: "paper",
+      hit_rate_5: hr,
+      run_at: at,
+      extra_metrics: { environment: { library: { documents: 52, chunks: 207047 }, scope } },
+    })
+
+  it("keeps both the scoped and the unscoped latest run for one dataset", () => {
+    const rows = latestRetrievalPerDataset([
+      withScope("scoped", 0.85, "2026-08-15T10:00:00+00:00"),
+      withScope("unscoped", 0.55, "2026-08-15T11:00:00+00:00"),
+    ])
+    expect(rows.map((r) => r.id).sort()).toEqual(["scoped", "unscoped"])
+  })
+
+  it("groups them apart, because one is not a newer measurement of the other", () => {
+    const groups = groupByComparability([
+      withScope("scoped", 0.85, "2026-08-15T10:00:00+00:00"),
+      withScope("unscoped", 0.55, "2026-08-15T11:00:00+00:00"),
+    ])
+    expect(groups).toHaveLength(2)
+    expect(isMixed(groups)).toBe(true)
+  })
+})
