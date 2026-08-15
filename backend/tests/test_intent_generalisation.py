@@ -91,3 +91,104 @@ def test_summary_shape_does_not_swallow_a_factual_question_about_a_topic():
     document is about."""
     assert classify_intent_heuristic("Who is Dr Halbrecht?")[0] != "summary"
     assert classify_intent_heuristic("When was the Vantari protocol written?")[0] != "summary"
+
+
+# Negation: a keyword only routes when nothing in front of it cancels it.
+#
+# "I don't need the whole overview, just tell me what year it was published"
+# asked for a fact and routed to summary. The fix is a rule about the sentence,
+# not four more phrases: any negation marker governing any keyword suppresses
+# that occurrence. These cases hold that rule across the cross-product, because
+# a fix that only handles "don't need the overview" is a fix to one row.
+
+NEGATIONS = [
+    "I don't need {kw}",
+    "I do not want {kw}",
+    "No {kw} please",
+    "Skip {kw}",
+    "Forget {kw}",
+    "Rather than {kw}",
+    "Instead of {kw}",
+    "Without {kw}",
+]
+
+# One per family in _SUMMARY_KWS: an explicit request word, a themes phrase, a
+# big-picture phrase, and one of the informal words.
+SUMMARY_KEYWORDS = ["a summary", "an overview", "the main points", "the big picture", "the gist"]
+
+# The relational and comparative sets go through the same matcher, so the rule
+# has to hold for them too or it is a summary-only patch wearing a general name.
+RELATIONAL_KEYWORDS = ["the relationship between them", "how they connect"]
+COMPARATIVE_KEYWORDS = ["a comparison", "the differences between them"]
+
+
+@pytest.mark.parametrize("negation", NEGATIONS)
+@pytest.mark.parametrize("keyword", SUMMARY_KEYWORDS)
+def test_a_negated_summary_keyword_does_not_route_to_summary(negation, keyword):
+    question = f"{negation.format(kw=keyword)}, tell me what year the Vantari protocol shipped."
+    assert classify_intent_heuristic(question)[0] != "summary", question
+
+
+@pytest.mark.parametrize("keyword", SUMMARY_KEYWORDS)
+def test_the_same_keyword_unnegated_still_routes_to_summary(keyword):
+    """The control. A suppression rule that also suppresses the real request has
+    traded one misroute for another."""
+    assert classify_intent_heuristic(f"Give me {keyword}")[0] == "summary", keyword
+
+
+@pytest.mark.parametrize("negation", NEGATIONS)
+@pytest.mark.parametrize("keyword", RELATIONAL_KEYWORDS + COMPARATIVE_KEYWORDS)
+def test_negation_applies_to_every_keyword_family(negation, keyword):
+    question = f"{negation.format(kw=keyword)}, quote the line about the Ostrek cipher."
+    assert classify_intent_heuristic(question)[0] not in {"relational", "comparative"}, question
+
+
+def test_negation_stops_at_its_own_clause():
+    """The negation governs `understand`, and the request after the comma is
+    exactly the one the sentence makes. Reaching past the clause boundary would
+    turn every apologetic preamble into a suppression."""
+    assert (
+        classify_intent_heuristic(
+            "I don't understand this document, can you summarize it?"
+        )[0]
+        == "summary"
+    )
+    assert (
+        classify_intent_heuristic("I don't like it, but summarize the document anyway")[0]
+        == "summary"
+    )
+
+
+def test_one_negated_mention_does_not_cancel_a_second_real_one():
+    """Every occurrence has to be negated for the mention to be suppressed."""
+    assert (
+        classify_intent_heuristic(
+            "No summary of chapter 1, give me the summary of chapter 2"
+        )[0]
+        == "summary"
+    )
+
+
+def test_negation_far_from_the_keyword_does_not_reach_it():
+    """Five words inside one clause, not the whole sentence: a negation about
+    something else earlier on must not silence a request made later."""
+    assert (
+        classify_intent_heuristic(
+            "I do not have much time this afternoon so give me an overview"
+        )[0]
+        == "summary"
+    )
+
+
+def test_summary_keywords_still_match_their_own_inflections():
+    """The negation rule must not quietly become a word-boundary rule. These
+    keywords are written singular and are meant to catch the plural: tightening
+    the match drops every one of them, which is a matching change disguised as a
+    negation fix. It happened once -- 'What are the central themes?' stopped
+    routing to summary and the gated golden fell from 1.0000 to 0.9800."""
+    for question in (
+        "What are the central themes?",
+        "What are the main ideas covered?",
+        "Give me the outlines",
+    ):
+        assert classify_intent_heuristic(question)[0] == "summary", question

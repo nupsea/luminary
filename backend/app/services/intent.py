@@ -330,6 +330,63 @@ _FACTUAL_KWS: frozenset[str] = frozenset(
 )
 
 
+# A keyword only routes when nothing negates it. "I don't need the whole
+# overview, just tell me what year it was published" asked for a fact and got a
+# summary, because `overview` matched and the `don't` in front of it did not
+# count. Negation is a rule about the sentence, not a phrase to add to a list:
+# any of these markers governing any keyword suppresses that occurrence.
+_NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|none|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot|"
+    r"skip|forget|omit|avoid|besides|rather than|instead of|other than|without)\b"
+)
+
+# Negation reaches only to the end of its own clause. Without this, "I don't
+# understand this document, can you summarise it?" would read as a negated
+# summary request, when the negation governs `understand` and the request that
+# follows the comma is exactly what it asks for.
+_CLAUSE_BREAK_RE = re.compile(r"[,;:.!?]|\bbut\b|\bjust\b|\bhowever\b|\balthough\b|\byet\b")
+
+# How far back a negation reaches inside its clause, in words. Five covers
+# "don't give me the long summary" without spanning a whole sentence.
+_NEGATION_WINDOW_WORDS = 5
+
+
+def _is_negated_at(text: str, start: int) -> bool:
+    """True when a negation governs the keyword occurrence beginning at *start*."""
+    prefix = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(prefix))
+    clause = prefix[breaks[-1].end() :] if breaks else prefix
+    recent = " ".join(clause.split()[-_NEGATION_WINDOW_WORDS:])
+    return bool(_NEGATION_RE.search(recent))
+
+
+def mentions(text: str, pattern: re.Pattern[str]) -> bool:
+    """True when *pattern* matches somewhere it is not negated.
+
+    Every occurrence has to be negated for the mention to be suppressed: "no
+    summary of chapter 1, give me the summary of chapter 2" still asks for a
+    summary.
+    """
+    return any(not _is_negated_at(text, m.start()) for m in pattern.finditer(text))
+
+
+def mentions_substring(text: str, keyword: str) -> bool:
+    """`keyword in text`, minus the occurrences a negation governs.
+
+    Substring, not word-boundary: the summary keywords are written to catch
+    their own inflections -- "outline" has to match "outlines", and "central
+    theme" has to match "central themes". Tightening this to a word boundary
+    silently drops every plural, which is a matching change wearing a negation
+    fix's clothes.
+    """
+    starts = []
+    at = text.find(keyword)
+    while at != -1:
+        starts.append(at)
+        at = text.find(keyword, at + 1)
+    return any(not _is_negated_at(text, start) for start in starts)
+
+
 @lru_cache(maxsize=512)
 def _kw_regex(kw: str) -> re.Pattern[str]:
     """Word-boundary matcher for one keyword.
@@ -355,12 +412,14 @@ def matches_summary_request(question: str) -> bool:
     search to the other.
     """
     q = question.lower()
-    return any(kw in q for kw in _SUMMARY_KWS) or any(p.search(q) for p in _SUMMARY_PATTERNS)
+    return any(mentions_substring(q, kw) for kw in _SUMMARY_KWS) or any(
+        mentions(q, p) for p in _SUMMARY_PATTERNS
+    )
 
 
 def _best_match(question: str, keywords: frozenset[str]) -> str | None:
     """Longest keyword matching *question* on word boundaries, or None."""
-    hits = [kw for kw in keywords if _kw_regex(kw).search(question)]
+    hits = [kw for kw in keywords if mentions(question, _kw_regex(kw))]
     return max(hits, key=len) if hits else None
 
 
