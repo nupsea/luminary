@@ -681,7 +681,35 @@ Falsifier: if four roles prove too coarse, **add a role, never a per-call-site m
 the point is that call sites name work. If too fine, collapse to interactive/background and keep
 vision as a capability flag.
 
-### P4 — Prompt contracts and accommodations
+### P4 — Prompt contracts and accommodations — **mechanism shipped 2026-08-16, one path converted**
+
+`app/services/prompt_spec.py`: a `PromptSpec` is a contract plus typed
+`Accommodation`s, each naming the model it was added for, the observation that justified it, and
+the condition under which it can go. `render(spec, profile)` emits the contract plus only what
+that model still needs. `make prompt-dump TASK=… MODEL=…` prints the rendered prompt and every
+accommodation with its verdict — it ships with the refactor, because making the real prompt exist
+only at runtime is otherwise a straight loss for anyone doing prompt work.
+
+**An accommodation is dropped only on measured evidence.** The shortcut that looked obvious —
+drop format policing for a model that declares `supports_json_schema` — is measurably wrong: that
+flag is true for `qwen2.5:14b-instruct`, which wrapped every one of 40 flashcard generations in
+prose. What a model *can* do and what it *does* are different measurements, and `ModelProfile`
+now carries `accommodations_measured` so "unmeasured" and "needs nothing" cannot be confused.
+
+Converted so far: the flashcard user prompt, with its two accommodations tagged
+(`json_escape_hint`, `worked_example` — both introduced for llama3.2). The rendered output is
+identical to the previous template except that the escape hint occupies its own line rather than
+being spliced into the sentence before it, which is the minimum change that makes it removable. A
+snapshot test holds the render, and the move was re-measured rather than assumed: `cards_generated`
+104, `generation_rate` 0.9905 and `first_pass_rate` 0.0000 are identical either side of it. Only
+`cards_returned` moved (44 → 32), which is the near-duplicate filter on a warmer library and not a
+fact about the model.
+
+Still to convert: concepts, topics, tagging, intent, vision. And the I-28 widening —
+`flashcard_prompts.py` still opens with "creating flashcards based on Bloom's Taxonomy", which the
+current guard covers only for suggestions.
+
+
 
 `PromptSpec` carries the contract; `Accommodation` records each compensation with its `kind`,
 `introduced_for`, `because` and `drop_when`. `render(spec, profile)` emits the contract plus only

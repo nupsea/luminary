@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from app.model_registry import default_chat_model, profile_for
+from app.services.prompt_spec import Accommodation, PromptSpec, render
+
 if TYPE_CHECKING:
     from app.models import DocumentModel
 
@@ -31,21 +34,63 @@ FLASHCARD_SYSTEM = (
     "(apply/analyze/evaluate) where the material allows."
 )
 
+# The user-side flashcard prompt as a contract plus its compensations. Rendering
+# it reproduces FLASHCARD_USER_TMPL exactly today: both accommodations still
+# apply, because nothing has measured that any model can go without them. The
+# separation is what makes deleting one an audit rather than a guess.
+FLASHCARD_USER_SPEC = PromptSpec(
+    task="flashcards",
+    contract=(
+        "Write {count} {difficulty}-level flashcards from the text below.\n"
+        "Difficulty: {difficulty_guidelines}\n"
+        "{extra_instructions}"
+        "Return a JSON object:\n"
+        '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
+        '"bloom_level": N}}]}}'
+    ),
+    accommodations=(
+        Accommodation(
+            id="json_escape_hint",
+            kind="format",
+            text="Use '\\n' for line breaks inside a string.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "raw newlines inside JSON strings made the completion unparseable, "
+                "which the tolerant parser then repaired silently"
+            ),
+            drop_when=(
+                "the model emits schema-valid JSON natively, or the measured "
+                "bad_escape repair count is zero across a matrix run"
+            ),
+        ),
+        Accommodation(
+            id="worked_example",
+            kind="example",
+            text=(
+                "Example card with a multi-point answer:\n"
+                '{{"flashcards": [{{"question": "How do random hardware faults and systematic '
+                'software errors differ for fault tolerance?", "answer": "They fail '
+                "differently, so they need different defences.\\n- Hardware faults are largely "
+                "independent -- redundancy masks them.\\n- Software errors are correlated and "
+                'can fail many nodes at once -- they need testing and isolation.", '
+                '"source_excerpt": "", "bloom_level": 4}}]}}'
+            ),
+            introduced_for="ollama/llama3.2",
+            because=(
+                "answers came back as one flat sentence; the example is what "
+                "produced multi-point answers with a lead sentence"
+            ),
+            drop_when=(
+                "the matrix shows answer structure holding without it -- a stronger "
+                "model regresses toward the example's register, so this caps it"
+            ),
+        ),
+    ),
+)
+
 FLASHCARD_USER_TMPL = (
-    "Write {count} {difficulty}-level flashcards from the text below.\n"
-    "Difficulty: {difficulty_guidelines}\n"
-    "{extra_instructions}"
-    "Return a JSON object, using '\\n' for line breaks inside a string:\n"
-    '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
-    '"bloom_level": N}}]}}\n'
-    "Example card with a multi-point answer:\n"
-    '{{"flashcards": [{{"question": "How do random hardware faults and systematic software '
-    'errors differ for fault tolerance?", "answer": "They fail differently, so they need '
-    'different defences.\\n- Hardware faults are largely independent -- redundancy masks '
-    'them.\\n- Software errors are correlated and can fail many nodes at once -- they need '
-    'testing and isolation.", "source_excerpt": "", "bloom_level": 4}}]}}\n\n'
-    "Text:\n{text}\n\n"
-    "JSON object:"
+    render(FLASHCARD_USER_SPEC, profile_for(default_chat_model()))
+    + "\nText:\n{text}\n\nJSON object:"
 )
 
 NOTES_CONCEPT_EXTRACT_SYSTEM = (

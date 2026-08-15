@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -269,6 +269,13 @@ eval-variance:
 		$(if $(COMPARE),--compare-to $(COMPARE),) \
 		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
 		--check-citations --assert-thresholds
+
+# The prompt a task actually sends, and why each part is in it. The PromptSpec
+# refactor makes the real prompt exist only at runtime; this is what replaces
+# reading the string in the file.
+prompt-dump:
+	cd backend && uv run python ../scripts/prompt_dump.py \
+		--task $(or $(TASK),flashcards) $(if $(MODEL),--model $(MODEL),)
 
 # Which models a run will use, and whether they are installed. Cheap, and the
 # only place the one-model / text+vision split is stated before a run rather

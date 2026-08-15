@@ -1,0 +1,122 @@
+"""A prompt is a contract plus the compensations a model still needs.
+
+Two things these guard. The rendered prompt is a snapshot, so a change to what
+a model receives shows up in review instead of arriving with a refactor. And an
+accommodation is only dropped on measured evidence — a capability flag is not
+evidence about behaviour, which this repo learned the expensive way:
+qwen2.5:14b-instruct declares `supports_json_schema` and wrapped every one of 40
+flashcard generations in prose.
+"""
+
+from dataclasses import replace
+
+import pytest
+
+from app.model_registry import REGISTRY, ModelProfile, profile_for
+from app.services.flashcard_prompts import FLASHCARD_USER_SPEC, FLASHCARD_USER_TMPL
+from app.services.prompt_spec import Accommodation, PromptSpec, describe, render
+
+# The flashcard prompt as every unmeasured model receives it. Update this when
+# the prompt is meant to change, never to make a test pass.
+FLASHCARD_RENDER = """\
+Write {count} {difficulty}-level flashcards from the text below.
+Difficulty: {difficulty_guidelines}
+{extra_instructions}Return a JSON object:
+{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", \
+"bloom_level": N}}]}}
+Use '\\n' for line breaks inside a string.
+Example card with a multi-point answer:
+{{"flashcards": [{{"question": "How do random hardware faults and systematic software errors \
+differ for fault tolerance?", "answer": "They fail differently, so they need different \
+defences.\\n- Hardware faults are largely independent -- redundancy masks them.\\n- Software \
+errors are correlated and can fail many nodes at once -- they need testing and isolation.", \
+"source_excerpt": "", "bloom_level": 4}}]}}
+"""
+
+
+def _unmeasured() -> ModelProfile:
+    return next(iter(REGISTRY.values()))
+
+
+def _measured(needed: tuple[str, ...]) -> ModelProfile:
+    return replace(_unmeasured(), accommodations_measured=True, accommodations_needed=needed)
+
+
+def test_the_rendered_flashcard_prompt_is_what_the_snapshot_says():
+    assert render(FLASHCARD_USER_SPEC, _unmeasured()) == FLASHCARD_RENDER
+
+
+def test_the_shipped_template_is_the_render_plus_its_text_slot():
+    """The template callers format is built from the spec, so the two cannot
+    drift into disagreeing about what the model is asked for."""
+    assert FLASHCARD_USER_TMPL.startswith(FLASHCARD_RENDER)
+    assert FLASHCARD_USER_TMPL.endswith("Text:\n{text}\n\nJSON object:")
+
+
+def test_an_unmeasured_model_keeps_every_accommodation():
+    """Empty `accommodations_needed` means nobody looked. Dropping on that is
+    how a working prompt quietly breaks."""
+    kept = FLASHCARD_USER_SPEC.for_profile(_unmeasured())
+    assert len(kept) == len(FLASHCARD_USER_SPEC.accommodations)
+
+
+def test_an_unregistered_model_keeps_every_accommodation():
+    assert FLASHCARD_USER_SPEC.for_profile(profile_for("ollama/nobody-registered-this")) == (
+        FLASHCARD_USER_SPEC.accommodations
+    )
+
+
+def test_a_measured_model_gets_only_what_it_was_measured_to_need():
+    kept = FLASHCARD_USER_SPEC.for_profile(_measured(("worked_example",)))
+
+    assert [a.id for a in kept] == ["worked_example"]
+
+
+def test_a_capability_flag_alone_never_drops_an_accommodation():
+    """The measurable mistake: `supports_json_schema` is true for the model that
+    needed the format accommodation on every one of 40 generations."""
+    schema_capable = replace(_unmeasured(), supports_json_schema=True)
+
+    assert FLASHCARD_USER_SPEC.for_profile(schema_capable) == FLASHCARD_USER_SPEC.accommodations
+
+
+@pytest.mark.parametrize("accommodation", FLASHCARD_USER_SPEC.accommodations)
+def test_every_accommodation_names_a_model_an_observation_and_an_exit(accommodation):
+    """An accommodation nobody can justify is dead code, and one with no exit
+    condition is permanent — which is the ceiling this refactor exists to lift."""
+    assert accommodation.introduced_for.startswith(("ollama/", "openai/", "anthropic/"))
+    assert len(accommodation.because) > 20
+    assert len(accommodation.drop_when) > 20
+
+
+def test_describe_reports_what_this_model_gets_and_why():
+    rows = describe(FLASHCARD_USER_SPEC, _measured(("worked_example",)))
+
+    applied = {r["id"]: r["applied"] for r in rows}
+    assert applied == {"json_escape_hint": "no", "worked_example": "yes"}
+
+
+def test_a_contract_with_no_accommodations_renders_alone():
+    spec = PromptSpec(task="t", contract="Do the thing.")
+
+    assert render(spec, None) == "Do the thing.\n"
+
+
+def test_accommodation_text_is_appended_in_declaration_order():
+    spec = PromptSpec(
+        task="t",
+        contract="Contract.",
+        accommodations=tuple(
+            Accommodation(
+                id=f"a{i}",
+                kind="format",
+                text=f"Line {i}.",
+                introduced_for="ollama/x",
+                because="because this model did the thing it should not have",
+                drop_when="when the matrix says it no longer does the thing",
+            )
+            for i in (1, 2)
+        ),
+    )
+
+    assert render(spec, None) == "Contract.\nLine 1.\nLine 2.\n"

@@ -53,7 +53,11 @@ class ModelProfile:
     # /qa; every local call sets think=False for this reason (I-27).
     thinking_default: bool
     multimodal: bool = False
-    # Filled by the model matrix, never authored. Empty means unmeasured.
+    # Set by the model matrix when it has run against this model. Until then,
+    # `accommodations_needed` being empty means nobody looked -- not that the
+    # model needs nothing.
+    accommodations_measured: bool = False
+    # Filled by the model matrix, never authored.
     accommodations_needed: tuple[str, ...] = field(default_factory=tuple)
 
     @property
