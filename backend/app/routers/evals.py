@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services import llm_output_stats
 from app.services.background import fire_and_forget
 from app.services.dataset_generator_service import (
     count_questions,
@@ -594,6 +595,25 @@ class EvalEnvironmentResponse(BaseModel):
     generation_model: str
     vision_model: str
     library: EvalLibraryFingerprint
+
+
+class OutputStatsResponse(BaseModel):
+    """What model output needed before it could be used. See `llm_output_stats`."""
+
+    counts: dict[str, int]
+    first_pass_rate: float | None
+    attempts_per_generation: float | None
+
+
+@router.get("/output-stats", response_model=OutputStatsResponse)
+async def output_stats() -> OutputStatsResponse:
+    """Repair counters, monotonic since process start.
+
+    An eval snapshots this before and after a run and takes the difference.
+    There is deliberately no reset: a reset is a mutation two concurrent
+    readers can lose, and a diff cannot be.
+    """
+    return OutputStatsResponse(**llm_output_stats.snapshot())
 
 
 @router.get("/environment", response_model=EvalEnvironmentResponse)

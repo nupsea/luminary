@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-routing eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -267,6 +267,16 @@ eval-models:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python check_models.py \
 		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
 
+# Cross-document routing: does retrieval pick the right DOCUMENT, unscoped, the
+# way real "All documents" chat runs. `make eval` pins each row to its source,
+# so it cannot see a routing failure at all. No floor yet -- this records the
+# baseline; a threshold needs numbers first, in one library state.
+ROUTING_DATASETS ?= book,paper,legal,play,study
+eval-routing:
+	@echo "Corpus-wide routing (unscoped) on $(ROUTING_DATASETS)..."
+	uv run --project $(CURDIR)/backend python evals/run_corpus_routing.py \
+		--datasets $(ROUTING_DATASETS) --backend-url $(BACKEND_URL) $(if $(TYPO),--typo,)
+
 # Summary quality. `summary_grounding` (HHEM) needs no LLM; `no_hallucination`
 # needs the judge, so SKIP_JUDGE=1 gives the deterministic half on a machine
 # with no model to spare.
@@ -283,6 +293,7 @@ eval-all:
 	$(MAKE) eval-models
 	$(MAKE) eval-ingest
 	$(MAKE) eval
+	$(MAKE) eval-routing
 	$(MAKE) eval-gen
 	$(MAKE) eval-intent
 	$(MAKE) eval-topics

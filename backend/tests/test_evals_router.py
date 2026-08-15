@@ -425,3 +425,36 @@ async def test_environment_counts_the_corpus_it_measures(test_db):
         data = (await client.get("/evals/environment")).json()
 
     assert data["library"] == {"documents": 1, "chunks": 1}
+
+
+@pytest.mark.asyncio
+async def test_output_stats_counts_what_a_completion_needed(test_db):
+    """The signal that distinguishes a model emitting clean JSON from one the
+    parser carries. Byte-identical objects come out either way, so without these
+    counters a model swap cannot move any number."""
+    from app.services import llm_output_stats
+    from app.services.llm_json import parse_llm_json_array, parse_llm_json_object
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        before = (await client.get("/evals/output-stats")).json()
+
+        assert parse_llm_json_object('{"a": 1}') == {"a": 1}
+        assert parse_llm_json_object('```json\n{"b": 2}\n```') == {"b": 2}
+        assert parse_llm_json_array('[{"c": 3},') == [{"c": 3}]
+
+        after = (await client.get("/evals/output-stats")).json()
+
+    moved = llm_output_stats.delta(before, after)["counts"]
+    assert moved["parses"] == 3
+    assert moved["parses_first_pass"] == 1
+    assert moved["repair_fenced"] == 1
+    assert moved["repair_truncated"] == 1
+
+
+@pytest.mark.asyncio
+async def test_output_stats_rate_is_none_before_anything_parsed():
+    """0.0 would read as 'this model never emits clean JSON'."""
+    from app.services import llm_output_stats
+
+    empty = {"counts": {}}
+    assert llm_output_stats.delta(empty, empty)["first_pass_rate"] is None

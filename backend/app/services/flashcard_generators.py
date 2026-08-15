@@ -30,6 +30,7 @@ from app.models import (
     NoteModel,
     SectionModel,
 )
+from app.services import llm_output_stats
 from app.services.flashcard_parsers import (
     _build_cloze_question,
     _parse_cloze_llm_response,
@@ -371,6 +372,11 @@ async def _collect_with_backfill(
             "flashcard: %d/%d usable cards after %d attempt(s) (model=%s)",
             len(candidates), count, attempts, _generation_model() or "default",
         )
+    # Retry-to-backfill is where a weaker model shows up as call count rather
+    # than as quality: N cards are delivered either way, and only `attempts`
+    # differs. Counted here so the difference is a number.
+    delivered = min(len(candidates), count)
+    llm_output_stats.record_generation(requested=count, delivered=delivered, attempts=attempts)
     return candidates[:count]
 
 

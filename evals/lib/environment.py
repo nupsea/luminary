@@ -53,6 +53,40 @@ def capture(backend_url: str, **run_args: Any) -> dict[str, Any]:
     return env
 
 
+def output_stats(backend_url: str) -> dict[str, Any] | None:
+    """Repair counters as they stand right now, or None when unreadable.
+
+    Snapshot before a run and again after: the difference is what this run's
+    completions needed before they could be used.
+    """
+    try:
+        resp = httpx.get(f"{backend_url.rstrip('/')}/evals/output-stats", timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def stats_delta(
+    before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Counter movement between two snapshots, in the snapshot's own shape."""
+    if not before or not after:
+        return None
+    before_counts = before.get("counts", {})
+    after_counts = after.get("counts", {})
+    counts = {
+        key: after_counts.get(key, 0) - before_counts.get(key, 0)
+        for key in set(before_counts) | set(after_counts)
+        if after_counts.get(key, 0) - before_counts.get(key, 0)
+    }
+    parses = counts.get("parses", 0)
+    return {
+        "counts": counts,
+        "first_pass_rate": (counts.get("parses_first_pass", 0) / parses) if parses else None,
+    }
+
+
 def self_judging(env: dict[str, Any]) -> str | None:
     """The model id when one model both answered and graded, else None.
 

@@ -302,7 +302,7 @@ incremented, and the two normalisers are the same function.
 
 Stage 2 makes a number comparable. This stage makes it **sensitive to the thing being changed**.
 
-### P2 — Output instrumentation
+### P2 — Output instrumentation — **shipped 2026-08-15**
 
 - `parse_llm_json_*` returns `repairs: frozenset[str]` — `fenced`, `bad_escape`, `truncated`,
   `key_alias` — set as attributes on the existing `trace_llm_call` span.
@@ -311,6 +311,20 @@ Stage 2 makes a number comparable. This stage makes it **sensitive to the thing 
 - Counters for first-pass acceptance rate, retries per generation, requested-versus-delivered
   count.
 - Time to first token recorded separately for interactive and background calls.
+
+`app/services/llm_output_stats.py` holds process-wide monotonic counters; `llm_json` records
+`fenced`, `bad_escape`, `truncated` and `surrounded_by_prose` per parse plus first-pass acceptance;
+`card_field` records `key_alias`; `_collect_with_backfill` records requested/delivered/attempts.
+`flashcard_parsers._parse_llm_response` now calls `llm_json` instead of re-implementing the ladder,
+which both removes the duplicate and makes flashcard repairs visible. `GET /evals/output-stats`
+exposes the snapshot and `run_eval` records the delta per run — no reset endpoint, because a diff
+cannot be lost by a concurrent reader the way a reset can.
+
+**First reading, `qwen2.5:14b-instruct`, 3 cards requested and 3 delivered**: `parses: 1`,
+`parses_repaired: 1`, `repair_surrounded_by_prose: 1`, `first_pass_rate: 0.0`. The model wrapped
+its array in prose and the parser carried it — invisible before this, because the cards came out
+identical either way. That is the P2 acceptance criterion met: a non-zero repair count on the
+shipped path.
 
 Behaviour-neutral, a few dozen lines, and everything downstream argues from the numbers it
 produces.
@@ -350,6 +364,26 @@ target.
 `/search`'s per-document groups without restoring rank order (`:274`), then sorts `all_matches` by
 `global_rank` at `:319`, which is that restoration.
 
+**Shipped 2026-08-15.** The stale warning is gone, `run_eval.py --unscoped` drops the pin for the
+retrieval call while keeping it for `/qa` (scope must match the filter or the classifier routes to
+library-wide synthesis), and `make eval-routing` records routing. Measured in one library state
+(52 documents, 207,047 chunks — the 43MB manual is 65% of it):
+
+| dataset | scoped HR@5 | unscoped HR@5 | route@1 | route@5 |
+|---|---|---|---|---|
+| book | 0.5250 | 0.5000 | 0.70 | 0.85 |
+| paper | 0.8500 | **0.5500** | 0.75 | 0.80 |
+| legal | 0.5500 | 0.5167 | 0.93 | 0.97 |
+| play | — | — | 0.92 | 0.93 |
+| study | — | — | 0.88 | 0.90 |
+
+**The gap is dataset-dependent, not a constant.** `paper` loses 0.30 while `book` and `legal` lose
+~0.03. `paper` is 146 chunks of Unix-philosophy prose competing against 135k chunks of a MySQL
+manual; topical interference, not a funnel property. **route@1 0.70–0.93 means 7–30% of questions
+put the wrong document first** — the failure `make eval` cannot see by construction. Routing runs
+with rerank on and the scoped/unscoped arms above ran with it off, so the two tables are not
+directly comparable. No floor yet: one measurement in one library state is a baseline, not a bar.
+
 **Fix**: delete the stale warning; add an unscoped arm to `run_eval.py` and a `make eval-routing`
 target over `run_corpus_routing.py` on datasets clearing the 20-row floor. Record `route@1`,
 `route@5` and unscoped HR@5 as baselines. No threshold until the numbers exist.
@@ -372,13 +406,12 @@ them, which are the least measured part of the suite.
 | `code` dataset | 5 rows; the generator accepted 5 of 12 | Reproduce the reported 0/5 retrieval first — a 0.00 is a defect hypothesis, most likely code-block chunking against an 80-character prose hint. Fix in ingestion, then regenerate to ≥20 rows |
 | Socratic, teach-back, Feynman, FSRS, multi-turn, graph | No runner | Out of scope for the switch; named so the gap is not mistaken for coverage |
 
-### E11 — The eval cannot see a dropped citation
+### E11 — The eval cannot see a dropped citation — **already shipped**
 
-`citation_coverage` is measured, but the split between the two reasons an answer carries no chip —
-the model emitted none, or the excerpt filter removed one — is not. Two runs put the filter at 2 of
-80, so the split is currently inferred from a backend log. Surfacing a per-response drop count
-under `include_context`, the same eval-only precedent as `context_chunks`, makes it a number
-instead of an inference.
+Closed before this stage opened, and verified rather than rebuilt: `/qa` reports
+`citations_proposed`, `citations_gated` and `citations_dropped` in its `done` event under
+`include_context` (`qa.py:1092-1096`), and `run_eval` records all three. Confirmed on a live
+answer — 2 proposed, 0 gated, 0 dropped. The plan entry was stale.
 
 ---
 

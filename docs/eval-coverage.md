@@ -21,14 +21,20 @@ whatever retrieval returned.
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
 | Flashcards | `evals/run_flashcard_eval.py` | — | **no target** |
-| Corpus routing | `evals/run_corpus_routing.py` | — | **no target** |
+| Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
+| Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, attempts per generation | any run | recorded per eval run |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
 | HTTP contract | `make smoke` — ~230 scripts | live backend | yes, separately |
 
 ## What is not covered
 
-- **Two eval runners still have no make target**: flashcard and corpus routing. They exist, they
-  import cleanly, and nothing runs them.
+- **One eval runner still has no make target**: flashcard. It exists, it imports cleanly, and
+  nothing runs it.
+
+- **`make eval` measures scoped retrieval only.** Each row is pinned to its source document, so a
+  routing failure is invisible there by construction. `make eval-routing` measures unscoped, and
+  `run_eval --unscoped` runs the same rows without the pin. Measured once (52 documents): route@1
+  0.70–0.93, and `paper` drops 0.85 → 0.55 unscoped while `book` and `legal` move ~0.03.
 - **`make eval-gen` covers 2 of 6 kinds.** All six have been measured once (see the plan doc), but
   only book and paper are wired into the target, so only they are re-measured on a change.
 - **No end-to-end task-success measure.** `make smoke` checks wire contracts, not whether the

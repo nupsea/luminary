@@ -34,7 +34,9 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "backend"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.retrieval_metrics import _extract_hint_norms, _norm  # noqa: E402
+from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 from evals.run_eval import (  # noqa: E402
     load_golden,
@@ -118,6 +120,10 @@ def main():
     args = ap.parse_args()
 
     manifest = load_manifest()
+    # One capture for the series: every dataset in this invocation is measured
+    # against the same library, and that is the fact the numbers depend on.
+    environment = capture_environment(args.backend_url, scope="unscoped", arms=",".join(
+        ["clean", "typo"] if args.typo else ["clean"]))
     tokens = [t.strip() for t in args.datasets.split(",") if t.strip()]
     arms = ["clean", "typo"] if args.typo else ["clean"]
 
@@ -152,6 +158,8 @@ def main():
                     metrics.update({"route_1_typo": tr1, "route_5_typo": tr5, "hr_5_typo": thr})
                 store_results(args.backend_url, label, "no-llm", metrics,
                               eval_kind="corpus_routing")
+                append_history(label, "no-llm", metrics, True, eval_kind="corpus_routing",
+                               environment=environment)
 
     print()
     for arm in arms:

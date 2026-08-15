@@ -1,0 +1,117 @@
+"""Counters for what a model's output needed before it could be used.
+
+Nothing in this codebase distinguished a model that emits clean JSON from one
+whose output is repaired into shape. Two tolerant parsers, a key-alias lookup
+and a retry-to-backfill loop mean fenced, mis-keyed or truncated output produces
+byte-identical downstream objects -- so a weaker model costs latency and call
+count, and every quality metric reads the same. That is why swapping models has
+never moved a number.
+
+Process-wide and monotonic. An eval snapshots before and after a run and takes
+the difference: no reset endpoint, because a reset is a mutation two concurrent
+readers can lose.
+
+Cheap by construction -- integer increments under a lock, on paths that have
+just finished waiting on a model.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+# Repair kinds. `key_alias` is recorded by the reader that accepts alternate key
+# names, not by the parser: the JSON was valid, the shape was not.
+FENCED = "fenced"
+BAD_ESCAPE = "bad_escape"
+TRUNCATED = "truncated"
+KEY_ALIAS = "key_alias"
+
+_lock = threading.Lock()
+_counts: dict[str, int] = {}
+
+
+def _bump(key: str, amount: int = 1) -> None:
+    if amount <= 0:
+        return
+    with _lock:
+        _counts[key] = _counts.get(key, 0) + amount
+
+
+def record_parse(*, ok: bool, repairs: frozenset[str]) -> None:
+    """One attempt to read structured output from a completion.
+
+    `first_pass` means strict JSON parsed with nothing repaired -- the number
+    that separates a model that follows the format from one that is carried.
+    """
+    _bump("parses")
+    if not ok:
+        _bump("parse_failures")
+        return
+    if repairs:
+        _bump("parses_repaired")
+        for kind in repairs:
+            _bump(f"repair_{kind}")
+    else:
+        _bump("parses_first_pass")
+
+
+def record_key_alias() -> None:
+    """A field read under an alternate name the prompt did not ask for."""
+    _bump("repair_key_alias")
+
+
+def record_generation(*, requested: int, delivered: int, attempts: int) -> None:
+    """One generation that had to produce N items.
+
+    Retries are how quality becomes latency here: a weaker model is rejected
+    more often and retried, so the delivered count matches and only the call
+    count moves.
+    """
+    _bump("generations")
+    _bump("items_requested", requested)
+    _bump("items_delivered", delivered)
+    _bump("generation_attempts", max(attempts, 0))
+    if attempts > 1:
+        _bump("generations_retried")
+    if delivered < requested:
+        _bump("generations_short")
+
+
+def snapshot() -> dict[str, Any]:
+    """Every counter, plus the two rates that are read most often.
+
+    Rates are None rather than 0.0 when nothing has been counted: a first-pass
+    rate of 0.0 on zero parses reads as a model that never emits clean JSON.
+    """
+    with _lock:
+        counts = dict(_counts)
+    parses = counts.get("parses", 0)
+    generations = counts.get("generations", 0)
+    return {
+        "counts": counts,
+        "first_pass_rate": (counts.get("parses_first_pass", 0) / parses) if parses else None,
+        "attempts_per_generation": (
+            (counts.get("generation_attempts", 0) / generations) if generations else None
+        ),
+    }
+
+
+def delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """What happened between two snapshots, in the same shape."""
+    before_counts = before.get("counts", {})
+    after_counts = after.get("counts", {})
+    counts = {
+        key: after_counts.get(key, 0) - before_counts.get(key, 0)
+        for key in set(before_counts) | set(after_counts)
+        if after_counts.get(key, 0) - before_counts.get(key, 0)
+    }
+    parses = counts.get("parses", 0)
+    generations = counts.get("generations", 0)
+    return {
+        "counts": counts,
+        "first_pass_rate": (counts.get("parses_first_pass", 0) / parses) if parses else None,
+        "attempts_per_generation": (
+            (counts.get("generation_attempts", 0) / generations) if generations else None
+        ),
+    }

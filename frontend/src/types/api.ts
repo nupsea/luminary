@@ -1816,6 +1816,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/output-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Output Stats
+         * @description Repair counters, monotonic since process start.
+         *
+         *     An eval snapshots this before and after a run and takes the difference.
+         *     There is deliberately no reset: a reset is a mutation two concurrent
+         *     readers can lose, and a diff cannot be.
+         */
+        get: operations["output_stats_evals_output_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/environment": {
         parameters: {
             query?: never;
@@ -8364,6 +8388,20 @@ export interface components {
             /** Model */
             model: string;
         };
+        /**
+         * OutputStatsResponse
+         * @description What model output needed before it could be used. See `llm_output_stats`.
+         */
+        OutputStatsResponse: {
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** First Pass Rate */
+            first_pass_rate: number | null;
+            /** Attempts Per Generation */
+            attempts_per_generation: number | null;
+        };
         /** PDFMetaResponse */
         PDFMetaResponse: {
             /** Page Count */
@@ -12930,6 +12968,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    output_stats_evals_output_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputStatsResponse"];
                 };
             };
         };

@@ -43,7 +43,7 @@ from evals.lib.citation_metrics import (  # noqa: E402
     pair_answer_with_citations,
 )
 from evals.lib.environment import capture as capture_environment  # noqa: E402
-from evals.lib.environment import self_judging  # noqa: E402
+from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -268,18 +268,13 @@ def search_chunks(
         params["document_id"] = document_id
         params["limit"] = "20"
     else:
-        # Unscoped calls flatten /search's per-document groups WITHOUT restoring
-        # global rank order (a top document's tail matches shadow other docs'
-        # best chunks), so ranking metrics for this row are unreliable. Reaching
-        # this branch means the golden row failed to resolve a document_id
-        # (missing source_document_id and no manifest mapping) -- fix the
-        # dataset/manifest rather than trusting this run.
-        print(
-            f"  WARNING: search_chunks has no document_id for {question[:60]!r} "
-            "-- unscoped group flattening breaks rank order; fix the golden "
-            "row's manifest/source_document_id mapping.",
-            file=sys.stderr,
-        )
+        # No pin: /search's per-document groups are flattened and re-sorted by
+        # global_rank below, which IS the retriever's final order, so an
+        # unscoped run measures the regime real chat uses. (An earlier warning
+        # here claimed the opposite and was wrong -- the sort it says is missing
+        # is forty lines down.) What it cannot do is attribute a miss to routing
+        # versus ranking; run_corpus_routing.py separates those.
+        params["limit"] = str(limit or 20)
     if limit is not None:
         params["limit"] = str(limit)
     if not expand_context:
@@ -557,6 +552,15 @@ def main() -> None:
     )
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE-style query expansion.")
     parser.add_argument(
+        "--unscoped",
+        action="store_true",
+        help=(
+            "Search the whole library instead of pinning each row to its source "
+            "document. This is the regime real 'All documents' chat uses; the "
+            "gated arm is scoped, so run both and record the gap."
+        ),
+    )
+    parser.add_argument(
         "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
     parser.add_argument(
@@ -832,12 +836,16 @@ def main() -> None:
         context_hint = row.get("context_hint", "")
         source_file = row.get("source_file", "")
         doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
+        # The unscoped arm keeps doc_id for /qa (scope must match the filter, or
+        # the classifier can route to library-wide synthesis and return zero
+        # context) and drops it only for the retrieval call being measured.
+        search_doc_id = None if args.unscoped else doc_id
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
         chunks = search_chunks(
             args.backend_url,
             question,
-            doc_id,
+            search_doc_id,
             hyde=args.hyde,
             rerank=args.rerank,
             rerank_depth=args.rerank_depth,
@@ -882,6 +890,10 @@ def main() -> None:
     # only dropped answers — run generation rows sequentially. (A hosted
     # answering model could parallelise, but the app default is local; correctness
     # over speed for a background batch job.)
+    # Repair counters before the first question: the difference after the run
+    # is what THIS run's completions needed to be usable.
+    stats_before = output_stats(args.backend_url)
+
     max_workers = 1 if needs_qa else 6
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         samples = list(pool.map(_process_row, enumerate(rows, start=1)))
@@ -1106,12 +1118,17 @@ def main() -> None:
         args.backend_url,
         run_group=os.environ.get("LUMINARY_RUN_GROUP") or None,
         run_index=int(os.environ.get("LUMINARY_RUN_INDEX", "0")) or None,
-        scope="scoped",
+        scope="unscoped" if args.unscoped else "scoped",
         rerank=bool(args.rerank),
         hyde=bool(args.hyde),
         judge_model=args.judge_model or None,
         check_citations=bool(args.check_citations),
     )
+    moved = stats_delta(stats_before, output_stats(args.backend_url))
+    if moved and moved["counts"]:
+        metrics["output_repairs"] = moved["counts"]
+        metrics["first_pass_rate"] = moved["first_pass_rate"]
+
     same_model = self_judging(environment)
     environment["self_judged"] = bool(same_model)
     if same_model:

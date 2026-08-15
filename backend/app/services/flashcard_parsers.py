@@ -9,6 +9,9 @@ import json
 import logging
 import re
 
+from app.services import llm_output_stats
+from app.services.llm_json import parse_llm_json_array, parse_llm_json_object
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,32 +60,22 @@ def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
     - Responses with preamble prose before the array
     - Responses with trailing text after the array
     """
-    raw = raw.strip()
+    # One tolerant parser, not two. This path used to re-implement fence
+    # stripping and brace slicing, which meant every repair it performed was
+    # invisible to the counters that exist to tell a model that emits clean
+    # JSON from one that is carried by the parser.
+    cards = parse_llm_json_array(raw)
+    if cards:
+        return cards
 
-    # Strip markdown code fences
-    raw = re.sub(r"^```[^\n]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
-    raw = raw.strip()
-
-    # Try the whole thing as JSON: an array, or (json-mode models) an object wrapping the array
-    # like {"flashcards": [...]}, or even a single card object.
-    try:
-        coerced = _coerce_cards(json.loads(raw))
+    # json-mode models wrap the array in an object -- {"flashcards": [...]} --
+    # or return a single card; both are objects, so the array parser sees
+    # nothing to salvage.
+    obj = parse_llm_json_object(raw)
+    if obj is not None:
+        coerced = _coerce_cards(obj)
         if coerced is not None:
             return coerced
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Fall back: find the first '[' and last ']' and parse that slice
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(raw[start : end + 1])
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
 
     logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
@@ -106,10 +99,16 @@ def _coerce_cards(data: object) -> list | None:
 
 def card_field(item: dict, *names: str) -> str:
     """First non-empty string among the given keys -- tolerates local models that use alternate
-    field names (front/back, q/a, term/definition) instead of question/answer."""
-    for n in names:
+    field names (front/back, q/a, term/definition) instead of question/answer.
+
+    An alternate name is counted: the JSON was valid but the shape was not the
+    one the prompt asked for, and that difference is otherwise erased here.
+    """
+    for index, n in enumerate(names):
         v = item.get(n)
         if isinstance(v, str) and v.strip():
+            if index:
+                llm_output_stats.record_key_alias()
             return v.strip()
     return ""
 
