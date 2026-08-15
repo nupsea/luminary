@@ -442,8 +442,27 @@ Three consequences, all now handled:
 - `items_deduped` is counted where the filter runs, so the gap is attributable instead of being
   the difference between two numbers that mean different things.
 
-The first run's 90 of 105 was a first-contact reading against a library that already held cards
-for some of these documents. It is not a baseline and is not reproducible.
+Confirmed by re-running the same 35 rows against the now-warmer library:
+
+| | run 1 | run 2 | |
+|---|---|---|---|
+| `cards_generated` (model) | 103 | **104** | stable — 0.99 of requested |
+| `cards_returned` (library) | 90 | **44** | halved, with nothing about the model changed |
+| `cards_deduped` | (not counted) | **60** | 104 − 60 = 44, the gap closes exactly |
+| `first_pass_rate` | 0.0000 | **0.0000** | 40 of 40 parses repaired, all `surrounded_by_prose` |
+| `generations_retried` | 1 | 4 | retries rise as dedup removes cards and backfill tries again |
+
+**The model's number reproduced to within one card while the library's number halved.** That is
+the split working: `generation_rate` is a property of `qwen2.5:14b-instruct`, `cards_returned` is a
+property of a corpus that already had flashcards in it, and before this they were one number.
+
+The per-kind returned/requested breakdown is likewise dominated by dedup on a warm library and
+says nothing about the model; read the per-kind split only on generated counts, and only in a
+library state recorded with the run.
+
+**`first_pass_rate` 0.0000 across two independent runs is the first reproducible model-quality
+number in this repo.** This model never emitted parseable JSON for a flashcard batch in 76
+attempts; the parser carried every one.
 
 ### Retrieval by content kind
 
