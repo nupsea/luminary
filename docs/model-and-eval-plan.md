@@ -423,10 +423,27 @@ any judge involved.
 **Delivery is kind-dependent too**: technical books deliver 71% of requested cards against 90% for
 narrative and conversation. The generation-side counterpart of the retrieval table above.
 
-One discrepancy to resolve before either number is quoted in a decision: the in-process counter
-reports `items_delivered 103` while the API returned 90 cards. Something between
-`_collect_with_backfill` and the response drops 13, and which count is "delivered" decides what
-the delivery rate means.
+**Chased: the 103-vs-90 gap is a near-duplicate filter, and it makes the API count unusable as a
+metric.** After `_collect_with_backfill` returns candidates, `generate` embeds each question and
+drops any that is close to a card the document already holds
+(`flashcard_generators.py:598`). So the number the API returns depends on what is already in the
+library, not on the model.
+
+Proven rather than inferred: a passage that produced cards during the eval was re-sent twice with
+the same count and **returned 0 both times**, with the document's stored card count unchanged.
+Re-running the eval therefore yields fewer cards every time and converges to zero.
+
+Three consequences, all now handled:
+
+- `cards_returned` is recorded but is **not** a model metric and must never gate or be compared
+  across models.
+- `cards_generated` / `generation_rate` come from the pre-dedup counter — what the model actually
+  produced — and that is the comparable number.
+- `items_deduped` is counted where the filter runs, so the gap is attributable instead of being
+  the difference between two numbers that mean different things.
+
+The first run's 90 of 105 was a first-contact reading against a library that already held cards
+for some of these documents. It is not a baseline and is not reproducible.
 
 ### Retrieval by content kind
 

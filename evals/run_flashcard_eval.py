@@ -117,8 +117,11 @@ def main() -> None:
 
     metrics: dict[str, object] = {
         "cards_requested": requested,
-        "cards_delivered": delivered,
-        "delivery_rate": delivered / requested if requested else None,
+        # What the API returned. NOT a property of the model: a near-duplicate
+        # filter drops candidates that resemble cards the document already has,
+        # so the same passage yields fewer cards on every re-run and eventually
+        # none. Proven: two identical calls after one eval run both returned 0.
+        "cards_returned": delivered,
         "rows_scored": len(per_row),
     }
     if not args.skip_judge:
@@ -130,8 +133,16 @@ def main() -> None:
 
     moved = stats_delta(stats_before, output_stats(args.backend_url))
     if moved and moved["counts"]:
-        metrics["output_repairs"] = moved["counts"]
+        counts = moved["counts"]
+        metrics["output_repairs"] = counts
         metrics["first_pass_rate"] = moved["first_pass_rate"]
+        # The model's own number: cards it produced before the library-state
+        # filter saw them. This is the one that may be compared across models.
+        produced = counts.get("items_delivered")
+        if produced is not None and requested:
+            metrics["cards_generated"] = produced
+            metrics["generation_rate"] = produced / requested
+        metrics["cards_deduped"] = counts.get("items_deduped", 0)
 
     environment = capture_environment(
         args.backend_url,
@@ -170,7 +181,7 @@ def main() -> None:
     store_results(args.backend_url, args.dataset, model_name, metrics, eval_kind="flashcard")
     print_table(args.dataset, metrics)
 
-    print(f"  {'content type':<16} {'rows':>5} {'delivered/requested':>20}")
+    print(f"  {'content type':<16} {'rows':>5} {'returned/requested':>20}")
     for kind in sorted(per_kind):
         rowset = per_kind[kind]
         got = sum(r["cards"] for r in rowset)

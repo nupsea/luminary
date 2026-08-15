@@ -78,6 +78,18 @@ def record_generation(*, requested: int, delivered: int, attempts: int) -> None:
         _bump("generations_short")
 
 
+def record_items_deduped(count: int) -> None:
+    """Items a model produced that a later filter removed.
+
+    Counted apart from generation because it is not a fact about the model: the
+    near-duplicate filter compares against what the document already holds, so
+    the same passage generated twice yields fewer cards the second time and
+    eventually none. Without this, that library-state effect arrives inside a
+    delivery rate and reads as a weaker model.
+    """
+    _bump("items_deduped", count)
+
+
 def snapshot() -> dict[str, Any]:
     """Every counter, plus the two rates that are read most often.
 

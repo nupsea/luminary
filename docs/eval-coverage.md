@@ -20,13 +20,19 @@ whatever retrieval returned.
 | Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl`, 50 rows | yes |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
-| Flashcards | `make eval-flashcards` — delivery rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
+| Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, attempts per generation | any run | recorded per eval run |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
 | HTTP contract | `make smoke` — ~230 scripts | live backend | yes, separately |
 
 ## What is not covered
+
+- **A flashcard count from the API is not a model measurement.** Generated cards pass a
+  near-duplicate filter against what the document already holds, so the same passage returns fewer
+  cards on every re-run and eventually none — verified, two identical calls both returned 0. Read
+  `cards_generated` (pre-filter, the model's own output) and `cards_deduped`; `cards_returned`
+  describes the library, not the model.
 
 - **Flashcards are gated but their floors are inherited, not derived.** `factuality` 0.85,
   `atomicity` 0.80 and `clarity_avg` 3.5 were authored before any distribution existed. Treat them

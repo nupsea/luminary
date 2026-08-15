@@ -590,6 +590,7 @@ async def generate(
         cand_vecs = None
 
     pool_vecs = existing_vecs
+    deduped = 0
     flashcards: list[FlashcardModel] = []
     for i, item in enumerate(candidates):
         question = str(item.get("question", "")).strip()
@@ -601,6 +602,7 @@ async def generate(
                     "flashcard.generate: skipping near-duplicate question: %r",
                     question[:80],
                 )
+                deduped += 1
                 continue
             pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
         card_bloom_level = item.get("bloom_level")
@@ -631,6 +633,15 @@ async def generate(
         session.add(card)
         await _sync_flashcard_fts(card, session)
         flashcards.append(card)
+
+    if deduped:
+        llm_output_stats.record_items_deduped(deduped)
+        logger.info(
+            "flashcard.generate: %d of %d candidates removed as near-duplicates of cards "
+            "this document already has",
+            deduped,
+            len(candidates),
+        )
 
     if flashcards:
         await session.commit()
