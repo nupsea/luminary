@@ -13,7 +13,6 @@ uses: a count may shrink, never grow, and shrinking it is the point.
 
 from __future__ import annotations
 
-import html
 import json
 import sys
 from pathlib import Path
@@ -86,7 +85,9 @@ def _source_text(source_file: str) -> str | None:
     path = REPO_ROOT / source_file
     if not path.exists():
         return None
-    return _norm(html.unescape(read_document_text(path)).replace("\xa0", " "))
+    # `_norm` now does the unescaping and nbsp folding this used to do itself;
+    # one function so the offline check and the runtime metric cannot disagree.
+    return _norm(read_document_text(path))
 
 
 def _hint_occurrences(rows: list[dict]) -> list[tuple[dict, int]]:

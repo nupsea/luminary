@@ -247,6 +247,20 @@ hands it to `judge_hallucination_counts` (`:117`). Two independent failures in o
 The runner has no make target, which is the only reason this number has never been spent on a
 decision.
 
+**Shipped 2026-08-15.** Grounding is retrieved per claim (`/search` scoped to the document,
+3 chunks per claim, 12k chars) instead of read off the front of the file, which is the only shape
+that scales — the manual indexes 135k chunks. The judge scores that grounding, and
+`summary_grounding` (HHEM over the same passages) is computed alongside it, so a machine with no
+model to spare still gets an honest summary number. `make eval-summary` exists; floors stay unset
+until a distribution is measured.
+
+**What the fixed metric found immediately**: `/summarize/{doc}?mode=one_sentence` on
+`ollama/qwen2.5:14b-instruct` returns 2,271 characters of conversational recap of two chapters —
+"It seems like you've provided an excellent summary of the key events in Chapters XI and XII" —
+against a prompt reading "Summarize in a single sentence of at most 30 words"
+(`summarizer.py:47`). theme_coverage 0.333, conciseness 3.8x target, grounding 0.090. This is the
+M4 thesis with a measurement under it, and it was invisible while the metric was invalid.
+
 **Fix**: read through `read_document_text`; judge claims against the document rather than a prefix
 — claim-level NLI over its chunks is cheaper, deterministic, and already exists in
 `evals/lib/runners.py`. Then `make eval-summary`, a baseline, and a floor derived from measured
@@ -266,6 +280,14 @@ substring-matched against a retrieved chunk.
   `test_golden_integrity.py:89` applies `html.unescape` and `\xa0` folding before `_norm`;
   `retrieval_metrics._norm` does not. A hint that passes the integrity test can be unmatchable at
   runtime on content carrying entities or non-breaking spaces.
+
+**Shipped 2026-08-15.** `retrieval_metrics._norm` now unescapes entities and folds `\xa0`, and
+`test_golden_integrity` uses that one function instead of its own copy. `count_boundary_misses`
+reports misses whose hint reassembles across adjacent retrieved chunks, joined both with and
+without a space — a whitespace-splitting chunker and the character-splitter fallback break
+differently. **HR@5's definition is unchanged**: widening it would move every committed baseline
+without retrieval changing, so the counter sits beside the metric as the evidence that a chunking
+change moved a score.
 
 **Fix**: one shared normaliser for both paths; match against adjacent retrieved chunks joined in
 rank order, and record a `boundary_miss` count alongside HR@5 so a split reads as a split rather

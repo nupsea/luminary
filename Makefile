@@ -1,7 +1,15 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
+
+# The text model every eval target judges with. One variable, not six copies:
+# `make eval-gen EVAL_TEXT_MODEL=ollama/llama3.2` switches the whole suite.
+# A machine with a single model uses it for answering AND judging -- legal, and
+# recorded as `self_judged` because a judge is not neutral about its own output.
+# The vision model is resolved by the backend (Settings), never by the eval, and
+# is recorded per run; `make eval-models` prints both before anything runs.
+EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
 
 LUMINARY_PORT ?= 7820
 
@@ -237,8 +245,8 @@ eval:
 # only, which is why every faithfulness column in the UI read "-" before it existed.
 eval-gen:
 	@echo "Generation quality eval on book + paper (local judge, asserted -- slow)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct --check-citations --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
 
 # Repeated generation eval: mean and sd over N runs in ONE library state, gated
 # on the mean. A single generation run cannot resolve a change below ~0.10 on
@@ -249,8 +257,35 @@ eval-variance:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_variance.py \
 		--dataset $(or $(DATASET),book) --runs $(or $(RUNS),4) \
 		$(if $(COMPARE),--compare-to $(COMPARE),) \
-		--backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
 		--check-citations --assert-thresholds
+
+# Which models a run will use, and whether they are installed. Cheap, and the
+# only place the one-model / text+vision split is stated before a run rather
+# than inferred from a failure.
+eval-models:
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python check_models.py \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
+
+# Summary quality. `summary_grounding` (HHEM) needs no LLM; `no_hallucination`
+# needs the judge, so SKIP_JUDGE=1 gives the deterministic half on a machine
+# with no model to spare.
+eval-summary:
+	@echo "Summary eval (mode=$(or $(MODE),executive))..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_summary_eval.py \
+		--mode $(or $(MODE),executive) --backend-url $(BACKEND_URL) \
+		--judge-model $(EVAL_TEXT_MODEL) $(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
+
+# Everything, in the order the stages constrain each other: ingestion is the
+# ceiling on retrieval, retrieval is the ceiling on generation. Running them in
+# any other order attributes a regression to the wrong stage.
+eval-all:
+	$(MAKE) eval-models
+	$(MAKE) eval-ingest
+	$(MAKE) eval
+	$(MAKE) eval-gen
+	$(MAKE) eval-intent
+	$(MAKE) eval-topics
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
@@ -267,7 +302,7 @@ eval-d2l-rerank:
 # Slow (one judge call per question); separate from the fast HR/MRR target above.
 eval-d2l-gen:
 	@echo "Generation eval on d2l (RAGAS, local judge — slow)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
 
 # Topic-generation eval (precision/recall/F1 + junk-rate). Uses the backend venv.
 eval-topics:

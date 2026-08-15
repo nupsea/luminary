@@ -19,7 +19,7 @@ whatever retrieval returned.
 | Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
 | Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl`, 50 rows | yes |
 | Topics | `make eval-topics` | d2l | yes |
-| Summaries | `evals/run_summary_eval.py` | — | **no target** |
+| Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
 | Flashcards | `evals/run_flashcard_eval.py` | — | **no target** |
 | Corpus routing | `evals/run_corpus_routing.py` | — | **no target** |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
@@ -27,11 +27,8 @@ whatever retrieval returned.
 
 ## What is not covered
 
-- **Three eval runners still have no make target**: summary, flashcard, corpus routing. They
-  exist, they import cleanly, and nothing runs them. Intent routing was the fourth and is now
-  gated by `make eval-intent`, which matters most of the four: the chat graph routes every
-  message by intent, so a misroute makes each downstream number describe a question the user did
-  not ask (I-25, I-26).
+- **Two eval runners still have no make target**: flashcard and corpus routing. They exist, they
+  import cleanly, and nothing runs them.
 - **`make eval-gen` covers 2 of 6 kinds.** All six have been measured once (see the plan doc), but
   only book and paper are wired into the target, so only they are re-measured on a change.
 - **No end-to-end task-success measure.** `make smoke` checks wire contracts, not whether the
@@ -53,6 +50,25 @@ whatever retrieval returned.
   stderr; the number is biased upward and is not comparable to a run judged by another model.
 - **Enrichment, entity extraction and the graph are unmeasured.** `eval-ingest` stops at chunk
   retention.
+
+## Running it: one model, or a text model plus vision
+
+`make eval-models` prints the resolved model per role, whether each is installed, and which shape
+is in force. Run it before an eval rather than diagnosing a missing model from a swallowed
+exception.
+
+| Shape | What it means |
+|---|---|
+| One model | Answering, generation and judging are the same id. Normal on a laptop. The judged metrics are then scored by the model that wrote the answers — recorded as `self_judged`, biased upward, and not comparable to a run judged by another model. |
+| Text + vision | A second model exists only to caption figures at ingestion time. Nothing else uses it. The backend resolves it from Settings; the eval records it and never chooses it. |
+
+`EVAL_TEXT_MODEL` names the judge for every target in one place —
+`make eval-gen EVAL_TEXT_MODEL=ollama/llama3.2` switches the whole suite. What survives with no
+LLM at all: retrieval, ingestion, routing, faithfulness and `summary_grounding` (both HHEM).
+
+`make eval-all` runs the stages in the order they constrain each other — models, ingestion,
+retrieval, generation, intent, topics. Ingestion is the ceiling on retrieval and retrieval is the
+ceiling on generation, so any other order attributes a regression to the wrong stage.
 
 ## Every gated run records what produced it
 

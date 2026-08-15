@@ -67,6 +67,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_mrr,
     compute_ndcg_10,
     compute_recall_at,
+    count_boundary_misses,
 )
 from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
@@ -966,6 +967,9 @@ def main() -> None:
         "hit_rate_5": hr5,
         "mrr": mrr,
         "ndcg_10": ndcg10,
+        # Misses that are chunk splits rather than absent passages. A chunking
+        # change moves HR@5 through this number without retrieval changing.
+        "boundary_misses": count_boundary_misses(samples),
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,

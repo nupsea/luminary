@@ -12,12 +12,21 @@ makes nDCG@10 a log-discounted single-hit metric — comparable, just less
 informative than with graded goldens.
 """
 
+import html
 import math
 import re
 
 
 def _norm(s: str) -> str:
-    """Collapse whitespace and normalise typographic quotes for substring matching."""
+    """One normalisation for hints, chunks and source text.
+
+    Used by the runtime metrics AND by tests/test_golden_integrity.py, which
+    checks the same hints against the corpus offline. The two drifted once: the
+    offline check unescaped HTML entities and folded non-breaking spaces while
+    this did not, so a hint could pass the integrity gate and be unmatchable at
+    runtime on exactly the scraped content that carries `&amp;` and `\xa0`.
+    """
+    s = html.unescape(s).replace("\xa0", " ")
     s = s.replace("‘", "'").replace("’", "'")
     s = s.replace("“", '"').replace("”", '"')
     return re.sub(r"\s+", " ", s).strip().lower()
@@ -49,7 +58,14 @@ def _extract_hint_norms(sample: dict) -> list[str]:
 
 
 def compute_hit_rate_5(samples: list[dict]) -> float:
-    """HR@5: fraction of questions where ANY hint substring is in top-5 chunks."""
+    """HR@5: fraction of questions where ANY hint substring is in top-5 chunks.
+
+    Strict: the hint must sit inside ONE chunk. `count_boundary_misses` reports
+    how many of the remaining misses are chunk-boundary artifacts rather than
+    retrieval failures. This definition is unchanged and the committed baselines
+    are measured against it -- widening it would move every recorded number
+    without any change in retrieval.
+    """
     if not samples:
         return 0.0
     hits = 0
@@ -61,6 +77,35 @@ def compute_hit_rate_5(samples: list[dict]) -> float:
         if any(any(h in _norm(ctx) for h in hint_norms) for ctx in chunks):
             hits += 1
     return hits / len(samples)
+
+
+def count_boundary_misses(samples: list[dict], k: int = 5) -> int:
+    """Misses whose hint spans two retrieved chunks instead of being absent.
+
+    A hint is matched on an 80-character normalised prefix, so ingestion
+    splitting text inside that window scores a miss even when both halves come
+    back at ranks 1 and 2. That is a chunking property, not a retrieval failure,
+    and it makes HR@5 move when chunk size changes for reasons unrelated to what
+    retrieval found. Counted here rather than folded into the hit rate: the
+    number is the evidence that a chunking change, not the funnel, moved a score.
+    """
+    misses = 0
+    for s in samples:
+        hint_norms = _extract_hint_norms(s)
+        if not hint_norms:
+            continue
+        chunks = [_norm(c) for c in s.get("contexts", [])[:k]]
+        if any(any(h in c for h in hint_norms) for c in chunks):
+            continue
+        # Joined in rank order, both ways. A chunker that breaks at whitespace
+        # reassembles with a space; the character-splitter fallback cuts
+        # mid-word, where only a seamless join puts the hint back together.
+        # Trying one alone under-reports whichever split the corpus produced.
+        spaced = " ".join(chunks)
+        seamless = "".join(chunks)
+        if any(h in spaced or h in seamless for h in hint_norms):
+            misses += 1
+    return misses
 
 
 def compute_recall_at(samples: list[dict], k: int) -> float:
