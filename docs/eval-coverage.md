@@ -20,7 +20,7 @@ whatever retrieval returned.
 | Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl`, 50 rows | yes |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
-| Flashcards | `evals/run_flashcard_eval.py` | — | **no target** |
+| Flashcards | `make eval-flashcards` — delivery rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, attempts per generation | any run | recorded per eval run |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
@@ -28,8 +28,10 @@ whatever retrieval returned.
 
 ## What is not covered
 
-- **One eval runner still has no make target**: flashcard. It exists, it imports cleanly, and
-  nothing runs it.
+- **Flashcards are gated but their floors are inherited, not derived.** `factuality` 0.85,
+  `atomicity` 0.80 and `clarity_avg` 3.5 were authored before any distribution existed. Treat them
+  as placeholders until `make eval-flashcards` has run enough times to derive floors the way the
+  generation floors were derived.
 
 - **`make eval` measures scoped retrieval only.** Each row is pinned to its source document, so a
   routing failure is invisible there by construction. `make eval-routing` measures unscoped, and

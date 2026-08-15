@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-routing eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance eval-models eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -270,6 +270,24 @@ eval-variance:
 eval-models:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python check_models.py \
 		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
+
+# Flashcard quality. SKIP_JUDGE=1 reports the structural half only -- cards
+# asked for against cards delivered, and what the parser had to repair. Those
+# are deterministic and model-sensitive, which is what gates a model swap; the
+# judged scores are neither, and on a one-model machine the judge is grading its
+# own cards.
+eval-flashcards:
+	@echo "Flashcard eval across content kinds..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_flashcard_eval.py \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
+		$(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
+
+# Rebuild the flashcard golden by sampling passages from the live index. Fixed
+# seed, balanced across content types; no model authors anything, because the
+# passage is the ground truth the cards are judged against.
+golden-flashcards:
+	uv run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
+		--per-kind $(or $(PER_KIND),7)
 
 # Cross-document routing: does retrieval pick the right DOCUMENT, unscoped, the
 # way real "All documents" chat runs. `make eval` pins each row to its source,

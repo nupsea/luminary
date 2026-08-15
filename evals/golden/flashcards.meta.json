@@ -1,0 +1,21 @@
+{
+  "name": "flashcards",
+  "generated_at": "2026-08-15T07:20:21.728739+00:00",
+  "generator_model": null,
+  "selection": {
+    "seed": 20260815,
+    "per_kind": 7,
+    "cards_per_passage": 3,
+    "min_chars": 400,
+    "max_chars": 1500,
+    "edge_trim": 0.1
+  },
+  "rows": 35,
+  "by_content_type": {
+    "book": 7,
+    "conversation": 7,
+    "paper": 7,
+    "tech_article": 7,
+    "tech_book": 7
+  }
+}

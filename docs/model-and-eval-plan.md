@@ -391,6 +391,43 @@ target over `run_corpus_routing.py` on datasets clearing the 20-row floor. Recor
 Verified by: both arms on the same rows in one run, both recorded. A gap is expected; an
 *unrecorded* gap is the defect.
 
+### Flashcards: what the first structural run found
+
+`evals/build_flashcard_golden.py` samples passages from the live index — fixed seed, balanced
+across content types, middle 80% of each document's chunk sequence, 400–1500 characters. **No
+model authors anything**: the eval judges generated cards against the source passage, so the
+passage is the ground truth. `expected_facts` was authored on the old 6-row file and never read by
+anything, which is why sampling replaces it rather than extending it.
+
+First run, judge off, `qwen2.5:14b-instruct`, 35 passages × 3 cards:
+
+| | |
+|---|---|
+| cards delivered | **90 of 105** (0.857) |
+| first-pass parse rate | **0.0000** — 36 of 36 parses repaired, every one `surrounded_by_prose` |
+| retries | 1 generation retried, 1 finished short |
+
+| content type | delivered / requested |
+|---|---|
+| book | 19 / 21 |
+| conversation | 19 / 21 |
+| paper | 19 / 21 |
+| tech_article | 18 / 21 |
+| **tech_book** | **15 / 21** |
+
+**Not one clean JSON emission in 36 attempts.** The tolerant parser repaired every generation, and
+before P2 that was invisible: the cards arrive either way. This is the M2 laundering channel with a
+number on it, and it is the first number in this repo that would move under a model swap without
+any judge involved.
+
+**Delivery is kind-dependent too**: technical books deliver 71% of requested cards against 90% for
+narrative and conversation. The generation-side counterpart of the retrieval table above.
+
+One discrepancy to resolve before either number is quoted in a decision: the in-process counter
+reports `items_delivered 103` while the API returned 90 cards. Something between
+`_collect_with_backfill` and the response drops 13, and which count is "delivered" decides what
+the delivery rate means.
+
 ### Retrieval by content kind
 
 Scoped, rerank off, one library state (52 documents / 207,047 chunks), measured 2026-08-15. Every
@@ -502,7 +539,7 @@ them, which are the least measured part of the suite.
 
 | Surface | State | Needed |
 |---|---|---|
-| Flashcards | Runner exists, 6 golden rows, no make target | ≥30 rows, a target, P2 structural metrics |
+| Flashcards | **Done 2026-08-15.** 35 rows over 5 content types, `make eval-flashcards`, structural metrics wired | — |
 | Summaries | Invalid (E3) | Fixed in Stage 2; target and baseline here |
 | Corpus routing | Runner exists, no target | Target (E2) |
 | Intent | Gated at 0.85, measured 1.0000 on 50 rows | Adversarial rows — a saturated metric cannot show a regression, and the classifier is model-sensitive |

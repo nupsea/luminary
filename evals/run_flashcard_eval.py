@@ -16,6 +16,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import get_settings  # noqa: E402
+from evals.lib.environment import capture as capture_environment  # noqa: E402
+from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
 from evals.lib.flashcard_metrics import judge_flashcard, score_flashcards  # noqa: E402
 from evals.lib.loader import load_golden  # noqa: E402
 from evals.lib.manifest import ensure_ingested, load_manifest  # noqa: E402
@@ -43,48 +45,141 @@ def print_table(dataset: str, metrics: dict) -> None:
     print(f"  Flashcard evaluation -- dataset={dataset}")
     print(f"{'=' * 58}")
     for key, val in metrics.items():
-        print(f"  {key:<22}  {val:.4f}" if val is not None else f"  {key:<22}  n/a")
+        if val is None:
+            print(f"  {key:<22}  n/a")
+        elif isinstance(val, float):
+            print(f"  {key:<22}  {val:.4f}")
+        elif isinstance(val, dict):
+            print(f"  {key:<22}  {', '.join(f'{k} {v}' for k, v in sorted(val.items()))}")
+        else:
+            print(f"  {key:<22}  {val}")
     print(f"{'=' * 58}\n")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run flashcard correctness eval.")
     parser.add_argument("--dataset", default="flashcards")
-    parser.add_argument("--backend-url", default="http://localhost:8000")
+    parser.add_argument("--backend-url", default="http://localhost:7820")
     parser.add_argument("--judge-model", default=get_settings().LITELLM_DEFAULT_MODEL)
+    parser.add_argument(
+        "--skip-judge",
+        action="store_true",
+        help=(
+            "Skip the LLM judge and report the structural half only: how many "
+            "cards were asked for against how many arrived, and what the "
+            "parser had to repair. Those are deterministic and model-sensitive, "
+            "which is what gates a model swap -- the judged scores are neither."
+        ),
+    )
     parser.add_argument("--assert-thresholds", action="store_true")
     args = parser.parse_args()
 
     rows = load_golden(args.dataset, FlashcardGoldenEntry)
     manifest = load_manifest()
+    stats_before = output_stats(args.backend_url)
+
     per_row: list[dict] = []
+    per_kind: dict[str, list[dict]] = {}
+    requested = delivered = 0
+    skipped: list[str] = []
+
     for row in rows:
-        doc_id = ensure_ingested(args.backend_url, row["source_file"], manifest)
+        # Rows sampled from the live index name their document; only a row that
+        # does not gets ingested from disk.
+        doc_id = row.get("source_document_id") or ensure_ingested(
+            args.backend_url, row["source_file"], manifest
+        )
         if not doc_id:
+            skipped.append(row["question"][:60])
             continue
         cards = generate_cards(args.backend_url, doc_id, row)
-        per_row.append(
-            score_flashcards(
+        requested += int(row.get("expected_card_count") or 1)
+        delivered += len(cards)
+        scored = {"cards": len(cards), "requested": int(row.get("expected_card_count") or 1)}
+        if not args.skip_judge:
+            scored |= score_flashcards(
                 cards,
                 row["chunk_id_or_text"],
                 judge=lambda card, chunk: judge_flashcard(card, chunk, args.judge_model),
             )
+        per_row.append(scored)
+        per_kind.setdefault(row.get("content_type") or "?", []).append(scored)
+
+    if not per_row:
+        print("ERROR: no rows produced cards", file=sys.stderr)
+        sys.exit(1)
+
+    def _mean(key: str, rowset: list[dict]) -> float | None:
+        # A judge that failed yields None, and averaging it as 0.0 would report
+        # a broken judge as a bad model (I-32).
+        vals = [r[key] for r in rowset if r.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    metrics: dict[str, object] = {
+        "cards_requested": requested,
+        "cards_delivered": delivered,
+        "delivery_rate": delivered / requested if requested else None,
+        "rows_scored": len(per_row),
+    }
+    if not args.skip_judge:
+        metrics |= {
+            "factuality": _mean("factuality", per_row),
+            "atomicity": _mean("atomicity", per_row),
+            "clarity_avg": _mean("clarity_avg", per_row),
+        }
+
+    moved = stats_delta(stats_before, output_stats(args.backend_url))
+    if moved and moved["counts"]:
+        metrics["output_repairs"] = moved["counts"]
+        metrics["first_pass_rate"] = moved["first_pass_rate"]
+
+    environment = capture_environment(
+        args.backend_url,
+        judge_model=None if args.skip_judge else args.judge_model,
+        skip_judge=bool(args.skip_judge),
+    )
+    same_model = self_judging(environment)
+    environment["self_judged"] = bool(same_model)
+    if same_model:
+        print(
+            f"  WARNING: {same_model} both wrote and judged these cards; "
+            "the judged scores are biased upward. Delivery and repair counts are not.",
+            file=sys.stderr,
         )
 
-    metrics = {
-        "factuality": sum(s["factuality"] or 0.0 for s in per_row) / len(per_row),
-        "atomicity": sum(s["atomicity"] or 0.0 for s in per_row) / len(per_row),
-        "clarity_avg": sum(s["clarity_avg"] or 0.0 for s in per_row) / len(per_row),
-    }
     violations = [
         f"{key} {metrics[key]:.4f} < {threshold}"
         for key, threshold in THRESHOLDS.items()
-        if metrics[key] < threshold
+        if isinstance(metrics.get(key), float) and metrics[key] < threshold
     ]
+    # Requested-but-uncomputed is a violation, not a skip.
+    if not args.skip_judge:
+        violations += [
+            f"{key} was requested but never computed"
+            for key in THRESHOLDS
+            if metrics.get(key) is None
+        ]
+    if skipped:
+        violations.append(f"{len(skipped)} row(s) had no document: {skipped[:3]}")
+
     passed = len(violations) == 0
-    append_history(args.dataset, args.judge_model, metrics, passed, eval_kind="flashcard")
-    store_results(args.backend_url, args.dataset, args.judge_model, metrics, eval_kind="flashcard")
+    model_name = "no-judge" if args.skip_judge else args.judge_model
+    append_history(
+        args.dataset, model_name, metrics, passed, eval_kind="flashcard", environment=environment
+    )
+    store_results(args.backend_url, args.dataset, model_name, metrics, eval_kind="flashcard")
     print_table(args.dataset, metrics)
+
+    print(f"  {'content type':<16} {'rows':>5} {'delivered/requested':>20}")
+    for kind in sorted(per_kind):
+        rowset = per_kind[kind]
+        got = sum(r["cards"] for r in rowset)
+        want = sum(r["requested"] for r in rowset)
+        judged = _mean("factuality", rowset)
+        suffix = "" if judged is None else f"   factuality {judged:.2f}"
+        print(f"  {kind:<16} {len(rowset):>5} {got:>10}/{want:<9}{suffix}")
+    print()
+
     if args.assert_thresholds and violations:
         for violation in violations:
             print(f"QUALITY GATE FAILED: {violation}", file=sys.stderr)
