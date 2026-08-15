@@ -218,6 +218,9 @@ ner-compare:
 eval-intent:
 	@echo "Intent routing accuracy (backend must be running)..."
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
+	@echo "Adversarial phrasing (report-only -- a known-open finding, not a gate)..."
+	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+		--dataset intents_adversarial --backend-url $(BACKEND_URL)
 
 # Ingestion fidelity: how much of each source document survives into chunks.
 # Deterministic, LLM-free, no backend needed -- it reads the dev database directly.

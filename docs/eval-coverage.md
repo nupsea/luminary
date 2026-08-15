@@ -17,7 +17,7 @@ whatever retrieval returned.
 | Ingestion | `make eval-ingest` — retention, duplication | all 12 manifest documents | yes |
 | Retrieval | `make eval` — HR@5, MRR, nDCG@10 | book, paper, legal, play, study | yes |
 | Generation | `make eval-gen` — faithfulness, answer relevance, citation support, citation coverage, answer rate | book, paper | yes |
-| Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl`, 50 rows | yes |
+| Intent routing | `make eval-intent` — routing accuracy, per-route P/R | `golden/intents.jsonl` 50 rows (gated) + `intents_adversarial.jsonl` 29 rows (report-only) | yes / report-only |
 | Topics | `make eval-topics` | d2l | yes |
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
@@ -116,6 +116,11 @@ this and cannot be compared to one that has it.
 **Intent routing is deterministic.** The keyword heuristic answers most messages without an LLM
 and the classifier runs at temperature 0, so a single run is a valid measurement here and a small
 delta is real, unlike generation. Measured 1.0000 on all four routes.
+
+**The 1.0000 is on easy rows.** The same classifier scores **0.5862** on 29 adversarial
+phrasings, where search absorbs 11 of 12 misroutes: `graph` and `comparative` fire on their
+keyword and nothing else. Read the gated golden as a regression check, never as evidence that
+routing is solved.
 
 **A perfect score on a 50-row golden proves very little**, which is why routing carries a
 generalisation suite as well (`tests/test_intent_generalisation.py`). It holds each phrasing and

@@ -391,6 +391,44 @@ target over `run_corpus_routing.py` on datasets clearing the 20-row floor. Recor
 Verified by: both arms on the same rows in one run, both recorded. A gap is expected; an
 *unrecorded* gap is the defect.
 
+### Intent routing: 1.0000 on the golden, 0.5862 on hard phrasing
+
+`golden/intents.jsonl` measures 1.0000, so it cannot show a regression — a saturated metric has
+no headroom in either direction. `golden/intents_adversarial.jsonl` holds the same four routes and
+makes the **phrasing** hard rather than the subject novel: terse fragments ("TL;DR?", "X vs Y?"),
+verbose wrappers, negated openings, and intents stated without their keyword — a comparison with
+no "compare", a summary with no "summarise", a relation with no "connect". Subjects are the
+invented, corpus-free set the generalisation suite uses, so a route that depends on a corpus
+entity fails here instead of passing from memory.
+
+Hand-authored, 29 rows. Multi-intent questions are deliberately excluded: no single label is
+defensible for "summarise X and compare it to Y", so such a row would measure the labeller rather
+than the router.
+
+| | accuracy | precision | recall |
+|---|---|---|---|
+| overall | **0.5862** | | |
+| summary | | 0.833 | 0.625 |
+| graph | | 1.000 | **0.333** |
+| comparative | | 1.000 | **0.429** |
+| search | | **0.389** | 0.875 |
+
+**Search is the sink: 11 of 12 misroutes land there.** `graph` and `comparative` have perfect
+precision and poor recall — they fire only on their explicit keyword, and everything else falls
+through to search. The twelfth misroute goes the other way and is a different bug: *"I don't need
+the whole overview, just tell me what year the Ostrek cipher was published"* routes to summary,
+because the keyword fires and the negation in front of it does not.
+
+**Deliberately not fixed here.** Adding keywords for "elevator pitch", "have to do with" and
+"better fit" would fit the router to rows I wrote this afternoon, which is the failure this
+dataset exists to detect. The repo's own precedent is the rule: route by sentence shape and prove
+it generalises. A fix belongs with a shape rule plus cases in `test_intent_generalisation.py`,
+measured against this set afterwards — never tuned against it. Negation is the exception worth
+taking first: "not a summary, just X" is a general rule, not a phrasing.
+
+Run report-only by `make eval-intent`, alongside the gated 50-row arm. No floor: a known-open
+finding is recorded, not used to fail a build.
+
 ### Flashcards: what the first structural run found
 
 `evals/build_flashcard_golden.py` samples passages from the live index — fixed seed, balanced
@@ -578,7 +616,7 @@ them, which are the least measured part of the suite.
 | Flashcards | **Done 2026-08-15.** 35 rows over 5 content types, `make eval-flashcards`, structural metrics wired | — |
 | Summaries | Invalid (E3) | Fixed in Stage 2; target and baseline here |
 | Corpus routing | Runner exists, no target | Target (E2) |
-| Intent | Gated at 0.85, measured 1.0000 on 50 rows | Adversarial rows — a saturated metric cannot show a regression, and the classifier is model-sensitive |
+| Intent | **Done 2026-08-15.** `golden/intents_adversarial.jsonl`, 29 rows, measured **0.5862** | — |
 | Concepts, tagging, vision JSON | Only topics gated, on `d2l` | Structural tier per path |
 | `code` dataset | 5 rows, and **the product cannot ingest its source** | Reproduced 2026-08-15: `POST /documents/ingest` with `DATA/code/embedder.py` returns 400, "Unsupported file type '.py'" (`documents.py:134`). The reported 0/5 was not a chunking defect — the document could never have been indexed. Decide whether `.py` becomes a supported kind or the dataset is regenerated against code as it actually reaches the product, inside markdown. Do not gate it either way until then |
 | Socratic, teach-back, Feynman, FSRS, multi-turn, graph | No runner | Out of scope for the switch; named so the gap is not mistaken for coverage |

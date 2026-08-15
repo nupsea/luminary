@@ -1,0 +1,29 @@
+{"question": "TL;DR?", "expected_route": "summary"}
+{"question": "gist?", "expected_route": "summary"}
+{"question": "In two sentences, what is this about?", "expected_route": "summary"}
+{"question": "Give me the elevator pitch for this whole thing.", "expected_route": "summary"}
+{"question": "I have five minutes before a meeting — what do I need to know from this?", "expected_route": "summary"}
+{"question": "Pretend I know nothing about it. Where do I start and what is the big picture?", "expected_route": "summary"}
+{"question": "I've been reading this all week and honestly I'm lost. Can you give me the shape of the whole argument?", "expected_route": "summary"}
+{"question": "What are the main themes running through it?", "expected_route": "summary"}
+{"question": "the Vantari protocol vs the Ostrek cipher?", "expected_route": "comparative"}
+{"question": "Is the Vantari protocol or the Ostrek cipher the better fit here?", "expected_route": "comparative"}
+{"question": "Which of quantisation and distillation does the author favour?", "expected_route": "comparative"}
+{"question": "Where do Dr Halbrecht and Professor Nkemi disagree?", "expected_route": "comparative"}
+{"question": "Sorry, long question — but if I had to choose between the copper kettle and the iron stove, which does the text argue for and why?", "expected_route": "comparative"}
+{"question": "Rather than a list of similarities, tell me what sets the Vantari protocol apart from the Ostrek cipher.", "expected_route": "comparative"}
+{"question": "Is quantisation better or worse than distillation for this?", "expected_route": "comparative"}
+{"question": "What does the copper kettle have to do with the iron stove?", "expected_route": "graph"}
+{"question": "How does quantisation feed into distillation?", "expected_route": "graph"}
+{"question": "Rather than a list of differences, what ties the Vantari protocol to the Ostrek cipher?", "expected_route": "graph"}
+{"question": "Sorry for the long message, but what I really need to understand is how Dr Halbrecht's work leads into Professor Nkemi's.", "expected_route": "graph"}
+{"question": "Trace the thread from quantisation through to distillation.", "expected_route": "graph"}
+{"question": "What sits between the copper kettle and the iron stove in the chain?", "expected_route": "graph"}
+{"question": "Don't summarise it — I just need the sentence where the author states the claim.", "expected_route": "search"}
+{"question": "Where does the text define the Vantari protocol?", "expected_route": "search"}
+{"question": "Find the passage where Dr Halbrecht describes the failure.", "expected_route": "search"}
+{"question": "What did Professor Nkemi say about the copper kettle?", "expected_route": "search"}
+{"question": "Which page mentions distillation?", "expected_route": "search"}
+{"question": "Quote the part about the iron stove.", "expected_route": "search"}
+{"question": "I don't need the whole overview, just tell me what year the Ostrek cipher was published.", "expected_route": "search"}
+{"question": "Look up what quantisation means here.", "expected_route": "search"}
