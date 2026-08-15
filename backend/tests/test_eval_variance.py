@@ -97,9 +97,10 @@ def test_a_series_row_is_not_one_of_its_own_runs(tmp_path, monkeypatch):
     import run_variance
 
     history = tmp_path / "scores_history.jsonl"
+    member = {"eval_kind": "citation", "environment": {"run_group": "g1"}}
     rows = [
-        {"eval_kind": "citation", "citation_support_rate": 0.60, "environment": {"run_group": "g1"}},
-        {"eval_kind": "citation", "citation_support_rate": 0.70, "environment": {"run_group": "g1"}},
+        {**member, "citation_support_rate": 0.60},
+        {**member, "citation_support_rate": 0.70},
         {
             "eval_kind": "citation-series",
             "runs": 2,

@@ -257,7 +257,5 @@ def test_shapes_do_not_swallow_ordinary_lookups(question):
 def test_a_keyword_outranks_a_shape_from_the_other_family():
     """A keyword names the intent; a shape infers it. 'the difference between X
     and Y' carries both, and the statement wins over the inference."""
-    assert (
-        classify_intent_heuristic("What is the difference between the Vantari protocol and the Ostrek cipher?")[0]
-        == "comparative"
-    )
+    question = "What is the difference between the Vantari protocol and the Ostrek cipher?"
+    assert classify_intent_heuristic(question)[0] == "comparative"
