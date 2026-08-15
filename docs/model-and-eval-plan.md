@@ -728,9 +728,15 @@ no-rerank" (which `time_machine` decided), and lifting `hamlet` from .567 to .66
 defect is narrower and real: **there is no held-out data**, so nothing distinguishes a retrieval
 improvement from a fit to twelve documents.
 
-**Fix**: a frozen tune/holdout split declared in one place. Sweeps read tune only. The holdout is
-measured and recorded on every gated run and never used to select a value. A change that improves
-tune and not holdout is a fit.
+**Shipped 2026-08-15.** `evals/lib/split.py` declares TUNE (book, book_time_machine, paper, legal,
+play, study, d2l) and HOLDOUT (book_alice, book_frankenstein, odyssey, notes, conversation).
+`run_eval.py` refuses an ablation sweep on a holdout dataset and records `split` in the run's
+environment.
+
+**Today's holdout is provisional, and the plan must not forget it.** The sweep that chose
+`RERANK_MODEL` ran over all twelve manifest documents, so every dataset above was visible to it.
+The split freezes from here; a genuinely clean holdout needs a dataset built from a document no
+sweep has seen, and the next one generated is the first that can claim it.
 
 Verified by: re-running the reranker sweep reproduces the current default on the tune set, and the
 holdout numbers are committed as a separate baseline.

@@ -26,6 +26,7 @@ for _path in (REPO_ROOT, REPO_ROOT / "evals"):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from evals.lib import provenance  # noqa: E402
 from evals.lib.retrieval_metrics import _extract_hint_norms, _norm  # noqa: E402
 
 from app.services.universal_parser import read_document_text  # noqa: E402
@@ -181,3 +182,33 @@ def test_a_dataset_small_enough_to_swing_on_one_question_is_declared():
             f"{dataset} has {len(rows)} rows, under the {_MIN_ROWS_TO_GATE} needed for a "
             "gate. Add rows, or declare it in _TOO_SMALL_TO_GATE."
         )
+
+
+# Where a hint came from (E8)
+
+
+def _meta_for(name: str) -> dict | None:
+    path = GOLDEN_DIR / f"{name}.meta.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+@pytest.mark.parametrize("name,rows", _retrieval_goldens())
+def test_every_golden_records_where_its_hints_came_from(name, rows):
+    """`realign_hints.py` can replace a hint with one the retriever surfaced,
+    which lets the retriever define its own target. Nothing recorded which had
+    happened, and the two are indistinguishable in the file afterwards."""
+    meta = _meta_for(name)
+    assert meta is not None, f"{name} has no meta.json, so nothing records its provenance"
+    assert provenance.violations(rows, meta) == [], f"{name}: {provenance.violations(rows, meta)}"
+
+
+def test_a_realigned_row_must_say_why_it_was_safe():
+    """The guard itself, on a synthetic dataset -- the real ones carry none yet,
+    and a test that passes because the case is absent guards nothing."""
+    meta = {"row_provenance": provenance.GENERATED}
+    rows = [{"provenance": provenance.REALIGNED}]
+
+    assert provenance.violations(rows, meta) != []
+    assert provenance.violations(
+        [{"provenance": provenance.REALIGNED, "provenance_reason": "hint was not verbatim"}], meta
+    ) == []

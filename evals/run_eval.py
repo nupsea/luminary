@@ -72,6 +72,7 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
 from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
+from evals.lib.split import refuse_if_holdout, split_of  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
 from evals.lib.store import store_results as _lib_store_results  # noqa: E402
 
@@ -646,6 +647,13 @@ def main() -> None:
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
         sys.exit(1)
 
+    # An ablation compares arms so one can be chosen; that is selection, and
+    # selection on the holdout is what leaves nothing to detect a fit with.
+    if args.ablation:
+        refusal = refuse_if_holdout(args.dataset or "", "an ablation sweep")
+        if refusal:
+            print(f"ERROR: {refusal}", file=sys.stderr)
+            sys.exit(2)
     if args.rerank_depths and not args.ablation:
         print("ERROR: --rerank-depths requires --ablation", file=sys.stderr)
         sys.exit(1)
@@ -1119,6 +1127,7 @@ def main() -> None:
         run_group=os.environ.get("LUMINARY_RUN_GROUP") or None,
         run_index=int(os.environ.get("LUMINARY_RUN_INDEX", "0")) or None,
         scope="unscoped" if args.unscoped else "scoped",
+        split=split_of(dataset_label),
         rerank=bool(args.rerank),
         hyde=bool(args.hyde),
         judge_model=args.judge_model or None,
