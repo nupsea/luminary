@@ -66,3 +66,51 @@ async def test_classify_only_returns_valid_route():
         resp = await client.post("/qa/classify-only", json={"question": "summarize this book"})
     assert resp.status_code == 200
     assert resp.json()["chosen_route"] in {"summary", "graph", "comparative", "search"}
+
+
+@pytest.mark.asyncio
+async def test_classify_only_can_run_the_fallback_the_chat_graph_runs(monkeypatch):
+    """The heuristic alone is a floor. Below confidence 0.7 the chat graph asks
+    the LLM, so an eval that never does measures a routing no user receives."""
+    import app.routers.qa as qa_module
+
+    async def _fake_fallback(question, default, scope="all"):
+        return "comparative"
+
+    monkeypatch.setattr(qa_module, "_llm_classify_fallback", _fake_fallback)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # A bare phrase the heuristic cannot place: catch-all, confidence 0.5.
+        body = {"question": "the Vantari protocol against the Ostrek cipher"}
+        without = (await client.post("/qa/classify-only", json=body)).json()
+        with_llm = (
+            await client.post("/qa/classify-only?llm_fallback=true", json=body)
+        ).json()
+
+    assert without["source"] == "heuristic"
+    assert without["confidence"] < 0.7
+    assert with_llm["source"] == "llm"
+    assert with_llm["chosen_route"] == "comparative"
+
+
+@pytest.mark.asyncio
+async def test_a_confident_heuristic_never_reaches_the_llm(monkeypatch):
+    """The risk the fallback cannot cover: a heuristic that is confidently wrong
+    is never second-guessed. Shapes fire at 0.8 and so lock the LLM out."""
+    import app.routers.qa as qa_module
+
+    async def _must_not_run(question, default, scope="all"):
+        raise AssertionError("fallback ran for a confident heuristic answer")
+
+    monkeypatch.setattr(qa_module, "_llm_classify_fallback", _must_not_run)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/qa/classify-only?llm_fallback=true", json={"question": "Summarize this document"}
+        )
+
+    assert resp.json() == {
+        **resp.json(),
+        "chosen_route": "summary",
+        "source": "heuristic",
+    }

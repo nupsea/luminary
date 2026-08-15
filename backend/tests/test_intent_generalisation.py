@@ -192,3 +192,72 @@ def test_summary_keywords_still_match_their_own_inflections():
         "Give me the outlines",
     ):
         assert classify_intent_heuristic(question)[0] == "summary", question
+
+
+# Shapes for the two families that had perfect precision and poor recall: they
+# fired on their own keyword and nothing else, so an intent stated without that
+# word fell through to search. Each template below is a structure with subject
+# slots, instantiated against every subject pair.
+
+COMPARATIVE_SHAPE_TEMPLATES = [
+    "Which of {a} and {b} does the author favour?",
+    "Which one of {a} or {b} is stronger?",
+    "Is {a} or {b} the better fit here?",
+    "Should I use {a} or {b}?",
+    "If I had to choose between {a} and {b}, which does the text argue for?",
+    "Where do {a} and {b} disagree?",
+    "The points where {a} and {b} diverge",
+]
+
+RELATIONAL_SHAPE_TEMPLATES = [
+    "What sits between {a} and {b} in the chain?",
+    "What does {a} have to do with {b}?",
+    "How does {a} lead into {b}?",
+    "Trace the thread from {a} through to {b}",
+    "Does {a} feed into {b}?",
+]
+
+
+@pytest.mark.parametrize("template", COMPARATIVE_SHAPE_TEMPLATES)
+def test_a_comparison_without_the_word_compare_still_routes_comparative(template):
+    for question in _instantiate(template):
+        assert classify_intent_heuristic(question)[0] == "comparative", question
+
+
+@pytest.mark.parametrize("template", RELATIONAL_SHAPE_TEMPLATES)
+def test_a_relation_without_the_word_connect_still_routes_relational(template):
+    for question in _instantiate(template):
+        assert classify_intent_heuristic(question)[0] == "relational", question
+
+
+@pytest.mark.parametrize(
+    "template", COMPARATIVE_SHAPE_TEMPLATES + RELATIONAL_SHAPE_TEMPLATES
+)
+def test_shape_routes_do_not_depend_on_their_subjects(template):
+    routes = {classify_intent_heuristic(q)[0] for q in _instantiate(template)}
+    assert len(routes) == 1, f"{template} routed {routes} depending on its subjects"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Show me the sections from page 5 to page 10",
+        "What happened from 1920 to 1930?",
+        "Which page mentions the Vantari protocol?",
+        "What did Dr Halbrecht say about the copper kettle?",
+        "Who was Professor Nkemi?",
+    ],
+)
+def test_shapes_do_not_swallow_ordinary_lookups(question):
+    """A range and a plain lookup are searches. `from X to Y` is deliberately not
+    a relational shape for this reason -- it is how pages and dates are written."""
+    assert classify_intent_heuristic(question)[0] not in {"relational", "comparative"}, question
+
+
+def test_a_keyword_outranks_a_shape_from_the_other_family():
+    """A keyword names the intent; a shape infers it. 'the difference between X
+    and Y' carries both, and the statement wins over the inference."""
+    assert (
+        classify_intent_heuristic("What is the difference between the Vantari protocol and the Ostrek cipher?")[0]
+        == "comparative"
+    )

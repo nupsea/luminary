@@ -3976,6 +3976,11 @@ export interface paths {
         /**
          * Classify Only
          * @description Classify the chat route without executing retrieval/LLM graph nodes.
+         *
+         *     The heuristic alone is not what production routes on: `chat_graph` sends
+         *     anything below 0.7 to the LLM, and the catch-all sits at 0.5. Measuring this
+         *     endpoint without `llm_fallback` therefore measures a path no user takes on
+         *     its own -- it is the floor, not the routing.
          */
         post: operations["classify_only_qa_classify_only_post"];
         delete?: never;
@@ -6168,6 +6173,12 @@ export interface components {
             intent: string;
             /** Confidence */
             confidence: number;
+            /**
+             * Source
+             * @default heuristic
+             * @enum {string}
+             */
+            source: "heuristic" | "llm";
         };
         /** ClipCreateRequest */
         ClipCreateRequest: {
@@ -16488,7 +16499,10 @@ export interface operations {
     };
     classify_only_qa_classify_only_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Also run the LLM fallback the chat graph runs below confidence 0.7. Off by default so the heuristic can be measured alone; on, this is the routing a user actually gets. */
+                llm_fallback?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

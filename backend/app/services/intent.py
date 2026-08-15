@@ -203,6 +203,62 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
     }
 )
 
+# Some intents are a sentence shape, not a phrase. These carry the questions that
+# state an intent WITHOUT its keyword -- a comparison with no "compare", a
+# relation with no "connect" -- which fell through to search: on the adversarial
+# routing set, comparative recall was 0.29 and graph 0.33 while both held perfect
+# precision, the signature of a trigger that only fires on its own word.
+#
+# Slots are bounded and stop at "?" so a shape cannot span two questions. Each
+# one names a structure, never a subject: what a user calls their own topics is
+# not enumerable, which is the whole reason keywords ran out.
+_COMPARATIVE_SHAPES: tuple[re.Pattern[str], ...] = (
+    # "Which of X and Y ...", "which one of X or Y ..." -- choosing between
+    # named alternatives is a comparison whatever verb follows.
+    re.compile(r"\bwhich (?:one )?of\b[^?]{0,70}\b(?:and|or)\b"),
+    # "if I had to choose between X and Y", "deciding between X and Y".
+    re.compile(
+        r"\b(?:choose|choosing|chose|decide|deciding|pick|picking|select|prefer)\b"
+        r"[^?]{0,30}\bbetween\b"
+    ),
+    # A polar question offering two alternatives: "Is X or Y the better fit?".
+    # Anchored at the start so a mid-sentence "or" in an ordinary question does
+    # not qualify.
+    re.compile(
+        r"^\s*(?:is|are|was|were|do|does|did|should|would|will|can|could)\b"
+        r"[^?]{0,80}\bor\b[^?]{0,80}"
+    ),
+    # Two subjects and a verb of (dis)agreement: "where do X and Y disagree",
+    # "the points where A and B diverge". The family completed the way the
+    # relation verbs were -- `differ` was already a keyword, its siblings were
+    # not.
+    re.compile(
+        r"\b(?:and|or)\b[^?]{0,50}\b(?:disagree|agrees?|agreed|diverge[sd]?|"
+        r"converge[sd]?|overlaps?|conflict|clash)\b"
+    ),
+)
+
+_RELATIONAL_SHAPES: tuple[re.Pattern[str], ...] = (
+    # "What sits between X and Y", "the step between X and Y" -- `between ... and`
+    # asks about what lies across two things. A comparison phrased this way
+    # ("difference between X and Y") matches a comparative keyword too, and the
+    # more specific match already wins.
+    re.compile(r"\bbetween\b[^?]{0,50}\band\b"),
+    # The relation-verb family, extended from "what connects" to the same verbs
+    # used in the middle of a sentence: "X leads into Y", "how A feeds into B".
+    re.compile(
+        r"\b(?:leads?|led|feeds?|fed|flows?|points?|ties?|links?|connects?|relates?|"
+        r"contributes?|builds?|follows?)\s+(?:in)?to\b"
+    ),
+    # "What does X have to do with Y" -- an idiom whose slots are the subjects,
+    # matched as a shape for the same reason "what is <this> <noun> about" is.
+    re.compile(r"\b(?:have|has|had|having)\s+to\s+do\s+with\b"),
+    # A path between two things: "from X through to Y", "from A into B". Plain
+    # "from X to Y" is deliberately excluded -- it is how page and date ranges
+    # are written, and it would take ordinary lookups into the graph route.
+    re.compile(r"\bfrom\b[^?]{0,60}\b(?:through to|into|onto|towards?)\b"),
+)
+
 _COMPARATIVE_KWS: frozenset[str] = frozenset(
     {
         # Explicit comparison
@@ -460,15 +516,29 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
     # instead, which is order-independent and survives either set growing.
     relational = _best_match(q, _RELATIONAL_KWS)
     comparative = _best_match(q, _COMPARATIVE_KWS)
+    # A shape decides only when neither family matched a keyword: a keyword names
+    # the intent outright, a shape infers it from structure, and an inference
+    # must not outrank a statement.
+    comparative_shape = any(mentions(q, p) for p in _COMPARATIVE_SHAPES)
+    relational_shape = any(mentions(q, p) for p in _RELATIONAL_SHAPES)
     if relational or comparative:
         if comparative and (relational is None or len(comparative) >= len(relational)):
             return ("comparative", 0.85)
         return ("relational", 0.85)
+    if comparative_shape or relational_shape:
+        # Comparative first: "which of X and Y" is also "between X and Y" read
+        # loosely, and choosing between two things is the narrower reading.
+        return ("comparative" if comparative_shape else "relational", 0.8)
     if any(kw in q for kw in _FACTUAL_KWS):
         return ("factual", 0.8)
     if any(kw in q for kw in _GENERATIVE_KWS):
         return ("exploratory", 0.75)
     return ("exploratory", 0.5)
+
+
+# Below this the heuristic is guessing and the LLM decides. Shared so the chat
+# graph and anything measuring it cannot drift apart.
+LLM_FALLBACK_BELOW = 0.7
 
 
 async def _llm_classify_fallback(question: str, default: str, scope: str = "all") -> str:
