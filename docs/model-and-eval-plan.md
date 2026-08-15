@@ -632,7 +632,31 @@ answer — 2 proposed, 0 gated, 0 dropped. The plan entry was stale.
 
 ## Stage 4 — Extract the seams
 
-### P3 — Model registry and role router
+### P3 — Model registry and role router — **shipped 2026-08-15**
+
+`app/model_registry.py` (Config layer) holds `ModelProfile` with both halves — footprint
+(resident bytes, licence, `min_ram_gb`) and capability (`usable_context`,
+`supports_json_schema`, `thinking_default`, `multimodal`, `accommodations_needed`).
+`accommodations_needed` is empty on every entry and means **unmeasured**, not "needs nothing":
+Phase 6 fills it.
+
+`app/services/model_router.resolve(role, *, background)` is the one entry point, over four roles.
+Generation now follows Settings unless `LITELLM_GENERATION_MODEL` is explicitly set — which is the
+bug fix: two services read that value straight from config, so a model chosen in Settings applied
+to chat and silently did not apply to flashcard generation. Both paths returned a model, so
+nothing failed; the two answers simply disagreed.
+
+Six config readers migrated (`flashcard.py`, `flashcard_generators.py`, `image_enricher.py`,
+`monitoring.py`, `main.py`, `eval_environment.py`) and two more moved to registry defaults
+(`settings_service.py`, `llm.py`). `tests/test_model_registry.py` greps `app/` and fails if any
+module outside the registry reads a model name from config. `resident_models()` is the set Phase
+7's residency test asserts against. Smoke S230 checks the roles resolve consistently on a live
+backend.
+
+Not visible on this machine's numbers: `LITELLM_DEFAULT_MODEL` happens to equal the Settings
+choice here, so the defect was silent rather than wrong. It is the tests that prove the fix.
+
+
 
 Model choice resolves in five places today, and two bypass the settings service entirely
 (`services/flashcard.py:102`, `services/flashcard_generators.py:78`), so **a model chosen in

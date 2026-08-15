@@ -45,7 +45,9 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
     llm = await settings_service.get_llm_settings(db)
     documents, chunks = await DocumentRepo(db).corpus_counts()
 
-    generation_model = settings.LITELLM_GENERATION_MODEL or settings.LITELLM_DEFAULT_MODEL
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    generation_model = resolve("generation").model
 
     # Both arms, because `hybrid` resolves them to different models: interactive
     # goes to the cloud while background stays local. A run that records one

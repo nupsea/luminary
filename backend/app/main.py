@@ -235,6 +235,13 @@ async def lifespan(app: FastAPI):
     shutdown_model_executor()
 
 
+def _resolve_chat_model() -> str:
+    """What a chat would actually be served by, resolved not configured."""
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return resolve("chat").model
+
+
 def _restrict_permissions(data_dir: Path) -> None:
     """Tighten the library to owner-only. Best-effort: a mounted volume may not
     permit chmod, and that must not stop the app from starting."""
@@ -377,7 +384,9 @@ async def read_settings(settings: Settings = Depends(get_settings)):
         "DATA_DIR": settings.DATA_DIR,
         "OLLAMA_URL": settings.OLLAMA_URL,
         "LOG_LEVEL": settings.LOG_LEVEL,
-        "LITELLM_DEFAULT_MODEL": settings.LITELLM_DEFAULT_MODEL,
+        # The model that would actually serve a chat, which is not always the
+        # configured default: Settings can point elsewhere.
+        "chat_model": _resolve_chat_model(),
         "PHOENIX_ENABLED": settings.PHOENIX_ENABLED,
         "OPENAI_API_KEY": mask(settings.OPENAI_API_KEY),
         "ANTHROPIC_API_KEY": mask(settings.ANTHROPIC_API_KEY),

@@ -188,18 +188,19 @@ def _with_ollama_prefix(model: str) -> str:
 
 
 def get_local_chat_model() -> str:
-    """The on-device chat model, as chosen in Settings or configured."""
-    from app.config import get_settings  # noqa: PLC0415
+    """The on-device chat model: what Settings holds, else the registry default."""
+    from app.model_registry import default_chat_model  # noqa: PLC0415
 
-    return _with_ollama_prefix(_cache["local_chat_model"] or get_settings().LITELLM_DEFAULT_MODEL)
+    chosen = _cache["local_chat_model"]
+    return _with_ollama_prefix(chosen) if chosen else default_chat_model()
 
 
 def get_vision_model() -> str:
-    """The model that reads figures, as chosen in Settings or configured."""
-    from app.config import get_settings  # noqa: PLC0415
+    """The model that reads figures: Settings, else the registry default."""
+    from app.model_registry import default_vision_model  # noqa: PLC0415
 
     chosen = _cache["vision_model"]
-    return _with_ollama_prefix(chosen) if chosen else get_settings().VISION_MODEL
+    return _with_ollama_prefix(chosen) if chosen else default_vision_model()
 
 
 async def update_llm_settings(

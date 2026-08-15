@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from app.services.model_router import resolve
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,8 @@ async def get_overview(
     phoenix_running = await _check_phoenix_running() if settings.PHOENIX_ENABLED else False
 
     return MonitoringOverview(
-        llm_status=settings.LITELLM_DEFAULT_MODEL,
+        # What the backend would actually call, not what config names.
+        llm_status=resolve("chat").model,
         phoenix_running=phoenix_running,
         phoenix_configured=settings.PHOENIX_ENABLED,
         langfuse_configured=bool(settings.LANGFUSE_PUBLIC_KEY),

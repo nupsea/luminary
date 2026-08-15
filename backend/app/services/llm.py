@@ -108,7 +108,9 @@ def _local_model(settings: Settings) -> str:
 
         chosen = get_local_chat_model()
     except Exception:
-        chosen = settings.LITELLM_DEFAULT_MODEL
+        from app.model_registry import default_chat_model  # noqa: PLC0415
+
+        chosen = default_chat_model()
     return chosen if chosen.startswith("ollama/") else f"ollama/{chosen}"
 
 
@@ -309,7 +311,9 @@ class LLMService:
         except ValueError:
             raise
         except Exception:
-            return get_settings().LITELLM_DEFAULT_MODEL, None
+            from app.model_registry import default_chat_model  # noqa: PLC0415
+
+            return default_chat_model(), None
 
     async def complete(
         self,

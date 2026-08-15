@@ -10,7 +10,6 @@ from typing import Any, Literal
 from sqlalchemy import false, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     ChunkModel,
     FlashcardModel,
@@ -98,9 +97,15 @@ logger = logging.getLogger(__name__)
 
 
 def _get_generation_model() -> str | None:
-    """Return the model override for generation tasks, or None to use default."""
-    m = get_settings().LITELLM_GENERATION_MODEL
-    return m if m else None
+    """The model generation runs on, resolved rather than read from config.
+
+    Reading `LITELLM_GENERATION_MODEL` here meant a model chosen in Settings
+    never reached flashcard generation. The router applies the override when one
+    is configured and Settings otherwise.
+    """
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return resolve("generation").model
 
 
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)

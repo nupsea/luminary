@@ -211,7 +211,11 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
     back to LITELLM_DEFAULT_MODEL (e.g. a cloud model) if it is not Ollama-based.
     """
     vision_model: str = get_vision_model()
-    default_model: str = settings.LITELLM_DEFAULT_MODEL  # type: ignore[attr-defined]
+    # The text model to fall back to, resolved the way every other call site
+    # resolves one. Read from config here, it ignored a model chosen in Settings.
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    default_model: str = resolve("chat").model
 
     # Build list of models to try: primary first, then cloud fallback if primary is Ollama.
     models_to_try: list[str] = [vision_model]

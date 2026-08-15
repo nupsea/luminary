@@ -20,7 +20,6 @@ from typing import Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -76,8 +75,10 @@ def _get_llm_service():
 
 
 def _generation_model() -> str | None:
-    m = get_settings().LITELLM_GENERATION_MODEL
-    return m if m else None
+    """See `flashcard._get_generation_model`: resolved, not read from config."""
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return resolve("generation").model
 
 
 async def generate_technical(
