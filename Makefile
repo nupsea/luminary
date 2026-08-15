@@ -224,9 +224,13 @@ eval-intent:
 # Retrieval scores what was indexed and cannot report what never arrived, so this
 # is the ceiling every downstream number sits under. Run it before trusting a
 # retrieval or generation figure on a corpus that was re-ingested.
+# ALL=1 measures every complete document in the library grouped by format --
+# epub, docx and scraped articles each reach chunks through a different parse
+# path, and the 12 manifest documents cover only txt, md and one PDF.
 eval-ingest:
 	@echo "Ingestion fidelity across every manifest document..."
-	uv run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds
+	uv run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds \
+		$(if $(ALL),--all-documents,)
 
 # Every document kind under DATA. `thoughts` is deliberately absent: 4 rows over a
 # 7-chunk document scores 1.000 by construction, so it is measured, not gated.

@@ -103,9 +103,48 @@ def read_document_text(file_path: Path) -> str:
     yields `%PDF-1.5 /FlateDecode`, and a golden generated from that asks
     questions about the container.
     """
-    if file_path.suffix.lower() == ".pdf":
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
         return UniversalParser._read_pdf_text(file_path)
+    if suffix == ".epub":
+        return _read_epub_text(file_path)
+    if suffix == ".docx":
+        return _read_docx_text(file_path)
     return read_source_text(file_path).replace("\r\n", "\n")
+
+
+def _read_epub_text(file_path: Path) -> str:
+    """EPUB reading text, extracted the way `_parse_epub` extracts it.
+
+    An EPUB is a zip, so byte decoding returns `PK\x03\x04 ... mimetype
+    application/epub+zip` -- the same failure the PDF branch exists to prevent,
+    and with the same consequence: a golden generated from it asks about the
+    container, and an integrity check reports every hint unresolved.
+    """
+    import ebooklib  # noqa: PLC0415
+    from ebooklib import epub  # noqa: PLC0415
+
+    from app.services.parser import _epub_text  # noqa: PLC0415
+
+    book = epub.read_epub(str(file_path), options={"ignore_ncx": True})
+    parts: list[str] = []
+    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+        # Navigation documents are structure, not reading text; ingestion skips
+        # them, so counting them here would report loss that did not happen.
+        if any(k in item.get_name().lower() for k in ("nav", "toc", "ncx")):
+            continue
+        text = _epub_text(item.get_content().decode("utf-8", errors="replace"))
+        if text.strip():
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _read_docx_text(file_path: Path) -> str:
+    """DOCX reading text. Also a zip, and so also unreadable as bytes."""
+    from docx import Document as DocxDocument  # noqa: PLC0415
+
+    document = DocxDocument(str(file_path))
+    return "\n\n".join(p.text for p in document.paragraphs if p.text.strip())
 
 
 class UniversalParser:

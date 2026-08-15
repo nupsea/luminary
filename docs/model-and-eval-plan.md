@@ -393,6 +393,35 @@ Verified by: both arms on the same rows in one run, both recorded. A gap is expe
 
 ### E9 — Coverage holes that block the switch specifically
 
+**Ingestion fidelity now measured per document kind** (`make eval-ingest ALL=1` →
+`run_ingest_eval.py --all-documents`), over every complete document in the library rather than the
+12 manifest ones. Measured 2026-08-15, 47 documents:
+
+| format | docs | min retention | mean | max duplication |
+|---|---|---|---|---|
+| txt | 15 | 94.2% | 98.5% | 1.41 |
+| md | 13 | 87.2% | 97.7% | 1.60 |
+| pdf | 18 | 88.6% | 97.5% | **3.58** |
+| epub | 1 | 100.0% | 100.0% | 1.09 |
+| wav | 4 | — | — | — |
+
+Three findings the manifest-only run could not have produced:
+
+- **EPUB first read 0.3% retention, and the defect was the reader.** `read_document_text` — the
+  function the eval-integrity rule names as the one true way to read a corpus — dispatched only on
+  `.pdf` and decoded everything else as bytes, so an EPUB returned
+  `PK\x03\x04 … application/epub+zip`. Fixed by extracting through ingestion's own `_epub_text`;
+  the same hole was open for `.docx` and is closed with it. Re-measured: **100.0%**. A golden
+  generated from an EPUB before this would have asked questions about the zip container, which is
+  exactly the PDF failure that produced this rule in the first place.
+- **The PDF path chunks 2–3.6× denser than text.** `matrix_calculus_for_dl`: 602 chunks of median
+  45 tokens over a 12,277-token source. Diagnosed rather than assumed — only 6 distinct tokens
+  appear in chunks and not in the source, so this is overlap, not text the reader missed. DDIA
+  carries 11,431 chunks per copy at 3.58×.
+- **Audio is unmeasurable by this method and says so.** Four `wav` documents reach chunks through
+  transcription, so the file on disk holds no text to compare against. Reported as a coverage gap
+  rather than scored 0%.
+
 If the switch fails, it fails on JSON-emitting generation — the paths with tolerant parsers behind
 them, which are the least measured part of the suite.
 
@@ -403,7 +432,7 @@ them, which are the least measured part of the suite.
 | Corpus routing | Runner exists, no target | Target (E2) |
 | Intent | Gated at 0.85, measured 1.0000 on 50 rows | Adversarial rows — a saturated metric cannot show a regression, and the classifier is model-sensitive |
 | Concepts, tagging, vision JSON | Only topics gated, on `d2l` | Structural tier per path |
-| `code` dataset | 5 rows; the generator accepted 5 of 12 | Reproduce the reported 0/5 retrieval first — a 0.00 is a defect hypothesis, most likely code-block chunking against an 80-character prose hint. Fix in ingestion, then regenerate to ≥20 rows |
+| `code` dataset | 5 rows, and **the product cannot ingest its source** | Reproduced 2026-08-15: `POST /documents/ingest` with `DATA/code/embedder.py` returns 400, "Unsupported file type '.py'" (`documents.py:134`). The reported 0/5 was not a chunking defect — the document could never have been indexed. Decide whether `.py` becomes a supported kind or the dataset is regenerated against code as it actually reaches the product, inside markdown. Do not gate it either way until then |
 | Socratic, teach-back, Feynman, FSRS, multi-turn, graph | No runner | Out of scope for the switch; named so the gap is not mistaken for coverage |
 
 ### E11 — The eval cannot see a dropped citation — **already shipped**

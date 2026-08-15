@@ -46,6 +46,11 @@ from evals.lib.scoring_history import append_history  # noqa: E402
 # drops it by design, and counting it as loss flags every public-domain book.
 THRESHOLDS = {"min_retention": 0.90, "max_duplication": 1.60}
 
+# Audio reaches chunks through transcription, so the file on disk holds no text
+# to compare against. Measured by a different method or not at all -- never by
+# pretending 0% retention is a result.
+_AUDIO_FORMATS = frozenset({"wav", "mp3", "m4a", "mp4"})
+
 
 def tokens(text: str) -> list[str]:
     return re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split()
@@ -74,10 +79,31 @@ def main() -> None:
     # This tool reads the DB directly and needs no backend. The URL is only for
     # provenance; when nothing answers, the row records why rather than nothing.
     parser.add_argument("--backend-url", default="http://localhost:7820")
+    parser.add_argument(
+        "--all-documents",
+        action="store_true",
+        dest="all_documents",
+        help=(
+            "Measure every complete document in the library, grouped by format, "
+            "instead of the 12 manifest documents. The manifest covers txt, md "
+            "and one PDF; a library also holds epub, docx, scraped articles and "
+            "audio, and each reaches chunks through a different parse path."
+        ),
+    )
     args = parser.parse_args()
 
-    manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
     con = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
+    if args.all_documents:
+        rows = con.execute(
+            "SELECT file_path, id, format, title FROM documents "
+            "WHERE stage = 'complete' AND file_path IS NOT NULL"
+        ).fetchall()
+        sources = {r[0]: r[1] for r in rows}
+        formats = {r[0]: (r[2] or "?") for r in rows}
+    else:
+        manifest = json.loads((GOLDEN_DIR / "manifest.json").read_text())
+        sources = manifest
+        formats = {src: Path(src).suffix.lstrip(".") or "?" for src in manifest}
 
     print(f"{'document':<34} {'src tok':>8} {'chunks':>7} {'retention':>10} {'dup':>6}")
     print("-" * 72)
@@ -87,9 +113,19 @@ def main() -> None:
     dups: list[float] = []
     missing: list[str] = []
 
-    for src, doc_id in sorted(manifest.items()):
-        path = REPO_ROOT / src
+    by_format: dict[str, list[tuple[float, float]]] = {}
+    unmeasurable: list[str] = []
+
+    for src, doc_id in sorted(sources.items()):
+        path = Path(src) if Path(src).is_absolute() else REPO_ROOT / src
         name = Path(src).name[:33]
+        fmt = formats.get(src, "?")
+        if fmt in _AUDIO_FORMATS:
+            # The source is audio; its text exists only as the transcript that
+            # ingestion produced. Comparing chunks against it would compare the
+            # output to itself, so this method cannot measure the kind at all.
+            unmeasurable.append(f"{name} ({fmt})")
+            continue
         if not path.exists():
             missing.append(src)
             print(f"{name:<34} source file not found")
@@ -109,6 +145,7 @@ def main() -> None:
         retention, dup = measure(source, chunk_texts)
         retentions.append(retention)
         dups.append(dup)
+        by_format.setdefault(fmt, []).append((retention, dup))
         flag = ""
         if retention < THRESHOLDS["min_retention"]:
             violations.append(f"{name}: retention {retention:.1%} < {THRESHOLDS['min_retention']:.0%}")
@@ -122,12 +159,36 @@ def main() -> None:
         )
 
     print("-" * 72)
+    if by_format:
+        print(f"\n{'format':<10} {'docs':>5} {'min retention':>14} {'mean':>8} {'max dup':>8}")
+        for fmt in sorted(by_format):
+            vals = by_format[fmt]
+            rets = [r for r, _ in vals]
+            print(
+                f"{fmt:<10} {len(vals):>5} {min(rets):>13.1%} "
+                f"{sum(rets) / len(rets):>7.1%} {max(d for _, d in vals):>8.2f}"
+            )
+    if unmeasurable:
+        # Stated, never silently dropped: a kind nothing measures is a coverage
+        # gap, and an unreported skip is indistinguishable from a pass.
+        print(f"\nnot measurable by source comparison ({len(unmeasurable)}): "
+              f"{', '.join(unmeasurable[:6])}")
     if missing:
         # Requested-but-uncomputed is a failure, never a silent skip (I-32).
         violations.append(f"{len(missing)} manifest source file(s) missing: {missing[:3]}")
 
     metrics = {
         "documents": len(retentions),
+        "formats": {
+            fmt: {
+                "documents": len(v),
+                "min_retention": min(r for r, _ in v),
+                "mean_retention": sum(r for r, _ in v) / len(v),
+                "max_duplication": max(d for _, d in v),
+            }
+            for fmt, v in by_format.items()
+        },
+        "unmeasurable_documents": len(unmeasurable),
         "min_retention": min(retentions) if retentions else None,
         "mean_retention": sum(retentions) / len(retentions) if retentions else None,
         "max_duplication": max(dups) if dups else None,
