@@ -3221,6 +3221,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-lab/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalogue
+         * @description Every stage that can be compared, and every model available to compare.
+         */
+        get: operations["get_catalogue_model_lab_catalogue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_model_lab_runs_get"];
+        put?: never;
+        /**
+         * Start Run
+         * @description Start a comparison. 409 when one is already in flight.
+         */
+        post: operations["start_run_model_lab_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_model_lab_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop after the task currently in flight.
+         *
+         *     A completed call is the finest granularity available: interrupting a runner
+         *     mid-generation leaves its counters describing a partial pass, and a partial
+         *     pass is not evidence.
+         */
+        post: operations["cancel_run_model_lab_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/monitoring/phoenix-url": {
         parameters: {
             query?: never;
@@ -5848,6 +5930,23 @@ export interface components {
             /** Archived */
             archived: number;
         };
+        /** ArmView */
+        ArmView: {
+            /** Model */
+            model: string;
+            /** Tasks */
+            tasks: components["schemas"]["TaskRunView"][];
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Failed Tasks */
+            failed_tasks: string[];
+            /** Environment */
+            environment: {
+                [key: string]: unknown;
+            };
+        };
         /** AssemblePreview */
         AssemblePreview: {
             /** Due Count */
@@ -8057,6 +8156,26 @@ export interface components {
              */
             ollama_reachable: boolean;
         };
+        /**
+         * LabCatalogue
+         * @description What can be compared, and what a comparison will do to this machine.
+         */
+        LabCatalogue: {
+            /** Tasks */
+            tasks: components["schemas"]["TaskInfo"][];
+            /** Qa Datasets */
+            qa_datasets: string[];
+            /** Installed Models */
+            installed_models: string[];
+            /** Registry Models */
+            registry_models: string[];
+            /** Current Model */
+            current_model: string;
+            /** Busy */
+            busy: boolean;
+            /** Running Id */
+            running_id?: string | null;
+        };
         /** LearningObjectiveItem */
         LearningObjectiveItem: {
             /** Id */
@@ -8172,6 +8291,24 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * MetricRow
+         * @description One metric across every arm, with the tier that decides whether it counts.
+         */
+        MetricRow: {
+            /** Key */
+            key: string;
+            /** Metric */
+            metric: string;
+            /** Tier */
+            tier: string;
+            /** Values */
+            values: {
+                [key: string]: number | null;
+            };
+            /** Identical */
+            identical: boolean;
         };
         /** MisconceptionStatsResponse */
         MisconceptionStatsResponse: {
@@ -8869,6 +9006,37 @@ export interface components {
             /** Evidence */
             evidence: string;
         };
+        /** RunView */
+        RunView: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Total Units */
+            total_units: number;
+            /** Completed Units */
+            completed_units: number;
+            /** Arms */
+            arms: components["schemas"]["ArmView"][];
+            /** Rows */
+            rows: components["schemas"]["MetricRow"][];
+            /** Separation */
+            separation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error?: string | null;
+            /** Restore Error */
+            restore_error?: string | null;
+        };
         /** SavePositionRequest */
         SavePositionRequest: {
             /** Last Section Id */
@@ -9222,6 +9390,23 @@ export interface components {
             /** Concepts */
             concepts: components["schemas"]["StartConceptItemResponse"][];
         };
+        /** StartRunRequest */
+        StartRunRequest: {
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /**
+             * Qa Datasets
+             * @default []
+             */
+            qa_datasets: string[];
+            /**
+             * Max Questions
+             * @default 0
+             */
+            max_questions: number;
+        };
         /** StatsResponse */
         StatsResponse: {
             /** Today Count */
@@ -9486,6 +9671,32 @@ export interface components {
             display_name?: string | null;
             /** Parent Tag */
             parent_tag?: string | null;
+        };
+        /** TaskInfo */
+        TaskInfo: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Typical Seconds */
+            typical_seconds: number;
+            /** Mutates Library */
+            mutates_library: boolean;
+        };
+        /** TaskRunView */
+        TaskRunView: {
+            /** Task */
+            task: string;
+            /** Status */
+            status: string;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Error */
+            error?: string | null;
         };
         /** TeachbackRequest */
         TeachbackRequest: {
@@ -15468,6 +15679,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrichmentJobItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_catalogue_model_lab_catalogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabCatalogue"];
+                };
+            };
+        };
+    };
+    list_runs_model_lab_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_run_model_lab_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_model_lab_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_model_lab_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

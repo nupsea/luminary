@@ -8,6 +8,7 @@ import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
 import { KindMatrix } from "@/components/evals/KindMatrix"
+import { ModelLab } from "@/components/evals/ModelLab"
 import { ModelMatrix } from "@/components/evals/ModelMatrix"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
@@ -83,7 +84,7 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "kinds" | "models" | "runs"
+type TabId = "datasets" | "results" | "kinds" | "models" | "lab" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
@@ -93,6 +94,10 @@ const TABS: { id: TabId; label: string }[] = [
   // Which model produced which numbers. Its own view because the metrics that
   // may decide a model swap are a strict subset of the ones on every other tab.
   { id: "models", label: "By model" },
+  // Launching a comparison, as opposed to reading one: it owns the model
+  // selection while it runs, so it is a deliberate place you go rather than a
+  // button on a results table.
+  { id: "lab", label: "Model lab" },
   { id: "runs", label: "Runs" },
 ]
 
@@ -569,6 +574,7 @@ export default function Quality() {
         {activeTab === "results" && <ResultsDashboard selection={consoleSel} />}
         {activeTab === "kinds" && <KindMatrix />}
         {activeTab === "models" && <ModelMatrix />}
+        {activeTab === "lab" && <ModelLab />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
       </main>
 

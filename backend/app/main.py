@@ -41,6 +41,7 @@ from app.routers.graph import router as graph_router
 from app.routers.home import router as home_router
 from app.routers.images import router as images_router
 from app.routers.mastery import router as mastery_router
+from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.pomodoro import router as pomodoro_router
@@ -318,6 +319,7 @@ ROUTER_REGISTRY = {
     "graph": graph_router,
     "home": home_router,
     "images": images_router,
+    "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
     "pomodoro": pomodoro_router,

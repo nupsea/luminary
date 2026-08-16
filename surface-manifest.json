@@ -401,7 +401,8 @@
       },
       "backend": {
         "routers": [
-          "evals"
+          "evals",
+          "model_lab"
         ]
       },
       "labels": {
