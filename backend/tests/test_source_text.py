@@ -290,3 +290,46 @@ def test_a_chapter_heading_a_scrape_repeated_is_still_authored(scraped_file):
         "Chapter 2. Growth",
         "Chapter 3. Decline",
     ]
+
+
+# Furniture collapse must not eat repeated content
+
+
+def test_a_repeated_indented_idiom_survives_intact():
+    """The reported failure: three functions sharing a `try/except` idiom. The
+    idiom repeats at exactly the threshold, so collapsing it deleted the bodies
+    of the second and third functions -- retrieval over them could never return
+    their error handling again."""
+    body = "    try:\n        return parse(x)\n    except ValueError:\n        return None\n"
+    source = "".join(f"def {name}(x):\n{body}\n" for name in ("a", "b", "c"))
+
+    out = normalise(source)
+
+    # Every function keeps its own body: the idiom appears three times, not once.
+    assert out.count("return parse(x)") == 3
+    assert out.count("except ValueError:") == 3
+    # `normalise` joins the kept lines, so a trailing blank line is not
+    # reproduced; every other line is, in order.
+    assert out.splitlines() == source.splitlines()[: len(out.splitlines())]
+    assert len(out.splitlines()) >= len(source.splitlines()) - 1
+
+
+def test_flush_left_scrape_chrome_still_collapses():
+    """The case the collapse exists for: a nav block repeated on every page."""
+    chrome = "Prev\nNext\nUp\n"
+    source = "".join(f"{chrome}Section {i} says something distinct.\n" for i in range(4))
+
+    out = normalise(source)
+
+    assert out.count("Prev") == 1
+    assert all(f"Section {i}" in out for i in range(4))
+
+
+def test_indentation_beats_frequency():
+    """A margin, not a threshold. An indented block repeated far more often than
+    any chrome still survives, because no number can tell chrome from content and
+    the left margin can."""
+    block = "    logger.debug('step')\n    validate(x)\n    commit(x)\n"
+    source = "".join(f"def f{i}(x):\n{block}\n" for i in range(12))
+
+    assert normalise(source).count("validate(x)") == 12

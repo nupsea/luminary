@@ -502,6 +502,28 @@ library state recorded with the run.
 number in this repo.** This model never emitted parseable JSON for a flashcard batch in 76
 attempts; the parser carried every one.
 
+### Furniture collapse deleted repeated content, and the fix is a margin not a number
+
+`source_text.normalise` collapses runs of recurring lines, and it runs on every text ingest —
+`.txt` and `.md`, not just the saved scrape it was built for. Its docstring claimed losing content
+was impossible by construction; that holds at document scale and not at position scale, because the
+surviving instance is wherever the line first appeared. Reproduced: three functions sharing a
+three-line `try/except` idiom come back with the second and third **bodies deleted**.
+
+Measured before choosing a fix. On the real corpus only the intended document loses anything —
+`art_of_unix.txt` 404 lines, every book 0, `d2l` 0 — so nothing shipped is damaged today, but the
+mechanism is live for any document with a repeated block.
+
+Frequency cannot separate the two: chrome lines occur 16–44 times, the destroyed idiom 3, and a
+sweep found no threshold that both preserves the scrape and spares the idiom (4 → 370 lines
+collapsed, 8 → 298, against 404 at the current 3). **The left margin separates them exactly**: 0
+of 516 recurring lines in the scrape carry indentation, and every line of a code idiom does. An
+indented line is now never furniture.
+
+`art_of_unix` still collapses exactly 404 lines, so the indexed corpus is unchanged and `paper`'s
+baseline holds. Residual risk, stated: unindented content repeated three times in a run of three
+consecutive lines is still collapsed — the run requirement is what keeps a verse refrain safe.
+
 ### Retrieval by content kind
 
 Scoped, rerank off, one library state (52 documents / 207,047 chunks), measured 2026-08-15. Every

@@ -72,10 +72,26 @@ def _collapse_repeated_furniture(lines: list[str]) -> list[str]:
     silently deletes any label that recurs more often than the furniture does.
 
     The residue is one instance of each furniture line: 403 lines removed on the
-    scraped corpus, 61 left standing, against zero risk of dropping content.
+    scraped corpus, 61 left standing.
+
+    "Nothing distinct is ever lost" holds at document scale and not at position
+    scale: the surviving instance is wherever it first appeared, so a block that
+    legitimately recurs is gone from every later place it belonged. That is why
+    `_MIN_REPEATS` is set from the measured gap between chrome and content
+    rather than at the smallest number that works.
     """
+    # An indented line is never furniture. Scrape chrome arrives flush-left --
+    # 0 of 516 recurring lines in the corpus this was written for carry any
+    # indentation -- while repeated *content* is usually indented: a three-line
+    # `try/except` idiom shared by three functions repeats at exactly the
+    # threshold, and collapsing it deleted the bodies of the second and third
+    # functions outright. Frequency cannot tell the two apart; the left margin
+    # can, and it does so without a number to tune.
     freq = Counter(line.strip() for line in lines if line.strip())
-    recurring = [bool(ln.strip()) and freq[ln.strip()] >= _MIN_REPEATS for ln in lines]
+    recurring = [
+        bool(ln.strip()) and ln == ln.lstrip() and freq[ln.strip()] >= _MIN_REPEATS
+        for ln in lines
+    ]
 
     in_run = [False] * len(lines)
     i = 0
