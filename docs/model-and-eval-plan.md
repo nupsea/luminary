@@ -1061,7 +1061,45 @@ carrying the same two refusals as the runner: columns measured against different
 labelled rather than ranked, and a metric identical across models is flagged `did not move` rather
 than read as the models being equivalent.
 
-Still unrun: the `qwen3.5:0.8b` / `4b` acceptance pair, the `qa` task, and both prompt arms.
+#### The 8GB class, measured 2026-08-16
+
+Footprints are measured (`scripts/model_footprint.py`, Ollama `/api/ps` after a real generation at
+the deployed `num_ctx`), so the registry offers an 8GB host four text models instead of one. The
+matrix then ran all four on intent + flashcards, shipped arm, one library state.
+
+| | llama3.2 | qwen3.5:4b | phi4-mini | gemma3:4b |
+|---|---|---|---|---|
+| routing_accuracy | 0.8621 | 0.8966 | **0.9310** | 0.8621 |
+| card_reject_rate | 0.0463 | **0.0278** | 0.0374 | **0.1161** |
+| — deictic rejects | 3 | 2 | 2 | **13** |
+| generation_rate | 0.9714 | **1.0000** | 0.9810 | 0.9238 |
+| LLM calls / 35 generations | 40 | 41 | **61** | 41 |
+| resident | 2.88GB | 3.21GB | 3.45GB | 3.62GB |
+| wall clock | **212s** | 450s | 336s | 406s |
+
+`qwen3.5:4b` and `phi4-mini` are the two credible candidates. phi4-mini leads on routing but needed
+18 retries against 4–6, which on a laptop is a latency and battery cost no quality metric shows —
+the reason `parses` belongs in the tier. `gemma3:4b` is the laggard on the one metric that reads
+instruction-following: 13 deictic rejections, 4× the others, on a rule the prompt states outright.
+Spot-checked against the gate's own log — the rejects are real ("Why does *the author* describe…"),
+not a misfiring gate.
+
+**Not a basis for a switch yet.** Single runs; n=29 for routing and ~108 for cards, so a 1–3 event
+difference is noise and only gemma3's reject rate and phi4-mini's call count are actionable.
+`first_pass_rate`, `parse_failure_rate` and `shape_deviation_rate` read 1.0000/0.0000/0.0000 on all
+four — the json-mode saturation, not agreement between models.
+
+Two instrument limits this run exposed, both open:
+
+- **The separation block compares only the first two arms.** With four models it silently ignores
+  the rest.
+- **`cards_generated` absorbs repeated questions.** `_collect_with_backfill` caps delivery at the
+  requested count and drops questions the model repeated within a generation, so llama3.2 lost 1
+  card and gemma3 lost 2 with nothing reporting it. A model repeating itself is exactly the
+  structural weakness this tier should show; it wants a `duplicate_question_rate`.
+
+Still unrun: the `qa` task on this class, both prompt arms on it, and P5's latency probe on any
+of them.
 
 
 
