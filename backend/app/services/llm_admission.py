@@ -45,18 +45,34 @@ logger = logging.getLogger(__name__)
 
 _POLL_SECONDS = 0.2
 
-# An in-flight interactive call older than this is presumed leaked rather than
-# slow: the longest request timeout in the codebase is 300s, so nothing
-# legitimate reaches here. Deliberately far above the deferral bound -- that
-# bound is the normal release path, this is only a backstop.
-_STALE_INTERACTIVE_SECONDS = 600.0
+# How long an interactive call keeps applying pressure with no sign of life.
+#
+# Pressure decays from the call's **last activity**, not from when it started: a
+# stream bumps this on every token, so a live answer keeps yielding to the user
+# however long it runs, while one the client walked away from stops counting
+# shortly after its last token.
+#
+# That distinction is load-bearing rather than tidy. Holding the gate for the
+# lifetime of an async generator means the release depends on that generator
+# being closed, and a consumer that breaks out of the loop -- a browser
+# navigating away mid-answer, a probe that stops at the first token -- may never
+# close it. Measured: one abandoned stream left `interactive_inflight` stuck at
+# 1, which suspends every background call behind it.
+#
+# Sized above the worst first-token latency measured under ingest load (88s) so
+# a genuinely slow answer is never mistaken for an abandoned one, and far below
+# the old 600s, which stalled ingestion for ten minutes per abandoned stream.
+_STALE_INTERACTIVE_SECONDS = 180.0
 
 
 @dataclass
 class AdmissionState:
     """Live counters for one event loop. Also the source of the UI's paused state."""
 
-    interactive_starts: list[float] = field(default_factory=list)
+    # One entry per in-flight interactive call, holding its last-activity time.
+    # A list of single-element lists so a streaming call can bump its own entry
+    # in place without needing an index that reordering would invalidate.
+    interactive_activity: list[list[float]] = field(default_factory=list)
     background_inflight: int = 0
     background_waiting: int = 0
     last_interactive_end: float = 0.0
@@ -66,7 +82,7 @@ class AdmissionState:
 
     @property
     def interactive_inflight(self) -> int:
-        return len(self.interactive_starts)
+        return len(self.interactive_activity)
 
 
 # Keyed by running loop, as in enrichment_concurrency: state shared within the
@@ -117,15 +133,16 @@ def _max_defer_seconds() -> float:
 def under_interactive_pressure() -> bool:
     """Whether an interactive call is in flight or finished within the grace window.
 
-    A call in flight for longer than `_STALE_INTERACTIVE_SECONDS` stops counting.
-    An SSE stream the client abandoned would otherwise hold pressure for the life
-    of the process.
+    A call with no activity for longer than `_STALE_INTERACTIVE_SECONDS` stops
+    counting. A stream bumps its own activity per token, so this separates a slow
+    answer from one the client walked away from -- which a start-time-only rule
+    could not, and which leaked in practice.
     """
     state = current_state()
     if state is None:
         return False
     now = time.monotonic()
-    if any(now - started < _STALE_INTERACTIVE_SECONDS for started in state.interactive_starts):
+    if any(now - seen[0] < _STALE_INTERACTIVE_SECONDS for seen in state.interactive_activity):
         return True
     if state.last_interactive_end <= 0.0:
         return False
@@ -194,13 +211,13 @@ async def _wait_for_slot(state: AdmissionState) -> None:
 async def interactive_call():
     """Mark interactive pressure for the life of a call, plus the grace window."""
     state = _state()
-    started = time.monotonic()
-    state.interactive_starts.append(started)
+    entry = [time.monotonic()]
+    state.interactive_activity.append(entry)
     try:
-        yield
+        yield entry
     finally:
         with contextlib.suppress(ValueError):
-            state.interactive_starts.remove(started)
+            state.interactive_activity.remove(entry)
         state.last_interactive_end = time.monotonic()
 
 
@@ -219,13 +236,26 @@ async def background_call():
 
 @asynccontextmanager
 async def admit(model: str, *, background: bool):
-    """The one gate `LLMService` applies. Cloud models pass straight through."""
+    """The one gate `LLMService` applies. Cloud models pass straight through.
+
+    Yields a `keepalive` callable. A streaming caller must invoke it as tokens
+    arrive: that is what tells the gate the answer is still being delivered
+    rather than abandoned.
+    """
     if is_cloud_model(model):
-        yield
+        yield _noop
         return
     if background:
         async with background_call():
-            yield
+            yield _noop
         return
-    async with interactive_call():
-        yield
+    async with interactive_call() as entry:
+
+        def keepalive() -> None:
+            entry[0] = time.monotonic()
+
+        yield keepalive
+
+
+def _noop() -> None:
+    """Keepalive for a call the gate does not track."""

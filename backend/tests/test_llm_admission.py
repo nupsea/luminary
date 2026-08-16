@@ -154,6 +154,69 @@ async def test_a_held_background_call_is_admitted_before_ingestion_stalls(
 
 
 @pytest.mark.asyncio
+async def test_a_stream_the_client_walked_away_from_stops_applying_pressure(
+    admission_settings, monkeypatch
+):
+    """The gate cannot depend on a generator being closed.
+
+    Holding it for the generator's lifetime means a consumer that breaks out of
+    the loop -- a browser navigating away mid-answer, a probe that stops at the
+    first token -- may never close it. Measured against a live backend: one
+    abandoned stream left `interactive_inflight` stuck at 1, which suspends
+    every background call behind it until the staleness horizon.
+    """
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    monkeypatch.setattr(llm_admission, "_STALE_INTERACTIVE_SECONDS", 0.3)
+    svc = LLMService()
+
+    async def stream_chunks():
+        for token in ("one", "two", "three"):
+            yield _chunk(token)
+
+    async def fake_acompletion(**kwargs):
+        return stream_chunks()
+
+    with patch("litellm.acompletion", side_effect=fake_acompletion):
+        gen = await svc.stream_messages([{"role": "user", "content": "hi"}], model=LOCAL)
+        async for _ in gen:
+            break  # exactly what a disconnecting client does
+
+    # The entry is still held -- the generator was never closed.
+    assert llm_admission.current_state().interactive_inflight == 1
+    # But pressure decays from the last token, so background work is not stuck.
+    await asyncio.sleep(0.4)
+    assert llm_admission.under_interactive_pressure() is False
+
+
+@pytest.mark.asyncio
+async def test_a_slow_live_stream_keeps_yielding_to_the_user(admission_settings, monkeypatch):
+    """The other half of the same rule: a stream still producing tokens must keep
+    background work back however long it runs, or the decay would cut off a
+    genuinely slow answer."""
+    admission_settings(OLLAMA_NUM_PARALLEL=1, LLM_ADMISSION_GRACE_SECONDS=0.0)
+    monkeypatch.setattr(llm_admission, "_STALE_INTERACTIVE_SECONDS", 0.3)
+    svc = LLMService()
+
+    async def slow_chunks():
+        for token in ("a", "b", "c", "d"):
+            await asyncio.sleep(0.15)
+            yield _chunk(token)
+
+    async def fake_acompletion(**kwargs):
+        return slow_chunks()
+
+    seen = 0
+    with patch("litellm.acompletion", side_effect=fake_acompletion):
+        gen = await svc.stream_messages([{"role": "user", "content": "hi"}], model=LOCAL)
+        async for _ in gen:
+            seen += 1
+            # Well past the horizon in elapsed time, but tokens keep arriving.
+            assert llm_admission.under_interactive_pressure() is True
+
+    assert seen == 4
+
+
+@pytest.mark.asyncio
 async def test_an_abandoned_interactive_call_does_not_hold_the_gate_for_ever(
     admission_settings, monkeypatch
 ):

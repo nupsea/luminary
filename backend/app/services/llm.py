@@ -458,13 +458,15 @@ class LLMService:
     async def _token_stream(
         self, kwargs: dict, fallback_kwargs: dict | None = None, *, background: bool = False
     ) -> AsyncGenerator[str]:
-        """Stream deltas, holding the admission gate for the whole stream.
+        """Stream deltas, holding the admission gate while tokens are flowing.
 
         A stream is not finished when its first token arrives -- the user is
-        still being served, so the gate is released only once the generator is
-        exhausted or closed.
+        still being served. But the gate must not depend on this generator being
+        closed either: a consumer that breaks out of the loop may never close
+        it. So each token refreshes the gate's activity clock, and an abandoned
+        stream stops applying pressure shortly after its last token.
         """
-        async with admit(str(kwargs.get("model", "")), background=background):
+        async with admit(str(kwargs.get("model", "")), background=background) as keepalive:
             try:
                 response = await litellm.acompletion(stream=True, **kwargs)
             except Exception as exc:
@@ -481,6 +483,11 @@ class LLMService:
             async for chunk in response:
                 delta = chunk.choices[0].delta.content
                 if delta:
+                    # Tells the gate the answer is still being delivered. Without
+                    # it, pressure is held by this generator's lifetime, and a
+                    # consumer that stops reading may never close it -- which
+                    # left the gate stuck and suspended every background call.
+                    keepalive()
                     yield delta
 
 
