@@ -234,3 +234,65 @@ def test_a_task_that_moved_at_all_is_not_flagged_as_unmeasured():
     from evals.lib.matrix import unmeasured_tasks
 
     assert unmeasured_tasks({"qa.answer_rate": 0.9}, {"qa.answer_rate": 0.95}) == []
+
+
+def test_a_task_that_did_not_finish_is_kept_out_of_the_comparison(monkeypatch):
+    """A truncated flashcard run reported 37 cards against another model's 108,
+    and the separation check called that a difference between the models. A
+    partial run is not a measurement."""
+    monkeypatch.setattr(run_model_matrix, "_switch_model", lambda url, model: model)
+    monkeypatch.setattr(run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"})
+    monkeypatch.setattr(
+        run_model_matrix,
+        "run_task",
+        lambda task, url: {
+            "task": task.name,
+            "exit_code": 0 if task.name == "intent" else 1,
+            "duration_s": 1.0,
+            "rows_recorded": 1,
+            "metrics": {"routing_accuracy": 0.9} if task.name == "intent" else {"parses": 13},
+            "stderr_tail": [] if task.name == "intent" else ["httpx.ReadTimeout"],
+        },
+    )
+
+    tasks = run_model_matrix._tasks("http://x")
+    arm = run_model_matrix.run_model("ollama/m", [tasks["intent"], tasks["flashcards"]], "http://x")
+
+    assert arm["metrics"] == {"intent.routing_accuracy": 0.9}
+    assert arm["failed_tasks"] == ["flashcards"]
+
+
+def test_asserting_separation_refuses_incomplete_evidence(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        run_model_matrix,
+        "_environment",
+        lambda url: {"prompt_arm": "shipped", "local_chat_model": "ollama/a"},
+    )
+    monkeypatch.setattr(run_model_matrix, "_installed_models", lambda url: [])
+    monkeypatch.setattr(run_model_matrix, "_switch_model", lambda url, model: model)
+    monkeypatch.setattr(
+        run_model_matrix,
+        "run_model",
+        lambda model, tasks, url: {
+            "model": model,
+            "tasks": [],
+            "metrics": {"intent.routing_accuracy": 0.9 if model.endswith("b") else 0.5},
+            "failed_tasks": ["flashcards"] if model.endswith("b") else [],
+            "environment": {"prompt_arm": "shipped"},
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_model_matrix.py",
+            "--models",
+            "ollama/a,ollama/b",
+            "--assert-separation",
+            "--out",
+            str(tmp_path / "m.jsonl"),
+        ],
+    )
+
+    assert run_model_matrix.main() == 1
+    assert "incomplete evidence" in capsys.readouterr().err

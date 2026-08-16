@@ -286,14 +286,23 @@ def run_task(task: Task, backend_url: str) -> dict[str, Any]:
 def run_model(model: str, tasks: list[Task], backend_url: str) -> dict[str, Any]:
     resolved = _switch_model(backend_url, model)
     results = [run_task(task, backend_url) for task in tasks]
+
+    # A task that exited non-zero stopped part way, so its counters describe
+    # however much of the work it got through. Those numbers are kept for
+    # diagnosis and kept OUT of the comparison: a truncated flashcard run
+    # reported 37 cards against another model's 108 and the separation check
+    # duly called that a difference between the models.
     merged: dict[str, Any] = {}
     for result in results:
+        if result["exit_code"] != 0:
+            continue
         for key, value in result["metrics"].items():
             merged[f"{result['task']}.{key}"] = value
     return {
         "model": resolved,
         "tasks": results,
         "metrics": merged,
+        "failed_tasks": [r["task"] for r in results if r["exit_code"] != 0],
         "environment": _environment(backend_url),
     }
 
@@ -346,7 +355,10 @@ def _print_report(arms: list[dict[str, Any]], tasks: list[Task]) -> None:
         if result["exit_code"] != 0
     ]
     for model, task, tail in failures:
-        print(f"  NOTE: {model} {task} exited non-zero: {' | '.join(tail) or 'no stderr'}")
+        print(
+            f"  INCOMPLETE: {model} {task} exited non-zero and is EXCLUDED from the\n"
+            f"  comparison -- a partial run is not a measurement. {' | '.join(tail) or 'no stderr'}"
+        )
     print()
 
 
@@ -459,6 +471,7 @@ def main() -> int:
                 "metrics": arm["metrics"],
                 "structural": structural_metrics(arm["metrics"]),
                 "environment": arm["environment"],
+                "failed_tasks": arm.get("failed_tasks", []),
                 "tasks": [
                     {k: v for k, v in result.items() if k != "metrics"} for result in arm["tasks"]
                 ],
@@ -471,6 +484,17 @@ def main() -> int:
         fh.write(json.dumps(record) + "\n")
     print(f"  recorded to {args.out}")
 
+    incomplete = [
+        f"{arm['model']} {task}" for arm in arms for task in arm.get("failed_tasks", [])
+    ]
+    if args.assert_separation and incomplete:
+        print(
+            "MATRIX GATE FAILED: incomplete evidence -- "
+            f"{', '.join(incomplete)} did not finish. A separation claimed over a "
+            "truncated run is not a claim about the models.",
+            file=sys.stderr,
+        )
+        return 1
     if args.assert_separation and (verdict is None or not verdict["separated"]):
         print(
             "MATRIX GATE FAILED: the structural tier did not separate "
