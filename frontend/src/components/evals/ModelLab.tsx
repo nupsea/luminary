@@ -138,6 +138,56 @@ function RunCard({ run }: { run: LabRun }) {
         </Notice>
       ) : null}
 
+      <div>
+        <p className="mb-1 text-xs font-medium text-foreground">Stages</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <tbody>
+              {run.arms.flatMap((arm) =>
+                arm.tasks.map((t) => (
+                  <tr key={`${arm.model}-${t.task}`} className="border-b last:border-0 align-top">
+                    <td className="py-1.5 pr-3 text-muted-foreground">{arm.model}</td>
+                    <td className="py-1.5 pr-3 font-medium">{t.task}</td>
+                    <td className="py-1.5 pr-3">
+                      <span
+                        className={
+                          t.status === "failed"
+                            ? "text-rose-600 dark:text-rose-400"
+                            : t.status === "complete"
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-muted-foreground"
+                        }
+                      >
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                      {t.duration_s == null ? "—" : `${Math.round(t.duration_s)}s`}
+                    </td>
+                    <td className="py-1.5 text-muted-foreground">
+                      {t.error && <div className="text-rose-600 dark:text-rose-400">{t.error}</div>}
+                      {t.warnings.slice(0, 3).map((w) => (
+                        <div key={w} className="text-amber-700 dark:text-amber-400">
+                          {w}
+                        </div>
+                      ))}
+                      {t.stderr_tail.length > 0 && (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-[11px]">runner output</summary>
+                          <pre className="mt-1 max-w-full overflow-x-auto rounded bg-muted p-2 text-[10px]">
+                            {t.stderr_tail.join("\n")}
+                          </pre>
+                        </details>
+                      )}
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <RunTable run={run} />
     </div>
   )
@@ -309,6 +359,12 @@ export function ModelLab() {
             </label>
           </div>
         )}
+
+        <Notice tone="warn">
+          A comparison owns the model selection for its whole duration, so other Quality runs are
+          refused while it works and the app answers with whichever candidate is loaded. Expect it
+          to use the machine hard — it is one local model generating continuously.
+        </Notice>
 
         {willWrite.length > 0 && (
           <Notice tone="warn">

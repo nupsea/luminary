@@ -197,6 +197,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
+    # Model-lab comparisons take hours; without this they exist only for the
+    # life of the process, and `uvicorn --reload` restarts on every edit.
+    try:
+        from app.services.model_lab import load_history  # noqa: PLC0415
+
+        load_history()
+    except Exception:
+        logger.warning("Failed to load model-lab history", exc_info=True)
+
     # Start pre-loading/warming up models in the background (skipped in test runs)
     import sys
 

@@ -1179,6 +1179,7 @@ async def run_generated_dataset_eval(
             err = _validate_model_available(candidate, settings)
             if err:
                 raise HTTPException(status_code=422, detail=err)
+    _refuse_if_lab_running()
     run_id = f"generated-{dataset_id}-{len(_background_tasks) + 1}"
     _record_run_start(
         dataset_id,
@@ -1304,6 +1305,7 @@ async def run_eval(req: EvalRunRequest) -> dict:
         req.judge_model = ""
         req.model = None
         req.generate = False
+    _refuse_if_lab_running()
     settings = get_settings()
     for candidate in (req.judge_model, req.model):
         if candidate:
@@ -1405,6 +1407,31 @@ def _ollama_models(settings) -> tuple[set[str], str | None]:
 # arbitrary-file read/write primitive. Enforce a strict provider/name shape so
 # no argv token can begin with "-" or carry separators.
 _MODEL_ID_RE = re.compile(r"^(ollama|openai|anthropic|gemini)/[A-Za-z0-9._:-]+$")
+
+
+def _refuse_if_lab_running() -> None:
+    """Refuse an eval while a model comparison holds the model selection.
+
+    Not politeness about CPU. A comparison switches the selected model between
+    candidates for its whole duration, so an eval started alongside one would be
+    answered by whichever model the lab happened to have loaded at that moment,
+    and would record that model's environment as its own. The number would look
+    ordinary and mean nothing.
+    """
+    from app.services import model_lab  # noqa: PLC0415
+
+    running = model_lab.current_run()
+    if running is None:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "A model comparison is running and owns the model selection "
+            f"({' vs '.join(running.models)}). An eval started now would be answered "
+            "by whichever candidate is loaded and would record the wrong model. "
+            "Wait for it to finish, or stop it from Quality → Model lab."
+        ),
+    )
 
 
 def _validate_model_available(model: str, settings) -> str | None:

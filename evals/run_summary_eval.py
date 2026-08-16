@@ -89,6 +89,13 @@ def _collect_sse_tokens(text: str) -> str:
     return "".join(tokens)
 
 
+# `--force-refresh` regenerates through map-reduce, which is one LLM call per
+# batch over a whole document -- minutes on a local model, and longer on a slow
+# one. The previous 120s crashed the runner on the first slow document, losing
+# every metric for that model while a faster model reported normally.
+SUMMARY_REQUEST_TIMEOUT = 900.0
+
+
 def fetch_summary(
     backend_url: str,
     document_id: str,
@@ -109,7 +116,9 @@ def fetch_summary(
         payload["force_refresh"] = True
     if model:
         payload["model"] = model
-    resp = httpx.post(f"{backend_url}/summarize/{document_id}", json=payload, timeout=120.0)
+    resp = httpx.post(
+        f"{backend_url}/summarize/{document_id}", json=payload, timeout=SUMMARY_REQUEST_TIMEOUT
+    )
     resp.raise_for_status()
     return _collect_sse_tokens(resp.text)
 
@@ -161,19 +170,27 @@ def main() -> None:
 
     manifest = load_manifest()
     scored: list[dict] = []
+    failed_docs: list[str] = []
     graded: list[dict] = []
     judge_failures = 0
     for row in rows:
         doc_id = ensure_ingested(args.backend_url, row["source_file"], manifest)
         if not doc_id:
             continue
-        summary = fetch_summary(
-            args.backend_url,
-            doc_id,
-            args.mode,
-            args.model or None,
-            force_refresh=args.force_refresh,
-        )
+        try:
+            summary = fetch_summary(
+                args.backend_url,
+                doc_id,
+                args.mode,
+                args.model or None,
+                force_refresh=args.force_refresh,
+            )
+        except httpx.HTTPError as exc:
+            # A hole, counted rather than swallowed: one document that timed out
+            # must not discard every other document's score (I-32).
+            failed_docs.append(f"{type(exc).__name__}: {str(exc)[:80]}")
+            print(f"WARNING: summary failed ({type(exc).__name__}), continuing", file=sys.stderr)
+            continue
         theme = compute_theme_coverage(summary, row["expected_themes"])
         concision = compute_conciseness_pct(summary, row["target_length_chars"])
         grounding = _grounding_for(args.backend_url, doc_id, summary)
@@ -213,6 +230,7 @@ def main() -> None:
         "theme_coverage": sum(s["theme_coverage"] for s in scored) / len(scored),
         "no_hallucination": sum(judged) / len(judged) if judged else None,
         "conciseness_pct": sum(s["conciseness_pct"] or 0.0 for s in scored) / len(scored),
+        "rows_failed": len(failed_docs),
         "summary_grounding": nli.get("faithfulness"),
         "grounding_model": nli.get("faithfulness_model"),
     }
@@ -224,6 +242,10 @@ def main() -> None:
         )
 
     violations: list[str] = []
+    if failed_docs:
+        violations.append(
+            f"{len(failed_docs)} document(s) could not be summarised: {failed_docs[:2]}"
+        )
     if metrics["theme_coverage"] < THRESHOLDS["theme_coverage"]:
         violations.append("theme_coverage below threshold")
     if not args.skip_judge and metrics["no_hallucination"] is None:

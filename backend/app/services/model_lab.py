@@ -55,6 +55,11 @@ _DATASET_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 RunStatus = Literal["running", "complete", "failed", "cancelled"]
 
+# A stage may legitimately run far longer than its estimate on a slow model, so
+# the timeout is a wedge detector rather than a schedule.
+_TIMEOUT_SLACK = 6
+_MIN_TASK_TIMEOUT = 1800.0
+
 
 @dataclass
 class TaskSpec:
@@ -176,6 +181,10 @@ class TaskResult:
     duration_s: float | None = None
     metrics: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # The runner's own WARNING lines, kept whether or not it failed: a stage
+    # that skipped rows still reports, and the reason belongs beside the number.
+    warnings: list[str] = field(default_factory=list)
+    stderr_tail: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -361,6 +370,10 @@ async def _run_task(spec: TaskSpec, backend_url: str) -> TaskResult:
     offset = _scores_offset()
     before = llm_output_stats.snapshot()
     started = time.monotonic()
+    # Generous, because these are batch jobs on a local model and a tight bound
+    # is how a slow model comes to look like a broken one. Present at all
+    # because a wedged runner would otherwise hold the model selection for ever.
+    budget = max(spec.typical_seconds * _TIMEOUT_SLACK, _MIN_TASK_TIMEOUT)
     try:
         proc = await asyncio.to_thread(
             subprocess.run,  # noqa: S603 -- fixed argv, ids validated on entry
@@ -369,7 +382,16 @@ async def _run_task(spec: TaskSpec, backend_url: str) -> TaskResult:
             capture_output=True,
             text=True,
             check=False,
+            timeout=budget,
         )
+    except subprocess.TimeoutExpired:
+        result.status = "failed"
+        result.error = (
+            f"exceeded {int(budget)}s. The stage is a batch job, so this means it "
+            "wedged rather than that it was slow."
+        )
+        result.duration_s = round(time.monotonic() - started, 1)
+        return result
     except OSError as exc:
         result.status = "failed"
         result.error = f"{type(exc).__name__}: {exc}"
@@ -383,13 +405,26 @@ async def _run_task(spec: TaskSpec, backend_url: str) -> TaskResult:
     metrics |= _repairs_between(before, llm_output_stats.snapshot())
     result.metrics = metrics
 
+    # The runner's own warnings, whether or not it exited non-zero: a stage that
+    # skipped rows still reports, and the reason belongs next to the number.
+    result.warnings = [
+        line.strip()
+        for line in (proc.stderr or "").splitlines()
+        if line.startswith(("WARNING", "QUALITY GATE FAILED"))
+    ][:10]
+
     if proc.returncode == 0:
         result.status = "complete"
     else:
         result.status = "failed"
-        tail = (proc.stderr or "").strip().splitlines()
+        tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln.strip()]
         result.error = (tail[-1] if tail else "runner exited non-zero")[:400]
-        logger.warning("model lab: task %s failed rc=%d", spec.key, proc.returncode)
+        # Kept so a failure is diagnosable from the UI rather than only from a
+        # terminal someone would have to have been watching.
+        result.stderr_tail = tail[-8:]
+        logger.warning(
+            "model lab: task %s failed rc=%d: %s", spec.key, proc.returncode, result.error
+        )
     return result
 
 
@@ -476,6 +511,79 @@ def _append_history(run: MatrixRun) -> None:
             fh.write(json.dumps(to_dict(run)) + "\n")
     except OSError:
         logger.warning("model lab: could not append run history", exc_info=True)
+
+
+def _from_dict(data: dict[str, Any]) -> MatrixRun:
+    run = MatrixRun(
+        id=data["id"],
+        models=data.get("models", []),
+        tasks=data.get("tasks", []),
+        status=data.get("status", "complete"),
+        started_at=data.get("started_at", ""),
+        finished_at=data.get("finished_at"),
+        separation=data.get("separation"),
+        error=data.get("error"),
+        restored_model=data.get("restored_model"),
+        restore_error=data.get("restore_error"),
+    )
+    for arm in data.get("arms", []):
+        run.arms.append(
+            ArmResult(
+                model=arm["model"],
+                tasks=[
+                    TaskResult(**{k: v for k, v in t.items() if k in _TASK_FIELDS})
+                    for t in arm.get("tasks", [])
+                ],
+                metrics=arm.get("metrics", {}),
+                environment=arm.get("environment", {}),
+            )
+        )
+    return run
+
+
+_TASK_FIELDS = set(TaskResult.__dataclass_fields__)
+
+
+def load_history(limit: int = 50) -> None:
+    """Re-read finished runs from disk into memory.
+
+    Without this a comparison exists only for the life of the process, and in
+    development `uvicorn --reload` restarts on every edit -- so a two-hour run
+    could be lost to a one-line change. Called at startup; failures are logged
+    and never fatal, because a lab with no history is still a working lab.
+    """
+    if not HISTORY_PATH.exists():
+        return
+    try:
+        with HISTORY_PATH.open() as fh:
+            lines = fh.readlines()[-limit:]
+    except OSError:
+        logger.warning("model lab: could not read run history", exc_info=True)
+        return
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        # The CLI matrix writes to the same file in its own shape; skip anything
+        # that is not one of ours rather than half-parsing it.
+        if not isinstance(data, dict) or "id" not in data or "arms" not in data:
+            continue
+        try:
+            run = _from_dict(data)
+        except (KeyError, TypeError):
+            logger.debug("model lab: skipping unreadable history row", exc_info=True)
+            continue
+        # A run recorded as running was interrupted by whatever stopped the
+        # process. It never finished, so it is not a result.
+        if run.status == "running":
+            run.status = "failed"
+            run.error = "the backend restarted while this run was in flight"
+        _runs.setdefault(run.id, run)
 
 
 def to_dict(run: MatrixRun) -> dict[str, Any]:

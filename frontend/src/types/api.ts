@@ -9697,6 +9697,16 @@ export interface components {
             duration_s?: number | null;
             /** Error */
             error?: string | null;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+            /**
+             * Stderr Tail
+             * @default []
+             */
+            stderr_tail: string[];
         };
         /** TeachbackRequest */
         TeachbackRequest: {

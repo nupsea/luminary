@@ -66,6 +66,12 @@ class TaskRunView(BaseModel):
     exit_code: int | None = None
     duration_s: float | None = None
     error: str | None = None
+    # The runner's own WARNING lines, kept whether or not it failed: a stage that
+    # skipped rows still reports, and the reason belongs beside the number.
+    warnings: list[str] = []
+    # Enough of the failure to diagnose it from the UI rather than from a
+    # terminal someone would have to have been watching.
+    stderr_tail: list[str] = []
 
 
 class ArmView(BaseModel):

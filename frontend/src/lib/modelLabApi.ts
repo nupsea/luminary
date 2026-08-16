@@ -25,6 +25,10 @@ export interface LabTaskRun {
   exit_code: number | null
   duration_s: number | null
   error: string | null
+  /** The runner's own WARNING lines — a stage can skip rows and still report. */
+  warnings: string[]
+  /** Enough of a failure to diagnose it without going to a terminal. */
+  stderr_tail: string[]
 }
 
 export interface LabArm {

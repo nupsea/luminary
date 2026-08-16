@@ -28,6 +28,16 @@ from evals.lib.store import store_results  # noqa: E402
 THRESHOLDS = {"factuality": 0.85, "atomicity": 0.80, "clarity_avg": 3.5}
 
 
+# One request generates several cards, and a slow local model re-prompts to
+# backfill the ones its first pass did not deliver -- so this is minutes, not
+# seconds, and it is a background batch job. The previous 120s crashed the whole
+# runner on the first slow row: every metric for that model was lost while a
+# faster model on the same hardware reported normally, which reads as "the model
+# produced nothing" rather than "the harness gave up". Matches
+# `run_eval.QA_REQUEST_TIMEOUT` deliberately.
+GENERATE_REQUEST_TIMEOUT = 600.0
+
+
 def generate_cards(backend_url: str, document_id: str, row: dict) -> list[dict]:
     payload = {
         "document_id": document_id,
@@ -35,7 +45,9 @@ def generate_cards(backend_url: str, document_id: str, row: dict) -> list[dict]:
         "count": row.get("expected_card_count") or 1,
         "context": row["chunk_id_or_text"],
     }
-    resp = httpx.post(f"{backend_url}/flashcards/generate", json=payload, timeout=120.0)
+    resp = httpx.post(
+        f"{backend_url}/flashcards/generate", json=payload, timeout=GENERATE_REQUEST_TIMEOUT
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -82,6 +94,7 @@ def main() -> None:
     per_kind: dict[str, list[dict]] = {}
     requested = delivered = 0
     skipped: list[str] = []
+    failed_rows: list[str] = []
 
     for row in rows:
         # Rows sampled from the live index name their document; only a row that
@@ -92,7 +105,16 @@ def main() -> None:
         if not doc_id:
             skipped.append(row["question"][:60])
             continue
-        cards = generate_cards(args.backend_url, doc_id, row)
+        try:
+            cards = generate_cards(args.backend_url, doc_id, row)
+        except httpx.HTTPError as exc:
+            # One row that timed out or errored is a hole in the measurement, not
+            # a reason to throw away every other row. Counted rather than
+            # swallowed: `rows_failed` is reported, and asserted runs fail on it
+            # (I-32 -- requested-but-uncomputed is a failure, never a pass).
+            failed_rows.append(f"{type(exc).__name__}: {str(exc)[:80]}")
+            print(f"WARNING: row failed ({type(exc).__name__}), continuing", file=sys.stderr)
+            continue
         requested += int(row.get("expected_card_count") or 1)
         delivered += len(cards)
         scored = {"cards": len(cards), "requested": int(row.get("expected_card_count") or 1)}
@@ -123,6 +145,8 @@ def main() -> None:
         # none. Proven: two identical calls after one eval run both returned 0.
         "cards_returned": delivered,
         "rows_scored": len(per_row),
+        # A hole in the measurement, stated rather than averaged away.
+        "rows_failed": len(failed_rows),
     }
     if not args.skip_judge:
         metrics |= {
@@ -183,6 +207,10 @@ def main() -> None:
         ]
     if skipped:
         violations.append(f"{len(skipped)} row(s) had no document: {skipped[:3]}")
+    if failed_rows:
+        violations.append(
+            f"{len(failed_rows)} row(s) could not be generated: {failed_rows[:2]}"
+        )
 
     passed = len(violations) == 0
     model_name = "no-judge" if args.skip_judge else args.judge_model

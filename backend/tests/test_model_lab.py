@@ -291,3 +291,104 @@ async def test_the_catalogue_endpoint_reports_what_is_available(client):
     assert {t["key"] for t in body["tasks"]} >= {"intent", "flashcards", "summary"}
     assert "book" in body["qa_datasets"]
     assert body["busy"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_eval_is_refused_while_a_comparison_owns_the_model(client, monkeypatch):
+    """Not politeness about CPU. A comparison switches the selected model between
+    candidates, so an eval started alongside one would be answered by whichever
+    candidate happened to be loaded and would record that as its own environment
+    -- a number that looks ordinary and means nothing."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _hold(spec, backend_url):
+        started.set()
+        await release.wait()
+        return model_lab.TaskResult(task=spec.key, status="complete", exit_code=0)
+
+    monkeypatch.setattr(model_lab, "_run_task", _hold)
+    monkeypatch.setattr(model_lab, "_switch_model", _fake_switch)
+    monkeypatch.setattr(model_lab, "_environment", _fake_env)
+
+    await client.post("/model-lab/runs", json={"models": ["ollama/a"], "tasks": ["intent"]})
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    blocked = await client.post("/evals/run", json={"dataset": "book"})
+
+    assert blocked.status_code == 409
+    assert "model comparison is running" in blocked.json()["detail"]
+
+    release.set()
+    await _settle()
+
+
+@pytest.mark.asyncio
+async def test_a_stage_that_wedges_is_bounded_rather_than_holding_the_model_for_ever(monkeypatch):
+    """The timeout is a wedge detector, not a schedule: it is deliberately far
+    above any real runtime, because a tight bound is how a slow model comes to
+    look like a broken one."""
+    import subprocess
+
+    def _hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="runner", timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(subprocess, "run", _hang)
+    spec = model_lab.task_catalogue("http://x", qa_datasets=[], max_questions=None)["intent"]
+
+    result = await model_lab._run_task(spec, "http://x")
+
+    assert result.status == "failed"
+    assert "wedged" in (result.error or "")
+
+
+def test_history_survives_a_restart(tmp_path, monkeypatch):
+    """A comparison takes hours; in development `uvicorn --reload` restarts on
+    every edit, so an in-memory-only store loses the run to a one-line change."""
+    import json
+
+    path = tmp_path / "history.jsonl"
+    monkeypatch.setattr(model_lab, "HISTORY_PATH", path)
+    run = model_lab.MatrixRun(
+        id="abc", models=["ollama/a"], tasks=["intent"], status="complete", started_at="t"
+    )
+    run.arms.append(model_lab.ArmResult(model="ollama/a", metrics={"intent.routing_accuracy": 0.9}))
+    model_lab._append_history(run)
+    model_lab.reset_for_tests()
+
+    model_lab.load_history()
+    restored = model_lab.get_run("abc")
+
+    assert restored is not None
+    assert restored.arms[0].metrics == {"intent.routing_accuracy": 0.9}
+    assert json.loads(path.read_text().strip())["id"] == "abc"
+
+
+def test_a_run_interrupted_by_a_restart_is_not_presented_as_a_result(tmp_path, monkeypatch):
+    path = tmp_path / "history.jsonl"
+    monkeypatch.setattr(model_lab, "HISTORY_PATH", path)
+    run = model_lab.MatrixRun(
+        id="mid", models=["ollama/a"], tasks=["intent"], status="running", started_at="t"
+    )
+    model_lab._append_history(run)
+    model_lab.reset_for_tests()
+
+    model_lab.load_history()
+
+    restored = model_lab.get_run("mid")
+    assert restored is not None
+    assert restored.status == "failed"
+    assert "restarted" in (restored.error or "")
+
+
+def test_the_cli_matrix_rows_in_the_same_file_are_skipped(tmp_path, monkeypatch):
+    """`run_model_matrix.py` writes its own shape to this file; half-parsing one
+    of its rows would invent a run that never existed here."""
+    path = tmp_path / "history.jsonl"
+    path.write_text('{"timestamp": "x", "models": ["a"], "results": []}\n')
+    monkeypatch.setattr(model_lab, "HISTORY_PATH", path)
+    model_lab.reset_for_tests()
+
+    model_lab.load_history()
+
+    assert model_lab.recent_runs() == []
