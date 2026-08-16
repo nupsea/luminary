@@ -594,6 +594,10 @@ class EvalEnvironmentResponse(BaseModel):
     local_chat_model: str
     generation_model: str
     vision_model: str
+    # Which prompt produced the run: `shipped` or the matrix's `bare` arm, plus
+    # any accommodations withheld one at a time for the necessity check.
+    prompt_arm: str = "shipped"
+    prompt_accommodations_dropped: list[str] = []
     library: EvalLibraryFingerprint
 
 

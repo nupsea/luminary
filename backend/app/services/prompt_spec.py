@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from app.config import get_settings
 from app.model_registry import ModelProfile
 
 AccommodationKind = Literal[
@@ -143,10 +144,41 @@ def step_decomposition(text: str, *, introduced_for: str, because: str) -> Accom
     )
 
 
+def withheld() -> tuple[bool, frozenset[str]]:
+    """The matrix's two arms: (bare contract, accommodation ids to withhold).
+
+    `bare` is the scaffolding-tax arm — the contract alone, for every model. The
+    id list is the necessity check, one accommodation at a time. Both are
+    restart-level settings and both are recorded in a run's environment, because
+    a number produced under either arm is not comparable to a shipped one.
+    """
+    settings = get_settings()
+    dropped = frozenset(
+        part.strip() for part in settings.PROMPT_DROP_ACCOMMODATIONS.split(",") if part.strip()
+    )
+    return settings.PROMPT_ARM == "bare", dropped
+
+
+def _applied(
+    accommodation: Accommodation,
+    profile: ModelProfile | None,
+    bare: bool,
+    dropped: frozenset[str],
+) -> bool:
+    if bare or accommodation.id in dropped:
+        return False
+    return accommodation.needed_by(profile)
+
+
 def render(spec: PromptSpec, profile: ModelProfile | None) -> str:
     """The prompt this model gets: the contract, then only what it still needs."""
+    bare, dropped = withheld()
     parts = [spec.contract.rstrip()]
-    parts.extend(a.text.strip() for a in spec.for_profile(profile))
+    parts.extend(
+        a.text.strip()
+        for a in spec.accommodations
+        if _applied(a, profile, bare, dropped)
+    )
     return "\n".join(p for p in parts if p) + "\n"
 
 
@@ -157,11 +189,12 @@ def describe(spec: PromptSpec, profile: ModelProfile | None) -> list[dict[str, s
     at runtime, which is a genuine loss for anyone doing prompt work; this is the
     replacement, and it ships with the refactor rather than after it.
     """
+    bare, dropped = withheld()
     return [
         {
             "id": a.id,
             "kind": a.kind,
-            "applied": "yes" if a.needed_by(profile) else "no",
+            "applied": "yes" if _applied(a, profile, bare, dropped) else "no",
             "introduced_for": a.introduced_for,
             "because": a.because,
             "drop_when": a.drop_when,

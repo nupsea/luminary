@@ -931,7 +931,49 @@ Falsifier: if hard-suspend on `low` makes ingest unacceptable for people who upl
 suspend only while a chat is actively streaming and resume on idle. If yielding between calls is
 still too coarse, the lever is call size, not preemption — Ollama exposes no preemption primitive.
 
-### P6 — Eval matrix and calibration
+### P6 — Eval matrix and calibration — **instrument shipped 2026-08-16, not yet run across models**
+
+`evals/run_model_matrix.py` switches the backend's model per candidate, runs the model-sensitive
+runners against it, takes the repair counters around every task, and reports the three tiers from
+`evals/lib/matrix.py`. `make eval-matrix MODELS=a,b` is the entry point; every run appends to
+`evals/model_matrix_history.jsonl` with the full environment block per arm.
+
+Four refusals, because a matrix that produces a number it cannot defend is worse than no matrix:
+it refuses to run when the backend is in a different prompt arm from the one asked for, refuses a
+model it could not verify the switch to, refuses a model that is not installed, and restores the
+original model even when a task fails. `--assert-separation` is the instrument's own acceptance
+test — it fails unless the structural tier tells the first two models apart, and prints that this
+is a finding about the instrument rather than about the models.
+
+**The two arms are backend settings, not runner flags.** `PROMPT_ARM=bare` renders the contract
+alone; `PROMPT_DROP_ACCOMMODATIONS=<ids>` withholds them one at a time for the necessity check.
+Both are read where `render()` is called, which is at import, so switching arms means restarting
+the backend — and that is the property that makes a run unable to straddle two arms. Both appear
+in `/evals/environment` as `prompt_arm` and `prompt_accommodations_dropped`, so every history row
+records which prompt produced it (E5).
+
+**Metric tiering is where the judgement lives**, and two entries are worth naming. `routing_accuracy`
+gates: its ground truth is hand-labelled, so it is not the style artifact a judged score is.
+`cards_returned` and `cards_deduped` are structural in shape but contaminated by library state —
+the near-duplicate filter drops candidates resembling cards the document already has — so they are
+reported and never allowed to decide a separation. `hit_rate`, `MRR` and `nDCG` never appear at all.
+
+**A P4 gap this work found, and the reason `accommodations_needed` cannot yet do anything.** Every
+spec is rendered at import time against `profile_for(default_chat_model())` — the *configured
+default*, not the model that will answer. Today that is invisible, because no registry entry has
+`accommodations_measured` set and so every model gets every accommodation. The moment the matrix
+fills `accommodations_needed` for one model, the value will be read for the wrong model or not at
+all. Rendering per resolved model is therefore a prerequisite for the necessity check's output to
+mean anything, and it belongs in P4 rather than being smuggled into the matrix.
+
+**Not yet run across models.** The acceptance criterion — separating `qwen3.5:0.8b` from
+`qwen3.5:4b` — needs both pulled and a full pass per model, and is unverified. What has run is one
+end-to-end pass on the current model with the intent task only: 29 adversarial rows in 10.9s,
+`routing_accuracy` 0.9655. That is plumbing evidence, **not** a model comparison and not comparable
+to the 0.5862 recorded above, which is the heuristic-only arm measured before the shape rules and
+the negation fix shipped.
+
+
 
 `evals/run_model_matrix.py` drives the model-sensitive runners (`run_intent_eval`,
 `run_flashcard_eval`, `run_summary_eval`, `/qa`) across candidates, with two arms the previous

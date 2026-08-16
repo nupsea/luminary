@@ -7016,6 +7016,16 @@ export interface components {
             generation_model: string;
             /** Vision Model */
             vision_model: string;
+            /**
+             * Prompt Arm
+             * @default shipped
+             */
+            prompt_arm: string;
+            /**
+             * Prompt Accommodations Dropped
+             * @default []
+             */
+            prompt_accommodations_dropped: string[];
             library: components["schemas"]["EvalLibraryFingerprint"];
         };
         /** EvalLibraryFingerprint */

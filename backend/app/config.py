@@ -122,6 +122,16 @@ class Settings(BaseSettings):
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""
+    # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
+    # the accommodations a model still needs; `bare` renders the contract alone.
+    # A model that scores HIGHER on `bare` is telling you the accommodation set
+    # is its ceiling. This changes what every generation prompt says, so it is a
+    # restart-level knob, and every eval run records the arm that produced it.
+    PROMPT_ARM: Literal["shipped", "bare"] = "shipped"
+    # Comma-separated accommodation ids to withhold, for the necessity check:
+    # drop one, re-measure, and what survives is what `accommodations_needed` on
+    # the registry entry should name.
+    PROMPT_DROP_ACCOMMODATIONS: str = ""
     # Opt-in: Phoenix is a dev observability server (launches on :6006, persists
     # phoenix.db, instruments every LLM call). A local-first/offline runtime
     # shouldn't pay that cost or its serializer noise by default — set

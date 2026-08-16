@@ -22,6 +22,7 @@ from app.paths import app_version
 from app.repos.document_repo import DocumentRepo
 from app.services import settings_service
 from app.services.embedder import MODEL_NAME as EMBEDDING_MODEL
+from app.services.prompt_spec import withheld
 from app.services.vector_store import TABLE_NAME as CHUNK_VECTOR_TABLE
 
 # I-9: the corpus is embedded at this width and the stored vectors carry it.
@@ -55,6 +56,11 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
     interactive_model = _routed(background=False)
     background_model = _routed(background=True)
 
+    # Which prompt the models were given. A `bare` run measures the contract
+    # without its accommodations, so its numbers are a different measurement
+    # from a shipped run's rather than a newer one.
+    bare, dropped = withheld()
+
     return {
         "backend_version": app_version(),
         "embedding_model": EMBEDDING_MODEL,
@@ -70,5 +76,7 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         "local_chat_model": llm["local_chat_model"],
         "generation_model": generation_model,
         "vision_model": llm["vision_model"],
+        "prompt_arm": "bare" if bare else "shipped",
+        "prompt_accommodations_dropped": sorted(dropped),
         "library": {"documents": documents, "chunks": chunks},
     }

@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -283,6 +283,18 @@ prompt-dump:
 eval-models:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python check_models.py \
 		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
+
+# The model matrix: run the model-sensitive evals across candidates and report
+# the structural tier, which is the only one allowed to decide a swap. Switches
+# the backend's model per candidate and restores it afterwards. ARM=bare needs
+# the backend restarted with PROMPT_ARM=bare; the matrix refuses to straddle
+# arms. MODELS is required -- there is no default worth guessing.
+eval-matrix:
+	@echo "Model matrix over $(MODELS) (arm=$(or $(ARM),shipped))..."
+	uv run --project $(CURDIR)/backend python evals/run_model_matrix.py \
+		--models $(MODELS) --backend-url $(BACKEND_URL) \
+		$(if $(TASKS),--tasks $(TASKS),) $(if $(ARM),--arm $(ARM),) \
+		$(if $(ASSERT_SEPARATION),--assert-separation,)
 
 # Flashcard quality. SKIP_JUDGE=1 reports the structural half only -- cards
 # asked for against cards delivered, and what the parser had to repair. Those

@@ -181,3 +181,55 @@ def test_the_shared_format_accommodation_is_one_object_not_a_copied_sentence():
     users = [t for t, s in _all_specs().items() if NO_FENCES in s.accommodations]
 
     assert len(users) >= 5, users
+
+
+# The matrix's two arms (P6). Both are restart-level settings, so what these
+# guard is that the switch reaches the render and shows up in `describe` -- an
+# arm that silently did nothing would produce a scaffolding-tax measurement of
+# zero on every model.
+
+
+@pytest.fixture
+def prompt_settings(monkeypatch):
+    import app.config as config_module
+    import app.services.prompt_spec as spec_module
+
+    def _apply(**overrides):
+        stub = config_module.Settings().model_copy(update=overrides)
+        monkeypatch.setattr(spec_module, "get_settings", lambda: stub)
+        return stub
+
+    return _apply
+
+
+def test_the_shipped_arm_is_the_default():
+    from app.services.prompt_spec import withheld
+
+    bare, dropped = withheld()
+
+    assert bare is False
+    assert dropped == frozenset()
+
+
+def test_the_bare_arm_renders_the_contract_alone(prompt_settings):
+    prompt_settings(PROMPT_ARM="bare")
+
+    rendered = render(FLASHCARD_USER_SPEC, _unmeasured())
+
+    assert rendered.strip() == FLASHCARD_USER_SPEC.contract.strip()
+    for accommodation in FLASHCARD_USER_SPEC.accommodations:
+        assert accommodation.text.strip() not in rendered
+
+
+def test_one_accommodation_can_be_withheld_for_the_necessity_check(prompt_settings):
+    dropped_id = FLASHCARD_USER_SPEC.accommodations[0].id
+    prompt_settings(PROMPT_DROP_ACCOMMODATIONS=dropped_id)
+
+    rendered = render(FLASHCARD_USER_SPEC, _unmeasured())
+    reported = {row["id"]: row["applied"] for row in describe(FLASHCARD_USER_SPEC, _unmeasured())}
+
+    assert FLASHCARD_USER_SPEC.accommodations[0].text.strip() not in rendered
+    assert reported[dropped_id] == "no"
+    for accommodation in FLASHCARD_USER_SPEC.accommodations[1:]:
+        assert accommodation.text.strip() in rendered
+        assert reported[accommodation.id] == "yes"

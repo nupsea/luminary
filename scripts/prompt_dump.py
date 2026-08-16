@@ -35,7 +35,7 @@ from app.services.flashcard_prompts import (  # noqa: E402
 from app.services.image_enricher import VISION_SPEC  # noqa: E402
 from app.services.intent import INTENT_CLASSIFY_SPEC  # noqa: E402
 from app.services.note_tagger import NOTE_TAG_SPEC  # noqa: E402
-from app.services.prompt_spec import describe, render  # noqa: E402
+from app.services.prompt_spec import describe, render, withheld  # noqa: E402
 from app.services.suggestion_service import (  # noqa: E402
     CROSS_DOC_SUGGESTION_SPEC,
     SUGGESTION_SPEC,
@@ -77,6 +77,11 @@ def main() -> int:
         print("       (not in the registry: no measured footprint or capability)")
     elif not profile.accommodations_measured:
         print("       (accommodations unmeasured: every one is kept)")
+    bare, dropped = withheld()
+    if bare:
+        print("arm    bare -- the contract alone, the matrix's scaffolding-tax arm")
+    if dropped:
+        print(f"held   {', '.join(sorted(dropped))}")
     print()
     print("--- rendered ---")
     print(render(spec, profile))

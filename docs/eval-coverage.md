@@ -23,6 +23,7 @@ whatever retrieval returned.
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, attempts per generation | any run | recorded per eval run |
+| Model choice | `make eval-matrix MODELS=a,b` — the model-sensitive runners across candidates, structural tier only | whatever the chosen tasks use | `--assert-separation` gates the instrument, not a model |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
 | HTTP contract | `make smoke` — ~230 scripts | live backend | yes, separately |
 
