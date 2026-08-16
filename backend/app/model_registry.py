@@ -65,35 +65,84 @@ class ModelProfile:
         return round(self.resident_bytes / _GB, 2)
 
 
-# Keyed by the id LiteLLM is called with, provider prefix included.
+# Every footprint below is MEASURED, by `scripts/model_footprint.py`, from
+# Ollama's own `/api/ps` after a real generation at the deployed `OLLAMA_NUM_CTX`
+# of 8192 -- weights plus one KV cache, which is what `resident_bytes` means.
+# Re-measure rather than adjust: the estimates these replaced were low by up to
+# 44% (llama3.2 was carried at 2.0GB and weighs 2.88GB), and these numbers now
+# decide whether a model is offered on someone's laptop.
+#
+# `min_ram_gb` is the one derived value and it is policy, not measurement: twice
+# the resident size rounded up to a RAM tier, the model taking half the machine
+# while the other half carries the OS, the backend (4.7GB peak during ingest),
+# the embedder and the entity model. The rule reproduces every value that was
+# hand-written here before it existed.
+#
+# `usable_context` is a deployment decision and deliberately NOT the advertised
+# window: llama3.2 and phi4-mini advertise 131072 and qwen3.5 262144, but a slot
+# costs a full window of KV cache (I-31) and one value is in force per loaded
+# model (I-27). The advertised figure is a capability, never a budget.
+MEASURED_AT_NUM_CTX = 8192
+
 REGISTRY: dict[str, ModelProfile] = {
     "ollama/llama3.2": ModelProfile(
         id="ollama/llama3.2",
         licence="Llama 3.2 Community License",
-        resident_bytes=2 * _GB,
+        resident_bytes=3092376453,  # 2.88GB
         min_ram_gb=8,
         usable_context=8192,
-        supports_json_schema=False,
+        supports_json_schema=True,
         thinking_default=False,
     ),
-    "ollama/qwen2.5:14b-instruct": ModelProfile(
-        id="ollama/qwen2.5:14b-instruct",
+    "ollama/qwen3.5:4b": ModelProfile(
+        id="ollama/qwen3.5:4b",
         licence="Apache-2.0",
-        resident_bytes=10 * _GB,
-        min_ram_gb=24,
-        usable_context=32768,
+        resident_bytes=3446960783,  # 3.21GB
+        min_ram_gb=8,
+        usable_context=8192,
+        supports_json_schema=True,
+        # The only candidate in this class that reasons unless told not to. Every
+        # local call sets think=False (I-27); without it this model put an entire
+        # JSON object into the `thinking` field and returned an empty `response`,
+        # which is the empty-/qa failure that rule exists to prevent.
+        thinking_default=True,
+    ),
+    "ollama/phi4-mini": ModelProfile(
+        id="ollama/phi4-mini",
+        licence="MIT",
+        resident_bytes=3704409292,  # 3.45GB
+        min_ram_gb=8,
+        usable_context=8192,
+        supports_json_schema=True,
+        thinking_default=False,
+    ),
+    "ollama/gemma3:4b": ModelProfile(
+        id="ollama/gemma3:4b",
+        licence="Gemma Terms of Use",
+        resident_bytes=3887002419,  # 3.62GB
+        min_ram_gb=8,
+        usable_context=8192,
         supports_json_schema=True,
         thinking_default=False,
     ),
     "ollama/qwen2.5vl:7b": ModelProfile(
         id="ollama/qwen2.5vl:7b",
         licence="Apache-2.0",
-        resident_bytes=6 * _GB,
+        resident_bytes=7311392768,  # 6.81GB
         min_ram_gb=16,
-        usable_context=32768,
-        supports_json_schema=False,
+        usable_context=8192,
+        supports_json_schema=True,
         thinking_default=False,
         multimodal=True,
+    ),
+    "ollama/qwen2.5:14b-instruct": ModelProfile(
+        id="ollama/qwen2.5:14b-instruct",
+        licence="Apache-2.0",
+        resident_bytes=10383085076,  # 9.67GB
+        min_ram_gb=24,
+        usable_context=8192,
+        supports_json_schema=True,
+        thinking_default=False,
     ),
 }
 

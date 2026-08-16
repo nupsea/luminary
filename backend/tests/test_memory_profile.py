@@ -205,3 +205,55 @@ async def test_the_report_counts_distinct_models_not_roles():
 
     assert report["resident_count"] == len(set(report["resident_models"]))
     assert len(report["roles"]) == 4
+
+
+# Footprints are measured, not estimated (scripts/model_footprint.py)
+
+
+def test_every_footprint_is_a_measured_figure_not_a_round_estimate():
+    """The estimates these replaced were low by up to 44% -- llama3.2 was carried
+    at a round 2.0GB and weighs 2.88GB. A round number here means someone typed
+    it, and these values decide whether a model is offered on a laptop."""
+    rounded = [p.id for p in REGISTRY.values() if p.resident_bytes % (1024**3) == 0]
+
+    assert rounded == [], f"these look estimated rather than measured: {rounded}"
+
+
+def test_the_min_ram_policy_matches_every_entry():
+    """`min_ram_gb` is derived, so it must not drift from the rule that derives
+    it: twice the resident size, rounded up to a RAM tier."""
+    tiers = (8, 16, 24, 32, 48, 64, 96, 128)
+
+    for profile in REGISTRY.values():
+        needed = profile.resident_gb * 2
+        expected = next(t for t in tiers if t >= needed)
+        assert profile.min_ram_gb == expected, (
+            f"{profile.id}: {profile.resident_gb}GB resident implies min_ram {expected}GB, "
+            f"entry says {profile.min_ram_gb}GB"
+        )
+
+
+def test_no_entry_adopts_its_advertised_context_as_its_budget():
+    """I-27: a model advertising 131072 or 262144 is stating a capability. A
+    slot costs a full window of KV cache, so the deployed window is a decision."""
+    for profile in REGISTRY.values():
+        assert profile.usable_context <= 32768, (
+            f"{profile.id} carries usable_context={profile.usable_context}, "
+            "which reads as an advertised window rather than a deployment choice"
+        )
+
+
+def test_the_small_class_all_fits_an_eight_gigabyte_machine():
+    """The product targets 8-16GB. If nothing in the registry fits that, the
+    catalogue cannot answer the question a user on a laptop is asking."""
+    text_models = [p for p in models_for_host(8) if not p.multimodal]
+
+    assert len(text_models) >= 4, [p.id for p in text_models]
+
+
+def test_a_thinking_model_is_recorded_as_one():
+    """think=False is unconditional (I-27), and this is the field that says for
+    which models that is load-bearing rather than incidental."""
+    thinkers = [p.id for p in REGISTRY.values() if p.thinking_default]
+
+    assert "ollama/qwen3.5:4b" in thinkers
