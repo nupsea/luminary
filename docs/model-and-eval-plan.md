@@ -1098,8 +1098,42 @@ Two instrument limits this run exposed, both open:
   card and gemma3 lost 2 with nothing reporting it. A model repeating itself is exactly the
   structural weakness this tier should show; it wants a `duplicate_question_rate`.
 
-Still unrun: the `qa` task on this class, both prompt arms on it, and P5's latency probe on any
-of them.
+#### The answering path decides it, and it reverses the flashcard ranking
+
+`make eval-matrix` gained `--qa-datasets`, so the answering task runs once per content kind with
+metrics namespaced per dataset. Measured on the two credible candidates, 3 kinds × 40 questions ×
+2 models = 240 scored answers.
+
+| | qwen3.5:4b | phi4-mini |
+|---|---|---|
+| book — answer_rate / citation_coverage | 0.9750 / **0.7179** | 0.9500 / **0.1842** |
+| legal — answer_rate / citation_coverage | 1.0000 / **0.7250** | 0.9500 / **0.1842** |
+| study — answer_rate / citation_coverage | 1.0000 / **0.6750** | 1.0000 / **0.2000** |
+| citations proposed (book/legal/study) | 66 / 100 / 85 | 8 / 9 / 8 |
+| uncited answers | 11 / 11 / 13 | 31 / 31 / 32 |
+| faithfulness *(report only)* | 0.549 / 0.602 / 0.441 | 0.629 / 0.685 / 0.540 |
+
+**13 metrics separated the two models, where the flashcard task separated one.** The answering path
+is the most discriminating instrument in the suite, and running it per content kind is what makes
+the result unarguable: the same 4× citation gap appears on prose fiction, a contract and a
+textbook, so it cannot be read as a genre effect.
+
+phi4-mini won routing accuracy on the flashcard run and **fails the product's core contract here**,
+leaving 3 of 4 answers unverifiable. Verified with a live call rather than inferred from the
+counter: its answer ends as prose and emits no citations block at all — it is not producing
+malformed markers that get dropped, it ignores the contract. The identical 0.1842 on two datasets
+is a real coincidence (both landed on 38 answered and 31 uncited; `citations_proposed` differs),
+not a replayed artifact.
+
+**Recommendation for the 8–16GB profile: `qwen3.5:4b`** — 3.21GB, leads every gating metric across
+both tasks. Not yet a switch: single runs, and P5's latency behaviour under ingest is unmeasured.
+
+**Do not read the faithfulness row as favouring phi4-mini.** It is the report-only tier, and a
+cross-model HHEM delta is exactly the style artifact that cost this repo a model decision once
+already. Shorter uncited answers plausibly hug the retrieved context more closely; that is a
+hypothesis, not a measurement.
+
+Still unrun: both prompt arms on this class, and P5's latency probe on any of them.
 
 
 
