@@ -85,6 +85,34 @@ class Task:
     note: str
 
 
+def _qa_task(backend_url: str, dataset: str, max_questions: int | None) -> Task:
+    """One answering run over one golden.
+
+    Named per dataset so the metrics stay separable: retrieval quality is a
+    property of the kind of writing more than of the funnel, and pooling a
+    contract with a novel would hide which one a model is bad at.
+    """
+    argv = [
+        "uv", "run", "--no-sync", "python",
+        "run_eval.py",
+        "--dataset", dataset,
+        "--generate",
+        "--check-citations",
+        # No judge: the judged tier never gates a model swap, and on a one-model
+        # machine it would be grading its own answers.
+        "--judge-model", "",
+        "--backend-url", backend_url,
+    ]
+    if max_questions:
+        argv += ["--max-questions", str(max_questions)]
+    return Task(
+        name=f"qa:{dataset}",
+        cwd=EVALS_DIR,
+        argv=tuple(argv),
+        note=f"answering over {dataset}: answer rate, citation validity, abstention",
+    )
+
+
 def _tasks(backend_url: str) -> dict[str, Task]:
     return {
         "intent": Task(
@@ -123,20 +151,7 @@ def _tasks(backend_url: str) -> dict[str, Task]:
             ),
             note="deterministic half, regenerated: a stored summary scores the model that wrote it",
         ),
-        "qa": Task(
-            name="qa",
-            cwd=EVALS_DIR,
-            argv=(
-                "uv", "run", "--no-sync", "python",
-                "run_eval.py",
-                "--dataset", "book",
-                "--generate",
-                "--check-citations",
-                "--judge-model", "",
-                "--backend-url", backend_url,
-            ),
-            note="answering path: answer rate and citation validity, no judge",
-        ),
+        "qa": _qa_task(backend_url, "book", None),
     }
 
 
@@ -392,6 +407,22 @@ def main() -> int:
     ap.add_argument("--backend-url", default="http://localhost:7820")
     ap.add_argument("--tasks", default="intent,flashcards,summary")
     ap.add_argument(
+        "--qa-datasets",
+        default="",
+        help=(
+            "comma-separated goldens for the qa task, one run each -- e.g. "
+            "book,legal,study. Varying the kind of writing is the largest known "
+            "source of spread, so a single dataset measures one genre rather "
+            "than the answering path. Replaces the qa task's default of `book`."
+        ),
+    )
+    ap.add_argument(
+        "--max-questions",
+        type=int,
+        default=0,
+        help="sample this many rows per qa golden (seeded), 0 for all of them",
+    )
+    ap.add_argument(
         "--arm",
         choices=["shipped", "bare"],
         default="shipped",
@@ -415,6 +446,22 @@ def main() -> int:
         return 1
 
     available = _tasks(args.backend_url)
+    qa_datasets = [d.strip() for d in args.qa_datasets.split(",") if d.strip()]
+    if qa_datasets:
+        from evals.lib.split import HOLDOUT  # noqa: PLC0415
+
+        spent = sorted(set(qa_datasets) & HOLDOUT)
+        if spent:
+            print(
+                f"NOTE: {', '.join(spent)} is held out. Choosing a model on it spends it -- "
+                "the run is recorded, but prefer the tune split for a comparison.",
+                file=sys.stderr,
+            )
+        available.pop("qa", None)
+        for dataset in qa_datasets:
+            task = _qa_task(args.backend_url, dataset, args.max_questions or None)
+            available[task.name] = task
+
     unknown = [t for t in args.tasks.split(",") if t.strip() and t.strip() not in available]
     if unknown:
         print(f"ERROR: unknown task(s) {unknown}; known: {sorted(available)}", file=sys.stderr)

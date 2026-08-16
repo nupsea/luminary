@@ -296,3 +296,50 @@ def test_asserting_separation_refuses_incomplete_evidence(monkeypatch, tmp_path,
 
     assert run_model_matrix.main() == 1
     assert "incomplete evidence" in capsys.readouterr().err
+
+
+def test_qa_runs_once_per_dataset_and_keeps_the_metrics_separable():
+    """Retrieval quality is a property of the kind of writing more than of the
+    funnel, so pooling a contract with a novel hides which one a model is bad
+    at."""
+    task = run_model_matrix._qa_task("http://x", "legal", 40)
+
+    assert task.name == "qa:legal"
+    assert "--dataset" in task.argv
+    assert task.argv[task.argv.index("--dataset") + 1] == "legal"
+    assert task.argv[task.argv.index("--max-questions") + 1] == "40"
+
+
+def test_a_qa_run_asks_for_no_judge():
+    """The judged tier never gates a swap, and on a one-model machine it grades
+    its own answers."""
+    task = run_model_matrix._qa_task("http://x", "book", None)
+
+    assert task.argv[task.argv.index("--judge-model") + 1] == ""
+    assert "--max-questions" not in task.argv
+
+
+def test_naming_a_holdout_dataset_is_called_out(monkeypatch, capsys):
+    """Choosing a model on the holdout spends it. Recorded, not blocked --
+    a comparison is not the ablation sweep the split forbids."""
+    monkeypatch.setattr(
+        run_model_matrix, "_environment", lambda url: {"prompt_arm": "shipped"}
+    )
+    monkeypatch.setattr(run_model_matrix, "_installed_models", lambda url: [])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_model_matrix.py",
+            "--models",
+            "ollama/a",
+            "--tasks",
+            "qa:nonexistent",
+            "--qa-datasets",
+            "odyssey",
+        ],
+    )
+
+    run_model_matrix.main()
+
+    assert "held out" in capsys.readouterr().err
