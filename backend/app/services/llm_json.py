@@ -33,6 +33,23 @@ def _strip_fences(text: str) -> tuple[str, bool]:
     return cleaned, False
 
 
+def _strict(text: str) -> object | None:
+    """The whole completion as JSON, or None.
+
+    Tried before any slicing. A completion that is valid JSON end to end needed
+    no repair whatever shape it is, and slicing first was not a detail: an
+    object wrapping an array -- `{"flashcards": [...]}`, exactly what the
+    flashcard prompt asks for -- looked to the array parser like an array with
+    prose on both sides. Every compliant generation was recorded as repaired,
+    which pinned `first_pass_rate` at 0.0000 for every model and made the metric
+    a fact about the parser's attempt order.
+    """
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
 def _skip(text: str, i: int, chars: str = " \t\r\n") -> int:
     """Advance past `chars`. raw_decode does not skip leading whitespace itself."""
     n = len(text)
@@ -72,6 +89,9 @@ def parse_object_with_repairs(raw: str) -> tuple[dict | None, frozenset[str]]:
     """
     cleaned, fenced = _strip_fences(raw)
     repairs: set[str] = {stats.FENCED} if fenced else set()
+    whole = _strict(cleaned)
+    if whole is not None:
+        return (whole if isinstance(whole, dict) else None), frozenset(repairs)
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start == -1 or end < start:
@@ -158,19 +178,36 @@ def salvage_llm_json_object(raw: str) -> dict | None:
     return out or None
 
 
-def parse_llm_json_array(raw: str) -> list:
-    """Extract a JSON array from an LLM completion, tolerating markdown
-    fences, surrounding prose, illegal escape sequences, and truncation.
+def top_level_shape(raw: str) -> str | None:
+    """Which JSON shape the completion opens with: "object", "array", or neither.
 
-    Returns [] when no array content is recoverable. Truncation recovery
-    keeps every complete element and drops the partial trailing one.
+    What a caller dispatches on, so a completion is parsed once by the parser
+    that fits it instead of being tried array-first and mis-counted.
+    """
+    cleaned, _ = _strip_fences(raw)
+    obj, arr = cleaned.find("{"), cleaned.find("[")
+    if obj == -1 and arr == -1:
+        return None
+    if arr == -1 or (obj != -1 and obj < arr):
+        return "object"
+    return "array"
+
+
+def parse_array_with_repairs(raw: str) -> tuple[list | None, frozenset[str]]:
+    """Parse, and report which repairs the completion needed. None on failure.
+
+    The array counterpart of `parse_object_with_repairs`, and for the same
+    reason: a caller that tries both shapes must record one parse for one
+    completion, not one per attempt.
     """
     cleaned, fenced = _strip_fences(raw)
     repairs: set[str] = {stats.FENCED} if fenced else set()
+    whole = _strict(cleaned)
+    if whole is not None:
+        return (whole if isinstance(whole, list) else None), frozenset(repairs)
     start = cleaned.find("[")
     if start == -1:
-        stats.record_parse(ok=False, repairs=frozenset(repairs))
-        return []
+        return None, frozenset(repairs)
     end = cleaned.rfind("]")
     if end <= start:
         repairs.add(stats.TRUNCATED)
@@ -184,10 +221,19 @@ def parse_llm_json_array(raw: str) -> list:
             continue
         if attempt:
             repairs.add(stats.BAD_ESCAPE)
-        ok = isinstance(parsed, list)
-        stats.record_parse(ok=ok, repairs=frozenset(repairs))
-        return parsed if ok else []
+        return (parsed if isinstance(parsed, list) else None), frozenset(repairs)
     salvaged = _salvage_elements(_repair_escapes(candidate))
     repairs.add(stats.TRUNCATED)
-    stats.record_parse(ok=bool(salvaged), repairs=frozenset(repairs))
-    return salvaged
+    return (salvaged or None), frozenset(repairs)
+
+
+def parse_llm_json_array(raw: str) -> list:
+    """Extract a JSON array from an LLM completion, tolerating markdown
+    fences, surrounding prose, illegal escape sequences, and truncation.
+
+    Returns [] when no array content is recoverable. Truncation recovery
+    keeps every complete element and drops the partial trailing one.
+    """
+    parsed, repairs = parse_array_with_repairs(raw)
+    stats.record_parse(ok=parsed is not None, repairs=repairs)
+    return parsed if parsed is not None else []

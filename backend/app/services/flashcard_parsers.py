@@ -10,7 +10,11 @@ import logging
 import re
 
 from app.services import llm_output_stats
-from app.services.llm_json import parse_llm_json_array, parse_llm_json_object
+from app.services.llm_json import (
+    parse_array_with_repairs,
+    parse_object_with_repairs,
+    top_level_shape,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,34 +55,56 @@ def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
     return "", []
 
 
-def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
-    """Extract a JSON array from the LLM response.
+def _parse_llm_response(
+    raw: str, document_id: str, *, expect: str | None = None
+) -> list[dict]:
+    """Extract flashcards from the LLM response, whichever shape it arrived in.
 
-    Handles:
-    - Clean JSON array responses
-    - Responses wrapped in markdown code fences
-    - Responses with preamble prose before the array
-    - Responses with trailing text after the array
+    Handles clean arrays, `{"flashcards": [...]}` objects, markdown fences,
+    preamble or trailing prose, illegal escapes and truncation.
+
+    **Dispatched on the shape the completion actually opens with, and counted
+    once.** Trying the array parser first was not a harmless ordering: against
+    the object the flashcard prompt asks for, it sliced out the inner array and
+    recorded the `{"flashcards":` wrapper as prose around it. Every compliant
+    generation was counted as repaired, so `first_pass_rate` read 0.0000 on a 3B
+    model and on a 14B one -- a measurement of this function, not of either
+    model.
+
+    *expect* is the shape the prompt asked for, when the caller knows it. A
+    clean parse in the other shape is a real deviation and is counted as one --
+    separately from the repairs, because nothing had to be rewritten.
     """
-    # One tolerant parser, not two. This path used to re-implement fence
-    # stripping and brace slicing, which meant every repair it performed was
-    # invisible to the counters that exist to tell a model that emits clean
-    # JSON from one that is carried by the parser.
-    cards = parse_llm_json_array(raw)
-    if cards:
-        return cards
+    shape = top_level_shape(raw)
+    attempts = (
+        (_from_object, _from_array) if shape == "object" else (_from_array, _from_object)
+    )
 
-    # json-mode models wrap the array in an object -- {"flashcards": [...]} --
-    # or return a single card; both are objects, so the array parser sees
-    # nothing to salvage.
-    obj = parse_llm_json_object(raw)
-    if obj is not None:
-        coerced = _coerce_cards(obj)
-        if coerced is not None:
-            return coerced
+    first_repairs: frozenset[str] = frozenset()
+    for i, attempt in enumerate(attempts):
+        cards, repairs, got = attempt(raw)
+        if i == 0:
+            first_repairs = repairs
+        if cards is not None:
+            llm_output_stats.record_parse(ok=True, repairs=repairs)
+            if expect is not None and got != expect:
+                llm_output_stats.record_shape_deviation()
+            return cards
 
+    llm_output_stats.record_parse(ok=False, repairs=first_repairs)
     logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
+
+
+def _from_array(raw: str) -> tuple[list[dict] | None, frozenset[str], str]:
+    parsed, repairs = parse_array_with_repairs(raw)
+    return (parsed if parsed else None), repairs, "array"
+
+
+def _from_object(raw: str) -> tuple[list[dict] | None, frozenset[str], str]:
+    parsed, repairs = parse_object_with_repairs(raw)
+    cards = _coerce_cards(parsed) if parsed is not None else None
+    return (cards or None), repairs, "object"
 
 
 def _coerce_cards(data: object) -> list | None:
@@ -166,35 +192,58 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text))
 
 
-def card_rejection_reason(question: str, answer: str) -> str | None:
-    """Why this Q/A card is low quality, or None if it passes the gate.
+# Stable kinds for the gate's verdicts. The message carries the specifics for a
+# log line; the kind is what gets counted, so a metric survives a reworded
+# message.
+REJECT_EMPTY_FIELD = "empty_field"
+REJECT_SHORT_ANSWER = "short_answer"
+REJECT_DEICTIC = "deictic"
+REJECT_BLOATED = "bloated"
+
+
+def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
+    """(kind, message) for a low-quality Q/A card, or None if it passes.
 
     Catches the failure modes the generation prompt forbids but weak models
     still produce: empty fields, one-word answers (which includes bare yes/no),
     source-referencing/leading questions, and bloated leading questions paired
     with a trivial answer. Cloze cards use a separate builder and are
     intentionally not run through this gate.
+
+    The verdict used to be computed, logged and dropped. It is the one signal on
+    this path that is deterministic, needs no judge, and measures whether the
+    model followed the contract rather than whether its JSON parsed -- so it is
+    counted now.
     """
     q = question.strip()
     a = answer.strip()
     if not q or not a:
-        return "empty question or answer"
+        return REJECT_EMPTY_FIELD, "empty question or answer"
 
     q_words = _word_count(q)
     a_words = _word_count(a)
 
     if a_words < _MIN_ANSWER_WORDS:
-        return f"answer too short ({a_words} word)"
+        return REJECT_SHORT_ANSWER, f"answer too short ({a_words} word)"
 
     q_lower = q.lower()
     for phrase in _LEADING_PHRASES:
         if phrase in q_lower:
-            return f"leading/deictic phrase in question ({phrase!r})"
+            return REJECT_DEICTIC, f"leading/deictic phrase in question ({phrase!r})"
 
     if q_words >= _BLOATED_QUESTION_WORDS and a_words <= _TRIVIAL_ANSWER_WORDS:
-        return f"bloated question ({q_words}w) with trivial answer ({a_words}w)"
+        return (
+            REJECT_BLOATED,
+            f"bloated question ({q_words}w) with trivial answer ({a_words}w)",
+        )
 
     return None
+
+
+def card_rejection_reason(question: str, answer: str) -> str | None:
+    """The gate's message alone, for callers that only report it."""
+    verdict = card_rejection(question, answer)
+    return verdict[1] if verdict else None
 
 
 def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
@@ -237,7 +286,7 @@ def _parse_cloze_llm_response(raw: str) -> list[dict]:
     Filters out any element whose cloze_text has no {{}} markers (malformed).
     Returns only valid elements.
     """
-    items = _parse_llm_response(raw, "cloze")
+    items = _parse_llm_response(raw, "cloze", expect="array")
     valid = []
     for item in items:
         if not isinstance(item, dict):

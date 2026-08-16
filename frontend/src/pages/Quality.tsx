@@ -8,6 +8,7 @@ import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
 import { KindMatrix } from "@/components/evals/KindMatrix"
+import { ModelMatrix } from "@/components/evals/ModelMatrix"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
   DatasetSize,
@@ -82,13 +83,16 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "kinds" | "runs"
+type TabId = "datasets" | "results" | "kinds" | "models" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
   // Retrieval scores differ by kind of writing more than by anything the funnel
   // does, so the per-kind table is a first-class view rather than a filter.
   { id: "kinds", label: "By kind" },
+  // Which model produced which numbers. Its own view because the metrics that
+  // may decide a model swap are a strict subset of the ones on every other tab.
+  { id: "models", label: "By model" },
   { id: "runs", label: "Runs" },
 ]
 
@@ -564,6 +568,7 @@ export default function Quality() {
 
         {activeTab === "results" && <ResultsDashboard selection={consoleSel} />}
         {activeTab === "kinds" && <KindMatrix />}
+        {activeTab === "models" && <ModelMatrix />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
       </main>
 

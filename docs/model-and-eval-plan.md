@@ -999,12 +999,30 @@ stronger test of whether the instrument can see a model at all.
 14B one. Everything the flashcard path reports is identical, and `parses` differing by one is
 noise below the margin.
 
-**Every flashcard generation on both models needed the same repair.** `first_pass_rate` is 0.0000
-on a 3B and on a 14B: 39 of 39 and 38 of 38 completions arrived with prose around the JSON, which
-`surrounded_by_prose` strips. `no_fences` is in that prompt — "No explanation, no preamble, no
-markdown fences" — and neither model obeys it. An accommodation that changes nothing on any model
-tested is not a compensation, it is decoration, and the necessity check should be expected to
-delete it rather than confirm it.
+**`first_pass_rate` 0.0000 on both models was the harness, not the models — corrected 2026-08-16.**
+A metric pinned at 0.0000 everywhere has no more headroom than one pinned at 1.0000, and this one
+was measuring `_parse_llm_response`'s attempt order. It tried the array parser first; the flashcard
+prompt asks for `{"flashcards": [...]}` and the call passes `response_format={"type":"json_object"}`,
+so a fully compliant completion was sliced between the first `[` and the last `]` and its
+`{"flashcards":` wrapper counted as prose around an array. Every compliant generation was recorded
+as repaired, on every model, by construction.
+
+Three fixes, all of which change what future numbers mean:
+
+- **Parse the whole completion before slicing.** Valid JSON end to end needed no repair whatever
+  shape it is (`llm_json._strict`). Slicing is now the fallback, so `surrounded_by_prose` means
+  actual prose.
+- **Dispatch on the shape the completion opens with, and count one parse per completion**
+  (`top_level_shape`, `parse_array_with_repairs`). Trying both shapes used to record two parses,
+  which is the denominator of every rate on the path.
+- **A clean parse in the other shape is a deviation, not a repair.** `shape_deviations` counts it
+  separately: nothing had to be rewritten, but the model did not return the shape the prompt
+  specified. `expect=` is passed at each of the six flashcard call sites, taken from what that
+  site's own prompt asks for.
+
+Verified on the four cases: the compliant object is a first pass with no repairs; a bare array is a
+first pass plus one `shape_deviation`; prose around the JSON is a repair; a fenced object is a
+repair. **The 0.0000 numbers above are void** and the comparison needs re-running.
 
 **The summary task measured neither model, and that is the finding worth keeping.** All three
 summary metrics came back bit-identical to four decimals (`theme_coverage` 0.7833,
@@ -1014,6 +1032,34 @@ looks like a model comparison and is not one. Fixed two ways: `run_summary_eval.
 (recorded in the run's environment, and always passed by the matrix), and
 `matrix.unmeasured_tasks`, which flags any task whose every metric is identical across two models,
 because two models do not produce the same float to full precision on work that depends on them.
+
+#### Metrics added because saturation is not a measurement
+
+The flashcard structural tier was three saturated numbers — `generation_rate` 1.0000,
+`parse_failure_rate` 0.0000, `first_pass_rate` 0.0000 — and one that worked. A tier that cannot
+move cannot decide anything, so two signals that already existed but were thrown away are now
+counted:
+
+- **`card_reject_rate`** and the per-reason counts (`card_reject_deictic`, `_short_answer`,
+  `_empty_field`, `_bloated`). `_gate_cards` already ran `card_rejection_reason` on every generated
+  card, logged the verdict and dropped it. That gate checks exactly what the prompt forbids —
+  deictic questions, one-word answers, empty fields, a bloated question with a trivial answer — so
+  it reads instruction-following with no judge in the loop, which is the rarest thing in this
+  suite. The verdict now carries a stable kind so the counter survives a reworded message.
+- **`shape_deviation_rate`**, above.
+
+Both are in the structural tier, in `make eval-flashcards`, and in the matrix. Neither can saturate
+the way a parse-success rate does, because both measure content the model chose.
+
+#### Where these show up
+
+Per-run structural metrics already reach the Quality dashboard: anything outside the fixed column
+set rides in `extra_metrics` (`evals/lib/store.py`) and the Runs tab renders it generically. What
+did not exist was the comparison — the matrix wrote a local JSONL and nothing else. **Quality →
+By model** now pivots stored runs by resolved model, one column per model, structural tier only,
+carrying the same two refusals as the runner: columns measured against different corpora are
+labelled rather than ranked, and a metric identical across models is flagged `did not move` rather
+than read as the models being equivalent.
 
 Still unrun: the `qwen3.5:0.8b` / `4b` acceptance pair, the `qa` task, and both prompt arms.
 

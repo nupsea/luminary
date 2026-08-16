@@ -182,7 +182,7 @@ class FlashcardAuditService:
                 llm = get_llm_service()
                 raw = await llm.generate(prompt, system=system, stream=False, background=True)
 
-            cards_data = _parse_llm_response(raw, document_id)
+            cards_data = _parse_llm_response(raw, document_id, expect="array")
             return (section_id, level, cards_data)
 
         tasks = []

@@ -108,3 +108,41 @@ def test_strip_source_ref_leaves_clean_answers_untouched() -> None:
 def test_strip_source_ref_never_empties_a_short_answer() -> None:
     # if stripping would leave nothing meaningful, keep the original
     assert strip_source_ref("In Chapter 1.") == "In Chapter 1."
+
+
+def test_the_gate_verdict_is_counted_by_kind():
+    """The gate computed a verdict per card and threw it away. It is the one
+    signal on this path that needs no judge and measures whether the model
+    followed the contract -- deictic questions, one-word answers and empty
+    fields are all things the prompt forbids."""
+    from app.services import llm_output_stats as stats
+    from app.services.flashcard_generators import _gate_cards
+
+    before = dict(stats.snapshot()["counts"])
+    kept = _gate_cards(
+        [
+            {"question": "What partitions a Kafka topic?", "answer": "Consumer groups read them"},
+            {"question": "In this passage, what does X claim?", "answer": "Several things"},
+            {"question": "Is Kafka a broker?", "answer": "Yes"},
+            {"question": "", "answer": "orphan"},
+        ]
+    )
+    after = stats.snapshot()["counts"]
+    moved = {k: after[k] - before.get(k, 0) for k in after if after[k] - before.get(k, 0)}
+
+    assert len(kept) == 1
+    assert moved["cards_gated"] == 4
+    assert moved["cards_rejected"] == 3
+    assert moved["card_reject_deictic"] == 1
+    assert moved["card_reject_short_answer"] == 1
+    assert moved["card_reject_empty_field"] == 1
+
+
+def test_the_rejection_kind_survives_a_reworded_message():
+    """The message carries specifics for a log line; the kind is what is counted."""
+    from app.services.flashcard_parsers import REJECT_DEICTIC, card_rejection
+
+    kind, message = card_rejection("In this passage, what is X?", "A real answer here")
+
+    assert kind == REJECT_DEICTIC
+    assert "in this passage" in message

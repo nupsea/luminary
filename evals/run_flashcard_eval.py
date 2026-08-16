@@ -143,6 +143,17 @@ def main() -> None:
             metrics["cards_generated"] = produced
             metrics["generation_rate"] = produced / requested
         metrics["cards_deduped"] = counts.get("items_deduped", 0)
+        # The deterministic gate's verdict, which the product computed and threw
+        # away: every rejection is something the prompt explicitly forbids, so
+        # this reads instruction-following with no judge in the loop.
+        gated = counts.get("cards_gated", 0)
+        if gated:
+            metrics["cards_gated"] = gated
+            metrics["cards_rejected"] = counts.get("cards_rejected", 0)
+            metrics["card_reject_rate"] = counts.get("cards_rejected", 0) / gated
+        parses = counts.get("parses", 0)
+        if parses:
+            metrics["shape_deviation_rate"] = counts.get("shape_deviations", 0) / parses
 
     environment = capture_environment(
         args.backend_url,

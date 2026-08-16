@@ -37,6 +37,7 @@ from app.services.flashcard_parsers import (
     _parse_concept_extract,
     _parse_llm_response,
     card_field,
+    card_rejection,
     card_rejection_reason,
     strip_source_ref,
 )
@@ -142,7 +143,7 @@ async def generate_technical(
             prompt, system=TECH_FLASHCARD_SYSTEM,
             model=_generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, document_id))
+        return _gate_cards(_parse_llm_response(raw, document_id, expect="array"))
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -337,9 +338,10 @@ def _gate_cards(parsed: list) -> list[dict]:
             continue
         q = card_field(item, "question", "front", "q", "term", "prompt")
         a = strip_source_ref(card_field(item, "answer", "back", "a", "definition", "response"))
-        reason = card_rejection_reason(q, a)
-        if reason:
-            logger.info("flashcard: dropped low-quality card (%s): %r", reason, q[:80])
+        verdict = card_rejection(q, a)
+        llm_output_stats.record_card_gate(verdict[0] if verdict else None)
+        if verdict:
+            logger.info("flashcard: dropped low-quality card (%s): %r", verdict[1], q[:80])
             continue
         kept.append({
             **item,
@@ -412,7 +414,7 @@ async def _generate_concept_cards(
             prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
             model=_generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, parse_ctx))
+        return _gate_cards(_parse_llm_response(raw, parse_ctx, expect="array"))
 
     # cards are grounded one-per-concept, so the achievable count is bounded by
     # how many concepts were extracted -- never retry past that
@@ -549,7 +551,7 @@ async def generate(
             model=_generation_model(), stream=False,
             response_format={"type": "json_object"},
         )
-        return _gate_cards(_parse_llm_response(raw, document_id))
+        return _gate_cards(_parse_llm_response(raw, document_id, expect="object"))
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -933,7 +935,7 @@ async def generate_from_graph(
                 prompt, system=GRAPH_FLASHCARD_SYSTEM,
                 model=_generation_model(), stream=False,
             )
-            cards_data = _parse_llm_response(raw, document_id)
+            cards_data = _parse_llm_response(raw, document_id, expect="array")
 
             now = datetime.now(UTC)
             cards: list[FlashcardModel] = []

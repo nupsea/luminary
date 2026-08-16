@@ -171,10 +171,14 @@ def _repairs_between(before: dict[str, Any], after: dict[str, Any]) -> dict[str,
         if a.get(key, 0) - b.get(key, 0)
     }
     parses = counts.get("parses", 0)
+    gated = counts.get("cards_gated", 0)
     out: dict[str, Any] = {"counts": counts}
     if parses:
         out["first_pass_rate"] = counts.get("parses_first_pass", 0) / parses
         out["parse_failure_rate"] = counts.get("parse_failures", 0) / parses
+        out["shape_deviation_rate"] = counts.get("shape_deviations", 0) / parses
+    if gated:
+        out["card_reject_rate"] = counts.get("cards_rejected", 0) / gated
     return out
 
 
@@ -260,7 +264,12 @@ def run_task(task: Task, backend_url: str) -> dict[str, Any]:
 
     metrics = _metrics_from_rows(rows)
     metrics |= repairs["counts"]
-    for key in ("first_pass_rate", "parse_failure_rate"):
+    for key in (
+        "first_pass_rate",
+        "parse_failure_rate",
+        "shape_deviation_rate",
+        "card_reject_rate",
+    ):
         if key in repairs:
             metrics[key] = repairs[key]
 

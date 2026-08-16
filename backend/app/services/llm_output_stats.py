@@ -26,6 +26,10 @@ FENCED = "fenced"
 BAD_ESCAPE = "bad_escape"
 TRUNCATED = "truncated"
 KEY_ALIAS = "key_alias"
+# Not a repair -- the JSON was clean, the top-level shape was not the one the
+# prompt asked for (a bare array where an object was specified, or the reverse).
+# Counted separately so it cannot be confused with output that needed rewriting.
+SHAPE_DEVIATION = "shape_deviation"
 
 _lock = threading.Lock()
 _counts: dict[str, int] = {}
@@ -54,6 +58,27 @@ def record_parse(*, ok: bool, repairs: frozenset[str]) -> None:
             _bump(f"repair_{kind}")
     else:
         _bump("parses_first_pass")
+
+
+def record_shape_deviation() -> None:
+    """The completion parsed cleanly but in the other top-level shape."""
+    _bump("shape_deviations")
+
+
+def record_card_gate(kind: str | None) -> None:
+    """One generated card through the deterministic quality gate.
+
+    `cards_gated` counts every card the model produced; `card_reject_<kind>`
+    counts the ones the gate dropped. Together they give a reject rate that
+    needs no judge and moves with the model -- the gate checks exactly what the
+    prompt forbids (deictic questions, one-word answers, empty fields), so a
+    model that ignores those instructions scores worse without anyone grading
+    style.
+    """
+    _bump("cards_gated")
+    if kind:
+        _bump(f"card_reject_{kind}")
+        _bump("cards_rejected")
 
 
 def record_key_alias() -> None:

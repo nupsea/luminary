@@ -25,6 +25,18 @@ STRUCTURAL: frozenset[str] = frozenset(
     {
         "first_pass_rate",
         "parse_failure_rate",
+        # The completion parsed cleanly but in the other top-level shape. Not a
+        # repair -- nothing was rewritten -- and a direct read on whether the
+        # model followed the shape the prompt specified.
+        "shape_deviations",
+        "shape_deviation_rate",
+        # The deterministic card gate: empty fields, one-word answers, deictic
+        # questions, bloated question with trivial answer. Every one of those is
+        # something the prompt forbids, so this measures instruction-following
+        # with no judge in the loop.
+        "cards_gated",
+        "cards_rejected",
+        "card_reject_rate",
         "cards_requested",
         "cards_generated",
         "generation_rate",
@@ -91,7 +103,11 @@ def metric_name(key: str) -> str:
 def tier(key: str) -> str:
     """Which tier a metric key belongs to: structural, quality, excluded, other."""
     key = metric_name(key)
-    if key.startswith("repair_") or key in ("parses", "parses_repaired", "parses_first_pass"):
+    if key.startswith(("repair_", "card_reject_")) or key in (
+        "parses",
+        "parses_repaired",
+        "parses_first_pass",
+    ):
         return "structural"
     if key in STRUCTURAL:
         return "structural"
