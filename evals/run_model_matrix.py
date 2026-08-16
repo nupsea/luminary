@@ -118,9 +118,10 @@ def _tasks(backend_url: str) -> dict[str, Task]:
                 "run_summary_eval.py",
                 "--mode", "executive",
                 "--skip-judge",
+                "--force-refresh",
                 "--backend-url", backend_url,
             ),
-            note="deterministic half: grounding needs no judge",
+            note="deterministic half, regenerated: a stored summary scores the model that wrote it",
         ),
         "qa": Task(
             name="qa",
@@ -347,6 +348,12 @@ def _print_separation(verdict: dict[str, Any], a: str, b: str) -> None:
         print(
             f"    [{mark}] {row['metric']:<40} {row['a']:>12.4f} -> {row['b']:>12.4f}"
             f"  ({row['delta']:+.4f})"
+        )
+    for task in verdict["unmeasured_tasks"]:
+        print(
+            f"  WARNING: every {task} metric is identical on both models. Two models do not\n"
+            f"  score the same to full precision on work that depends on them -- {task}\n"
+            "  measured something other than the model, and its numbers say nothing here.\n"
         )
     if verdict["separated"]:
         print(f"  SEPARATED on {', '.join(verdict['separating_metrics'])}\n")

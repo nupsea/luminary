@@ -10,10 +10,9 @@ from functools import lru_cache
 from sqlalchemy import func, select, update
 
 from app.database import get_session_factory
-from app.model_registry import default_chat_model, profile_for
 from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
-from app.services.prompt_spec import NO_FENCES, PromptSpec, render
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,8 @@ SUGGESTION_SPEC = PromptSpec(
     accommodations=(NO_FENCES,),
 )
 
-_SYSTEM_PROMPT = render(SUGGESTION_SPEC, profile_for(default_chat_model()))
+def _system_prompt() -> str:
+    return render_for(SUGGESTION_SPEC, "background")
 
 _USER_PROMPT = (
     "Passages from the document:\n{passages}\n\n"
@@ -75,7 +75,8 @@ CROSS_DOC_SUGGESTION_SPEC = PromptSpec(
     accommodations=(NO_FENCES,),
 )
 
-_CROSS_DOC_SYSTEM = render(CROSS_DOC_SUGGESTION_SPEC, profile_for(default_chat_model()))
+def _cross_doc_system() -> str:
+    return render_for(CROSS_DOC_SUGGESTION_SPEC, "background")
 
 
 # Words that carry no subject matter. Only used to reduce past questions to the
@@ -365,7 +366,7 @@ class SuggestionService:
 
         if document_id is not None:
             grounding = "\n\n".join(passages) if passages else summary[:3000]
-            system = _SYSTEM_PROMPT.format(
+            system = _system_prompt().format(
                 guidance=guidance,
                 bloom_level=target_bloom,
                 history=history_text,
@@ -375,7 +376,7 @@ class SuggestionService:
                 entities=", ".join(entity_names[:10]),
             )
         else:
-            system = _CROSS_DOC_SYSTEM.format(
+            system = _cross_doc_system().format(
                 guidance=guidance,
                 bloom_level=target_bloom,
                 history=history_text,

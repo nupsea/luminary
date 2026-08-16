@@ -9,12 +9,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from app.model_registry import default_chat_model, profile_for
 from app.services.prompt_spec import (
     NO_FENCES,
     Accommodation,
     PromptSpec,
-    render,
+    render_for,
     step_decomposition,
 )
 
@@ -94,10 +93,9 @@ FLASHCARD_USER_SPEC = PromptSpec(
     ),
 )
 
-FLASHCARD_USER_TMPL = (
-    render(FLASHCARD_USER_SPEC, profile_for(default_chat_model()))
-    + "\nText:\n{text}\n\nJSON object:"
-)
+def flashcard_user_tmpl() -> str:
+    """The user prompt, rendered for the model that will generate the cards."""
+    return render_for(FLASHCARD_USER_SPEC, "generation") + "\nText:\n{text}\n\nJSON object:"
 
 NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
     task="concepts",
@@ -134,9 +132,8 @@ NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
     ),
 )
 
-NOTES_CONCEPT_EXTRACT_SYSTEM = render(
-    NOTES_CONCEPT_EXTRACT_SPEC, profile_for(default_chat_model())
-)
+def notes_concept_extract_system() -> str:
+    return render_for(NOTES_CONCEPT_EXTRACT_SPEC, "generation")
 
 NOTES_CONCEPT_EXTRACT_TMPL = (
     "Identify the domain and extract up to {max_concepts} learnable concepts from these notes.\n\n"

@@ -18,7 +18,6 @@ from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.model_registry import default_chat_model, profile_for
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -30,7 +29,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
-from app.services.prompt_spec import render, tag_spec
+from app.services.prompt_spec import render_for, tag_spec
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +112,8 @@ TAG_STOPLIST: frozenset[str] = frozenset(
 
 DOCUMENT_TAG_SPEC = tag_spec("document")
 
-_SYSTEM = render(DOCUMENT_TAG_SPEC, profile_for(default_chat_model()))
+def _system() -> str:
+    return render_for(DOCUMENT_TAG_SPEC, "background")
 
 _USER_TMPL = (
     "Title:\n{title}\n\nSummary:\n{summary}\n\nExcerpt:\n{excerpt}\n\n"
@@ -146,7 +146,7 @@ class DocumentTaggerService:
         try:
             raw = await get_llm_service().complete(
                 messages=[
-                    {"role": "system", "content": _SYSTEM},
+                    {"role": "system", "content": _system()},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,

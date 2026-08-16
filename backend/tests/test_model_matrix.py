@@ -207,3 +207,30 @@ def test_every_task_is_invoked_the_way_make_invokes_its_runner(task):
     assert spec.argv[0] == "uv"
     assert "--backend-url" in spec.argv
     assert spec.cwd.exists()
+
+
+def test_a_task_that_scored_identically_on_both_models_is_flagged():
+    """The summary task did exactly this: `/summarize` replays the stored
+    summary unless asked to refresh, so a 3B and a 14B model scored the same to
+    four decimals and the task measured neither of them."""
+    from evals.lib.matrix import unmeasured_tasks
+
+    a = {
+        "summary.theme_coverage": 0.7833,
+        "summary.conciseness_pct": 2.4781,
+        "flashcards.parses": 39,
+    }
+    b = {
+        "summary.theme_coverage": 0.7833,
+        "summary.conciseness_pct": 2.4781,
+        "flashcards.parses": 38,
+    }
+
+    assert unmeasured_tasks(a, b) == ["summary"]
+    assert separation(a, b)["unmeasured_tasks"] == ["summary"]
+
+
+def test_a_task_that_moved_at_all_is_not_flagged_as_unmeasured():
+    from evals.lib.matrix import unmeasured_tasks
+
+    assert unmeasured_tasks({"qa.answer_rate": 0.9}, {"qa.answer_rate": 0.95}) == []

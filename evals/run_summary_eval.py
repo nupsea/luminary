@@ -89,8 +89,24 @@ def _collect_sse_tokens(text: str) -> str:
     return "".join(tokens)
 
 
-def fetch_summary(backend_url: str, document_id: str, mode: str, model: str | None) -> str:
+def fetch_summary(
+    backend_url: str,
+    document_id: str,
+    mode: str,
+    model: str | None,
+    *,
+    force_refresh: bool = False,
+) -> str:
+    """The summary for this document, generated now or replayed from the store.
+
+    Without *force_refresh* the endpoint returns whatever is already stored, so
+    the score belongs to the model that wrote it -- which may not be the model
+    running. Measured: two different models scored bit-identically on all three
+    metrics, because neither of them generated anything.
+    """
     payload: dict[str, object] = {"mode": mode}
+    if force_refresh:
+        payload["force_refresh"] = True
     if model:
         payload["model"] = model
     resp = httpx.post(f"{backend_url}/summarize/{document_id}", json=payload, timeout=120.0)
@@ -125,6 +141,15 @@ def main() -> None:
         action="store_true",
         help="Skip LLM hallucination judge and report no_hallucination as n/a.",
     )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help=(
+            "Regenerate each summary instead of scoring the stored one. Required "
+            "whenever the number is about the model rather than about the library: "
+            "without it the run scores whichever model wrote the summary first."
+        ),
+    )
     args = parser.parse_args()
 
     rows = [
@@ -142,7 +167,13 @@ def main() -> None:
         doc_id = ensure_ingested(args.backend_url, row["source_file"], manifest)
         if not doc_id:
             continue
-        summary = fetch_summary(args.backend_url, doc_id, args.mode, args.model or None)
+        summary = fetch_summary(
+            args.backend_url,
+            doc_id,
+            args.mode,
+            args.model or None,
+            force_refresh=args.force_refresh,
+        )
         theme = compute_theme_coverage(summary, row["expected_themes"])
         concision = compute_conciseness_pct(summary, row["target_length_chars"])
         grounding = _grounding_for(args.backend_url, doc_id, summary)
@@ -213,6 +244,7 @@ def main() -> None:
         mode=args.mode,
         judge_model=None if args.skip_judge else args.judge_model,
         skip_judge=bool(args.skip_judge),
+        force_refresh=bool(args.force_refresh),
     )
     same_model = self_judging(environment)
     environment["self_judged"] = bool(same_model)

@@ -27,7 +27,6 @@ from sqlalchemy import func, select
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
-from app.model_registry import default_vision_model, profile_for
 from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
@@ -35,7 +34,7 @@ from app.services import (
 )
 from app.services.llm import LLMUnavailableError, get_llm_service, missing_model_from
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
-from app.services.prompt_spec import NO_FENCES, PromptSpec, render, step_decomposition
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for, step_decomposition
 from app.services.settings_service import get_vision_model
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,8 @@ VISION_SPEC = PromptSpec(
     ),
 )
 
-_VISION_PROMPT = render(VISION_SPEC, profile_for(default_vision_model()))
+def _vision_prompt() -> str:
+    return render_for(VISION_SPEC, "vision")
 
 _CONTEXT_TMPL = "Document context:\n{context}\n\n"
 
@@ -272,7 +272,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                                     "text": (
                                         _CONTEXT_TMPL.format(context=context) if context else ""
                                     )
-                                    + _VISION_PROMPT,
+                                    + _vision_prompt(),
                                 },
                                 {
                                     "type": "image_url",

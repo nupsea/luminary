@@ -755,6 +755,19 @@ or if any accommodation lacks a model, an observation and an exit.
 Still open: the I-28 widening — `flashcard_prompts.py` opens with "creating flashcards based on
 Bloom's Taxonomy", and the guard covers suggestions only.
 
+**Per-model rendering, closed 2026-08-16.** Every spec was rendered at import against
+`profile_for(default_chat_model())` — the configured default, not the model that would answer — so
+a model chosen in Settings received another model's accommodations, and `accommodations_needed` on
+a registry entry would have been read for a model nobody was going to call. Invisible while
+nothing is measured, and wrong the moment the matrix fills one in. `render_for(spec, role)` now
+resolves the profile through `model_router` at call time, and nine sites use the role their own
+call already passes: flashcards and notes-concept extraction `generation`, both taggers and both
+suggestion prompts `background`, intent `chat`, vision `vision`. Rendered per call and never
+cached, because the model changes under a running process — Settings, and the matrix switching
+candidates. `tests/test_prompt_spec.py` fails if any module renders against a configured default
+again, and a second test patches the router to a measured profile and asserts the accommodations
+disappear.
+
 
 
 `PromptSpec` carries the contract; `Accommodation` records each compensation with its `kind`,
@@ -966,12 +979,43 @@ fills `accommodations_needed` for one model, the value will be read for the wron
 all. Rendering per resolved model is therefore a prerequisite for the necessity check's output to
 mean anything, and it belongs in P4 rather than being smuggled into the matrix.
 
-**Not yet run across models.** The acceptance criterion — separating `qwen3.5:0.8b` from
-`qwen3.5:4b` — needs both pulled and a full pass per model, and is unverified. What has run is one
-end-to-end pass on the current model with the intent task only: 29 adversarial rows in 10.9s,
-`routing_accuracy` 0.9655. That is plumbing evidence, **not** a model comparison and not comparable
-to the 0.5862 recorded above, which is the heuristic-only arm measured before the shape rules and
-the negation fix shipped.
+#### First run: separated, on one metric out of nine
+
+`llama3.2:latest` (2.0GB) against `qwen2.5:14b-instruct` (9.0GB), shipped arm, tasks intent +
+flashcards + summary, one library state (52 documents), 2026-08-16. Not the `qwen3.5:0.8b` /
+`4b` pair the plan names — those numbers still do not exist — but a wider size gap, which is the
+stronger test of whether the instrument can see a model at all.
+
+| structural | llama3.2 | qwen2.5:14b |
+|---|---|---|
+| intent.routing_accuracy | 0.8621 | **0.9655** |
+| flashcards.first_pass_rate | 0.0000 | 0.0000 |
+| flashcards.generation_rate | 1.0000 | 1.0000 |
+| flashcards.parse_failure_rate | 0.0000 | 0.0000 |
+| flashcards.cards_generated | 105 | 105 |
+| flashcards.parses / repaired | 39 / 39 | 38 / 38 |
+
+**The instrument is not blind, but it is nearly blind.** One metric separated a 3B model from a
+14B one. Everything the flashcard path reports is identical, and `parses` differing by one is
+noise below the margin.
+
+**Every flashcard generation on both models needed the same repair.** `first_pass_rate` is 0.0000
+on a 3B and on a 14B: 39 of 39 and 38 of 38 completions arrived with prose around the JSON, which
+`surrounded_by_prose` strips. `no_fences` is in that prompt — "No explanation, no preamble, no
+markdown fences" — and neither model obeys it. An accommodation that changes nothing on any model
+tested is not a compensation, it is decoration, and the necessity check should be expected to
+delete it rather than confirm it.
+
+**The summary task measured neither model, and that is the finding worth keeping.** All three
+summary metrics came back bit-identical to four decimals (`theme_coverage` 0.7833,
+`conciseness_pct` 2.4781, `summary_grounding` 0.3274). `POST /summarize/{id}` returns the stored
+summary unless asked to refresh, so the run scored whichever model wrote it first — a number that
+looks like a model comparison and is not one. Fixed two ways: `run_summary_eval.py --force-refresh`
+(recorded in the run's environment, and always passed by the matrix), and
+`matrix.unmeasured_tasks`, which flags any task whose every metric is identical across two models,
+because two models do not produce the same float to full precision on work that depends on them.
+
+Still unrun: the `qwen3.5:0.8b` / `4b` acceptance pair, the `qa` task, and both prompt arms.
 
 
 

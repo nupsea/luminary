@@ -136,6 +136,40 @@ def structural_metrics(metrics: dict[str, Any]) -> dict[str, float]:
     return out
 
 
+def _by_task(metrics: dict[str, Any]) -> dict[str, dict[str, float]]:
+    grouped: dict[str, dict[str, float]] = {}
+    for key, value in metrics.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        task = key.split(".", 1)[0] if "." in key else ""
+        grouped.setdefault(task, {})[metric_name(key)] = float(value)
+    return grouped
+
+
+def unmeasured_tasks(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
+    """Tasks whose every metric came out bit-identical on two different models.
+
+    Two models do not produce the same float to full precision on work that
+    depends on them. When a task does, it measured something other than the
+    model -- a stored artifact replayed instead of regenerated, a golden the
+    model never saw, a switch that did not reach that path. Measured: the
+    summary task scored identically on a 3B and a 14B model, because
+    `/summarize` returns the stored summary unless asked to refresh.
+
+    Reported loudly, because "identical" otherwise reads as "the models are
+    equivalent" -- which is the same wrong conclusion the last comparison drew.
+    """
+    left, right = _by_task(a), _by_task(b)
+    flagged = []
+    for task in sorted(set(left) & set(right)):
+        keys = set(left[task]) & set(right[task])
+        if not keys or set(left[task]) != set(right[task]):
+            continue
+        if all(left[task][key] == right[task][key] for key in keys):
+            flagged.append(task)
+    return flagged
+
+
 def separation(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """What, if anything, tells two models apart on the structural tier.
 
@@ -163,4 +197,5 @@ def separation(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
         "deltas": deltas,
         "separating_metrics": separating,
         "separated": bool(separating),
+        "unmeasured_tasks": unmeasured_tasks(a, b),
     }

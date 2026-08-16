@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.config import get_settings
-from app.model_registry import ModelProfile
+from app.model_registry import ModelProfile, Role
 
 AccommodationKind = Literal[
     # English that polices output format: "return only JSON", escape hints.
@@ -180,6 +180,25 @@ def render(spec: PromptSpec, profile: ModelProfile | None) -> str:
         if _applied(a, profile, bare, dropped)
     )
     return "\n".join(p for p in parts if p) + "\n"
+
+
+def render_for(spec: PromptSpec, role: Role, *, background: bool = False) -> str:
+    """The prompt as the model that will actually serve this role receives it.
+
+    Rendering against the configured default instead was a hole in the mechanism
+    rather than a detail: a model chosen in Settings answered with another
+    model's accommodations, and `accommodations_needed` on a registry entry
+    would have been read for a model that was never going to be called. It was
+    invisible while nothing is measured -- every model gets every accommodation
+    -- and wrong the moment the matrix fills one in.
+
+    Rendered per call, never cached. The model changes under a running process:
+    Settings, and the matrix switching candidates. A cached render pins the
+    first one, which is the same defect with a smaller radius.
+    """
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return render(spec, resolve(role, background=background).profile)
 
 
 def describe(spec: PromptSpec, profile: ModelProfile | None) -> list[dict[str, str]]:

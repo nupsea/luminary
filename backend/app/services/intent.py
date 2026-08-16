@@ -8,8 +8,7 @@ import logging
 import re
 from functools import lru_cache
 
-from app.model_registry import default_chat_model, profile_for
-from app.services.prompt_spec import Accommodation, PromptSpec, render
+from app.services.prompt_spec import Accommodation, PromptSpec, render_for
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +615,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
                 {
                     "role": "system",
                     "content": f"{scope_hint} "
-                    + render(INTENT_CLASSIFY_SPEC, profile_for(default_chat_model())),
+                    + render_for(INTENT_CLASSIFY_SPEC, "chat"),
                 },
                 {"role": "user", "content": question},
             ],

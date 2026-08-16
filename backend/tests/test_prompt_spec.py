@@ -13,7 +13,7 @@ from dataclasses import replace
 import pytest
 
 from app.model_registry import REGISTRY, ModelProfile, profile_for
-from app.services.flashcard_prompts import FLASHCARD_USER_SPEC, FLASHCARD_USER_TMPL
+from app.services.flashcard_prompts import FLASHCARD_USER_SPEC, flashcard_user_tmpl
 from app.services.prompt_spec import Accommodation, PromptSpec, describe, render
 
 # The flashcard prompt as every unmeasured model receives it. Update this when
@@ -49,8 +49,8 @@ def test_the_rendered_flashcard_prompt_is_what_the_snapshot_says():
 def test_the_shipped_template_is_the_render_plus_its_text_slot():
     """The template callers format is built from the spec, so the two cannot
     drift into disagreeing about what the model is asked for."""
-    assert FLASHCARD_USER_TMPL.startswith(FLASHCARD_RENDER)
-    assert FLASHCARD_USER_TMPL.endswith("Text:\n{text}\n\nJSON object:")
+    assert flashcard_user_tmpl().startswith(FLASHCARD_RENDER)
+    assert flashcard_user_tmpl().endswith("Text:\n{text}\n\nJSON object:")
 
 
 def test_an_unmeasured_model_keeps_every_accommodation():
@@ -233,3 +233,51 @@ def test_one_accommodation_can_be_withheld_for_the_necessity_check(prompt_settin
     for accommodation in FLASHCARD_USER_SPEC.accommodations[1:]:
         assert accommodation.text.strip() in rendered
         assert reported[accommodation.id] == "yes"
+
+
+# A prompt is rendered for the model that will answer (P4 gap, closed 2026-08-16).
+
+
+def test_a_prompt_is_rendered_for_the_model_that_will_answer(monkeypatch):
+    """Rendering against the configured default meant a model chosen in Settings
+    answered with another model's accommodations -- and `accommodations_needed`
+    on a registry entry would have been read for a model nobody was going to
+    call, which is the whole output of the matrix's necessity check."""
+    from types import SimpleNamespace
+
+    import app.services.model_router as router_module
+
+    measured = _measured(needed=())
+    monkeypatch.setattr(
+        router_module,
+        "resolve",
+        lambda role, background=False: SimpleNamespace(profile=measured, model="ollama/measured"),
+    )
+
+    rendered = flashcard_user_tmpl()
+
+    assert rendered.startswith(FLASHCARD_USER_SPEC.contract.rstrip())
+    for accommodation in FLASHCARD_USER_SPEC.accommodations:
+        assert accommodation.text.strip() not in rendered
+
+
+def test_nothing_renders_a_prompt_against_the_configured_default():
+    """The guard that keeps the hole shut. `profile_for(default_*_model())` asks
+    what config defaults to, which is a different question from what will serve
+    the call -- and the two disagree the moment a user picks a model."""
+    import re
+    from pathlib import Path
+
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    pattern = re.compile(r"render\s*\(\s*\w+\s*,\s*profile_for\s*\(\s*default_\w*model\(\)")
+    offenders = [
+        f"{path.relative_to(app_dir)}:{i}"
+        for path in app_dir.rglob("*.py")
+        for i, line in enumerate(path.read_text().splitlines(), start=1)
+        if pattern.search(line)
+    ]
+
+    assert offenders == [], (
+        "these render for the configured default instead of the resolved model: "
+        f"{offenders}. Use render_for(spec, role)."
+    )

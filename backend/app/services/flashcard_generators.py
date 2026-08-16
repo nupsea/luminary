@@ -45,17 +45,17 @@ from app.services.flashcard_prompts import (
     _DIFFICULTY_GUIDELINES,
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
-    FLASHCARD_USER_TMPL,
     GRAPH_FLASHCARD_SYSTEM,
     GRAPH_FLASHCARD_USER_TMPL,
     NOTES_CARD_FROM_CONCEPTS_SYSTEM,
     NOTES_CARD_FROM_CONCEPTS_TMPL,
-    NOTES_CONCEPT_EXTRACT_SYSTEM,
     NOTES_CONCEPT_EXTRACT_TMPL,
     TECH_FLASHCARD_SYSTEM,
     TECH_FLASHCARD_USER_TMPL,
     _build_genre_system_prompt,
     _infer_genre,
+    flashcard_user_tmpl,
+    notes_concept_extract_system,
 )
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
@@ -537,7 +537,7 @@ async def generate(
             )
 
     async def _batch(want: int, avoid: list[str]) -> list[dict]:
-        batch_prompt = FLASHCARD_USER_TMPL.format(
+        batch_prompt = flashcard_user_tmpl().format(
             count=want,
             difficulty=difficulty,
             difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
@@ -710,7 +710,7 @@ async def generate_from_notes(
 
         raw_concepts = await llm.generate(
             extract_prompt,
-            system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+            system=notes_concept_extract_system(),
             model=_generation_model(), stream=False,
         )
         domain, concepts = _parse_concept_extract(raw_concepts)
@@ -827,7 +827,7 @@ async def generate_from_collection(
                 max_concepts=max(count_per_note, 8),
                 text=combined_text,
             ),
-            system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+            system=notes_concept_extract_system(),
             model=_generation_model(),
             stream=False,
         )
