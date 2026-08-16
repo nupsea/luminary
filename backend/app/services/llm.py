@@ -16,6 +16,7 @@ from typing import Any
 import litellm
 
 from app.config import Settings, get_settings
+from app.services.llm_admission import admit
 from app.telemetry import trace_llm_call
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,8 @@ class LLMService:
 
         with trace_llm_call("complete", model=effective_model) as span:
             try:
-                response = await litellm.acompletion(**kwargs)
+                async with admit(effective_model, background=background):
+                    response = await litellm.acompletion(**kwargs)
             except Exception as exc:
                 retry = (
                     self._offline_fallback_kwargs(
@@ -376,7 +378,8 @@ class LLMService:
                 )
                 effective_model = retry["model"]
                 span.set_attribute("llm.offline_fallback", True)
-                response = await litellm.acompletion(**retry)
+                async with admit(effective_model, background=background):
+                    response = await litellm.acompletion(**retry)
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
             prompt_tokens = 0
@@ -415,7 +418,7 @@ class LLMService:
         fallback = self._offline_fallback_kwargs(
             model, effective_model, kwargs, settings, num_ctx=num_ctx
         )
-        return self._token_stream(kwargs, fallback)
+        return self._token_stream(kwargs, fallback, background=background)
 
     async def generate(
         self,
@@ -453,25 +456,32 @@ class LLMService:
         )
 
     async def _token_stream(
-        self, kwargs: dict, fallback_kwargs: dict | None = None
+        self, kwargs: dict, fallback_kwargs: dict | None = None, *, background: bool = False
     ) -> AsyncGenerator[str]:
-        try:
-            response = await litellm.acompletion(stream=True, **kwargs)
-        except Exception as exc:
-            if fallback_kwargs is None or not _is_offline_error(exc):
-                raise
-            logger.warning(
-                "%s unreachable while streaming (%s); retrying on local model %s",
-                kwargs.get("model"),
-                type(exc).__name__,
-                fallback_kwargs["model"],
-            )
-            fallback_kwargs.pop("stream", None)
-            response = await litellm.acompletion(stream=True, **fallback_kwargs)
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        """Stream deltas, holding the admission gate for the whole stream.
+
+        A stream is not finished when its first token arrives -- the user is
+        still being served, so the gate is released only once the generator is
+        exhausted or closed.
+        """
+        async with admit(str(kwargs.get("model", "")), background=background):
+            try:
+                response = await litellm.acompletion(stream=True, **kwargs)
+            except Exception as exc:
+                if fallback_kwargs is None or not _is_offline_error(exc):
+                    raise
+                logger.warning(
+                    "%s unreachable while streaming (%s); retrying on local model %s",
+                    kwargs.get("model"),
+                    type(exc).__name__,
+                    fallback_kwargs["model"],
+                )
+                fallback_kwargs.pop("stream", None)
+                response = await litellm.acompletion(stream=True, **fallback_kwargs)
+            async for chunk in response:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
 
 
 def _messages_to_text(messages: list[dict]) -> str:

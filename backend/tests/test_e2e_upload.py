@@ -52,6 +52,9 @@ def _assert_status_schema(body: dict) -> None:
     assert isinstance(body.get("stage"), str), "stage must be a string"
     assert isinstance(body.get("progress_pct"), int), "progress_pct must be an int"
     assert isinstance(body.get("done"), bool), "done must be a bool"
+    assert isinstance(body.get("paused_for_interaction"), bool), (
+        "paused_for_interaction must be a bool -- the UI has no pause state without it"
+    )
     assert body.get("error_message") is None or isinstance(body["error_message"], str), (
         "error_message must be str or null"
     )

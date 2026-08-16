@@ -5691,6 +5691,52 @@ export interface components {
              */
             member_type: string;
         };
+        /**
+         * AdmissionStats
+         * @description Live state of the interactive/background LLM gate (P5).
+         */
+        AdmissionStats: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Reserve
+             * @default 0
+             */
+            reserve: number;
+            /**
+             * Interactive Inflight
+             * @default 0
+             */
+            interactive_inflight: number;
+            /**
+             * Background Inflight
+             * @default 0
+             */
+            background_inflight: number;
+            /**
+             * Background Waiting
+             * @default 0
+             */
+            background_waiting: number;
+            /**
+             * Deferred Calls
+             * @default 0
+             */
+            deferred_calls: number;
+            /**
+             * Deferred Seconds
+             * @default 0
+             */
+            deferred_seconds: number;
+            /**
+             * Forced Admissions
+             * @default 0
+             */
+            forced_admissions: number;
+        };
         /** AnnotationCreateRequest */
         AnnotationCreateRequest: {
             /** Document Id */
@@ -8098,6 +8144,19 @@ export interface components {
             };
             /** Qa Daily */
             qa_daily: components["schemas"]["QADailyCount"][];
+            /**
+             * @default {
+             *       "enabled": true,
+             *       "reserve": 0,
+             *       "interactive_inflight": 0,
+             *       "background_inflight": 0,
+             *       "background_waiting": 0,
+             *       "deferred_calls": 0,
+             *       "deferred_seconds": 0,
+             *       "forced_admissions": 0
+             *     }
+             */
+            llm_admission: components["schemas"]["AdmissionStats"];
         };
         /** MonitoringOverview */
         MonitoringOverview: {

@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     # Ollama rather than overlap (I-31). Costs one KV cache per slot, so 1 is
     # the floor for an unmeasured machine; installers raise it from host RAM.
     OLLAMA_NUM_PARALLEL: int = 1
+    # Admission control: background LLM work yields to interactive work at the
+    # granularity of one completed call (Ollama has no preemption). The reserve
+    # is derived from OLLAMA_NUM_PARALLEL rather than configured -- at one slot
+    # background suspends, at two or more one slot stays free for an Ask. Off
+    # only to reproduce the un-gated latency baseline.
+    LLM_ADMISSION_ENABLED: bool = True
+    # Hold the reserve this long after an interactive call ends, so a background
+    # call is not admitted between two turns of the same conversation.
+    LLM_ADMISSION_GRACE_SECONDS: float = 5.0
+    # Starvation bound. Someone who keeps chatting must not stop ingestion
+    # for ever: a background call held this long is admitted anyway and logged.
+    LLM_ADMISSION_MAX_DEFER_SECONDS: float = 60.0
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept

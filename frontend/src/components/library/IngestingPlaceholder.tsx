@@ -5,20 +5,8 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { apiDelete } from "@/lib/apiClient"
 import { fetchIngestionStatus, type IngestionStatus } from "@/lib/ingestionApi"
+import { pauseNote, stageLabel } from "@/lib/ingestionStatus"
 import { Progress } from "@/components/ui/progress"
-
-const STAGE_LABELS: Record<string, string> = {
-  parsing: "Parsing document",
-  transcribing: "Transcribing",
-  classifying: "Classifying content",
-  chunking: "Chunking text",
-  embedding: "Generating embeddings",
-  indexing: "Building keyword index",
-  summarizing: "Summarising sections",
-  entity_extract: "Extracting entities",
-  complete: "Complete",
-  error: "Failed",
-}
 
 interface IngestingPlaceholderProps {
   documentId: string
@@ -57,7 +45,13 @@ export function IngestingPlaceholder({
       const stage = query.state.data?.stage
       return stage === "complete" || stage === "error" ? false : 2000
     },
-    initialData: { stage: initialStage, progress_pct: 0, done: false, error_message: null },
+    initialData: {
+      stage: initialStage,
+      progress_pct: 0,
+      done: false,
+      paused_for_interaction: false,
+      error_message: null,
+    },
   })
 
   const stage = status?.stage ?? initialStage
@@ -88,7 +82,11 @@ export function IngestingPlaceholder({
     },
   })
 
-  const stageLabel = STAGE_LABELS[stage] ?? `Processing (${progress}%)`
+  const label = stageLabel(stage, progress)
+  const paused = pauseNote({
+    stage,
+    paused_for_interaction: status?.paused_for_interaction ?? false,
+  })
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 p-6">
@@ -115,9 +113,14 @@ export function IngestingPlaceholder({
           <>
             <Progress value={progress} />
             <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground">{stageLabel}</span>
+              <span className="text-foreground">{label}</span>
               <span className="text-xs text-muted-foreground">{progress}%</span>
             </div>
+            {paused ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                {paused}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               Learning features (Study, Visualize, Chat, flashcards, search) become available once
               ingestion completes. You can keep using the rest of Luminary while this runs.

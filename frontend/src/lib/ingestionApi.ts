@@ -18,6 +18,8 @@ export interface IngestionStatus {
   stage: string
   progress_pct: number
   done: boolean
+  /** Background indexing is being held back for an in-flight question. */
+  paused_for_interaction?: boolean
   error_message: string | null
 }
 

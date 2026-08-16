@@ -834,7 +834,64 @@ rows is reported at the top of its run.
 
 ## Stage 5 — Schedule and calibrate
 
-### P5 — Scheduling and admission control
+### P5 — Scheduling and admission control — **shipped 2026-08-16, latency not yet re-measured**
+
+`app/services/llm_admission.py` is a priority gate in front of the local runtime's slots, applied
+inside `LLMService.complete` and `_token_stream` so `background=True` is the whole of what a caller
+says. Interactive calls never wait; a background call waits for interactive pressure to clear
+before issuing its next one, since one completed call is the finest yield granularity Ollama
+offers. A stream holds the gate until it is exhausted or closed — a stream is not finished when its
+first token lands.
+
+**The reserve is derived from the serving width, not from a profile knob.** The plan said `low`
+hard-suspends, `standard` reserves a slot, `performance` separates physically; `LUMINARY_PROFILE`
+is an installer variable the backend never reads, and `LUMINARY_MEMORY_PROFILE` does not exist
+until P7. `background_reserve() = OLLAMA_NUM_PARALLEL - 1` produces the same three cases from the
+number the installer already sizes from host RAM: one slot means no slot to give, so background
+suspends outright; two or more keeps one free for an Ask and lets the rest serve ingestion. P7 then
+has one fewer knob to reconcile. Physical separation stays a runtime property (each loaded model
+gets its own runner, I-31), not something the app can express.
+
+Two bounds keep the gate from becoming a wedge, and they are different quantities:
+
+- `LLM_ADMISSION_MAX_DEFER_SECONDS` (60s) — a held call is admitted anyway and counted as a forced
+  admission. Someone who keeps chatting must not stop ingestion for ever.
+- `_STALE_INTERACTIVE_SECONDS` (600s) — an interactive call still in flight after ten minutes is
+  presumed leaked and stops counting as pressure. An abandoned SSE stream would otherwise hold the
+  gate for the life of the process. Far above the longest request timeout in the codebase (300s),
+  so only a leak trips it. This matters beyond tidiness: a deferring background call may hold a
+  lock an interactive request needs, and both bounds mean that resolves itself rather than hanging.
+
+Cloud calls pass straight through — they contend for nothing on this machine.
+
+The UI state is `paused_for_interaction` on `GET /documents/{id}/status`, which the ingesting
+placeholder already polls every 2s, rendered as "Paused while you're asking". It is true only while
+a background call is actually being held, not merely while a question is in flight — I-10 wants an
+explicit state, not a plausible one. `GET /monitoring/metrics` carries the counters
+(`deferred_calls`, `deferred_seconds`, `forced_admissions`), which are what separate "the Ask was
+fast" from "the Ask was fast *and* the gate engaged". `tests/test_llm_admission.py` holds the
+ordering properties; smoke S231 holds the wire contract.
+
+**The call-site audit found no unbounded background prompt.** Every one of the 27 `background=True`
+sites slices its input: 600–3,000 chars at most of them, `TEXT_HARD_CAP` 10,000 chars in
+`section_summarizer`, `_MAP_BATCH_TOKENS` 3,000 tokens per map batch in `summarizer`, 6×800 chars
+of grounding in `suggestion_service`, 250 sampled headings in `topic_service`. The one site with no
+explicit slice is `reference_enricher._extract_references`, which passes a section summary the
+summarizer generated — bounded by what a 2-3 sentence prompt emits rather than by construction. So
+**the worst-case interactive wait is set by generation length, not prompt length**: ~16s of decode
+against ~0.4s of prefill (I-31). Adding prompt caps would not have moved it.
+
+Not done, and the reason Stage 5 is not closed: **the latency gate is unmeasured.** P0's probe has
+to run both arms on the same document — `LLM_ADMISSION_ENABLED=false` exists to reproduce the
+un-gated baseline — and ingestion throughput has to be recorded beside TTFT, or a stall has merely
+been traded for an ingest that never finishes. The 75–115s figure this gate exists to fix is a
+measurement of 0.6.1; nothing here has re-measured it.
+
+Also untouched, and still open from P0: embedding and reranking are CPU-bound through
+`run_in_executor(None, …)`, so a large ingest slows the query embed and the ~510ms cross-encoder
+even when no LLM call is queued. Admission control has no term for that channel.
+
+
 
 **Single residency fixes memory and makes contention worse.** I-31 states it directly: each loaded
 model gets its own runner with its own slots, so text and vision do not contend. Two runners is an
