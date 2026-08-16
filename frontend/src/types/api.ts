@@ -4252,6 +4252,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model Residency
+         * @description The active memory profile, what each role resolves to, and the footprint.
+         */
+        get: operations["get_model_residency_settings_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/models/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model Catalogue
+         * @description Every registry entry with its footprint, smallest first.
+         *
+         *     Includes models this host cannot hold, flagged rather than hidden: a user
+         *     choosing a machine or deciding what to pull is better served by seeing what
+         *     exists and what it would need.
+         */
+        get: operations["get_model_catalogue_settings_models_catalogue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/llm": {
         parameters: {
             query?: never;
@@ -7918,6 +7962,25 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** InstallableModel */
+        InstallableModel: {
+            /** Id */
+            id: string;
+            /** Resident Gb */
+            resident_gb: number;
+            /** Min Ram Gb */
+            min_ram_gb: number;
+            /** Licence */
+            licence: string;
+            /** Multimodal */
+            multimodal: boolean;
+            /** Usable Context */
+            usable_context: number;
+            /** Accommodations Measured */
+            accommodations_measured: boolean;
+            /** Fits Host */
+            fits_host: boolean;
+        };
         /** KindleIngestResponse */
         KindleIngestResponse: {
             /** Document Ids */
@@ -8118,6 +8181,42 @@ export interface components {
             resolved_count: number;
             /** Resolved Last 30D */
             resolved_last_30d: number;
+        };
+        /**
+         * ModelResidencyResponse
+         * @description What this configuration costs on this machine, and whether it fits.
+         *
+         *     Every number here was knowable before and none was put together, so a model
+         *     too large for the host was selectable and the first symptom was a crash
+         *     during ingestion rather than a refusal at the point of choosing.
+         */
+        ModelResidencyResponse: {
+            /** Profile */
+            profile: string;
+            /** Profile Explicit */
+            profile_explicit: boolean;
+            /** Profile Suits Host */
+            profile_suits_host: boolean;
+            /** Host Ram Gb */
+            host_ram_gb: number;
+            /** Roles */
+            roles: {
+                [key: string]: components["schemas"]["RoleResolution"];
+            };
+            /** Resident Models */
+            resident_models: string[];
+            /** Resident Count */
+            resident_count: number;
+            /** Max Resident */
+            max_resident: number;
+            /** Within Residency Limit */
+            within_residency_limit: boolean;
+            /** Resident Gb */
+            resident_gb: number;
+            /** Unmeasured Models */
+            unmeasured_models: string[];
+            /** Oversized Models */
+            oversized_models: string[];
         };
         /** ModelUsageItem */
         ModelUsageItem: {
@@ -8744,6 +8843,17 @@ export interface components {
             session_id?: string | null;
             /** Predicted Rating */
             predicted_rating?: ("again" | "hard" | "good" | "easy") | null;
+        };
+        /** RoleResolution */
+        RoleResolution: {
+            /** Model */
+            model: string;
+            /** Local */
+            local: boolean;
+            /** Resident Gb */
+            resident_gb?: number | null;
+            /** Fallback Reason */
+            fallback_reason?: string | null;
         };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {
@@ -16970,6 +17080,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_residency_settings_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResidencyResponse"];
+                };
+            };
+        };
+    };
+    get_model_catalogue_settings_models_catalogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallableModel"][];
                 };
             };
         };

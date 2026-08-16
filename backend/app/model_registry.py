@@ -109,6 +109,53 @@ def profile_for(model_id: str) -> ModelProfile | None:
     return REGISTRY.get(model_id) or REGISTRY.get(f"ollama/{model_id}")
 
 
+def fits_host(profile: ModelProfile, ram_gb: int | None = None) -> bool:
+    """Whether this machine has the RAM the model asks for.
+
+    `min_ram_gb` sat unread on every entry until this existed, so a 10GB model
+    was selectable on a 16GB laptop and the first symptom was a crash mid-ingest
+    rather than a refusal at the point of choosing.
+
+    An unreadable RAM figure (0) answers True: the check exists to warn about a
+    machine we measured, never to block one we could not.
+    """
+    from app.memory_profile import host_ram_gb  # noqa: PLC0415
+
+    available = host_ram_gb() if ram_gb is None else ram_gb
+    return available == 0 or available >= profile.min_ram_gb
+
+
+def models_for_host(
+    ram_gb: int | None = None, *, multimodal: bool | None = None
+) -> list[ModelProfile]:
+    """Registry entries this machine can hold, smallest first.
+
+    Smallest first because the question this answers is "what can I run", and on
+    a constrained machine the honest first suggestion is the one that leaves
+    room for everything else the pipeline loads -- the embedder, the entity
+    model, and a vision model if enrichment is on.
+    """
+    out = [
+        p
+        for p in REGISTRY.values()
+        if fits_host(p, ram_gb) and (multimodal is None or p.multimodal == multimodal)
+    ]
+    return sorted(out, key=lambda p: p.resident_bytes)
+
+
+def oversized_for_host(model_id: str, ram_gb: int | None = None) -> ModelProfile | None:
+    """The profile of *model_id* when it does not fit this host, else None.
+
+    Returns the profile rather than a bool so a caller can say how much the
+    model wants. An unregistered model returns None -- unmeasured is not the
+    same as too large, and the caller that reports it says so (`profile_for`).
+    """
+    profile = profile_for(model_id)
+    if profile is None or fits_host(profile, ram_gb):
+        return None
+    return profile
+
+
 def default_chat_model() -> str:
     """The configured on-device default, with its provider prefix."""
     model = get_settings().LITELLM_DEFAULT_MODEL

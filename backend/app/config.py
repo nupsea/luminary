@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     # is derived from OLLAMA_NUM_PARALLEL rather than configured -- at one slot
     # background suspends, at two or more one slot stays free for an Ask. Off
     # only to reproduce the un-gated latency baseline.
+    # low | standard | performance, or empty to size from host RAM. Constrains
+    # how many models may stay resident and which the registry will recommend.
+    # The installer already sizes OLLAMA_MAX_LOADED_MODELS / OLLAMA_NUM_PARALLEL
+    # from the same RAM reading and passes them to Ollama too -- this never
+    # overrides those, because a backend disagreeing with the runtime about slot
+    # count leaves the extra slots idle (I-31). `public` is read as `low`.
+    LUMINARY_MEMORY_PROFILE: str = ""
     LLM_ADMISSION_ENABLED: bool = True
     # Hold the reserve this long after an interactive call ends, so a background
     # call is not admitted between two turns of the same conversation.

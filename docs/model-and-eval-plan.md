@@ -1094,7 +1094,49 @@ time.
 
 ## Stage 6 — Switch and lean out
 
-### P7 — Memory profile and the model switch
+### P7 — Memory profile and the model switch — **registry made load-bearing 2026-08-16; the switch is not made**
+
+`app/memory_profile.py` detects host RAM and resolves the active profile;
+`model_router.residency_report()` answers what the current configuration costs on this machine;
+`GET /settings/models` and `/settings/models/catalogue` expose both. Smoke S232.
+
+**The gap this closed is that the registry was inert.** `min_ram_gb` and `resident_bytes` had been
+on every entry since P3 and nothing read them, so a 10GB model was selectable on a 16GB laptop and
+the first symptom was a crash during ingestion rather than a refusal at the point of choosing.
+Three numbers were each knowable and never put together: host RAM, how many *distinct* models the
+four roles resolve to, and what those models weigh.
+
+Verified by firing the check rather than by a clean pass — a check that has never returned False is
+unverified. This machine's actual configuration, evaluated against a 16GB host: profile `low`,
+2 models resident against a limit of 1, 16.0GB of models, `qwen2.5:14b-instruct` flagged oversized.
+That is the reported crash, predicted from config alone.
+
+**Advisory in the backend, authoritative at install time.** `install.sh` and `supervisor.rs` size
+`OLLAMA_MAX_LOADED_MODELS` and `OLLAMA_NUM_PARALLEL` from the same RAM reading and pass them to
+Ollama as well; I-31 is explicit that a backend disagreeing with the runtime leaves the extra slots
+idle. Nothing here overrides them. The thresholds match `install.sh:_default_profile` deliberately —
+two detectors disagreeing about what machine this is would be worse than one occasionally wrong.
+
+One vocabulary, one alias: `install.sh` called the small profile `public`, which collides with
+`LUMINARY_MODE=public`, a surface-curation concept on an unrelated axis. `low` is the name;
+`public` is read as a legacy alias so an installed `.env` keeps working.
+
+Still open in this phase, and none of it is a detail:
+
+- **The profile does not yet pick the role map.** It reports and constrains; it does not choose a
+  smaller model, and `VISION_MODEL` is still a first-class knob rather than the `vision` role's
+  resolution.
+- **Runtime geometry is still global.** `OLLAMA_NUM_CTX` is one value for every model (I-27 says
+  the value belongs to the model and is read from its profile — that half was never built),
+  `QA_CONTEXT_TOKEN_BUDGET` is 1500 for everyone, and `think=False` is unconditional. All three
+  were sized for llama3.2, so a more capable model cannot be given more without giving it to
+  everything.
+- **`accommodations_needed` is empty on all three entries and nothing writes it.** P6 now produces
+  the evidence; there is no path from a matrix run to a calibrated profile.
+- **Three registry entries.** The four models in the 8–16GB class that are installed on this
+  machine — `phi4-mini`, `gemma3:4b`, `qwen3.5:4b` alongside `llama3.2` — have no entries, so the
+  catalogue cannot recommend them and the matrix cannot report their footprint.
+- **The exit gate is unmet**: P0 footprint, P5 latency and P6 structural on all three profiles.
 
 `LUMINARY_MEMORY_PROFILE: low | standard | performance`, defaulted from host RAM. Reuse
 `total_memory_gb()` and `_mem_gb()` rather than adding a third detector. The profile picks the role

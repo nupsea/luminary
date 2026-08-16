@@ -26,8 +26,17 @@ ingestion for a configuration problem the user can see in Settings.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from app.model_registry import ModelProfile, Role, configured_generation_override, profile_for
+from app.model_registry import (
+    _GB,
+    ROLES,
+    ModelProfile,
+    Role,
+    configured_generation_override,
+    fits_host,
+    profile_for,
+)
 from app.services import settings_service
 
 
@@ -81,4 +90,73 @@ def resident_models() -> set[str]:
     cost two runners whatever `OLLAMA_MAX_LOADED_MODELS` says (I-31). The
     residency test in plan Phase 7 asserts against exactly this.
     """
-    return {resolve(role).model for role in ("chat", "generation", "background", "vision")}
+    return {resolve(role).model for role in ROLES}
+
+
+def residency_report() -> dict[str, Any]:
+    """What this configuration costs on this machine, and whether it fits.
+
+    The three numbers that decide whether a machine can run this configuration
+    were each knowable and none was ever put together: how much RAM the host
+    has, how many distinct models the four roles resolve to, and what those
+    models weigh. A configuration that exceeds the host is reported here rather
+    than discovered as a crash during ingestion.
+
+    Cloud models weigh nothing locally and are excluded from the footprint;
+    unregistered local models are listed as unmeasured, because an unknown
+    footprint must not be silently counted as zero.
+    """
+    from app.memory_profile import (  # noqa: PLC0415
+        active_profile,
+        host_ram_gb,
+        max_resident_models,
+        profile_is_explicit,
+        profile_suits_host,
+    )
+
+    per_role = {role: resolve(role) for role in ROLES}
+    local = {c.model for c in per_role.values() if c.is_local}
+
+    measured_bytes = 0
+    unmeasured: list[str] = []
+    for model in sorted(local):
+        profile = profile_for(model)
+        if profile is None:
+            unmeasured.append(model)
+        else:
+            measured_bytes += profile.resident_bytes
+
+    profile_name = active_profile()
+    limit = max_resident_models(profile_name)
+    ram = host_ram_gb()
+
+    oversized = sorted(
+        {
+            model
+            for model in local
+            if (p := profile_for(model)) is not None and not fits_host(p, ram or None)
+        }
+    )
+
+    return {
+        "profile": profile_name,
+        "profile_explicit": profile_is_explicit(),
+        "profile_suits_host": profile_suits_host(profile_name),
+        "host_ram_gb": ram,
+        "roles": {
+            role: {
+                "model": choice.model,
+                "local": choice.is_local,
+                "resident_gb": (p.resident_gb if (p := profile_for(choice.model)) else None),
+                "fallback_reason": choice.fallback_reason,
+            }
+            for role, choice in per_role.items()
+        },
+        "resident_models": sorted(local),
+        "resident_count": len(local),
+        "max_resident": limit,
+        "within_residency_limit": len(local) <= limit,
+        "resident_gb": round(measured_bytes / _GB, 2),
+        "unmeasured_models": unmeasured,
+        "oversized_models": oversized,
+    }
