@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
+from app.model_registry import default_vision_model, profile_for
 from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 from app.services import embedder as _embedder_module  # indirect: get_embedding_service is patched
 from app.services import (
@@ -34,6 +35,7 @@ from app.services import (
 )
 from app.services.llm import LLMUnavailableError, get_llm_service, missing_model_from
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render, step_decomposition
 from app.services.settings_service import get_vision_model
 
 logger = logging.getLogger(__name__)
@@ -41,26 +43,42 @@ logger = logging.getLogger(__name__)
 # Transcription-first prompting: forcing the model to commit to the labels it
 # can actually read before describing anchors the description in legible
 # content and measurably curbs invented node names on dense diagrams.
-_VISION_PROMPT = (
-    "You are analyzing an image extracted from a document.\n"
-    "Step 1 -- transcribe the text labels that are legible in the image, "
-    "exactly as written. Never guess or invent labels; omit any you cannot "
-    "read clearly.\n"
-    "Step 2 -- classify the image as one of: architecture_diagram, "
-    "sequence_diagram, er_diagram, flowchart, code_screenshot, table, chart, "
-    "photo, other.\n"
-    "Step 3 -- describe what the image shows and what it is for. For "
-    "diagrams, describe the structure: which labeled components exist and how "
-    "they connect or flow.\n"
-    "The image is the primary evidence. Any document context provided may be "
-    "vague, incomplete, or unrelated -- weigh it against what you see. When "
-    "the image is clear, describe it confidently even if the context says "
-    "little; use the context to supply names the image alone cannot (such as "
-    "what a figure or system is called), and only when it matches what you "
-    "see.\n"
-    'Reply ONLY with JSON: {"image_type": "...", "labels": ["..."], '
-    '"description": "..."}'
+VISION_SPEC = PromptSpec(
+    task="vision",
+    contract=(
+        "You are analyzing an image extracted from a document.\n"
+        "Transcribe the text labels that are legible in the image, exactly as "
+        "written. Never guess or invent labels; omit any you cannot read "
+        "clearly.\n"
+        "Classify the image as one of: architecture_diagram, sequence_diagram, "
+        "er_diagram, flowchart, code_screenshot, table, chart, photo, other.\n"
+        "Describe what the image shows and what it is for. For diagrams, "
+        "describe the structure: which labeled components exist and how they "
+        "connect or flow.\n"
+        "The image is the primary evidence. Any document context provided may "
+        "be vague, incomplete, or unrelated -- weigh it against what you see. "
+        "When the image is clear, describe it confidently even if the context "
+        "says little; use the context to supply names the image alone cannot "
+        "(such as what a figure or system is called), and only when it matches "
+        "what you see.\n"
+        'Reply with JSON: {"image_type": "...", "labels": ["..."], '
+        '"description": "..."}'
+    ),
+    accommodations=(
+        step_decomposition(
+            "Work in three steps: transcribe the labels, then classify, then describe.",
+            introduced_for="ollama/qwen2.5vl:7b",
+            because=(
+                "descriptions invented labels the image did not contain until "
+                "transcription was made an explicit first step (I-33's sibling "
+                "failure on the vision path)"
+            ),
+        ),
+        NO_FENCES,
+    ),
 )
+
+_VISION_PROMPT = render(VISION_SPEC, profile_for(default_vision_model()))
 
 _CONTEXT_TMPL = "Document context:\n{context}\n\n"
 

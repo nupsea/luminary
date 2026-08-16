@@ -734,9 +734,26 @@ snapshot test holds the render, and the move was re-measured rather than assumed
 `cards_returned` moved (44 → 32), which is the near-duplicate filter on a warmer library and not a
 fact about the model.
 
-Still to convert: concepts, topics, tagging, intent, vision. And the I-28 widening —
-`flashcard_prompts.py` still opens with "creating flashcards based on Bloom's Taxonomy", which the
-current guard covers only for suggestions.
+**All JSON-emitting paths converted 2026-08-16**: flashcards, concepts, both taggers, vision,
+intent, and both suggestion prompts — eight specs, each registered in `make prompt-dump`.
+
+The dedup fell out of the tagging: `"No explanation, no preamble, no markdown fences"` was the
+same sentence in five prompts, so it is now one `NO_FENCES` object with one observation behind it
+(40 of 40 flashcard generations needed the `surrounded_by_prose` repair). Copying that sentence
+into every prompt is what made it look like part of each task's contract.
+
+Three accommodations were found in the process, each with its observation recorded:
+`step_decomposition` on vision (transcription had to be an explicit first step or descriptions
+invented labels) and on concepts (the domain was being read from the notes' setting rather than
+their subject), and `bare_topic_example` on intent — a corpus entity hardcoded in a prompt, which
+the no-hardcoded-examples rule forbids, kept because the observation behind it is real and now
+carrying an exit condition.
+
+`tests/test_prompt_spec.py` fails if a module defines a spec that `prompt_dump` does not register,
+or if any accommodation lacks a model, an observation and an exit.
+
+Still open: the I-28 widening — `flashcard_prompts.py` opens with "creating flashcards based on
+Bloom's Taxonomy", and the guard covers suggestions only.
 
 
 

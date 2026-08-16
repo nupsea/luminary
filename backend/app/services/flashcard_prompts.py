@@ -10,7 +10,13 @@ import re
 from typing import TYPE_CHECKING
 
 from app.model_registry import default_chat_model, profile_for
-from app.services.prompt_spec import Accommodation, PromptSpec, render
+from app.services.prompt_spec import (
+    NO_FENCES,
+    Accommodation,
+    PromptSpec,
+    render,
+    step_decomposition,
+)
 
 if TYPE_CHECKING:
     from app.models import DocumentModel
@@ -93,25 +99,43 @@ FLASHCARD_USER_TMPL = (
     + "\nText:\n{text}\n\nJSON object:"
 )
 
-NOTES_CONCEPT_EXTRACT_SYSTEM = (
-    "You are a learning analyst. Given a learner's notes, your job is two steps. "
-    "STEP 1 -- DOMAIN: Identify the primary subject domain of the notes in a single short phrase. "
-    "The domain is what the learner is actively trying to understand or remember. "
-    "It is never the setting, date, location, or context in which the notes were written. "
-    "STEP 2 -- CONCEPTS: Extract atomic, learnable concepts that are directly about that domain. "
-    "A concept must be an insight, claim, argument, principle, or relationship within the domain. "
-    "STRICT GROUNDING: extract only what is explicitly stated or directly implied by the notes. "
-    "Never introduce knowledge from outside the notes. "
-    "REJECT any concept that is about: "
-    "the physical setting (weather, environment, location, surroundings); "
-    "people or events incidental to the subject; "
-    "bare enumerations with no explanatory content; "
-    "meta-commentary about the notes. "
-    "For each accepted concept, assign a type: "
-    "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
-    'Output ONLY a JSON object with keys "domain" (string) and '
-    '"concepts" (array of {"concept": "...", "type": "..."}). '
-    "No explanation, no preamble, no markdown fences."
+NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
+    task="concepts",
+    contract=(
+        "You are a learning analyst. Given a learner's notes, identify the primary "
+        "subject domain and extract atomic, learnable concepts about it. "
+        "The domain is what the learner is actively trying to understand or remember. "
+        "It is never the setting, date, location, or context in which the notes were written. "
+        "A concept must be an insight, claim, argument, principle, or relationship within "
+        "the domain. "
+        "STRICT GROUNDING: extract only what is explicitly stated or directly implied by "
+        "the notes. Never introduce knowledge from outside the notes. "
+        "REJECT any concept that is about: "
+        "the physical setting (weather, environment, location, surroundings); "
+        "people or events incidental to the subject; "
+        "bare enumerations with no explanatory content; "
+        "meta-commentary about the notes. "
+        "For each accepted concept, assign a type: "
+        "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
+        'Output a JSON object with keys "domain" (string) and '
+        '"concepts" (array of {"concept": "...", "type": "..."}).'
+    ),
+    accommodations=(
+        step_decomposition(
+            "Work in two steps: STEP 1 -- DOMAIN, then STEP 2 -- CONCEPTS.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "without an explicit first step the domain was inferred from the "
+                "notes' setting -- the weather and the place -- rather than their "
+                "subject, and every concept followed it"
+            ),
+        ),
+        NO_FENCES,
+    ),
+)
+
+NOTES_CONCEPT_EXTRACT_SYSTEM = render(
+    NOTES_CONCEPT_EXTRACT_SPEC, profile_for(default_chat_model())
 )
 
 NOTES_CONCEPT_EXTRACT_TMPL = (

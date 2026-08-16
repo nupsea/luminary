@@ -10,8 +10,10 @@ from functools import lru_cache
 from sqlalchemy import func, select, update
 
 from app.database import get_session_factory
+from app.model_registry import default_chat_model, profile_for
 from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +39,21 @@ _STYLE_RULES = (
     "something that is not there."
 )
 
-_SYSTEM_PROMPT = (
-    "You are helping someone study a document they are reading. "
-    "Write exactly 6 questions they could ask about it.\n"
-    "{guidance}\n"
-    f"{_STYLE_RULES}\n"
-    "These topics are already covered -- prefer different ones: {history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
-    "(integer, always {bloom_level}). No explanation, no markdown fences."
+SUGGESTION_SPEC = PromptSpec(
+    task="suggestions",
+    contract=(
+        "You are helping someone study a document they are reading. "
+        "Write exactly 6 questions they could ask about it.\n"
+        "{guidance}\n"
+        f"{_STYLE_RULES}\n"
+        "These topics are already covered -- prefer different ones: {history}\n\n"
+        "Output a JSON array of objects with keys 'question' and 'depth' "
+        "(integer, always {bloom_level})."
+    ),
+    accommodations=(NO_FENCES,),
 )
+
+_SYSTEM_PROMPT = render(SUGGESTION_SPEC, profile_for(default_chat_model()))
 
 _USER_PROMPT = (
     "Passages from the document:\n{passages}\n\n"
@@ -53,15 +61,21 @@ _USER_PROMPT = (
     "Write the 6 questions."
 )
 
-_CROSS_DOC_SYSTEM = (
-    "You are helping someone study their own library. Write exactly 6 questions "
-    "that connect ideas across the documents shown.\n"
-    "{guidance}\n"
-    f"{_STYLE_RULES}\n"
-    "These topics are already covered -- prefer different ones: {history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
-    "(integer, always {bloom_level}). No explanation, no markdown fences."
+CROSS_DOC_SUGGESTION_SPEC = PromptSpec(
+    task="suggestions_cross_doc",
+    contract=(
+        "You are helping someone study their own library. Write exactly 6 questions "
+        "that connect ideas across the documents shown.\n"
+        "{guidance}\n"
+        f"{_STYLE_RULES}\n"
+        "These topics are already covered -- prefer different ones: {history}\n\n"
+        "Output a JSON array of objects with keys 'question' and 'depth' "
+        "(integer, always {bloom_level})."
+    ),
+    accommodations=(NO_FENCES,),
 )
+
+_CROSS_DOC_SYSTEM = render(CROSS_DOC_SUGGESTION_SPEC, profile_for(default_chat_model()))
 
 
 # Words that carry no subject matter. Only used to reduce past questions to the

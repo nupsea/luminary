@@ -120,3 +120,64 @@ def test_accommodation_text_is_appended_in_declaration_order():
     )
 
     assert render(spec, None) == "Contract.\nLine 1.\nLine 2.\n"
+
+
+# Every spec in the tree (P4)
+
+
+def _all_specs() -> dict[str, PromptSpec]:
+    import importlib.util
+    from pathlib import Path
+
+    dump = Path(__file__).resolve().parent.parent.parent / "scripts" / "prompt_dump.py"
+    spec = importlib.util.spec_from_file_location("prompt_dump", dump)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SPECS
+
+
+def _defined_specs() -> set[str]:
+    """Modules that construct a PromptSpec, by grep rather than import."""
+    from pathlib import Path
+
+    services = Path(__file__).resolve().parent.parent / "app" / "services"
+    return {
+        path.name
+        for path in services.glob("*.py")
+        if "PromptSpec(" in path.read_text() and path.name != "prompt_spec.py"
+    }
+
+
+def test_every_prompt_spec_is_dumpable():
+    """A spec that `make prompt-dump` cannot print is a prompt that exists only
+    at runtime -- the cost this refactor pays back, unpaid."""
+    dumped = _all_specs()
+
+    assert len(dumped) >= len(_defined_specs()), (
+        f"{len(_defined_specs())} modules define a PromptSpec but only "
+        f"{len(dumped)} are registered in scripts/prompt_dump.py"
+    )
+
+
+@pytest.mark.parametrize("task", sorted(_all_specs()))
+def test_every_registered_spec_renders_and_justifies_itself(task):
+    spec = _all_specs()[task]
+    rendered = render(spec, _unmeasured())
+
+    assert rendered.strip(), task
+    for accommodation in spec.accommodations:
+        assert accommodation.text.strip() in rendered, f"{task}: {accommodation.id} missing"
+        assert accommodation.introduced_for.startswith(("ollama/", "openai/", "anthropic/"))
+        assert len(accommodation.because) > 20, f"{task}: {accommodation.id} has no observation"
+        assert len(accommodation.drop_when) > 20, f"{task}: {accommodation.id} has no exit"
+
+
+def test_the_shared_format_accommodation_is_one_object_not_a_copied_sentence():
+    """"No explanation, no preamble, no markdown fences" appeared in five
+    prompts. One observation, one accommodation: copying the sentence is what
+    made it look like part of each task's contract."""
+    from app.services.prompt_spec import NO_FENCES
+
+    users = [t for t, s in _all_specs().items() if NO_FENCES in s.accommodations]
+
+    assert len(users) >= 5, users

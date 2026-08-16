@@ -86,6 +86,63 @@ class PromptSpec:
         return tuple(a for a in self.accommodations if a.needed_by(profile))
 
 
+# Compensations that appear in five or more prompts. Declared once: they are one
+# accommodation with one observation behind them, and copying the sentence into
+# every prompt is what made them look like part of each task's contract.
+
+NO_FENCES = Accommodation(
+    id="no_fences",
+    kind="format",
+    text="No explanation, no preamble, no markdown fences.",
+    introduced_for="ollama/llama3.2",
+    because=(
+        "local models wrap JSON in prose or a ```json fence; measured on "
+        "qwen2.5:14b-instruct, 40 of 40 flashcard generations needed the "
+        "surrounded_by_prose repair"
+    ),
+    drop_when="the matrix shows the raw parse rate holding without it",
+)
+
+
+def tag_spec(subject: str) -> PromptSpec:
+    """The tagging prompt, one spec for documents and notes.
+
+    These were the same sentence twice, differing only in the noun, so the
+    format policing had to be changed in two files or the two drifted.
+    """
+    return PromptSpec(
+        task=f"tags_{subject}",
+        contract=(
+            f"You are a tagging assistant. Given a {subject}, suggest up to 5 short, "
+            "lowercase tags that best describe its topics. Tags should be 1-3 words, "
+            "no punctuation. Output a JSON array of strings."
+        ),
+        accommodations=(
+            Accommodation(
+                id="tag_example",
+                kind="example",
+                text='For example: ["machine learning", "python"].',
+                introduced_for="ollama/llama3.2",
+                because="tags came back as a prose sentence rather than a JSON array",
+                drop_when="the matrix shows schema conformance holding without it",
+            ),
+            NO_FENCES,
+        ),
+    )
+
+
+def step_decomposition(text: str, *, introduced_for: str, because: str) -> Accommodation:
+    """A STEP 1 / STEP 2 breakdown of a task the model could plan itself."""
+    return Accommodation(
+        id="step_decomposition",
+        kind="decomposition",
+        text=text,
+        introduced_for=introduced_for,
+        because=because,
+        drop_when="the matrix shows the same output quality from the contract alone",
+    )
+
+
 def render(spec: PromptSpec, profile: ModelProfile | None) -> str:
     """The prompt this model gets: the contract, then only what it still needs."""
     parts = [spec.contract.rstrip()]

@@ -962,7 +962,9 @@ async def test_vision_call_includes_context_when_given(tmp_path: Path) -> None:
         await _call_vision_llm(img_path, settings, "Figure 1: The model architecture")
         prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]
         assert "Figure 1: The model architecture" in prompt_text
-        assert "transcribe the text labels" in prompt_text
+        # The instruction, not its casing: it opens the contract now rather than
+        # following "Step 1 -- ", so the sentence starts with a capital.
+        assert "transcribe the text labels" in prompt_text.lower()
 
         await _call_vision_llm(img_path, settings, "")
         prompt_text = mock_llm.call_args.kwargs["messages"][0]["content"][0]["text"]

@@ -22,11 +22,41 @@ BACKEND = Path(__file__).resolve().parent.parent / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.model_registry import default_chat_model, profile_for  # noqa: E402
-from app.services.flashcard_prompts import FLASHCARD_USER_SPEC  # noqa: E402
+from app.model_registry import (  # noqa: E402
+    default_chat_model,
+    default_vision_model,
+    profile_for,
+)
+from app.services.document_tagger import DOCUMENT_TAG_SPEC  # noqa: E402
+from app.services.flashcard_prompts import (  # noqa: E402
+    FLASHCARD_USER_SPEC,
+    NOTES_CONCEPT_EXTRACT_SPEC,
+)
+from app.services.image_enricher import VISION_SPEC  # noqa: E402
+from app.services.intent import INTENT_CLASSIFY_SPEC  # noqa: E402
+from app.services.note_tagger import NOTE_TAG_SPEC  # noqa: E402
 from app.services.prompt_spec import describe, render  # noqa: E402
+from app.services.suggestion_service import (  # noqa: E402
+    CROSS_DOC_SUGGESTION_SPEC,
+    SUGGESTION_SPEC,
+)
 
-SPECS = {FLASHCARD_USER_SPEC.task: FLASHCARD_USER_SPEC}
+# Every PromptSpec in the tree. `tests/test_prompt_spec.py` fails if one is
+# defined and not listed here, because a prompt nobody can dump is a prompt that
+# only exists at runtime -- which is the cost this script pays back.
+SPECS = {
+    spec.task: spec
+    for spec in (
+        FLASHCARD_USER_SPEC,
+        NOTES_CONCEPT_EXTRACT_SPEC,
+        DOCUMENT_TAG_SPEC,
+        NOTE_TAG_SPEC,
+        VISION_SPEC,
+        INTENT_CLASSIFY_SPEC,
+        SUGGESTION_SPEC,
+        CROSS_DOC_SUGGESTION_SPEC,
+    )
+}
 
 
 def main() -> int:
@@ -36,7 +66,9 @@ def main() -> int:
     args = ap.parse_args()
 
     spec = SPECS[args.task]
-    model = args.model or default_chat_model()
+    model = args.model or (
+        default_vision_model() if spec.task == "vision" else default_chat_model()
+    )
     profile = profile_for(model)
 
     print(f"task   {spec.task}")

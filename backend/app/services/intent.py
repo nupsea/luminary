@@ -8,6 +8,9 @@ import logging
 import re
 from functools import lru_cache
 
+from app.model_registry import default_chat_model, profile_for
+from app.services.prompt_spec import Accommodation, PromptSpec, render
+
 logger = logging.getLogger(__name__)
 
 _VALID_INTENTS: frozenset[str] = frozenset(
@@ -543,6 +546,41 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
 LLM_FALLBACK_BELOW = 0.7
 
 
+# The classifier prompt as a contract plus what this model needed to follow it.
+# The bare-topic rule carries a corpus entity as its example, which is the
+# hardcoded-example rule's own counter-case: the observation is real, so it is
+# tagged rather than deleted, and the example goes when the matrix says the rule
+# holds without it.
+INTENT_CLASSIFY_SPEC = PromptSpec(
+    task="intent",
+    contract=(
+        "The user has asked a question about their documents. Decide how to "
+        "look the answer up. Reply with exactly one word: "
+        "summary, factual, relational, comparative, or exploratory. "
+        "Use 'summary' ONLY when the user explicitly asks to summarize, or "
+        "for an overview of a whole body of work. Breadth of scope is not a "
+        "request for a summary. "
+        "Use 'factual' for questions about specific people, facts, concepts, "
+        "or entities, even if phrased as what they 'discuss' or 'explain'. "
+        "A bare topic or entity name with no verb is 'factual', whatever the scope."
+    ),
+    accommodations=(
+        Accommodation(
+            id="bare_topic_example",
+            kind="example",
+            text="For example, a two-word product name on its own is 'factual', not 'summary'.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "a bare entity name under scope='all' classified as 'summary', "
+                "returning the library summary instead of what the library says "
+                "about that entity"
+            ),
+            drop_when="the matrix shows bare topics classified as factual without it",
+        ),
+    ),
+)
+
+
 async def _llm_classify_fallback(question: str, default: str, scope: str = "all") -> str:
     """Call LiteLLM to classify intent when heuristic confidence < 0.7.
 
@@ -577,19 +615,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        f"{scope_hint} "
-                        "The user has asked a question about their documents. Decide how to "
-                        "look the answer up. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, or exploratory. "
-                        "Use 'summary' ONLY when the user explicitly asks to summarize, or "
-                        "for an overview of a whole body of work. Breadth of scope is not a "
-                        "request for a summary. "
-                        "Use 'factual' for questions about specific people, facts, concepts, "
-                        "or entities, even if phrased as what they 'discuss' or 'explain'. "
-                        "A bare topic or entity name with no verb (e.g. 'Apache Iceberg') is "
-                        "'factual', whatever the scope."
-                    ),
+                    "content": f"{scope_hint} "
+                    + render(INTENT_CLASSIFY_SPEC, profile_for(default_chat_model())),
                 },
                 {"role": "user", "content": question},
             ],
