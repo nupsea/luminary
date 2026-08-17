@@ -146,3 +146,35 @@ def test_the_rejection_kind_survives_a_reworded_message():
 
     assert kind == REJECT_DEICTIC
     assert "in this passage" in message
+
+
+def test_an_answer_that_lists_facts_is_rejected():
+    """A list is several cards wearing one question -- the primary defect in a card.
+
+    Rules 4, 9 and 10 of the card-writing canon say split it. The prompt used to ask
+    for bulleted answers and the measured atomicity floor was 0.7778, with 9 of 12
+    sampled cards carrying bullets, so the deterministic backstop matters even after
+    the prompt stopped encouraging them.
+    """
+    from app.services.flashcard_parsers import REJECT_ENUMERATED, card_rejection
+
+    verdict = card_rejection(
+        "What institutions support the council?",
+        "A council of state helps.\n- a chamber of accounts\n- five admiralty colleges",
+    )
+
+    assert verdict is not None
+    kind, message = verdict
+    assert kind == REJECT_ENUMERATED
+    assert "2 items" in message
+
+
+def test_a_lead_sentence_with_one_detail_line_is_still_one_card():
+    """One item is a lead plus its detail; two is a list. The boundary is deliberate."""
+    assert (
+        card_rejection_reason(
+            "What supports the council?",
+            "A council of state helps.\n- together with a chamber of accounts",
+        )
+        is None
+    )

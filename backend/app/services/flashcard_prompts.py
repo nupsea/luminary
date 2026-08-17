@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 FLASHCARD_SYSTEM = (
     "You are a learning assistant that writes flashcards for active recall. Each card is a "
-    "self-contained question testing understanding of one idea, plus a concise, complete "
-    "answer -- both grounded only in the provided text.\n"
+    "self-contained question testing understanding of exactly one idea, plus the shortest "
+    "complete answer -- both grounded only in the provided text.\n"
     "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
     "comparison asks how two things differ; a role/process asks what X enables in Y; a "
     "definition asks what X is. Name the concept directly and prefer why/how/apply over recall. "
@@ -32,9 +32,12 @@ FLASHCARD_SYSTEM = (
     "which specific example or analogy the text used. The question must stand alone -- never "
     "say 'in this passage', 'according to the text', or 'the author'; it must make sense "
     "without the source.\n"
-    "ANSWER: lead with one sentence that directly answers the question, then add a short "
-    "markdown bullet list ('- ...') only when it has several distinct points. Keep it tight -- "
-    "no filler, and no chapter/section reference.\n"
+    "ANSWER: one sentence, the shortest that is still complete. If the text lists several "
+    "items, write one card per item rather than one card listing them -- an answer carrying a "
+    "list is several cards wearing a single question, and it is the hardest kind to recall. "
+    "Two sentences only when the question compares two things and both sides must be stated. "
+    "Every claim must be supported by the text: if you cannot point at the sentence that "
+    "backs it, leave it out. No filler, no chapter/section reference.\n"
     'Include a "bloom_level" integer 1-6 (1=remember ... 6=create); aim for level 3+ '
     "(apply/analyze/evaluate) where the material allows."
 )
@@ -69,25 +72,27 @@ FLASHCARD_USER_SPEC = PromptSpec(
             ),
         ),
         Accommodation(
-            id="worked_example",
+            id="atomic_answer_example",
             kind="example",
             text=(
-                "Example card with a multi-point answer:\n"
-                '{{"flashcards": [{{"question": "How do random hardware faults and systematic '
-                'software errors differ for fault tolerance?", "answer": "They fail '
-                "differently, so they need different defences.\\n- Hardware faults are largely "
-                "independent -- redundancy masks them.\\n- Software errors are correlated and "
-                'can fail many nodes at once -- they need testing and isolation.", '
+                "Example card:\n"
+                '{{"flashcards": [{{"question": "Why do independent hardware faults need a '
+                'different defence from systematic software errors?", "answer": "Hardware '
+                "faults are largely independent so redundancy can mask them, while software "
+                'errors are correlated and can fail many nodes at once.", '
                 '"source_excerpt": "", "bloom_level": 4}}]}}'
             ),
-            introduced_for="ollama/llama3.2",
+            introduced_for="ollama/qwen3.5:4b",
             because=(
-                "answers came back as one flat sentence; the example is what "
-                "produced multi-point answers with a lead sentence"
+                "it replaces `worked_example`, which existed to turn one-sentence "
+                "answers into multi-point bulleted ones. That was the wrong target: "
+                "rules 4, 9 and 10 of the card-writing canon make a list the primary "
+                "defect in a card, and the measured atomicity floor was 0.7778 with "
+                "the old example in place"
             ),
             drop_when=(
-                "the matrix shows answer structure holding without it -- a stronger "
-                "model regresses toward the example's register, so this caps it"
+                "atomicity holds at 1.0 across a matrix run without it -- an example "
+                "sets the register a model regresses toward, in either direction"
             ),
         ),
     ),
@@ -311,6 +316,36 @@ _TECH_TITLE_KEYWORDS = re.compile(
 )
 
 
+# What to ask of each kind of material. Distilled from the card-writing canon
+# (SuperMemo's 20 rules, which Anki's manual defers to) and pointed at the failure
+# each kind actually shows: narrative cards drift into "which word was used",
+# technical cards into restating prose instead of the rule, academic cards into
+# "who wrote it", and transcript cards into facts that go stale unread.
+_GENRE_STRATEGY = {
+    "narrative": (
+        "Ask about cause and consequence, what a character wanted, or what a choice cost. "
+        "Never ask which words the text used or which example illustrated a point."
+    ),
+    "non-fiction": (
+        "Ask what a claim asserts, why it holds, and what it rules out."
+    ),
+    "technical": (
+        "Ask the invariant, the failure mode, when one option beats another, and what a "
+        "parameter controls. Where the text gives syntax, a signature or a formula, quote "
+        "its exact form in the answer rather than describing it."
+    ),
+    "academic": (
+        "Ask what was claimed, how it was measured, what the evidence was, and what "
+        "limitation the work states. Never ask who wrote it or where it was published."
+    ),
+    "conversation": (
+        "Ask what was decided, who owns it, and why the alternative was rejected. Anything "
+        "that will go stale -- a date, a version, a headcount -- must carry its date in the "
+        "answer so a card reviewed months later is still checkable."
+    ),
+}
+
+
 def _infer_genre(doc: DocumentModel | None) -> str:
     """Infer document genre for system prompt tuning.
 
@@ -329,15 +364,25 @@ def _infer_genre(doc: DocumentModel | None) -> str:
         return "academic"
     if content_type == "book":
         return "technical" if _TECH_TITLE_KEYWORDS.search(title) else "non-fiction"
-    # transcripts / notes / unknown: non-fiction recall prompt is safer than narrative
+    # A transcript's value is the decision and its owner, which the non-fiction
+    # prompt does not ask for; it also holds the most volatile facts in a library.
+    if content_type in ("conversation", "transcript", "meeting", "audio", "video"):
+        return "conversation"
+    # notes / unknown: non-fiction recall prompt is safer than narrative
     return "non-fiction"
 
 
 def _build_genre_system_prompt(genre: str) -> str:
-    """The single flashcard system prompt, prefixed with a one-line genre hint.
+    """The single flashcard system prompt plus what to ask of this kind of material.
 
-    One source of truth (FLASHCARD_SYSTEM) drives generation; the hint just nudges
-    tone for technical/academic/non-fiction material.
+    One source of truth (FLASHCARD_SYSTEM) drives generation. The genre block used
+    to be the sentence "This is a {genre} document.", which named the material and
+    asked for nothing: cards from a meeting transcript and cards from a textbook
+    came out the same shape. Each strategy below says what a good card *asks* for
+    that kind, which is the part a model cannot infer from the label.
     """
-    hint = f"This is a {genre} document. " if genre != "narrative" else ""
-    return hint + FLASHCARD_SYSTEM
+    article = "an" if genre[:1] in "aeiou" else "a"
+    label = f"This is {article} {genre} document. " if genre != "narrative" else ""
+    strategy = _GENRE_STRATEGY.get(genre, "")
+    prefix = f"{label}{strategy}\n" if strategy else label
+    return prefix + FLASHCARD_SYSTEM

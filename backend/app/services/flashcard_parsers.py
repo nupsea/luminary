@@ -167,6 +167,14 @@ _MIN_ANSWER_WORDS = 2
 _BLOATED_QUESTION_WORDS = 22
 _TRIVIAL_ANSWER_WORDS = 3
 
+# Two or more enumerated items make the answer a list, and a list is several cards
+# wearing one question -- the primary defect in a flashcard (rules 4, 9 and 10 of
+# the card-writing canon). Measured 2026-08-17: with the prompt asking for bulleted
+# answers, the atomicity floor was 0.7778 and 9 of 12 sampled cards carried
+# bullets. One item is a lead sentence plus its detail and stays allowed.
+_MAX_ENUMERATED_ITEMS = 1
+_ENUM_LINE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+\S")
+
 # Source-referencing / deictic phrases that make no sense on a standalone card.
 _LEADING_PHRASES = (
     "in this passage",
@@ -199,6 +207,7 @@ REJECT_EMPTY_FIELD = "empty_field"
 REJECT_SHORT_ANSWER = "short_answer"
 REJECT_DEICTIC = "deictic"
 REJECT_BLOATED = "bloated"
+REJECT_ENUMERATED = "enumerated"
 
 
 def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
@@ -206,9 +215,10 @@ def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
 
     Catches the failure modes the generation prompt forbids but weak models
     still produce: empty fields, one-word answers (which includes bare yes/no),
-    source-referencing/leading questions, and bloated leading questions paired
-    with a trivial answer. Cloze cards use a separate builder and are
-    intentionally not run through this gate.
+    source-referencing/leading questions, answers that carry a list of facts
+    instead of one, and bloated leading questions paired with a trivial answer.
+    Cloze cards use a separate builder and are intentionally not run through this
+    gate -- a cloze is one deletion by construction.
 
     The verdict used to be computed, logged and dropped. It is the one signal on
     this path that is deterministic, needs no judge, and measures whether the
@@ -230,6 +240,13 @@ def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
     for phrase in _LEADING_PHRASES:
         if phrase in q_lower:
             return REJECT_DEICTIC, f"leading/deictic phrase in question ({phrase!r})"
+
+    enumerated = sum(1 for line in a.splitlines() if _ENUM_LINE.match(line))
+    if enumerated > _MAX_ENUMERATED_ITEMS:
+        return (
+            REJECT_ENUMERATED,
+            f"answer lists {enumerated} items; split it into one card each",
+        )
 
     if q_words >= _BLOATED_QUESTION_WORDS and a_words <= _TRIVIAL_ANSWER_WORDS:
         return (

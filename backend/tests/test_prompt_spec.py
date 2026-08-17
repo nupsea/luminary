@@ -25,12 +25,11 @@ Difficulty: {difficulty_guidelines}
 {{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", \
 "bloom_level": N}}]}}
 Use '\\n' for line breaks inside a string.
-Example card with a multi-point answer:
-{{"flashcards": [{{"question": "How do random hardware faults and systematic software errors \
-differ for fault tolerance?", "answer": "They fail differently, so they need different \
-defences.\\n- Hardware faults are largely independent -- redundancy masks them.\\n- Software \
-errors are correlated and can fail many nodes at once -- they need testing and isolation.", \
-"source_excerpt": "", "bloom_level": 4}}]}}
+Example card:
+{{"flashcards": [{{"question": "Why do independent hardware faults need a different defence \
+from systematic software errors?", "answer": "Hardware faults are largely independent so \
+redundancy can mask them, while software errors are correlated and can fail many nodes at \
+once.", "source_excerpt": "", "bloom_level": 4}}]}}
 """
 
 
@@ -67,9 +66,9 @@ def test_an_unregistered_model_keeps_every_accommodation():
 
 
 def test_a_measured_model_gets_only_what_it_was_measured_to_need():
-    kept = FLASHCARD_USER_SPEC.for_profile(_measured(("worked_example",)))
+    kept = FLASHCARD_USER_SPEC.for_profile(_measured(("atomic_answer_example",)))
 
-    assert [a.id for a in kept] == ["worked_example"]
+    assert [a.id for a in kept] == ["atomic_answer_example"]
 
 
 def test_a_capability_flag_alone_never_drops_an_accommodation():
@@ -90,10 +89,10 @@ def test_every_accommodation_names_a_model_an_observation_and_an_exit(accommodat
 
 
 def test_describe_reports_what_this_model_gets_and_why():
-    rows = describe(FLASHCARD_USER_SPEC, _measured(("worked_example",)))
+    rows = describe(FLASHCARD_USER_SPEC, _measured(("atomic_answer_example",)))
 
     applied = {r["id"]: r["applied"] for r in rows}
-    assert applied == {"json_escape_hint": "no", "worked_example": "yes"}
+    assert applied == {"json_escape_hint": "no", "atomic_answer_example": "yes"}
 
 
 def test_a_contract_with_no_accommodations_renders_alone():
