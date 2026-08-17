@@ -253,3 +253,40 @@ def test_grounding_is_skipped_when_the_caller_has_no_passage():
         )
         is None
     )
+
+
+def test_the_prompts_own_example_can_never_be_a_cards_evidence():
+    """A check the system can satisfy with its own material is not a check.
+
+    Measured 2026-08-17: shown a plausible `source_excerpt` in the worked example,
+    the model pasted that exact string as its evidence for two unrelated technical
+    documents. It failed the gate only because the string happened not to appear in
+    those passages. This asserts it fails even when it does appear -- otherwise a
+    fabricated card can be grounded on text the product supplied.
+    """
+    from app.services.flashcard_parsers import REJECT_UNGROUNDED, card_rejection
+    from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT
+
+    passage = f"In practice {EXAMPLE_SOURCE_EXCERPT}, which changes how you defend each."
+
+    verdict = card_rejection(
+        "Why do the two fault kinds differ?",
+        "They fail in different ways and need different defences.",
+        EXAMPLE_SOURCE_EXCERPT,
+        passage,
+    )
+
+    assert verdict is not None
+    assert verdict[0] == REJECT_UNGROUNDED
+    assert "example" in verdict[1]
+
+    # and a real quote from that same passage is still accepted
+    assert (
+        card_rejection_reason(
+            "Why do the two fault kinds differ?",
+            "They fail in different ways and need different defences.",
+            "which changes how you defend each",
+            passage,
+        )
+        is None
+    )

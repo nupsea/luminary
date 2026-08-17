@@ -49,6 +49,9 @@ produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded
 These are the ones that get violated by an agent working from general priors rather than
 from this repo. The full set is in `docs/invariants.md`.
 
+- **Nothing the system supplies may satisfy a check on the system's output.** Prompt examples,
+  placeholders and defaults are not evidence; a verification the product can pass with its own
+  text verifies nothing. `.claude/rules/common/product-integrity.md`.
 - **`uv` only.** Never `pip`, never `poetry`. Add packages with `uv add`. (I-15)
 - **All LLM calls go through LiteLLM.** Never a provider SDK directly.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler

@@ -327,6 +327,16 @@ def card_rejection(
                 REJECT_UNGROUNDED,
                 f"no usable source quote ({len(excerpt)} chars)",
             )
+        # Text the prompt supplied can never be a card's evidence, even if a
+        # passage happens to contain it. A verification the system can satisfy
+        # with its own material verifies nothing.
+        from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
+
+        if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+            return (
+                REJECT_UNGROUNDED,
+                "source quote is the prompt's own example, not the document",
+            )
         if not excerpt_is_verbatim(excerpt, source_text):
             return (
                 REJECT_UNGROUNDED,

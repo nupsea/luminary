@@ -21,6 +21,18 @@ if TYPE_CHECKING:
     from app.models import DocumentModel
 
 
+# The quote inside the worked example. It is named because the gate has to refuse
+# it: a model shown a plausible excerpt pastes it as its own evidence, measured on
+# 2026-08-17 when this exact string came back as the "source quote" for two
+# unrelated technical documents. It is harmless today only because it happens not
+# to appear in those passages -- luck, not a mechanism. Nothing the prompt supplies
+# may satisfy a check that the prompt's own output has to pass.
+EXAMPLE_SOURCE_EXCERPT = (
+    "hardware faults are random and independent, whereas software faults are "
+    "correlated across nodes"
+)
+
+
 FLASHCARD_SYSTEM = (
     "You are a learning assistant that writes flashcards for active recall. Each card is a "
     "self-contained question testing understanding of exactly one idea, plus the shortest "
@@ -84,8 +96,8 @@ FLASHCARD_USER_SPEC = PromptSpec(
                 'different defence from systematic software errors?", "answer": "Hardware '
                 "faults are largely independent so redundancy can mask them, while software "
                 'errors are correlated and can fail many nodes at once.", '
-                '"source_excerpt": "hardware faults are random and independent, whereas '
-                'software faults are correlated across nodes", "bloom_level": 4}}]}}'
+                '"source_excerpt": "' + EXAMPLE_SOURCE_EXCERPT + '", '
+                '"bloom_level": 4}}]}}'
             ),
             introduced_for="ollama/qwen3.5:4b",
             because=(
