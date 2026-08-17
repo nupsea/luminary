@@ -55,6 +55,13 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+# `evals.lib.matrix` imports `app.services.eval_tiers`, so the backend package has
+# to be importable however this is launched. Without it `make eval-matrix` fails at
+# import from every working directory -- the comparison that chooses a model could
+# not be run from the command line at all.
+BACKEND_DIR = REPO_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from evals.lib.matrix import (  # noqa: E402
     LIBRARY_STATE_DEPENDENT,
@@ -113,7 +120,7 @@ def _qa_task(backend_url: str, dataset: str, max_questions: int | None) -> Task:
     )
 
 
-def _tasks(backend_url: str) -> dict[str, Task]:
+def _tasks(backend_url: str, judge_model: str = "") -> dict[str, Task]:
     return {
         "intent": Task(
             name="intent",
@@ -133,10 +140,15 @@ def _tasks(backend_url: str) -> dict[str, Task]:
             argv=(
                 "uv", "run", "--no-sync", "python",
                 "run_flashcard_eval.py",
-                "--skip-judge",
+                *(("--judge-model", judge_model) if judge_model else ("--skip-judge",)),
                 "--backend-url", backend_url,
             ),
-            note="structural half only: a one-model machine judges its own cards",
+            note=(
+                "structural half by default: a one-model machine judges its own cards. "
+                "Pass --judge-model with a model that is not a candidate to add the "
+                "judged half -- factuality stays report-only, but a comparison that "
+                "cannot see it decides a model swap on shape alone"
+            ),
         ),
         "summary": Task(
             name="summary",
@@ -407,6 +419,17 @@ def main() -> int:
     ap.add_argument("--backend-url", default="http://localhost:7820")
     ap.add_argument("--tasks", default="intent,flashcards,summary")
     ap.add_argument(
+        "--judge-model",
+        default="",
+        help=(
+            "model that grades generated content, e.g. ollama/phi4-mini. Empty (the "
+            "default) skips the judged half: on a one-model machine the judge would be "
+            "a candidate grading itself, which is not a measurement. It must not be one "
+            "of --models, and it should be small enough to stay resident beside the "
+            "candidate or every call reloads a runner (I-31)."
+        ),
+    )
+    ap.add_argument(
         "--qa-datasets",
         default="",
         help=(
@@ -445,7 +468,17 @@ def main() -> int:
         print("ERROR: --assert-separation needs at least two models", file=sys.stderr)
         return 1
 
-    available = _tasks(args.backend_url)
+    # A judge that is also a candidate grades its own output, which is not a
+    # measurement -- refused here rather than quietly producing a number.
+    if args.judge_model and args.judge_model in [m.strip() for m in args.models.split(",")]:
+        print(
+            f"ERROR: --judge-model {args.judge_model} is one of the candidates; "
+            "pick a model that is not being compared",
+            file=sys.stderr,
+        )
+        return 2
+
+    available = _tasks(args.backend_url, args.judge_model)
     qa_datasets = [d.strip() for d in args.qa_datasets.split(",") if d.strip()]
     if qa_datasets:
         from evals.lib.split import HOLDOUT  # noqa: PLC0415

@@ -37,6 +37,11 @@ STRUCTURAL: frozenset[str] = frozenset(
         # with no judge in the loop.
         "cards_gated",
         "cards_rejected",
+        # Counted from the answer text (`answer_fact_count`), not asked of a
+        # judge. It moved here on 2026-08-17, when asking a judge for it returned
+        # 1.0000 on a sample that was two thirds bulleted multi-point answers --
+        # an undefined axis is a rubber stamp. Structural, so it may gate.
+        "atomicity",
         "card_reject_rate",
         "cards_requested",
         "cards_generated",
@@ -62,7 +67,6 @@ QUALITY: frozenset[str] = frozenset(
         "answer_relevance",
         "citation_support_rate",
         "factuality",
-        "atomicity",
         "clarity_avg",
         "theme_coverage",
         "no_hallucination",

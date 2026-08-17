@@ -79,6 +79,21 @@ def compute_clarity_avg(scores: list[int]) -> float | None:
     return sum(scores) / len(scores)
 
 
+def score_structural(cards: list[dict]) -> dict[str, float | None]:
+    """The half of card quality that needs no model, so it survives --skip-judge.
+
+    Atomicity is counted from the answer, not asked of a judge, which means a model
+    comparison can see it: `run_model_matrix.py` skips the judge on purpose (a
+    one-model machine would have a model judging its own cards), and every metric
+    behind that flag is invisible to the decision the matrix exists to inform.
+    """
+    if not cards:
+        return {"atomicity": None}
+    return {
+        "atomicity": compute_atomicity([is_atomic(c.get("answer", "")) for c in cards]),
+    }
+
+
 def score_flashcards(
     cards: list[dict],
     source_chunk: str,

@@ -18,7 +18,11 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import get_settings  # noqa: E402
 from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
-from evals.lib.flashcard_metrics import judge_flashcard, score_flashcards  # noqa: E402
+from evals.lib.flashcard_metrics import (  # noqa: E402
+    judge_flashcard,
+    score_flashcards,
+    score_structural,
+)
 from evals.lib.loader import load_golden  # noqa: E402
 from evals.lib.manifest import ensure_ingested, load_manifest  # noqa: E402
 from evals.lib.schemas import FlashcardGoldenEntry  # noqa: E402
@@ -118,6 +122,9 @@ def main() -> None:
         requested += int(row.get("expected_card_count") or 1)
         delivered += len(cards)
         scored = {"cards": len(cards), "requested": int(row.get("expected_card_count") or 1)}
+        # Computed whether or not the judge runs: it needs no model, and the matrix
+        # -- which always skips the judge -- would otherwise never see it.
+        scored |= score_structural(cards)
         if not args.skip_judge:
             scored |= score_flashcards(
                 cards,
@@ -148,10 +155,10 @@ def main() -> None:
         # A hole in the measurement, stated rather than averaged away.
         "rows_failed": len(failed_rows),
     }
+    metrics["atomicity"] = _mean("atomicity", per_row)
     if not args.skip_judge:
         metrics |= {
             "factuality": _mean("factuality", per_row),
-            "atomicity": _mean("atomicity", per_row),
             "clarity_avg": _mean("clarity_avg", per_row),
         }
 
