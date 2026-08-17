@@ -27,22 +27,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models import (
     AnnotationModel,
+    ChatSuggestionHistoryModel,
     ChunkModel,
     ClipModel,
     CodeSnippetModel,
     CollectionMemberModel,
     DocumentModel,
+    DocumentTagIndexModel,
+    DocumentTagProvenanceModel,
     EnrichmentJobModel,
+    FeynmanSessionModel,
     FlashcardModel,
     ImageModel,
     LearningGoalModel,
     LearningObjectiveModel,
     MisconceptionModel,
     NoteModel,
+    NoteSourceModel,
+    PomodoroSessionModel,
+    PredictionEventModel,
     QAHistoryModel,
     ReadingPositionModel,
     ReadingProgressModel,
     SectionModel,
+    SectionSummaryModel,
     StudySessionModel,
     SummaryModel,
     WebReferenceModel,
@@ -65,16 +73,39 @@ _DOCUMENT_ID_CHILD_TABLES: tuple[type, ...] = (
     CodeSnippetModel,
     WebReferenceModel,
     ChunkModel,
+    SectionSummaryModel,
     SectionModel,
     SummaryModel,
     FlashcardModel,
     MisconceptionModel,
+    NoteSourceModel,
     NoteModel,
     QAHistoryModel,
     ReadingProgressModel,
     AnnotationModel,
     LearningGoalModel,
     ClipModel,
+    ChatSuggestionHistoryModel,
+    DocumentTagIndexModel,
+    DocumentTagProvenanceModel,
+)
+
+# Deleted by the explicit statements in `delete_sqlite_cascade` rather than by the
+# loop above: their condition is not a plain `document_id ==`.
+_SPECIAL_CASE_TABLES: tuple[type, ...] = (
+    ReadingPositionModel,
+    StudySessionModel,
+    CollectionMemberModel,
+)
+
+# Carries a document_id and is deliberately kept. The learner record outlives the
+# document it was earned against -- deleting a book must not erase the evidence
+# that someone studied it -- so these rows keep a document_id that may no longer
+# resolve, and every reader of them has to tolerate that.
+_LEARNER_RECORD_TABLES: tuple[type, ...] = (
+    FeynmanSessionModel,
+    PomodoroSessionModel,
+    PredictionEventModel,
 )
 
 
