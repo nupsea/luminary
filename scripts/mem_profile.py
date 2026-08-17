@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import platform
 import subprocess
 import time
@@ -336,6 +337,28 @@ def _ollama_cap(procs: dict[str, list[psutil.Process]]) -> str | None:
     return None
 
 
+async def _admission_snapshot(client: httpx.AsyncClient, backend: str) -> dict[str, Any]:
+    """The admission gate's counters, read from the backend it is running in.
+
+    "The Ask was fast" and "the gate deferred background work" are two claims,
+    and a latency row carrying only the first cannot support the second.
+    """
+    try:
+        resp = await client.get(f"{backend}/monitoring/metrics", timeout=10.0)
+        resp.raise_for_status()
+        return dict(resp.json().get("llm_admission") or {})
+    except (httpx.HTTPError, ValueError):
+        return {}
+
+
+def _pct(values: list[float], q: float) -> float | None:
+    """Nearest-rank percentile. Few probes fit in a run, so nothing is interpolated."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
+
+
 def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
     """Peak per stage, and the worst interactive latency observed."""
 
@@ -365,8 +388,9 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
     return {
         # Bumped when a field changes meaning. Schema 1 summed a second
         # Luminary install into peak_rss_mb; rows without this key predate the
-        # fix and are not comparable to rows carrying it.
-        "schema": 2,
+        # fix and are not comparable to rows carrying it. Schema 3 adds the
+        # TTFT distribution and the gate counters the run itself moved.
+        "schema": 3,
         **meta,
         "peak_rss_mb": round(peak / MB, 1),
         "peak_backend_mb": round(peak_backend / MB, 1),
@@ -376,6 +400,8 @@ def _summarise(samples: list[dict], probes: list[dict], meta: dict) -> dict:
         "peak_by_stage_mb": {k: round(v / MB, 1) for k, v in by_stage.items()},
         "ttft_worst_s": max(ttfts) if ttfts else None,
         "ttft_best_s": min(ttfts) if ttfts else None,
+        "ttft_p50_s": _pct(ttfts, 0.5),
+        "ttft_p90_s": _pct(ttfts, 0.9),
         "probes_run": len(ttfts),
         "probes_skipped": sum(1 for p in probes if (p["error"] or "").startswith("skipped")),
         "probes_declined": sum(1 for p in probes if p.get("declined")),
@@ -402,9 +428,22 @@ def _print_report(summary: dict, samples: list[dict]) -> None:
     print(f"  max models loaded        {summary['max_models_loaded']:>10}")
     if summary["ttft_worst_s"] is not None:
         print(f"  Ask time-to-first-token  {summary['ttft_best_s']:>10.2f} s best")
+        print(f"                           {summary['ttft_p50_s']:>10.2f} s p50")
+        print(f"                           {summary['ttft_p90_s']:>10.2f} s p90")
         print(f"                           {summary['ttft_worst_s']:>10.2f} s worst")
+        print(f"  probes measured          {summary['probes_run']:>10}")
     if summary["probe_failures"]:
         print(f"  probe failures           {summary['probe_failures']:>10}")
+    gate = summary.get("admission") or {}
+    if gate:
+        print(
+            f"  admission gate           {'on' if gate.get('enabled') else 'off':>10}"
+            f"  reserve {gate.get('reserve')}"
+        )
+        print(
+            f"    deferred by this run   {gate.get('deferred_calls')!s:>10} calls, "
+            f"{gate.get('deferred_seconds')}s held, {gate.get('forced_admissions')} forced"
+        )
     print()
     print("  peak by stage")
     for stage, mb in summary["peak_by_stage_mb"].items():
@@ -433,6 +472,7 @@ async def run(args: argparse.Namespace) -> int:
             print(f"backend not reachable at {backend}: {exc}")
             return 1
         backend_version = health.json().get("version")
+        admission_before = await _admission_snapshot(client, backend)
 
         procs = _find_procs(backend, ollama_url)
         if not procs["backend"]:
@@ -464,6 +504,10 @@ async def run(args: argparse.Namespace) -> int:
             ingest_task = asyncio.create_task(_ingest(client, backend, path))
 
         probe_offsets = sorted(args.probe_at)
+        window: tuple[float, float] | None = None
+        if args.probe_window:
+            start_s, _, end_s = args.probe_window.partition(":")
+            window = (float(start_s), float(end_s))
         probe_tasks: list[asyncio.Task] = []
         deadline = t0 + args.idle if args.idle else None
         settle_until: float | None = None
@@ -529,6 +573,22 @@ async def run(args: argparse.Namespace) -> int:
                         )
                     )
                 )
+            # Back-to-back probing across the contended window: one in flight,
+            # the next started the moment the last returns. `_harvest` above has
+            # already cleared any finished task, so an empty list means free.
+            if window is not None and not probe_tasks and window[0] <= (now - t0) <= window[1]:
+                probe_tasks.append(
+                    asyncio.create_task(
+                        _probe_ttft(
+                            client,
+                            backend,
+                            args.question,
+                            t0,
+                            doc_id if args.probe_scope == "ingesting" else None,
+                        )
+                    )
+                )
+
             _harvest()
 
             stage = samples[-1]["stage"]
@@ -562,7 +622,19 @@ async def run(args: argparse.Namespace) -> int:
             ingest_task.cancel()
 
         library_after = await _library(client, backend)
+        admission_after = await _admission_snapshot(client, backend)
         raw.close()
+
+    admission: dict[str, Any] = {}
+    if admission_after:
+        admission = {key: admission_after.get(key) for key in ("enabled", "reserve")}
+        # Counters are cumulative for the backend process. A run may claim only
+        # what moved while it was sampling, so the deltas are what is recorded.
+        for key in ("deferred_calls", "deferred_seconds", "forced_admissions"):
+            after = admission_after.get(key)
+            admission[key] = (
+                None if after is None else round(after - (admission_before.get(key) or 0), 3)
+            )
 
     meta = {
         "recorded_at": datetime.now(UTC).isoformat(),
@@ -576,6 +648,8 @@ async def run(args: argparse.Namespace) -> int:
         "source": Path(args.ingest).name if args.ingest else None,
         "dedup_hit": dedup_hit,
         "ingest_error": ingest_error,
+        "probe_window": args.probe_window or None,
+        "admission": admission,
     }
     summary = _summarise(samples, probes, meta)
 
@@ -621,6 +695,17 @@ def main() -> int:
         type=lambda v: [float(x) for x in v.split(",") if x.strip()],
         default=[15.0, 45.0, 90.0, 180.0],
         help="seconds after start to time an Ask (comma-separated)",
+    )
+    ap.add_argument(
+        "--probe-window",
+        default="",
+        help=(
+            "START:END -- issue Asks back to back between these offsets instead of "
+            "at fixed points. In the contended window an Ask takes most of a "
+            "minute, so a dense fixed schedule mostly reports 'skipped'; this "
+            "keeps exactly one in flight and starts the next as soon as the last "
+            "returns, which is how you get a sample rather than an anecdote."
+        ),
     )
     ap.add_argument("--question", default="What is this document about?")
     ap.add_argument(

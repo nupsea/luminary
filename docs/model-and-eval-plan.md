@@ -847,7 +847,7 @@ rows is reported at the top of its run.
 
 ## Stage 5 — Schedule and calibrate
 
-### P5 — Scheduling and admission control — **shipped 2026-08-16, latency not yet re-measured**
+### P5 — Scheduling and admission control — **shipped 2026-08-16, measured 2026-08-17**
 
 `app/services/llm_admission.py` is a priority gate in front of the local runtime's slots, applied
 inside `LLMService.complete` and `_token_stream` so `background=True` is the whole of what a caller
@@ -869,11 +869,15 @@ Two bounds keep the gate from becoming a wedge, and they are different quantitie
 
 - `LLM_ADMISSION_MAX_DEFER_SECONDS` (60s) — a held call is admitted anyway and counted as a forced
   admission. Someone who keeps chatting must not stop ingestion for ever.
-- `_STALE_INTERACTIVE_SECONDS` (600s) — an interactive call still in flight after ten minutes is
-  presumed leaked and stops counting as pressure. An abandoned SSE stream would otherwise hold the
-  gate for the life of the process. Far above the longest request timeout in the codebase (300s),
-  so only a leak trips it. This matters beyond tidiness: a deferring background call may hold a
-  lock an interactive request needs, and both bounds mean that resolves itself rather than hanging.
+- `_STALE_INTERACTIVE_SECONDS` (180s) — pressure decays from a call's **last activity**, not from
+  when it started: a stream bumps it on every token, so a live answer keeps yielding to the user
+  however long it runs, while one the client walked away from stops counting shortly after its last
+  token. A start-time-only rule could not tell those apart, and did not: one abandoned stream left
+  `interactive_inflight` at 1 and suspended every background call behind it (`9b8c13a`). Sized
+  above the worst first-token latency measured under ingest load (88s) so a slow answer is never
+  mistaken for an abandoned one. This matters beyond tidiness: a deferring background call may hold
+  a lock an interactive request needs, and both bounds mean that resolves itself rather than
+  hanging.
 
 Cloud calls pass straight through — they contend for nothing on this machine.
 
@@ -891,14 +895,53 @@ sites slices its input: 600–3,000 chars at most of them, `TEXT_HARD_CAP` 10,00
 of grounding in `suggestion_service`, 250 sampled headings in `topic_service`. The one site with no
 explicit slice is `reference_enricher._extract_references`, which passes a section summary the
 summarizer generated — bounded by what a 2-3 sentence prompt emits rather than by construction. So
-**the worst-case interactive wait is set by generation length, not prompt length**: ~16s of decode
-against ~0.4s of prefill (I-31). Adding prompt caps would not have moved it.
+**the worst-case interactive wait is set by generation length, not prompt length**, and adding
+prompt caps would not have moved it. The audit put that length at ~16s of decode against ~0.4s of
+prefill (I-31); the measurement below found the deferred summary chain generating for minutes, so
+that figure was an inference from prompt size, never a measurement of output length.
 
-Not done, and the reason Stage 5 is not closed: **the latency gate is unmeasured.** P0's probe has
-to run both arms on the same document — `LLM_ADMISSION_ENABLED=false` exists to reproduce the
-un-gated baseline — and ingestion throughput has to be recorded beside TTFT, or a stall has merely
-been traded for an ingest that never finishes. The 75–115s figure this gate exists to fix is a
-measurement of 0.6.1; nothing here has re-measured it.
+**Measured 2026-08-17, both arms on the same document.** `mem_profile.py --probe-window 150:800`
+asks back to back through the deferred-work window — one Ask in flight, the next issued the moment
+the last returns — because in that window an Ask takes most of a minute, so a fixed schedule mostly
+reports `skipped` and yields four points rather than a sample. Same 449KB text differing by one
+byte, same host, nothing else resident, model pre-warmed, a fresh backend per arm;
+`LLM_ADMISSION_ENABLED=false` is the un-gated arm. Both rows are in `evals/mem_profile_history.jsonl`
+at schema 3, which carries the gate counters, so a row says whether the gate engaged instead of
+leaving that to be inferred from the latency beside it.
+
+| | un-gated | gated |
+|---|---|---|
+| Asks answered in the window | 23 | 34 |
+| TTFT p50 | 19.43s | 10.08s |
+| TTFT p90 | 44.50s | 18.85s |
+| TTFT worst | 104.25s | 172.94s |
+| `web_refs` enrichment job | 677.8s | 792.8s |
+| deferred / held / forced | — | 6 calls / 360.0s / 6 |
+
+**The gate halves typical latency for 17% of ingest wall clock.** p50 and p90 both roughly halve,
+and half again as many questions are answered in the same window because each costs less. Deferred
+enrichment finished in both arms — the failure the defer bound exists to prevent did not occur — at
+699s un-gated against 815s gated.
+
+**Every deferral was force-admitted, each after exactly the full 60s.** Not one was released by
+pressure clearing, so under continuous questioning it is `LLM_ADMISSION_MAX_DEFER_SECONDS`, not the
+pressure signal, that schedules background work: the gate's real behaviour under a chatting user is
+one background call per 60s. That is the bound working as specified, and the counters are the only
+place it is visible.
+
+**The tail is not the gate. It is one background call that cannot be preempted.** The worst Ask in
+each arm was waiting for `summarizer.pregenerate mode=detailed`: un-gated it produced its first
+token at 13:33:55 against that call's 13:33:56 completion, gated at 13:49:07 against 13:49:02. The
+same call over the same 12,481-char input ran 107s in one arm and 179s in the other. The gate cannot
+help here by construction — yield granularity is one completed call, and this one was admitted
+before the Ask arrived. **The lever is call size: cap or split `pregenerate`'s longest mode.** Until
+that lands, a question asked in the minute after an upload finishes can still wait two to three
+minutes, and no amount of scheduling policy will change it.
+
+Not measured: generated tokens per arm (`llm_calls` reads 0 without Phoenix, so throughput here is
+wall-clock only), any host other than this 36GB machine, and variance across repeated pairs — one
+pair per arm. An earlier pair run under unequal memory pressure agreed on every sign, including the
+worse tail, but not on the magnitudes.
 
 Also untouched, and still open from P0: embedding and reranking are CPU-bound through
 `run_in_executor(None, …)`, so a large ingest slows the query embed and the ~510ms cross-encoder
