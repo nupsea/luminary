@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import DocumentModel, QAHistoryModel
@@ -605,6 +605,53 @@ class QAService:
     the graph nodes (app/runtime/chat_graph.py).
     """
 
+    async def _no_context_reason(
+        self, scope: str, document_ids: list[str] | None, *, retrieval_failed: bool
+    ) -> tuple[str, str]:
+        """Why nothing was retrieved, and what the user can do about it.
+
+        One message used to cover four situations, and it named the least likely
+        one: a user with 52 documents was told to make sure a document had been
+        ingested. What they should do differs in each case, so the code differs.
+        """
+        if retrieval_failed:
+            return (
+                "retrieval_failed",
+                "Search could not run just now — indexing may be using the machine."
+                " Try again in a moment.",
+            )
+        async with get_session_factory()() as session:
+            total = (
+                await session.execute(select(func.count()).select_from(DocumentModel))
+            ).scalar_one()
+            indexing = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(DocumentModel)
+                    .where(DocumentModel.stage != "complete")
+                )
+            ).scalar_one()
+        if not total:
+            return (
+                "no_documents",
+                "Your library is empty. Ingest a document and ask again.",
+            )
+        if total == indexing:
+            return (
+                "still_indexing",
+                "Your documents are still being indexed. Ask again in a moment.",
+            )
+        if scope == "single" and document_ids:
+            titles = await self._fetch_doc_titles(document_ids)
+            name = next(iter(titles.values()), "")
+            if name:
+                return (
+                    "no_match_in_document",
+                    f"Nothing in “{name}” answers that."
+                    " Switch to all documents to search the rest of your library.",
+                )
+        return ("no_context", "Nothing in your library matches that question.")
+
     async def _fetch_doc_titles(self, document_ids: list[str]) -> dict[str, str]:
         if not document_ids:
             return {}
@@ -825,14 +872,17 @@ class QAService:
 
                 if result.get("not_found"):
                     if not chunks_returned:
-                        # No context retrieved — surface as a distinct error
-                        root_span.set_attribute("error", True)
-                        root_span.set_attribute("error.message", "no_context")
-                        yield (
-                            'data: {"error": "no_context", '
-                            '"message": "No relevant content found. '
-                            'Make sure a document has been ingested.", "done": true}\n\n'
+                        # No context retrieved. Which of the four reasons it was
+                        # decides what the user should do about it.
+                        code, msg = await self._no_context_reason(
+                            scope,
+                            document_ids,
+                            retrieval_failed=bool(result.get("retrieval_failed")),
                         )
+                        root_span.set_attribute("error", True)
+                        root_span.set_attribute("error.message", code)
+                        payload = {"error": code, "message": msg, "done": True}
+                        yield f"data: {json.dumps(payload)}\n\n"
                     else:
                         # Chunks present but LLM could not find the answer
                         await self._store_qa(question, None, [], "low", None, scope, store_model)

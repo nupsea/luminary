@@ -784,9 +784,19 @@ export default function Chat() {
     // Read scope/doc from the store, not the render closure: callers like the
     // reader "Ask" flow set these via state and immediately invoke sendMessage,
     // so the closure values would be stale and retrieval would run unscoped.
+    //
+    // The document comes from the chat's own selection and nowhere else. It used
+    // to fall back to activeDocumentId -- the file last opened in the reader --
+    // which is not a chat scope: with chatScope left at "single" and nothing
+    // selected here, a question went out scoped to whatever document the user had
+    // just opened or uploaded, while the header chip (which reads selectedDocId,
+    // not scope) said "All documents". Seen 2026-08-17: a library question landed
+    // on a PDF 40 seconds into ingestion and came back empty. If the scope says
+    // single but this chat has no document, the chip is right and the scope is
+    // stale -- ask the whole library, which is what the user is being shown.
     const st = useAppStore.getState()
-    const effScope = st.chatScope
-    const effSelectedDocId = st.chatSelectedDocId ?? st.activeDocumentId
+    const effSelectedDocId = st.chatSelectedDocId
+    const effScope = st.chatScope === "single" && !effSelectedDocId ? "all" : st.chatScope
 
     // Resolve / create the persisted session before we start streaming, so we have
     // a stable id to attach both the user turn and the assistant turn to.
@@ -929,14 +939,15 @@ export default function Chat() {
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
+              // Only llm_unavailable is reworded here, because the right wording
+              // depends on llmMode, which is client state. Retrieval failures
+              // carry a server message that names which of them happened.
               const errorMsg =
                 errorCode === "llm_unavailable"
                   ? (llmMode === "private"
                       ? "Ollama is not running. Start it with: ollama serve"
                       : "LLM service is unreachable. Please check your internet connection or settings.")
-                  : errorCode === "no_context"
-                    ? "No relevant content found. Make sure at least one document has been ingested."
-                    : fallbackMsg
+                  : fallbackMsg
               setIsStreaming(false)
               setMessages((m) =>
                 m.map((msg) =>

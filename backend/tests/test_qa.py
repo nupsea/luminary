@@ -711,7 +711,11 @@ async def test_endpoint_returns_sse_content_type(test_db):
 
 @pytest.mark.asyncio
 async def test_endpoint_not_found_response(test_db):
-    """No chunks → no_context error event."""
+    """No chunks, and nothing in the library → no_documents.
+
+    The error names which of the four reasons applied; on an empty library the
+    honest one is that there is nothing to search.
+    """
     _engine, factory, tmp_path = test_db
 
     result = _make_graph_result(answer="", not_found=True, chunks=[])
@@ -725,7 +729,7 @@ async def test_endpoint_not_found_response(test_db):
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert len(events) == 1
     payload = json.loads(events[0][len("data: ") :])
-    assert payload["error"] == "no_context"
+    assert payload["error"] == "no_documents"
     assert payload["done"] is True
 
 
@@ -755,7 +759,7 @@ async def test_endpoint_all_scope_produces_answer(test_db):
 
 @pytest.mark.asyncio
 async def test_qa_no_context(test_db):
-    """Graph returns not_found=True with no chunks → 1 SSE event with error='no_context'."""
+    """not_found with no chunks on an empty library → one event naming that reason."""
     _engine, factory, tmp_path = test_db
 
     result = _make_graph_result(answer="", not_found=True, chunks=[])
@@ -770,7 +774,7 @@ async def test_qa_no_context(test_db):
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
     payload = json.loads(data_lines[0][len("data: ") :])
-    assert payload["error"] == "no_context"
+    assert payload["error"] == "no_documents"
     assert payload["done"] is True
 
 
@@ -1306,3 +1310,58 @@ def test_a_citation_excerpt_never_quotes_the_generated_section_summary():
     assert excerpt
     assert excerpt in document
     assert "redundancy masks" not in excerpt
+
+
+# One message used to cover four situations, and it named the least likely one:
+# "make sure at least one document has been ingested", shown to a user holding 52
+# documents while a 53rd was indexing (2026-08-17).
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_names_the_document_when_scoped(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason(
+        "single", [doc_id], retrieval_failed=False
+    )
+
+    assert code == "no_match_in_document"
+    assert "the_odyssey" in msg
+    assert "all documents" in msg, "the user needs to be told what to try next"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_for_a_library_that_simply_has_no_match(test_db):
+    _engine, factory, tmp_path = test_db
+    await _insert_doc(factory, tmp_path, str(uuid.uuid4()), title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason("all", None, retrieval_failed=False)
+
+    assert code == "no_context"
+    assert "ingest" not in msg.lower(), "the library is not empty; do not tell them to ingest"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_when_every_document_is_still_indexing(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="ibm-sdm-vol-2")
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+        doc.stage = "embedding"
+        await session.commit()
+
+    code, _ = await QAService()._no_context_reason("all", None, retrieval_failed=False)
+
+    assert code == "still_indexing"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_distinguishes_a_failed_search(test_db):
+    """A search that raised is not a library that is empty."""
+    code, msg = await QAService()._no_context_reason("all", None, retrieval_failed=True)
+
+    assert code == "retrieval_failed"
+    assert "again" in msg.lower()

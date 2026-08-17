@@ -22,6 +22,26 @@ from app.types import ChatState, ScoredChunk
 logger = logging.getLogger(__name__)
 
 
+READY_STAGE = "complete"
+
+
+async def _unready_document_ids() -> set[str]:
+    """Ids of documents that are not finished ingesting.
+
+    Their chunk rows land in SQLite before their vectors exist, so such a
+    document contributes nothing to retrieval while still being able to take
+    slots in the result window. Measured 2026-08-17: a question scoped to a
+    document 90 seconds into a 52,331-chunk ingest retrieved zero chunks, and
+    the user was told to make sure a document had been ingested -- with 52 in
+    the library.
+    """
+    async with get_session_factory()() as session:
+        rows = await session.execute(
+            select(DocumentModel.id).where(DocumentModel.stage != READY_STAGE)
+        )
+        return {str(r[0]) for r in rows}
+
+
 async def _fetch_section_summaries(
     doc_heading_pairs: list[tuple[str, str]],
 ) -> dict[tuple[str, str], str]:
@@ -143,6 +163,30 @@ async def search_node(state: ChatState) -> dict:
                 len(effective_doc_ids) if effective_doc_ids else "all",
             )
 
+    # A document still being ingested is never searched, whatever the scope asked
+    # for: it has no vectors yet, so including it can only displace documents that
+    # do. When the scope named nothing else, the rest of the library answers --
+    # the question is about material the user has, not about the file that happens
+    # to be uploading.
+    unready = await _unready_document_ids()
+    if unready:
+        if effective_doc_ids:
+            ready_requested = [d for d in effective_doc_ids if d not in unready]
+            if not ready_requested:
+                logger.info(
+                    "search_node: every requested document is still indexing "
+                    "— searching the rest of the library instead"
+                )
+                effective_doc_ids = None
+            elif len(ready_requested) != len(effective_doc_ids):
+                effective_doc_ids = ready_requested
+        if effective_doc_ids is None:
+            async with get_session_factory()() as session:
+                rows = await session.execute(
+                    select(DocumentModel.id).where(DocumentModel.stage == READY_STAGE)
+                )
+                effective_doc_ids = [str(r[0]) for r in rows] or None
+
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
         q[:80],
@@ -168,6 +212,7 @@ async def search_node(state: ChatState) -> dict:
 
     chunks_dicts: list[dict] = []
     image_ids: list[str] = []
+    retrieval_failed = False
     try:
         t_ret = time.perf_counter()
         retriever = get_retriever()
@@ -229,6 +274,10 @@ async def search_node(state: ChatState) -> dict:
             )
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
+        retrieval_failed = True
+
+    if unready and chunks_dicts:
+        chunks_dicts = [c for c in chunks_dicts if c.get("document_id") not in unready]
 
     # For scope='all': cap at 2 chunks per document so no single doc dominates
     # context. Skip the cap when routing deliberately narrowed to a doc set --
@@ -238,4 +287,8 @@ async def search_node(state: ChatState) -> dict:
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
     logger.info("search_node: returning %d chunks, %d image_ids", len(chunks_dicts), len(image_ids))
-    return {"chunks": chunks_dicts, "image_ids": image_ids}
+    return {
+        "chunks": chunks_dicts,
+        "image_ids": image_ids,
+        "retrieval_failed": retrieval_failed,
+    }

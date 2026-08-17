@@ -95,6 +95,10 @@ class ChatState(TypedDict):
     # Set by strategy nodes
     chunks: list[dict]
     section_context: str | None
+    # True when retrieval raised rather than returning nothing. Without it, a
+    # failed search and an empty library are the same downstream state, and the
+    # user is told to ingest a document while their library sits there.
+    retrieval_failed: bool
 
     # Set by synthesize_node
     answer: str
