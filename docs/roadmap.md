@@ -21,6 +21,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 
 | Capability | Where its contract lives |
 |---|---|
+| Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
 | The 31 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
@@ -39,28 +40,7 @@ adequately described by `architecture.md` plus the code. Their specs were delete
 
 ## Open
 
-### 1. The frontend lint gate is not in CI
-
-`make lint` runs `npm run lint`; `make ci` does not — it runs only `npm run build` and
-`npx tsc --noEmit`. So the ESLint rules, including the `no-restricted-syntax` guard that forbids
-raw `fetch()`, are advisory: nothing fails when they are violated.
-
-Fix: add `npm run lint` to the `ci` target, then fix the fallout. Do this before item 2 — that
-one is the measured consequence of this gate not running, and it will regrow if the gate stays
-advisory. Items 3-5 are independent of it.
-
-### 2. `apiClient` is bypassed by raw `fetch()`
-
-**55 bare `fetch(` calls across 20 files** in `frontend/src`, of which 8 carry a justified
-`eslint-disable`. Measured with `grep -rnE '(^|[^a-zA-Z.])fetch\('` — a naive `fetch(` search
-reports 77 because it also matches `refetch(`/`prefetch(`, which are TanStack Query and are fine.
-
-The 2026 quality audit measured 29 (`git show master:docs/refactor-quality-plan.md`, finding S6),
-so this roughly doubled while the guard in item 1 was unenforced. Each bypasses `apiClient`'s
-central error handling and base-URL resolution — the latter is what broke param-bearing GETs
-under a relative `/api` base in production once already.
-
-### 3. String-interpolated SQL
+### 1. String-interpolated SQL
 
 Six sites build `IN (...)` clauses by quoting values into the string rather than binding them:
 
@@ -75,7 +55,7 @@ primitive that one change in id provenance turns live, and it defeats statement 
 `graph_view.py:208,283,339,428` and `graph_tech.py:464` already bind `$name` placeholders and
 are the pattern to copy. Do not "fix" those — they are already correct.
 
-### 4. OKF is a grounding service, not yet a projection
+### 2. OKF is a grounding service, not yet a projection
 
 `okf.md` describes a folder of Markdown files — one per concept, plus `index.md` and `log.md` —
 as an export/import/grounding layer. Only the grounding half exists: `services/okf_context.py`
@@ -85,7 +65,7 @@ no file projection, no export endpoint, and no import path.
 I-21 already governs the unbuilt half (OKF is a projection, never a transport and never a source
 of truth), so build it against that invariant when it is built. `okf.md` is marked accordingly.
 
-### 5. The `unstable` test quarantine
+### 3. The `unstable` test quarantine
 
 **28 tests across 15 files** carry `@pytest.mark.unstable` and are excluded from the default
 run by `addopts`. Run them with `uv run pytest -m unstable`.
@@ -103,7 +83,7 @@ needs the background work (`test_e2e_upload` does).
 Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
 marker over two causes is why this has stalled twice.
 
-### 6. Model footprint, scheduling, substitutability, and the eval baseline that gates them
+### 4. Model footprint, scheduling, substitutability, and the eval baseline that gates them
 
 A 0.5.0 user reported ~16GB resident and a crash ingesting a PDF. `spawn_ollama` in
 `src-tauri/src/supervisor.rs` sets `OLLAMA_KEEP_ALIVE=30m` but never

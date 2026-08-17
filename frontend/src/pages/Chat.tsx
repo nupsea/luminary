@@ -31,7 +31,7 @@ import { useAppStore } from "@/store"
 import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, shortModelLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
@@ -58,12 +58,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
   const { data: cached } = useQuery<SuggestionsResponse>({
     queryKey: ["chat-suggestions-cached", documentId],
     queryFn: async () => {
-      const url = documentId
-        ? `${API_BASE}/chat/suggestions/cached?document_id=${encodeURIComponent(documentId)}`
-        : `${API_BASE}/chat/suggestions/cached`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to fetch cached suggestions")
-      return res.json() as Promise<SuggestionsResponse>
+      return apiGet<SuggestionsResponse>("/chat/suggestions/cached", {
+        document_id: documentId || undefined,
+      })
     },
     staleTime: 30_000,
   })
@@ -72,12 +69,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
   const { data: fresh } = useQuery<SuggestionsResponse>({
     queryKey: ["chat-suggestions", documentId],
     queryFn: async () => {
-      const url = documentId
-        ? `${API_BASE}/chat/suggestions?document_id=${encodeURIComponent(documentId)}`
-        : `${API_BASE}/chat/suggestions`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to fetch suggestions")
-      const result = res.json() as Promise<SuggestionsResponse>
+      const result = apiGet<SuggestionsResponse>("/chat/suggestions", {
+        document_id: documentId || undefined,
+      })
       // Once fresh data arrives, also update the cached query so next switch is instant
       result.then((data) => {
         qc.setQueryData(["chat-suggestions-cached", documentId], data)
@@ -111,7 +105,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
             key={s.id || s.text}
             onClick={() => {
               if (s.id) {
-                fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
+                apiPost(`/chat/suggestions/${s.id}/asked`).catch(() => {
+                  /* fire-and-forget: suggestion tracking is best-effort */
+                })
               }
               onSuggest(s.text)
             }}
@@ -131,9 +127,11 @@ interface DocListItem {
 }
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
+  const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+    sort: "last_accessed",
+    page: 1,
+    page_size: 100,
+  })
   return data.items ?? []
 }
 
@@ -235,9 +233,7 @@ interface LLMSettings {
 }
 
 async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("Failed to fetch LLM settings")
-  return res.json() as Promise<LLMSettings>
+  return apiGet<LLMSettings>("/settings/llm")
 }
 
 function persistedToChatMessage(p: PersistedMessage): ChatMessage {
@@ -607,11 +603,7 @@ export default function Chat() {
 
   const { data: webSearchSettings } = useQuery<WebSearchSettings>({
     queryKey: ["web-search-settings"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/settings/web-search`)
-      if (!res.ok) throw new Error("Failed to fetch web search settings")
-      return res.json() as Promise<WebSearchSettings>
-    },
+    queryFn: () => apiGet<WebSearchSettings>("/settings/web-search"),
     staleTime: 300_000,
     refetchOnWindowFocus: false,
   })
@@ -623,11 +615,7 @@ export default function Chat() {
     refetch: refetchPlan,
   } = useQuery<SessionPlanResponse>({
     queryKey: ["session-plan"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/study/session-plan?minutes=20`)
-      if (!res.ok) throw new Error("Failed to fetch session plan")
-      return res.json() as Promise<SessionPlanResponse>
-    },
+    queryFn: () => apiGet<SessionPlanResponse>("/study/session-plan", { minutes: 20 }),
     enabled: showPlanPanel,
     staleTime: 60_000,
   })
@@ -850,6 +838,9 @@ export default function Chat() {
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

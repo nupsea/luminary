@@ -486,6 +486,7 @@ endif
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit
+	cd frontend && npm run lint
 	@echo "CI passed."
 
 regen-api-types:

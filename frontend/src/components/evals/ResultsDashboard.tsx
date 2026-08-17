@@ -12,13 +12,13 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import type { DatasetSelection } from "./api"
 import { StrategyFunnel } from "./StrategyFunnel"
 import { isStale, shippedAblationArm, THRESHOLDS, timeAgo } from "./thresholds"
 import type { EvalRunFull, GoldenDatasetDetail } from "./types"
 import { ChartTooltip } from "@/components/ui/chart-tooltip"
+import { apiGet } from "@/lib/apiClient"
 
 const RETRIEVAL_KINDS = new Set(["retrieval", "generation", "citation", null])
 
@@ -45,25 +45,14 @@ interface GoldenInfo {
   } | null
 }
 
-async function fetchRuns(dataset: string): Promise<EvalRunFull[]> {
-  const res = await fetch(
-    `${API_BASE}/evals/runs?dataset_name=${encodeURIComponent(dataset)}&limit=50`,
-  )
-  if (!res.ok) throw new Error("Failed to fetch runs")
-  return res.json() as Promise<EvalRunFull[]>
-}
+const fetchRuns = (dataset: string): Promise<EvalRunFull[]> =>
+  apiGet<EvalRunFull[]>("/evals/runs", { dataset_name: dataset, limit: 50 })
 
-async function fetchGoldenInfo(dataset: string): Promise<GoldenInfo> {
-  const res = await fetch(`${API_BASE}/evals/golden/${encodeURIComponent(dataset)}/info`)
-  if (!res.ok) throw new Error("Failed to fetch golden info")
-  return res.json() as Promise<GoldenInfo>
-}
+const fetchGoldenInfo = (dataset: string): Promise<GoldenInfo> =>
+  apiGet<GoldenInfo>(`/evals/golden/${encodeURIComponent(dataset)}/info`)
 
-async function fetchGeneratedInfo(id: string): Promise<GoldenDatasetDetail> {
-  const res = await fetch(`${API_BASE}/evals/datasets/${id}?limit=1`)
-  if (!res.ok) throw new Error("Failed to fetch dataset")
-  return res.json() as Promise<GoldenDatasetDetail>
-}
+const fetchGeneratedInfo = (id: string): Promise<GoldenDatasetDetail> =>
+  apiGet<GoldenDatasetDetail>(`/evals/datasets/${id}`, { limit: 1 })
 
 // Provenance card for DB-generated datasets — the file GoldenCard reads a
 // JSONL sidecar that generated datasets don't have.
