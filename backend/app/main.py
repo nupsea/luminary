@@ -197,6 +197,38 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
+    # An ingestion that was running when the process died cannot resume: its task
+    # is gone and nothing owns the document any more. It used to keep its last
+    # stage for ever, so the UI showed a progress card that would never finish --
+    # seen twice on 2026-08-17, when a code reload under `uvicorn --reload` killed
+    # a 52,331-chunk embed at 70%. An interrupted ingest is now marked failed at
+    # startup, which is a state the user can act on (I-10).
+    try:
+        from sqlalchemy import update  # noqa: PLC0415
+
+        from app.models import DocumentModel  # noqa: PLC0415
+
+        _terminal_stages = ("complete", "error")
+        async with get_session_factory()() as _session:
+            result = await _session.execute(
+                update(DocumentModel)
+                .where(DocumentModel.stage.notin_(_terminal_stages))
+                .values(
+                    stage="error",
+                    error_message=(
+                        "Ingestion was interrupted before it finished. "
+                        "Delete this document and upload it again."
+                    ),
+                )
+            )
+            await _session.commit()
+        if result.rowcount:
+            logger.warning(
+                "marked %d interrupted ingestion(s) as failed at startup", result.rowcount
+            )
+    except Exception:
+        logger.warning("could not reconcile interrupted ingestions", exc_info=True)
+
     # Model-lab comparisons take hours; without this they exist only for the
     # life of the process, and `uvicorn --reload` restarts on every edit.
     try:

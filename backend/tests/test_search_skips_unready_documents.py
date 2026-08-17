@@ -1,4 +1,4 @@
-"""A document still being ingested is never searched, whatever the scope asked for.
+"""Only a document that exists and has finished ingesting is ever searched.
 
 From a real failure on 2026-08-17: a 52,331-chunk PDF was 90 seconds into ingestion
 when a question arrived scoped to it. Its chunk rows were already in SQLite but
@@ -135,3 +135,36 @@ async def test_a_retrieval_exception_is_reported_as_a_failure_not_as_emptiness(t
     assert result["retrieval_failed"] is True, (
         "a failed search and an empty library must not be the same state"
     )
+
+
+@pytest.mark.asyncio
+async def test_scope_on_a_deleted_document_falls_back_to_the_library(test_db):
+    """The reported failure: a chat scoped to a document that no longer exists.
+
+    The id lived in the browser store, survived nine days, three chats and two
+    re-uploads, and matched no row at all -- so retrieval filtered every question
+    down to a document that was not there and answered nothing, while the header
+    read "All documents" because a missing id has no title to render.
+    """
+    ready_id = str(uuid.uuid4())
+    deleted_id = str(uuid.uuid4())
+    await _add_document(test_db, ready_id, "the_odyssey", "complete")
+
+    retriever = AsyncMock()
+    retriever.retrieve_with_images = AsyncMock(return_value=([_chunk(ready_id)], []))
+
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=retriever):
+        result = await search_node(
+            {
+                "question": "Who is the queen of Ithaca?",
+                "scope": "single",
+                "doc_ids": [deleted_id],
+            }
+        )
+
+    passed_ids = retriever.retrieve_with_images.await_args.args[1]
+    assert deleted_id not in (passed_ids or []), "a deleted document is not searchable"
+    # None means no document filter at all, i.e. the whole library -- which is the
+    # widened search. Either that or the explicit list of searchable ids is correct.
+    assert passed_ids is None or passed_ids == [ready_id]
+    assert result["chunks"], "the library still holds the answer and must be asked"

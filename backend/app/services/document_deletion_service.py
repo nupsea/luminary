@@ -21,12 +21,13 @@ import logging
 import shutil
 from pathlib import Path
 
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import (
     AnnotationModel,
+    ChatSessionModel,
     ChatSuggestionHistoryModel,
     ChunkModel,
     ClipModel,
@@ -156,6 +157,27 @@ class DocumentDeletionService:
                 StudySessionModel.document_id == document_id
             )
         )
+        # Chat sessions hold their scope as a JSON array, so no document_id column
+        # exists for the loop above to match. Leaving the id behind is not cosmetic:
+        # a chat scoped to a deleted document filters every question down to a row
+        # that no longer exists and answers nothing, which is what happened for nine
+        # days before it was found. A session left with no documents becomes
+        # library-wide rather than scoped to nothing.
+        sessions = (
+            await session.execute(
+                select(ChatSessionModel).where(
+                    ChatSessionModel.document_ids.like(f"%{document_id}%")
+                )
+            )
+        ).scalars()
+        for chat in sessions:
+            remaining = [d for d in (chat.document_ids or []) if d != document_id]
+            if remaining == list(chat.document_ids or []):
+                continue
+            chat.document_ids = remaining
+            if not remaining:
+                chat.scope = "all"
+
         # Keyed on (member_id, member_type), not document_id, so the loop above
         # misses it; orphaned rows inflate every collection's badge.
         await session.execute(

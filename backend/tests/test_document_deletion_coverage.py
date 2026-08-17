@@ -12,6 +12,8 @@ is: cascaded, special-cased, or part of the learner record that outlives the
 document.
 """
 
+import inspect
+
 from app.models import Base
 from app.services.document_deletion_service import (
     _DOCUMENT_ID_CHILD_TABLES,
@@ -66,3 +68,19 @@ def test_the_three_lists_do_not_overlap():
     assert not cascaded & kept, sorted(c.__name__ for c in cascaded & kept)
     assert not cascaded & special, sorted(c.__name__ for c in cascaded & special)
     assert not special & kept, sorted(c.__name__ for c in special & kept)
+
+
+def test_chat_sessions_are_handled_even_though_they_have_no_document_id_column():
+    """`chat_sessions.document_ids` is a JSON array, so the column scan above misses it.
+
+    That is exactly how a chat stayed pointed at a deleted document: nothing in the
+    cascade could match a JSON array, so the id survived the delete. The handling is
+    explicit code in `delete_sqlite_cascade`; this asserts it is still there, since a
+    silent removal would restore the bug without failing anything else.
+    """
+    from app.services import document_deletion_service as svc
+
+    source = inspect.getsource(svc.DocumentDeletionService.delete_sqlite_cascade)
+    assert "ChatSessionModel" in source, (
+        "deleting a document must also clear it from chat session scopes"
+    )

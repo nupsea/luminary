@@ -279,7 +279,11 @@ class DocumentParser:
         toc = doc.get_toc()  # [[level, title, page_num (1-based)], ...]
 
         if toc:
-            logger.info("PDF TOC (%d entries): %s", len(toc), toc)
+            # The entries themselves are not logged: a 1,017-entry manual wrote a
+            # single INFO record thousands of lines long on every ingest, which
+            # buries everything else in the log it shares.
+            logger.info("PDF TOC: %d entries", len(toc))
+            logger.debug("PDF TOC entries: %s", toc)
             # Use the full TOC hierarchy to build sections directly.
             # Trust the TOC structure -- it reflects what the author intended.
             # Font-based sub-heading detection is skipped here to avoid

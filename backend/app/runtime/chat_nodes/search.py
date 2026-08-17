@@ -25,21 +25,23 @@ logger = logging.getLogger(__name__)
 READY_STAGE = "complete"
 
 
-async def _unready_document_ids() -> set[str]:
-    """Ids of documents that are not finished ingesting.
+async def _searchable_document_ids() -> tuple[set[str], int]:
+    """(ids that can actually be searched, total document count).
 
-    Their chunk rows land in SQLite before their vectors exist, so such a
-    document contributes nothing to retrieval while still being able to take
-    slots in the result window. Measured 2026-08-17: a question scoped to a
-    document 90 seconds into a 52,331-chunk ingest retrieved zero chunks, and
-    the user was told to make sure a document had been ingested -- with 52 in
-    the library.
+    A document is searchable only if it exists and has finished ingesting. Both
+    halves were live defects on 2026-08-17:
+
+    - A document 90 seconds into a 52,331-chunk ingest has its chunk rows in
+      SQLite but no vectors, so it returns nothing while still consuming the
+      result window.
+    - A chat scoped to a *deleted* document returned nothing for nine days. The
+      id came from the browser store and matched no row at all, so every question
+      in that chat was filtered down to a document that did not exist.
     """
     async with get_session_factory()() as session:
-        rows = await session.execute(
-            select(DocumentModel.id).where(DocumentModel.stage != READY_STAGE)
-        )
-        return {str(r[0]) for r in rows}
+        rows = await session.execute(select(DocumentModel.id, DocumentModel.stage))
+        pairs = [(str(r[0]), r[1]) for r in rows]
+    return {doc_id for doc_id, stage in pairs if stage == READY_STAGE}, len(pairs)
 
 
 async def _fetch_section_summaries(
@@ -163,29 +165,30 @@ async def search_node(state: ChatState) -> dict:
                 len(effective_doc_ids) if effective_doc_ids else "all",
             )
 
-    # A document still being ingested is never searched, whatever the scope asked
-    # for: it has no vectors yet, so including it can only displace documents that
-    # do. When the scope named nothing else, the rest of the library answers --
-    # the question is about material the user has, not about the file that happens
-    # to be uploading.
-    unready = await _unready_document_ids()
-    if unready:
-        if effective_doc_ids:
-            ready_requested = [d for d in effective_doc_ids if d not in unready]
-            if not ready_requested:
-                logger.info(
-                    "search_node: every requested document is still indexing "
-                    "— searching the rest of the library instead"
-                )
-                effective_doc_ids = None
-            elif len(ready_requested) != len(effective_doc_ids):
-                effective_doc_ids = ready_requested
-        if effective_doc_ids is None:
-            async with get_session_factory()() as session:
-                rows = await session.execute(
-                    select(DocumentModel.id).where(DocumentModel.stage == READY_STAGE)
-                )
-                effective_doc_ids = [str(r[0]) for r in rows] or None
+    # Only documents that exist and have finished ingesting are searched, whatever
+    # the scope asked for. A missing or half-ingested document contributes nothing
+    # and can only displace documents that do; when the scope named nothing else,
+    # the rest of the library answers, because the question is about material the
+    # user has rather than about the id their chat happened to be holding.
+    searchable, total_documents = await _searchable_document_ids()
+    unsearchable_exist = len(searchable) != total_documents
+    if effective_doc_ids:
+        kept = [d for d in effective_doc_ids if d in searchable]
+        if not kept:
+            logger.info(
+                "search_node: none of the %d requested document(s) are searchable "
+                "(missing or still indexing) — searching the rest of the library",
+                len(effective_doc_ids),
+            )
+            effective_doc_ids = None
+        elif len(kept) != len(effective_doc_ids):
+            logger.info(
+                "search_node: dropped %d unsearchable document(s) from the filter",
+                len(effective_doc_ids) - len(kept),
+            )
+            effective_doc_ids = kept
+    if effective_doc_ids is None and unsearchable_exist:
+        effective_doc_ids = sorted(searchable) or None
 
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
@@ -276,8 +279,8 @@ async def search_node(state: ChatState) -> dict:
         logger.warning("search_node: retrieval failed", exc_info=True)
         retrieval_failed = True
 
-    if unready and chunks_dicts:
-        chunks_dicts = [c for c in chunks_dicts if c.get("document_id") not in unready]
+    if unsearchable_exist and chunks_dicts:
+        chunks_dicts = [c for c in chunks_dicts if c.get("document_id") in searchable]
 
     # For scope='all': cap at 2 chunks per document so no single doc dominates
     # context. Skip the cap when routing deliberately narrowed to a doc set --

@@ -644,12 +644,21 @@ class QAService:
         if scope == "single" and document_ids:
             titles = await self._fetch_doc_titles(document_ids)
             name = next(iter(titles.values()), "")
-            if name:
+            if not name:
+                # The chat is pointed at a document that is no longer in the
+                # library. Deleting a document does not clear the selection that
+                # named it, so this survived nine days and three chats before
+                # anyone could see why the answers were empty.
                 return (
-                    "no_match_in_document",
-                    f"Nothing in “{name}” answers that."
-                    " Switch to all documents to search the rest of your library.",
+                    "document_missing",
+                    "This chat is pointed at a document that is no longer in your"
+                    " library. Pick a document, or switch to all documents.",
                 )
+            return (
+                "no_match_in_document",
+                f"Nothing in “{name}” answers that."
+                " Switch to all documents to search the rest of your library.",
+            )
         return ("no_context", "Nothing in your library matches that question.")
 
     async def _fetch_doc_titles(self, document_ids: list[str]) -> dict[str, str]:

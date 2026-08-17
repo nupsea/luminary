@@ -1365,3 +1365,17 @@ async def test_no_context_reason_distinguishes_a_failed_search(test_db):
 
     assert code == "retrieval_failed"
     assert "again" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_names_a_deleted_document(test_db):
+    """Scoped to an id that resolves to nothing: say that, not "your library"."""
+    _engine, factory, tmp_path = test_db
+    await _insert_doc(factory, tmp_path, str(uuid.uuid4()), title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason(
+        "single", [str(uuid.uuid4())], retrieval_failed=False
+    )
+
+    assert code == "document_missing"
+    assert "no longer in your library" in msg

@@ -543,6 +543,18 @@ export default function Chat() {
     staleTime: 30_000,
   })
 
+  // A selected document that is no longer in the library must not scope a search.
+  // chatSelectedDocId is persisted, and deleting a document never cleared it, so a
+  // chat could stay pointed at a document that had been gone for days: the header
+  // showed "All documents" (a missing id has no title to render) while every
+  // question was filtered down to that one dead id and answered nothing.
+  useEffect(() => {
+    if (!docList || !selectedDocId) return
+    if (docList.some((d) => d.id === selectedDocId)) return
+    setSelectedDocId(null)
+    setScope("all")
+  }, [docList, selectedDocId, setSelectedDocId, setScope])
+
   // Pre-populate from global store when user arrives from Learning tab.
   // Use a ref to avoid re-populating after the user explicitly clears
   // the document selection (clicking the X button).
