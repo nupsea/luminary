@@ -7,7 +7,7 @@
  * mounted in tests).
  */
 
-import type { LabMetricRow, LabRun, LabTask } from "@/lib/modelLabApi"
+import type { LabMetricRow, LabRun, LabRunSummary, LabTask } from "@/lib/modelLabApi"
 
 /** Stage keys selected in the form, expanded to the task ids the API expects. */
 export function expandTasks(selected: string[], qaDatasets: string[]): string[] {
@@ -55,7 +55,7 @@ export function mutatingStages(tasks: LabTask[], selected: string[]): string[] {
   return tasks.filter((t) => selected.includes(t.key) && t.mutates_library).map((t) => t.label)
 }
 
-export function progressPct(run: LabRun): number {
+export function progressPct(run: Pick<LabRun, "total_units" | "completed_units">): number {
   if (run.total_units <= 0) return 0
   return Math.round((run.completed_units / run.total_units) * 100)
 }
@@ -113,7 +113,16 @@ export function formatMetric(metric: string, value: number | null): string {
  * nothing separates them, the right conclusion is that this instrument cannot
  * tell them apart, never that the models are equivalent.
  */
-export function verdict(run: LabRun): { tone: "good" | "warn" | "bad"; text: string } {
+export function verdict(
+  run: LabRun | LabRunSummary,
+): { tone: "good" | "warn" | "bad"; text: string } {
+  const separated =
+    "separation" in run ? (run.separation?.separated ?? null) : run.separated
+  const count =
+    "separation" in run
+      ? (run.separation?.separating_metrics.length ?? 0)
+      : run.separating_count
+
   if (run.status === "running") return { tone: "warn", text: "Running…" }
   if (run.status === "cancelled") {
     return { tone: "warn", text: "Cancelled — partial results are not a comparison." }
@@ -124,14 +133,11 @@ export function verdict(run: LabRun): { tone: "good" | "warn" | "bad"; text: str
   if (run.models.length < 2) {
     return { tone: "warn", text: "One model measured — nothing to compare it against." }
   }
-  if (!run.separation) {
+  if (separated === null) {
     return { tone: "warn", text: "No separation computed." }
   }
-  if (run.separation.separated) {
-    return {
-      tone: "good",
-      text: `Separated on ${run.separation.separating_metrics.length} structural metric(s).`,
-    }
+  if (separated) {
+    return { tone: "good", text: `Separated on ${count} structural metric(s).` }
   }
   return {
     tone: "bad",

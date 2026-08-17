@@ -277,6 +277,41 @@ async def test_a_metric_identical_on_every_model_is_flagged(client, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_the_run_list_carries_no_results(client, monkeypatch):
+    """Results accumulate for ever. A list that repeats every metric of every
+    past comparison grows without bound, so listing is a summary and expanding
+    one asks for its detail."""
+
+    async def _ok(spec, backend_url):
+        return model_lab.TaskResult(
+            task=spec.key,
+            status="complete",
+            exit_code=0,
+            metrics={f"m{i}": float(i) for i in range(40)},
+        )
+
+    monkeypatch.setattr(model_lab, "_switch_model", _fake_switch)
+    monkeypatch.setattr(model_lab, "_environment", _fake_env)
+    monkeypatch.setattr(model_lab, "_run_task", _ok)
+
+    await client.post("/model-lab/runs", json={"models": ["ollama/a"], "tasks": ["intent"]})
+    await _settle()
+
+    listed = (await client.get("/model-lab/runs")).json()
+    row = listed[0]
+
+    assert "rows" not in row
+    assert "arms" not in row
+    # Still enough to render a line and a progress bar without the results.
+    assert row["models"] == ["ollama/a"]
+    assert row["total_units"] == 1
+    assert row["stage_status"] == {"ollama/a::intent": "complete"}
+
+    detail = (await client.get(f"/model-lab/runs/{row['id']}")).json()
+    assert len(detail["rows"]) == 40
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_run_id_is_a_404(client):
     assert (await client.get("/model-lab/runs/nope")).status_code == 404
     assert (await client.post("/model-lab/runs/nope/cancel")).status_code == 404

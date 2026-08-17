@@ -16,8 +16,10 @@ import {
 } from "@/lib/modelLab"
 import {
   type LabRun,
+  type LabRunSummary,
   cancelLabRun,
   fetchLabCatalogue,
+  fetchLabRun,
   fetchLabRuns,
   startLabRun,
 } from "@/lib/modelLabApi"
@@ -90,23 +92,88 @@ function RunTable({ run }: { run: LabRun }) {
   )
 }
 
-function RunCard({ run }: { run: LabRun }) {
+const TONE_DOT = {
+  good: "bg-emerald-500",
+  warn: "bg-amber-500",
+  bad: "bg-rose-500",
+}
+
+/**
+ * One run, collapsed to a line until asked for.
+ *
+ * Results accumulate for ever, and a page that renders every metric of every
+ * past comparison grows without bound. The detail is fetched only when a card
+ * is opened, so the list stays the same size whether there are three runs or
+ * three hundred.
+ */
+function RunCard({ summary, defaultOpen }: { summary: LabRunSummary; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const v = verdict(summary)
+
+  const detail = useQuery({
+    queryKey: ["model-lab", "run", summary.id],
+    queryFn: () => fetchLabRun(summary.id),
+    enabled: open,
+    refetchInterval: summary.status === "running" ? 5_000 : false,
+  })
+
+  return (
+    <div className="rounded-lg border border-border">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full flex-wrap items-center gap-3 px-4 py-2.5 text-left
+          transition-colors hover:bg-accent"
+      >
+        <span className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOT[v.tone]}`} />
+        <span className="flex-1 truncate text-sm font-medium text-foreground">
+          {summary.models.map((m) => m.replace("ollama/", "")).join("  vs  ")}
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {summary.tasks.length} stage{summary.tasks.length === 1 ? "" : "s"}
+          {summary.failed_tasks.length > 0 && (
+            <span className="ml-2 text-rose-600 dark:text-rose-400">
+              {summary.failed_tasks.length} failed
+            </span>
+          )}
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {new Date(summary.started_at).toLocaleString()}
+        </span>
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {summary.status}
+        </span>
+      </button>
+
+      {summary.status === "running" && (
+        <div className="px-4 pb-2">
+          <Progress value={progressPct(summary)} />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {summary.completed_units} of {summary.total_units} stage-runs finished
+          </p>
+        </div>
+      )}
+
+      {open && (
+        <div className="space-y-3 border-t border-border p-4">
+          {detail.isLoading && <p className="text-xs text-muted-foreground">Loading results…</p>}
+          {detail.isError && (
+            <Notice tone="bad">
+              Could not load this run:{" "}
+              {detail.error instanceof Error ? detail.error.message : "unknown error"}
+            </Notice>
+          )}
+          {detail.data && <RunDetail run={detail.data} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RunDetail({ run }: { run: LabRun }) {
   const v = verdict(run)
   const failed = run.arms.flatMap((a) => a.failed_tasks.map((t) => `${a.model} ${t}`))
   return (
-    <div className="space-y-3 rounded-lg border border-border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-foreground">{run.models.join("  vs  ")}</p>
-          <p className="text-[11px] text-muted-foreground">
-            {new Date(run.started_at).toLocaleString()} · {run.tasks.join(", ")}
-          </p>
-        </div>
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          {run.status}
-        </span>
-      </div>
-
+    <div className="space-y-3">
       {run.status === "running" && (
         <div>
           <Progress value={progressPct(run)} />
@@ -419,9 +486,15 @@ export function ModelLab() {
           No comparisons yet. Pick two models and a stage above.
         </div>
       ) : (
-        <div className="space-y-4">
-          {runList.map((run) => (
-            <RunCard key={run.id} run={run} />
+        <div className="space-y-2">
+          {runList.map((run, i) => (
+            // The newest run, or whatever is in flight, opens on arrival; older
+            // ones stay a line until asked for.
+            <RunCard
+              key={run.id}
+              summary={run}
+              defaultOpen={run.status === "running" || i === 0}
+            />
           ))}
         </div>
       )}

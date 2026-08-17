@@ -239,9 +239,63 @@ async def start_run(req: StartRunRequest) -> RunView:
     return _view(run)
 
 
-@router.get("/runs", response_model=list[RunView])
-async def list_runs(limit: int = 20) -> list[RunView]:
-    return [_view(run) for run in model_lab.recent_runs(limit)]
+class RunSummaryView(BaseModel):
+    """Enough to list a run without carrying its results.
+
+    The full view repeats every metric for every arm, so a list of them grows
+    with each comparison until the page is fetching a payload nobody reads.
+    Expanding one asks for its detail.
+    """
+
+    id: str
+    status: str
+    models: list[str]
+    tasks: list[str]
+    started_at: str
+    finished_at: str | None = None
+    total_units: int
+    completed_units: int
+    # Per-stage status only -- no metrics -- so a run in flight still shows
+    # which stage it is on.
+    stage_status: dict[str, str]
+    failed_tasks: list[str]
+    separated: bool | None = None
+    separating_count: int = 0
+    unmeasured_tasks: list[str] = []
+    error: str | None = None
+    restore_error: str | None = None
+
+
+def _summary(run: model_lab.MatrixRun) -> RunSummaryView:
+    data = model_lab.to_dict(run)
+    sep = data["separation"] or {}
+    return RunSummaryView(
+        id=data["id"],
+        status=data["status"],
+        models=data["models"],
+        tasks=data["tasks"],
+        started_at=data["started_at"],
+        finished_at=data["finished_at"],
+        total_units=data["total_units"],
+        completed_units=data["completed_units"],
+        stage_status={
+            f"{arm['model']}::{t['task']}": t["status"]
+            for arm in data["arms"]
+            for t in arm["tasks"]
+        },
+        failed_tasks=[f"{arm['model']} {t}" for arm in data["arms"] for t in arm["failed_tasks"]],
+        separated=sep.get("separated"),
+        separating_count=len(sep.get("separating_metrics") or []),
+        unmeasured_tasks=sep.get("unmeasured_tasks") or [],
+        error=data["error"],
+        restore_error=data["restore_error"],
+    )
+
+
+@router.get("/runs", response_model=list[RunSummaryView])
+async def list_runs(limit: int = 20) -> list[RunSummaryView]:
+    """Recent runs, newest first, without their results."""
+    return [_summary(run) for run in model_lab.recent_runs(limit)]
 
 
 @router.get("/runs/{run_id}", response_model=RunView)

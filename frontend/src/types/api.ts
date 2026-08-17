@@ -3248,7 +3248,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Runs */
+        /**
+         * List Runs
+         * @description Recent runs, newest first, without their results.
+         */
         get: operations["list_runs_model_lab_runs_get"];
         put?: never;
         /**
@@ -9005,6 +9008,54 @@ export interface components {
             score: number;
             /** Evidence */
             evidence: string;
+        };
+        /**
+         * RunSummaryView
+         * @description Enough to list a run without carrying its results.
+         *
+         *     The full view repeats every metric for every arm, so a list of them grows
+         *     with each comparison until the page is fetching a payload nobody reads.
+         *     Expanding one asks for its detail.
+         */
+        RunSummaryView: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Total Units */
+            total_units: number;
+            /** Completed Units */
+            completed_units: number;
+            /** Stage Status */
+            stage_status: {
+                [key: string]: string;
+            };
+            /** Failed Tasks */
+            failed_tasks: string[];
+            /** Separated */
+            separated?: boolean | null;
+            /**
+             * Separating Count
+             * @default 0
+             */
+            separating_count: number;
+            /**
+             * Unmeasured Tasks
+             * @default []
+             */
+            unmeasured_tasks: string[];
+            /** Error */
+            error?: string | null;
+            /** Restore Error */
+            restore_error?: string | null;
         };
         /** RunView */
         RunView: {
@@ -15739,7 +15790,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunView"][];
+                    "application/json": components["schemas"]["RunSummaryView"][];
                 };
             };
             /** @description Validation Error */

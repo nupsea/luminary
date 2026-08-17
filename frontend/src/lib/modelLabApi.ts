@@ -78,7 +78,31 @@ export interface StartRunBody {
 export const fetchLabCatalogue = (): Promise<LabCatalogue> =>
   apiGet<LabCatalogue>("/model-lab/catalogue")
 
-export const fetchLabRuns = (): Promise<LabRun[]> => apiGet<LabRun[]>("/model-lab/runs")
+/**
+ * A run without its results. The full view repeats every metric for every arm,
+ * so a list of them grows with each comparison until the page is fetching a
+ * payload nobody reads; expanding a card asks for its detail.
+ */
+export interface LabRunSummary {
+  id: string
+  status: LabRun["status"]
+  models: string[]
+  tasks: string[]
+  started_at: string
+  finished_at: string | null
+  total_units: number
+  completed_units: number
+  stage_status: Record<string, string>
+  failed_tasks: string[]
+  separated: boolean | null
+  separating_count: number
+  unmeasured_tasks: string[]
+  error: string | null
+  restore_error: string | null
+}
+
+export const fetchLabRuns = (): Promise<LabRunSummary[]> =>
+  apiGet<LabRunSummary[]>("/model-lab/runs")
 
 export const fetchLabRun = (id: string): Promise<LabRun> =>
   apiGet<LabRun>(`/model-lab/runs/${id}`)
