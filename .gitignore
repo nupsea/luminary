@@ -44,6 +44,9 @@ backend/MagicMock/
 
 # Personal corpus (only shared fixtures under DATA/books/ are tracked)
 DATA/books/frankenstein.txt
+# Downloaded reference PDFs used as profiling corpora -- tens of MB each, and
+# re-downloadable, so they stay local rather than entering the history.
+DATA/books/*.pdf
 DATA/code/
 DATA/conversations/
 DATA/notes/
