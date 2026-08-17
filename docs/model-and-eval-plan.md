@@ -934,9 +934,48 @@ each arm was waiting for `summarizer.pregenerate mode=detailed`: un-gated it pro
 token at 13:33:55 against that call's 13:33:56 completion, gated at 13:49:07 against 13:49:02. The
 same call over the same 12,481-char input ran 107s in one arm and 179s in the other. The gate cannot
 help here by construction — yield granularity is one completed call, and this one was admitted
-before the Ask arrived. **The lever is call size: cap or split `pregenerate`'s longest mode.** Until
-that lands, a question asked in the minute after an upload finishes can still wait two to three
-minutes, and no amount of scheduling policy will change it.
+before the Ask arrived. The lever is call size, not scheduling policy.
+
+#### The tail, chased to three causes — 2026-08-17
+
+| gated arm, same document and protocol | `detailed` call | worst Ask | p50 | p90 |
+|---|---|---|---|---|
+| as shipped | 179s | 172.94s | 10.08s | 18.85s |
+| `max_tokens` cap on pregeneration | 106s | 52.05s | 13.10s | 23.16s |
+| `detailed` assembled | 0.001s | 56.82s | 13.45s | 23.64s |
+| + library summary served stale | 0.001s | 48.80s | 13.84s | 22.98s |
+
+**A generation cap was tried and rejected.** `max_tokens=1200` cut the wait but truncated the
+stored summary mid-word at 1,001 words, dropping half the document's sections — the model wrote
+long per-section prose regardless of an instruction not to. A latency bound that silently deletes
+content is not a bound worth having.
+
+**`detailed` is assembled, not generated.** The section summarizer already writes one summary per
+section during ingestion, and `_build_section_summary_input` renders exactly the heading-plus-body
+shape this mode asks a model to produce. Generating it spent the longest call in the pipeline
+paraphrasing text that was already a summary: 1,840 words out of a 1,903-word input in one run and
+4,991 in another, the second ending in degenerate repetition. Assembling costs one database read,
+covers all 24 sections verbatim, and is deterministic. Where no section summaries exist the mode is
+generated one batch of paragraphs at a time — per-section output is the only mode that splits
+without changing meaning, and every batch is summarised so coverage is never the thing traded away.
+
+**A question no longer waits for the library summary it triggered.** Ingestion used to *delete*
+every `LibrarySummaryModel` row, so the next question found none, fired the regeneration itself and
+queued behind it — 54.5s to first token, and routed through retrieval rather than the summary path,
+so the answer differed in kind. Ingestion now refreshes in place and readers keep serving the
+previous summary until the replacement is stored. Confirmed in the re-measurement: zero questions
+hit the no-summary branch, and the served summary moved from 5,449 to 5,740 chars mid-run with no
+gap. The warm-up call was also mislabelled — `stream_library_summary` never passed `background`, so
+a refresh nobody was waiting on outranked the question that started it.
+
+**What sets the tail now: the library synthesis itself**, ~52s of generation for 5-7 themes across
+60 documents, as ordinary background work an Ask can still land behind. That is the same pattern for
+the third time — **a background call that states no output length becomes the worst-case Ask
+latency** — and the remaining lever is bounding that prompt, which shortens the library overview a
+user reads.
+
+p50 across five gated runs: 16.47, 10.08, 13.10, 13.45, 13.84. A 3s move is inside that spread; the
+124s taken off the tail is not.
 
 Not measured: generated tokens per arm (`llm_calls` reads 0 without Phoenix, so throughput here is
 wall-clock only), any host other than this 36GB machine, and variance across repeated pairs — one
