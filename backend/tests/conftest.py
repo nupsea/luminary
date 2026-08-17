@@ -37,6 +37,17 @@ def isolated_data_dir(tmp_path_factory):
     # This prevents conflicts when a live dev backend is running concurrently.
     os.environ["PHOENIX_ENABLED"] = "false"
 
+    # No test may reach a live model. Several write paths fire background LLM
+    # work that swallows its own errors -- `POST /notes` generates a description
+    # via `asyncio.create_task` (routers/notes.py:121) -- so on a developer
+    # machine with Ollama running, the first such test silently loaded whatever
+    # LITELLM_DEFAULT_MODEL names and left it resident for the keep-alive window:
+    # measured at 10.3GB, on every `make ci`, started by the first note test.
+    # A closed port is the honest answer for a unit suite: the fire-and-forget
+    # paths log and move on, and a test that genuinely needs a model must mock
+    # it or carry the e2e marker.
+    os.environ["OLLAMA_URL"] = "http://127.0.0.1:1"
+
     # Clear the settings LRU cache so get_settings() picks up the new env var.
     from app.config import get_settings
 
@@ -167,6 +178,23 @@ async def _drain_leaked_tasks(request):
     for t in survivors:
         UNDRAINABLE_TASKS.append(f"{request.node.nodeid} :: {_task_module(t)} :: {t!r}")
         _detach_from_loop_shutdown(t)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_lab_history(tmp_path_factory):
+    """Keep the suite out of the committed model-comparison record.
+
+    `model_lab` appends a row per run to `evals/model_matrix_history.jsonl`, which
+    is what P6 reads to compare models, and the tests monkeypatch the runner but
+    never the path. Every suite run therefore appended stub arms to the real file:
+    68 of its 79 rows were test output, so anyone reading it to compare two models
+    was reading mostly runs that never happened.
+    """
+    from app.services import model_lab
+
+    path = tmp_path_factory.mktemp("model_lab") / "model_matrix_history.jsonl"
+    with patch.object(model_lab, "HISTORY_PATH", path):
+        yield
 
 
 @pytest.fixture(autouse=True)
