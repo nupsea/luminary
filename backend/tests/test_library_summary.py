@@ -4,6 +4,7 @@ All tests use an in-memory SQLite DB and mock the LLM service so no model
 downloads or live databases are required.
 """
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -198,8 +199,17 @@ async def test_library_summary_error_when_fewer_than_2_docs(test_db):
 
 
 @pytest.mark.asyncio
-async def test_library_summary_cache_invalidated_after_new_ingest(test_db):
-    """After invalidate_library_cache(), next call regenerates (cached=false)."""
+async def test_library_summary_stays_readable_while_it_refreshes(test_db):
+    """A new ingest refreshes the library summary without ever leaving it missing.
+
+    Deleting every row instead left a window with no library summary at all, and
+    the next question was what regenerated it: `summary_node` found nothing, fired
+    the generation and then queued behind it on the one serving slot -- 54.5s to
+    first token against a 13.5s median on 2026-08-17, and answered from retrieval
+    rather than from the summary, so it differed in kind too. A reader must see the
+    previous summary for the whole time the replacement is being generated, and the
+    generation must be background work so an Ask outranks it.
+    """
     _engine, factory, tmp_path = test_db
 
     doc_id_a = str(uuid.uuid4())
@@ -209,7 +219,6 @@ async def test_library_summary_cache_invalidated_after_new_ingest(test_db):
     await _insert_executive_summary(factory, doc_id_a, "Summary A.")
     await _insert_executive_summary(factory, doc_id_b, "Summary B.")
 
-    # Pre-populate library cache directly
     async with factory() as session:
         session.add(
             LibrarySummaryModel(
@@ -220,28 +229,36 @@ async def test_library_summary_cache_invalidated_after_new_ingest(test_db):
         )
         await session.commit()
 
-    # Verify cache is hit first
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp_cached = await ac.post("/summarize/all", json={"mode": "executive", "model": None})
-
-    events_cached = _parse_sse_events(resp_cached.text)
-    done_cached = [e for e in events_cached if e.get("done") is True]
-    assert done_cached[0].get("cached") is True
-
-    # Now invalidate
     from app.services.summarizer import get_summarization_service
 
     svc = get_summarization_service()
-    await svc.invalidate_library_cache()
+    generating = asyncio.Event()
+    may_finish = asyncio.Event()
 
-    # After invalidation, next call regenerates
+    async def _blocked_tokens():
+        generating.set()
+        await may_finish.wait()
+        yield "Fresh overview"
+
     mock_llm = MagicMock()
-    mock_llm.generate = AsyncMock(return_value=_async_iter(["Fresh overview"]))
+    mock_llm.generate = AsyncMock(return_value=_blocked_tokens())
 
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            resp_fresh = await ac.post("/summarize/all", json={"mode": "executive", "model": None})
+        refresh = asyncio.create_task(svc.refresh_library_summary())
+        await asyncio.wait_for(generating.wait(), timeout=5)
 
-    events_fresh = _parse_sse_events(resp_fresh.text)
-    done_fresh = [e for e in events_fresh if e.get("done") is True]
-    assert done_fresh[0].get("cached") is False
+        # Mid-refresh: the previous summary is still what a reader gets.
+        during = await svc._fetch_library_cached("executive")
+        assert during is not None, "the library summary must never be missing"
+        assert during.content == "Cached overview text"
+
+        may_finish.set()
+        await asyncio.wait_for(refresh, timeout=5)
+
+    after = await svc._fetch_library_cached("executive")
+    assert after is not None
+    assert after.content == "Fresh overview", "the refreshed summary must win once stored"
+
+    assert mock_llm.generate.await_args.kwargs["background"] is True, (
+        "a refresh nobody is waiting on must not outrank an Ask"
+    )

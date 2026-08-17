@@ -91,8 +91,10 @@ async def _generate_library_summary_task() -> None:
 
     svc = get_summarization_service()
     try:
+        # background=True: nothing is waiting on this. Left interactive it would
+        # take the serving slot ahead of the very question that fired it.
         async for _ in svc.stream_library_summary(
-            mode="executive", model=None, force_refresh=False
+            mode="executive", model=None, force_refresh=False, background=True
         ):
             pass  # consuming the generator triggers generation + storage
     except Exception:

@@ -401,6 +401,7 @@ class LLMService:
         background: bool = False,
         temperature: float | None = None,
         timeout: float | None = None,
+        max_tokens: int | None = None,
         num_ctx: int | None = None,
     ) -> AsyncGenerator[str]:
         """Stream content deltas for the given message list."""
@@ -415,6 +416,8 @@ class LLMService:
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         fallback = self._offline_fallback_kwargs(
             model, effective_model, kwargs, settings, num_ctx=num_ctx
         )
@@ -431,6 +434,7 @@ class LLMService:
         response_format: dict | None = None,
         num_ctx: int | None = None,
         temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str | AsyncGenerator[str]:
         messages: list[dict] = []
         if system:
@@ -442,6 +446,7 @@ class LLMService:
                 model=model,
                 background=background,
                 timeout=timeout,
+                max_tokens=max_tokens,
                 num_ctx=num_ctx,
                 temperature=temperature,
             )
@@ -450,6 +455,7 @@ class LLMService:
             model=model,
             background=background,
             timeout=timeout,
+            max_tokens=max_tokens,
             response_format=response_format,
             num_ctx=num_ctx,
             temperature=temperature,

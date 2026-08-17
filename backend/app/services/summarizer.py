@@ -106,6 +106,34 @@ _MAP_CALL_TIMEOUT = 300.0
 # Modes pre-generated at ingestion time
 PREGENERATE_MODES = ("one_sentence", "executive", "detailed")
 
+# A background call sets the worst-case wait for an Ask that arrives while it is
+# generating: Ollama cannot preempt, so the finest yield granularity is one
+# completed call (I-31), and the admission gate cannot touch a call it has
+# already admitted. In the 2026-08-17 latency pair the slowest Ask in *both*
+# arms was waiting on this file's `detailed` call -- 107s and 179s on one
+# 24-section document, against 6s and 21s for the two modes that state their own
+# length. A generation cap fixes the wait by truncating the summary, which is
+# not a trade this makes: the bound comes from call size instead.
+_PREGENERATE_MAX_TOKENS = 1_200
+
+# `detailed` asks for exactly what the section summarizer already wrote during
+# ingestion -- one summary per section, under its heading, which is the shape
+# `_build_section_summary_input` returns and the S82 metadata filter has already
+# cleaned. Re-generating it spends the longest call in the pipeline to paraphrase
+# text that is already a summary, and the two measured runs disagreed by 2.7x on
+# length (1,840 vs 4,991 words) from identical input. Assembling costs nothing,
+# drops nothing, and is the summarizer's own wording rather than a paraphrase of
+# it.
+_ASSEMBLED_MODES = frozenset({"detailed"})
+
+# Slow path only, where no section summaries exist and `detailed` must be
+# generated. Per-section output is the one mode that splits without changing
+# meaning -- a synthesis would lose the cross-section view; this does not. Every
+# batch is summarised and none is dropped, so the bound is on how long one call
+# runs, never on how much of the document is covered.
+_DETAILED_BATCH_TOKENS = 1_500
+_DETAILED_BATCH_MAX_TOKENS = 1_000
+
 _METADATA_IGNORE = (
     "Ignore any copyright notices, licensing terms, distribution metadata, "
     "publisher boilerplate, or digitisation project information. "
@@ -127,6 +155,31 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
         f"and how they relate to each other. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
     ),
 }
+
+
+def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) -> list[str]:
+    """Split on blank lines into batches of at most `budget_tokens`.
+
+    Splits between paragraphs so a section is summarised as a whole. A single
+    paragraph over the budget is its own batch rather than being cut: the point
+    of batching is to bound one call, never to drop text.
+    """
+    batches: list[str] = []
+    current: list[str] = []
+    current_tokens = 0
+    for para in text.split("\n\n"):
+        if not para.strip():
+            continue
+        tokens = len(para) // _CHARS_PER_TOKEN
+        if current and current_tokens + tokens > budget_tokens:
+            batches.append("\n\n".join(current))
+            current = []
+            current_tokens = 0
+        current.append(para)
+        current_tokens += tokens
+    if current:
+        batches.append("\n\n".join(current))
+    return batches
 
 
 def _build_system_prompt(mode: str) -> str:
@@ -279,6 +332,28 @@ class SummarizationService:
         await self._store_summary(document_id, "_map_reduce", result)
         return result
 
+    async def _generate_detailed(self, input_text: str, model: str | None) -> str:
+        """Generate the per-section summary as one bounded call per batch.
+
+        Only reached when no section summaries exist. The batches are joined in
+        document order, so the whole input is covered by exactly one call each.
+        """
+        llm = get_llm_service()
+        system = _build_system_prompt("detailed")
+        parts: list[str] = []
+        for batch in _split_for_detail(input_text):
+            text = await llm.generate(
+                batch,
+                system=system,
+                model=model,
+                background=True,
+                num_ctx=_summary_num_ctx(),
+                max_tokens=_DETAILED_BATCH_MAX_TOKENS,
+            )
+            assert isinstance(text, str)  # noqa: S101
+            parts.append(text.strip())
+        return "\n\n".join(p for p in parts if p)
+
     async def _build_section_summary_input(self, document_id: str) -> str | None:
         """Return a markdown string built from section summaries, or None if < 3 units exist.
 
@@ -355,6 +430,22 @@ class SummarizationService:
             else:
                 chunks = await self._fetch_chunks(document_id)
                 input_text = await self._build_input_text(document_id, chunks, model)
+
+            if mode in _ASSEMBLED_MODES:
+                # Same rule as pregenerate, so a refresh cannot replace the
+                # assembled per-section text with a paraphrase of it. Neither
+                # branch streams, so the summary is sent as one event exactly as
+                # the cache path above does.
+                text = (
+                    section_input
+                    if section_input is not None
+                    else await self._generate_detailed(_truncate_to_budget(input_text), model)
+                )
+                summary_id = await self._store_summary(document_id, mode, text)
+                yield f"data: {json.dumps({'token': text})}\n\n"
+                done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                yield f"data: {json.dumps(done_evt)}\n\n"
+                return
 
             llm = get_llm_service()
             system = _build_system_prompt(mode)
@@ -481,14 +572,19 @@ class SummarizationService:
 
             for mode in modes_needed:
                 try:
-                    system = _build_system_prompt(mode)
-                    text = await llm.generate(
-                        _truncate_to_budget(input_text),
-                        system=system,
-                        model=model,
-                        background=True,
-                        num_ctx=_summary_num_ctx(),
-                    )
+                    if mode in _ASSEMBLED_MODES and section_input is not None:
+                        text = section_input
+                    elif mode in _ASSEMBLED_MODES:
+                        text = await self._generate_detailed(_truncate_to_budget(input_text), model)
+                    else:
+                        text = await llm.generate(
+                            _truncate_to_budget(input_text),
+                            system=_build_system_prompt(mode),
+                            model=model,
+                            background=True,
+                            num_ctx=_summary_num_ctx(),
+                            max_tokens=_PREGENERATE_MAX_TOKENS,
+                        )
                     assert isinstance(text, str)  # noqa: S101
                     await self._store_summary(document_id, mode, text)
                     logger.info(
@@ -600,6 +696,7 @@ class SummarizationService:
         mode: str,
         model: str | None,
         force_refresh: bool = False,
+        background: bool = False,
     ) -> AsyncGenerator[str]:
         """Synthesize a holistic summary across all ingested documents.
 
@@ -696,6 +793,7 @@ class SummarizationService:
                 system=system,
                 model=model,
                 stream=True,
+                background=background,
                 num_ctx=_summary_num_ctx(),
             )
 
@@ -720,15 +818,30 @@ class SummarizationService:
             err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
-    async def invalidate_library_cache(self) -> None:
-        """Delete all LibrarySummaryModel rows so the next call regenerates."""
+    async def refresh_library_summary(self) -> None:
+        """Regenerate the library summary in place, keeping the old one readable.
+
+        This used to delete every row, which left the library with no summary at
+        all until something regenerated it -- and that something was the next
+        question. `summary_node` found nothing, fired the generation itself, and
+        then queued behind it on the one serving slot: measured 2026-08-17 at 54.5s
+        to first token against a 13.5s median for the same question. That Ask also
+        took the retrieval route rather than the summary route, so it differed in
+        kind and not only in latency.
+
+        Regenerating here puts the work in ingestion, where the admission gate can
+        defer it, and readers keep serving the previous summary until the
+        replacement is stored -- both readers order by `created_at`, so the new row
+        wins the moment it exists and never before. A summary one document out of
+        date is worth more than no summary at all.
+        """
         try:
-            async with get_session_factory()() as session:
-                await session.execute(delete(LibrarySummaryModel))
-                await session.commit()
-            logger.info("library summary cache invalidated")
+            async for _ in self.stream_library_summary(
+                mode="executive", model=None, force_refresh=True, background=True
+            ):
+                pass
         except Exception as exc:
-            logger.warning("library summary cache invalidation failed (non-fatal): %s", exc)
+            logger.warning("library summary refresh failed (non-fatal): %s", exc)
 
 
 _summarization_service: SummarizationService | None = None
