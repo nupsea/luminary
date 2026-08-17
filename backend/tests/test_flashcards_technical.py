@@ -185,7 +185,7 @@ async def test_generate_technical_warning_admonition_produces_definition(test_db
             {
                 "question": "What should you never do while iterating over an object?",
                 "answer": "Delete it — this causes undefined behaviour.",
-                "source_excerpt": "Never delete an object while iterating.",
+                "source_excerpt": "Never delete an object while iterating over it",
                 "flashcard_type": "definition",
                 "bloom_level": 1,
             }
@@ -249,7 +249,7 @@ async def test_generate_technical_tradeoff_heading_produces_design_decision(test
                     "Choose a tuple when the data is fixed and must not change; "
                     "its immutability signals intent and allows hashing."
                 ),
-                "source_excerpt": "Lists are mutable; tuples are immutable.",
+                "source_excerpt": "Lists are mutable sequences; tuples are immutable",
                 "flashcard_type": "design_decision",
                 "bloom_level": 5,
             }
@@ -321,7 +321,7 @@ async def test_generate_technical_stores_type_and_bloom_level(test_db):
             {
                 "question": "What is Big-O for binary search?",
                 "answer": "O(log n) — the search space halves each step.",
-                "source_excerpt": "Binary search halves the search space.",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "complexity",
                 "bloom_level": 5,
             }
@@ -364,7 +364,7 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
             {
                 "question": "What is the output of print(2 ** 3)?",
                 "answer": "8 -- the ** operator raises 2 to the power 3.",
-                "source_excerpt": "2 ** 3",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "trace",
                 "bloom_level": 4,
             }
@@ -403,6 +403,7 @@ async def test_generate_technical_backfills_gated_cards(test_db):
         [
             {"question": "What does the ** operator do in Python?",
              "answer": "It raises the left operand to the power of the right operand.",
+             "source_excerpt": "def add(a, b):",
              "flashcard_type": "definition", "bloom_level": 2},
             {"question": "What is the output of print(2 ** 3)?", "answer": "8",
              "flashcard_type": "trace", "bloom_level": 4},
@@ -412,6 +413,7 @@ async def test_generate_technical_backfills_gated_cards(test_db):
         [
             {"question": "How does floor division // differ from / in Python?",
              "answer": "// discards the fractional part and returns an integer-valued result.",
+             "source_excerpt": "def add(a, b):",
              "flashcard_type": "definition", "bloom_level": 2},
         ]
     )
@@ -451,7 +453,7 @@ async def test_generate_technical_coerces_string_bloom_level(test_db):
             {
                 "question": "Apply the map function to double each element.",
                 "answer": "list(map(lambda x: x * 2, items))",
-                "source_excerpt": "map(lambda x: x * 2, items)",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "code_completion",
                 "bloom_level": "4",
             }

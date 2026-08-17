@@ -178,3 +178,78 @@ def test_a_lead_sentence_with_one_detail_line_is_still_one_card():
         )
         is None
     )
+
+
+# Grounding. Measured 2026-08-17 on 35 passages: 27% of delivered cards were
+# unsupported by the passage they came from, and rewriting the prompt did not move
+# that number (0.7300 -> 0.7267 factuality). A model asked for a well-shaped card
+# still writes what it already believes about a famous text; quoting is the part it
+# cannot do from memory.
+
+_PASSAGE = (
+    "Penelope set up a great web in her house and told the suitors she would choose "
+    "a husband when it was finished, but she undid her work each night for three "
+    "years, while 108 suitors waited."
+)
+
+
+def test_a_card_quoting_the_passage_passes():
+    assert (
+        card_rejection_reason(
+            "How did Penelope delay the suitors?",
+            "She undid her weaving each night so it was never finished.",
+            "she undid her work each night for three years",
+            _PASSAGE,
+        )
+        is None
+    )
+
+
+def test_a_card_whose_quote_is_not_in_the_passage_is_rejected():
+    """The reported failure: a card asserting the suitors tricked Penelope.
+
+    No span of the passage supports it, so no honest quote exists for it.
+    """
+    from app.services.flashcard_parsers import REJECT_UNGROUNDED, card_rejection
+
+    verdict = card_rejection(
+        "How did the suitors trick Penelope?",
+        "They fooled her by having a maid show false work.",
+        "the suitors tricked Penelope by having a maid show the false work",
+        _PASSAGE,
+    )
+
+    assert verdict is not None
+    assert verdict[0] == REJECT_UNGROUNDED
+
+
+def test_a_shortened_quote_is_accepted_part_by_part():
+    """Models elide long quotes with '...'; each surviving part must still be real."""
+    assert (
+        card_rejection_reason(
+            "What did Penelope promise?",
+            "To choose a husband once the web was finished.",
+            "told the suitors ... when it was finished",
+            _PASSAGE,
+        )
+        is None
+    )
+
+
+# A rule requiring every figure in an answer to appear in the passage was tried and
+# removed: across four full-golden runs it rejected nothing, and it fails a
+# legitimate answer like "a state of being both 0 and 1" whose digits are
+# conceptual rather than quoted. Unmeasured value, demonstrated false positives.
+
+
+def test_grounding_is_skipped_when_the_caller_has_no_passage():
+    """Cards built from concepts or gaps have no single text to quote."""
+    assert (
+        card_rejection_reason(
+            "What is spaced repetition?",
+            "Reviewing material at increasing intervals.",
+            "",
+            None,
+        )
+        is None
+    )

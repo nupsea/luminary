@@ -29,7 +29,8 @@ Example card:
 {{"flashcards": [{{"question": "Why do independent hardware faults need a different defence \
 from systematic software errors?", "answer": "Hardware faults are largely independent so \
 redundancy can mask them, while software errors are correlated and can fail many nodes at \
-once.", "source_excerpt": "", "bloom_level": 4}}]}}
+once.", "source_excerpt": "hardware faults are random and independent, whereas software \
+faults are correlated across nodes", "bloom_level": 4}}]}}
 """
 
 

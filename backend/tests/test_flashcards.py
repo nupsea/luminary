@@ -61,6 +61,10 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
     return DocumentModel(**defaults)
 
 
+# A verbatim span of the chunk text below -- cards must quote what they came from.
+_CHUNK_QUOTE = "Quantum entanglement describes a correlation between particles"
+
+
 def _make_chunk(chunk_id: str | None = None, doc_id: str = "doc-1", **kwargs) -> ChunkModel:
     defaults = {
         "id": chunk_id or str(uuid.uuid4()),
@@ -83,7 +87,7 @@ def _make_flashcard(card_id: str | None = None, doc_id: str = "doc-1", **kwargs)
         "chunk_id": str(uuid.uuid4()),
         "question": "What is entanglement?",
         "answer": "A quantum correlation between particles.",
-        "source_excerpt": "Quantum entanglement describes a correlation.",
+        "source_excerpt": _CHUNK_QUOTE,
         "fsrs_state": "new",
         "fsrs_stability": 0.0,
         "fsrs_difficulty": 0.0,
@@ -115,12 +119,12 @@ async def test_service_parses_json_and_creates_cards(test_db):
             {
                 "question": "What is a qubit?",
                 "answer": "A quantum bit.",
-                "source_excerpt": "A qubit.",
+                "source_excerpt": _CHUNK_QUOTE,
             },
             {
                 "question": "What is superposition?",
                 "answer": "A state of being both 0 and 1.",
-                "source_excerpt": "Superposition...",
+                "source_excerpt": _CHUNK_QUOTE,
             },
         ]
     )
@@ -160,7 +164,7 @@ async def test_service_strips_markdown_fences(test_db):
     llm_json = (
         '```json\n[{"question": "What does a replication log record?", '
         '"answer": "The ordered sequence of writes followers replay to stay '
-        'consistent with the leader.", "source_excerpt": "src."}]\n```'
+        'consistent with the leader.", "source_excerpt": "' + _CHUNK_QUOTE + '"}]\n```'
     )
     mock_llm = _MockLLMService(response=llm_json)
 
@@ -246,7 +250,7 @@ async def test_service_prompt_includes_difficulty(test_db):
 
     llm_json = json.dumps(
         [
-            {"question": "Hard Q?", "answer": "Hard A.", "source_excerpt": "src."},
+            {"question": "Hard Q?", "answer": "Hard A.", "source_excerpt": _CHUNK_QUOTE},
         ]
     )
     mock_llm = _CapturingLLMService(response=llm_json)
@@ -441,7 +445,7 @@ async def test_generate_endpoint_returns_201(test_db):
                 "question": "What problem does quorum consistency solve?",
                 "answer": "It ensures a read overlaps a recent write so at least one "
                 "queried replica returns the latest value.",
-                "source_excerpt": "src.",
+                "source_excerpt": _CHUNK_QUOTE,
             },
         ]
     )
@@ -481,9 +485,11 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
         {
             "flashcards": [
                 {"question": "What is a write-ahead log?",
-                 "answer": "A durable append-only record written before applying changes."},
+                 "answer": "A durable append-only record written before applying changes.",
+                  "source_excerpt": _CHUNK_QUOTE},
                 {"question": "What is a follower replica?",
-                 "answer": "A replica that applies the leader's writes to serve reads."},
+                 "answer": "A replica that applies the leader's writes to serve reads.",
+                  "source_excerpt": _CHUNK_QUOTE},
                 {"question": "What input closes the analytics loop?", "answer": "Feedback"},
                 {"question": "What names a data partition?", "answer": "Shard"},
             ]
@@ -493,9 +499,11 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
         {
             "flashcards": [
                 {"question": "What does a quorum guarantee?",
-                 "answer": "That a read and a write overlap on at least one replica."},
+                 "answer": "That a read and a write overlap on at least one replica.",
+                  "source_excerpt": _CHUNK_QUOTE},
                 {"question": "What is eventual consistency?",
-                 "answer": "Replicas converge to the same value once writes stop."},
+                 "answer": "Replicas converge to the same value once writes stop.",
+                  "source_excerpt": _CHUNK_QUOTE},
             ]
         }
     )

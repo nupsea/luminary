@@ -119,7 +119,8 @@ def _make_bloom_l3_response(count: int = 5) -> str:
             {
                 "question": f"Why does Ulysses choose to resist the Sirens in Book XII (card {i})?",
                 "answer": f"In Book XII - The Sirens, Ulysses demonstrates wisdom by... (card {i})",
-                "source_excerpt": f"Ulysses ordered his men... (excerpt {i})",
+                # A verbatim span of the chunk text above: cards must quote their source.
+                "source_excerpt": "Ulysses ordered his men to plug their ears with wax",
                 "bloom_level": bloom,
             }
         )

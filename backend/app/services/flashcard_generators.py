@@ -144,7 +144,9 @@ async def generate_technical(
             prompt, system=TECH_FLASHCARD_SYSTEM,
             model=model or _generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, document_id, expect="array"))
+        return _gate_cards(
+            _parse_llm_response(raw, document_id, expect="array"), source_text=combined_text
+        )
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -329,27 +331,28 @@ def _avoid_suffix(avoid: list[str]) -> str:
     return f"\nDo NOT repeat or paraphrase these already-written questions: {listed}\n"
 
 
-def _gate_cards(parsed: list) -> list[dict]:
+def _gate_cards(parsed: list, source_text: str | None = None) -> list[dict]:
     """Normalize parsed LLM items to {question, answer, source_excerpt, ...} and
     drop any that fail the quality gate. Extra fields (bloom_level,
-    flashcard_type) pass through untouched for the caller to persist."""
+    flashcard_type) pass through untouched for the caller to persist.
+
+    *source_text* is the passage the cards were generated from. Passing it turns
+    on the grounding rules -- the card must quote that text and may not invent
+    figures. Generators that build cards from concepts or gaps have no single
+    passage to quote and pass nothing."""
     kept: list[dict] = []
     for item in parsed:
         if not isinstance(item, dict):
             continue
         q = card_field(item, "question", "front", "q", "term", "prompt")
         a = strip_source_ref(card_field(item, "answer", "back", "a", "definition", "response"))
-        verdict = card_rejection(q, a)
+        excerpt = card_field(item, "source_excerpt", "source", "excerpt")
+        verdict = card_rejection(q, a, excerpt, source_text)
         llm_output_stats.record_card_gate(verdict[0] if verdict else None)
         if verdict:
             logger.info("flashcard: dropped low-quality card (%s): %r", verdict[1], q[:80])
             continue
-        kept.append({
-            **item,
-            "question": q,
-            "answer": a,
-            "source_excerpt": card_field(item, "source_excerpt", "source", "excerpt"),
-        })
+        kept.append({**item, "question": q, "answer": a, "source_excerpt": excerpt})
     return kept
 
 
@@ -553,7 +556,9 @@ async def generate(
             model=model or _generation_model(), stream=False,
             response_format={"type": "json_object"},
         )
-        return _gate_cards(_parse_llm_response(raw, document_id, expect="object"))
+        return _gate_cards(
+            _parse_llm_response(raw, document_id, expect="object"), source_text=combined_text
+        )
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 

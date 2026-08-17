@@ -208,15 +208,78 @@ REJECT_SHORT_ANSWER = "short_answer"
 REJECT_DEICTIC = "deictic"
 REJECT_BLOATED = "bloated"
 REJECT_ENUMERATED = "enumerated"
+REJECT_UNGROUNDED = "ungrounded"
+
+# A quote has to be specific enough that finding it in the text means something.
+# Counting words alone fails code: `def factorial(n):` is a precise, checkable
+# quote in two whitespace tokens, and requiring four dropped signatures, formulas
+# and API names -- the most quotable lines a technical passage has. Characters
+# carry that specificity where words do not. The floor sits between the shortest
+# quote worth having and the longest phrase that proves nothing: "def add(a, b):"
+# is 14 characters and checkable, "the author" is 10 and appears in any text.
+_MIN_EXCERPT_CHARS = 12
+_MIN_EXCERPT_TOKENS = 2
+
+# Curly quotes, dashes and ellipses differ between a model's output and the text
+# it was given, and none of those differences mean the quote is invented.
+_QUOTE_CHARS = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+    "\u2013": "-", "\u2014": "-", "\u2026": "...",
+})
 
 
-def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
+def _normalise_for_match(text: str) -> str:
+    """Lowercased, whitespace-collapsed, punctuation-unified -- for quote matching."""
+    return re.sub(r"\s+", " ", (text or "").translate(_QUOTE_CHARS)).strip().lower()
+
+
+def excerpt_is_verbatim(excerpt: str, source_text: str) -> bool:
+    """Whether *excerpt* is really a span of *source_text*.
+
+    A model that must quote the passage has to look at it. This does not prove the
+    answer follows from the quote -- that needs a judge -- but it does prove the
+    card is anchored to text that exists, which a fabricated card cannot be.
+
+    An excerpt elided with "..." is checked part by part: models shorten long
+    quotes that way, and each surviving part must still be real.
+    """
+    haystack = _normalise_for_match(source_text)
+    if not haystack:
+        return True  # nothing to check against; not the card's fault
+    parts = [p for p in _normalise_for_match(excerpt).split("...") if p.strip()]
+    if not parts:
+        return False
+    # Whitespace differs between a quote and its source wherever notation is
+    # involved -- "G ( n, p )" against "G(n,p)" is the same span, and rejecting it
+    # loses real cards from mathematical and code-heavy passages. Fabrication does
+    # not survive this comparison; formatting does.
+    squeezed = haystack.replace(" ", "")
+    return all(
+        part.strip() in haystack or part.replace(" ", "") in squeezed
+        for part in parts
+        if len(part.split()) >= 2
+    )
+
+
+def card_rejection(
+    question: str,
+    answer: str,
+    source_excerpt: str | None = None,
+    source_text: str | None = None,
+) -> tuple[str, str] | None:
     """(kind, message) for a low-quality Q/A card, or None if it passes.
 
     Catches the failure modes the generation prompt forbids but weak models
     still produce: empty fields, one-word answers (which includes bare yes/no),
     source-referencing/leading questions, answers that carry a list of facts
     instead of one, and bloated leading questions paired with a trivial answer.
+
+    When the caller passes the text the card was generated from, two grounding
+    rules also apply: the card must quote that text verbatim, and any number it
+    asserts must appear there. Measured 2026-08-17: 27% of delivered cards were
+    unsupported by their passage, unchanged by rewriting the prompt, because a
+    model asked for a well-shaped card will still write what it already believes
+    about a famous text. Quoting is the part it cannot do from memory.
     Cloze cards use a separate builder and are intentionally not run through this
     gate -- a cloze is one deletion by construction.
 
@@ -254,12 +317,32 @@ def card_rejection(question: str, answer: str) -> tuple[str, str] | None:
             f"bloated question ({q_words}w) with trivial answer ({a_words}w)",
         )
 
+    # Grounding is only checkable when the caller knows which text the card came
+    # from. Generators that build cards from concepts or gaps rather than a
+    # passage pass nothing and skip these two rules.
+    if source_text:
+        excerpt = (source_excerpt or "").strip()
+        if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
+            return (
+                REJECT_UNGROUNDED,
+                f"no usable source quote ({len(excerpt)} chars)",
+            )
+        if not excerpt_is_verbatim(excerpt, source_text):
+            return (
+                REJECT_UNGROUNDED,
+                f"source quote is not in the text ({excerpt[:60]!r})",
+            )
     return None
 
 
-def card_rejection_reason(question: str, answer: str) -> str | None:
+def card_rejection_reason(
+    question: str,
+    answer: str,
+    source_excerpt: str | None = None,
+    source_text: str | None = None,
+) -> str | None:
     """The gate's message alone, for callers that only report it."""
-    verdict = card_rejection(question, answer)
+    verdict = card_rejection(question, answer, source_excerpt, source_text)
     return verdict[1] if verdict else None
 
 

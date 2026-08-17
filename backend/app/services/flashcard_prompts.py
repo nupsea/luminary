@@ -38,6 +38,10 @@ FLASHCARD_SYSTEM = (
     "Two sentences only when the question compares two things and both sides must be stated. "
     "Every claim must be supported by the text: if you cannot point at the sentence that "
     "backs it, leave it out. No filler, no chapter/section reference.\n"
+    "SOURCE_EXCERPT: copy the sentence from the text below that proves the answer, word for "
+    "word, at least four words long. It must come from that text and from nowhere else -- not "
+    "from any example, and not from memory. A card whose quote is not in the text is "
+    "discarded. Use '...' if you need to shorten a long sentence.\n"
     'Include a "bloom_level" integer 1-6 (1=remember ... 6=create); aim for level 3+ '
     "(apply/analyze/evaluate) where the material allows."
 )
@@ -80,7 +84,8 @@ FLASHCARD_USER_SPEC = PromptSpec(
                 'different defence from systematic software errors?", "answer": "Hardware '
                 "faults are largely independent so redundancy can mask them, while software "
                 'errors are correlated and can fail many nodes at once.", '
-                '"source_excerpt": "", "bloom_level": 4}}]}}'
+                '"source_excerpt": "hardware faults are random and independent, whereas '
+                'software faults are correlated across nodes", "bloom_level": 4}}]}}'
             ),
             introduced_for="ollama/qwen3.5:4b",
             because=(
