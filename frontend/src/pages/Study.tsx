@@ -27,6 +27,9 @@ import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
+import { ModelSelector } from "@/components/ModelSelector"
+import { buildModelOptions, effectiveDefaultModel } from "@/lib/chatSettingsUtils"
+import { fetchLLMSettings } from "@/lib/llmSettings"
 import { useAppStore } from "@/store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
 import { isDocumentReady } from "@/lib/documentReadiness"
@@ -158,6 +161,8 @@ export default function Study() {
         outcome: PreparedStudySessionOutcome
         scopeForBeginNew: PrepareStudySessionOptions
       }
+  // Per-surface model override; "" follows Settings, exactly as Ask does.
+  const [studyModel, setStudyModel] = useState("")
   const [studyPhase, setStudyPhase] = useState<StudyPhase>({ phase: "idle" })
 
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
@@ -170,6 +175,21 @@ export default function Study() {
         return []
       }
     },
+  })
+
+  const { data: llmSettings } = useQuery({
+    queryKey: ["llm-settings"],
+    queryFn: fetchLLMSettings,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+  const studyProvider = llmSettings?.provider
+  const { data: studyCloudModels } = useQuery({
+    queryKey: ["study-cloud-models", studyProvider],
+    queryFn: () =>
+      apiGet<{ id: string }[]>("/settings/llm/models", { provider: studyProvider as string }),
+    enabled: Boolean(studyProvider),
+    staleTime: 300_000,
   })
 
   const { data: docList = [] } = useQuery<DocListItem[]>({
@@ -246,6 +266,7 @@ export default function Study() {
           scope: "section",
           section_heading: sectionHeading,
           count: 8,
+          ...(studyModel ? { model: studyModel } : {}),
         })
       }
       if (!cards || cards.length === 0) {
@@ -454,6 +475,19 @@ export default function Study() {
             }}
           />
         </div>
+
+        <ModelSelector
+          value={studyModel}
+          onChange={setStudyModel}
+          localModels={
+            buildModelOptions(llmSettings).length > 0
+              ? buildModelOptions(llmSettings)
+              : (llmSettings?.available_local_models ?? [])
+          }
+          cloudModels={(studyCloudModels ?? []).map((m) => `${studyProvider}/${m.id}`)}
+          effectiveDefault={effectiveDefaultModel(llmSettings)}
+          title="Model that writes the cards here. 'Auto' follows your Settings."
+        />
       </div>
 
       <div className="flex-1 overflow-auto p-8 lg:p-12">

@@ -188,6 +188,7 @@ async def generate_flashcards(
             "count": req.count,
             "difficulty": req.difficulty,
             "has_context": bool(req.context),
+            "model": req.model or "auto",
         },
     )
     try:
@@ -199,6 +200,7 @@ async def generate_flashcards(
             difficulty=req.difficulty,
             session=session,
             context=req.context,
+            model=req.model,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(
@@ -319,6 +321,7 @@ async def generate_technical_flashcards(
             section_heading=req.section_heading,
             count=req.count,
             session=session,
+            model=req.model,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(

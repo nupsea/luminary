@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
+import { ModelSelector } from "@/components/ModelSelector"
+import { fetchLLMSettings } from "@/lib/llmSettings"
 import { ChatSessionList } from "@/components/chat/ChatSessionList"
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import {
@@ -28,7 +30,7 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
-import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, shortModelLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -215,27 +217,6 @@ interface SessionPlanResponse {
   items: SessionPlanItem[]
 }
 
-interface CloudProvider {
-  name: string
-  available: boolean
-}
-
-interface LLMSettings {
-  processing_mode: string
-  active_model: string
-  available_local_models: string[]
-  cloud_providers: CloudProvider[]
-  // Raw saved config (present in the response) — used to show/resolve the
-  // effective chat model and to offer the right cloud models.
-  mode?: string
-  provider?: string
-  model?: string
-}
-
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  return apiGet<LLMSettings>("/settings/llm")
-}
-
 function persistedToChatMessage(p: PersistedMessage): ChatMessage {
   const extra = (p.extra ?? {}) as Record<string, unknown>
   return {
@@ -318,62 +299,6 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
 }
 
 // ---------------------------------------------------------------------------
-// ChatModelSelector -- header dropdown showing/overriding the model for this chat
-// ---------------------------------------------------------------------------
-
-interface ChatModelSelectorProps {
-  value: string // per-request override; "" = use the app default
-  onChange: (model: string) => void
-  localModels: string[]
-  cloudModels: string[]
-  effectiveDefault: string
-}
-
-function ChatModelSelector({
-  value,
-  onChange,
-  localModels,
-  cloudModels,
-  effectiveDefault,
-}: ChatModelSelectorProps) {
-  const current = value ? shortModelLabel(value) : shortModelLabel(effectiveDefault)
-  return (
-    <label
-      className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-      title="Model answering this chat. 'Auto' follows your Settings; pick another to override just this conversation."
-    >
-      <Cpu size={13} className="shrink-0 text-muted-foreground" />
-      <span className="text-muted-foreground">Model:</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="max-w-[160px] cursor-pointer truncate bg-transparent font-medium text-foreground focus:outline-none"
-      >
-        <option value="">Auto · {shortModelLabel(effectiveDefault)}</option>
-        {localModels.length > 0 && (
-          <optgroup label="Local (Ollama)">
-            {localModels.map((m) => (
-              <option key={m} value={m}>
-                {shortModelLabel(m)}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {cloudModels.length > 0 && (
-          <optgroup label="Cloud">
-            {cloudModels.map((m) => (
-              <option key={m} value={m}>
-                {shortModelLabel(m)}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
-      {value && <span className="sr-only">{current}</span>}
-    </label>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // DocumentScopeCombobox -- inline document scope selector in Chat header (S186)
 // ---------------------------------------------------------------------------
@@ -1154,7 +1079,7 @@ export default function Chat() {
 
         {/* Inline model indicator + per-conversation override */}
         {!llmLoading && llmSettings && (
-          <ChatModelSelector
+          <ModelSelector
             value={model}
             onChange={(m) => {
               setModel(m)

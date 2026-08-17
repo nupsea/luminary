@@ -94,6 +94,7 @@ async def generate_technical(
     section_heading: str | None,
     count: int,
     session: AsyncSession,
+    model: str | None = None,
 ) -> list[FlashcardModel]:
     """Generate Bloom's-taxonomy-typed flashcards for tech_book/tech_article documents.
 
@@ -141,7 +142,7 @@ async def generate_technical(
         ) + _avoid_suffix(avoid)
         raw = await llm.generate(
             prompt, system=TECH_FLASHCARD_SYSTEM,
-            model=_generation_model(), stream=False,
+            model=model or _generation_model(), stream=False,
         )
         return _gate_cards(_parse_llm_response(raw, document_id, expect="array"))
 
@@ -429,6 +430,7 @@ async def generate(
     session: AsyncSession,
     difficulty: Literal["easy", "medium", "hard"] = "medium",
     context: str | None = None,
+    model: str | None = None,
 ) -> list[FlashcardModel]:
     """Generate flashcards from document chunks using LLM.
 
@@ -548,7 +550,7 @@ async def generate(
         ) + _avoid_suffix(avoid)
         raw = await llm.generate(
             batch_prompt, system=system_prompt,
-            model=_generation_model(), stream=False,
+            model=model or _generation_model(), stream=False,
             response_format={"type": "json_object"},
         )
         return _gate_cards(_parse_llm_response(raw, document_id, expect="object"))
@@ -581,7 +583,8 @@ async def generate(
 
     if not candidates:
         logger.warning(
-            "flashcard.generate: 0 usable cards (model=%s)", _generation_model() or "default"
+            "flashcard.generate: 0 usable cards (model=%s)",
+            model or _generation_model() or "default",
         )
 
     if candidates and existing_vecs is not None:

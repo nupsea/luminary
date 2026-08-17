@@ -5,10 +5,26 @@ The router re-exports these names verbatim via `__all__` so existing
 imports in `routers/study.py` and `schemas/study.py` keep working.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# provider/name, the shape LiteLLM routes on. Validated rather than passed
+# through so a typo fails loudly here instead of silently falling back to the
+# configured default, which would make a model comparison in the UI a lie.
+_MODEL_ID_RE = re.compile(r"^(ollama|openai|anthropic|gemini)/[A-Za-z0-9._:-]+$")
+
+
+def _validate_model_id(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if not _MODEL_ID_RE.match(value):
+        raise ValueError(
+            "model must look like 'provider/name', e.g. ollama/qwen3.5:4b"
+        )
+    return value
 
 
 class FlashcardGenerateRequest(BaseModel):
@@ -18,6 +34,14 @@ class FlashcardGenerateRequest(BaseModel):
     count: int = 10
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     context: str | None = None  # selected text from reader; used directly when provided
+    # None follows the model chosen in Settings, exactly as /qa does when its
+    # selector reads "Auto". A concrete id overrides it for this request only.
+    model: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str | None) -> str | None:
+        return _validate_model_id(value)
 
 
 class FromGapsRequest(BaseModel):
@@ -61,6 +85,12 @@ class GenerateTechnicalRequest(BaseModel):
     scope: Literal["full", "section"] = "full"
     section_heading: str | None = None
     count: int = 10
+    model: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str | None) -> str | None:
+        return _validate_model_id(value)
 
 
 class FlashcardResponse(BaseModel):

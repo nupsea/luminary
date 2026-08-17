@@ -7543,6 +7543,8 @@ export interface components {
             difficulty: "easy" | "medium" | "hard";
             /** Context */
             context?: string | null;
+            /** Model */
+            model?: string | null;
         };
         /** FlashcardResponse */
         FlashcardResponse: {
@@ -7714,6 +7716,8 @@ export interface components {
              * @default 10
              */
             count: number;
+            /** Model */
+            model?: string | null;
         };
         /** GeneratedRunRequest */
         GeneratedRunRequest: {

@@ -542,11 +542,12 @@ class FlashcardService(FlashcardSearchService):
         session: AsyncSession,
         difficulty: Literal["easy", "medium", "hard"] = "medium",
         context: str | None = None,
+        model: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
         return await _gen(
-            document_id, scope, section_heading, count, session, difficulty, context
+            document_id, scope, section_heading, count, session, difficulty, context, model
         )
 
     async def generate_from_notes(
@@ -726,12 +727,15 @@ class FlashcardService(FlashcardSearchService):
         section_heading: str | None,
         count: int,
         session: AsyncSession,
+        model: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import (  # noqa: PLC0415
             generate_technical as _gen_technical,
         )
 
-        return await _gen_technical(document_id, scope, section_heading, count, session)
+        return await _gen_technical(
+            document_id, scope, section_heading, count, session, model
+        )
 
     async def generate_cloze(
         self,
