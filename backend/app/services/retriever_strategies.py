@@ -60,12 +60,20 @@ _HYDE_SYSTEM = (
     "Make a reasonable guess based on common knowledge if uncertain -- do not "
     "refuse or say 'I don't know'. Output the answer only, no preamble."
 )
-# llama3.2:3b is fast (~1s warm) and produces usable hypotheticals for general
-# questions. For domain-specific questions where the model lacks knowledge, the
-# hypothetical at worst adds neutral noise; the call fails-soft so retrieval
-# is never worse than the no-hyde baseline. Local-first per I-16.
-_HYDE_MODEL = "ollama/llama3.2:3b"
+# A hypothetical only has to be plausible prose, so this deliberately does not
+# pick a model of its own: it borrows whichever one the host already has
+# resident. A named third model was a real cost -- on a profile that keeps one
+# model resident, `llama3.2:3b` evicted the chat model on every expanded query
+# and paid a reload on the way back (I-27), for a hypothetical the call already
+# treats as optional. Fails soft, so retrieval is never worse than no-hyde.
 _HYDE_TIMEOUT_S = 20.0
+
+
+def _hyde_model() -> str:
+    """The model already loaded for chat, per I-27."""
+    from app.model_registry import default_chat_model  # noqa: PLC0415
+
+    return default_chat_model()
 
 # Graph-augmented deterministic query expansion. Detect entities in the
 # query via GLiNER, resolve to canonical labels via EntityDisambiguator, then
@@ -328,7 +336,7 @@ async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
         result = await llm.generate(
             prompt=f"Question: {query}\n\nAnswer:",
             system=_HYDE_SYSTEM,
-            model=_HYDE_MODEL,
+            model=_hyde_model(),
             timeout=timeout,
         )
         if isinstance(result, str) and result.strip():

@@ -12,10 +12,11 @@ the user's explicit request and onto their own machine, keeps the distributed
 artifact clean -- which is why ``licence`` is part of the catalogue and is shown
 before an install starts, not buried in a notices file.
 
-This catalogue is also the single source of truth for model names. They were
-previously repeated across config.py, .env.example, three install scripts,
-docker-compose.yml, start.sh and the README, with no mechanism keeping them
-consistent.
+Model names are **not** decided here. `model_registry` holds the measured
+footprints and the per-profile preference order, and the two model entries below
+resolve their tag and size from it. When this file carried its own names it
+offered `llama3.2` on a machine whose installer had pulled the profile's model,
+so the setup screen and the installer disagreed about what the app runs.
 """
 
 import asyncio
@@ -33,6 +34,11 @@ from pathlib import Path
 import httpx
 
 from app.config import get_settings
+from app.model_registry import (
+    default_chat_model,
+    default_vision_model,
+    profile_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +66,38 @@ class Component:
 _GB = 1024**3
 _MB = 1024**2
 
+
+def _registry_tag(model_id: str) -> str:
+    """`ollama/qwen3.5:4b` -> `qwen3.5:4b`, the tag `ollama pull` takes."""
+    return model_id.split("/", 1)[-1]
+
+
+def _registry_size(model_id: str, fallback: int) -> int:
+    """Measured resident bytes, which is what the user waits for and pays RAM for.
+
+    The fallback covers a configured model the registry has never measured -- a
+    third-party or hand-picked tag. Showing a wrong-but-plausible size is better
+    than showing none, and `models_for_host` already refuses to plan around an
+    unmeasured model.
+    """
+    profile = profile_for(model_id)
+    return profile.resident_bytes if profile is not None else fallback
+
+
+def _registry_licence(model_id: str) -> str:
+    """Shown before a download starts, so an unmeasured model must not claim one."""
+    profile = profile_for(model_id)
+    return profile.licence if profile is not None else "See the model's own licence"
+
 CATALOGUE: tuple[Component, ...] = (
     Component(
         id="chat_model",
         label="Chat model",
         description="Answers questions and generates flashcards, entirely on this machine.",
         kind="ollama_model",
-        ref="llama3.2",
-        size_bytes=2 * _GB,
-        licence="Llama 3.2 Community License",
+        ref=_registry_tag(default_chat_model()),
+        size_bytes=_registry_size(default_chat_model(), 2 * _GB),
+        licence=_registry_licence(default_chat_model()),
         default=True,
         enables=("Ask", "Flashcard generation", "Summaries"),
     ),
@@ -77,9 +106,9 @@ CATALOGUE: tuple[Component, ...] = (
         label="Vision model",
         description="Reads figures, diagrams and screenshots inside your documents.",
         kind="ollama_model",
-        ref="qwen2.5vl:7b",
-        size_bytes=6 * _GB,
-        licence="Apache-2.0",
+        ref=_registry_tag(default_vision_model()),
+        size_bytes=_registry_size(default_vision_model(), 6 * _GB),
+        licence=_registry_licence(default_vision_model()),
         enables=("Figure captioning", "Diagram understanding"),
     ),
     Component(

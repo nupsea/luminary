@@ -136,3 +136,67 @@ def test_accommodations_are_empty_until_the_matrix_measures_them():
 def test_the_configured_override_carries_a_provider_prefix():
     override = configured_generation_override()
     assert override is None or "/" in override
+
+
+# --- a literal name is the other half of the same defect ---------------------
+
+# The guard above catches a module *reading* a model out of config. It does not
+# catch one that simply writes the name down, which is the same defect with no
+# config involved: `_HYDE_MODEL = "ollama/llama3.2:3b"` loaded a third model that
+# no profile budgeted for and that evicted the resident one on a single-slot host
+# (I-27), and `components.py` offered `llama3.2` to the setup screen while the
+# installer on the same machine pulled the profile's model.
+#
+# Provenance is exempt and must stay exempt: `introduced_for="ollama/llama3.2"`
+# records which model an accommodation was discovered on. It is a historical
+# fact, not a selection, and rewriting it when the default moves would destroy
+# the only thing it is for.
+_PROVENANCE = re.compile(r"introduced_for\s*=|measured_on\s*=|#")
+
+_LITERAL_MODEL = re.compile(
+    r"""["']((?:ollama/)?(?:llama|qwen|gemma|phi|granite|mistral|deepseek)[\w.]*(?::[\w.-]+)?)["']"""
+)
+
+# `config.py` is where a shipped default belongs -- it is the settings surface
+# the user overrides from `.env`, and `model_registry` reads it and narrows it to
+# the host. `evals.py` names the models an eval request verifies *against*, which
+# is a parameter of the measurement and not a choice about what the product runs.
+_MAY_NAME_A_MODEL = {"model_registry.py", "config.py", "evals.py"}
+
+
+def test_no_module_outside_the_registry_writes_a_model_name_down():
+    """One place decides which model runs, and it is not a string in a service."""
+    offenders = []
+    for path in _APP.rglob("*.py"):
+        if path.name in _MAY_NAME_A_MODEL:
+            continue
+        for i, line in enumerate(path.read_text().splitlines(), start=1):
+            if _PROVENANCE.search(line):
+                continue
+            match = _LITERAL_MODEL.search(line)
+            if match:
+                offenders.append(f"{path.relative_to(_APP)}:{i} names {match.group(1)!r}")
+
+    assert offenders == [], (
+        "these decide a model by writing its name down instead of asking the "
+        "registry:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_suite_reads_the_shipped_defaults_not_a_developer_env_file():
+    """A guard for the fixture that pins them.
+
+    `backend/.env` is untracked and outranks the field defaults in
+    pydantic-settings, so without the fixture every model assertion in this
+    suite is a statement about whoever ran it. It has already produced a test
+    that passed on GitHub -- which has no .env -- and failed locally.
+    """
+    from app.config import Settings, get_settings
+
+    for knob in ("LITELLM_DEFAULT_MODEL", "VISION_MODEL"):
+        declared = Settings.model_fields[knob].default
+        actual = getattr(get_settings(), knob)
+        assert actual == declared, (
+            f"{knob} is {actual!r} but the shipped default is {declared!r} -- "
+            "a local .env is leaking into the suite"
+        )

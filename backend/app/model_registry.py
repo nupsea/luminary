@@ -296,15 +296,6 @@ def fits_together(models: tuple[ModelProfile, ...], ram_gb: int | None = None) -
     return total <= ram * _GB * _RESIDENT_SET_FRACTION
 
 
-def best_text_model(ram_gb: int | None = None) -> ModelProfile | None:
-    """The strongest measured text model this host can hold, ignoring vision."""
-    for model_id in TEXT_PREFERENCE:
-        profile = REGISTRY.get(model_id)
-        if profile is not None and fits_host(profile, ram_gb):
-            return profile
-    return None
-
-
 def recommended_assignment(ram_gb: int | None = None) -> tuple[str, str] | None:
     """(text model, vision model) -- the best pair this machine can actually hold.
 
@@ -344,6 +335,24 @@ GENERALIST_PREFERENCE: tuple[str, ...] = (
 )
 
 
+def _multimodal_ranked(
+    preference: tuple[str, ...], ram_gb: int | None = None
+) -> list[ModelProfile]:
+    """Multimodal models this host can hold, ranked by a measured preference.
+
+    Unranked entries sort last by size: a multimodal model nobody has measured is
+    not one to hand a figure to ahead of one that has been.
+    """
+    fitting = [p for p in REGISTRY.values() if p.multimodal and fits_host(p, ram_gb)]
+    return sorted(
+        fitting,
+        key=lambda p: (
+            preference.index(p.id) if p.id in preference else len(preference),
+            p.resident_bytes,
+        ),
+    )
+
+
 def generalist_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
     """Models that can fill *every* role alone on this host, best measured first.
 
@@ -352,16 +361,55 @@ def generalist_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
     and vision to a second model it had no room for -- two models on a machine
     allowed one, which is not a configuration at all.
     """
-    fitting = [p for p in REGISTRY.values() if p.multimodal and fits_host(p, ram_gb)]
-    return sorted(
-        fitting,
-        key=lambda p: (
-            GENERALIST_PREFERENCE.index(p.id)
-            if p.id in GENERALIST_PREFERENCE
-            else len(GENERALIST_PREFERENCE),
-            p.resident_bytes,
-        ),
-    )
+    return _multimodal_ranked(GENERALIST_PREFERENCE, ram_gb)
+
+
+def _resolve_chat_model() -> tuple[str, str | None]:
+    """(model, why the configured one was overruled) -- None when it was kept.
+
+    The reason is returned rather than logged because the promise in the
+    docstrings below is that a user who configures an oversized model is *told*.
+    Narrowing silently and reporting nothing is how a machine ends up running a
+    model its owner did not pick and cannot see.
+    """
+    from app.memory_profile import max_resident_models  # noqa: PLC0415
+
+    configured = get_settings().LITELLM_DEFAULT_MODEL
+    configured = configured if "/" in configured else f"ollama/{configured}"
+    profile = profile_for(configured)
+
+    if profile is None:
+        return configured, None  # unregistered: nothing measured to narrow it with
+
+    if max_resident_models() <= 1:
+        # One model has to do everything, so it has to be able to read a figure.
+        if fits_host(profile) and profile.multimodal:
+            return configured, None
+        candidates = generalist_candidates()
+        if not candidates:
+            return configured, None
+        why = "does not fit this host" if not fits_host(profile) else "cannot read figures"
+        return candidates[0].id, (
+            f"this profile keeps one model resident and {configured} {why}"
+        )
+
+    # Room for two. On a host large enough to hold the strongest text model
+    # *alongside* a reader, use it -- that is what the extra memory is for, and
+    # the shipped default is sized for the machine that cannot. The pair is
+    # chosen together (`recommended_assignment`) because the strongest text model
+    # is not multimodal: picking it alone can leave vision with nothing that fits.
+    recommended = recommended_assignment()
+    if recommended is not None:
+        text_id, _ = recommended
+        if _text_rank(text_id) < _text_rank(configured):
+            # An upgrade, not an overrule: the host can hold something stronger.
+            return text_id, None
+    if fits_host(profile):
+        return configured, None
+    fitting = [p for p in REGISTRY.values() if fits_host(p)]
+    if not fitting:
+        return configured, None
+    return fitting[0].id, f"{configured} does not fit this host"
 
 
 def default_chat_model() -> str:
@@ -373,41 +421,10 @@ def default_chat_model() -> str:
     serve every role. Shipping `llama3.2` there left vision needing a second
     model the host could not hold.
 
-    Only the *default* is narrowed. An explicit choice in Settings is honoured
-    even when oversized -- `residency_report()` reports it rather than this
-    silently overruling the user.
+    When this overrules a configured model, `narrowed_defaults()` carries the
+    reason and `residency_report()` surfaces it.
     """
-    from app.memory_profile import max_resident_models  # noqa: PLC0415
-
-    configured = get_settings().LITELLM_DEFAULT_MODEL
-    configured = configured if "/" in configured else f"ollama/{configured}"
-    profile = profile_for(configured)
-
-    if profile is None:
-        return configured  # unregistered: nothing measured to narrow it with
-
-    single_resident = max_resident_models() <= 1
-    if single_resident:
-        # One model has to do everything, so it has to be able to read a figure.
-        if fits_host(profile) and profile.multimodal:
-            return configured
-        candidates = generalist_candidates()
-        return candidates[0].id if candidates else configured
-
-    # Room for two. On a host large enough to hold the strongest text model
-    # *alongside* a reader, use it -- that is what the extra memory is for, and
-    # the shipped default is sized for the machine that cannot. The pair is
-    # chosen together (`recommended_assignment`) because the strongest text model
-    # is not multimodal: picking it alone can leave vision with nothing that fits.
-    recommended = recommended_assignment()
-    if recommended is not None:
-        text_id, _ = recommended
-        if _text_rank(text_id) < _text_rank(configured):
-            return text_id
-    if fits_host(profile):
-        return configured
-    fitting = [p for p in REGISTRY.values() if fits_host(p)]
-    return fitting[0].id if fitting else configured
+    return _resolve_chat_model()[0]
 
 
 def _text_rank(model_id: str) -> int:
@@ -435,17 +452,24 @@ VISION_PREFERENCE: tuple[str, ...] = (
 def vision_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
     """Multimodal models this machine can hold, best measured reader first.
 
-    Unranked entries sort last: a multimodal model nobody has looked at is not a
-    model to hand a figure to ahead of one that has been measured.
+    Ranked separately from `generalist_candidates`: a dedicated VLM can outrank a
+    generalist at reading a figure while never being a candidate to also answer
+    every text question.
     """
-    fitting = [p for p in REGISTRY.values() if p.multimodal and fits_host(p, ram_gb)]
-    return sorted(
-        fitting,
-        key=lambda p: (
-            VISION_PREFERENCE.index(p.id) if p.id in VISION_PREFERENCE else len(VISION_PREFERENCE),
-            p.resident_bytes,
-        ),
-    )
+    return _multimodal_ranked(VISION_PREFERENCE, ram_gb)
+
+
+def _resolve_vision_model() -> tuple[str, str | None]:
+    """(model, why the configured one was overruled) -- None when it was kept."""
+    configured = get_settings().VISION_MODEL
+    configured = configured if "/" in configured else f"ollama/{configured}"
+    profile = profile_for(configured)
+    if profile is None or fits_host(profile):
+        return configured, None
+    candidates = vision_candidates()
+    if not candidates:
+        return configured, None
+    return candidates[0].id, f"{configured} does not fit this host"
 
 
 def default_vision_model() -> str:
@@ -456,17 +480,36 @@ def default_vision_model() -> str:
     feasible model and the whole profile had no feasible assignment. Falling back
     to a fitting multimodal model is what makes that machine work.
 
-    An explicit choice in Settings is honoured even when it does not fit --
-    `residency_report()` reports it as oversized rather than this silently
-    overruling the user. Only the default is host-aware.
+    When this overrules a configured model, `narrowed_defaults()` carries the
+    reason and `residency_report()` surfaces it.
     """
-    configured = get_settings().VISION_MODEL
-    configured = configured if "/" in configured else f"ollama/{configured}"
-    profile = profile_for(configured)
-    if profile is None or fits_host(profile):
-        return configured
-    candidates = vision_candidates()
-    return candidates[0].id if candidates else configured
+    return _resolve_vision_model()[0]
+
+
+def narrowed_defaults() -> dict[str, dict[str, str]]:
+    """Roles where the host overruled the configured model, and why.
+
+    Empty when every configured model was honoured. `residency_report` builds
+    its `oversized_models` from the models actually in play, so a model that was
+    narrowed *away* is absent from that list entirely -- configuring a 14B on a
+    single-resident profile reported a clean bill of health for a 4B the user
+    never chose.
+    """
+    narrowed: dict[str, dict[str, str]] = {}
+    for role, resolve in (("chat", _resolve_chat_model), ("vision", _resolve_vision_model)):
+        model, reason = resolve()
+        if reason is not None:
+            configured = (
+                get_settings().LITELLM_DEFAULT_MODEL
+                if role == "chat"
+                else get_settings().VISION_MODEL
+            )
+            narrowed[role] = {
+                "configured": configured if "/" in configured else f"ollama/{configured}",
+                "resolved": model,
+                "reason": reason,
+            }
+    return narrowed
 
 
 def configured_factuality_checker() -> str:

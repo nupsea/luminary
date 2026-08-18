@@ -33,8 +33,9 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # Keep the text (llama3.2) and vision (qwen2.5vl) models resident together
-      # so enrichment does not thrash reloading them.
+      # Keep the text and vision models resident together so enrichment does
+      # not thrash reloading them. Which models those are is the app's
+      # decision, not compose's -- see LITELLM_DEFAULT_MODEL below.
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
       # A floor, not a guess: compose cannot measure the host and each slot
       # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
@@ -56,7 +57,7 @@ services:
     entrypoint:
       - sh
       - -c
-      - 'until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; ollama pull llama3.2'
+      - 'M="${LITELLM_DEFAULT_MODEL:-qwen3.5:4b}"; M="${M#ollama/}"; until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; echo "pulling $M"; ollama pull "$M"'
     restart: "no"
     profiles:
       - ai

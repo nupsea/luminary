@@ -388,9 +388,6 @@ def test_transcription_is_kept_out_of_the_bundle_dependency_set():
         ("qwen2.5vl:7b", "vision_model"),
         # What Ollama echoes back in the error -- it drops the tag.
         ("qwen2.5vl", "vision_model"),
-        ("llama3.2", "chat_model"),
-        ("llama3.2:latest", "chat_model"),
-        ("ollama/llama3.2", "chat_model"),
         # Not ours to install.
         ("gpt-4o", None),
         ("", None),
@@ -402,6 +399,30 @@ def test_a_model_name_resolves_to_the_component_that_installs_it(reported, expec
 
     comp = component_for_model(reported)
     assert (comp.id if comp else None) == expected
+
+
+@pytest.mark.parametrize("shape", ["bare", "tagged", "prefixed"])
+def test_the_configured_chat_model_resolves_in_every_shape(shape):
+    """Written against the catalogue, not a fixed name.
+
+    These cases named `llama3.2` while the catalogue offered it. When the
+    catalogue started following the configured model the assertions still
+    passed for a while against a model nothing would install, because the
+    resolver matched a name no surface used any more.
+    """
+    from app.services.components import component_for_model, get_component
+
+    ref = get_component("chat_model").ref
+    reported = {
+        "bare": ref.split(":", 1)[0],
+        "tagged": ref if ":" in ref else f"{ref}:latest",
+        "prefixed": f"ollama/{ref}",
+    }[shape]
+
+    comp = component_for_model(reported)
+    assert comp is not None and comp.id == "chat_model", (
+        f"{reported!r} does not resolve to the component that installs it"
+    )
 
 
 def test_the_vision_model_is_a_startup_phase_users_can_act_on():
