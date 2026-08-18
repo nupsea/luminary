@@ -121,8 +121,40 @@ class FlashcardResponse(BaseModel):
     chunk_classification: str | None = None
     # section heading for source grounding display
     section_heading: str | None = None
+    # unchecked | verified | unsupported | unverifiable -- whether this card's
+    # source_excerpt was found in the text the card came from. The review UI needs
+    # it to decide whether it may present that excerpt as a source.
+    grounding: str = "unchecked"
 
     model_config = {"from_attributes": True}
+
+    @field_validator("grounding", mode="before")
+    @classmethod
+    def _default_grounding(cls, value: str | None) -> str:
+        """A card read before its row was flushed has no verdict yet, not a passing
+        one. Coerced here so every reader sees the same four states."""
+        return value or "unchecked"
+
+
+class GroundingAuditRequest(BaseModel):
+    """Body for POST /flashcards/grounding/audit."""
+
+    document_id: str | None = Field(
+        default=None, description="Audit one document's cards; omit to audit the library."
+    )
+
+
+class GroundingReport(BaseModel):
+    """Counts by grounding state. Every state is reported, including the ones that
+    mean 'not proven' -- collapsing those into a pass rate is what made an
+    unverifiable card indistinguishable from a verified one."""
+
+    scanned: int
+    changed: int = 0
+    verified: int = 0
+    unsupported: int = 0
+    unverifiable: int = 0
+    unchecked: int = 0
 
 
 class CoverageReportResponse(BaseModel):

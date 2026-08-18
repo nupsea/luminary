@@ -159,6 +159,49 @@ const QUALITY_CLASS: Record<SourceQuality, string> = {
   unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800/60 dark:text-gray-400",
 }
 
+// What the app is entitled to say about a card's quote. Presenting an unverified
+// excerpt under a heading that reads "Source" is a claim the product cannot back:
+// measured on a real library, 26% of the cards that quoted anything quoted text
+// their document does not contain. Silence on an unchecked card is the same claim
+// made quietly, so every state says which one it is.
+const GROUNDING_NOTE: Record<string, { text: string; className: string }> = {
+  verified: {
+    text: "Found in this document",
+    className: "text-emerald-700 dark:text-emerald-400",
+  },
+  unsupported: {
+    text: "Not found in this document -- treat this quote as unverified",
+    className: "text-amber-700 dark:text-amber-400",
+  },
+  unverifiable: {
+    text: "Could not be checked against a document",
+    className: "text-muted-foreground",
+  },
+  unchecked: {
+    text: "Not checked against the document yet",
+    className: "text-muted-foreground",
+  },
+}
+
+function SourceExcerpt({ card }: { card: Flashcard }) {
+  const note = GROUNDING_NOTE[card.grounding ?? "unchecked"] ?? GROUNDING_NOTE.unchecked
+  const unsupported = card.grounding === "unsupported"
+  return (
+    <div className="flex flex-col gap-1">
+      <blockquote
+        className={`border-l-2 pl-3 text-xs italic ${
+          unsupported
+            ? "border-amber-500/60 text-muted-foreground/80"
+            : "border-border text-muted-foreground"
+        }`}
+      >
+        {card.source_excerpt}
+      </blockquote>
+      <p className={`pl-3 text-[11px] ${note.className}`}>{note.text}</p>
+    </div>
+  )
+}
+
 function SourcePanel({ card }: { card: Flashcard }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -187,11 +230,7 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
       {expanded && (
         <div className="flex flex-col gap-3 px-4 pb-4">
-          {card.source_excerpt && (
-            <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
-              {card.source_excerpt}
-            </blockquote>
-          )}
+          {card.source_excerpt && <SourceExcerpt card={card} />}
 
           {!card.section_id ? (
             <p className="text-xs text-muted-foreground">No web references for this card.</p>

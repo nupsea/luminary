@@ -39,6 +39,7 @@ def to_response(card: FlashcardModel, section_id: str | None = None) -> Flashcar
         cloze_text=getattr(card, "cloze_text", None),
         chunk_classification=getattr(card, "chunk_classification", None),
         section_heading=getattr(card, "section_heading", None),
+        grounding=getattr(card, "grounding", None) or "unchecked",
     )
 
 

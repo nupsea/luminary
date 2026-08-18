@@ -23,7 +23,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 31 hard invariants | `invariants.md` |
+| The 34 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -33,6 +33,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Client-side routing verification | `router-verification.md` |
 | Notes: CodeMirror 6 editor, wiki-links, backlinks | `architecture.md` (nav section) |
 | Hub recommender + misconception lifecycle | `recommender_service.py`, `misconceptions.py` |
+| Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on

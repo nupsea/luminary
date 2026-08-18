@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.services.flashcard import _parse_llm_response
+from app.services.flashcard_parsers import card_rejection, grounding_state
 from app.services.llm import get_llm_service
 from app.types import BloomGap, BloomSectionStat, CoverageReport
 
@@ -40,6 +41,10 @@ _BLOOM_LEVEL_INSTRUCTIONS: dict[int, str] = {
     ),
 }
 
+# Enough of a section to quote from without blowing a local model's context on a
+# single gap-fill card. Matches `flashcard._CHUNK_CHAR_LIMIT` in intent.
+_SECTION_CHAR_LIMIT = 6000
+
 _AUDIT_FILL_SYSTEM = (
     "You are a learning assistant creating a single flashcard "
     "at a specified Bloom's Taxonomy level. "
@@ -51,6 +56,7 @@ _AUDIT_FILL_SYSTEM = (
     "concept_explanation, analogy, code_completion, api_signature, "
     "trace, pattern_recognition, design_decision, complexity, implementation. "
     "Questions must be self-contained -- never use 'in this passage' or 'in this text'. "
+    "source_excerpt must be copied word for word from the section text you are given. "
     "Write no explanation, preamble, or markdown fences. "
     "Return exactly one card."
 )
@@ -159,6 +165,22 @@ class FlashcardAuditService:
         if not gaps:
             return 0
 
+        # The section's own text, fetched before the concurrent LLM calls because an
+        # AsyncSession cannot be shared across them. Without it this method asked the
+        # model to write a card -- source_excerpt and all -- from a heading string
+        # alone: every quote it returned was necessarily invented, and the card went
+        # into the deck under a "Source" blockquote. A card is written from a passage
+        # or it is not written.
+        section_text: dict[str, str] = {}
+        for gap in gaps:
+            rows = await db.execute(
+                select(ChunkModel.text)
+                .where(ChunkModel.document_id == document_id)
+                .where(ChunkModel.section_id == gap["section_id"])
+                .order_by(ChunkModel.chunk_index)
+            )
+            section_text[gap["section_id"]] = "\n\n".join(t for t in rows.scalars().all() if t)
+
         # AsyncSession is NOT safe for concurrent access. Strategy: run LLM calls
         # concurrently (bounded by llm_sem), collect results, then write DB rows
         # sequentially. This matches the project pattern from MEMORY.md.
@@ -172,6 +194,7 @@ class FlashcardAuditService:
             instruction = _BLOOM_LEVEL_INSTRUCTIONS.get(level, "")
             prompt = (
                 f"Section: {section_heading}\n\n"
+                f"Section text:\n{section_text.get(section_id, '')[:_SECTION_CHAR_LIMIT]}\n\n"
                 f"Target Bloom's level: {level}\n\n"
                 f"Instruction: {instruction}\n\n"
                 "Generate exactly 1 flashcard as a JSON array."
@@ -217,9 +240,16 @@ class FlashcardAuditService:
                     continue
                 question = str(item.get("question", "")).strip()
                 answer = str(item.get("answer", "")).strip()
-                if not question or not answer:
-                    continue
                 source_excerpt = str(item.get("source_excerpt", "")).strip()
+                passage = section_text.get(section_id, "")
+                verdict = card_rejection(question, answer, source_excerpt, passage)
+                if verdict:
+                    logger.info(
+                        "flashcard audit: dropped gap-fill card (%s): %r",
+                        verdict[1],
+                        question[:80],
+                    )
+                    continue
                 flashcard_type = str(item.get("flashcard_type", "concept_explanation")).strip()
                 # Honour bloom_level from LLM but coerce to target level if absent/wrong
                 raw_bloom = item.get("bloom_level")
@@ -247,6 +277,7 @@ class FlashcardAuditService:
                     reps=0,
                     lapses=0,
                     created_at=now,
+                    grounding=grounding_state(source_excerpt, passage),
                     flashcard_type=flashcard_type,
                     bloom_level=card_bloom,
                 )

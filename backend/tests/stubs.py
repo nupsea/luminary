@@ -23,11 +23,17 @@ class MockLLMService:
         self._response = response
         self._tokens = tokens or [response]
         self.call_count = 0
+        # What the caller actually asked. A test that only counts calls cannot tell
+        # a prompt carrying the source passage from one carrying a heading.
+        self.last_prompt = ""
+        self.last_system = ""
 
     async def generate(
         self, prompt: str, system: str = "", stream: bool = False, model=None, **kwargs
     ):
         self.call_count += 1
+        self.last_prompt = prompt
+        self.last_system = system
         if stream:
             return self._token_gen()
         return self._response

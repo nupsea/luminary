@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp } from "lucide-react"
 import { INSIGHTS_SECTIONS, computeMasteryPct } from "@/lib/studyUtils"
 
 import { DeckHealthPanel } from "./DeckHealthPanel"
+import { GroundingPanel } from "./GroundingPanel"
 import { HealthReportPanel } from "./HealthReportPanel"
 import { StrugglingPanel } from "./StrugglingPanel"
 import type { Flashcard } from "./types"
@@ -40,6 +41,9 @@ export function InsightsAccordion({ documentId, cards }: InsightsAccordionProps)
           {/* Sections driven by INSIGHTS_SECTIONS constant */}
           {INSIGHTS_SECTIONS.includes("health_report") && (
             <HealthReportPanel documentId={documentId} />
+          )}
+          {INSIGHTS_SECTIONS.includes("grounding") && (
+            <GroundingPanel documentId={documentId} />
           )}
           {INSIGHTS_SECTIONS.includes("bloom_audit") && (
             <DeckHealthPanel documentId={documentId} />

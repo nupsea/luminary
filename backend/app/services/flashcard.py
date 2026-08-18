@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.services.flashcard_parsers import (
     _CLOZE_BLANK_RE,
+    GROUNDING_UNVERIFIABLE,
     _build_cloze_question,
     _parse_cloze_llm_response,
     _parse_cloze_text,
@@ -624,7 +625,12 @@ class FlashcardService(FlashcardSearchService):
                     deck=deck,
                     question=item["front"].strip(),
                     answer=item["back"].strip(),
+                    # The gap phrase, not a passage: this path writes a card from a
+                    # named knowledge gap and never sees the document. Recorded as
+                    # unverifiable so the review UI stops presenting it as a source
+                    # quote, and so an audit does not mistake a label for a bad one.
                     source_excerpt=gap,
+                    grounding=GROUNDING_UNVERIFIABLE,
                     fsrs_state="new",
                     fsrs_stability=0.0,
                     fsrs_difficulty=0.0,

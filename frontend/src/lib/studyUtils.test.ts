@@ -169,9 +169,10 @@ describe("buildSmartGenerateParams", () => {
 })
 
 describe("INSIGHTS_SECTIONS", () => {
-  it("has exactly 3 sections: health_report, bloom_audit, struggling", () => {
-    expect(INSIGHTS_SECTIONS).toHaveLength(3)
+  it("has exactly 4 sections: health_report, grounding, bloom_audit, struggling", () => {
+    expect(INSIGHTS_SECTIONS).toHaveLength(4)
     expect(INSIGHTS_SECTIONS).toContain("health_report")
+    expect(INSIGHTS_SECTIONS).toContain("grounding")
     expect(INSIGHTS_SECTIONS).toContain("bloom_audit")
     expect(INSIGHTS_SECTIONS).toContain("struggling")
   })

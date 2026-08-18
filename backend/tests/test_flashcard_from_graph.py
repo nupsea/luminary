@@ -213,7 +213,7 @@ async def test_generate_from_graph_uses_co_occurs_fallback(test_db):
             {
                 "question": "What connects Eloi and Morlock?",
                 "answer": "They co-exist in the far future.",
-                "source_excerpt": "Eloi and Morlock.",
+                "source_excerpt": "met Weena in the future",
             }
         ]
     )
@@ -251,7 +251,7 @@ async def test_post_generate_from_graph_returns_201(test_db):
             {
                 "question": "How does Time Traveller relate to Weena?",
                 "answer": "He rescues her.",
-                "source_excerpt": "Met Weena.",
+                "source_excerpt": "The Time Traveller met Weena",
             }
         ]
     )

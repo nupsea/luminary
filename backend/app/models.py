@@ -194,6 +194,13 @@ class FlashcardModel(Base):
     mapping_status: Mapped[str] = mapped_column(
         String, nullable=False, default="mapped", server_default=text("'mapped'")
     )
+    # Whether this card can prove where it came from: unchecked | verified |
+    # unsupported | unverifiable (app.services.flashcard_parsers.GROUNDING_*).
+    # Defaults to 'unchecked' rather than to a verdict -- a row nobody has audited
+    # is not a row that passed. server_default for the same reason as above.
+    grounding: Mapped[str] = mapped_column(
+        String, nullable=False, default="unchecked", server_default=text("'unchecked'")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

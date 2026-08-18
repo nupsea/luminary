@@ -2456,6 +2456,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flashcards/grounding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grounding Summary
+         * @description How many cards can prove where they came from, as last audited.
+         *
+         *     Reads the stored verdicts; it does not recompute. `unchecked` is reported as
+         *     its own number rather than folded into a pass rate -- a card nobody has
+         *     audited is not a card that passed.
+         */
+        get: operations["grounding_summary_flashcards_grounding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/grounding/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit Card Grounding
+         * @description Recompute every card's grounding verdict against its document's text.
+         *
+         *     Deterministic and model-free: it looks for each card's `source_excerpt` in the
+         *     chunks the card came from. Cards generated before the grounding gate existed
+         *     are `unchecked` until this runs.
+         */
+        post: operations["audit_card_grounding_flashcards_grounding_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flashcards/generate": {
         parameters: {
             query?: never;
@@ -7601,6 +7649,11 @@ export interface components {
             chunk_classification?: string | null;
             /** Section Heading */
             section_heading?: string | null;
+            /**
+             * Grounding
+             * @default unchecked
+             */
+            grounding: string;
         };
         /** FlashcardSearchResponse */
         FlashcardSearchResponse: {
@@ -7973,6 +8026,52 @@ export interface components {
             grounded: boolean;
             /** Concepts */
             concepts: components["schemas"]["GroundedConcept"][];
+        };
+        /**
+         * GroundingAuditRequest
+         * @description Body for POST /flashcards/grounding/audit.
+         */
+        GroundingAuditRequest: {
+            /**
+             * Document Id
+             * @description Audit one document's cards; omit to audit the library.
+             */
+            document_id?: string | null;
+        };
+        /**
+         * GroundingReport
+         * @description Counts by grounding state. Every state is reported, including the ones that
+         *     mean 'not proven' -- collapsing those into a pass rate is what made an
+         *     unverifiable card indistinguishable from a verified one.
+         */
+        GroundingReport: {
+            /** Scanned */
+            scanned: number;
+            /**
+             * Changed
+             * @default 0
+             */
+            changed: number;
+            /**
+             * Verified
+             * @default 0
+             */
+            verified: number;
+            /**
+             * Unsupported
+             * @default 0
+             */
+            unsupported: number;
+            /**
+             * Unverifiable
+             * @default 0
+             */
+            unverifiable: number;
+            /**
+             * Unchecked
+             * @default 0
+             */
+            unchecked: number;
         };
         /** GroupInfo */
         GroupInfo: {
@@ -14622,6 +14721,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlashcardSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grounding_summary_flashcards_grounding_get: {
+        parameters: {
+            query?: {
+                document_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroundingReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_card_grounding_flashcards_grounding_audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroundingAuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroundingReport"];
                 };
             };
             /** @description Validation Error */

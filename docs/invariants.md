@@ -85,6 +85,38 @@ string test is not. `tests/test_qa.py` and `tests/test_context_packer.py` fail C
 resolves to the wrong chunk, if an ungrounded excerpt survives, or if any of the five prompts
 stops citing by marker.
 
+**I-34. A flashcard's excerpt is a span of the passage the card was written from, and every card
+records whether that was checked.**
+The review screen prints `source_excerpt` under a heading that reads "Source". Measured on a
+949-card library: of the 392 cards carrying a checkable quote, 102 (26%) quoted text absent from
+their document — 66 of them with no recognisable span of the document in the quote at all — and
+nothing in the product could tell them apart from the 289 that were real. Rewriting the prompt
+does not fix this: prompt v2 scored 0.7300 factuality against v1's 0.7267 on the full golden,
+because a model asked for a well-shaped card about a familiar text writes what it already
+believes. Quoting is the part it cannot do from memory, so the check is on the quote.
+
+Two generation paths were worse than unchecked. `flashcard_audit.fill_gaps` prompted with the
+section *heading* and nothing else while its system prompt demanded a `source_excerpt`, so every
+quote it produced was necessarily invented; `_generate_concept_cards` and `generate_from_graph`
+each had the passage in scope and passed it to neither the gate nor the verdict. A card is
+written from a passage or it is not written.
+
+`grounding` is four states — `unchecked | verified | unsupported | unverifiable` — and not a
+boolean, because "checked and found" and "nothing could be checked" are different answers and 59%
+of that library is the second. A boolean makes an unaudited deck read clean, which is the whole
+defect restated. `unsupported` is reserved for the strong claim: the card produced a quote and
+that quote is not in the text. Existing rows default to `unchecked` rather than to a verdict, and
+`POST /flashcards/grounding/audit` recomputes deterministically with no model in the loop; it
+never overwrites a verdict it cannot re-derive, since a note-sourced card's verdict was decided
+while the note text was in hand. The quote match tolerates whitespace, elision and one trailing
+punctuation character — 4 of 129 rejections differed from the document by a single closing `.` or
+`"` on a span otherwise verbatim to ~300 characters — and nothing more: `"...five moves on
+average."` against a document containing none of it stays rejected. `tests/test_flashcard_grounding.py`
+and `tests/test_flashcard_audit.py` fail CI if a fabricated quote is kept, if the gap-fill prompt
+stops carrying the section text, or if a verdict is computed and dropped. See I-33 for the same
+defect on the `/qa` surface, where the fix is different: an answer cites a marker and never
+reproduces source text, which a flashcard cannot do because the quote *is* the card's evidence.
+
 ## Vector Dimensions
 
 **I-9. Note and chunk vectors share one embedding space, whose dimension is a stored property of the corpus rather than a setting.**

@@ -233,6 +233,25 @@ def _normalise_for_match(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").translate(_QUOTE_CHARS)).strip().lower()
 
 
+# A model closes the sentence it quoted. Measured over the 392 checkable cards in
+# a real library, 4 of the 129 rejections differed from the document by exactly one
+# trailing character -- `.`, `"` or `)` -- on a span whose other 297 characters
+# were verbatim. Stripping one such character cannot turn a content mismatch into a
+# match: the cases that bracket this are "...netflix prize]." against a document
+# ending "...netflix prize]" (formatting, must pass) and "...five moves on average."
+# against a document containing none of it (22 characters of content, must fail).
+_EXCERPT_EDGE = "\"'\u201c\u201d\u2018\u2019"
+_EXCERPT_TAIL = ".,;:!?)]\"'"
+
+
+def _trim_edges(part: str) -> str:
+    """Drop a wrapping quote and one trailing terminal character."""
+    trimmed = part.strip().strip(_EXCERPT_EDGE).strip()
+    if trimmed and trimmed[-1] in _EXCERPT_TAIL:
+        trimmed = trimmed[:-1].strip()
+    return trimmed
+
+
 def excerpt_is_verbatim(excerpt: str, source_text: str) -> bool:
     """Whether *excerpt* is really a span of *source_text*.
 
@@ -242,6 +261,9 @@ def excerpt_is_verbatim(excerpt: str, source_text: str) -> bool:
 
     An excerpt elided with "..." is checked part by part: models shorten long
     quotes that way, and each surviving part must still be real.
+
+    Callers that need to distinguish "no text to check against" from "checked and
+    real" must use `grounding_state`; this returns True for the former.
     """
     haystack = _normalise_for_match(source_text)
     if not haystack:
@@ -255,10 +277,49 @@ def excerpt_is_verbatim(excerpt: str, source_text: str) -> bool:
     # not survive this comparison; formatting does.
     squeezed = haystack.replace(" ", "")
     return all(
-        part.strip() in haystack or part.replace(" ", "") in squeezed
-        for part in parts
+        part in haystack or part.replace(" ", "") in squeezed
+        for part in (_trim_edges(p) for p in parts)
         if len(part.split()) >= 2
     )
+
+
+# Where a card's answer came from, as a state rather than a boolean. A boolean
+# collapses the two cases that must never be confused: a card whose quote was
+# checked and found, and a card nothing could be checked against. 46% of the cards
+# in a real library carry no quote at all -- calling those `False` slanders them and
+# calling them `True` is the exact shortcut `product-integrity.md` forbids.
+GROUNDING_UNCHECKED = "unchecked"
+GROUNDING_VERIFIED = "verified"
+GROUNDING_UNSUPPORTED = "unsupported"
+GROUNDING_UNVERIFIABLE = "unverifiable"
+
+GROUNDING_STATES = frozenset(
+    {GROUNDING_UNCHECKED, GROUNDING_VERIFIED, GROUNDING_UNSUPPORTED, GROUNDING_UNVERIFIABLE}
+)
+
+
+def grounding_state(source_excerpt: str | None, source_text: str | None) -> str:
+    """Whether this card can prove where it came from.
+
+    `unsupported` is the strong claim and is reserved for it: the card produced a
+    quote and that quote is not in the text. A card with no quote, or one whose
+    source text no longer exists, is `unverifiable` -- unproven, which is not the
+    same as disproven and must not be reported as either verified or false.
+
+    Never returns `unchecked`; that is the state of a row nobody has looked at.
+    """
+    excerpt = (source_excerpt or "").strip()
+    if not source_text or not source_text.strip():
+        return GROUNDING_UNVERIFIABLE
+    if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
+        return GROUNDING_UNVERIFIABLE
+    from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
+
+    if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+        return GROUNDING_UNSUPPORTED
+    if excerpt_is_verbatim(excerpt, source_text):
+        return GROUNDING_VERIFIED
+    return GROUNDING_UNSUPPORTED
 
 
 def card_rejection(

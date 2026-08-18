@@ -31,6 +31,7 @@ from app.models import (
 )
 from app.services import llm_output_stats
 from app.services.flashcard_parsers import (
+    GROUNDING_UNCHECKED,
     _build_cloze_question,
     _parse_cloze_llm_response,
     _parse_cloze_text,
@@ -38,7 +39,7 @@ from app.services.flashcard_parsers import (
     _parse_llm_response,
     card_field,
     card_rejection,
-    card_rejection_reason,
+    grounding_state,
     strip_source_ref,
 )
 from app.services.flashcard_prompts import (
@@ -194,6 +195,7 @@ async def generate_technical(
             created_at=now,
             flashcard_type=flashcard_type,
             bloom_level=bloom_level,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -305,6 +307,13 @@ async def generate_cloze(
             flashcard_type="cloze",
             bloom_level=None,
             cloze_text=cloze_text,
+            # A cloze IS its passage, so the sentence stands in for a quote when the
+            # model gave none -- a cloze whose sentence is not in the section was
+            # written from memory, and that is checkable without a judge.
+            grounding=grounding_state(
+                source_excerpt or _build_cloze_question(cloze_text).replace("[____]", ""),
+                combined_text,
+            ),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -352,7 +361,16 @@ def _gate_cards(parsed: list, source_text: str | None = None) -> list[dict]:
         if verdict:
             logger.info("flashcard: dropped low-quality card (%s): %r", verdict[1], q[:80])
             continue
-        kept.append({**item, "question": q, "answer": a, "source_excerpt": excerpt})
+        # The gate already decided this; persisting it is what lets a reviewer ask
+        # later which cards proved their source, instead of the answer being lost
+        # the moment the request returns.
+        kept.append({
+            **item,
+            "question": q,
+            "answer": a,
+            "source_excerpt": excerpt,
+            "grounding": grounding_state(excerpt, source_text),
+        })
     return kept
 
 
@@ -418,7 +436,9 @@ async def _generate_concept_cards(
             prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
             model=_generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, parse_ctx, expect="array"))
+        return _gate_cards(
+            _parse_llm_response(raw, parse_ctx, expect="array"), source_text=combined_text
+        )
 
     # cards are grounded one-per-concept, so the achievable count is bounded by
     # how many concepts were extracted -- never retry past that
@@ -646,6 +666,7 @@ async def generate(
             chunk_classification=chunk_classification,
             bloom_level=card_bloom_level,
             section_heading=resolved_section_heading,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -756,6 +777,7 @@ async def generate_from_notes(
             reps=0,
             lapses=0,
             created_at=now,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -874,6 +896,7 @@ async def generate_from_collection(
                 reps=0,
                 lapses=0,
                 created_at=now,
+                grounding=item.get("grounding", GROUNDING_UNCHECKED),
             )
             session.add(card)
             await _sync_flashcard_fts(card, session)
@@ -953,10 +976,10 @@ async def generate_from_graph(
                 question = str(item.get("question", "")).strip()
                 answer = str(item.get("answer", "")).strip()
                 source_excerpt = str(item.get("source_excerpt", "")).strip()
-                reason = card_rejection_reason(question, answer)
-                if reason:
+                verdict = card_rejection(question, answer, source_excerpt, ctx)
+                if verdict:
                     logger.info(
-                        "flashcard: dropped low-quality card (%s): %r", reason, question[:80]
+                        "flashcard: dropped low-quality card (%s): %r", verdict[1], question[:80]
                     )
                     continue
                 cards.append(
@@ -977,6 +1000,7 @@ async def generate_from_graph(
                         reps=0,
                         lapses=0,
                         created_at=now,
+                        grounding=grounding_state(source_excerpt, ctx),
                     )
                 )
             return cards

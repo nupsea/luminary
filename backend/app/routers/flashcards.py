@@ -63,6 +63,8 @@ from app.schemas.flashcards import (
     FromGapsResponse,
     GenerateFromGraphRequest,
     GenerateTechnicalRequest,
+    GroundingAuditRequest,
+    GroundingReport,
     ReviewRequest,
     SourceContextResponse,
     TraceFlashcardRequest,
@@ -78,6 +80,7 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
+from app.services.flashcard_grounding import audit_grounding
 from app.services.flashcards_router_service import (
     cards_to_csv as _cards_to_csv,
 )
@@ -118,6 +121,8 @@ __all__ = [
     "FromGapsResponse",
     "GenerateFromGraphRequest",
     "GenerateTechnicalRequest",
+    "GroundingAuditRequest",
+    "GroundingReport",
     "ReviewRequest",
     "SourceContextResponse",
     "TraceFlashcardRequest",
@@ -171,6 +176,39 @@ async def search_flashcards(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/grounding", response_model=GroundingReport)
+async def grounding_summary(
+    document_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+) -> GroundingReport:
+    """How many cards can prove where they came from, as last audited.
+
+    Reads the stored verdicts; it does not recompute. `unchecked` is reported as
+    its own number rather than folded into a pass rate -- a card nobody has
+    audited is not a card that passed.
+    """
+    stmt = select(FlashcardModel.grounding, func.count()).group_by(FlashcardModel.grounding)
+    if document_id is not None:
+        stmt = stmt.where(FlashcardModel.document_id == document_id)
+    counts = dict((await session.execute(stmt)).all())
+    return GroundingReport(scanned=sum(counts.values()), **counts)
+
+
+@router.post("/grounding/audit", response_model=GroundingReport)
+async def audit_card_grounding(
+    req: GroundingAuditRequest,
+    session: AsyncSession = Depends(get_db),
+) -> GroundingReport:
+    """Recompute every card's grounding verdict against its document's text.
+
+    Deterministic and model-free: it looks for each card's `source_excerpt` in the
+    chunks the card came from. Cards generated before the grounding gate existed
+    are `unchecked` until this runs.
+    """
+    report = await audit_grounding(session, req.document_id)
+    return GroundingReport(**report)
 
 
 @router.post("/generate", response_model=list[FlashcardResponse], status_code=201)

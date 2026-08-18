@@ -83,7 +83,12 @@ export interface FlashcardSearchFilters {
 // Insights accordion sections and adaptive generate params
 
 /** Load-bearing constant: InsightsAccordion uses this to enumerate its sections. */
-export const INSIGHTS_SECTIONS = ["health_report", "bloom_audit", "struggling"] as const
+export const INSIGHTS_SECTIONS = [
+  "health_report",
+  "grounding",
+  "bloom_audit",
+  "struggling",
+] as const
 
 export type InsightsSection = (typeof INSIGHTS_SECTIONS)[number]
 
