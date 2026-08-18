@@ -655,25 +655,42 @@ def test_flashcard_prompt_forbids_deictic():
 
 
 def test_build_text_samples_across_range():
-    """_build_text should sample from beginning, middle, and end when limit is exceeded."""
-    from app.services.flashcard import _CHUNK_CHAR_LIMIT, _build_text
+    """The prompt draws from several places in the document, not one corner.
 
-    # Create enough chunks to exceed limit
-    # Each chunk 1000 chars, limit is 10,000. 15 chunks = 15,000 chars.
+    It used to take beginning/middle/end. Measured on `the_odyssey`, that gave a
+    9,345-char prompt -- 1.3% of the book -- spanning 3 of its 24 sections, and
+    ten cards asked from one corner of a book are ten cards about that corner:
+    three of ten were the same fact about Penelope's weaving, reworded.
+
+    Asserted as a property rather than by naming chunks. Naming "Chunk10" as the
+    middle pinned the test to how many windows there happened to be, so widening
+    the spread -- the fix -- failed it.
+    """
+    from app.services.flashcard import _CHUNK_CHAR_LIMIT, _SAMPLE_WINDOWS, _build_text
+
+    # 20 chunks of ~1000 chars against a 10,000 limit: sampling has to kick in.
     chunks = [
         _make_chunk(chunk_id=f"c{i}", text=f"Chunk{i} " + "x" * 990, chunk_index=i)
         for i in range(20)
     ]
 
     combined, first_id, used_ids = _build_text(chunks)
-    # Sampling drops the text between its three windows, so the recorded
-    # passage is a strict subset -- claiming every chunk would name text the
-    # model never saw.
-    assert 0 < len(used_ids) < len(chunks)
 
+    # Sampling drops the text between its windows, so the recorded passage is a
+    # strict subset -- claiming every chunk would name text the model never saw.
+    assert 0 < len(used_ids) < len(chunks)
     assert first_id == "c0"
-    assert "Chunk0" in combined  # Beginning
-    assert "Chunk10" in combined  # Middle
-    assert "Chunk19" in combined  # End
     assert "[...]" in combined
-    assert len(combined) <= _CHUNK_CHAR_LIMIT + 500  # allowing some overhead for separators
+    assert len(combined) <= _CHUNK_CHAR_LIMIT + 500  # separators
+
+    positions = sorted(int(cid[1:]) for cid in used_ids)
+    assert positions[0] == 0, "the opening is still sampled"
+    assert positions[-1] >= len(chunks) - 2, "so is the end"
+
+    # The point of the change: material from several separated places.
+    runs = 1 + sum(1 for a, b in zip(positions, positions[1:], strict=False) if b > a + 1)
+    assert runs >= 4, (
+        f"only {runs} contiguous run(s) sampled; the whole prompt comes from "
+        f"{runs} place(s) in the document, which is what produced duplicate cards"
+    )
+    assert runs <= _SAMPLE_WINDOWS

@@ -351,48 +351,89 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str, list[str]]:
     # Sampling strategy:
     # 1. Take first 25% of the limit from the beginning
     # 2. Take 50% from the middle
-    # 3. Take 25% from the end
-    target_len = _CHUNK_CHAR_LIMIT
-    segment_size = target_len // 4
-
-    used: list[str] = []
-
-    def get_segment(chunk_list: list[ChunkModel], max_chars: int) -> str:
-        parts: list[str] = []
-        current = 0
-        for c in chunk_list:
-            if current + len(c.text) > max_chars:
-                break
-            parts.append(c.text)
-            used.append(c.id)
-            current += len(c.text)
-        return "\n\n".join(parts)
-
-    # Beginning
-    beginning = get_segment(chunks, segment_size)
-
-    # Middle
-    mid_idx = len(chunks) // 2
-    middle = get_segment(chunks[mid_idx:], segment_size * 2)
-
-    # End
-    # For the end, we iterate backwards to get a segment, then reverse it
-    end_parts: list[str] = []
-    end_ids: list[str] = []
-    end_current = 0
-    for c in reversed(chunks):
-        if end_current + len(c.text) > segment_size:
-            break
-        end_parts.append(c.text)
-        end_ids.append(c.id)
-        end_current += len(c.text)
-    end = "\n\n".join(reversed(end_parts))
-    used.extend(reversed(end_ids))
-
-    combined = f"{beginning}\n\n[...]\n\n{middle}\n\n[...]\n\n{end}"
+    # Windows spread across the whole document, not three contiguous runs.
+    #
+    # Measured on `the_odyssey`: begin/middle/end gave a prompt of 9,345 chars --
+    # 1.3% of the book -- spanning 3 of its 24 sections, and every card generated
+    # from it came from those three places. Ten cards requested from one corner of
+    # a book are ten cards about that corner: three of ten were the same fact
+    # about Penelope's weaving, reworded.
+    #
+    # Same budget, same single call, more of the document. A window is aligned to
+    # a section when the chunks carry one, so a window is a passage rather than an
+    # arbitrary cut.
+    windows = _sample_windows(chunks, _CHUNK_CHAR_LIMIT)
+    used = [c.id for window in windows for c in window]
+    combined = "\n\n[...]\n\n".join(
+        "\n\n".join(c.text for c in window) for window in windows
+    )
     # dict.fromkeys rather than set(): the order is the reading order of the
     # passage, and rebuilding it out of order breaks any quote spanning a seam.
     return combined, chunks[0].id, list(dict.fromkeys(used))
+
+
+# How many places in the document one generation draws from. Six against the
+# previous three: a card asks for one fact, so N cards want at least a few
+# distinct passages, and the budget divided much further stops being a passage --
+# 10,000 chars across 6 windows is ~1,600 each, about a scene.
+_SAMPLE_WINDOWS = 6
+
+
+def _sample_windows(chunks: list[ChunkModel], budget: int) -> list[list[ChunkModel]]:
+    """Contiguous runs of chunks taken from evenly spaced points in the document.
+
+    Prefers to start each window at a section boundary, so a window reads as a
+    passage rather than as a cut. Falls back to even spacing by index when the
+    chunks carry no sections.
+    """
+    if not chunks:
+        return []
+    per_window = max(1, budget // _SAMPLE_WINDOWS)
+
+    starts: list[int] = []
+    seen_sections: set[str] = set()
+    for i, chunk in enumerate(chunks):
+        if chunk.section_id and chunk.section_id not in seen_sections:
+            seen_sections.add(chunk.section_id)
+            starts.append(i)
+    if len(starts) < _SAMPLE_WINDOWS:
+        # Too few sections to spread across: fall back to even index spacing.
+        step = max(1, len(chunks) // _SAMPLE_WINDOWS)
+        starts = list(range(0, len(chunks), step))
+    if len(starts) > _SAMPLE_WINDOWS:
+        # Spread the picks across the whole list rather than taking the first N,
+        # which would be the same front-of-the-book bias in a new shape.
+        stride = len(starts) / _SAMPLE_WINDOWS
+        starts = [starts[int(i * stride)] for i in range(_SAMPLE_WINDOWS)]
+
+    windows: list[list[ChunkModel]] = []
+    for begin in starts[:-1]:
+        window: list[ChunkModel] = []
+        size = 0
+        for chunk in chunks[begin:]:
+            if window and size + len(chunk.text) > per_window:
+                break
+            window.append(chunk)
+            size += len(chunk.text)
+        if window:
+            windows.append(window)
+
+    # The last window is taken backwards from the end, so the close of the
+    # document is always in the prompt. Spacing the starts evenly does not
+    # guarantee that -- the final start landed one window short of the end and
+    # the last chapters were never sampled, which the previous begin/middle/end
+    # sampler did get right.
+    tail: list[ChunkModel] = []
+    size = 0
+    for chunk in reversed(chunks):
+        if tail and size + len(chunk.text) > per_window:
+            break
+        tail.append(chunk)
+        size += len(chunk.text)
+    tail.reverse()
+    if tail and (not windows or tail[0].id != windows[-1][0].id):
+        windows.append(tail)
+    return windows
 
 
 # Chunk classifier helpers
