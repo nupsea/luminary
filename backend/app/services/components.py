@@ -28,13 +28,14 @@ import shutil
 import site
 import sys
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
 
 from app.config import get_settings
 from app.model_registry import (
+    REGISTRY,
     default_chat_model,
     default_vision_model,
     profile_for,
@@ -168,6 +169,27 @@ def component_for_model(model: str) -> Component | None:
         # `qwen2.5vl`.
         if wanted == ref or ref.startswith(f"{wanted}:") or wanted.startswith(f"{ref}:"):
             return comp
+
+    # Not the catalogue's current pick, but a model the registry knows: the user
+    # configured it, or a failure named it. The catalogue entries follow the host,
+    # so on a machine that resolves vision to the generalist, `qwen2.5vl:7b` --
+    # which the user may have chosen and Ollama may be complaining about -- matched
+    # nothing and the UI offered no way to install it.
+    #
+    # Built around the model that actually failed rather than returning the
+    # role's default, because the returned component is what gets pulled.
+    for model_id, known in REGISTRY.items():
+        bare = _bare_model_name(model_id)
+        if not (wanted == bare or bare.startswith(f"{wanted}:") or wanted.startswith(f"{bare}:")):
+            continue
+        template = _BY_ID["vision_model" if known.multimodal else "chat_model"]
+        return replace(
+            template,
+            ref=bare,
+            size_bytes=known.resident_bytes,
+            licence=known.licence,
+            default=False,
+        )
     return None
 
 

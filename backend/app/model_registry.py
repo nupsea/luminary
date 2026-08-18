@@ -406,7 +406,15 @@ def _resolve_chat_model() -> tuple[str, str | None]:
             return text_id, None
     if fits_host(profile):
         return configured, None
-    fitting = [p for p in REGISTRY.values() if fits_host(p)]
+    # Ranked, not `REGISTRY.values()[0]`. Dict order put `llama3.2` first, so a
+    # host too small for the configured model fell back to the model this whole
+    # selection scheme exists to stop shipping -- invisible on a large dev box
+    # and the default on a 16GB CI runner.
+    fitting = [
+        REGISTRY[model_id]
+        for model_id in TEXT_PREFERENCE
+        if model_id in REGISTRY and fits_host(REGISTRY[model_id])
+    ]
     if not fitting:
         return configured, None
     return fitting[0].id, f"{configured} does not fit this host"

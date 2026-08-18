@@ -288,6 +288,11 @@ def test_a_configured_model_the_host_cannot_use_is_reported(monkeypatch):
     narrowed *away* is absent from it: configuring a 14B on a single-resident
     profile produced a clean report describing a 4B nobody chose.
     """
+    from app import memory_profile
+
+    # Pinned: this asks whether the host overruled a choice, so leaving the host
+    # to whatever ran the suite makes the answer a property of the machine.
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 36)
     monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "low")
     monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
     from app.config import get_settings
@@ -307,6 +312,12 @@ def test_a_configured_model_the_host_cannot_use_is_reported(monkeypatch):
 
 def test_a_configured_model_the_host_can_use_is_not_reported(monkeypatch):
     """The other direction, so the field is a signal rather than a constant."""
+    from app import memory_profile
+
+    # 36GB, because the assertion is that a model the host *can* hold is kept.
+    # Unpinned this ran on a 16GB CI runner, where the 14B does not fit and the
+    # honest answer is the opposite of what the test claims.
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 36)
     monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "performance")
     monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
     from app.config import get_settings
