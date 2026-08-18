@@ -276,3 +276,109 @@ class TestOneModelServesEveryRole:
 def test_max_resident_never_promises_more_than_one_on_the_low_profile():
     """If this rises, the single-model requirement above stops being the point."""
     assert MAX_RESIDENT["low"] == 1
+
+
+# --- narrowing must be visible, not just correct -----------------------------
+
+
+def test_a_configured_model_the_host_cannot_use_is_reported(monkeypatch):
+    """Overruling the user silently is the failure this reports.
+
+    `oversized_models` is built from the models actually in play, so a model
+    narrowed *away* is absent from it: configuring a 14B on a single-resident
+    profile produced a clean report describing a 4B nobody chose.
+    """
+    monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "low")
+    monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        from app.services.model_router import residency_report
+
+        narrowed = residency_report()["narrowed_defaults"]
+        assert "chat" in narrowed, "the user was overruled and told nothing"
+        assert narrowed["chat"]["configured"] == "ollama/qwen2.5:14b-instruct"
+        assert narrowed["chat"]["resolved"] != "ollama/qwen2.5:14b-instruct"
+        assert narrowed["chat"]["reason"], "a warning with no reason is not actionable"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_configured_model_the_host_can_use_is_not_reported(monkeypatch):
+    """The other direction, so the field is a signal rather than a constant."""
+    monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "performance")
+    monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        from app.services.model_router import residency_report
+
+        report = residency_report()
+        assert report["narrowed_defaults"] == {}
+        assert report["roles"]["chat"]["model"] == "ollama/qwen2.5:14b-instruct"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_the_oversized_warning_actually_produces_a_warning():
+    """It never had. `oversized_models` is a list of model ids and this indexed
+    them as dicts, so the check raised TypeError; the boot caller catches every
+    exception, so the advisory silently did nothing for as long as it existed.
+
+    Asserting the text, not just the count: a warning that names no model and no
+    number tells a user nothing they can act on.
+    """
+    from app.services import model_router
+
+    original = model_router.residency_report
+    model_router.residency_report = lambda: {
+        "oversized_models": ["ollama/qwen2.5vl:7b"],
+        "host_ram_gb": 8,
+        "within_residency_limit": True,
+        "unmeasured_models": [],
+        "profile": "low",
+        "resident_count": 1,
+        "max_resident": 1,
+        "narrowed_defaults": {},
+    }
+    try:
+        warnings = model_router.warn_if_configuration_exceeds_host()
+    finally:
+        model_router.residency_report = original
+
+    assert len(warnings) == 1, warnings
+    assert "qwen2.5vl:7b" in warnings[0]
+    assert "8GB" in warnings[0], "the warning must name the machine it is about"
+    assert "16GB" in warnings[0], "and what the model actually needs"
+
+
+def test_a_narrowed_default_is_warned_about_at_boot():
+    """The user picked a model and got another one; silence is the defect."""
+    from app.services import model_router
+
+    original = model_router.residency_report
+    model_router.residency_report = lambda: {
+        "oversized_models": [],
+        "host_ram_gb": 8,
+        "within_residency_limit": True,
+        "unmeasured_models": [],
+        "profile": "low",
+        "resident_count": 1,
+        "max_resident": 1,
+        "narrowed_defaults": {
+            "chat": {
+                "configured": "ollama/qwen2.5:14b-instruct",
+                "resolved": "ollama/qwen3.5:4b",
+                "reason": "cannot read figures",
+            }
+        },
+    }
+    try:
+        warnings = model_router.warn_if_configuration_exceeds_host()
+    finally:
+        model_router.residency_report = original
+
+    assert len(warnings) == 1
+    assert "qwen2.5:14b-instruct" in warnings[0] and "qwen3.5:4b" in warnings[0]

@@ -124,7 +124,9 @@ async def lifespan(app: FastAPI):
 
         warn_if_configuration_exceeds_host()
     except Exception:  # noqa: BLE001 -- an advisory check may never block startup
-        logger.debug("model residency check failed", exc_info=True)
+        # warning, not debug: this swallowed a TypeError in the check itself for
+        # as long as the check existed, so the advisory never ran and nothing said so.
+        logger.warning("model residency check failed", exc_info=True)
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts

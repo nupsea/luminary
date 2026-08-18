@@ -150,6 +150,12 @@ class ModelResidencyResponse(BaseModel):
     resident_gb: float
     unmeasured_models: list[str]
     oversized_models: list[str]
+    # Roles where the host overruled the configured model, keyed by role, each
+    # carrying `configured`, `resolved` and `reason`. Empty when every configured
+    # model was honoured. A narrowed model is absent from `oversized_models`
+    # because it is not in play at all, so without this the report described a
+    # model the user never chose and flagged nothing.
+    narrowed_defaults: dict[str, dict[str, str]] = {}
 
 
 class InstallableModel(BaseModel):

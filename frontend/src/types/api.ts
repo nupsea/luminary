@@ -7269,6 +7269,31 @@ export interface components {
              * @default []
              */
             prompt_accommodations_dropped: string[];
+            /**
+             * Memory Profile
+             * @default unknown
+             */
+            memory_profile: string;
+            /**
+             * Memory Profile Explicit
+             * @default false
+             */
+            memory_profile_explicit: boolean;
+            /**
+             * Max Resident Models
+             * @default 0
+             */
+            max_resident_models: number;
+            /**
+             * Host Ram Gb
+             * @default 0
+             */
+            host_ram_gb: number;
+            /**
+             * Resident Models
+             * @default []
+             */
+            resident_models: string[];
             library: components["schemas"]["EvalLibraryFingerprint"];
         };
         /** EvalLibraryFingerprint */
@@ -8558,6 +8583,15 @@ export interface components {
             unmeasured_models: string[];
             /** Oversized Models */
             oversized_models: string[];
+            /**
+             * Narrowed Defaults
+             * @default {}
+             */
+            narrowed_defaults: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
         };
         /** ModelUsageItem */
         ModelUsageItem: {

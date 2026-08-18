@@ -37,6 +37,7 @@ from app.model_registry import (
     configured_generation_override,
     fits_host,
     fits_together,
+    narrowed_defaults,
     profile_for,
     vision_candidates,
 )
@@ -187,10 +188,20 @@ def warn_if_configuration_exceeds_host() -> list[str]:
     report = residency_report()
     warnings: list[str] = []
 
-    for model in report.get("oversized_models") or []:
+    # `oversized_models` is a list of model *ids*. Indexing them as dicts raised
+    # TypeError, which the boot-time caller catches and logs at debug -- so this
+    # warning had never once fired on a machine that needed it.
+    for model_id in report.get("oversized_models") or []:
+        needs = (p.min_ram_gb if (p := profile_for(model_id)) else None)
         warnings.append(
-            f"{model['model']} needs {model['min_ram_gb']}GB and this machine has "
+            f"{model_id} needs {needs}GB and this machine has "
             f"{report.get('host_ram_gb')}GB -- it will swap under load"
+        )
+
+    for role, detail in (report.get("narrowed_defaults") or {}).items():
+        warnings.append(
+            f"{role} was configured as {detail['configured']} but resolves to "
+            f"{detail['resolved']}: {detail['reason']}"
         )
     if not report.get("within_residency_limit", True):
         warnings.append(
@@ -275,4 +286,8 @@ def residency_report() -> dict[str, Any]:
         "resident_gb": round(measured_bytes / _GB, 2),
         "unmeasured_models": unmeasured,
         "oversized_models": oversized,
+        # A model narrowed away is not in `oversized`: it is not in play at all.
+        # Without this, configuring a model too large for the profile produced a
+        # clean report describing a model the user never chose.
+        "narrowed_defaults": narrowed_defaults(),
     }

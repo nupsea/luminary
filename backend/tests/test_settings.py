@@ -141,11 +141,16 @@ async def test_local_models_default_to_config_and_are_settable(test_db, monkeypa
     """
     import unittest.mock
 
-    from app.config import get_settings
+    from app.model_registry import default_chat_model, default_vision_model
     from app.services.settings_service import get_local_chat_model, get_vision_model
 
-    assert get_local_chat_model() == get_settings().LITELLM_DEFAULT_MODEL
-    assert get_vision_model() == get_settings().VISION_MODEL
+    # Compared against the registry, not raw config: with nothing chosen these
+    # fall back to the *host-aware* default, which deliberately differs from the
+    # configured value on a machine that can hold something better. Asserting
+    # equality with `get_settings().LITELLM_DEFAULT_MODEL` passed only while a
+    # developer .env happened to name the same model the registry resolved to.
+    assert get_local_chat_model() == default_chat_model()
+    assert get_vision_model() == default_vision_model()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         with unittest.mock.patch(

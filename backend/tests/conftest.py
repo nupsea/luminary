@@ -48,6 +48,25 @@ def isolated_data_dir(tmp_path_factory):
     # it or carry the e2e marker.
     os.environ["OLLAMA_URL"] = "http://127.0.0.1:1"
 
+    # Pin every model knob to its declared default, overriding `backend/.env`.
+    # pydantic-settings ranks env vars above the file, so without this a
+    # developer's .env *is* the suite's idea of the product defaults: this
+    # machine's pins `ollama/qwen2.5:14b-instruct` while the shipped default is
+    # `ollama/qwen3.5:4b`. It has already broken a test that passed on GitHub
+    # (which has no .env) and failed locally, and it silently makes any
+    # model-resolution assertion a statement about the developer's box.
+    # Read from the field defaults so there is nothing here to drift.
+    from app.config import Settings  # noqa: PLC0415
+
+    for _knob in (
+        "LITELLM_DEFAULT_MODEL",
+        "LITELLM_GENERATION_MODEL",
+        "VISION_MODEL",
+        "FLASHCARD_FACTUALITY_MODEL",
+        "LUMINARY_MEMORY_PROFILE",
+    ):
+        os.environ[_knob] = str(Settings.model_fields[_knob].default)
+
     # Clear the settings LRU cache so get_settings() picks up the new env var.
     from app.config import get_settings
 
