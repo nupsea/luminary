@@ -15,30 +15,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.services.flashcard import _parse_llm_response
 from app.services.flashcard_parsers import card_rejection, grounding_state
+from app.services.flashcard_prompts import bloom_from
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm import get_llm_service
 from app.types import BloomGap, BloomSectionStat, CoverageReport
 
 logger = logging.getLogger(__name__)
 
-# Level-specific prompt additions for gap fill (appended to TECH_FLASHCARD_SYSTEM base)
+# Level-specific prompt additions for gap fill (appended to TECH_FLASHCARD_SYSTEM).
+# Plain-language shape, never the taxonomy label (I-28): the dict key is the level
+# the code is filling a gap at, and only the sentence reaches the model. A label
+# is not a specification -- the model pattern-matches the word to the register it
+# has seen it in, which is how naming levels produced exam papers elsewhere.
 _BLOOM_LEVEL_INSTRUCTIONS: dict[int, str] = {
-    2: (
-        "Write an UNDERSTANDING question asking the learner to explain, summarise, "
-        "or interpret this concept in their own words."
-    ),
-    3: ("Write an APPLICATION question asking how to USE this concept in a realistic scenario."),
+    2: "Ask the reader to put this idea in their own words, or to say what it means.",
+    3: "Ask how this idea would work out in one concrete, realistic situation.",
     4: (
-        "Write an ANALYSIS question asking the reader to COMPARE, CONTRAST, or EVALUATE "
-        "different aspects of this concept."
+        "Ask how two parts of this material relate, or why the text chose one "
+        "approach over another."
     ),
     5: (
-        "Write an EVALUATION question asking the reader to justify or critique a design decision "
-        "related to this concept."
+        "Ask where this approach breaks down, or what it costs, and why that "
+        "trade-off was made."
     ),
     6: (
-        "Write a SYNTHESIS question asking the reader to design, construct, or propose "
-        "something using this concept."
+        "Ask the reader to put together something the text does not state "
+        "outright, using what it does say."
     ),
 }
 
@@ -47,12 +49,10 @@ _BLOOM_LEVEL_INSTRUCTIONS: dict[int, str] = {
 _SECTION_CHAR_LIMIT = 6000
 
 _AUDIT_FILL_SYSTEM = (
-    "You are a learning assistant creating a single flashcard "
-    "at a specified Bloom's Taxonomy level. "
+    "You are a learning assistant writing a single flashcard. "
     "Output a JSON array starting with [ and ending with ]. "
     'Each element: {"question": "...", "answer": "...", '
-    '"source_excerpt": "...", "flashcard_type": "...", "bloom_level": N}. '
-    "bloom_level is an integer 1-6 matching the level requested. "
+    '"source_excerpt": "...", "flashcard_type": "..."}. '
     "flashcard_type must be one of: definition, syntax_recall, "
     "concept_explanation, analogy, code_completion, api_signature, "
     "trace, pattern_recognition, design_decision, complexity, implementation. "
@@ -253,13 +253,9 @@ class FlashcardAuditService:
                     continue
                 flashcard_type = str(item.get("flashcard_type", "concept_explanation")).strip()
                 # Honour bloom_level from LLM but coerce to target level if absent/wrong
-                raw_bloom = item.get("bloom_level")
-                if isinstance(raw_bloom, int | float) or (
-                    isinstance(raw_bloom, str) and raw_bloom.isdigit()
-                ):
-                    card_bloom = int(raw_bloom)
-                else:
-                    card_bloom = level  # fallback to target level
+                # Derived from the card's type (I-28: the prompt names no level),
+                # falling back to the gap level this call was filling.
+                card_bloom = bloom_from(item) or level
 
                 card = FlashcardModel(
                     id=str(uuid.uuid4()),

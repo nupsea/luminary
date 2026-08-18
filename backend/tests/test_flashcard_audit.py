@@ -195,8 +195,12 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
                 "question": "How would you apply X in production?",
                 "answer": "Use X by following steps A, B, C.",
                 "source_excerpt": "Sample chunk text for Bloom's audit tests.",
-                "flashcard_type": "concept_explanation",
-                "bloom_level": 3,
+                # The type fixes the level now (I-28: the prompt names none), and
+                # `concept_explanation` is a level-2 shape. This stub used to
+                # claim level 3 while naming a level-2 type; the code resolves
+                # that in favour of the type, so the fixture states a type whose
+                # level is what the gap being filled asked for.
+                "flashcard_type": "trace",
             }
         ]
     )

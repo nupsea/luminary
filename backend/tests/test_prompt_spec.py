@@ -18,19 +18,23 @@ from app.services.prompt_spec import Accommodation, PromptSpec, describe, render
 
 # The flashcard prompt as every unmeasured model receives it. Update this when
 # the prompt is meant to change, never to make a test pass.
+# Updated 2026-08-18 for I-28: the wire key was `bloom_level`, which named a
+# taxonomy to the model. It is `depth` with plain words now, and the stored level
+# is derived from it in code. A snapshot change is the point of a snapshot -- this
+# one is here so the diff shows up in review rather than in a model's behaviour.
 FLASHCARD_RENDER = """\
 Write {count} {difficulty}-level flashcards from the text below.
 Difficulty: {difficulty_guidelines}
 {extra_instructions}Return a JSON object:
 {{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", \
-"bloom_level": N}}]}}
+"depth": "fact|explain|use|relate|limit|build"}}]}}
 Use '\\n' for line breaks inside a string.
 Example card:
 {{"flashcards": [{{"question": "Why do independent hardware faults need a different defence \
 from systematic software errors?", "answer": "Hardware faults are largely independent so \
 redundancy can mask them, while software errors are correlated and can fail many nodes at \
 once.", "source_excerpt": "hardware faults are random and independent, whereas software \
-faults are correlated across nodes", "bloom_level": 4}}]}}
+faults are correlated across nodes", "depth": "relate"}}]}}
 """
 
 

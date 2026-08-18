@@ -39,7 +39,8 @@ FLASHCARD_SYSTEM = (
     "complete answer -- both grounded only in the provided text.\n"
     "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
     "comparison asks how two things differ; a role/process asks what X enables in Y; a "
-    "definition asks what X is. Name the concept directly and prefer why/how/apply over recall. "
+    "definition asks what X is. Name the concept directly, and prefer why, how and "
+    "what-would-happen questions over recall. "
     "AVOID trivia about wording, yes/no questions, answers that are a bare list, and asking "
     "which specific example or analogy the text used. The question must stand alone -- never "
     "say 'in this passage', 'according to the text', or 'the author'; it must make sense "
@@ -54,9 +55,72 @@ FLASHCARD_SYSTEM = (
     "word, at least four words long. It must come from that text and from nowhere else -- not "
     "from any example, and not from memory. A card whose quote is not in the text is "
     "discarded. Use '...' if you need to shorten a long sentence.\n"
-    'Include a "bloom_level" integer 1-6 (1=remember ... 6=create); aim for level 3+ '
-    "(apply/analyze/evaluate) where the material allows."
+    "DEPTH: label each card with one word describing what it asks the reader to do:\n"
+    "  fact    -- state something the text says\n"
+    "  explain -- put an idea in their own words\n"
+    "  use     -- work the idea through a concrete situation\n"
+    "  relate  -- connect two ideas, or say why the text chose one over another\n"
+    "  limit   -- say where an approach breaks down, or what it costs\n"
+    "  build   -- put together something the text does not state outright\n"
+    "Prefer `use`, `relate` and `limit` where the material allows."
 )
+
+# The taxonomy never reaches the model (I-28). A level label is not a
+# specification: the model pattern-matches the word to the register it has seen
+# it in, which is how "Bloom taxonomy level 5 (Evaluate)" produced exam papers on
+# the suggestions surface. What a label resolves to is a property of the model
+# reading it, so a prompt built on one means something different on the next
+# model -- and the difference is invisible in any output-quality score.
+#
+# The wire word is `depth`, and the mapping to the stored `bloom_level` lives
+# here rather than in the prompt.
+DEPTH_TO_BLOOM: dict[str, int] = {
+    "fact": 1,
+    "explain": 2,
+    "use": 3,
+    "relate": 4,
+    "limit": 5,
+    "build": 6,
+}
+
+# The technical path names a card *type*, which is a shape rather than a taxonomy
+# label, so the level is derived from it and never asked for. These are the same
+# pairings the prompt used to spell out as "(L1)" ... "(L6)".
+TYPE_TO_BLOOM: dict[str, int] = {
+    "definition": 1,
+    "syntax_recall": 1,
+    "concept_explanation": 2,
+    "analogy": 2,
+    "code_completion": 3,
+    "api_signature": 3,
+    "trace": 4,
+    "pattern_recognition": 4,
+    "design_decision": 5,
+    "complexity": 5,
+    "implementation": 6,
+}
+
+
+def bloom_from(item: dict) -> int | None:
+    """The stored level for a generated card, derived rather than asked for.
+
+    Order matters: a technical card names its type and the type fixes the level,
+    so the model never has a say in it. A generic card carries `depth`, one of a
+    handful of plain words. A bare `bloom_level` is still honoured because cards
+    generated before this exist and the audit reads the column.
+    """
+    kind = str(item.get("flashcard_type") or "").strip().lower()
+    if kind in TYPE_TO_BLOOM:
+        return TYPE_TO_BLOOM[kind]
+    depth = str(item.get("depth") or "").strip().lower()
+    if depth in DEPTH_TO_BLOOM:
+        return DEPTH_TO_BLOOM[depth]
+    raw = item.get("bloom_level")
+    if isinstance(raw, (int, float)) and 1 <= int(raw) <= 6:
+        return int(raw)
+    if isinstance(raw, str) and raw.strip().isdigit() and 1 <= int(raw) <= 6:
+        return int(raw)
+    return None
 
 # The user-side flashcard prompt as a contract plus its compensations. Rendering
 # it reproduces FLASHCARD_USER_TMPL exactly today: both accommodations still
@@ -70,7 +134,7 @@ FLASHCARD_USER_SPEC = PromptSpec(
         "{extra_instructions}"
         "Return a JSON object:\n"
         '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
-        '"bloom_level": N}}]}}'
+        '"depth": "fact|explain|use|relate|limit|build"}}]}}'
     ),
     accommodations=(
         Accommodation(
@@ -97,7 +161,7 @@ FLASHCARD_USER_SPEC = PromptSpec(
                 "faults are largely independent so redundancy can mask them, while software "
                 'errors are correlated and can fail many nodes at once.", '
                 '"source_excerpt": "' + EXAMPLE_SOURCE_EXCERPT + '", '
-                '"bloom_level": 4}}]}}'
+                '"depth": "relate"}}]}}'
             ),
             introduced_for="ollama/qwen3.5:4b",
             because=(
@@ -227,11 +291,14 @@ _BOOK_CONTENT_GUIDELINE = (
 )
 
 TECH_FLASHCARD_SYSTEM = (
-    "You are a technical learning assistant creating flashcards based on Bloom's Taxonomy. "
+    "You are a technical learning assistant writing flashcards. "
+    # No taxonomy name and no level annotations (I-28). The type is a shape the
+    # model can act on; the level it maps to is derived in code (TYPE_TO_BLOOM)
+    # and is none of the model's business.
     "For each card choose exactly one of these flashcard types: "
-    "definition (L1), syntax_recall (L1), concept_explanation (L2), analogy (L2), "
-    "code_completion (L3), api_signature (L3), trace (L4), pattern_recognition (L4), "
-    "design_decision (L5), complexity (L5), implementation (L6). "
+    "definition, syntax_recall, concept_explanation, analogy, "
+    "code_completion, api_signature, trace, pattern_recognition, "
+    "design_decision, complexity, implementation. "
     "Choose the type that best matches what the card asks the learner to do. "
     "For code_completion cards: show a code block with a blank rendered as ____ where the "
     "learner must supply the missing part. "
@@ -242,8 +309,7 @@ TECH_FLASHCARD_SYSTEM = (
     "NEVER use phrases like 'in this passage' or 'in this text'. "
     "Output a JSON array starting with [ and ending with ]. "
     'Each element: {"question": "...", "answer": "...", '
-    '"source_excerpt": "...", "flashcard_type": "...", "bloom_level": N}. '
-    "bloom_level is an integer 1-6. "
+    '"source_excerpt": "...", "flashcard_type": "..."}. '
     "Write no explanation, preamble, or markdown fences."
 )
 

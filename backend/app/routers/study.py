@@ -190,21 +190,48 @@ _TEACHBACK_USER_TMPL = (
     '"missing_points": [str], "misconceptions": [str], "evidence": str}}'
 )
 
-async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
-    """The passage this card was written from, or "" when it is not recoverable.
+# A passage for a *prompt*, not for a substring search. `passage_for_card` falls
+# back to the whole document when a card predates `source_chunk_ids`, which is
+# right for the grounding audit -- it searches the text -- and catastrophic here:
+# a 700,000-character book in the evaluation prompt overruns the context window,
+# and the model returns something unparseable. Measured: 2 of 4 teach-back calls
+# came back HTTP 503 "unreadable evaluation" until this was bounded.
+_TEACHBACK_PASSAGE_CHARS = 6000
 
-    Cards created before `source_chunk_ids` fall back to their document, which is
-    more permissive and still far better than grading against the card's own
-    answer. Never raises: a teach-back that cannot find its source still scores,
-    it just scores against less.
+
+async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
+    """The passage this card was written from, bounded for use in a prompt.
+
+    A card with recorded chunks gets exactly those. A card without gets a window
+    of its document centred on the quote it claims, which is the best available
+    guess at where it came from -- and far better than grading the learner
+    against the card's own answer, which is what this replaced.
+
+    Never raises: a teach-back that cannot find its source still scores, it just
+    scores against less.
     """
     from app.services.flashcard_grounding import passage_for_card  # noqa: PLC0415
+    from app.services.flashcard_parsers import _normalise_for_match  # noqa: PLC0415
 
     try:
-        return await passage_for_card(card, session)
+        text = await passage_for_card(card, session)
     except Exception:  # noqa: BLE001
         logger.warning("teachback: could not rebuild the passage for card %s", card.id)
         return ""
+    if len(text) <= _TEACHBACK_PASSAGE_CHARS:
+        return text
+
+    # Centre the window on the card's own quote rather than taking the opening
+    # of the document, which is unlikely to be where the card came from.
+    excerpt = _normalise_for_match(card.source_excerpt or "")[:80]
+    haystack = _normalise_for_match(text)
+    found = haystack.find(excerpt) if excerpt else -1
+    if found < 0:
+        return text[:_TEACHBACK_PASSAGE_CHARS]
+    # Offsets shift under normalisation, so scale back into the raw string.
+    middle = int(found * len(text) / max(len(haystack), 1))
+    half = _TEACHBACK_PASSAGE_CHARS // 2
+    return text[max(0, middle - half) : middle + half]
 
 
 def _verified_evidence(parsed: dict, source: str) -> str:

@@ -65,6 +65,7 @@ from app.services.flashcard_prompts import (
     TECH_FLASHCARD_USER_TMPL,
     _build_genre_system_prompt,
     _infer_genre,
+    bloom_from,
     flashcard_user_tmpl,
     notes_concept_extract_system,
 )
@@ -183,14 +184,10 @@ async def generate_technical(
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
         flashcard_type = str(item.get("flashcard_type", "definition")).strip()
-        raw_bloom = item.get("bloom_level")
-        # Coerce bloom_level defensively: LLM may return int, float, or "4" string
-        if isinstance(raw_bloom, (int, float)):
-            bloom_level: int | None = int(raw_bloom)
-        elif isinstance(raw_bloom, str) and raw_bloom.isdigit():
-            bloom_level = int(raw_bloom)
-        else:
-            bloom_level = None
+        # Derived from the card's own type or depth word, not asked for as a
+        # number: the prompt no longer names a taxonomy (I-28), and the level a
+        # type maps to is a decision this codebase owns rather than the model.
+        bloom_level: int | None = bloom_from(item)
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
@@ -730,11 +727,10 @@ async def generate(
                 deduped += 1
                 continue
             pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
-        card_bloom_level = item.get("bloom_level")
-        if isinstance(card_bloom_level, int) and 1 <= card_bloom_level <= 6:
-            pass
-        else:
-            card_bloom_level = None
+        # Derived from the card's own type or depth word, not asked for as a
+        # number: the prompt no longer names a taxonomy (I-28), and the level a
+        # type maps to is a decision this codebase owns rather than the model.
+        card_bloom_level = bloom_from(item)
 
         card = FlashcardModel(
             id=str(uuid.uuid4()),
