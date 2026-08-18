@@ -25,6 +25,7 @@ ingestion for a configuration problem the user can see in Settings.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +39,8 @@ from app.model_registry import (
     profile_for,
 )
 from app.services import settings_service
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,19 @@ class ModelChoice:
 def resolve(role: Role, *, background: bool = False) -> ModelChoice:
     """The model this backend would actually call for *role*."""
     if role == "vision":
-        model = settings_service.get_vision_model()
+        override = settings_service.configured_vision_override()
+        if override:
+            return ModelChoice(role, override, None, profile_for(override), explicit=True)
+        # Sharing is a remedy for a host that cannot hold two models, not a
+        # preference. On a machine with room for a dedicated reader, the
+        # configured one is kept -- quietly retargeting vision on a 32GB laptop
+        # because a chat model happens to also have eyes would be this code
+        # overruling a deployment decision nobody asked it to revisit.
+        configured = settings_service.get_vision_model()
+        profile = profile_for(configured)
+        if profile is None or fits_host(profile):
+            return ModelChoice(role, configured, None, profile)
+        model = _shared_vision_model() or configured
         return ModelChoice(role, model, None, profile_for(model))
 
     if role == "generation":
@@ -81,6 +96,31 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
     except ValueError as exc:
         local = settings_service.get_local_chat_model()
         return ModelChoice(role, local, None, profile_for(local), fallback_reason=str(exc))
+
+
+def _shared_vision_model() -> str | None:
+    """The model already answering another role, when it can also read a figure.
+
+    On an 8GB host `max_resident_models` is 1, so a separate vision model is not
+    a second model -- it is the reason nothing fits. Before this, the vision role
+    resolved to a 6.81GB entry needing 16GB and the low profile had *zero*
+    feasible assignments across all four roles. Reusing the model that is already
+    resident makes the whole profile satisfiable with one model.
+
+    Only ever returns a model that is both multimodal and fits the host, so this
+    can widen what is possible and never narrow it. Consulted only when the
+    configured reader does not fit -- see the vision branch of `resolve`.
+    """
+    for role in ("chat", "generation"):
+        try:
+            model = resolve(role).model
+        except Exception:  # noqa: BLE001
+            logger.debug("vision reuse: role %s does not resolve", role, exc_info=True)
+            continue
+        profile = profile_for(model)
+        if profile is not None and profile.multimodal and fits_host(profile):
+            return model
+    return None
 
 
 def resident_models() -> set[str]:

@@ -245,10 +245,29 @@ def test_no_entry_adopts_its_advertised_context_as_its_budget():
 
 def test_the_small_class_all_fits_an_eight_gigabyte_machine():
     """The product targets 8-16GB. If nothing in the registry fits that, the
-    catalogue cannot answer the question a user on a laptop is asking."""
-    text_models = [p for p in models_for_host(8) if not p.multimodal]
+    catalogue cannot answer the question a user on a laptop is asking.
 
-    assert len(text_models) >= 4, [p.id for p in text_models]
+    This counted `not p.multimodal` as "text models", which assumed the two
+    categories are disjoint. They are not: a multimodal model is a text model
+    that also has eyes, and correcting two wrong `multimodal` flags dropped this
+    count from 4 to 2 without a single model leaving the registry. Every entry
+    does text, so the question is how many the host can hold.
+    """
+    fitting = models_for_host(8)
+
+    assert len(fitting) >= 4, [p.id for p in fitting]
+
+
+def test_an_eight_gigabyte_machine_is_offered_something_that_reads_figures():
+    """The role with a hard capability requirement is the one that had no model.
+
+    With both small multimodal entries recorded as text-only, the vision role
+    resolved to a 6.81GB model needing 16GB, and the low profile had zero
+    feasible assignments across its four roles.
+    """
+    readers = [p for p in models_for_host(8) if p.multimodal]
+
+    assert readers, "an 8GB host cannot run the vision role at all"
 
 
 def test_a_thinking_model_is_recorded_as_one():

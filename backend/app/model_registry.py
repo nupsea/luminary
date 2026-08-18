@@ -106,6 +106,13 @@ REGISTRY: dict[str, ModelProfile] = {
         # JSON object into the `thinking` field and returned an empty `response`,
         # which is the empty-/qa failure that rule exists to prevent.
         thinking_default=True,
+        # Measured 2026-08-18, not read off the capability list: on real library
+        # figures it named the root of a decision tree correctly and identified an
+        # Intel SDM operand-encoding table as x86 with the right field count, and
+        # `/api/ps` reported 3.21GB resident WITH an image loaded -- the same as
+        # its text footprint. This is what lets one model fill all four roles on an
+        # 8GB host, where the 6.81GB vision default cannot be resident at all.
+        multimodal=True,
     ),
     "ollama/phi4-mini": ModelProfile(
         id="ollama/phi4-mini",
@@ -124,6 +131,13 @@ REGISTRY: dict[str, ModelProfile] = {
         usable_context=8192,
         supports_json_schema=True,
         thinking_default=False,
+        # Capable, and measurably the worst of the three at it: on the same two
+        # library figures it called a decision tree "a Boolean logic circuit with
+        # addition and subtraction gates" (reading the +/- leaves as operators) and
+        # attributed an Intel SDM page to an "ARM Cortex-M4". It is 4x faster than
+        # the others because it answers short and wrong. Marked multimodal because
+        # the flag describes capability; `vision_preference` is what ranks it last.
+        multimodal=True,
     ),
     "ollama/qwen2.5vl:7b": ModelProfile(
         id="ollama/qwen2.5vl:7b",
@@ -238,9 +252,54 @@ def default_chat_model() -> str:
     return model if "/" in model else f"ollama/{model}"
 
 
+# Vision quality is measured, not inferred from the capability list, and it does
+# not track size. Ranked by what each model did on real library figures
+# (2026-08-18): `qwen3.5:4b` read a decision tree's root and an Intel operand
+# table correctly at 3.21GB; `qwen2.5vl:7b` was correct on structure but invented
+# mnemonic expansions, at 6.81GB; `gemma3:4b` called a decision tree a Boolean
+# circuit and an Intel manual page ARM. Lower ranks first.
+VISION_PREFERENCE: tuple[str, ...] = (
+    "ollama/qwen3.5:4b",
+    "ollama/qwen2.5vl:7b",
+    "ollama/gemma3:4b",
+)
+
+
+def vision_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
+    """Multimodal models this machine can hold, best measured reader first.
+
+    Unranked entries sort last: a multimodal model nobody has looked at is not a
+    model to hand a figure to ahead of one that has been measured.
+    """
+    fitting = [p for p in REGISTRY.values() if p.multimodal and fits_host(p, ram_gb)]
+    return sorted(
+        fitting,
+        key=lambda p: (
+            VISION_PREFERENCE.index(p.id) if p.id in VISION_PREFERENCE else len(VISION_PREFERENCE),
+            p.resident_bytes,
+        ),
+    )
+
+
 def default_vision_model() -> str:
-    model = get_settings().VISION_MODEL
-    return model if "/" in model else f"ollama/{model}"
+    """The model that reads figures when nobody has chosen one.
+
+    Host-aware, because the configured default weighs 6.81GB and asks for 16GB:
+    on an 8GB laptop it cannot be resident at all, so the vision role had *no*
+    feasible model and the whole profile had no feasible assignment. Falling back
+    to a fitting multimodal model is what makes that machine work.
+
+    An explicit choice in Settings is honoured even when it does not fit --
+    `residency_report()` reports it as oversized rather than this silently
+    overruling the user. Only the default is host-aware.
+    """
+    configured = get_settings().VISION_MODEL
+    configured = configured if "/" in configured else f"ollama/{configured}"
+    profile = profile_for(configured)
+    if profile is None or fits_host(profile):
+        return configured
+    candidates = vision_candidates()
+    return candidates[0].id if candidates else configured
 
 
 def configured_generation_override() -> str | None:

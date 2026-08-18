@@ -1143,6 +1143,49 @@ carrying the same two refusals as the runner: columns measured against different
 labelled rather than ranked, and a metric identical across models is flagged `did not move` rather
 than read as the models being equivalent.
 
+#### The low profile had no feasible assignment, and the cause was two wrong flags
+
+Measured 2026-08-18, by enumerating every assignment of a registry model to the four roles under
+`max_resident_models` and the half-the-machine memory policy:
+
+| profile | host | max resident | feasible assignments, before | after |
+|---|---|---|---|---|
+| low | 8GB | 1 | **0** | 2 |
+| standard | 16GB | 2 | 1 | 45 |
+| performance | 32GB | 2 | 29 | 101 |
+
+**Zero** meant a machine in the target class could not run the product: the vision role resolved
+to `qwen2.5vl:7b`, 6.81GB and `min_ram_gb=16`, and nothing else in the registry declared
+`multimodal`. The first symptom would have been a crash during ingestion, which is the failure
+this phase exists to convert into a refusal at the point of choosing.
+
+The cause was not the memory policy. `qwen3.5:4b` and `gemma3:4b` both read images and were both
+recorded `multimodal=False` — a capability written by hand with nothing to disagree with.
+`tests/test_registry_matches_runtime.py` now checks every entry's `multimodal` and
+`thinking_default` against what Ollama reports (marked `e2e`, and it calls `/api/show` only, so it
+runs no inference).
+
+**One model fills all four roles on an 8GB host: `qwen3.5:4b`, 3.21GB.** Vision costs it nothing
+resident — `/api/ps` reported 3.21GB with an image loaded, the same as its text footprint.
+
+Vision quality was measured on real library figures rather than inferred from the capability flag,
+because it does not track size:
+
+| | decision tree (root x₂, ± leaves) | Intel SDM operand-encoding table |
+|---|---|---|
+| `qwen3.5:4b` (3.21GB) | correct, named the root | correct: "x86", four operand fields |
+| `qwen2.5vl:7b` (6.81GB) | correct, root unidentified | structure right, invented "Move Register"/"Move Immediate" |
+| `gemma3:4b` (3.62GB) | **"Boolean logic circuit with addition and subtraction gates"** | **"ARM Cortex-M4"** |
+
+`gemma3:4b` is 4x faster than the other two and fabricated on both — it answers short and wrong,
+which matches its worst-in-class text behaviour below (13 deictic rejections, 4x the others).
+`VISION_PREFERENCE` encodes this ranking so a multimodal model nobody has measured cannot be
+handed a figure ahead of one that has been.
+
+**n=2 checkable figures.** Enough to disqualify `gemma3:4b`, not enough to retire `qwen2.5vl:7b`:
+sharing is therefore a remedy for a host that cannot hold two models, never a preference. A
+machine with room keeps its dedicated reader.
+
 #### The 8GB class, measured 2026-08-16
 
 Footprints are measured (`scripts/model_footprint.py`, Ollama `/api/ps` after a real generation at
@@ -1324,9 +1367,11 @@ One vocabulary, one alias: `install.sh` called the small profile `public`, which
 
 Still open in this phase, and none of it is a detail:
 
-- **The profile does not yet pick the role map.** It reports and constrains; it does not choose a
-  smaller model, and `VISION_MODEL` is still a first-class knob rather than the `vision` role's
-  resolution.
+- **The profile does not yet pick the role map**, but the vision role no longer breaks it.
+  Fixed 2026-08-18: `default_vision_model` is host-aware and `resolve("vision")` falls back to the
+  model already answering another role when the configured reader does not fit. It still does not
+  choose a *smaller text* model, and `VISION_MODEL` remains a knob — it is now a knob with a
+  host-aware default rather than a hardcoded 6.81GB one.
 - **Runtime geometry is still partly global.** The context window is no longer: I-27's value half
   shipped 2026-08-18 as `model_registry.context_window_for`, which reads the model's
   `usable_context` and falls back to `OLLAMA_NUM_CTX` only for an unregistered model. Every entry

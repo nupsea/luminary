@@ -195,12 +195,22 @@ def get_local_chat_model() -> str:
     return _with_ollama_prefix(chosen) if chosen else default_chat_model()
 
 
+def configured_vision_override() -> str | None:
+    """An explicit vision choice from Settings, or None when nobody chose.
+
+    The distinction is load-bearing: a chosen model is honoured even when it does
+    not fit the host, while the *default* is free to resolve to whatever the
+    machine can actually hold.
+    """
+    chosen = _cache["vision_model"]
+    return _with_ollama_prefix(chosen) if chosen else None
+
+
 def get_vision_model() -> str:
     """The model that reads figures: Settings, else the registry default."""
     from app.model_registry import default_vision_model  # noqa: PLC0415
 
-    chosen = _cache["vision_model"]
-    return _with_ollama_prefix(chosen) if chosen else default_vision_model()
+    return configured_vision_override() or default_vision_model()
 
 
 async def update_llm_settings(
