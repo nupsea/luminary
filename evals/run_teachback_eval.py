@@ -22,6 +22,26 @@ of the range is uncalibrated -- which is what an ad-hoc probe suggested: a vague
 explanation scored 10 against an outright wrong one at 15, where the prompt's own
 bands put "partly right" at 40-69.
 
+First run, 2026-08-18, 10 cases against `qwen3.5:4b`:
+
+    cases_scored 3, cases_incomplete 7   ordering_accuracy 1.0 (0 inversions / 9 pairs)
+    unrelated 0.00, wrong 36.33, incomplete 73.33, correct 93.33
+    correct_minus_wrong 57.0, no overlap
+
+Two things that number is not. **Seven of ten cases were discarded** because the
+evaluator returned unparseable JSON on at least one arm -- 11 failures in 40
+calls, surviving its own two retries -- so the three that scored are the three
+where the model happened to answer cleanly four times running, which is a
+selection effect and not a random sample.
+
+And the **`incomplete` arm is a gentler degradation than the case that failed
+before**. An ad-hoc probe scored a vague-but-not-wrong explanation at 10 against
+an outright wrong one at 15 -- an inversion. This harness's `incomplete` is the
+answer's own first clause, which is much closer to correct than a vague sentence
+is. A `vague` arm needs a paraphrase rather than a substring, so it cannot be
+constructed the way these four are, and it is exactly where the scorer is known
+to misbehave.
+
 Usage::
 
     python evals/run_teachback_eval.py --limit 12 --assert-thresholds
