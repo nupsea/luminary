@@ -149,30 +149,98 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
 _teachback_eval_sem = asyncio.Semaphore(1)
 
 
+# Teach-back grades what the learner wrote against the material, and it had two
+# defects the flashcard path already paid for.
+#
+# It never saw the source. The evaluator was given the card's answer and the
+# student's explanation, so it graded against a reference that may itself be
+# ungrounded -- measured on a real library, 26% of cards quoting anything quoted
+# text absent from their document. `source_chunk_ids` makes the passage
+# recoverable, so the passage is what the explanation is graded against and the
+# card's answer is context rather than truth.
+#
+# And the axis was undefined: "score 0 to 100" with nothing anchoring it. An
+# undefined axis is answered with whatever is agreeable -- that is what returned
+# `atomicity 1.0000` on a set that was two thirds multi-point answers. The bands
+# below say what each score means, and the evaluator has to quote the passage for
+# its accuracy claim, which is the one thing it cannot produce from memory.
 _TEACHBACK_SYSTEM = (
-    "You are a Socratic tutor evaluating a student's explanation. "
+    "You grade a student's explanation against a source passage. "
+    "Judge only against the passage: not against what you know about the subject. "
     "Output a JSON object with no preamble or markdown."
 )
 
 _TEACHBACK_USER_TMPL = (
-    "The correct answer to the question is: {answer}\n"
-    "The student explained: {explanation}\n\n"
-    "Evaluate the student's explanation for accuracy and completeness. "
-    "Score 0 to 100. "
-    "Identify correct points, missing points, and misconceptions.\n"
+    "PASSAGE (the source material):\n{source}\n\n"
+    "The card's answer, for reference: {answer}\n\n"
+    "The student explained:\n{explanation}\n\n"
+    "Score the explanation 0-100 against the passage:\n"
+    "  90-100  every claim is in the passage, and nothing important is missing\n"
+    "  70-89   accurate, but omits something the passage treats as central\n"
+    "  40-69   partly right, with a gap or a vague claim the passage contradicts\n"
+    "  1-39    mostly wrong, or reverses what the passage says\n"
+    "  0       unrelated to the passage, empty, or unintelligible\n\n"
+    "correct_points: what the student got right, as short phrases.\n"
+    "missing_points: what the passage covers and the explanation does not.\n"
+    "misconceptions: claims that contradict the passage. Empty if there are none "
+    "-- do not invent one to seem thorough.\n"
+    "evidence: one sentence copied word for word from the PASSAGE that supports "
+    "your score. Copy it exactly; do not paraphrase.\n\n"
     'Output JSON: {{"score": int, "correct_points": [str], '
-    '"missing_points": [str], "misconceptions": [str]}}'
+    '"missing_points": [str], "misconceptions": [str], "evidence": str}}'
 )
+
+async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
+    """The passage this card was written from, or "" when it is not recoverable.
+
+    Cards created before `source_chunk_ids` fall back to their document, which is
+    more permissive and still far better than grading against the card's own
+    answer. Never raises: a teach-back that cannot find its source still scores,
+    it just scores against less.
+    """
+    from app.services.flashcard_grounding import passage_for_card  # noqa: PLC0415
+
+    try:
+        return await passage_for_card(card, session)
+    except Exception:  # noqa: BLE001
+        logger.warning("teachback: could not rebuild the passage for card %s", card.id)
+        return ""
+
+
+def _verified_evidence(parsed: dict, source: str) -> str:
+    """The evaluator's quote, kept only when it is really in the passage.
+
+    It is asked to copy a sentence rather than paraphrase, which is the one part
+    of its answer it cannot produce from memory. An unverifiable quote is dropped
+    rather than shown: presenting it would be the product vouching for a sentence
+    it could not find.
+    """
+    from app.services.flashcard_parsers import excerpt_is_verbatim  # noqa: PLC0415
+
+    evidence = str(parsed.get("evidence") or "").strip()
+    if not evidence or not source:
+        return ""
+    return evidence if excerpt_is_verbatim(evidence, source) else ""
+
 
 _CORRECTION_SYSTEM = (
     "You are a flashcard generator creating a targeted correction card. "
     "Output a JSON object with no markdown."
 )
 
+# This asked for a `source_excerpt` while supplying no source, so every quote it
+# produced was necessarily invented -- the same defect as `fill_gaps`, which wrote
+# cards from a section heading. The passage is supplied now and the card goes
+# through the same grounding gate as every other card.
 _CORRECTION_USER_TMPL = (
+    "PASSAGE (the source material):\n{source}\n\n"
     "The student has this misconception: {misconception}\n"
-    'The correct answer to "{question}" is: {answer}\n\n'
-    "Write a focused correction flashcard that addresses this specific misconception. "
+    'The card\'s answer to "{question}" is: {answer}\n\n'
+    "Write one correction flashcard addressing that misconception, using only "
+    "what the passage says. The answer is a single sentence. "
+    "source_excerpt is copied word for word from the PASSAGE -- copy it exactly, "
+    "do not paraphrase, and do not write one if the passage does not support the "
+    "card.\n"
     'Output JSON: {{"question": str, "answer": str, "source_excerpt": str}}'
 )
 
@@ -1260,7 +1328,9 @@ async def teachback(
 
     # Call LLM to evaluate explanation
     llm = get_llm_service()
+    source = await _source_passage(card, session)
     prompt = _TEACHBACK_USER_TMPL.format(
+        source=source or "(the source passage could not be recovered)",
         answer=card.answer,
         explanation=req.user_explanation,
     )
@@ -1437,8 +1507,23 @@ async def _evaluate_teachback_bg(
     # LLM calls happen outside the semaphore so they don't block other evals.
     llm = get_llm_service()
 
+    # The passage, read in its own short-lived session before the LLM work: this
+    # coroutine must not share a session with its caller (I-1), and holding one
+    # across an LLM call starves concurrent writers.
+    source = ""
+    factory = get_session_factory()
+    async with factory() as read_session:
+        card_row = (
+            await read_session.execute(
+                select(FlashcardModel).where(FlashcardModel.id == card_id)
+            )
+        ).scalar_one_or_none()
+        if card_row is not None:
+            source = await _source_passage(card_row, read_session)
+
     # LLM call 1: evaluation
     prompt = _TEACHBACK_USER_TMPL.format(
+        source=source or "(the source passage could not be recovered)",
         answer=card_answer,
         explanation=user_explanation,
     )
@@ -1472,7 +1557,19 @@ async def _evaluate_teachback_bg(
     # starves concurrent HTTP inserts past busy_timeout.
     correction_payload: dict | None = None
     correction_card: FlashcardModel | None = None
-    if score < 60 and misconceptions:
+    # A correction card asserts the student is wrong about something. The
+    # evaluator has to have quoted the passage before the product will say that:
+    # if it could not produce a sentence that is really there, its misconception
+    # list is not grounded in anything, and the card it seeds would carry an
+    # invented quote of its own.
+    evidence = _verified_evidence(parsed, source)
+    if score < 60 and misconceptions and not evidence:
+        logger.info(
+            "teachback %s: misconceptions reported without a verifiable quote; "
+            "no correction card",
+            tb_id,
+        )
+    if score < 60 and misconceptions and evidence:
         session_factory = get_session_factory()
         # Separate read session so the card fetch does not hold a write lock
         # during the LLM correction card generation that follows.
@@ -1485,6 +1582,7 @@ async def _evaluate_teachback_bg(
             correction_payload = await _llm_correction_card_payload(
                 card=correction_card,
                 misconception=misconceptions[0],
+                source=source,
             )
 
     # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
@@ -1543,6 +1641,7 @@ async def _evaluate_teachback_bg(
                             card=correction_card,
                             payload=correction_payload,
                             session=session,
+                            source=source,
                         )
 
                 # Self-heal session tally: if the parent session has already
@@ -2229,6 +2328,7 @@ def _parse_teachback_response(raw: str) -> dict | None:
 async def _llm_correction_card_payload(
     card: FlashcardModel,
     misconception: str,
+    source: str = "",
 ) -> dict | None:
     """Run the LLM call for a correction flashcard -- no DB I/O.
 
@@ -2238,6 +2338,7 @@ async def _llm_correction_card_payload(
     """
     llm = get_llm_service()
     prompt = _CORRECTION_USER_TMPL.format(
+        source=source or "(the source passage could not be recovered)",
         misconception=misconception,
         question=card.question,
         answer=card.answer,
@@ -2263,16 +2364,35 @@ async def _insert_correction_flashcard(
     card: FlashcardModel,
     payload: dict,
     session: AsyncSession,
-) -> str:
-    """Insert a correction flashcard row -- caller must have the LLM payload."""
+    source: str = "",
+) -> str | None:
+    """Insert a correction flashcard row -- caller must have the LLM payload.
+
+    Returns None when the card fails the same grounding gate every other card
+    passes. This path used to ask for a `source_excerpt` while supplying no
+    source, so the quote was invented by construction and went into the deck
+    under a "Source" heading.
+    """
+    from app.services.flashcard_parsers import card_rejection, grounding_state  # noqa: PLC0415
+
+    question = payload.get("question") or f"Correction: {card.question}"
+    answer = payload.get("answer") or card.answer
+    excerpt = str(payload.get("source_excerpt") or "").strip()
+    verdict = card_rejection(question, answer, excerpt, source)
+    if verdict:
+        logger.info("teachback: dropped correction card (%s): %r", verdict[1], question[:80])
+        return None
+
     new_id = str(uuid.uuid4())
     correction = FlashcardModel(
         id=new_id,
         document_id=card.document_id,
         chunk_id=card.chunk_id,
-        question=payload.get("question", f"Correction: {card.question}"),
-        answer=payload.get("answer", card.answer),
-        source_excerpt=payload.get("source_excerpt", ""),
+        question=question,
+        answer=answer,
+        source_excerpt=excerpt,
+        grounding=grounding_state(excerpt, source),
+        source_chunk_ids=card.source_chunk_ids,
         fsrs_state="new",
         fsrs_stability=0.0,
         fsrs_difficulty=0.0,
@@ -2299,10 +2419,11 @@ async def _generate_correction_flashcard(
     background semaphore path. New code should call the split helpers so the
     LLM call happens outside the DB transaction.
     """
-    payload = await _llm_correction_card_payload(card, misconception)
+    source = await _source_passage(card, session)
+    payload = await _llm_correction_card_payload(card, misconception, source)
     if payload is None:
         return None
-    return await _insert_correction_flashcard(card, payload, session)
+    return await _insert_correction_flashcard(card, payload, session, source)
 
 
 # Lightweight session API (stateless start + review)
