@@ -280,7 +280,8 @@ if ($portActive) {
     }
 }
 
-# Memory profile first: the chat model below is chosen from $MaxLoaded, and an
+# Memory profile first: the model block below reads $LumProfile, $MemGB and
+# $MaxLoaded, and an
 # undefined variable compares as 0 in PowerShell -- so a later definition would
 # silently pick the single-model default on every profile.
 $MemGB = 0
@@ -292,6 +293,17 @@ try {
 
 # NOT $Profile: that is an automatic variable holding the user's profile path.
 $LumProfile = $env:LUMINARY_PROFILE
+# Validated rather than passed through. The `switch` below has a `default` arm,
+# so an unrecognised value silently took the single-model branch and was then
+# written verbatim to backend/.env, where the backend rejects it and re-sizes
+# from host RAM -- installer and app disagreeing with nothing said. Matched
+# case-sensitively so this agrees with install.sh, whose `case` is exact.
+if ($LumProfile -and -not ($LumProfile -cin @("public", "standard", "performance"))) {
+    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: public, standard, performance." -ForegroundColor Red
+    Write-Host "[install] It would be written to backend/.env, where the backend rejects it and" -ForegroundColor Red
+    Write-Host "[install] re-sizes from host RAM -- so the installer and the app would disagree." -ForegroundColor Red
+    exit 1
+}
 if (-not $LumProfile) {
     if ($MemGB -gt 24)      { $LumProfile = "performance" }
     elseif ($MemGB -ge 16)  { $LumProfile = "standard" }
@@ -326,16 +338,29 @@ $PublicGeneralist = "qwen3.5:4b"
 # The strongest text model, pulled only on `performance`: 9.67GB resident, and it
 # does not read figures, so it is always a second model alongside the reader.
 $LargeTextModel = "qwen2.5:14b-instruct"
+# The band is a policy choice; this is a measurement. The backend keeps its
+# resident set to half of RAM, and this model plus the generalist is 12.88GB, so
+# the pair needs 25.76GB -- 25GB fails and 26GB fits. Below this the installer
+# downloads 9.67GB the backend then refuses to load. Mirrors
+# LARGE_TEXT_MIN_RAM_GB in install.sh; test_installer_models.py fails on drift.
+$LargeTextMinRamGB = 26
+
 $chatModel = $env:LUMINARY_CHAT_MODEL
 $visionModel = $env:LUMINARY_VISION_MODEL
 if (-not $chatModel) {
-    if ($LumProfile -eq "performance") {
+    if ($LumProfile -eq "performance" -and $MemGB -ge $LargeTextMinRamGB) {
         # The only band with room for a text model that cannot read figures.
         $chatModel = $LargeTextModel
-        if (-not $visionModel) { $visionModel = $PublicGeneralist }
     } else {
         $chatModel = $PublicGeneralist
     }
+}
+# Outside the block above on purpose. While it was nested inside
+# `if (-not $chatModel)`, setting LUMINARY_CHAT_MODEL alone skipped it, and a
+# host with room for a reader pulled none -- figures then failed quietly, which
+# is the mode this profile exists to avoid.
+if ((-not $visionModel) -and $MaxLoaded -gt 1 -and $chatModel -ne $PublicGeneralist) {
+    $visionModel = $PublicGeneralist
 }
 if (Test-CommandExists "ollama") {
     Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
@@ -350,7 +375,7 @@ if (Test-CommandExists "ollama") {
 # The vision model, already resolved above from the profile and installed RAM.
 # It was re-read from the environment here, which discarded that decision and
 # left the pull disabled on every machine that had not set the variable.
-if ($visionModel) {
+if ($visionModel -and (Test-CommandExists "ollama")) {
     Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
     ollama pull $visionModel
     if ($LASTEXITCODE -ne 0) {

@@ -31,6 +31,12 @@ PUBLIC_GENERALIST="qwen3.5:4b"
 # The strongest text model, pulled only on `performance` -- 9.67GB resident, and
 # it does not read figures, so it is always a second model alongside the reader.
 LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
+# The band is a policy choice; this is a measurement. The backend keeps a
+# resident set to half of RAM, and this model plus the generalist is 12.88GB, so
+# the pair needs 25.76GB -- 25GB fails and 26GB fits. Below this the installer
+# would download 9.67GB the backend then refuses to load.
+# test_installer_models.py recomputes this from the registry and fails on drift.
+LARGE_TEXT_MIN_RAM_GB=26
 # Used where two models can be resident. Same id as the generalist today: the
 # structural matrix put it ahead of llama3.2 on every metric it measured, and
 # llama3.2 held the default only on an HHEM comparison this repo ruled
@@ -174,7 +180,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Performance profile — sizes Ollama residency/parallelism + vision concurrency.
-# public=1/1/1 (under 24GB), standard=2/2/2 (24GB+), performance=2/4/4 (opt-in).
+# public=1/1/1 (under 16GB), standard=2/2/2 (16-24GB), performance=2/4/4 (over 24GB).
 # ---------------------------------------------------------------------------
 # Physical RAM in GB, 0 when unreadable. The profile is a memory decision, so
 # an unknown box must not be guessed into "standard".
@@ -200,6 +206,15 @@ _default_profile() {
 }
 
 PROFILE="${LUMINARY_PROFILE:-}"
+case "${PROFILE:-public}" in
+    public|standard|performance) ;;
+    *)
+        _err "LUMINARY_PROFILE='$PROFILE' is not one of: public, standard, performance."
+        _err "It would be written to backend/.env, where the backend rejects it and"
+        _err "re-sizes from host RAM -- so the installer and the app would disagree."
+        exit 1
+        ;;
+esac
 if [ -z "$PROFILE" ]; then
     _suggested="$(_default_profile)"
     if [ -t 0 ]; then
@@ -238,15 +253,23 @@ if [ -z "$CHAT_MODEL" ]; then
         # read figures. Everywhere else one model does both, which is what the
         # backend resolves to -- pulling anything else downloads a model that
         # never loads.
-        if [ "$PROFILE" = "performance" ]; then
+        if [ "$PROFILE" = "performance" ] && [ "$(_mem_gb)" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
             CHAT_MODEL="$LARGE_TEXT_MODEL"
-            [ -z "$VISION_MODEL" ] && VISION_MODEL="$PUBLIC_GENERALIST"
-            _info "Profile 'performance': $CHAT_MODEL for text, $VISION_MODEL for figures"
         else
             CHAT_MODEL="$DEFAULT_CHAT_MODEL"
         fi
     fi
 fi
+
+# Outside the block above on purpose. While it was nested inside
+# `if [ -z "$CHAT_MODEL" ]`, setting LUMINARY_CHAT_MODEL alone skipped it, and a
+# `performance` host with room for a reader pulled none -- figures then failed
+# quietly, which is the exact mode this profile exists to avoid.
+if [ -z "$VISION_MODEL" ] && [ "$OLLAMA_MAX_LOADED_MODELS" -gt 1 ] \
+   && [ "$CHAT_MODEL" != "$PUBLIC_GENERALIST" ]; then
+    VISION_MODEL="$PUBLIC_GENERALIST"
+fi
+_info "Profile '$PROFILE': $CHAT_MODEL for text${VISION_MODEL:+, $VISION_MODEL for figures}"
 
 # Persist the app-side knobs so the backend (which reads backend/.env) picks them
 # up. OLLAMA_NUM_PARALLEL goes in too, not just the server env: the backend

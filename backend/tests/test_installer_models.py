@@ -134,5 +134,236 @@ def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
     before the profile exists takes the wrong branch silently. The band block has
     to be hoisted above the model pull that reads it."""
     defined = ps1.index('$LumProfile = "performance"')
-    used = ps1.index('if ($LumProfile -eq "performance")')
+    # Matched on the variable rather than the whole condition: the test read the
+    # condition verbatim, so adding the RAM gate to it broke an ordering check
+    # that had nothing to do with the gate.
+    used = ps1.index('if ($LumProfile -eq "performance"')
     assert defined < used, "the profile block must be hoisted above the model pull"
+
+
+# --- every path that names a model, not just the two installers --------------
+
+_BOOTSTRAP = _SCRIPTS / "bootstrap.sh"
+_START = _SCRIPTS / "start.sh"
+_COMPOSE = _SCRIPTS.parent / "docker-compose.yml"
+
+# A model name written outside the registry is a second way to configure the
+# app, and the two disagree the moment either moves. `bootstrap.sh` pinned
+# `LITELLM_DEFAULT_MODEL=ollama/llama3.2` into the user's .env -- a hard override
+# that outlives every host-aware default the backend has -- and was never
+# covered here because this file only read the two `install.*` scripts.
+_LAUNCH_PATHS = (_BOOTSTRAP, _START, _COMPOSE)
+
+
+def test_no_launch_path_pulls_a_literal_model_name():
+    """Every pull goes through a variable the profile resolved.
+
+    A literal tag on a `ollama pull` line is a second decision about which model
+    the app runs, made where nothing can reconcile it with the registry: compose
+    pulled `llama3.2` while the backend resolved a generalist, so the sidecar
+    downloaded one model and the app asked for another.
+    """
+    known_bare = {model_id.split("/", 1)[-1].split(":", 1)[0] for model_id in REGISTRY}
+    # Anything that looks like a model tag, plus the names we have shipped before.
+    literal = re.compile(r"ollama pull\s+\"?([A-Za-z][A-Za-z0-9._:-]*)")
+
+    offenders = []
+    for path in _LAUNCH_PATHS:
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            for match in literal.finditer(line):
+                tag = match.group(1)
+                if tag.startswith("$") or "$" in tag:
+                    continue  # resolved from the profile, which is the point
+                if tag.split(":", 1)[0] in known_bare or tag == "llama3.2":
+                    offenders.append(f"{path.name}:{number} pulls literal {tag!r}")
+
+    assert not offenders, "\n".join(offenders)
+
+
+def test_bootstrap_resolves_its_model_from_the_profile():
+    """It must not fall back to a name: that name reaches the user's .env."""
+    text = _BOOTSTRAP.read_text()
+    assign = _assign(text, r'^CHAT_MODEL="\$\{LUMINARY_CHAT_MODEL:-(.*)\}"')
+    assert assign == "", (
+        f"bootstrap.sh defaults CHAT_MODEL to {assign!r}; it writes that into "
+        "LITELLM_DEFAULT_MODEL, pinning a model on every machine it installs on"
+    )
+    assert _assign(text, r'^PUBLIC_GENERALIST="(.*)"') == GENERALIST_PREFERENCE[0].split("/", 1)[-1]
+
+
+def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
+    """Two installers that band differently give the same laptop two setups."""
+    boot = _BOOTSTRAP.read_text()
+    sh_text = _SH.read_text()
+    for band in ("16", "24"):
+        assert re.search(rf'MEM_GB.*-lt {band}|MEM_GB.*-le {band}', boot), (
+            f"bootstrap.sh has no {band}GB band"
+        )
+    for source, name in ((boot, "bootstrap.sh"), (sh_text, "install.sh")):
+        assert "performance" in source and "standard" in source, f"{name} lost a profile"
+
+
+def test_start_sh_does_not_assert_a_model_name():
+    """A pre-flight warning that names the wrong model sends the user to pull it."""
+    text = _START.read_text()
+    assert not re.search(r'CHAT_MODEL="\$\{LUMINARY_CHAT_MODEL:-[a-z]', text), (
+        "start.sh hardcodes a model name in its warning"
+    )
+
+
+def test_compose_pulls_the_configured_model_without_the_provider_prefix():
+    """`ollama pull` rejects the `ollama/` prefix that LiteLLM requires."""
+    text = _COMPOSE.read_text()
+    assert "LITELLM_DEFAULT_MODEL" in text, "compose pulls a model nothing configures"
+    assert "#ollama/" in text, (
+        "compose passes the setting to `ollama pull` without stripping `ollama/`"
+    )
+
+
+def test_no_installer_writes_the_legacy_profile_alias():
+    """`public` is the installers' word; the backend's is `low`.
+
+    They collide on a different axis -- `LUMINARY_MODE=public` curates surfaces
+    and has nothing to do with memory -- so `public` survives only as a legacy
+    alias. Writing it into a fresh install makes every new machine depend on a
+    compatibility shim that exists for old ones.
+    """
+    from app.memory_profile import _LEGACY_ALIASES
+
+    for path in (_SH, _PS1, _BOOTSTRAP):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if "LUMINARY_MEMORY_PROFILE" not in line or line.strip().startswith("#"):
+                continue
+            for alias in _LEGACY_ALIASES:
+                assert f'"{alias}"' not in line and f"={alias}" not in line, (
+                    f"{path.name}:{number} writes the legacy profile name {alias!r}"
+                )
+
+
+def test_the_large_text_threshold_is_the_measured_feasibility_point():
+    """Recomputed from the registry, not trusted as a written-down number.
+
+    The installer banded `performance` at >24GB and pulled the 9.67GB text model
+    there, but the backend keeps its resident set to half of RAM and the pair is
+    12.88GB -- so 25GB downloads a model the app then refuses to load. 25 fails
+    and 26 fits; those two cases are what fixes this constant.
+    """
+    from app.model_registry import fits_together, profile_for
+
+    declared = int(_assign(_SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
+    pair = (profile_for("ollama/qwen2.5:14b-instruct"), profile_for("ollama/qwen3.5:4b"))
+    assert all(p is not None for p in pair), "the performance pair left the registry"
+
+    smallest = next(ram for ram in range(1, 257) if fits_together(pair, ram))
+    assert declared == smallest, (
+        f"install.sh pulls the large text model at {declared}GB but the pair "
+        f"first fits at {smallest}GB"
+    )
+    assert not fits_together(pair, declared - 1), "the case below the line must fail"
+
+
+def test_the_profile_comment_states_the_bands_the_code_uses():
+    """The only place a reader sees all three bands together.
+
+    It said `public (under 24GB), standard (24GB+)` for as long as the three-band
+    split existed -- a reader checking the code against the comment would have
+    concluded the code was wrong.
+    """
+    text = _SH.read_text()
+    banner = next(
+        (line for line in text.splitlines() if "public=" in line and "standard=" in line),
+        None,
+    )
+    assert banner, "the profile banner comment is gone"
+    for band in ("16GB", "24GB"):
+        assert band in banner, f"the banner does not mention {band}: {banner}"
+    assert "under 24GB" not in banner, "the banner still states the pre-split bands"
+
+
+def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
+    """The vision default must not sit inside `if [ -z "$CHAT_MODEL" ]`.
+
+    While it did, setting LUMINARY_CHAT_MODEL alone gave a multi-slot host no
+    vision model, and figures failed quietly -- the mode the profile exists to
+    prevent.
+    """
+    text = _SH.read_text()
+    chat_block_start = text.index('if [ -z "$CHAT_MODEL" ]; then')
+    chat_block_end = text.index('\nfi\n', chat_block_start)
+    vision_default = text.index('VISION_MODEL="$PUBLIC_GENERALIST"')
+    assert not (chat_block_start < vision_default < chat_block_end), (
+        "the vision default is nested inside the chat-model block again"
+    )
+
+
+def test_an_unknown_profile_is_refused_rather_than_written_to_env():
+    """The backend rejects it and re-sizes, so the two silently disagreed."""
+    text = _SH.read_text()
+    assert re.search(r"public\|standard\|performance\)\s*;;", text), (
+        "install.sh no longer validates LUMINARY_PROFILE against the known set"
+    )
+
+
+# --- the Windows installer must hold the same shape, not just the same strings --
+#
+# These four were all live in install.ps1 while this file passed 21/21 against
+# it. `test_install_ps1_pulls_the_performance_pair` asserts that the assignment
+# `$visionModel = $PublicGeneralist` is *present*; it cannot see that the
+# assignment sat inside `if (-not $chatModel)` and so never ran when the chat
+# model was pinned. Presence is not structure.
+
+
+def test_ps1_vision_default_is_not_nested_in_the_chat_model_block():
+    """Nested, pinning LUMINARY_CHAT_MODEL left a roomy host with no reader."""
+    text = _PS1.read_text()
+    block_start = text.index("if (-not $chatModel) {")
+    # The block ends at the first line that closes it at column 0.
+    block_end = text.index("\n}\n", block_start)
+    assignment = text.index("$visionModel = $PublicGeneralist")
+    assert not (block_start < assignment < block_end), (
+        "install.ps1 nests the vision default inside the chat-model block again"
+    )
+
+
+def test_ps1_gates_the_large_text_model_on_actual_ram():
+    """Keying on the profile alone pulled 9.67GB onto a machine that cannot load it.
+
+    `LUMINARY_PROFILE=performance` on an 8GB box is a supported override, so the
+    band cannot be the only condition.
+    """
+    text = _PS1.read_text()
+    declared = int(_assign(text, r"^\$LargeTextMinRamGB = (\d+)"))
+    sh_declared = int(_assign(_SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
+    assert declared == sh_declared, (
+        f"install.ps1 gates at {declared}GB and install.sh at {sh_declared}GB"
+    )
+    assert "$MemGB -ge $LargeTextMinRamGB" in text, (
+        "install.ps1 declares the threshold but does not test actual RAM against it"
+    )
+
+
+def test_ps1_refuses_an_unknown_profile():
+    """`switch` has a `default` arm, so an unknown value was taken silently and
+    written to backend/.env. PowerShell's `switch` is also case-insensitive, so
+    `Performance` installed a performance profile on Windows and exited 1 on
+    macOS -- the same input, two different products."""
+    text = _PS1.read_text()
+    assert "-cin @(" in text, (
+        "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
+    )
+    assert 'public", "standard", "performance"' in text
+
+
+def test_ps1_guards_the_vision_pull_on_ollama_being_present():
+    """The chat pull is guarded and the vision pull was not, so on the branch the
+    script explicitly tolerates -- ollama off the PATH -- it invoked a missing
+    command under `$ErrorActionPreference = "Stop"`."""
+    text = _PS1.read_text()
+    pull = text.index("ollama pull $visionModel")
+    guard = text.rindex('Test-CommandExists "ollama"', 0, pull)
+    condition = text.rindex("if (", 0, pull)
+    assert guard > condition - 200, (
+        "the vision pull is not guarded by a Test-CommandExists check"
+    )

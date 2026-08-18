@@ -20,7 +20,11 @@ DATA_DIR="${LUMINARY_DATA_DIR:-$HOME/.luminary}"
 PORT="${LUMINARY_PORT:-7820}"
 REPO="${LUMINARY_REPO:-nupsea/luminary}"
 VERSION="${LUMINARY_VERSION:-latest}"
-CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+# Empty by default: resolved from the sized profile in step 5, never a fixed
+# name. This wrote LITELLM_DEFAULT_MODEL=ollama/llama3.2 into the user's .env,
+# which is a hard pin that outlives every host-aware default the app has.
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-}"
+VISION_MODEL="${LUMINARY_VISION_MODEL:-}"
 PROFILE="${LUMINARY_PROFILE:-}"
 BOOT_TIMEOUT="${LUMINARY_BOOT_TIMEOUT:-300}"
 
@@ -245,20 +249,47 @@ OLLAMA_BIN_DIR="$(dirname "$OLLAMA_BIN")"
 # ---------------------------------------------------------------------------
 _step "Sizing for this machine"
 
-# Sized on memory: each slot costs a full KV cache, and below 24GB the second
-# competes with the 7B vision model. 'performance' is never auto-selected.
+# Sized on memory: each slot costs a full KV cache. The bands and the models
+# they select are the same three as install.sh, and test_installer_models.py
+# fails when either drifts from the registry.
+#   under 16GB  one model resident, so it must be one that also reads figures
+#   16-24GB     two slots, generalist for both roles
+#   over 24GB   the large text model, with the generalist kept for figures
+PUBLIC_GENERALIST="qwen3.5:4b"
+LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
+DEFAULT_CHAT_MODEL="qwen3.5:4b"
+
 MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 if [ -z "$PROFILE" ]; then
-    if [ "$MEM_GB" -lt 24 ]; then PROFILE="public"
-    else                          PROFILE="standard"
+    if   [ "$MEM_GB" -lt 16 ]; then PROFILE="public"
+    elif [ "$MEM_GB" -le 24 ]; then PROFILE="standard"
+    else                            PROFILE="performance"
     fi
 fi
 case "$PROFILE" in
-    public)      MAX_LOADED=1; NUM_PARALLEL=1; VISION_CONCURRENCY=1 ;;
-    performance) MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
-    *)           MAX_LOADED=2; NUM_PARALLEL=2; VISION_CONCURRENCY=2 ;;
+    public)
+        MAX_LOADED=1; NUM_PARALLEL=1; VISION_CONCURRENCY=1
+        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$PUBLIC_GENERALIST"
+        ;;
+    performance)
+        MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4
+        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$LARGE_TEXT_MODEL"
+        [ -z "$VISION_MODEL" ] && VISION_MODEL="$PUBLIC_GENERALIST"
+        ;;
+    *)
+        MAX_LOADED=2; NUM_PARALLEL=2; VISION_CONCURRENCY=2
+        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+        ;;
 esac
-_info "${MEM_GB}GB RAM -> '$PROFILE' profile"
+_info "${MEM_GB}GB RAM -> '$PROFILE' profile, $CHAT_MODEL${VISION_MODEL:+ + $VISION_MODEL}"
+
+# The backend calls the small profile `low`; `public` is its name here and on
+# the install.sh side, and collides with LUMINARY_MODE=public. Write the
+# canonical name so a fresh install does not depend on a legacy alias.
+case "$PROFILE" in
+    public) BACKEND_PROFILE="low" ;;
+    *)      BACKEND_PROFILE="$PROFILE" ;;
+esac
 
 # Ollama.app is launched by launchd and does not inherit this shell's env, so
 # the knobs go into the GUI session before it starts. Set BEFORE launching.
@@ -296,6 +327,18 @@ if [ -n "$SRC" ]; then
         -e "s|@@VISION_CONCURRENCY@@|$VISION_CONCURRENCY|g" \
         -e "s|@@OLLAMA_NUM_PARALLEL@@|$NUM_PARALLEL|g" \
         "$SRC" > "$ENV_FILE"
+    # The template ships the knobs commented out so a human can read it. The
+    # models are appended rather than templated because this installer *pulled*
+    # specific ones: leaving them unset lets the app resolve a model that is not
+    # on disk, which fails at the first question instead of at install time.
+    cat >> "$ENV_FILE" <<EOF
+
+# Written by bootstrap.sh from the sized profile. Edit freely -- these are
+# ordinary settings, and the app follows whatever is here.
+LITELLM_DEFAULT_MODEL=ollama/$CHAT_MODEL
+VISION_MODEL=ollama/${VISION_MODEL:-$CHAT_MODEL}
+LUMINARY_MEMORY_PROFILE=$BACKEND_PROFILE
+EOF
 else
     cat > "$ENV_FILE" <<EOF
 DATA_DIR=$DATA_DIR
@@ -303,6 +346,8 @@ LUMINARY_MODE=public
 LOG_LEVEL=INFO
 OLLAMA_URL=http://127.0.0.1:11434
 LITELLM_DEFAULT_MODEL=ollama/$CHAT_MODEL
+VISION_MODEL=ollama/${VISION_MODEL:-$CHAT_MODEL}
+LUMINARY_MEMORY_PROFILE=$BACKEND_PROFILE
 ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY
 OLLAMA_NUM_PARALLEL=$NUM_PARALLEL
 GLINER_ENABLED=true
@@ -314,13 +359,16 @@ _info "Wrote $ENV_FILE"
 # ---------------------------------------------------------------------------
 # 7. Chat model
 # ---------------------------------------------------------------------------
-_step "Downloading the language model (~2GB)"
+_step "Downloading the language model${VISION_MODEL:+s}"
 
-if "$OLLAMA_BIN" list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$CHAT_MODEL\(:latest\)\?"; then
-    _info "$CHAT_MODEL already present."
-else
-    "$OLLAMA_BIN" pull "$CHAT_MODEL" || _die "Failed to pull $CHAT_MODEL."
-fi
+for model in "$CHAT_MODEL" "$VISION_MODEL"; do
+    [ -z "$model" ] && continue
+    if "$OLLAMA_BIN" list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$model\(:latest\)\?"; then
+        _info "$model already present."
+    else
+        "$OLLAMA_BIN" pull "$model" || _die "Failed to pull $model."
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # 8. Warm the ML models
