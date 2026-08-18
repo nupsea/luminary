@@ -61,6 +61,16 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
     # from a shipped run's rather than a newer one.
     bare, dropped = withheld()
 
+    from app.memory_profile import (  # noqa: PLC0415
+        active_profile,
+        host_ram_gb,
+        max_resident_models,
+        profile_is_explicit,
+    )
+    from app.services.model_router import resident_models  # noqa: PLC0415
+
+    profile = active_profile()
+
     return {
         "backend_version": app_version(),
         "embedding_model": EMBEDDING_MODEL,
@@ -75,8 +85,23 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         "background_model": background_model,
         "local_chat_model": llm["local_chat_model"],
         "generation_model": generation_model,
-        "vision_model": llm["vision_model"],
+        # Resolved, not configured. On a single-resident profile the vision role
+        # falls back to the model already answering another role, so reporting the
+        # configured id would name a model the run never loaded -- the exact class
+        # of defect E5 exists to prevent, in the block that exists to prevent it.
+        "vision_model": resolve("vision").model,
         "prompt_arm": "bare" if bare else "shipped",
         "prompt_accommodations_dropped": sorted(dropped),
+        # Which machine class produced the run. Stage 6's exit gate is "all three
+        # gates on all three profiles", and without this a run on the low profile
+        # is indistinguishable in the history from a run on a 32GB desktop -- the
+        # same defect E5 fixed for models, on the axis that decides which models
+        # are even resolvable. `max_resident` is the constraint that makes a
+        # single-model role map necessary rather than merely tidy.
+        "memory_profile": profile,
+        "memory_profile_explicit": profile_is_explicit(),
+        "max_resident_models": max_resident_models(profile),
+        "host_ram_gb": host_ram_gb(),
+        "resident_models": sorted(resident_models()),
         "library": {"documents": documents, "chunks": chunks},
     }

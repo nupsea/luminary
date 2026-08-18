@@ -82,6 +82,19 @@ class ModelProfile:
 # window: llama3.2 and phi4-mini advertise 131072 and qwen3.5 262144, but a slot
 # costs a full window of KV cache (I-31) and one value is in force per loaded
 # model (I-27). The advertised figure is a capability, never a budget.
+#
+# 8192 for every entry, and that is now a measurement rather than an inheritance.
+# `context_window_for` made per-model windows possible, so the saving was measured
+# on qwen3.5:4b (Ollama /api/ps, reproducible to 0 MB across repeats):
+#
+#   num_ctx 8192 -> 3.21GB   num_ctx 6144 -> 3.15GB   num_ctx 4096 -> 3.00GB
+#
+# Shrinking to 6144 saves 60MB -- 0.7% of an 8GB machine -- and cuts the flashcard
+# path's headroom from ~3,800 tokens to ~1,700. The only saving worth having
+# (210MB) is at 4096, which does not hold the largest prompt at all: ~3,177 tokens
+# of prompt plus ~1,200 of output against a 4,096 window, and Ollama truncates
+# rather than erroring. So no model gets a smaller window, and
+# `tests/test_window_fits_the_largest_prompt.py` fails any entry that tries.
 MEASURED_AT_NUM_CTX = 8192
 
 REGISTRY: dict[str, ModelProfile] = {

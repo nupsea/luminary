@@ -1143,6 +1143,41 @@ carrying the same two refusals as the runner: columns measured against different
 labelled rather than ranked, and a metric identical across models is flagged `did not move` rather
 than read as the models being equivalent.
 
+#### P6 on the low profile, 2026-08-18: separated, and it does not reproduce the earlier ranking
+
+`LUMINARY_MEMORY_PROFILE=low` in force, so all four roles resolve to one model. Candidates are the
+two generalists — the only models that can fill every role on that profile. Structural tier,
+judge skipped, 35-row flashcard golden + 29-row intent golden.
+
+| | qwen3.5:4b | gemma3:4b |
+|---|---|---|
+| intent.routing_accuracy | **0.8966** | 0.8621 |
+| flashcards.generation_rate | 0.7143 | **0.9143** |
+| flashcards.cards_generated | 75 | **96** |
+| flashcards.card_reject_rate | 0.3125 | **0.2826** |
+| flashcards.card_reject_deictic | **4** | 11 |
+| flashcards.card_reject_ungrounded | 31 | 28 |
+| flashcards.atomicity / first_pass_rate | 1.0000 / 1.0000 | 1.0000 / 1.0000 |
+
+**`qwen3.5:4b` does not lead every gating metric here, and the 2026-08-16 claim that it did no
+longer holds.** `gemma3:4b` delivered more cards and had the lower overall reject rate. What
+survives for `qwen3.5:4b`: routing, deictic instruction-following (4 rejections against 11, the
+same 3x gap seen in August), figure accuracy, and 0.4GB less resident.
+
+The shape of the comparison also changed under both models: `card_reject_ungrounded` (31 and 28)
+did not exist in August and now dominates rejections, so reject rates across the two runs are not
+comparable. Single runs on both sides.
+
+`memory_profile`, `max_resident_models`, `host_ram_gb` and the resolved `resident_models` are now
+in every run's environment block — without them a low-profile run was indistinguishable in the
+history from one on a 32GB desktop, which is E5's defect on the axis that decides which models are
+resolvable at all. `vision_model` reports the *resolved* model rather than the configured one, for
+the same reason.
+
+**What this run is not.** Setting the profile changes the role map, not the machine. The structural
+tier is portable — it measures what a model produces — but P0 footprint and P5 latency under the
+low profile still need 8GB hardware.
+
 #### The low profile had no feasible assignment, and the cause was two wrong flags
 
 Measured 2026-08-18, by enumerating every assignment of a registry model to the four roles under
@@ -1379,9 +1414,21 @@ Still open in this phase, and none of it is a detail:
 
   Only *defaults* are narrowed. An explicit choice in Settings is honoured and reported as
   oversized by `residency_report()`, and a host with room keeps a text-only default and a dedicated
-  reader. What is still open: the profile does not pick a smaller *window* (I-27's value half
-  exists, no model is measured at anything but 8192), and it does not choose between two models
-  that both fit.
+  reader.
+
+  **Room is the residency limit, not host RAM** — gating on RAM alone left a 36GB machine running
+  the low profile resolving two models against a limit of one, which is exactly what the bundled
+  app does when it sizes itself down. Found by running the profile rather than by reading the code.
+
+  **A smaller window is measured and rejected.** `context_window_for` made per-model windows
+  possible, so the saving was measured on `qwen3.5:4b` (`/api/ps`, reproducible to 0MB across
+  repeats): 8192 → 3.21GB, 6144 → 3.15GB, 4096 → 3.00GB. Shrinking to 6144 buys 60MB, 0.7% of an
+  8GB machine, and cuts flashcard headroom from ~3,800 tokens to ~1,700. The only saving worth
+  having is at 4096, which does not hold the largest prompt (~3,177 prompt + ~1,200 output) and
+  truncates instead of erroring. The mechanism stays; no model gets a different window, and
+  `tests/test_window_fits_the_largest_prompt.py` fails any entry that tries.
+
+  Still open: the profile does not choose between two models that both fit.
 - **Runtime geometry is still partly global.** The context window is no longer: I-27's value half
   shipped 2026-08-18 as `model_registry.context_window_for`, which reads the model's
   `usable_context` and falls back to `OLLAMA_NUM_CTX` only for an unregistered model. Every entry

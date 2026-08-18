@@ -598,6 +598,13 @@ class EvalEnvironmentResponse(BaseModel):
     # any accommodations withheld one at a time for the necessity check.
     prompt_arm: str = "shipped"
     prompt_accommodations_dropped: list[str] = []
+    # The machine class the run measured. Stage 6 gates on all three profiles,
+    # which is unverifiable if a stored run does not say which one it was.
+    memory_profile: str = "unknown"
+    memory_profile_explicit: bool = False
+    max_resident_models: int = 0
+    host_ram_gb: int = 0
+    resident_models: list[str] = []
     library: EvalLibraryFingerprint
 
 

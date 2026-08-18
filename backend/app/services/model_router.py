@@ -74,9 +74,19 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
         # configured one is kept -- quietly retargeting vision on a 32GB laptop
         # because a chat model happens to also have eyes would be this code
         # overruling a deployment decision nobody asked it to revisit.
+        #
+        # "Room" is the residency limit, not host RAM. Gating on RAM alone left a
+        # 36GB machine running the low profile resolving two models against a
+        # limit of one: the reader fitted the host and the profile still forbade
+        # it. That is the case the bundled app hits when it sizes itself down, and
+        # the case anyone hits by choosing the profile deliberately.
+        from app.memory_profile import max_resident_models  # noqa: PLC0415
+
         configured = settings_service.get_vision_model()
         profile = profile_for(configured)
-        if profile is None or fits_host(profile):
+        fits = profile is None or fits_host(profile)
+        room_for_two = max_resident_models() > 1
+        if fits and room_for_two:
             return ModelChoice(role, configured, None, profile)
         model = _shared_vision_model() or configured
         return ModelChoice(role, model, None, profile_for(model))
