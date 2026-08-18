@@ -252,3 +252,85 @@ def test_the_gate_records_the_verdict_on_the_card_it_keeps():
         source_text=_PASSAGE,
     )
     assert [c["grounding"] for c in kept] == [GROUNDING_VERIFIED]
+
+
+@pytest.mark.asyncio
+async def test_the_factuality_audit_refuses_without_a_configured_checker(test_db):
+    """No checker means no verdict, not a passing one.
+
+    There is deliberately no small-model default: measured on 59 live cards,
+    phi4-mini called 54 supported and granite3.2:8b 53, agreeing with a 14B on
+    the pass/fail call ~0.41. Silently falling back to one would certify exactly
+    what the audit was added to catch.
+    """
+    doc_id = await _seed(test_db)
+    async with test_db() as session:
+        session.add(_card(doc_id, "she undid her work each night"))
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post("/flashcards/factuality/audit", json={"limit": 5})
+
+    assert resp.status_code >= 400, "an unconfigured checker must not report a pass"
+    assert "FLASHCARD_FACTUALITY_MODEL" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_the_factuality_audit_skips_cards_whose_passage_is_gone(test_db, monkeypatch):
+    """A card with no recoverable passage is skipped and counted as skipped.
+
+    Judged against an approximation instead, a 60-card sample scored 0.3333 and
+    the number measured the reconstruction rather than the cards.
+    """
+    from app.services import flashcard_factuality as fact
+
+    monkeypatch.setattr(fact, "factuality_model", lambda: "ollama/some-checker")
+    monkeypatch.setattr(fact, "effective_generation_model", lambda: "ollama/other-model")
+
+    doc_id = await _seed(test_db)
+    async with test_db() as session:
+        # `source_chunk_ids` names chunks that no longer exist, so nothing can be
+        # rebuilt -- the state a re-ingest leaves behind.
+        session.add(
+            _card(doc_id, "she undid her work each night", source_chunk_ids=["gone-1"])
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post("/flashcards/factuality/audit", json={"limit": 5})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["judged"] == 0
+    assert body["skipped_no_passage"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_factuality_audit_ignores_cards_with_no_recorded_passage(test_db, monkeypatch):
+    """Only cards carrying `source_chunk_ids` are eligible at all.
+
+    Every card written before that column is permanently out of scope, which is a
+    limitation to state rather than paper over by falling back to the document.
+    """
+    from app.services import flashcard_factuality as fact
+
+    monkeypatch.setattr(fact, "factuality_model", lambda: "ollama/some-checker")
+    monkeypatch.setattr(fact, "effective_generation_model", lambda: "ollama/other-model")
+
+    doc_id = await _seed(test_db)
+    async with test_db() as session:
+        session.add(_card(doc_id, "she undid her work each night"))  # no source_chunk_ids
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post("/flashcards/factuality/audit", json={"limit": 5})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "judged": 0,
+        "skipped_no_passage": 0,
+        "remaining": 0,
+        "supported": 0,
+        "unsupported": 0,
+        "unverifiable": 0,
+    }
