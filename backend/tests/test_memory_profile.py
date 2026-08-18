@@ -51,14 +51,21 @@ def test_a_small_machine_gets_the_low_profile():
 
 
 def test_a_large_machine_gets_standard():
+    """16-24GB: two runners may load, but only one model actually fits."""
+    assert memory_profile.profile_for_ram(16) == "standard"
     assert memory_profile.profile_for_ram(24) == "standard"
-    assert memory_profile.profile_for_ram(64) == "standard"
 
 
-def test_performance_is_never_chosen_automatically():
-    """It raises parallelism past what a single GPU serves well (I-31), so it
-    stays opt-in however large the machine."""
-    assert memory_profile.profile_for_ram(512) == "standard"
+def test_performance_is_reachable_above_24gb():
+    """It was unreachable automatically, on the grounds that it raises parallelism
+    past what one GPU serves well (I-31). Above 24GB the memory it unlocks is
+    real -- the 9.67GB text model and a reader fit together -- so the band is
+    chosen for its model map. The slot count riding along is still the part I-31
+    warns about and is worth revisiting on its own.
+    """
+    assert memory_profile.profile_for_ram(24) == "standard"
+    assert memory_profile.profile_for_ram(25) == "performance"
+    assert memory_profile.profile_for_ram(64) == "performance"
 
 
 def test_an_unreadable_ram_figure_is_treated_as_a_small_machine():

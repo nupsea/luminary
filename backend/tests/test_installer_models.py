@@ -77,110 +77,62 @@ def test_the_generalist_fits_the_class_the_public_profile_targets(sh):
     )
 
 
-def test_install_sh_pulls_the_reader_rather_than_suggesting_it(sh):
-    """The banner used to recommend a 6.81GB model unconditionally.
-
-    On a host keeping one model loaded that advice is actively harmful -- the
-    second model evicts the one answering questions. And on a host with room the
-    backend resolves vision to it whether or not it is on disk, so leaving it a
-    suggestion put the install and the backend in disagreement. It is pulled where
-    it fits and not mentioned where it does not.
-    """
-    assert 'DEDICATED_READER="qwen2.5vl:7b"' in sh
-    assert 'VISION_MODEL="$DEDICATED_READER"' in sh, "the reader must be pulled, not suggested"
+def test_install_sh_pulls_the_performance_pair(sh):
+    """`performance` is the only band with room for a text model that cannot read
+    figures, so it is the only one that pulls two. Everywhere else one model does
+    both -- which is what the backend resolves to, so pulling anything else
+    downloads a model that never loads."""
+    assert 'LARGE_TEXT_MODEL="qwen2.5:14b-instruct"' in sh
+    assert 'CHAT_MODEL="$LARGE_TEXT_MODEL"' in sh
+    assert 'VISION_MODEL="$PUBLIC_GENERALIST"' in sh, (
+        "the reader on `performance` is the generalist: the large text model is "
+        "not multimodal, so something else has to read figures"
+    )
     assert "ollama pull qwen2.5vl:7b" not in sh, (
-        "a closing banner telling the user to pull a second model is the advice "
-        "that breaks a single-model host"
+        "a banner telling the user to pull a second model is the advice that "
+        "breaks a single-model host"
     )
 
 
-def test_install_ps1_pulls_the_reader_rather_than_suggesting_it(ps1):
-    assert '$DedicatedReader = "qwen2.5vl:7b"' in ps1
-    assert "$visionModel = $DedicatedReader" in ps1
-    assert "ollama pull qwen2.5vl:7b" not in ps1
+def test_install_ps1_pulls_the_performance_pair(ps1):
+    assert '$LargeTextModel = "qwen2.5:14b-instruct"' in ps1
+    assert "$chatModel = $LargeTextModel" in ps1
+    assert "$visionModel = $PublicGeneralist" in ps1
 
 
-def test_the_resolved_vision_model_is_not_re_read_from_the_environment(ps1):
-    """It was, and the re-read discarded the profile decision: `$visionModel` was
-    computed from RAM and then overwritten with an unset environment variable, so
-    the pull never ran on a machine that had not set it by hand."""
-    assert ps1.count("$visionModel = $env:LUMINARY_VISION_MODEL") == 1
-    assert ps1.index("$visionModel = $env:LUMINARY_VISION_MODEL") < ps1.index(
-        "Pulling vision model"
+def test_the_large_text_model_is_the_registry_top_rank(sh):
+    """The installer must pull what the backend will resolve to on that band."""
+    from app.model_registry import TEXT_PREFERENCE
+
+    declared = f"ollama/{_assign(sh, r'^LARGE_TEXT_MODEL=\"([^\"]+)\"')}"
+    assert declared == TEXT_PREFERENCE[0]
+
+
+def test_the_performance_pair_fits_the_band_it_targets(sh):
+    """`performance` starts above 24GB, so 32GB is the binding case."""
+    from app.model_registry import GENERALIST_PREFERENCE, fits_together
+
+    text = REGISTRY[f"ollama/{_assign(sh, r'^LARGE_TEXT_MODEL=\"([^\"]+)\"')}"]
+    reader = REGISTRY[GENERALIST_PREFERENCE[0]]
+    assert fits_together((text, reader), 32), (
+        f"{text.resident_gb + reader.resident_gb:.2f}GB does not fit a 32GB host "
+        f"under the half-the-machine budget"
     )
 
 
-class TestTheProfileReachesTheBackend:
-    """The installer's profile choice must be written where the backend reads it.
-
-    It wrote `OLLAMA_NUM_PARALLEL` and `ENRICHMENT_VISION_CONCURRENCY` but not the
-    profile, so the backend sized its own from host RAM. Choose `public` on a 32GB
-    machine and the two disagree: the installer pulls one generalist while the
-    backend resolves chat and vision to two models that were never downloaded.
-    """
-
-    def test_install_sh_persists_it(self, sh):
-        assert "_upsert_env LUMINARY_MEMORY_PROFILE" in sh
-
-    def test_install_ps1_persists_it(self, ps1):
-        assert 'Set-EnvLine $EnvLines "LUMINARY_MEMORY_PROFILE"' in ps1
-
-    def test_both_translate_public_to_the_canonical_name(self, sh, ps1):
-        """`public` collides with LUMINARY_MODE=public, an unrelated axis. `low` is
-        the name; the alias is read for .env files that predate it."""
-        from app.memory_profile import _LEGACY_ALIASES, PROFILES
-
-        assert _LEGACY_ALIASES.get("public") == "low"
-        assert "low" in PROFILES
-        assert 'public) _upsert_env LUMINARY_MEMORY_PROFILE "low"' in sh
-        assert 'if ($LumProfile -eq "public") { "low" }' in ps1
-
-    def test_every_name_the_installer_can_write_is_one_the_backend_knows(self, sh):
-        from app.memory_profile import _LEGACY_ALIASES, PROFILES
-
-        literals = set(re.findall(r'_upsert_env LUMINARY_MEMORY_PROFILE "([^"$]+)"', sh))
-        # The `*)` branch passes $PROFILE through, and the prompt offers exactly
-        # these three -- `public` is caught by the branch above it.
-        written = literals | {"standard", "performance"}
-        assert '*)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE"' in sh, (
-            "the fallthrough must still write the profile, not skip it"
-        )
-        unknown = {w for w in written if _LEGACY_ALIASES.get(w, w) not in PROFILES}
-        assert not unknown, f"the backend would size from RAM instead for: {unknown}"
-
-
-def test_the_reader_threshold_is_derived_from_the_registry(sh):
-    """`READER_MIN_RAM_GB` must be the RAM at which the backend will actually load
-    both models. Below it the installer would download 6GB for a model that never
-    runs; above it the backend resolves vision to a model that was never pulled.
-    """
-    from app.model_registry import (
-        _RESIDENT_SET_FRACTION,
-        GENERALIST_PREFERENCE,
-        VISION_PREFERENCE,
-        fits_together,
-    )
-
-    declared = int(_assign(sh, r"^READER_MIN_RAM_GB=(\d+)"))
-    text = REGISTRY[GENERALIST_PREFERENCE[0]]
-    reader = REGISTRY[
-        next(v for v in VISION_PREFERENCE if v not in GENERALIST_PREFERENCE)
-    ]
-
-    assert fits_together((text, reader), declared), (
-        f"the installer pulls the reader at {declared}GB, where the backend would "
-        f"refuse to load both: {text.resident_gb + reader.resident_gb:.2f}GB against a "
-        f"budget of {declared * _RESIDENT_SET_FRACTION:.2f}GB"
-    )
-    assert not fits_together((text, reader), declared - 8), (
-        f"{declared}GB is higher than it needs to be; the tier below also fits"
-    )
+def test_the_bands_agree_across_platforms(sh, ps1):
+    """Three bands, two scripts, one boundary set."""
+    assert '[ "$_gb" -lt 16 ]; then echo "public"' in sh
+    assert '[ "$_gb" -le 24 ]; then echo "standard"' in sh
+    assert 'echo "performance"' in sh
+    assert '$MemGB -gt 24' in ps1
+    assert '$MemGB -ge 16' in ps1
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
-    """PowerShell compares an undefined variable as 0, so `$MaxLoaded -le 1` is
-    True before `$MaxLoaded` exists -- which would silently pick the
-    single-model default on every profile, including a 32GB desktop."""
-    defined = ps1.index('"performance" { $MaxLoaded = 2')
-    used = ps1.index("if ($MaxLoaded -le 1)")
+    """PowerShell compares an undefined variable as 0, so a profile test evaluated
+    before the profile exists takes the wrong branch silently. The band block has
+    to be hoisted above the model pull that reads it."""
+    defined = ps1.index('$LumProfile = "performance"')
+    used = ps1.index('if ($LumProfile -eq "performance")')
     assert defined < used, "the profile block must be hoisted above the model pull"

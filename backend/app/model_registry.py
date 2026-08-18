@@ -387,13 +387,36 @@ def default_chat_model() -> str:
         return configured  # unregistered: nothing measured to narrow it with
 
     single_resident = max_resident_models() <= 1
-    if fits_host(profile) and not (single_resident and not profile.multimodal):
-        return configured
+    if single_resident:
+        # One model has to do everything, so it has to be able to read a figure.
+        if fits_host(profile) and profile.multimodal:
+            return configured
+        candidates = generalist_candidates()
+        return candidates[0].id if candidates else configured
 
-    candidates = generalist_candidates() if single_resident else [
-        p for p in REGISTRY.values() if fits_host(p)
-    ]
-    return candidates[0].id if candidates else configured
+    # Room for two. On a host large enough to hold the strongest text model
+    # *alongside* a reader, use it -- that is what the extra memory is for, and
+    # the shipped default is sized for the machine that cannot. The pair is
+    # chosen together (`recommended_assignment`) because the strongest text model
+    # is not multimodal: picking it alone can leave vision with nothing that fits.
+    recommended = recommended_assignment()
+    if recommended is not None:
+        text_id, _ = recommended
+        if _text_rank(text_id) < _text_rank(configured):
+            return text_id
+    if fits_host(profile):
+        return configured
+    fitting = [p for p in REGISTRY.values() if fits_host(p)]
+    return fitting[0].id if fitting else configured
+
+
+def _text_rank(model_id: str) -> int:
+    """Where a model sits in the measured text order; unranked models sort last."""
+    return (
+        TEXT_PREFERENCE.index(model_id)
+        if model_id in TEXT_PREFERENCE
+        else len(TEXT_PREFERENCE)
+    )
 
 
 # Vision quality is measured, not inferred from the capability list, and it does

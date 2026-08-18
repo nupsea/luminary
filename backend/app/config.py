@@ -167,7 +167,16 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
-    VISION_MODEL: str = "ollama/qwen2.5vl:7b"
+    # qwen3.5:4b since 2026-08-18. It read two real library figures correctly
+    # where the 6.81GB qwen2.5vl:7b invented mnemonic expansions on one, and it
+    # costs 3.21GB resident with an image loaded -- the same as its text
+    # footprint, so on a single-model host vision is free. The dedicated reader
+    # stays selectable in Settings and is honoured when chosen.
+    #
+    # n=2 figures. Enough to stop paying 6.81GB for a second model by default;
+    # not a finding that the specialist is worse. A larger figure sample is the
+    # measurement that would settle it either way.
+    VISION_MODEL: str = "ollama/qwen3.5:4b"
     # How long the vision runner stays resident after its last image, overriding
     # OLLAMA_KEEP_ALIVE for this path only. The vision model is the largest thing
     # Luminary loads (~6GB for a 7B VLM) and it is used in bursts: a document's

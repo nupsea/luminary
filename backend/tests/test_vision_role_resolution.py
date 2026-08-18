@@ -245,18 +245,32 @@ class TestOneModelServesEveryRole:
         )
         assert model_router.resolve("chat").model == "ollama/qwen2.5:14b-instruct"
 
-    def test_a_host_with_room_keeps_a_text_only_default(self, monkeypatch):
-        """Narrowing to a multimodal generalist is a remedy for a single-resident
-        host, not a general preference."""
+    def test_a_host_with_room_upgrades_the_text_model(self, monkeypatch):
+        """The shipped default is sized for the machine that cannot hold two.
+
+        Above 24GB the extra memory is there to be used: the strongest measured
+        text model plus a reader fits, and leaving the small default in place
+        would spend the band on nothing.
+        """
         from app import memory_profile
+        from app.model_registry import TEXT_PREFERENCE
 
         monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
-        monkeypatch.setattr(memory_profile, "max_resident_models", lambda profile=None: 2)
         monkeypatch.setattr(
             "app.model_registry.get_settings",
-            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/llama3.2"})(),
+            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b"})(),
         )
-        assert default_chat_model() == "ollama/llama3.2"
+        assert default_chat_model() == TEXT_PREFERENCE[0]
+
+    def test_a_host_without_room_keeps_the_small_default(self, monkeypatch):
+        from app import memory_profile
+
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
+        monkeypatch.setattr(
+            "app.model_registry.get_settings",
+            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b"})(),
+        )
+        assert default_chat_model() == "ollama/qwen3.5:4b"
 
 
 def test_max_resident_never_promises_more_than_one_on_the_low_profile():

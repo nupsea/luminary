@@ -48,6 +48,11 @@ _LEGACY_ALIASES = {"public": "low"}
 # larger profile buys at this size is parallelism, not a second model.
 _STANDARD_MIN_RAM_GB = 16
 
+# Above this, not at it: a 24GB machine stays `standard`. The 9.67GB text model
+# plus the 6.81GB reader is 16.48GB, which is over half of 24GB and under half of
+# 32GB, so 24GB is the last size that runs the small text model.
+_PERFORMANCE_MIN_RAM_GB = 24
+
 # How many models may stay resident at once. Mirrors OLLAMA_MAX_LOADED_MODELS as
 # the installer sets it; each loaded model gets its own runner and its own KV
 # cache (I-31), so this is a memory bound, not a concurrency one.
@@ -56,7 +61,16 @@ MAX_RESIDENT: dict[MemoryProfile, int] = {"low": 1, "standard": 2, "performance"
 # What a host must have before a profile is a sensible default for it. Used to
 # report a mismatch, never to refuse to start: someone who sets a profile by
 # hand has a reason, and a refusing backend is worse than a warning.
-PROFILE_MIN_RAM_GB: dict[MemoryProfile, int] = {"low": 0, "standard": 24, "performance": 32}
+PROFILE_MIN_RAM_GB: dict[MemoryProfile, int] = {
+    "low": 0,
+    # Tracks `_STANDARD_MIN_RAM_GB`. Left at 24 when that moved to 16, which
+    # made `profile_suits_host` report every auto-assigned 16GB machine as
+    # running a profile larger than its hardware.
+    "standard": _STANDARD_MIN_RAM_GB,
+    # Two models AND wider serving, and where the strongest text model and a
+    # reader fit together under the half-the-machine budget.
+    "performance": _PERFORMANCE_MIN_RAM_GB,
+}
 
 
 @functools.lru_cache(maxsize=1)
@@ -78,9 +92,19 @@ def host_ram_gb() -> int:
 def profile_for_ram(ram_gb: int) -> MemoryProfile:
     """The profile a host of this size gets by default.
 
-    `performance` is never chosen automatically — it raises parallelism past
-    what a single GPU serves well, so it stays opt-in (I-31).
+    Three bands since 2026-08-18: below 16GB one model, 16-24GB two models with
+    the small text model, above 24GB two models with the large one.
+
+    `performance` used to be unreachable automatically, on the grounds that it
+    raises parallelism past what a single GPU serves well (I-31). It is reachable
+    now because above 24GB the memory it unlocks is real -- the 9.67GB text model
+    and a reader fit together -- but the parallelism half of that profile is still
+    the part I-31 warns about: each slot costs a full window of KV cache and buys
+    nothing past the runtime's serving width. What the band is for is the model
+    map; the slot count rides along and is worth revisiting separately.
     """
+    if ram_gb > _PERFORMANCE_MIN_RAM_GB:
+        return "performance"
     return "standard" if ram_gb >= _STANDARD_MIN_RAM_GB else "low"
 
 

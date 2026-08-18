@@ -28,13 +28,9 @@ PUBLIC_GENERALIST="qwen3.5:4b"
 # optional before, which put the install and the backend in disagreement: the
 # backend resolves vision to this on a host with room whether or not it is on
 # disk, and figure analysis then fails quietly.
-DEDICATED_READER="qwen2.5vl:7b"
-# Below this the backend will not load both at once, so pulling the reader is a
-# 6GB download for a model that never runs. Derived, not chosen: the pair is
-# 3.21 + 6.81 = 10.02GB and a resident set takes at most half the machine, so
-# 10.02 x 2 = 20.04 rounded to the next tier. `tests/test_installer_models.py`
-# recomputes it from the registry and fails if the two drift.
-READER_MIN_RAM_GB=24
+# The strongest text model, pulled only on `performance` -- 9.67GB resident, and
+# it does not read figures, so it is always a second model alongside the reader.
+LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
 # Used where two models can be resident. Same id as the generalist today: the
 # structural matrix put it ahead of llama3.2 on every metric it measured, and
 # llama3.2 held the default only on an HHEM comparison this repo ruled
@@ -198,7 +194,8 @@ _default_profile() {
     _gb="$(_mem_gb)"
     if   [ "$_gb" -eq 0 ];  then echo "public"      # unknown: assume small
     elif [ "$_gb" -lt 16 ]; then echo "public"
-    else                         echo "standard"
+    elif [ "$_gb" -le 24 ]; then echo "standard"
+    else                         echo "performance"
     fi
 }
 
@@ -206,7 +203,7 @@ PROFILE="${LUMINARY_PROFILE:-}"
 if [ -z "$PROFILE" ]; then
     _suggested="$(_default_profile)"
     if [ -t 0 ]; then
-        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/under 16GB  [2] standard/16GB+  [3] performance  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
+        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/under 16GB  [2] standard/16-24GB  [3] performance/over 24GB  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
         read -r _p || _p=""
         case "$_p" in
             1|public)      PROFILE="public" ;;
@@ -237,11 +234,16 @@ if [ -z "$CHAT_MODEL" ]; then
         CHAT_MODEL="$PUBLIC_GENERALIST"
         _info "Profile '$PROFILE' keeps one model loaded: using $CHAT_MODEL for chat AND figures"
     else
-        CHAT_MODEL="$DEFAULT_CHAT_MODEL"
-        # Room for two AND enough RAM to hold both, which is what the backend
-        # checks before it resolves vision to a second model.
-        if [ -z "$VISION_MODEL" ] && [ "$(_mem_gb)" -ge "$READER_MIN_RAM_GB" ]; then
-            VISION_MODEL="$DEDICATED_READER"
+        # `performance` is the only band with room for a text model that cannot
+        # read figures. Everywhere else one model does both, which is what the
+        # backend resolves to -- pulling anything else downloads a model that
+        # never loads.
+        if [ "$PROFILE" = "performance" ]; then
+            CHAT_MODEL="$LARGE_TEXT_MODEL"
+            [ -z "$VISION_MODEL" ] && VISION_MODEL="$PUBLIC_GENERALIST"
+            _info "Profile 'performance': $CHAT_MODEL for text, $VISION_MODEL for figures"
+        else
+            CHAT_MODEL="$DEFAULT_CHAT_MODEL"
         fi
     fi
 fi

@@ -38,6 +38,7 @@ from app.model_registry import (
     fits_host,
     fits_together,
     profile_for,
+    vision_candidates,
 )
 from app.services import settings_service
 
@@ -102,7 +103,7 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
         )
         if fits and room_for_two and together:
             return ModelChoice(role, configured, None, profile)
-        model = _shared_vision_model() or configured
+        model = _shared_vision_model() or _reader_that_fits(text_profile) or configured
         return ModelChoice(role, model, None, profile_for(model))
 
     if role == "generation":
@@ -144,6 +145,23 @@ def _shared_vision_model() -> str | None:
         profile = profile_for(model)
         if profile is not None and profile.multimodal and fits_host(profile):
             return model
+    return None
+
+
+def _reader_that_fits(text_profile: ModelProfile | None) -> str | None:
+    """The best reader this host can hold *alongside* the text model.
+
+    Reached when the configured reader does not fit beside it -- on a 32GB host
+    the 9.67GB text model plus the 6.81GB reader is 16.48GB, just over half the
+    machine. Falling through to the configured reader there would resolve to the
+    very pair that was rejected a line earlier, which is how a check turns
+    decorative.
+    """
+    for candidate in vision_candidates():
+        if text_profile is None or candidate.id == text_profile.id:
+            return candidate.id
+        if fits_together((text_profile, candidate)):
+            return candidate.id
     return None
 
 

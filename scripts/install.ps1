@@ -293,7 +293,9 @@ try {
 # NOT $Profile: that is an automatic variable holding the user's profile path.
 $LumProfile = $env:LUMINARY_PROFILE
 if (-not $LumProfile) {
-    if ($MemGB -ge 16) { $LumProfile = "standard" } else { $LumProfile = "public" }
+    if ($MemGB -gt 24)      { $LumProfile = "performance" }
+    elseif ($MemGB -ge 16)  { $LumProfile = "standard" }
+    else                    { $LumProfile = "public" }
 }
 
 switch ($LumProfile) {
@@ -321,18 +323,19 @@ Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALL
 # NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
 # exit codes do not throw -- so check $LASTEXITCODE instead.
 $PublicGeneralist = "qwen3.5:4b"
-# Pulled where the profile can keep two loaded AND the machine can hold both.
-# Below ReaderMinRamGB the backend refuses to load the pair, so pulling it would
-# be a 6GB download for a model that never runs. See install.sh for the derivation.
-$DedicatedReader = "qwen2.5vl:7b"
-$ReaderMinRamGB = 24
+# The strongest text model, pulled only on `performance`: 9.67GB resident, and it
+# does not read figures, so it is always a second model alongside the reader.
+$LargeTextModel = "qwen2.5:14b-instruct"
 $chatModel = $env:LUMINARY_CHAT_MODEL
-if (-not $chatModel) {
-    if ($MaxLoaded -le 1) { $chatModel = $PublicGeneralist } else { $chatModel = "qwen3.5:4b" }
-}
 $visionModel = $env:LUMINARY_VISION_MODEL
-if (-not $visionModel -and $MaxLoaded -gt 1 -and $MemGB -ge $ReaderMinRamGB) {
-    $visionModel = $DedicatedReader
+if (-not $chatModel) {
+    if ($LumProfile -eq "performance") {
+        # The only band with room for a text model that cannot read figures.
+        $chatModel = $LargeTextModel
+        if (-not $visionModel) { $visionModel = $PublicGeneralist }
+    } else {
+        $chatModel = $PublicGeneralist
+    }
 }
 if (Test-CommandExists "ollama") {
     Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
