@@ -52,6 +52,8 @@ from app.schemas.flashcards import (
     DeckItem,
     EntityPairPreview,
     EntityPairsResponse,
+    FactualityAuditRequest,
+    FactualityReport,
     FillGapsResponse,
     FillUncoveredRequest,
     FillUncoveredResponse,
@@ -81,7 +83,7 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
-from app.services.flashcard_grounding import audit_grounding
+from app.services.flashcard_grounding import audit_factuality, audit_grounding
 from app.services.flashcard_repair import repair_flashcard_tables
 from app.services.flashcards_router_service import (
     cards_to_csv as _cards_to_csv,
@@ -112,6 +114,8 @@ __all__ = [
     "DeckItem",
     "EntityPairPreview",
     "EntityPairsResponse",
+    "FactualityAuditRequest",
+    "FactualityReport",
     "FillGapsResponse",
     "FillUncoveredRequest",
     "FillUncoveredResponse",
@@ -212,6 +216,23 @@ async def audit_card_grounding(
     """
     report = await audit_grounding(session, req.document_id)
     return GroundingReport(**report)
+
+
+@router.post("/factuality/audit", response_model=FactualityReport)
+async def audit_card_factuality(
+    req: FactualityAuditRequest,
+    session: AsyncSession = Depends(get_db),
+) -> FactualityReport:
+    """Check whether existing cards' answers follow from the passage they came from.
+
+    Only cards whose passage is recoverable (`source_chunk_ids`) are eligible --
+    judged against a passage reconstructed from `chunk_id` instead, a 60-card
+    sample scored 0.3333 and the number was an artefact of the reconstruction.
+    Bounded and resumable: keep calling while `remaining` is above zero.
+    """
+    return FactualityReport(**await audit_factuality(
+        session, limit=req.limit, document_id=req.document_id
+    ))
 
 
 @router.post("/repair", response_model=RepairReport)

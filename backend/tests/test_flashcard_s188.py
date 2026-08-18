@@ -152,7 +152,10 @@ def test_build_enriched_text_includes_heading():
     """Enriched text includes [parent > heading] prefix."""
     chunks = _make_chunks(1)
     section_ctx = {SEC_ID: ("The Sirens", "Book XII")}
-    text, first_id = _build_enriched_text(chunks, section_ctx)
+    text, first_id, used_ids = _build_enriched_text(chunks, section_ctx)
+    # The third element is the card's passage; `first_id` is only the first
+    # chunk of the scope and is not an answer to what the card was written from.
+    assert used_ids == [c.id for c in chunks]
 
     assert "[Book XII > The Sirens]" in text
     assert first_id == "chunk-0"

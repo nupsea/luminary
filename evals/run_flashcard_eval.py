@@ -182,6 +182,18 @@ def main() -> None:
             metrics["cards_gated"] = gated
             metrics["cards_rejected"] = counts.get("cards_rejected", 0)
             metrics["card_reject_rate"] = counts.get("cards_rejected", 0) / gated
+        # The product's own factuality gate, when one is configured. Reported as
+        # three counts rather than a pass rate: a checker that was unreachable for
+        # the whole run would otherwise be indistinguishable from one that passed
+        # every card.
+        checked = counts.get("factuality_checked", 0)
+        if checked:
+            metrics["factuality_checked"] = checked
+            for state in ("supported", "unsupported", "unverifiable"):
+                metrics[f"factuality_{state}"] = counts.get(f"factuality_{state}", 0)
+            metrics["factuality_reject_rate"] = (
+                counts.get("factuality_unsupported", 0) / checked
+            )
         parses = counts.get("parses", 0)
         if parses:
             metrics["shape_deviation_rate"] = counts.get("shape_deviations", 0) / parses

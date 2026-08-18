@@ -108,7 +108,19 @@ async def test_requested_model_is_the_one_asked_to_write_the_cards(test_db):
 
 
 @pytest.mark.asyncio
-async def test_omitting_the_model_keeps_following_settings(test_db):
+async def test_omitting_the_model_keeps_following_settings(test_db, monkeypatch):
+    """With no generation override configured, the request pins nothing.
+
+    The override is established here rather than assumed. Reading it from the
+    ambient environment made this test fail on any machine with
+    LITELLM_GENERATION_MODEL set -- a supported configuration, so the test was
+    wrong rather than the machine. Same monkeypatch as
+    `test_model_registry.test_generation_follows_settings_when_no_override_is_configured`.
+    """
+    from app.services import model_router
+
+    monkeypatch.setattr(model_router, "configured_generation_override", lambda: None)
+
     doc_id = await _seed_document(test_db)
     llm = AsyncMock()
     llm.generate = AsyncMock(return_value=_CARD_JSON)
@@ -124,6 +136,36 @@ async def test_omitting_the_model_keeps_following_settings(test_db):
     # None means "let LLMService route it", which is what carries the Settings
     # choice and the offline reroute. Pinning an id here would lose both.
     assert all(call.kwargs.get("model") is None for call in llm.generate.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_configured_override_generates_with_that_model(test_db, monkeypatch):
+    """The other half of the same rule, which nothing covered.
+
+    LITELLM_GENERATION_MODEL exists to send generation somewhere other than chat.
+    A request that names no model must follow it -- and the earlier assertion,
+    which expected None unconditionally, would have called that behaviour a bug.
+    """
+    from app.services import model_router
+
+    monkeypatch.setattr(
+        model_router, "configured_generation_override", lambda: "ollama/some-other-model"
+    )
+
+    doc_id = await _seed_document(test_db)
+    llm = AsyncMock()
+    llm.generate = AsyncMock(return_value=_CARD_JSON)
+
+    with patch("app.services.flashcard.get_llm_service", return_value=llm):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/flashcards/generate",
+                json={"document_id": doc_id, "count": 1, "context": _PASSAGE},
+            )
+
+    assert resp.status_code == 201, resp.text
+    models = {call.kwargs.get("model") for call in llm.generate.await_args_list}
+    assert models == {"ollama/some-other-model"}, f"saw {models}"
 
 
 @pytest.mark.asyncio

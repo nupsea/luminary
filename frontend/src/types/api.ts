@@ -2504,6 +2504,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flashcards/factuality/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit Card Factuality
+         * @description Check whether existing cards' answers follow from the passage they came from.
+         *
+         *     Only cards whose passage is recoverable (`source_chunk_ids`) are eligible --
+         *     judged against a passage reconstructed from `chunk_id` instead, a 60-card
+         *     sample scored 0.3333 and the number was an artefact of the reconstruction.
+         *     Bounded and resumable: keep calling while `remaining` is above zero.
+         */
+        post: operations["audit_card_factuality_flashcards_factuality_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flashcards/repair": {
         parameters: {
             query?: never;
@@ -7485,6 +7510,50 @@ export interface components {
             entity_names: string[];
         };
         /**
+         * FactualityAuditRequest
+         * @description Body for POST /flashcards/factuality/audit.
+         */
+        FactualityAuditRequest: {
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+        };
+        /**
+         * FactualityReport
+         * @description What one bounded pass of the factuality audit judged.
+         *
+         *     `skipped_no_passage` is reported rather than folded into a rate: a card whose
+         *     passage cannot be rebuilt was not judged, and counting it either way would
+         *     invent a verdict.
+         */
+        FactualityReport: {
+            /** Judged */
+            judged: number;
+            /** Skipped No Passage */
+            skipped_no_passage: number;
+            /** Remaining */
+            remaining: number;
+            /**
+             * Supported
+             * @default 0
+             */
+            supported: number;
+            /**
+             * Unsupported
+             * @default 0
+             */
+            unsupported: number;
+            /**
+             * Unverifiable
+             * @default 0
+             */
+            unverifiable: number;
+        };
+        /**
          * FadingItem
          * @description Content the user engaged with 7-21 days ago and not since.
          *
@@ -7678,6 +7747,11 @@ export interface components {
              * @default unchecked
              */
             grounding: string;
+            /**
+             * Factuality
+             * @default unchecked
+             */
+            factuality: string;
         };
         /** FlashcardSearchResponse */
         FlashcardSearchResponse: {
@@ -14821,6 +14895,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroundingReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_card_factuality_flashcards_factuality_audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FactualityAuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactualityReport"];
                 };
             };
             /** @description Validation Error */

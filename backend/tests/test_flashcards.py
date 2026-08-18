@@ -665,7 +665,11 @@ def test_build_text_samples_across_range():
         for i in range(20)
     ]
 
-    combined, first_id = _build_text(chunks)
+    combined, first_id, used_ids = _build_text(chunks)
+    # Sampling drops the text between its three windows, so the recorded
+    # passage is a strict subset -- claiming every chunk would name text the
+    # model never saw.
+    assert 0 < len(used_ids) < len(chunks)
 
     assert first_id == "c0"
     assert "Chunk0" in combined  # Beginning

@@ -65,6 +65,17 @@ def record_shape_deviation() -> None:
     _bump("shape_deviations")
 
 
+def record_factuality(verdict: str) -> None:
+    """One card through the factuality checker.
+
+    Every verdict is counted, including `unverifiable`. Counting only the
+    rejections would make a checker that was unreachable for the whole run look
+    identical to one that passed every card.
+    """
+    _bump("factuality_checked")
+    _bump(f"factuality_{verdict}")
+
+
 def record_card_gate(kind: str | None) -> None:
     """One generated card through the deterministic quality gate.
 

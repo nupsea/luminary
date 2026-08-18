@@ -201,6 +201,20 @@ class FlashcardModel(Base):
     grounding: Mapped[str] = mapped_column(
         String, nullable=False, default="unchecked", server_default=text("'unchecked'")
     )
+    # Whether the answer follows from the passage: unchecked | supported |
+    # unsupported | unverifiable (app.services.flashcard_factuality.FACTUALITY_*).
+    # Separate from `grounding`, which only proves the quote is real -- a card can
+    # quote a genuine sentence and still say something the passage does not.
+    factuality: Mapped[str] = mapped_column(
+        String, nullable=False, default="unchecked", server_default=text("'unchecked'")
+    )
+    # The chunks whose text was actually in the prompt, in reading order. This is
+    # the card's passage; `chunk_id` above is only the first chunk of the scope and
+    # is not a usable answer to "what was this card written from". NULL means the
+    # card predates this column or came from a path with no chunks; [] means the
+    # passage was text supplied directly (a reader selection) and is not
+    # reconstructible from the library.
+    source_chunk_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 

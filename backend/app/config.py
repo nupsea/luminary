@@ -129,6 +129,16 @@ class Settings(BaseSettings):
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""
+    # Model that checks whether a generated card's answer follows from its
+    # passage. Empty = the check does not run, and cards are recorded
+    # `unchecked` rather than passed. There is deliberately no small-model
+    # default: measured on 59 live cards, phi4-mini passed 54 and granite3.2:8b
+    # passed 53, agreeing with a 14B on the pass/fail call 0.41 and 0.42 of the
+    # time -- a gate built on either certifies exactly what it was added to
+    # catch. What re-enables a small checker is a measurement showing it
+    # separates supported from unsupported on this corpus, not a smaller model
+    # appearing. Must not equal the generation model (self-judging).
+    FLASHCARD_FACTUALITY_MODEL: str = ""
     # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
     # the accommodations a model still needs; `bare` renders the contract alone.
     # A model that scores HIGHER on `bare` is telling you the accommodation set

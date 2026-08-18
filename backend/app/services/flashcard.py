@@ -192,15 +192,18 @@ async def _get_entity_names_for_document(
 def _build_enriched_text(
     chunks: list[ChunkModel],
     section_ctx: dict[str, tuple[str, str | None]],
-) -> tuple[str, str]:
+) -> tuple[str, str, list[str]]:
     """Build combined text with section heading prefixes for context.
 
-    Returns (enriched_text, first_chunk_id).
+    Returns (enriched_text, first_chunk_id, used_chunk_ids). The third element is
+    the card's passage; this loop stops at `_CHUNK_CHAR_LIMIT`, so it is a prefix
+    of *chunks* and not all of them.
     """
     if not chunks:
-        return "", ""
+        return "", "", []
 
     parts: list[str] = []
+    used: list[str] = []
     total = 0
     for c in chunks:
         if total >= _CHUNK_CHAR_LIMIT:
@@ -211,9 +214,10 @@ def _build_enriched_text(
             prefix = f"[{parent} > {heading}]\n" if parent else f"[{heading}]\n"
         part = prefix + c.text
         parts.append(part)
+        used.append(c.id)
         total += len(part)
 
-    return "\n\n".join(parts), chunks[0].id
+    return "\n\n".join(parts), chunks[0].id, used
 
 
 def _resolve_section_heading(
@@ -322,19 +326,27 @@ async def _fetch_chunks(
     return all_chunks
 
 
-def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
+def _build_text(chunks: list[ChunkModel]) -> tuple[str, str, list[str]]:
     """Build combined text from chunks.
 
     If the total text exceeds _CHUNK_CHAR_LIMIT, it samples chunks from the
     beginning, middle, and end to provide better coverage of the entire document.
-    Returns (combined_text, first_chunk_id).
+
+    Returns (combined_text, first_chunk_id, used_chunk_ids). The third element is
+    what makes a card's passage recoverable later, and it is the *sampled* subset
+    rather than every chunk of the scope: over the limit this function drops the
+    text between its three windows, so recording the full list would name text the
+    model was never shown. `first_chunk_id` is NOT that passage -- it is the first
+    chunk of the scope, and mistaking it for the card's source is what made a
+    retrospective factuality measurement read 0.3333 (the judge was shown a passage
+    without the card's own quote in it 56 times out of 60).
     """
     if not chunks:
-        return "", ""
+        return "", "", []
 
     total_chars = sum(len(c.text) for c in chunks)
     if total_chars <= _CHUNK_CHAR_LIMIT:
-        return "\n\n".join(c.text for c in chunks), chunks[0].id
+        return "\n\n".join(c.text for c in chunks), chunks[0].id, [c.id for c in chunks]
 
     # Sampling strategy:
     # 1. Take first 25% of the limit from the beginning
@@ -343,6 +355,8 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
     target_len = _CHUNK_CHAR_LIMIT
     segment_size = target_len // 4
 
+    used: list[str] = []
+
     def get_segment(chunk_list: list[ChunkModel], max_chars: int) -> str:
         parts: list[str] = []
         current = 0
@@ -350,6 +364,7 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
             if current + len(c.text) > max_chars:
                 break
             parts.append(c.text)
+            used.append(c.id)
             current += len(c.text)
         return "\n\n".join(parts)
 
@@ -363,16 +378,21 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
     # End
     # For the end, we iterate backwards to get a segment, then reverse it
     end_parts: list[str] = []
+    end_ids: list[str] = []
     end_current = 0
     for c in reversed(chunks):
         if end_current + len(c.text) > segment_size:
             break
         end_parts.append(c.text)
+        end_ids.append(c.id)
         end_current += len(c.text)
     end = "\n\n".join(reversed(end_parts))
+    used.extend(reversed(end_ids))
 
     combined = f"{beginning}\n\n[...]\n\n{middle}\n\n[...]\n\n{end}"
-    return combined, chunks[0].id
+    # dict.fromkeys rather than set(): the order is the reading order of the
+    # passage, and rebuilding it out of order breaks any quote spanning a seam.
+    return combined, chunks[0].id, list(dict.fromkeys(used))
 
 
 # Chunk classifier helpers

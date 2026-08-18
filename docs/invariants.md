@@ -117,6 +117,41 @@ stops carrying the section text, or if a verdict is computed and dropped. See I-
 defect on the `/qa` surface, where the fix is different: an answer cites a marker and never
 reproduces source text, which a flashcard cannot do because the quote *is* the card's evidence.
 
+**I-35. A card's passage is what was in its prompt, and whatever judges that passage is not
+the model that wrote the card, nor a model that has been shown to agree with everything.**
+`flashcards.chunk_id` holds the first chunk of the generation *scope*. Nothing in the code says
+so, and reading it as "the chunk this card came from" is the obvious mistake: judged against a
+passage rebuilt that way, a 60-card sample scored `factuality 0.3333` — and the number was the
+rebuild, not the cards. The judge had been shown text not containing the card's own verified
+quote 56 times out of 60. `source_chunk_ids` records the chunks whose text actually reached the
+prompt, in reading order, and it is the *sampled* subset: past `_CHUNK_CHAR_LIMIT`, `_build_text`
+keeps a beginning/middle/end window and drops what is between, so recording the whole scope would
+name text the model never saw. Three states stay distinguishable and none may be read as another:
+recorded ids, `NULL` (predates the column, or a path with no chunks), and `[]` (supplied text —
+real, but not reconstructible from the library). A card whose passage cannot be rebuilt is
+**skipped and counted as skipped**, never judged against an approximation.
+
+The second half is not derivable from any code, only from measurement, and it is the half that
+will be undone to save memory. Whether an answer follows from a passage is semantic, so this is
+the one flashcard check that needs a model — which makes the model the load-bearing choice.
+Screened on 59 live cards with identical passages: `phi4-mini` returned `yes` for 54, `mistral`
+and `granite3.2:8b` for 53, each agreeing with `qwen2.5:14b` on the pass/fail call 0.41–0.42,
+which is worse than chance; `gemma3:4b` failed a four-case probe outright, certifying a card that
+reversed who did what. Only `gemma4` (43/59) and the 14B (19/59) discriminate. So
+`FLASHCARD_FACTUALITY_MODEL` has **no default** — an unnamed checker does not run, and cards stay
+`unchecked`, which is honest where a rubber stamp is not. Every candidate is fired on the
+four-case probe (supported / reversed / invented / off-topic) *and* at scale before it is
+trusted; passing the probe is necessary and demonstrably not sufficient.
+
+Self-judging is refused, and the guard must resolve the model that will actually generate rather
+than the configured override. The override is empty on the default path, which is exactly where
+the collision happens: with `LITELLM_DEFAULT_MODEL=ollama/qwen2.5:14b-instruct` and the same id
+configured as the checker, the guard reported no self-judging and the audit judged the model's own
+cards. `effective_generation_model()` resolves it; `scripts/smoke/S237.sh` refuses to measure when
+they collide, and `tests/test_flashcard_factuality.py` and `tests/test_flashcard_passage.py` fail
+CI if an unparseable verdict defaults to a pass, if a rebuilt passage falls back to `chunk_id`, or
+if the guard reads the override again.
+
 ## Vector Dimensions
 
 **I-9. Note and chunk vectors share one embedding space, whose dimension is a stored property of the corpus rather than a setting.**

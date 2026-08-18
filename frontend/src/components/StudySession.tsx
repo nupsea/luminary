@@ -14,6 +14,8 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+
+import { isDoubted, sourceNote } from "@/lib/cardSourceNote"
 import {
   Check,
   ChevronDown,
@@ -159,38 +161,13 @@ const QUALITY_CLASS: Record<SourceQuality, string> = {
   unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800/60 dark:text-gray-400",
 }
 
-// What the app is entitled to say about a card's quote. Presenting an unverified
-// excerpt under a heading that reads "Source" is a claim the product cannot back:
-// measured on a real library, 26% of the cards that quoted anything quoted text
-// their document does not contain. Silence on an unchecked card is the same claim
-// made quietly, so every state says which one it is.
-const GROUNDING_NOTE: Record<string, { text: string; className: string }> = {
-  verified: {
-    text: "Found in this document",
-    className: "text-emerald-700 dark:text-emerald-400",
-  },
-  unsupported: {
-    text: "Not found in this document -- treat this quote as unverified",
-    className: "text-amber-700 dark:text-amber-400",
-  },
-  unverifiable: {
-    text: "Could not be checked against a document",
-    className: "text-muted-foreground",
-  },
-  unchecked: {
-    text: "Not checked against the document yet",
-    className: "text-muted-foreground",
-  },
-}
-
 function SourceExcerpt({ card }: { card: Flashcard }) {
-  const note = GROUNDING_NOTE[card.grounding ?? "unchecked"] ?? GROUNDING_NOTE.unchecked
-  const unsupported = card.grounding === "unsupported"
+  const note = sourceNote(card)
   return (
     <div className="flex flex-col gap-1">
       <blockquote
         className={`border-l-2 pl-3 text-xs italic ${
-          unsupported
+          isDoubted(card)
             ? "border-amber-500/60 text-muted-foreground/80"
             : "border-border text-muted-foreground"
         }`}

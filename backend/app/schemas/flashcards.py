@@ -125,10 +125,14 @@ class FlashcardResponse(BaseModel):
     # source_excerpt was found in the text the card came from. The review UI needs
     # it to decide whether it may present that excerpt as a source.
     grounding: str = "unchecked"
+    # unchecked | supported | unsupported | unverifiable -- whether the answer
+    # follows from the passage. Distinct from `grounding`: a real quote does not
+    # make the answer true.
+    factuality: str = "unchecked"
 
     model_config = {"from_attributes": True}
 
-    @field_validator("grounding", mode="before")
+    @field_validator("grounding", "factuality", mode="before")
     @classmethod
     def _default_grounding(cls, value: str | None) -> str:
         """A card read before its row was flushed has no verdict yet, not a passing
@@ -155,6 +159,31 @@ class GroundingReport(BaseModel):
     unsupported: int = 0
     unverifiable: int = 0
     unchecked: int = 0
+
+
+class FactualityAuditRequest(BaseModel):
+    """Body for POST /flashcards/factuality/audit."""
+
+    document_id: str | None = None
+    # One model call per card, so a whole library is minutes of inference. The
+    # audit is resumable: call it again while `remaining` is above zero.
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class FactualityReport(BaseModel):
+    """What one bounded pass of the factuality audit judged.
+
+    `skipped_no_passage` is reported rather than folded into a rate: a card whose
+    passage cannot be rebuilt was not judged, and counting it either way would
+    invent a verdict.
+    """
+
+    judged: int
+    skipped_no_passage: int
+    remaining: int
+    supported: int = 0
+    unsupported: int = 0
+    unverifiable: int = 0
 
 
 class RepairReport(BaseModel):
