@@ -1166,7 +1166,9 @@ recorded `multimodal=False` — a capability written by hand with nothing to dis
 runs no inference).
 
 **One model fills all four roles on an 8GB host: `qwen3.5:4b`, 3.21GB.** Vision costs it nothing
-resident — `/api/ps` reported 3.21GB with an image loaded, the same as its text footprint.
+resident — `/api/ps` reported 3.21GB with an image loaded, the same as its text footprint. The two
+rankings agree on it independently: `GENERALIST_PREFERENCE` is P6's text order intersected with the
+figure probe below, and both put it first, so there is no trade-off to weigh.
 
 Vision quality was measured on real library figures rather than inferred from the capability flag,
 because it does not track size:
@@ -1367,11 +1369,19 @@ One vocabulary, one alias: `install.sh` called the small profile `public`, which
 
 Still open in this phase, and none of it is a detail:
 
-- **The profile does not yet pick the role map**, but the vision role no longer breaks it.
-  Fixed 2026-08-18: `default_vision_model` is host-aware and `resolve("vision")` falls back to the
-  model already answering another role when the configured reader does not fit. It still does not
-  choose a *smaller text* model, and `VISION_MODEL` remains a knob — it is now a knob with a
-  host-aware default rather than a hardcoded 6.81GB one.
+- **The profile picks the role map on a single-resident host** — shipped 2026-08-18. Fixing the
+  vision role alone was not enough and the gap was invisible: with vision host-aware but chat still
+  defaulting to text-only `llama3.2`, an 8GB host resolved chat to one model and vision to another,
+  which is two models on a profile allowed one. The failure had moved rather than gone.
+  `default_chat_model` now narrows to a `generalist_candidates` entry — multimodal, fits the host —
+  whenever `max_resident_models() <= 1`, and `default_vision_model` reuses it. A fresh 8GB install
+  resolves all four roles to `qwen3.5:4b`, 3.21GB, one resident model.
+
+  Only *defaults* are narrowed. An explicit choice in Settings is honoured and reported as
+  oversized by `residency_report()`, and a host with room keeps a text-only default and a dedicated
+  reader. What is still open: the profile does not pick a smaller *window* (I-27's value half
+  exists, no model is measured at anything but 8192), and it does not choose between two models
+  that both fit.
 - **Runtime geometry is still partly global.** The context window is no longer: I-27's value half
   shipped 2026-08-18 as `model_registry.context_window_for`, which reads the model's
   `usable_context` and falls back to `OLLAMA_NUM_CTX` only for an unregistered model. Every entry

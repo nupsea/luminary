@@ -246,10 +246,67 @@ def oversized_for_host(model_id: str, ram_gb: int | None = None) -> ModelProfile
     return profile
 
 
+# Where one model must serve every role, this is the order to try. It is the
+# text ranking from the P6 8GB-class run (`qwen3.5:4b` led card_reject_rate
+# 0.0278 vs gemma3's 0.1161 and generation_rate 1.0000 vs 0.9238) intersected
+# with the vision ranking above, which put the same model first. The two
+# independent measurements agree, which is why there is no trade-off to weigh.
+GENERALIST_PREFERENCE: tuple[str, ...] = (
+    "ollama/qwen3.5:4b",
+    "ollama/gemma3:4b",
+)
+
+
+def generalist_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
+    """Models that can fill *every* role alone on this host, best measured first.
+
+    A profile that may keep one model resident needs one model that does text and
+    reads figures. Without this an 8GB host resolved chat to a text-only default
+    and vision to a second model it had no room for -- two models on a machine
+    allowed one, which is not a configuration at all.
+    """
+    fitting = [p for p in REGISTRY.values() if p.multimodal and fits_host(p, ram_gb)]
+    return sorted(
+        fitting,
+        key=lambda p: (
+            GENERALIST_PREFERENCE.index(p.id)
+            if p.id in GENERALIST_PREFERENCE
+            else len(GENERALIST_PREFERENCE),
+            p.resident_bytes,
+        ),
+    )
+
+
 def default_chat_model() -> str:
-    """The configured on-device default, with its provider prefix."""
-    model = get_settings().LITELLM_DEFAULT_MODEL
-    return model if "/" in model else f"ollama/{model}"
+    """The on-device default, narrowed by what this machine can actually run.
+
+    Host-aware for the same reason `default_vision_model` is: the configured
+    default is a deployment decision made without knowing the machine, and on a
+    host that may keep only one model resident it has to be a model that can
+    serve every role. Shipping `llama3.2` there left vision needing a second
+    model the host could not hold.
+
+    Only the *default* is narrowed. An explicit choice in Settings is honoured
+    even when oversized -- `residency_report()` reports it rather than this
+    silently overruling the user.
+    """
+    from app.memory_profile import max_resident_models  # noqa: PLC0415
+
+    configured = get_settings().LITELLM_DEFAULT_MODEL
+    configured = configured if "/" in configured else f"ollama/{configured}"
+    profile = profile_for(configured)
+
+    if profile is None:
+        return configured  # unregistered: nothing measured to narrow it with
+
+    single_resident = max_resident_models() <= 1
+    if fits_host(profile) and not (single_resident and not profile.multimodal):
+        return configured
+
+    candidates = generalist_candidates() if single_resident else [
+        p for p in REGISTRY.values() if fits_host(p)
+    ]
+    return candidates[0].id if candidates else configured
 
 
 # Vision quality is measured, not inferred from the capability list, and it does

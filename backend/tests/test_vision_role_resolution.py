@@ -18,11 +18,14 @@ import pytest
 
 from app.memory_profile import MAX_RESIDENT, max_resident_models
 from app.model_registry import (
+    GENERALIST_PREFERENCE,
     REGISTRY,
     ROLES,
     VISION_PREFERENCE,
+    default_chat_model,
     default_vision_model,
     fits_host,
+    generalist_candidates,
     profile_for,
     vision_candidates,
 )
@@ -169,6 +172,67 @@ def test_an_8gb_host_resolves_every_role_to_one_model(monkeypatch):
     chosen = profile_for(next(iter(set(resolved.values()))))
     assert chosen is not None and chosen.multimodal, "the one model must be able to read a figure"
     assert fits_host(chosen, 8), "and the machine must be able to hold it"
+
+
+class TestOneModelServesEveryRole:
+    """Fixing the vision role alone was not enough, and the gap was invisible.
+
+    With vision host-aware but chat still defaulting to a text-only model, an 8GB
+    host resolved chat to `llama3.2` and vision to `qwen3.5:4b` -- two models on a
+    profile allowed one. The failure had moved rather than gone.
+    """
+
+    def test_a_fresh_install_on_8gb_resolves_every_role_to_one_model(self, monkeypatch):
+        from app import memory_profile
+        from app.services import model_router
+
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 8)
+
+        resolved = {role: model_router.resolve(role).model for role in ROLES}
+        distinct = set(resolved.values())
+        assert len(distinct) == 1, (
+            f"an 8GB host may keep one model resident, and these roles need "
+            f"{len(distinct)}: {resolved}"
+        )
+
+        chosen = profile_for(next(iter(distinct)))
+        assert chosen is not None
+        assert chosen.multimodal, "the one model has to be able to read a figure"
+        assert fits_host(chosen, 8), "and the machine has to be able to hold it"
+
+    def test_the_generalist_and_vision_rankings_agree(self):
+        """Two independent measurements -- P6's text metrics and the figure probe --
+        put the same model first, which is why there is no trade-off to weigh."""
+        assert GENERALIST_PREFERENCE[0] == VISION_PREFERENCE[0]
+
+    def test_a_generalist_must_be_able_to_do_both_jobs(self):
+        assert all(p.multimodal for p in generalist_candidates(8))
+
+    def test_an_explicit_oversized_chat_choice_is_not_silently_downgraded(
+        self, monkeypatch
+    ):
+        """Same rule as vision: the default is narrowed by the host, a choice is not."""
+        from app.services import model_router, settings_service
+
+        monkeypatch.setattr(
+            settings_service,
+            "get_effective_routing",
+            lambda background=False: ("ollama/qwen2.5:14b-instruct", None),
+        )
+        assert model_router.resolve("chat").model == "ollama/qwen2.5:14b-instruct"
+
+    def test_a_host_with_room_keeps_a_text_only_default(self, monkeypatch):
+        """Narrowing to a multimodal generalist is a remedy for a single-resident
+        host, not a general preference."""
+        from app import memory_profile
+
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
+        monkeypatch.setattr(memory_profile, "max_resident_models", lambda profile=None: 2)
+        monkeypatch.setattr(
+            "app.model_registry.get_settings",
+            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/llama3.2"})(),
+        )
+        assert default_chat_model() == "ollama/llama3.2"
 
 
 def test_max_resident_never_promises_more_than_one_on_the_low_profile():
