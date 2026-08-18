@@ -461,6 +461,11 @@ async def _collect_with_backfill(
         for c in batch:
             key = c["question"].lower()
             if key in seen:
+                # The model was told which questions it had already produced and
+                # produced one of them again. Dropping it silently hid exactly the
+                # structural weakness a small model shows first: `cards_generated`
+                # absorbed the repeat and nothing reported it.
+                llm_output_stats.record_duplicate_question()
                 continue
             seen.add(key)
             candidates.append(c)

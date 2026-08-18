@@ -76,6 +76,18 @@ def record_factuality(verdict: str) -> None:
     _bump(f"factuality_{verdict}")
 
 
+def record_duplicate_question(count: int = 1) -> None:
+    """A generation repeated a question it had already produced in this request.
+
+    The retry prompt lists the questions already accepted, so a repeat is the
+    model ignoring its own context rather than an unlucky sample. It never
+    reached a card and never reached `items_delivered`, so nothing else on this
+    path can see it.
+    """
+    for _ in range(count):
+        _bump("duplicate_questions")
+
+
 def record_card_gate(kind: str | None) -> None:
     """One generated card through the deterministic quality gate.
 

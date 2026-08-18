@@ -535,10 +535,18 @@ def main() -> int:
 
     _print_report(arms, tasks)
 
-    verdict = None
-    if len(arms) >= 2:
-        verdict = separation(arms[0]["metrics"], arms[1]["metrics"])
-        _print_separation(verdict, arms[0]["model"], arms[1]["model"])
+    # Every pair, not just the first two. With four models the old block compared
+    # arms[0] against arms[1] and silently ignored the rest, so a matrix could
+    # report SEPARATED while two of its candidates were indistinguishable -- which
+    # is the instrument being blind, reported as a result.
+    pairs: list[dict[str, Any]] = []
+    for i in range(len(arms)):
+        for j in range(i + 1, len(arms)):
+            verdict = separation(arms[i]["metrics"], arms[j]["metrics"])
+            _print_separation(verdict, arms[i]["model"], arms[j]["model"])
+            pairs.append({"a": arms[i]["model"], "b": arms[j]["model"], **verdict})
+    unseparated = [f"{p['a']} vs {p['b']}" for p in pairs if not p["separated"]]
+    verdict = pairs[0] if pairs else None
 
     record = {
         "timestamp": datetime.now(tz=UTC).isoformat(),
@@ -559,6 +567,9 @@ def main() -> int:
             for arm in arms
         ],
         "separation": verdict,
+        # Every pair's verdict, so a later reader can see which candidates the
+        # instrument could not tell apart rather than only the first two.
+        "separation_pairs": pairs,
     }
     with Path(args.out).open("a") as fh:
         fh.write(json.dumps(record) + "\n")
@@ -575,10 +586,18 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if args.assert_separation and (verdict is None or not verdict["separated"]):
+    if args.assert_separation and not pairs:
+        print(
+            "MATRIX GATE FAILED: fewer than two arms completed, so there is "
+            "nothing to separate.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.assert_separation and unseparated:
         print(
             "MATRIX GATE FAILED: the structural tier did not separate "
-            f"{arms[0]['model']} from {arms[1]['model']}",
+            f"{'; '.join(unseparated)}. That is a finding about the instrument, "
+            "not the models -- add metrics until it can see the difference.",
             file=sys.stderr,
         )
         return 1

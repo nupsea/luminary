@@ -47,7 +47,7 @@ nothing to see it with.
 | 2. Make numbers comparable | E5, E4, E3, E6 | Two runs from different library states are visibly non-comparable; a frozen build reproduces its mean within its own sd |
 | 3. Make the model visible | P2, E2, E9, E11 | Repair counters non-zero on llama3.2; scoped and unscoped arms both baselined; flashcard and routing targets in the gate |
 | 4. Extract the seams | P3, P4, E7, E8 | No service reads `LITELLM_*`; rendered-prompt snapshots exist; holdout recorded and never used to select |
-| 5. Schedule and calibrate | P5, P6 | TTFT under ingest load per profile; the matrix separates `qwen3.5:0.8b` from `4b` |
+| 5. Schedule and calibrate | P5, P6 | TTFT under ingest load per profile; the matrix separates `qwen3.5:0.8b` from `4b` — **both met 2026-08-18** |
 | 6. Switch and lean out | P7, P8, E10 | All three gates on all three profiles; both ratchets below `ba0c1db` |
 
 `P` items are the model/runtime track and keep the phase numbers work has already been branched
@@ -1026,7 +1026,7 @@ Falsifier: if hard-suspend on `low` makes ingest unacceptable for people who upl
 suspend only while a chat is actively streaming and resume on idle. If yielding between calls is
 still too coarse, the lever is call size, not preemption — Ollama exposes no preemption primitive.
 
-### P6 — Eval matrix and calibration — **instrument shipped 2026-08-16, not yet run across models**
+### P6 — Eval matrix and calibration — **acceptance test passed 2026-08-18**
 
 `evals/run_model_matrix.py` switches the backend's model per candidate, runs the model-sensitive
 runners against it, takes the repair counters around every task, and reports the three tiers from
@@ -1243,6 +1243,53 @@ different must not score alike.
 Falsifier: if it cannot separate them, the instrument is still blind. Go back to P2 and add metrics
 until it can. **Do not choose a model on a blind instrument.** That is exactly what happened last
 time.
+
+#### The acceptance test, run 2026-08-18: separated on 8 metrics
+
+`ollama/qwen3.5:0.8b` (1.04GB) against `ollama/qwen3.5:4b` (3.39GB), shipped arm, tasks intent +
+flashcards, one library state, judge skipped. The pair the plan names, whose numbers did not exist
+until now.
+
+| structural | qwen3.5:0.8b | qwen3.5:4b |
+|---|---|---|
+| intent.routing_accuracy | 0.8276 | **0.8966** |
+| flashcards.generation_rate | 0.3905 | **0.7905** |
+| flashcards.cards_generated | 41 | **83** |
+| flashcards.card_reject_rate | 0.5905 | **0.3538** |
+| flashcards.cards_rejected | 62 | 46 |
+| flashcards.atomicity | 0.9412 | **1.0000** |
+| flashcards.first_pass_rate | 0.9655 | **1.0000** |
+| flashcards.shape_deviation_rate | 0.0345 | **0.0000** |
+| flashcards.parses_repaired / repair_truncated | 2 / 2 | 0 / 0 |
+| flashcards.duplicate_question_rate | 0.0000 | 0.0000 |
+
+**Stage 5's exit gate is met.** The 0.8B delivers 41 of 105 requested cards against the 4B's 83,
+and more than half of what it produces the deterministic gate throws away. That is a model
+difference visible without a judge anywhere in the loop.
+
+Three things this run settled about the instrument itself:
+
+- **`first_pass_rate` is alive.** It read 0.0000 on every model until the parse dispatch was fixed,
+  which voided the 2026-08-16 numbers. It now reads 0.9655 against 1.0000 and separates.
+- **`atomicity` was not saturated, only unchallenged.** It had read 1.0000 on every run since the
+  prompt change; the 0.8B is the first model to move it (0.9412). A metric with no observed
+  headroom is not the same as one with none, and the way to tell them apart is a weaker arm.
+- **`duplicate_question_rate` did not fire.** Added for this run on the hypothesis that a small
+  model repeats itself, it read 0.0000 on both. Verified it *can* move
+  (`tests/test_duplicate_question_metric.py` drives a repeat through `_collect_with_backfill` and
+  asserts the counter), so this is a measurement and not a dead metric. The hypothesis was simply
+  wrong for this pair.
+
+Two instrument limits from the previous run are closed: separation now compares **every pair**
+rather than `arms[0]` against `arms[1]` (with four models it silently ignored the rest, so a run
+could print SEPARATED while two candidates were indistinguishable), and `--assert-separation`
+fails if any pair is unseparated. Every pair's verdict is written to history as `separation_pairs`.
+
+**`qwen3.5:0.8b` has no registry entry**, so `profile_for` returns None and this run carries no
+measured footprint. That is tolerated by design — callers degrade — but it means the run answers
+"can the instrument see the difference" and contributes nothing to the Stage 6 switch. Measuring
+it with `scripts/model_footprint.py` is the prerequisite if it is ever a candidate rather than a
+control.
 
 ---
 

@@ -43,6 +43,20 @@ STRUCTURAL: frozenset[str] = frozenset(
         # an undefined axis is a rubber stamp. Structural, so it may gate.
         "atomicity",
         "card_reject_rate",
+        # A question the model produced twice inside one request, having been told
+        # in the retry prompt which questions it had already produced. It is the
+        # model ignoring its own context, it never reaches a card, and until it was
+        # counted `cards_generated` absorbed it -- llama3.2 lost 1 and gemma3 lost 2
+        # in the 2026-08-16 run with nothing reporting it. Cannot saturate: it
+        # measures content the model chose.
+        "duplicate_questions",
+        "duplicate_question_rate",
+        # Cards whose answer the configured checker did not find in the passage.
+        # Only present when a checker is configured, which is deliberate: no
+        # checker means no verdict rather than a passing one.
+        "factuality_checked",
+        "factuality_unsupported",
+        "factuality_reject_rate",
         "cards_requested",
         "cards_generated",
         "generation_rate",

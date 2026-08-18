@@ -194,6 +194,13 @@ def main() -> None:
             metrics["factuality_reject_rate"] = (
                 counts.get("factuality_unsupported", 0) / checked
             )
+        # A model that repeats itself is a structural weakness the delivered-card
+        # count cannot show, because the repeat is dropped before delivery.
+        dupes = counts.get("duplicate_questions", 0)
+        produced_total = (produced or 0) + dupes
+        if produced_total:
+            metrics["duplicate_questions"] = dupes
+            metrics["duplicate_question_rate"] = dupes / produced_total
         parses = counts.get("parses", 0)
         if parses:
             metrics["shape_deviation_rate"] = counts.get("shape_deviations", 0) / parses
