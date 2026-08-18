@@ -38,8 +38,16 @@ def host_ram(monkeypatch):
 
 
 def test_a_small_machine_gets_the_low_profile():
+    """16GB moved to `standard` on 2026-08-18.
+
+    It had been `low`, which gave a 16GB laptop one serving slot. That machine
+    cannot carry two models -- the text model plus the 6.81GB reader is 10.02GB,
+    92% of RAM once the backend's 4.7GB ingest peak is counted -- but it can
+    comfortably carry more parallelism, which is what the larger profile buys it.
+    """
     assert memory_profile.profile_for_ram(8) == "low"
-    assert memory_profile.profile_for_ram(16) == "low"
+    assert memory_profile.profile_for_ram(12) == "low"
+    assert memory_profile.profile_for_ram(16) == "standard"
 
 
 def test_a_large_machine_gets_standard():

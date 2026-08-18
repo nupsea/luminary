@@ -77,27 +77,37 @@ def test_the_generalist_fits_the_class_the_public_profile_targets(sh):
     )
 
 
-def test_install_sh_only_suggests_a_second_model_to_a_host_with_room(sh):
-    """The closing banner used to recommend a 6.81GB vision model unconditionally.
+def test_install_sh_pulls_the_reader_rather_than_suggesting_it(sh):
+    """The banner used to recommend a 6.81GB model unconditionally.
 
-    On a host with `OLLAMA_MAX_LOADED_MODELS=1` that advice is actively harmful:
-    loading the second model evicts the one answering questions rather than
-    adding to it. The suggestion has to sit in the `else` branch.
+    On a host keeping one model loaded that advice is actively harmful -- the
+    second model evicts the one answering questions. And on a host with room the
+    backend resolves vision to it whether or not it is on disk, so leaving it a
+    suggestion put the install and the backend in disagreement. It is pulled where
+    it fits and not mentioned where it does not.
     """
-    assert "qwen2.5vl:7b" in sh, "the dedicated reader is still worth suggesting"
-    guard = sh.index('if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then\ncat <<EOF')
-    otherwise = sh.index("\nelse\n", guard)
-    assert guard < otherwise < sh.index("qwen2.5vl:7b", guard), (
-        "the vision suggestion must be in the branch for hosts that can hold two "
-        "models, not in the one that can hold one"
+    assert 'DEDICATED_READER="qwen2.5vl:7b"' in sh
+    assert 'VISION_MODEL="$DEDICATED_READER"' in sh, "the reader must be pulled, not suggested"
+    assert "ollama pull qwen2.5vl:7b" not in sh, (
+        "a closing banner telling the user to pull a second model is the advice "
+        "that breaks a single-model host"
     )
 
 
-def test_install_ps1_only_suggests_a_second_model_to_a_host_with_room(ps1):
-    assert "qwen2.5vl:7b" in ps1
-    guard = ps1.rindex("if ($MaxLoaded -le 1) {")
-    otherwise = ps1.index("} else {", guard)
-    assert guard < otherwise < ps1.index("qwen2.5vl:7b", guard)
+def test_install_ps1_pulls_the_reader_rather_than_suggesting_it(ps1):
+    assert '$DedicatedReader = "qwen2.5vl:7b"' in ps1
+    assert "$visionModel = $DedicatedReader" in ps1
+    assert "ollama pull qwen2.5vl:7b" not in ps1
+
+
+def test_the_resolved_vision_model_is_not_re_read_from_the_environment(ps1):
+    """It was, and the re-read discarded the profile decision: `$visionModel` was
+    computed from RAM and then overwritten with an unset environment variable, so
+    the pull never ran on a machine that had not set it by hand."""
+    assert ps1.count("$visionModel = $env:LUMINARY_VISION_MODEL") == 1
+    assert ps1.index("$visionModel = $env:LUMINARY_VISION_MODEL") < ps1.index(
+        "Pulling vision model"
+    )
 
 
 class TestTheProfileReachesTheBackend:
@@ -137,6 +147,34 @@ class TestTheProfileReachesTheBackend:
         )
         unknown = {w for w in written if _LEGACY_ALIASES.get(w, w) not in PROFILES}
         assert not unknown, f"the backend would size from RAM instead for: {unknown}"
+
+
+def test_the_reader_threshold_is_derived_from_the_registry(sh):
+    """`READER_MIN_RAM_GB` must be the RAM at which the backend will actually load
+    both models. Below it the installer would download 6GB for a model that never
+    runs; above it the backend resolves vision to a model that was never pulled.
+    """
+    from app.model_registry import (
+        _RESIDENT_SET_FRACTION,
+        GENERALIST_PREFERENCE,
+        VISION_PREFERENCE,
+        fits_together,
+    )
+
+    declared = int(_assign(sh, r"^READER_MIN_RAM_GB=(\d+)"))
+    text = REGISTRY[GENERALIST_PREFERENCE[0]]
+    reader = REGISTRY[
+        next(v for v in VISION_PREFERENCE if v not in GENERALIST_PREFERENCE)
+    ]
+
+    assert fits_together((text, reader), declared), (
+        f"the installer pulls the reader at {declared}GB, where the backend would "
+        f"refuse to load both: {text.resident_gb + reader.resident_gb:.2f}GB against a "
+        f"budget of {declared * _RESIDENT_SET_FRACTION:.2f}GB"
+    )
+    assert not fits_together((text, reader), declared - 8), (
+        f"{declared}GB is higher than it needs to be; the tier below also fits"
+    )
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):

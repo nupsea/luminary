@@ -17,7 +17,10 @@ def test_settings_defaults():
     try:
         settings = Settings(_env_file=None)
         assert settings.LOG_LEVEL == "INFO"
-        assert settings.LITELLM_DEFAULT_MODEL == "ollama/llama3.2"
+        # qwen3.5:4b since 2026-08-18: llama3.2 held the default on an HHEM
+        # comparison this repo ruled inadmissible for choosing a model, and the
+        # structural matrix put qwen3.5:4b ahead on every metric it measured.
+        assert settings.LITELLM_DEFAULT_MODEL == "ollama/qwen3.5:4b"
         assert settings.PHOENIX_ENABLED is False
     finally:
         for var, val in saved_vars.items():

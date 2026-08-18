@@ -36,6 +36,7 @@ from app.model_registry import (
     Role,
     configured_generation_override,
     fits_host,
+    fits_together,
     profile_for,
 )
 from app.services import settings_service
@@ -86,7 +87,20 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
         profile = profile_for(configured)
         fits = profile is None or fits_host(profile)
         room_for_two = max_resident_models() > 1
-        if fits and room_for_two:
+        # ...and the two must fit *together*. The residency limit says how many
+        # runners may load, not whether the machine survives them: on 16GB the
+        # text model plus the 6.81GB reader is 10.02GB, and the backend peaks at
+        # 4.7GB during ingest, which is when both are in use. That leaves ~1.3GB
+        # for the OS and the embedder, so the machine swaps rather than refuses --
+        # exactly what this phase exists to prevent.
+        text_profile = profile_for(resolve("chat").model)
+        together = (
+            profile is None
+            or text_profile is None
+            or profile.id == text_profile.id
+            or fits_together((text_profile, profile))
+        )
+        if fits and room_for_two and together:
             return ModelChoice(role, configured, None, profile)
         model = _shared_vision_model() or configured
         return ModelChoice(role, model, None, profile_for(model))

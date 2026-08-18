@@ -125,7 +125,14 @@ class Settings(BaseSettings):
     # regression. Per-request override via /search?spell_correct=.
     QUERY_SPELL_CORRECT: bool = True
     LOG_LEVEL: str = "INFO"
-    LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
+    # qwen3.5:4b since 2026-08-18. llama3.2 held this by inheritance: it was
+    # chosen on an HHEM faithfulness comparison, and a cross-model HHEM delta is
+    # a style artifact that may not decide a model. The structural matrix put
+    # qwen3.5:4b ahead on all three of its metrics (routing 0.8966 vs 0.8621,
+    # card_reject_rate 0.0278 vs 0.0463, generation_rate 1.0000 vs 0.9714), and
+    # it reads figures, which is what lets one model serve every role where only
+    # one may be resident. Single runs, so this ranks a default, not a swap.
+    LITELLM_DEFAULT_MODEL: str = "ollama/qwen3.5:4b"
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""

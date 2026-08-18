@@ -293,7 +293,7 @@ try {
 # NOT $Profile: that is an automatic variable holding the user's profile path.
 $LumProfile = $env:LUMINARY_PROFILE
 if (-not $LumProfile) {
-    if ($MemGB -ge 24) { $LumProfile = "standard" } else { $LumProfile = "public" }
+    if ($MemGB -ge 16) { $LumProfile = "standard" } else { $LumProfile = "public" }
 }
 
 switch ($LumProfile) {
@@ -321,9 +321,18 @@ Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALL
 # NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
 # exit codes do not throw -- so check $LASTEXITCODE instead.
 $PublicGeneralist = "qwen3.5:4b"
+# Pulled where the profile can keep two loaded AND the machine can hold both.
+# Below ReaderMinRamGB the backend refuses to load the pair, so pulling it would
+# be a 6GB download for a model that never runs. See install.sh for the derivation.
+$DedicatedReader = "qwen2.5vl:7b"
+$ReaderMinRamGB = 24
 $chatModel = $env:LUMINARY_CHAT_MODEL
 if (-not $chatModel) {
-    if ($MaxLoaded -le 1) { $chatModel = $PublicGeneralist } else { $chatModel = "llama3.2" }
+    if ($MaxLoaded -le 1) { $chatModel = $PublicGeneralist } else { $chatModel = "qwen3.5:4b" }
+}
+$visionModel = $env:LUMINARY_VISION_MODEL
+if (-not $visionModel -and $MaxLoaded -gt 1 -and $MemGB -ge $ReaderMinRamGB) {
+    $visionModel = $DedicatedReader
 }
 if (Test-CommandExists "ollama") {
     Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
@@ -335,10 +344,9 @@ if (Test-CommandExists "ollama") {
     Write-Warning "ollama is not on the PATH in this session. Open a new PowerShell window and run: ollama pull $chatModel"
 }
 
-# Optional vision model (powers image/figure analysis). Not prompted for — the
-# install stays non-interactive and the closing banner tells the user how to add
-# it later. Set LUMINARY_VISION_MODEL to pull one during install.
-$visionModel = $env:LUMINARY_VISION_MODEL
+# The vision model, already resolved above from the profile and installed RAM.
+# It was re-read from the environment here, which discarded that decision and
+# left the pull disabled on every machine that had not set the variable.
 if ($visionModel) {
     Write-Host "[install] Pulling vision model $visionModel (this can take several minutes)..." -ForegroundColor Yellow
     ollama pull $visionModel
@@ -497,10 +505,10 @@ Write-Host "Wait for 'Luminary is ready', then open http://localhost:7820"
 Write-Host ""
 Write-Host "If a tool was reported 'not on PATH' above, open a NEW PowerShell"
 Write-Host "window first so the updated PATH takes effect."
-if ($MaxLoaded -le 1) {
-    Write-Host "$chatModel answers questions and reads figures, so image analysis works already." -ForegroundColor Gray
-    Write-Host "This profile keeps one model loaded: a second one evicts the first rather than adding to it." -ForegroundColor Gray
+if ($visionModel) {
+    Write-Host "Models pulled: $chatModel and $visionModel. $visionModel reads figures." -ForegroundColor Gray
 } else {
-    Write-Host "Optional higher-fidelity figures:  ollama pull qwen2.5vl:7b" -ForegroundColor Gray
+    Write-Host "$chatModel answers questions and reads figures, so image analysis works already." -ForegroundColor Gray
+    Write-Host "A second model would evict it rather than adding to it on this machine." -ForegroundColor Gray
 }
 Write-Host "=========================================" -ForegroundColor Green

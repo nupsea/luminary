@@ -259,6 +259,80 @@ def oversized_for_host(model_id: str, ram_gb: int | None = None) -> ModelProfile
     return profile
 
 
+# Text quality, best first, from the structural matrix. `qwen2.5:14b-instruct`
+# led routing 0.9655 against llama3.2's 0.8621 (2026-08-16); `qwen3.5:4b` led
+# llama3.2 on all three metrics of the 8GB-class run (routing 0.8966 vs 0.8621,
+# card_reject_rate 0.0278 vs 0.0463, generation_rate 1.0000 vs 0.9714). Single
+# runs each, which is why this ranks a default and does not gate a swap.
+#
+# llama3.2 sat at the top of this list by inheritance: it was chosen on an HHEM
+# faithfulness comparison, and a cross-model HHEM delta is a style artifact that
+# may not decide a model. Nothing re-examined it until now.
+TEXT_PREFERENCE: tuple[str, ...] = (
+    "ollama/qwen2.5:14b-instruct",
+    "ollama/qwen3.5:4b",
+    "ollama/llama3.2",
+)
+
+# A resident set takes at most half the machine. That is the repo's own per-model
+# rule (`min_ram_gb` is twice the resident size) applied to the set instead of the
+# member, because two models break the assumption the per-model rule rests on --
+# "the other half carries the OS, the backend's 4.7GB ingest peak, the embedder
+# and the entity model" is a budget for everything else, and it does not double
+# when a second model loads. Measured consequence: `qwen3.5:4b` + the 6.81GB
+# reader is 10.02GB, which is 63% of a 16GB machine and 92% once the backend peak
+# is counted. It fits at 24GB and not before.
+_RESIDENT_SET_FRACTION = 0.5
+
+
+def fits_together(models: tuple[ModelProfile, ...], ram_gb: int | None = None) -> bool:
+    """Whether this whole set can be resident at once on this machine."""
+    from app.memory_profile import host_ram_gb  # noqa: PLC0415
+
+    ram = host_ram_gb() if ram_gb is None else ram_gb
+    if ram == 0:
+        return len(models) <= 1  # unmeasurable machine: assume it is small
+    total = sum(m.resident_bytes for m in models)
+    return total <= ram * _GB * _RESIDENT_SET_FRACTION
+
+
+def best_text_model(ram_gb: int | None = None) -> ModelProfile | None:
+    """The strongest measured text model this host can hold, ignoring vision."""
+    for model_id in TEXT_PREFERENCE:
+        profile = REGISTRY.get(model_id)
+        if profile is not None and fits_host(profile, ram_gb):
+            return profile
+    return None
+
+
+def recommended_assignment(ram_gb: int | None = None) -> tuple[str, str] | None:
+    """(text model, vision model) -- the best pair this machine can actually hold.
+
+    Text and vision cannot be chosen separately, which is the trap this exists to
+    avoid: the strongest text model is not multimodal, so picking it first can
+    leave vision with no model the host can also hold. On a 24GB machine
+    `qwen2.5:14b-instruct` fits on its own and leaves nothing for a reader, and
+    the honest answer there is a smaller text model plus a real one.
+
+    An enumeration rather than an optimisation. The candidate space is a handful
+    of pairs, the preference order is measured and written down
+    (`TEXT_PREFERENCE`, `VISION_PREFERENCE`), and a reader can check the result by
+    eye -- which a solver's answer would not allow.
+    """
+    for text_id in TEXT_PREFERENCE:
+        text = REGISTRY.get(text_id)
+        if text is None or not fits_host(text, ram_gb):
+            continue
+        for vision_id in VISION_PREFERENCE:
+            vision = REGISTRY.get(vision_id)
+            if vision is None or not fits_host(vision, ram_gb):
+                continue
+            models = (text,) if vision_id == text_id else (text, vision)
+            if fits_together(models, ram_gb):
+                return text_id, vision_id
+    return None
+
+
 # Where one model must serve every role, this is the order to try. It is the
 # text ranking from the P6 8GB-class run (`qwen3.5:4b` led card_reject_rate
 # 0.0278 vs gemma3's 0.1161 and generation_rate 1.0000 vs 0.9238) intersected

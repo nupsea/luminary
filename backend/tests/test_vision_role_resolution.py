@@ -121,10 +121,15 @@ class TestDefaultAndOverride:
 def test_a_host_with_room_keeps_its_dedicated_reader(monkeypatch):
     """Sharing is a remedy for a host that cannot hold two models, not a preference.
 
-    Quietly retargeting vision on a 32GB laptop -- because the chat model happens
-    to also have eyes -- would be this code overruling a deployment decision
-    nobody asked it to revisit. The shared model is consulted only when the
-    configured reader does not fit.
+    Quietly retargeting vision on a large machine -- because the chat model
+    happens to also have eyes -- would be this code overruling a deployment
+    decision nobody asked it to revisit.
+
+    "Room" is both models fitting *together*, not just the residency count. 32GB
+    was not enough for this assertion once that check existed: half of 32GB is
+    16GB and the pair is 10.02GB, which fits -- but the earlier version of this
+    test asserted sharing was never consulted at all, and it is consulted to
+    answer the question.
     """
     from app import memory_profile
     from app.services import model_router, settings_service
@@ -132,12 +137,31 @@ def test_a_host_with_room_keeps_its_dedicated_reader(monkeypatch):
     monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
     monkeypatch.setattr(settings_service, "configured_vision_override", lambda: None)
     monkeypatch.setattr(settings_service, "get_vision_model", lambda: "ollama/qwen2.5vl:7b")
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
     monkeypatch.setattr(
-        model_router,
-        "_shared_vision_model",
-        lambda: pytest.fail("sharing must not be consulted when the reader fits"),
+        settings_service,
+        "get_effective_routing",
+        lambda background=False: ("ollama/qwen3.5:4b", None),
     )
     assert model_router.resolve("vision").model == "ollama/qwen2.5vl:7b"
+
+
+def test_a_host_too_small_for_both_falls_back_to_one(monkeypatch):
+    """16GB is the case this exists for: the pair is 10.02GB, 63% of RAM before
+    the backend's 4.7GB ingest peak, which is when both models are in use."""
+    from app import memory_profile
+    from app.services import model_router, settings_service
+
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
+    monkeypatch.setattr(settings_service, "configured_vision_override", lambda: None)
+    monkeypatch.setattr(settings_service, "get_vision_model", lambda: "ollama/qwen2.5vl:7b")
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
+    monkeypatch.setattr(
+        settings_service,
+        "get_effective_routing",
+        lambda background=False: ("ollama/qwen3.5:4b", None),
+    )
+    assert model_router.resolve("vision").model == "ollama/qwen3.5:4b"
 
 
 def test_an_8gb_host_resolves_every_role_to_one_model(monkeypatch):

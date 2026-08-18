@@ -24,8 +24,22 @@ VISION_MODEL="${LUMINARY_VISION_MODEL:-}"
 # fails if the two drift, because the backend resolves to that model whether or
 # not this pulled it.
 PUBLIC_GENERALIST="qwen3.5:4b"
-# Used where two models can be resident.
-DEFAULT_CHAT_MODEL="llama3.2"
+# The dedicated reader, pulled where the profile can hold a second model. Left
+# optional before, which put the install and the backend in disagreement: the
+# backend resolves vision to this on a host with room whether or not it is on
+# disk, and figure analysis then fails quietly.
+DEDICATED_READER="qwen2.5vl:7b"
+# Below this the backend will not load both at once, so pulling the reader is a
+# 6GB download for a model that never runs. Derived, not chosen: the pair is
+# 3.21 + 6.81 = 10.02GB and a resident set takes at most half the machine, so
+# 10.02 x 2 = 20.04 rounded to the next tier. `tests/test_installer_models.py`
+# recomputes it from the registry and fails if the two drift.
+READER_MIN_RAM_GB=24
+# Used where two models can be resident. Same id as the generalist today: the
+# structural matrix put it ahead of llama3.2 on every metric it measured, and
+# llama3.2 held the default only on an HHEM comparison this repo ruled
+# inadmissible for choosing a model.
+DEFAULT_CHAT_MODEL="qwen3.5:4b"
 
 _info()  { printf '\033[0;36m[install]\033[0m %s\n' "$*"; }
 _warn()  { printf '\033[0;33m[install]\033[0m %s\n' "$*"; }
@@ -183,7 +197,7 @@ _mem_gb() {
 _default_profile() {
     _gb="$(_mem_gb)"
     if   [ "$_gb" -eq 0 ];  then echo "public"      # unknown: assume small
-    elif [ "$_gb" -lt 24 ]; then echo "public"
+    elif [ "$_gb" -lt 16 ]; then echo "public"
     else                         echo "standard"
     fi
 }
@@ -192,7 +206,7 @@ PROFILE="${LUMINARY_PROFILE:-}"
 if [ -z "$PROFILE" ]; then
     _suggested="$(_default_profile)"
     if [ -t 0 ]; then
-        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/8-16GB  [2] standard/24GB+  [3] performance  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
+        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/under 16GB  [2] standard/16GB+  [3] performance  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
         read -r _p || _p=""
         case "$_p" in
             1|public)      PROFILE="public" ;;
@@ -224,6 +238,11 @@ if [ -z "$CHAT_MODEL" ]; then
         _info "Profile '$PROFILE' keeps one model loaded: using $CHAT_MODEL for chat AND figures"
     else
         CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+        # Room for two AND enough RAM to hold both, which is what the backend
+        # checks before it resolves vision to a second model.
+        if [ -z "$VISION_MODEL" ] && [ "$(_mem_gb)" -ge "$READER_MIN_RAM_GB" ]; then
+            VISION_MODEL="$DEDICATED_READER"
+        fi
     fi
 fi
 
@@ -278,9 +297,9 @@ fi
 # Pull models only if not already cached.
 _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
 
-# Optional vision model (powers image/figure analysis). Not prompted for — the
-# install stays non-interactive and the closing banner tells the user how to add
-# it later. Set LUMINARY_VISION_MODEL to pull one during install.
+# The vision model is pulled only where the profile can keep a second model
+# loaded; on the single-model profile the chat model reads figures itself.
+# Set LUMINARY_VISION_MODEL to override which one.
 for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     [ -z "$model" ] && continue
     if _pulled "$model" || _pulled "${model}:latest"; then
@@ -326,15 +345,15 @@ cat <<EOF
 
 EOF
 else
-cat <<'EOF'
+cat <<EOF
 
 [install] Done.
 
   Next:  make start
   Open:  http://localhost:7820
 
-  Optional: a dedicated vision model reads figures at higher fidelity.
-  Add it any time with:  ollama pull qwen2.5vl:7b
+  Models pulled: $CHAT_MODEL${VISION_MODEL:+ and $VISION_MODEL}.
+  ${VISION_MODEL:-$CHAT_MODEL} reads figures.
 
 EOF
 fi

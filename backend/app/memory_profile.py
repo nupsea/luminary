@@ -41,7 +41,12 @@ PROFILES: tuple[MemoryProfile, ...] = ("low", "standard", "performance")
 _LEGACY_ALIASES = {"public": "low"}
 
 # Matches `install.sh:_default_profile`. Below this, one runner and nothing else.
-_STANDARD_MIN_RAM_GB = 24
+# 16GB since 2026-08-18: 24 put every 16GB laptop on the low profile, which is a
+# machine class that can comfortably carry more serving width than one slot. It
+# still cannot carry two models -- `qwen3.5:4b` plus the 6.81GB reader is
+# 10.02GB, 63% of 16GB before the backend's 4.7GB ingest peak -- so what the
+# larger profile buys at this size is parallelism, not a second model.
+_STANDARD_MIN_RAM_GB = 16
 
 # How many models may stay resident at once. Mirrors OLLAMA_MAX_LOADED_MODELS as
 # the installer sets it; each loaded model gets its own runner and its own KV
