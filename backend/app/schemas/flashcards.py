@@ -157,6 +157,14 @@ class GroundingReport(BaseModel):
     unchecked: int = 0
 
 
+class RepairReport(BaseModel):
+    """What POST /flashcards/repair actually changed. Zeroes on a healthy library."""
+
+    index_rows_removed: int
+    cards_indexed: int
+    orphan_rows_removed: int
+
+
 class CoverageReportResponse(BaseModel):
     """Response schema for GET /flashcards/audit/{document_id}"""
 

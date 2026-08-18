@@ -2504,6 +2504,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flashcards/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Flashcards
+         * @description Reconcile the search index and card-scoped tables with the cards that exist.
+         *
+         *     Removes index rows and child rows naming a deleted card, and indexes any card
+         *     that was inserted without being indexed. Deletes no flashcard, and leaves
+         *     `review_events` alone -- an event with no card records a review that happened.
+         */
+        post: operations["repair_flashcards_flashcards_repair_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flashcards/generate": {
         parameters: {
             query?: never;
@@ -9065,6 +9089,18 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * RepairReport
+         * @description What POST /flashcards/repair actually changed. Zeroes on a healthy library.
+         */
+        RepairReport: {
+            /** Index Rows Removed */
+            index_rows_removed: number;
+            /** Cards Indexed */
+            cards_indexed: number;
+            /** Orphan Rows Removed */
+            orphan_rows_removed: number;
+        };
         /** RetrievalSettingsPatch */
         RetrievalSettingsPatch: {
             /** Rerank Enabled */
@@ -14794,6 +14830,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_flashcards_flashcards_repair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairReport"];
                 };
             };
         };

@@ -220,6 +220,7 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
 
     async with factory() as session:
         from sqlalchemy import select as sa_select
+        from sqlalchemy import text as sa_text
 
         result = await session.execute(
             sa_select(FlashcardModel)
@@ -227,6 +228,13 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
             .where(FlashcardModel.bloom_level >= 3)
         )
         high_bloom_cards = result.scalars().all()
+        # A card that never enters the FTS index exists and cannot be found: this
+        # path inserted without indexing, so every gap-fill card was unsearchable.
+        indexed = await session.execute(
+            sa_text("SELECT COUNT(*) FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": high_bloom_cards[0].id},
+        )
+        assert indexed.scalar_one() == 1, "a gap-fill card must be searchable"
     assert len(high_bloom_cards) >= 2
 
 

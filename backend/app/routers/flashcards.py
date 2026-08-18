@@ -65,6 +65,7 @@ from app.schemas.flashcards import (
     GenerateTechnicalRequest,
     GroundingAuditRequest,
     GroundingReport,
+    RepairReport,
     ReviewRequest,
     SourceContextResponse,
     TraceFlashcardRequest,
@@ -81,6 +82,7 @@ from app.services.flashcard import (
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
 from app.services.flashcard_grounding import audit_grounding
+from app.services.flashcard_repair import repair_flashcard_tables
 from app.services.flashcards_router_service import (
     cards_to_csv as _cards_to_csv,
 )
@@ -123,6 +125,7 @@ __all__ = [
     "GenerateTechnicalRequest",
     "GroundingAuditRequest",
     "GroundingReport",
+    "RepairReport",
     "ReviewRequest",
     "SourceContextResponse",
     "TraceFlashcardRequest",
@@ -209,6 +212,19 @@ async def audit_card_grounding(
     """
     report = await audit_grounding(session, req.document_id)
     return GroundingReport(**report)
+
+
+@router.post("/repair", response_model=RepairReport)
+async def repair_flashcards(
+    session: AsyncSession = Depends(get_db),
+) -> RepairReport:
+    """Reconcile the search index and card-scoped tables with the cards that exist.
+
+    Removes index rows and child rows naming a deleted card, and indexes any card
+    that was inserted without being indexed. Deletes no flashcard, and leaves
+    `review_events` alone -- an event with no card records a review that happened.
+    """
+    return RepairReport(**await repair_flashcard_tables(session))
 
 
 @router.post("/generate", response_model=list[FlashcardResponse], status_code=201)

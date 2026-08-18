@@ -95,6 +95,7 @@ from app.schemas.study import (
 )
 from app.services import study_assembler
 from app.services.background import fire_and_forget
+from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
 from app.services.llm_json import parse_llm_json_object
@@ -1538,7 +1539,7 @@ async def _evaluate_teachback_bg(
                             )
                             session.add(misconception)
                     if correction_payload is not None:
-                        _insert_correction_flashcard(
+                        await _insert_correction_flashcard(
                             card=correction_card,
                             payload=correction_payload,
                             session=session,
@@ -2258,7 +2259,7 @@ async def _llm_correction_card_payload(
     return data
 
 
-def _insert_correction_flashcard(
+async def _insert_correction_flashcard(
     card: FlashcardModel,
     payload: dict,
     session: AsyncSession,
@@ -2281,6 +2282,9 @@ def _insert_correction_flashcard(
     )
     # correction card persisted in caller's session; commit is caller's responsibility
     session.add(correction)
+    # Without this the card exists but cannot be found: flashcard search reads the
+    # FTS index, and a card that never enters it is invisible to every query.
+    await _sync_flashcard_fts(correction, session)
     return new_id
 
 
@@ -2298,7 +2302,7 @@ async def _generate_correction_flashcard(
     payload = await _llm_correction_card_payload(card, misconception)
     if payload is None:
         return None
-    return _insert_correction_flashcard(card, payload, session)
+    return await _insert_correction_flashcard(card, payload, session)
 
 
 # Lightweight session API (stateless start + review)

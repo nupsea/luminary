@@ -61,6 +61,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 # indirect: get_lancedb_service is patched in tests
 from app.services import vector_store as _vector_store_module
 from app.services.documents_service import delete_raw_file
+from app.services.flashcard_search import _delete_flashcard_fts
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,23 @@ class DocumentDeletionService:
             text("DELETE FROM images_fts WHERE document_id = :doc_id"),
             {"doc_id": document_id},
         )
+
+        # flashcards_fts carries no document_id for the two deletes above to match,
+        # and an FTS5 UNINDEXED column cannot be filtered on directly (I-4) -- so the
+        # card ids have to be read first. Skipping this is why 228 rows in that index
+        # pointed at cards that no longer existed: flashcard search matches the index,
+        # so a deleted document's cards kept turning up in results.
+        card_ids = (
+            (
+                await session.execute(
+                    select(FlashcardModel.id).where(FlashcardModel.document_id == document_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for card_id in card_ids:
+            await _delete_flashcard_fts(card_id, session)
 
         for model in _DOCUMENT_ID_CHILD_TABLES:
             await session.execute(

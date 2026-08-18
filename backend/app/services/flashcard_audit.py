@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChunkModel, FlashcardModel, SectionModel
 from app.services.flashcard import _parse_llm_response
 from app.services.flashcard_parsers import card_rejection, grounding_state
+from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm import get_llm_service
 from app.types import BloomGap, BloomSectionStat, CoverageReport
 
@@ -282,6 +283,7 @@ class FlashcardAuditService:
                     bloom_level=card_bloom,
                 )
                 db.add(card)
+                await _sync_flashcard_fts(card, db)
                 created_cards.append(card)
 
         if created_cards:
