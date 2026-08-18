@@ -1327,11 +1327,12 @@ Still open in this phase, and none of it is a detail:
 - **The profile does not yet pick the role map.** It reports and constrains; it does not choose a
   smaller model, and `VISION_MODEL` is still a first-class knob rather than the `vision` role's
   resolution.
-- **Runtime geometry is still global.** `OLLAMA_NUM_CTX` is one value for every model (I-27 says
-  the value belongs to the model and is read from its profile — that half was never built),
-  `QA_CONTEXT_TOKEN_BUDGET` is 1500 for everyone, and `think=False` is unconditional. All three
-  were sized for llama3.2, so a more capable model cannot be given more without giving it to
-  everything.
+- **Runtime geometry is still partly global.** The context window is no longer: I-27's value half
+  shipped 2026-08-18 as `model_registry.context_window_for`, which reads the model's
+  `usable_context` and falls back to `OLLAMA_NUM_CTX` only for an unregistered model. Every entry
+  still declares 8192, so nothing moves in production until a model is measured at a different
+  window — the mechanism exists, the calibration does not. `QA_CONTEXT_TOKEN_BUDGET` is still 1500
+  for everyone and `think=False` is still unconditional; both were sized for llama3.2.
 - **`accommodations_needed` is empty on all three entries and nothing writes it.** P6 now produces
   the evidence; there is no path from a matrix run to a calibrated profile.
 - **Three registry entries.** The four models in the 8–16GB class that are installed on this

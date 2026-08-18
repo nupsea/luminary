@@ -20,7 +20,6 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import delete, select
 
-from app.config import get_settings
 from app.database import get_session_factory
 from app.models import (
     ChunkModel,
@@ -74,8 +73,20 @@ _SUMMARY_RESERVE_TOKENS = 2_000
 _CHARS_PER_TOKEN = 4
 
 
-def _summary_num_ctx() -> int:
-    return get_settings().OLLAMA_NUM_CTX
+def _summary_num_ctx(model: str | None = None) -> int:
+    """The window the summary runs in, and the size of its input budget.
+
+    Resolved from the model rather than from the global window (I-27): the same
+    value both requests the window and sizes `_input_token_budget`, so pinning it
+    to the global while the model's profile said something else would ask for one
+    window, reload the runner, and then truncate the input against the wrong
+    number. `None` means the caller let the router choose, which is the summary's
+    own role resolution.
+    """
+    from app.model_registry import context_window_for  # noqa: PLC0415
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return context_window_for(model or resolve("background").model)
 
 
 def _input_token_budget() -> int:
@@ -316,7 +327,7 @@ class SummarizationService:
                 model=model,
                 timeout=_MAP_CALL_TIMEOUT,
                 background=True,
-                num_ctx=_summary_num_ctx(),
+                num_ctx=_summary_num_ctx(model),
             )
             assert isinstance(s, str)  # noqa: S101
             section_summaries.append(s)
@@ -347,7 +358,7 @@ class SummarizationService:
                 system=system,
                 model=model,
                 background=True,
-                num_ctx=_summary_num_ctx(),
+                num_ctx=_summary_num_ctx(model),
                 max_tokens=_DETAILED_BATCH_MAX_TOKENS,
             )
             assert isinstance(text, str)  # noqa: S101
@@ -454,7 +465,7 @@ class SummarizationService:
                 system=system,
                 model=model,
                 stream=True,
-                num_ctx=_summary_num_ctx(),
+                num_ctx=_summary_num_ctx(model),
             )
 
             collected: list[str] = []
@@ -582,7 +593,7 @@ class SummarizationService:
                             system=_build_system_prompt(mode),
                             model=model,
                             background=True,
-                            num_ctx=_summary_num_ctx(),
+                            num_ctx=_summary_num_ctx(model),
                             max_tokens=_PREGENERATE_MAX_TOKENS,
                         )
                     assert isinstance(text, str)  # noqa: S101
@@ -794,7 +805,7 @@ class SummarizationService:
                 model=model,
                 stream=True,
                 background=background,
-                num_ctx=_summary_num_ctx(),
+                num_ctx=_summary_num_ctx(model),
             )
 
             collected: list[str] = []

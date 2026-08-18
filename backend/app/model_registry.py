@@ -158,6 +158,33 @@ def profile_for(model_id: str) -> ModelProfile | None:
     return REGISTRY.get(model_id) or REGISTRY.get(f"ollama/{model_id}")
 
 
+def context_window_for(model_id: str) -> int:
+    """The one context window in force for *model_id* (I-27).
+
+    I-27 has two halves. The rule -- exactly one window per loaded model, because
+    Ollama keys a loaded runner on `num_ctx` and a differing call reloads
+    llama-server -- has been enforced since it was written. The other half, that
+    the *value* is a property of the model and is read from its profile, was never
+    built: `usable_context` sat on every entry unread while one global
+    `OLLAMA_NUM_CTX` was in force for every model at once. That is why a more
+    capable model could not be given a larger window without giving it to
+    everything, and why a smaller model could not be given a smaller one to save
+    the KV cache it does not need.
+
+    Resolving from the model rather than the call site is *stronger* than the
+    global constant, not weaker: the window is now a pure function of the model,
+    so two call sites cannot disagree about it even by accident.
+
+    An unregistered model falls back to `OLLAMA_NUM_CTX`. A user may point
+    Settings at any model Ollama holds, and refusing to answer is worse than
+    answering with the deployment default.
+    """
+    profile = profile_for(model_id)
+    if profile is not None:
+        return profile.usable_context
+    return get_settings().OLLAMA_NUM_CTX
+
+
 def fits_host(profile: ModelProfile, ram_gb: int | None = None) -> bool:
     """Whether this machine has the RAM the model asks for.
 

@@ -16,6 +16,7 @@ from typing import Any
 import litellm
 
 from app.config import Settings, get_settings
+from app.model_registry import context_window_for
 from app.services.llm_admission import admit
 from app.telemetry import trace_llm_call
 
@@ -218,9 +219,11 @@ class LLMService:
             # explicitly (Ollama defaults to 2048 and silently truncates beyond it).
             # num_ctx is a per-model property here, not a per-call one: overriding
             # it forces Ollama to unload and reload the runner, so leave it unset
-            # unless a call genuinely needs a different model instance.
+            # unless a call genuinely needs a different model instance. The value
+            # comes from the model's registry profile (I-27), which is what makes
+            # it impossible for two call sites to disagree about it.
             kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
-            kwargs["num_ctx"] = num_ctx or settings.OLLAMA_NUM_CTX
+            kwargs["num_ctx"] = num_ctx or context_window_for(model)
             # Thinking-capable models (qwen3+) auto-enable reasoning, which
             # streams as reasoning_content (never surfaced) and burns the
             # num_ctx generation budget BEFORE any answer tokens -- on real QA
