@@ -280,13 +280,51 @@ if ($portActive) {
     }
 }
 
-# Pull the chat model. llama3.2 stays the default: it beat qwen3.5:4b and
-# phi4-mini on the eval harness (HHEM faithfulness, d2l + book corpora,
-# 2026-07-23) and was the fastest of the three. Override via LUMINARY_CHAT_MODEL.
+# Memory profile first: the chat model below is chosen from $MaxLoaded, and an
+# undefined variable compares as 0 in PowerShell -- so a later definition would
+# silently pick the single-model default on every profile.
+$MemGB = 0
+try {
+    $MemGB = [int][math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+} catch {
+    Write-Host "[install] Could not read installed RAM; assuming a small machine." -ForegroundColor Gray
+}
+
+# NOT $Profile: that is an automatic variable holding the user's profile path.
+$LumProfile = $env:LUMINARY_PROFILE
+if (-not $LumProfile) {
+    if ($MemGB -ge 24) { $LumProfile = "standard" } else { $LumProfile = "public" }
+}
+
+switch ($LumProfile) {
+    "performance" { $MaxLoaded = 2; $NumParallel = 4; $VisionConcurrency = 4 }
+    "standard"    { $MaxLoaded = 2; $NumParallel = 2; $VisionConcurrency = 2 }
+    default       { $MaxLoaded = 1; $NumParallel = 1; $VisionConcurrency = 1 }
+}
+Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALLEL=$NumParallel)" -ForegroundColor Yellow
+
+# Pull the chat model, chosen from the memory profile.
+#
+# llama3.2 was the default on the strength of an HHEM faithfulness comparison
+# (d2l + book, 2026-07-23). That comparison is no longer admissible -- a
+# cross-model HHEM delta is a style artifact, which is why it may not gate a
+# model decision -- and the structural matrix (2026-08-16) put qwen3.5:4b ahead
+# on every gating metric.
+#
+# The profile decides because "public" keeps ONE model loaded. A text-only chat
+# model there leaves the vision role with nothing the machine can hold: loading a
+# second model evicts the one answering questions. qwen3.5:4b reads figures at
+# 3.21GB resident, the same as its text footprint, so one model covers every role.
+# Must stay equal to model_registry.GENERALIST_PREFERENCE[0]; the guard is
+# backend/tests/test_installer_models.py.
+#
 # NOTE: try/catch cannot detect native command failure in PS 5.1 -- non-zero
 # exit codes do not throw -- so check $LASTEXITCODE instead.
+$PublicGeneralist = "qwen3.5:4b"
 $chatModel = $env:LUMINARY_CHAT_MODEL
-if (-not $chatModel) { $chatModel = "llama3.2" }
+if (-not $chatModel) {
+    if ($MaxLoaded -le 1) { $chatModel = $PublicGeneralist } else { $chatModel = "llama3.2" }
+}
 if (Test-CommandExists "ollama") {
     Write-Host "[install] Pulling chat model $chatModel (this can take a few minutes)..." -ForegroundColor Yellow
     ollama pull $chatModel
@@ -367,29 +405,9 @@ try {
 # ---------------------------------------------------------------------------
 # 6b. Performance profile
 # ---------------------------------------------------------------------------
-# Parallelism is a memory decision: one KV cache per slot. Sized from installed
-# RAM, overridable via $env:LUMINARY_PROFILE. 'performance' is never automatic.
+# The profile itself is resolved further up, before the model pull that depends
+# on it. Parallelism is a memory decision: one KV cache per slot.
 Set-Location -Path $RepoRoot
-
-$MemGB = 0
-try {
-    $MemGB = [int][math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-} catch {
-    Write-Host "[install] Could not read installed RAM; assuming a small machine." -ForegroundColor Gray
-}
-
-# NOT $Profile: that is an automatic variable holding the user's profile path.
-$LumProfile = $env:LUMINARY_PROFILE
-if (-not $LumProfile) {
-    if ($MemGB -ge 24) { $LumProfile = "standard" } else { $LumProfile = "public" }
-}
-
-switch ($LumProfile) {
-    "performance" { $MaxLoaded = 2; $NumParallel = 4; $VisionConcurrency = 4 }
-    "standard"    { $MaxLoaded = 2; $NumParallel = 2; $VisionConcurrency = 2 }
-    default       { $MaxLoaded = 1; $NumParallel = 1; $VisionConcurrency = 1 }
-}
-Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALLEL=$NumParallel)" -ForegroundColor Yellow
 
 # Persist for the backend, which reads backend\.env and sizes its enrichment
 # concurrency from OLLAMA_NUM_PARALLEL.
@@ -406,6 +424,11 @@ function Set-EnvLine($Lines, $Key, $Value) {
 
 $EnvLines = Set-EnvLine $EnvLines "OLLAMA_NUM_PARALLEL" $NumParallel
 $EnvLines = Set-EnvLine $EnvLines "ENRICHMENT_VISION_CONCURRENCY" $VisionConcurrency
+# The profile in the backend's vocabulary, so it does not size a different one
+# from host RAM and resolve to models this install never pulled. "low" is
+# canonical; "public" survives only as a legacy alias.
+$BackendProfile = if ($LumProfile -eq "public") { "low" } else { $LumProfile }
+$EnvLines = Set-EnvLine $EnvLines "LUMINARY_MEMORY_PROFILE" $BackendProfile
 Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
 
 # Ollama on Windows reads its own knobs from the user environment, and the
@@ -474,5 +497,10 @@ Write-Host "Wait for 'Luminary is ready', then open http://localhost:7820"
 Write-Host ""
 Write-Host "If a tool was reported 'not on PATH' above, open a NEW PowerShell"
 Write-Host "window first so the updated PATH takes effect."
-Write-Host "Optional image analysis:  ollama pull qwen2.5vl:7b" -ForegroundColor Gray
+if ($MaxLoaded -le 1) {
+    Write-Host "$chatModel answers questions and reads figures, so image analysis works already." -ForegroundColor Gray
+    Write-Host "This profile keeps one model loaded: a second one evicts the first rather than adding to it." -ForegroundColor Gray
+} else {
+    Write-Host "Optional higher-fidelity figures:  ollama pull qwen2.5vl:7b" -ForegroundColor Gray
+}
 Write-Host "=========================================" -ForegroundColor Green

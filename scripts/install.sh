@@ -13,8 +13,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+# Resolved after the profile is known: on a host that may keep only ONE model
+# loaded, the chat model has to be the one that also reads figures, or vision has
+# no model that machine can hold. See PUBLIC_GENERALIST below.
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-}"
 VISION_MODEL="${LUMINARY_VISION_MODEL:-}"
+
+# One model, every role, on an 8-16GB laptop. Must stay equal to
+# `model_registry.GENERALIST_PREFERENCE[0]`; `tests/test_installer_models.py`
+# fails if the two drift, because the backend resolves to that model whether or
+# not this pulled it.
+PUBLIC_GENERALIST="qwen3.5:4b"
+# Used where two models can be resident.
+DEFAULT_CHAT_MODEL="llama3.2"
 
 _info()  { printf '\033[0;36m[install]\033[0m %s\n' "$*"; }
 _warn()  { printf '\033[0;33m[install]\033[0m %s\n' "$*"; }
@@ -202,6 +213,20 @@ esac
 export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL
 _info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
 
+# The chat model follows the profile, because on `public` the runtime keeps one
+# model loaded. Pulling a text-only model there left the vision role with nothing
+# the machine could hold: the backend would resolve it to a second model, and
+# OLLAMA_MAX_LOADED_MODELS=1 means loading it evicts the one answering questions.
+# `qwen3.5:4b` reads figures at 3.21GB resident -- the same as its text footprint.
+if [ -z "$CHAT_MODEL" ]; then
+    if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
+        CHAT_MODEL="$PUBLIC_GENERALIST"
+        _info "Profile '$PROFILE' keeps one model loaded: using $CHAT_MODEL for chat AND figures"
+    else
+        CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+    fi
+fi
+
 # Persist the app-side knobs so the backend (which reads backend/.env) picks them
 # up. OLLAMA_NUM_PARALLEL goes in too, not just the server env: the backend
 # sizes its enrichment concurrency from it.
@@ -216,6 +241,16 @@ _upsert_env() {
 }
 _upsert_env ENRICHMENT_VISION_CONCURRENCY "$VISION_CONCURRENCY"
 _upsert_env OLLAMA_NUM_PARALLEL "$OLLAMA_NUM_PARALLEL"
+# The profile itself, in the backend's vocabulary. Without it the backend sized
+# its own profile from host RAM and could disagree with the one chosen here: pick
+# `public` on a 32GB machine and the backend would resolve chat and vision to two
+# models this install never pulled. `low` is the canonical name; `public` is read
+# as a legacy alias, so writing the canonical one keeps old .env files working
+# without adding a second spelling.
+case "$PROFILE" in
+    public) _upsert_env LUMINARY_MEMORY_PROFILE "low" ;;
+    *)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE" ;;
+esac
 
 # Start ollama if it's not already serving.
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
@@ -277,6 +312,20 @@ fi
 _info "Building production SPA..."
 make build
 
+if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
+cat <<EOF
+
+[install] Done.
+
+  Next:  make start
+  Open:  http://localhost:7820
+
+  $CHAT_MODEL answers questions and reads figures, so image analysis works
+  already. This profile keeps one model loaded: adding a second one does not
+  give you both, it evicts the first.
+
+EOF
+else
 cat <<'EOF'
 
 [install] Done.
@@ -284,7 +333,8 @@ cat <<'EOF'
   Next:  make start
   Open:  http://localhost:7820
 
-  Optional: image/figure analysis needs a vision model (~6GB download).
+  Optional: a dedicated vision model reads figures at higher fidelity.
   Add it any time with:  ollama pull qwen2.5vl:7b
 
 EOF
+fi
