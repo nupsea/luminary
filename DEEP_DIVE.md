@@ -23,10 +23,11 @@
 15. [The Frontend: A 72px Nav Rail, Six Learner Surfaces, Two Dev Surfaces](#the-frontend-a-72px-nav-rail-six-learner-surfaces-two-dev-surfaces)
 16. [Observability and Evaluation](#observability-and-evaluation)
 17. [Deployment Model](#deployment-model)
-18. [Performance Characteristics](#performance-characteristics)
-19. [Engineering Philosophy: The Harness Engineering Framework](#engineering-philosophy-the-harness-engineering-framework)
-20. [Possible Future Extensions](#possible-future-extensions)
-21. [Summary](#summary)
+18. [Model Selection: One Registry, Three Bands](#model-selection-one-registry-three-bands)
+19. [Performance Characteristics](#performance-characteristics)
+20. [Engineering Philosophy: The Harness Engineering Framework](#engineering-philosophy-the-harness-engineering-framework)
+21. [Possible Future Extensions](#possible-future-extensions)
+22. [Summary](#summary)
 
 ---
 
@@ -520,7 +521,8 @@ User's machine
 **Prerequisites:**
 - Python 3.13 with uv (package manager)
 - Node 20+
-- Ollama with at least one model pulled (`ollama pull mistral`)
+- Ollama with at least one model pulled. `make install` pulls what your RAM
+  band needs; by hand, `ollama pull qwen3.5:4b` covers every role.
 
 **Startup:**
 ```bash
@@ -533,6 +535,84 @@ make dev            # Terminal 2 (starts both backend and frontend)
 **Cloud LLM is opt-in.** If the user configures an OpenAI, Anthropic, or Google API key, LiteLLM routes requests to the cloud provider. Otherwise, all LLM calls go to Ollama. The system degrades gracefully when Ollama is offline: search, entity browsing, and flashcard review still work; features requiring LLM (summarization, chat, flashcard generation) return HTTP 503 with an actionable message ("Ollama is unreachable. Start it with: `ollama serve`").
 
 **Desktop packaging.** Luminary ships as a web app today (Vite dev server in development, served static from FastAPI in single-binary builds). A native desktop wrapper (e.g. Tauri) is not on the active roadmap; if pursued, it would wrap the existing frontend bundle and run the Python backend as a sidecar — no architectural changes required.
+
+---
+
+## Model Selection: One Registry, Three Bands
+
+Which model answers a question is not a constant, and it is not read from config
+at the call site. `app/model_registry.py` is the only module that reads a model
+name out of configuration; everything else asks the router for a **role** --
+`chat`, `generation`, `background`, or `vision` -- and gets back whatever the
+current configuration resolves to. A test fails the build if a service starts
+reading a model id directly, because a model chosen in Settings has to reach
+every call site or none.
+
+### The registry knows what a model costs
+
+Each entry carries a measured footprint rather than an estimate: resident bytes
+from Ollama's own `/api/ps` after a real generation at the deployed context
+window, which is weights plus one KV cache. The estimates these replaced were low
+by up to 44%, and the number decides whether a model is offered on a machine at
+all.
+
+`min_ram_gb` is the one derived value, and it is policy: twice the resident size,
+the model taking half the machine while the other half carries the OS, the
+backend's 4.7 GB ingest peak, the embedder and the entity model.
+
+Capability is measured too, not declared. Two entries were recorded as text-only
+while both could read images, which left the vision role resolving to a 6.8 GB
+model an 8 GB laptop could not hold -- and no feasible assignment of models to
+roles on that machine at all. A test now checks every entry's declared
+capabilities against what the runtime reports.
+
+### Three bands, decided by RAM
+
+| RAM | Profile | Text roles | Vision | Resident |
+|-----|---------|-----------|--------|----------|
+| under 16 GB | `low` | `qwen3.5:4b` | the same model | 3.2 GB |
+| 16-24 GB | `standard` | `qwen3.5:4b` | the same model | 3.2 GB |
+| over 24 GB | `performance` | `qwen2.5:14b-instruct` | `qwen3.5:4b` | 12.9 GB |
+
+The band picks the role map, and a second model loads only when both fit
+*together*. That is the per-model rule applied to the resident set: two models
+break the assumption the per-model rule rests on, because "the other half carries
+everything else" is a budget that does not double when a second model loads. A
+16 GB laptop cannot hold a 3.2 GB text model beside a 6.8 GB reader -- 10 GB is
+63% of RAM before the ingest peak and 92% after -- so what the larger band buys
+that machine is serving width, not a second model.
+
+Text and vision are chosen as a pair, because the strongest text model is not
+multimodal: picking it first can leave the vision role with nothing the host can
+also hold. The choice is an enumeration over a handful of candidates with a
+written-down preference order, not an optimisation -- the whole feasible space
+across all three bands is small enough to read.
+
+### One context window per loaded model
+
+Ollama keys a loaded runner on `num_ctx`, so a call asking for a different window
+unloads llama-server and reloads it. Three call-site-specific windows once made a
+single chat turn reload the model twice. The window is therefore a property of
+the model, read from its registry profile, and no call site chooses one.
+
+Shrinking it was measured and rejected: on `qwen3.5:4b`, 8192 costs 3.21 GB,
+6144 costs 3.15 GB and 4096 costs 3.00 GB. The 60 MB saved by 6144 is 0.7% of an
+8 GB machine and halves the flashcard path's headroom; the only saving worth
+having is at 4096, which cannot hold the largest prompt the app builds and
+truncates rather than erroring.
+
+### Configuration, and what happens when it does not fit
+
+Three layers, strongest first: what you pick in the app's Settings (stored in the
+database), then `backend/.env`, then the RAM-sized registry default. Only the
+default is host-aware -- an explicit choice is honoured even when it does not fit,
+because a backend that refuses to start over a model choice is worse than one
+that says the choice is expensive.
+
+What it does instead is warn: at startup in the log, at `GET /settings/models`,
+and in `make models`. The warning is not cosmetic. A configuration that exceeds
+the host swaps under load, and its first symptom is a stall during ingestion
+rather than an error.
 
 ---
 
@@ -570,7 +650,7 @@ Luminary's engineering practices are codified in 25 "golden principles" derived 
 
 **Repository is the system of record.** All architectural decisions, design choices, patterns, and conventions live as versioned Markdown in `docs/`. If it is not in the repo, it does not exist. This is critical for agent-assisted development: an AI agent has no memory between sessions, so the repository must contain everything it needs to make correct decisions.
 
-**Enforce invariants mechanically.** The project has 18 mechanically enforced invariants documented in `docs/invariants.md` (grouped by Async/Concurrency, FTS5/SQLite, Imports, LLM/SSE, Vector Dimensions, Frontend, Quality Gates, Packages, Privacy & Local-First). They include: no pip (only uv), no direct LLM SDK imports (only LiteLLM), no raw dicts at API boundaries (only Pydantic models), no `print()` in production code (only structured logging), TypeScript strict mode, and more. Each invariant is checked by either a CI linter, a pre-commit hook, or a Claude Code PreToolUse hook. Violation messages include remediation instructions.
+**Enforce invariants mechanically.** The project has 35 mechanically enforced invariants documented in `docs/invariants.md` (grouped by Async/Concurrency, FTS5/SQLite, Imports, LLM/SSE, Vector Dimensions, Frontend, Quality Gates, Packages, Privacy & Local-First). They include: no pip (only uv), no direct LLM SDK imports (only LiteLLM), no raw dicts at API boundaries (only Pydantic models), no `print()` in production code (only structured logging), TypeScript strict mode, and more. Each invariant is checked by either a CI linter, a pre-commit hook, or a Claude Code PreToolUse hook. Violation messages include remediation instructions.
 
 **Tests must use real artifacts at real scale.** Integration tests ingest full, untruncated public-domain books with real ML models (BAAI/bge-small-en-v1.5, GLiNER). Only LiteLLM is mocked (to avoid requiring Ollama in CI). Golden datasets for evaluation are grounded in actually ingested content with verifiable context passages.
 

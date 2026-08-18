@@ -115,6 +115,16 @@ async def lifespan(app: FastAPI):
         status.set_state("db", "failed", str(exc))
         raise
     status.set_state("db", "ready")
+
+    # Say it out loud at boot, not only at GET /settings/models. An oversized
+    # configuration's first symptom was a crash during ingestion, which is the
+    # least useful moment to learn that the models do not fit.
+    try:
+        from app.services.model_router import warn_if_configuration_exceeds_host
+
+        warn_if_configuration_exceeds_host()
+    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
+        logger.debug("model residency check failed", exc_info=True)
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts

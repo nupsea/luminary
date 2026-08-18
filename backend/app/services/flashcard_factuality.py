@@ -30,8 +30,6 @@ from __future__ import annotations
 
 import logging
 
-from app.config import get_settings
-
 logger = logging.getLogger(__name__)
 
 FACTUALITY_UNCHECKED = "unchecked"
@@ -80,8 +78,15 @@ _MAX_PASSAGE_CHARS = 6000
 
 
 def factuality_model() -> str:
-    """The configured checker, or empty when none is set."""
-    return (get_settings().FLASHCARD_FACTUALITY_MODEL or "").strip()
+    """The configured checker, or empty when none is set.
+
+    Delegates to the registry: one module reads model ids out of config, so there
+    is a single place a user changes what runs (`tests/test_model_registry.py`
+    fails if a service starts reading one directly again).
+    """
+    from app.model_registry import configured_factuality_checker  # noqa: PLC0415
+
+    return configured_factuality_checker()
 
 
 def is_self_judging(checker: str, generator: str | None) -> bool:

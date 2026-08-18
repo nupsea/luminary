@@ -13,6 +13,18 @@ EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
 
 LUMINARY_PORT ?= 7820
 
+models:  ## what the current model configuration costs on this machine
+	@cd backend && uv run python -c "\
+from app.services.model_router import residency_report, warn_if_configuration_exceeds_host; \
+r = residency_report(); \
+print(f\"profile {r['profile']}  host {r['host_ram_gb']}GB  keeps {r['max_resident']} loaded\"); \
+[print(f\"  {role:<11} {v['model']:<28} {v['resident_gb'] or '?'}GB\") for role, v in r['roles'].items()]; \
+print(f\"  resident: {r['resident_count']} model(s), {r['resident_gb']}GB\"); \
+w = warn_if_configuration_exceeds_host(); \
+[print(f'  WARNING: {line}') for line in w] or print('  no warnings'); \
+print('  (.env + registry defaults; a model chosen in Settings is stored in the'); \
+print('   database and only shows at GET /settings/models on a running server)')"
+
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
 	@for port in 7820 5173 5174; do \

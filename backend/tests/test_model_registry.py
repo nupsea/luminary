@@ -26,8 +26,18 @@ _APP = Path(__file__).resolve().parent.parent / "app"
 # asks the router, so a Settings change reaches every call site or none.
 _MAY_READ_CONFIG = {"model_registry.py"}
 
-_CONFIG_MODEL_READ = re.compile(r"settings\s*\.\s*(?:LITELLM_\w+|VISION_MODEL)|"
-                                r"get_settings\(\)\s*\.\s*(?:LITELLM_\w+|VISION_MODEL)")
+# Every knob that names a *generation-role* model. RERANK_MODEL, NER_MODEL and
+# WHISPER_MODEL_SIZE are deliberately outside this: they are not roles a user
+# picks per request, they are not routed, and nothing in Settings offers them.
+# FLASHCARD_FACTUALITY_MODEL was outside it by omission and is not any more --
+# it names a model that grades product output, which is exactly what this guard
+# is for.
+_ROLE_MODEL_KNOBS = r"LITELLM_\w+|VISION_MODEL|FLASHCARD_FACTUALITY_MODEL"
+
+_CONFIG_MODEL_READ = re.compile(
+    rf"settings\s*\.\s*(?:{_ROLE_MODEL_KNOBS})|"
+    rf"get_settings\(\)\s*\.\s*(?:{_ROLE_MODEL_KNOBS})"
+)
 
 
 def _offenders() -> list[str]:

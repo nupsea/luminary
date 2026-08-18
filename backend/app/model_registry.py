@@ -469,6 +469,17 @@ def default_vision_model() -> str:
     return candidates[0].id if candidates else configured
 
 
+def configured_factuality_checker() -> str:
+    """The model that checks whether a generated card's answer follows from its
+    passage, or "" when none is configured.
+
+    Read here rather than in the service for the same reason as every other model
+    id: one module owns "which model", so a change reaches every call site or
+    none. `flashcard_factuality.factuality_model` re-exports this.
+    """
+    return (get_settings().FLASHCARD_FACTUALITY_MODEL or "").strip()
+
+
 def configured_generation_override() -> str | None:
     """`LITELLM_GENERATION_MODEL`, or None when unset.
 

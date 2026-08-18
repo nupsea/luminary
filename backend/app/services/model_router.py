@@ -175,6 +175,40 @@ def resident_models() -> set[str]:
     return {resolve(role).model for role in ROLES}
 
 
+def warn_if_configuration_exceeds_host() -> list[str]:
+    """Log every way the configured models are too big for this machine.
+
+    Returns the warnings so a caller can surface them too. Advisory by design:
+    a model chosen by hand is honoured, because a backend that refuses to start
+    over a model choice is worse than one that says the choice is expensive.
+    Before this the report existed only at `GET /settings/models`, so the first
+    sign of an oversized configuration was a crash during ingestion.
+    """
+    report = residency_report()
+    warnings: list[str] = []
+
+    for model in report.get("oversized_models") or []:
+        warnings.append(
+            f"{model['model']} needs {model['min_ram_gb']}GB and this machine has "
+            f"{report.get('host_ram_gb')}GB -- it will swap under load"
+        )
+    if not report.get("within_residency_limit", True):
+        warnings.append(
+            f"{report['resident_count']} models resolve for {len(ROLES)} roles but the "
+            f"{report.get('profile')} profile keeps {report['max_resident']} loaded -- "
+            f"each call to the odd one out evicts a model that was answering"
+        )
+    if report.get("unmeasured_models"):
+        warnings.append(
+            f"no measured footprint for {', '.join(report['unmeasured_models'])} -- "
+            f"this machine's headroom is unknown, not fine"
+        )
+
+    for line in warnings:
+        logger.warning("model configuration: %s", line)
+    return warnings
+
+
 def residency_report() -> dict[str, Any]:
     """What this configuration costs on this machine, and whether it fits.
 

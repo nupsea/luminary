@@ -183,31 +183,60 @@ The home screen surfaces the day's highest-leverage action (review due cards, co
 
 ## Models
 
-If the app warns that Ollama isn't running or no model is pulled, only the LLM features (chat, teach-back, flashcards) pause — everything else keeps working. Fix it with `ollama serve` and `ollama pull llama3.2` (Docker users: the `--profile ai` sidecar does this automatically on first start).
+If the app warns that Ollama isn't running or no model is pulled, only the LLM features (chat, teach-back, flashcards) pause — everything else keeps working. Fix it with `ollama serve` and `ollama pull qwen3.5:4b` (Docker users: the `--profile ai` sidecar does this automatically on first start).
 
-Luminary defaults to **Llama 3.2** via Ollama (pulled by `make install`).
+Luminary sizes its models from your machine's RAM, and `make install` pulls what that band needs.
 
-| Model | Command | Best for | RAM/VRAM |
-|-------|---------|----------|------|
-| Llama 3.2 3B (default) | `ollama pull llama3.2` | Everyday use, lightweight laptops | ~2 GB |
-| Gemma 3 4B | `ollama pull gemma3:4b` | Strong reasoning at a small size | ~4 GB |
-| Llama 3.1 8B | `ollama pull llama3.1` | A step up in quality | ~5 GB |
-| Qwen 2.5 14B | `ollama pull qwen2.5:14b-instruct` | Highest quality, needs more memory | ~9 GB |
+| RAM | Profile | Text (chat, generation, background) | Figures | Resident |
+|-----|---------|-------------------------------------|---------|----------|
+| under 16 GB | `low` | `qwen3.5:4b` | the same model | 3.2 GB |
+| 16–24 GB | `standard` | `qwen3.5:4b` | the same model | 3.2 GB |
+| over 24 GB | `performance` | `qwen2.5:14b-instruct` | `qwen3.5:4b` | 12.9 GB |
 
-Any Ollama-served chat model works — these are just tested starting points. `llama3.2` is the default because it was the fastest and most faithful of the small models on our eval harness.
+`qwen3.5:4b` reads images as well as text, which is what lets one model fill every
+role on a small machine. A second model is loaded only where both fit at once —
+a 16 GB laptop can keep one model loaded, so what the larger profile buys it is
+concurrency rather than a second model.
 
-### How to switch to other models
+Any Ollama-served model works; these are the ones with measured footprints and
+eval numbers behind them. `ollama show <model>` lists whether a model can read
+images.
 
-To use a different local model:
-1. Pull the desired model via Ollama (e.g., `ollama pull gemma3:4b`).
-2. Add or update `LITELLM_DEFAULT_MODEL` in `backend/.env` (prefixed with `ollama/`):
-   ```bash
-   LITELLM_DEFAULT_MODEL=ollama/gemma3:4b
-   ```
+| Model | Command | Best for | Resident |
+|-------|---------|----------|----------|
+| Qwen 3.5 4B (default) | `ollama pull qwen3.5:4b` | Everyday use; also reads figures | 3.2 GB |
+| Llama 3.2 3B | `ollama pull llama3.2` | The lightest option, text only | 2.9 GB |
+| Phi-4 mini | `ollama pull phi4-mini` | Text only | 3.5 GB |
+| Gemma 3 4B | `ollama pull gemma3:4b` | Reads figures, but least accurate on them | 3.6 GB |
+| Qwen 2.5 14B | `ollama pull qwen2.5:14b-instruct` | Highest quality text, needs 24 GB+ | 9.7 GB |
+| Qwen 2.5 VL 7B | `ollama pull qwen2.5vl:7b` | A dedicated figure reader | 6.8 GB |
+
+### Changing which models run
+
+**`backend/.env` is the one file to edit** — copy `backend/.env.example`, which
+documents every model knob. Nothing else in the codebase reads a model name out
+of configuration, so a change there reaches every call site.
+
+Three layers decide which model runs, strongest first:
+
+1. **Settings in the app** — what you pick in the UI. Stored in the database,
+   per-machine, and it wins over the file.
+2. **`backend/.env`** — the deployment default for this install.
+3. **The registry default** — sized from your RAM, as in the table above. Applies
+   only where the first two say nothing.
+
+```bash
+LITELLM_DEFAULT_MODEL=ollama/gemma3:4b   # chat, and the fallback for everything
+LITELLM_GENERATION_MODEL=                # empty = follow the above
+VISION_MODEL=ollama/qwen2.5vl:7b         # must be a model with vision
+```
+
+Run `make models` to print what your current configuration costs, which roles
+resolve to which model, and any warnings.
 
 ### Switch to a cloud model (optional)
 
-Create or update `backend/.env`:
+An id is `provider/name`. A local model needs no key; a hosted one does.
 
 ```bash
 # OpenAI
@@ -223,17 +252,27 @@ LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-pro
 GOOGLE_API_KEY=...
 ```
 
+### If you choose a model too big for the machine
+
+Luminary warns and carries on — at startup in the log, at `GET /settings/models`,
+and in `make models`. It never overrides your choice. What it is warning about is
+real: a model that does not fit swaps under load, and the first symptom is usually
+a stall during ingestion rather than an error.
+
 ---
 
 ## Configuration
 
-All settings are environment variables in `backend/.env` (gitignored).
+All settings are environment variables in `backend/.env` (gitignored). `backend/.env.example` is the annotated template.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LITELLM_DEFAULT_MODEL` | `ollama/llama3.2` | LLM for chat, summaries, flashcards |
+| `LITELLM_DEFAULT_MODEL` | `ollama/qwen3.5:4b` | Chat, and the fallback for every other role |
+| `LITELLM_GENERATION_MODEL` | *(empty)* | Flashcards and summaries; empty follows the model above |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
-| `VISION_MODEL` | `ollama/qwen2.5vl:7b` | Model for image/figure analysis (optional, full mode only) |
+| `VISION_MODEL` | `ollama/qwen3.5:4b` | Image and figure analysis; must be a model with vision |
+| `FLASHCARD_FACTUALITY_MODEL` | *(empty)* | Checks a generated card's answer against its passage; off by default |
+| `LUMINARY_MEMORY_PROFILE` | *(from RAM)* | `low` / `standard` / `performance`; forces a smaller footprint |
 | `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures (LaTeX papers embed no images) |
 | `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
