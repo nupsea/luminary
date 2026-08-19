@@ -3,13 +3,17 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.intent import classify_intent_heuristic
+from app.services.intent import (
+    LLM_FALLBACK_BELOW,
+    _llm_classify_fallback,
+    classify_intent_heuristic,
+)
 from app.services.llm import get_llm_service
 from app.services.okf_context import get_okf_context_service
 from app.services.qa import get_qa_service
@@ -46,6 +50,9 @@ class ClassifyOnlyResponse(BaseModel):
     chosen_route: Literal["summary", "graph", "comparative", "search"]
     intent: str
     confidence: float
+    # Which stage decided. A heuristic answer below the fallback threshold is a
+    # guess the chat graph would have handed to the LLM.
+    source: Literal["heuristic", "llm"] = "heuristic"
 
 
 def _normalize_classify_route(intent: str) -> Literal["summary", "graph", "comparative", "search"]:
@@ -79,13 +86,36 @@ async def ask_question(req: QARequest) -> StreamingResponse:
 
 
 @router.post("/classify-only", response_model=ClassifyOnlyResponse)
-async def classify_only(req: QARequest) -> ClassifyOnlyResponse:
-    """Classify the chat route without executing retrieval/LLM graph nodes."""
+async def classify_only(
+    req: QARequest,
+    llm_fallback: bool = Query(
+        default=False,
+        description=(
+            "Also run the LLM fallback the chat graph runs below confidence 0.7. "
+            "Off by default so the heuristic can be measured alone; on, this is "
+            "the routing a user actually gets."
+        ),
+    ),
+) -> ClassifyOnlyResponse:
+    """Classify the chat route without executing retrieval/LLM graph nodes.
+
+    The heuristic alone is not what production routes on: `chat_graph` sends
+    anything below 0.7 to the LLM, and the catch-all sits at 0.5. Measuring this
+    endpoint without `llm_fallback` therefore measures a path no user takes on
+    its own -- it is the floor, not the routing.
+    """
     intent, confidence = classify_intent_heuristic(req.question)
+    source = "heuristic"
+    if llm_fallback and confidence < LLM_FALLBACK_BELOW:
+        intent = await _llm_classify_fallback(
+            req.question, default=intent, scope=req.scope or "all"
+        )
+        source = "llm"
     return ClassifyOnlyResponse(
         chosen_route=_normalize_classify_route(intent),
         intent=intent,
         confidence=confidence,
+        source=source,
     )
 
 

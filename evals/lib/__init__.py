@@ -6,7 +6,7 @@ Public API used by run_eval.py and future eval runners (S214-S218).
 from evals.lib.citation_metrics import (
     compute_citation_support_rate,
     judge_citation,
-    parse_claims_with_citations,
+    pair_answer_with_citations,
 )
 from evals.lib.flashcard_metrics import (
     compute_atomicity,
@@ -76,7 +76,7 @@ __all__ = [
     "judge_hallucination_counts",
     "load_golden",
     "normalize_route",
-    "parse_claims_with_citations",
+    "pair_answer_with_citations",
     "score_flashcards",
     "store_results",
 ]

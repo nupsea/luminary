@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,22 @@ _STYLE_RULES = (
     "something that is not there."
 )
 
-_SYSTEM_PROMPT = (
-    "You are helping someone study a document they are reading. "
-    "Write exactly 6 questions they could ask about it.\n"
-    "{guidance}\n"
-    f"{_STYLE_RULES}\n"
-    "These topics are already covered -- prefer different ones: {history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
-    "(integer, always {bloom_level}). No explanation, no markdown fences."
+SUGGESTION_SPEC = PromptSpec(
+    task="suggestions",
+    contract=(
+        "You are helping someone study a document they are reading. "
+        "Write exactly 6 questions they could ask about it.\n"
+        "{guidance}\n"
+        f"{_STYLE_RULES}\n"
+        "These topics are already covered -- prefer different ones: {history}\n\n"
+        "Output a JSON array of objects with keys 'question' and 'depth' "
+        "(integer, always {bloom_level})."
+    ),
+    accommodations=(NO_FENCES,),
 )
+
+def _system_prompt() -> str:
+    return render_for(SUGGESTION_SPEC, "background")
 
 _USER_PROMPT = (
     "Passages from the document:\n{passages}\n\n"
@@ -53,15 +61,22 @@ _USER_PROMPT = (
     "Write the 6 questions."
 )
 
-_CROSS_DOC_SYSTEM = (
-    "You are helping someone study their own library. Write exactly 6 questions "
-    "that connect ideas across the documents shown.\n"
-    "{guidance}\n"
-    f"{_STYLE_RULES}\n"
-    "These topics are already covered -- prefer different ones: {history}\n\n"
-    "Output ONLY a JSON array of objects with keys 'question' and 'depth' "
-    "(integer, always {bloom_level}). No explanation, no markdown fences."
+CROSS_DOC_SUGGESTION_SPEC = PromptSpec(
+    task="suggestions_cross_doc",
+    contract=(
+        "You are helping someone study their own library. Write exactly 6 questions "
+        "that connect ideas across the documents shown.\n"
+        "{guidance}\n"
+        f"{_STYLE_RULES}\n"
+        "These topics are already covered -- prefer different ones: {history}\n\n"
+        "Output a JSON array of objects with keys 'question' and 'depth' "
+        "(integer, always {bloom_level})."
+    ),
+    accommodations=(NO_FENCES,),
 )
+
+def _cross_doc_system() -> str:
+    return render_for(CROSS_DOC_SUGGESTION_SPEC, "background")
 
 
 # Words that carry no subject matter. Only used to reduce past questions to the
@@ -351,7 +366,7 @@ class SuggestionService:
 
         if document_id is not None:
             grounding = "\n\n".join(passages) if passages else summary[:3000]
-            system = _SYSTEM_PROMPT.format(
+            system = _system_prompt().format(
                 guidance=guidance,
                 bloom_level=target_bloom,
                 history=history_text,
@@ -361,7 +376,7 @@ class SuggestionService:
                 entities=", ".join(entity_names[:10]),
             )
         else:
-            system = _CROSS_DOC_SYSTEM.format(
+            system = _cross_doc_system().format(
                 guidance=guidance,
                 bloom_level=target_bloom,
                 history=history_text,

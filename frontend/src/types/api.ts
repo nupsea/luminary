@@ -1816,6 +1816,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/output-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Output Stats
+         * @description Repair counters, monotonic since process start.
+         *
+         *     An eval snapshots this before and after a run and takes the difference.
+         *     There is deliberately no reset: a reset is a mutation two concurrent
+         *     readers can lose, and a diff cannot be.
+         */
+        get: operations["output_stats_evals_output_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eval Environment
+         * @description What produced a number: build, resolved models, and the corpus fingerprint.
+         *
+         *     Recorded with every eval run so two runs can be compared, or shown to be
+         *     incomparable, without reading a commit log.
+         */
+        get: operations["eval_environment_evals_environment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/runs": {
         parameters: {
             query?: never;
@@ -2403,6 +2450,103 @@ export interface paths {
         get: operations["search_flashcards_flashcards_search_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/grounding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grounding Summary
+         * @description How many cards can prove where they came from, as last audited.
+         *
+         *     Reads the stored verdicts; it does not recompute. `unchecked` is reported as
+         *     its own number rather than folded into a pass rate -- a card nobody has
+         *     audited is not a card that passed.
+         */
+        get: operations["grounding_summary_flashcards_grounding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/grounding/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit Card Grounding
+         * @description Recompute every card's grounding verdict against its document's text.
+         *
+         *     Deterministic and model-free: it looks for each card's `source_excerpt` in the
+         *     chunks the card came from. Cards generated before the grounding gate existed
+         *     are `unchecked` until this runs.
+         */
+        post: operations["audit_card_grounding_flashcards_grounding_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/factuality/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit Card Factuality
+         * @description Check whether existing cards' answers follow from the passage they came from.
+         *
+         *     Only cards whose passage is recoverable (`source_chunk_ids`) are eligible --
+         *     judged against a passage reconstructed from `chunk_id` instead, a 60-card
+         *     sample scored 0.3333 and the number was an artefact of the reconstruction.
+         *     Bounded and resumable: keep calling while `remaining` is above zero.
+         */
+        post: operations["audit_card_factuality_flashcards_factuality_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Flashcards
+         * @description Reconcile the search index and card-scoped tables with the cards that exist.
+         *
+         *     Removes index rows and child rows naming a deleted card, and indexes any card
+         *     that was inserted without being indexed. Deletes no flashcard, and leaves
+         *     `review_events` alone -- an event with no card records a review that happened.
+         */
+        post: operations["repair_flashcards_flashcards_repair_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3174,6 +3318,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-lab/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalogue
+         * @description Every stage that can be compared, and every model available to compare.
+         */
+        get: operations["get_catalogue_model_lab_catalogue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description Recent runs, newest first, without their results.
+         */
+        get: operations["list_runs_model_lab_runs_get"];
+        put?: never;
+        /**
+         * Start Run
+         * @description Start a comparison. 409 when one is already in flight.
+         */
+        post: operations["start_run_model_lab_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_model_lab_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-lab/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop after the task currently in flight.
+         *
+         *     A completed call is the finest granularity available: interrupting a runner
+         *     mid-generation leaves its counters describing a partial pass, and a partial
+         *     pass is not evidence.
+         */
+        post: operations["cancel_run_model_lab_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/monitoring/phoenix-url": {
         parameters: {
             query?: never;
@@ -3929,6 +4158,11 @@ export interface paths {
         /**
          * Classify Only
          * @description Classify the chat route without executing retrieval/LLM graph nodes.
+         *
+         *     The heuristic alone is not what production routes on: `chat_graph` sends
+         *     anything below 0.7 to the LLM, and the catch-all sits at 0.5. Measuring this
+         *     endpoint without `llm_fallback` therefore measures a path no user takes on
+         *     its own -- it is the floor, not the routing.
          */
         post: operations["classify_only_qa_classify_only_post"];
         delete?: never;
@@ -4192,6 +4426,50 @@ export interface paths {
          * @description Return all sections with full text assembled from their chunks.
          */
         get: operations["get_section_content_sections__document_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model Residency
+         * @description The active memory profile, what each role resolves to, and the footprint.
+         */
+        get: operations["get_model_residency_settings_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/models/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Model Catalogue
+         * @description Every registry entry with its footprint, smallest first.
+         *
+         *     Includes models this host cannot hold, flagged rather than hidden: a user
+         *     choosing a machine or deciding what to pull is better served by seeing what
+         *     exists and what it would need.
+         */
+        get: operations["get_model_catalogue_settings_models_catalogue_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5639,6 +5917,52 @@ export interface components {
              */
             member_type: string;
         };
+        /**
+         * AdmissionStats
+         * @description Live state of the interactive/background LLM gate (P5).
+         */
+        AdmissionStats: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Reserve
+             * @default 0
+             */
+            reserve: number;
+            /**
+             * Interactive Inflight
+             * @default 0
+             */
+            interactive_inflight: number;
+            /**
+             * Background Inflight
+             * @default 0
+             */
+            background_inflight: number;
+            /**
+             * Background Waiting
+             * @default 0
+             */
+            background_waiting: number;
+            /**
+             * Deferred Calls
+             * @default 0
+             */
+            deferred_calls: number;
+            /**
+             * Deferred Seconds
+             * @default 0
+             */
+            deferred_seconds: number;
+            /**
+             * Forced Admissions
+             * @default 0
+             */
+            forced_admissions: number;
+        };
         /** AnnotationCreateRequest */
         AnnotationCreateRequest: {
             /** Document Id */
@@ -5705,6 +6029,23 @@ export interface components {
         ArchiveMasteredResponse: {
             /** Archived */
             archived: number;
+        };
+        /** ArmView */
+        ArmView: {
+            /** Model */
+            model: string;
+            /** Tasks */
+            tasks: components["schemas"]["TaskRunView"][];
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Failed Tasks */
+            failed_tasks: string[];
+            /** Environment */
+            environment: {
+                [key: string]: unknown;
+            };
         };
         /** AssemblePreview */
         AssemblePreview: {
@@ -6121,6 +6462,12 @@ export interface components {
             intent: string;
             /** Confidence */
             confidence: number;
+            /**
+             * Source
+             * @default heuristic
+             * @enum {string}
+             */
+            source: "heuristic" | "llm";
         };
         /** ClipCreateRequest */
         ClipCreateRequest: {
@@ -6879,6 +7226,83 @@ export interface components {
             /** Chapters */
             chapters: components["schemas"]["EpubChapterTocItem"][];
         };
+        /**
+         * EvalEnvironmentResponse
+         * @description The build, models and corpus a run measures. See `eval_environment.py`.
+         */
+        EvalEnvironmentResponse: {
+            /** Backend Version */
+            backend_version: string;
+            /** Embedding Model */
+            embedding_model: string;
+            /** Embedding Dim */
+            embedding_dim: number;
+            /** Chunk Vector Table */
+            chunk_vector_table: string;
+            /** Rerank Model */
+            rerank_model: string;
+            /** Rerank Depth */
+            rerank_depth: number;
+            /** Rerank Blend Alpha */
+            rerank_blend_alpha: number | null;
+            /** Query Spell Correct */
+            query_spell_correct: boolean;
+            /** Llm Mode */
+            llm_mode: string;
+            /** Chat Model */
+            chat_model: string;
+            /** Background Model */
+            background_model: string;
+            /** Local Chat Model */
+            local_chat_model: string;
+            /** Generation Model */
+            generation_model: string;
+            /** Vision Model */
+            vision_model: string;
+            /**
+             * Prompt Arm
+             * @default shipped
+             */
+            prompt_arm: string;
+            /**
+             * Prompt Accommodations Dropped
+             * @default []
+             */
+            prompt_accommodations_dropped: string[];
+            /**
+             * Memory Profile
+             * @default unknown
+             */
+            memory_profile: string;
+            /**
+             * Memory Profile Explicit
+             * @default false
+             */
+            memory_profile_explicit: boolean;
+            /**
+             * Max Resident Models
+             * @default 0
+             */
+            max_resident_models: number;
+            /**
+             * Host Ram Gb
+             * @default 0
+             */
+            host_ram_gb: number;
+            /**
+             * Resident Models
+             * @default []
+             */
+            resident_models: string[];
+            library: components["schemas"]["EvalLibraryFingerprint"];
+        };
+        /** EvalLibraryFingerprint */
+        EvalLibraryFingerprint: {
+            /** Documents */
+            documents: number;
+            /** Chunks */
+            chunks: number;
+        };
         /** EvalResultItem */
         EvalResultItem: {
             /** Dataset */
@@ -7111,6 +7535,50 @@ export interface components {
             entity_names: string[];
         };
         /**
+         * FactualityAuditRequest
+         * @description Body for POST /flashcards/factuality/audit.
+         */
+        FactualityAuditRequest: {
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+        };
+        /**
+         * FactualityReport
+         * @description What one bounded pass of the factuality audit judged.
+         *
+         *     `skipped_no_passage` is reported rather than folded into a rate: a card whose
+         *     passage cannot be rebuilt was not judged, and counting it either way would
+         *     invent a verdict.
+         */
+        FactualityReport: {
+            /** Judged */
+            judged: number;
+            /** Skipped No Passage */
+            skipped_no_passage: number;
+            /** Remaining */
+            remaining: number;
+            /**
+             * Supported
+             * @default 0
+             */
+            supported: number;
+            /**
+             * Unsupported
+             * @default 0
+             */
+            unsupported: number;
+            /**
+             * Unverifiable
+             * @default 0
+             */
+            unverifiable: number;
+        };
+        /**
          * FadingItem
          * @description Content the user engaged with 7-21 days ago and not since.
          *
@@ -7241,6 +7709,8 @@ export interface components {
             difficulty: "easy" | "medium" | "hard";
             /** Context */
             context?: string | null;
+            /** Model */
+            model?: string | null;
         };
         /** FlashcardResponse */
         FlashcardResponse: {
@@ -7297,6 +7767,16 @@ export interface components {
             chunk_classification?: string | null;
             /** Section Heading */
             section_heading?: string | null;
+            /**
+             * Grounding
+             * @default unchecked
+             */
+            grounding: string;
+            /**
+             * Factuality
+             * @default unchecked
+             */
+            factuality: string;
         };
         /** FlashcardSearchResponse */
         FlashcardSearchResponse: {
@@ -7412,6 +7892,8 @@ export interface components {
              * @default 10
              */
             count: number;
+            /** Model */
+            model?: string | null;
         };
         /** GeneratedRunRequest */
         GeneratedRunRequest: {
@@ -7668,6 +8150,52 @@ export interface components {
             /** Concepts */
             concepts: components["schemas"]["GroundedConcept"][];
         };
+        /**
+         * GroundingAuditRequest
+         * @description Body for POST /flashcards/grounding/audit.
+         */
+        GroundingAuditRequest: {
+            /**
+             * Document Id
+             * @description Audit one document's cards; omit to audit the library.
+             */
+            document_id?: string | null;
+        };
+        /**
+         * GroundingReport
+         * @description Counts by grounding state. Every state is reported, including the ones that
+         *     mean 'not proven' -- collapsing those into a pass rate is what made an
+         *     unverifiable card indistinguishable from a verified one.
+         */
+        GroundingReport: {
+            /** Scanned */
+            scanned: number;
+            /**
+             * Changed
+             * @default 0
+             */
+            changed: number;
+            /**
+             * Verified
+             * @default 0
+             */
+            verified: number;
+            /**
+             * Unsupported
+             * @default 0
+             */
+            unsupported: number;
+            /**
+             * Unverifiable
+             * @default 0
+             */
+            unverifiable: number;
+            /**
+             * Unchecked
+             * @default 0
+             */
+            unchecked: number;
+        };
         /** GroupInfo */
         GroupInfo: {
             /** Name */
@@ -7762,6 +8290,25 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** InstallableModel */
+        InstallableModel: {
+            /** Id */
+            id: string;
+            /** Resident Gb */
+            resident_gb: number;
+            /** Min Ram Gb */
+            min_ram_gb: number;
+            /** Licence */
+            licence: string;
+            /** Multimodal */
+            multimodal: boolean;
+            /** Usable Context */
+            usable_context: number;
+            /** Accommodations Measured */
+            accommodations_measured: boolean;
+            /** Fits Host */
+            fits_host: boolean;
+        };
         /** KindleIngestResponse */
         KindleIngestResponse: {
             /** Document Ids */
@@ -7837,6 +8384,26 @@ export interface components {
              * @default true
              */
             ollama_reachable: boolean;
+        };
+        /**
+         * LabCatalogue
+         * @description What can be compared, and what a comparison will do to this machine.
+         */
+        LabCatalogue: {
+            /** Tasks */
+            tasks: components["schemas"]["TaskInfo"][];
+            /** Qa Datasets */
+            qa_datasets: string[];
+            /** Installed Models */
+            installed_models: string[];
+            /** Registry Models */
+            registry_models: string[];
+            /** Current Model */
+            current_model: string;
+            /** Busy */
+            busy: boolean;
+            /** Running Id */
+            running_id?: string | null;
         };
         /** LearningObjectiveItem */
         LearningObjectiveItem: {
@@ -7954,6 +8521,24 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * MetricRow
+         * @description One metric across every arm, with the tier that decides whether it counts.
+         */
+        MetricRow: {
+            /** Key */
+            key: string;
+            /** Metric */
+            metric: string;
+            /** Tier */
+            tier: string;
+            /** Values */
+            values: {
+                [key: string]: number | null;
+            };
+            /** Identical */
+            identical: boolean;
+        };
         /** MisconceptionStatsResponse */
         MisconceptionStatsResponse: {
             /** Open Count */
@@ -7962,6 +8547,51 @@ export interface components {
             resolved_count: number;
             /** Resolved Last 30D */
             resolved_last_30d: number;
+        };
+        /**
+         * ModelResidencyResponse
+         * @description What this configuration costs on this machine, and whether it fits.
+         *
+         *     Every number here was knowable before and none was put together, so a model
+         *     too large for the host was selectable and the first symptom was a crash
+         *     during ingestion rather than a refusal at the point of choosing.
+         */
+        ModelResidencyResponse: {
+            /** Profile */
+            profile: string;
+            /** Profile Explicit */
+            profile_explicit: boolean;
+            /** Profile Suits Host */
+            profile_suits_host: boolean;
+            /** Host Ram Gb */
+            host_ram_gb: number;
+            /** Roles */
+            roles: {
+                [key: string]: components["schemas"]["RoleResolution"];
+            };
+            /** Resident Models */
+            resident_models: string[];
+            /** Resident Count */
+            resident_count: number;
+            /** Max Resident */
+            max_resident: number;
+            /** Within Residency Limit */
+            within_residency_limit: boolean;
+            /** Resident Gb */
+            resident_gb: number;
+            /** Unmeasured Models */
+            unmeasured_models: string[];
+            /** Oversized Models */
+            oversized_models: string[];
+            /**
+             * Narrowed Defaults
+             * @default {}
+             */
+            narrowed_defaults: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
         };
         /** ModelUsageItem */
         ModelUsageItem: {
@@ -7998,6 +8628,19 @@ export interface components {
             };
             /** Qa Daily */
             qa_daily: components["schemas"]["QADailyCount"][];
+            /**
+             * @default {
+             *       "enabled": true,
+             *       "reserve": 0,
+             *       "interactive_inflight": 0,
+             *       "background_inflight": 0,
+             *       "background_waiting": 0,
+             *       "deferred_calls": 0,
+             *       "deferred_seconds": 0,
+             *       "forced_admissions": 0
+             *     }
+             */
+            llm_admission: components["schemas"]["AdmissionStats"];
         };
         /** MonitoringOverview */
         MonitoringOverview: {
@@ -8299,6 +8942,20 @@ export interface components {
             /** Model */
             model: string;
         };
+        /**
+         * OutputStatsResponse
+         * @description What model output needed before it could be used. See `llm_output_stats`.
+         */
+        OutputStatsResponse: {
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** First Pass Rate */
+            first_pass_rate: number | null;
+            /** Attempts Per Generation */
+            attempts_per_generation: number | null;
+        };
         /** PDFMetaResponse */
         PDFMetaResponse: {
             /** Page Count */
@@ -8540,6 +9197,18 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * RepairReport
+         * @description What POST /flashcards/repair actually changed. Zeroes on a healthy library.
+         */
+        RepairReport: {
+            /** Index Rows Removed */
+            index_rows_removed: number;
+            /** Cards Indexed */
+            cards_indexed: number;
+            /** Orphan Rows Removed */
+            orphan_rows_removed: number;
+        };
         /** RetrievalSettingsPatch */
         RetrievalSettingsPatch: {
             /** Rerank Enabled */
@@ -8562,6 +9231,17 @@ export interface components {
             /** Predicted Rating */
             predicted_rating?: ("again" | "hard" | "good" | "easy") | null;
         };
+        /** RoleResolution */
+        RoleResolution: {
+            /** Model */
+            model: string;
+            /** Local */
+            local: boolean;
+            /** Resident Gb */
+            resident_gb?: number | null;
+            /** Fallback Reason */
+            fallback_reason?: string | null;
+        };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {
             /** Score */
@@ -8575,6 +9255,85 @@ export interface components {
             score: number;
             /** Evidence */
             evidence: string;
+        };
+        /**
+         * RunSummaryView
+         * @description Enough to list a run without carrying its results.
+         *
+         *     The full view repeats every metric for every arm, so a list of them grows
+         *     with each comparison until the page is fetching a payload nobody reads.
+         *     Expanding one asks for its detail.
+         */
+        RunSummaryView: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Total Units */
+            total_units: number;
+            /** Completed Units */
+            completed_units: number;
+            /** Stage Status */
+            stage_status: {
+                [key: string]: string;
+            };
+            /** Failed Tasks */
+            failed_tasks: string[];
+            /** Separated */
+            separated?: boolean | null;
+            /**
+             * Separating Count
+             * @default 0
+             */
+            separating_count: number;
+            /**
+             * Unmeasured Tasks
+             * @default []
+             */
+            unmeasured_tasks: string[];
+            /** Error */
+            error?: string | null;
+            /** Restore Error */
+            restore_error?: string | null;
+        };
+        /** RunView */
+        RunView: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Total Units */
+            total_units: number;
+            /** Completed Units */
+            completed_units: number;
+            /** Arms */
+            arms: components["schemas"]["ArmView"][];
+            /** Rows */
+            rows: components["schemas"]["MetricRow"][];
+            /** Separation */
+            separation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error?: string | null;
+            /** Restore Error */
+            restore_error?: string | null;
         };
         /** SavePositionRequest */
         SavePositionRequest: {
@@ -8929,6 +9688,23 @@ export interface components {
             /** Concepts */
             concepts: components["schemas"]["StartConceptItemResponse"][];
         };
+        /** StartRunRequest */
+        StartRunRequest: {
+            /** Models */
+            models: string[];
+            /** Tasks */
+            tasks: string[];
+            /**
+             * Qa Datasets
+             * @default []
+             */
+            qa_datasets: string[];
+            /**
+             * Max Questions
+             * @default 0
+             */
+            max_questions: number;
+        };
         /** StatsResponse */
         StatsResponse: {
             /** Today Count */
@@ -9193,6 +9969,42 @@ export interface components {
             display_name?: string | null;
             /** Parent Tag */
             parent_tag?: string | null;
+        };
+        /** TaskInfo */
+        TaskInfo: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Typical Seconds */
+            typical_seconds: number;
+            /** Mutates Library */
+            mutates_library: boolean;
+        };
+        /** TaskRunView */
+        TaskRunView: {
+            /** Task */
+            task: string;
+            /** Status */
+            status: string;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+            /**
+             * Stderr Tail
+             * @default []
+             */
+            stderr_tail: string[];
         };
         /** TeachbackRequest */
         TeachbackRequest: {
@@ -12869,6 +13681,46 @@ export interface operations {
             };
         };
     };
+    output_stats_evals_output_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutputStatsResponse"];
+                };
+            };
+        };
+    };
+    eval_environment_evals_environment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalEnvironmentResponse"];
+                };
+            };
+        };
+    };
     get_eval_runs_evals_runs_get: {
         parameters: {
             query?: {
@@ -14026,6 +14878,123 @@ export interface operations {
             };
         };
     };
+    grounding_summary_flashcards_grounding_get: {
+        parameters: {
+            query?: {
+                document_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroundingReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_card_grounding_flashcards_grounding_audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroundingAuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroundingReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_card_factuality_flashcards_factuality_audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FactualityAuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactualityReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_flashcards_flashcards_repair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairReport"];
+                };
+            };
+        };
+    };
     generate_flashcards_flashcards_generate_post: {
         parameters: {
             query?: never;
@@ -15135,6 +16104,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrichmentJobItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_catalogue_model_lab_catalogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabCatalogue"];
+                };
+            };
+        };
+    };
+    list_runs_model_lab_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummaryView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_run_model_lab_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_model_lab_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_model_lab_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -16345,7 +17462,10 @@ export interface operations {
     };
     classify_only_qa_classify_only_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Also run the LLM fallback the chat graph runs below confidence 0.7. Off by default so the heuristic can be measured alone; on, this is the routing a user actually gets. */
+                llm_fallback?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -16744,6 +17864,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_residency_settings_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResidencyResponse"];
+                };
+            };
+        };
+    };
+    get_model_catalogue_settings_models_catalogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallableModel"][];
                 };
             };
         };

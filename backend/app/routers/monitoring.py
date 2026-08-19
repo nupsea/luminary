@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models import ChunkModel, DocumentModel, QAHistoryModel
+from app.services.llm_admission import admission_stats
+from app.services.model_router import resolve
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +195,8 @@ async def get_overview(
     phoenix_running = await _check_phoenix_running() if settings.PHOENIX_ENABLED else False
 
     return MonitoringOverview(
-        llm_status=settings.LITELLM_DEFAULT_MODEL,
+        # What the backend would actually call, not what config names.
+        llm_status=resolve("chat").model,
         phoenix_running=phoenix_running,
         phoenix_configured=settings.PHOENIX_ENABLED,
         langfuse_configured=bool(settings.LANGFUSE_PUBLIC_KEY),
@@ -206,6 +209,19 @@ async def get_overview(
 class QADailyCount(BaseModel):
     date: str  # YYYY-MM-DD (UTC)
     count: int
+
+
+class AdmissionStats(BaseModel):
+    """Live state of the interactive/background LLM gate (P5)."""
+
+    enabled: bool = True
+    reserve: int = 0
+    interactive_inflight: int = 0
+    background_inflight: int = 0
+    background_waiting: int = 0
+    deferred_calls: int = 0
+    deferred_seconds: float = 0.0
+    forced_admissions: int = 0
 
 
 class MonitoringMetrics(BaseModel):
@@ -221,6 +237,10 @@ class MonitoringMetrics(BaseModel):
     llm_completion_tokens: int
     spans_by_kind: dict[str, int]
     qa_daily: list[QADailyCount]
+    # Counters are process-wide and cumulative: they are what separates "the Ask
+    # was fast" from "the Ask was fast and the gate actually engaged", which a
+    # latency number alone cannot say.
+    llm_admission: AdmissionStats = AdmissionStats()
 
 
 def _percentile(sorted_vals: list[float], q: float) -> float | None:
@@ -292,6 +312,7 @@ async def get_metrics(
         llm_completion_tokens=llm_completion_tokens,
         spans_by_kind=spans_by_kind,
         qa_daily=qa_daily,
+        llm_admission=AdmissionStats(**admission_stats()),
     )
 
 

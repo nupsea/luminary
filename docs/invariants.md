@@ -38,10 +38,126 @@ Implicit rollback on session close is insufficient after a generator exception. 
 **I-8. The `done` SSE event payload contains the clean `answer` field.**
 The frontend must replace `msg.text` with `payload.answer` on the done event. Streamed tokens include citation JSON fragments -- never leave raw accumulated tokens as the final displayed text.
 
+**I-33. A citation excerpt is a quote the grounding contains. Nothing invents one.**
+Measured on shipped 0.6.1 over 10 `book` questions: of 6 citation chips returned, 3 were absent
+from the chunks the answer was generated from. One was the model's own narration of events
+("After the mysterious disappearance of the time machine, everyone is silent for a moment"),
+one was commentary about the retrieval itself ("The context does not provide specific details
+about the physical layout of the dining area"), and one was real prose from the source that
+retrieval never returned — recited from the model's own memory, so no chunk links to it. All
+three render as a source chip indistinguishable from a real quote.
+
+All five citation-bearing system prompts specified the field as a bare format example,
+`"excerpt":"..."`, which states a shape and not a provenance, so the model fills it the way it
+fills any free-text field. Nothing downstream could tell a quote from a sentence the model
+wrote: `_split_response` only parses JSON, and `_enrich_citation_titles` matches on
+(section_heading, page) and never on the excerpt text. The chunk-derived `source_citations` are
+safe by construction — each carries a `chunk_id` and slices `section_preview_snippet` out of the
+chunk — so two lists with opposite trustworthiness rendered side by side under the same answer.
+The eval could not catch it either: `citation_support_rate` scored the commentary chip `yes`.
+
+**Asking the model to copy the quote instead is not the fix, and measuring it is what showed
+why.** Prompted to reproduce the passage verbatim and having its excerpt dropped when it did
+not, the model stopped citing rather than risk the attempt: `citation_coverage` fell 0.750 →
+0.5429 on `book` and 0.872 → 0.7632 on `paper` against bit-identical retrieval, while the
+verification filter itself removed only 2 citations across all 80 questions. Trading a
+fabricated quote for no quote is progress; trading a findable quote for no quote is not.
+
+So the model never reproduces source text. `pack_context_indexed` labels each passage it emits
+with an `[S<n>]` marker and returns the marker map, the model cites `{"source":"S1"}`, and
+`_resolve_marker_citations` fills the excerpt from the chunk that marker names — verbatim by
+construction, and carrying the `chunk_id` that makes the chip deep-linkable. Marker numbering
+must come from the packer, because grouping, dedup and the token budget all decide which chunks
+reach the prompt; numbering the input list instead points every citation at the wrong passage.
+A `quote` the model offers is used only to locate a sentence inside that chunk, never as content.
+**Which part of the chunk is shown is itself load-bearing.** A chunk is sized for the embedder, so
+the sentence carrying the claim sits anywhere in it, and cutting the head shows the wrong text:
+12 of 15 measured `book` chips were head cuts, and the same chips scored 0.5667 on their displayed
+excerpt against 0.8667 judged on their full chunk. `_excerpt_from_chunk` therefore selects the
+window by content overlap with the answer, weighting the model's `quote` above it. Anything that
+scores the displayed excerpt — `citation_support_rate` above all — is measuring that selection as
+much as the citation, which is why two structural fixes aimed at citation choice moved it barely
+at all.
+A marker naming no such passage is dropped. Citations still arriving as free-text excerpts (other
+prompts, other models) stay on the verification path: a contiguous run of 8 normalised tokens
+must appear in the grounding, loose enough to survive re-punctuation and ellipses, which an exact
+string test is not. `tests/test_qa.py` and `tests/test_context_packer.py` fail CI if a marker
+resolves to the wrong chunk, if an ungrounded excerpt survives, or if any of the five prompts
+stops citing by marker.
+
+**I-34. A flashcard's excerpt is a span of the passage the card was written from, and every card
+records whether that was checked.**
+The review screen prints `source_excerpt` under a heading that reads "Source". Measured on a
+949-card library: of the 392 cards carrying a checkable quote, 102 (26%) quoted text absent from
+their document — 66 of them with no recognisable span of the document in the quote at all — and
+nothing in the product could tell them apart from the 289 that were real. Rewriting the prompt
+does not fix this: prompt v2 scored 0.7300 factuality against v1's 0.7267 on the full golden,
+because a model asked for a well-shaped card about a familiar text writes what it already
+believes. Quoting is the part it cannot do from memory, so the check is on the quote.
+
+Two generation paths were worse than unchecked. `flashcard_audit.fill_gaps` prompted with the
+section *heading* and nothing else while its system prompt demanded a `source_excerpt`, so every
+quote it produced was necessarily invented; `_generate_concept_cards` and `generate_from_graph`
+each had the passage in scope and passed it to neither the gate nor the verdict. A card is
+written from a passage or it is not written.
+
+`grounding` is four states — `unchecked | verified | unsupported | unverifiable` — and not a
+boolean, because "checked and found" and "nothing could be checked" are different answers and 59%
+of that library is the second. A boolean makes an unaudited deck read clean, which is the whole
+defect restated. `unsupported` is reserved for the strong claim: the card produced a quote and
+that quote is not in the text. Existing rows default to `unchecked` rather than to a verdict, and
+`POST /flashcards/grounding/audit` recomputes deterministically with no model in the loop; it
+never overwrites a verdict it cannot re-derive, since a note-sourced card's verdict was decided
+while the note text was in hand. The quote match tolerates whitespace, elision and one trailing
+punctuation character — 4 of 129 rejections differed from the document by a single closing `.` or
+`"` on a span otherwise verbatim to ~300 characters — and nothing more: `"...five moves on
+average."` against a document containing none of it stays rejected. `tests/test_flashcard_grounding.py`
+and `tests/test_flashcard_audit.py` fail CI if a fabricated quote is kept, if the gap-fill prompt
+stops carrying the section text, or if a verdict is computed and dropped. See I-33 for the same
+defect on the `/qa` surface, where the fix is different: an answer cites a marker and never
+reproduces source text, which a flashcard cannot do because the quote *is* the card's evidence.
+
+**I-35. A card's passage is what was in its prompt, and whatever judges that passage is not
+the model that wrote the card, nor a model that has been shown to agree with everything.**
+`flashcards.chunk_id` holds the first chunk of the generation *scope*. Nothing in the code says
+so, and reading it as "the chunk this card came from" is the obvious mistake: judged against a
+passage rebuilt that way, a 60-card sample scored `factuality 0.3333` — and the number was the
+rebuild, not the cards. The judge had been shown text not containing the card's own verified
+quote 56 times out of 60. `source_chunk_ids` records the chunks whose text actually reached the
+prompt, in reading order, and it is the *sampled* subset: past `_CHUNK_CHAR_LIMIT`, `_build_text`
+keeps a beginning/middle/end window and drops what is between, so recording the whole scope would
+name text the model never saw. Three states stay distinguishable and none may be read as another:
+recorded ids, `NULL` (predates the column, or a path with no chunks), and `[]` (supplied text —
+real, but not reconstructible from the library). A card whose passage cannot be rebuilt is
+**skipped and counted as skipped**, never judged against an approximation.
+
+The second half is not derivable from any code, only from measurement, and it is the half that
+will be undone to save memory. Whether an answer follows from a passage is semantic, so this is
+the one flashcard check that needs a model — which makes the model the load-bearing choice.
+Screened on 59 live cards with identical passages: `phi4-mini` returned `yes` for 54, `mistral`
+and `granite3.2:8b` for 53, each agreeing with `qwen2.5:14b` on the pass/fail call 0.41–0.42,
+which is worse than chance; `gemma3:4b` failed a four-case probe outright, certifying a card that
+reversed who did what. Only `gemma4` (43/59) and the 14B (19/59) discriminate. So
+`FLASHCARD_FACTUALITY_MODEL` has **no default** — an unnamed checker does not run, and cards stay
+`unchecked`, which is honest where a rubber stamp is not. Every candidate is fired on the
+four-case probe (supported / reversed / invented / off-topic) *and* at scale before it is
+trusted; passing the probe is necessary and demonstrably not sufficient.
+
+Self-judging is refused, and the guard must resolve the model that will actually generate rather
+than the configured override. The override is empty on the default path, which is exactly where
+the collision happens: with `LITELLM_DEFAULT_MODEL=ollama/qwen2.5:14b-instruct` and the same id
+configured as the checker, the guard reported no self-judging and the audit judged the model's own
+cards. `effective_generation_model()` resolves it; `scripts/smoke/S237.sh` refuses to measure when
+they collide, and `tests/test_flashcard_factuality.py` and `tests/test_flashcard_passage.py` fail
+CI if an unparseable verdict defaults to a pass, if a rebuilt passage falls back to `chunk_id`, or
+if the guard reads the override again.
+
 ## Vector Dimensions
 
-**I-9. Note and chunk vectors are 384-dimensional (bge-small-en-v1.5 output).**
-The LanceDB schema must declare `pa.list_(pa.float32(), 384)`. Notes and chunks share one embedder and one vector space, so a note vector is directly comparable to a chunk vector. Any table declaring a different dimension is a bug.
+**I-9. Note and chunk vectors share one embedding space, whose dimension is a stored property of the corpus rather than a setting.**
+The deployed embedder is `bge-small-en-v1.5` and the LanceDB schema must declare `pa.list_(pa.float32(), 384)` to match it. Notes and chunks share one embedder and one vector space, so a note vector is directly comparable to a chunk vector. Any table declaring a different dimension is a bug.
+
+The embedder is therefore not pluggable the way a generation model is. Every stored vector was written by the deployed model, so replacing it is a full re-embed of the corpus behind a migration, not a config change — the dimension in the schema moves with it or nothing matches anything. Work that makes generation models substitutable must state explicitly that it stops here.
 
 ## Frontend
 
@@ -62,6 +178,9 @@ The order is load-bearing, not cosmetic: a lint error masks the test error under
 **I-14. `make ci` passing does not mean the app works. `make smoke` is the HTTP contract check.**
 `make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~230 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
 
+**I-32. An eval metric that could not be computed is a failure, never a pass.**
+`run_eval.py` scored every generation metric behind `if value is not None`, so an NLI model that failed to load, a judge that errored, or a `/qa` that timed out produced `None`, was skipped, and recorded `passed: true` for a run that measured nothing of what it was asked to measure. 166 rows in `scores_history.jsonl` were written under that rule, one of them a generation run whose faithfulness is null -- and history is what later comparisons are read against, so a pass that was never earned poisons every delta computed from it. The distinction the gate must keep is between **requested-but-uncomputed**, which fails, and **not-requested**, which is a skip: a retrieval-only run legitimately has no faithfulness, while a run that generated answers and could not score them has a hole in it. `_check()` in `run_eval.py` takes `requested=` for exactly this, and asking for generation while `/qa` returns no answers at all is itself a violation. Never paper over the gap with a default -- no `or 0.0`, no `or 1.0`, no neutral score for a missing verdict. `tests/test_eval_gate.py` fails CI if an uncomputed metric passes, or if a violation stops short of a non-zero exit. See the `eval-integrity` skill.
+
 ## Packages
 
 **I-15. Use `uv` only -- never `pip` or `poetry`.**
@@ -69,8 +188,8 @@ The lockfile is `uv.lock`. Adding packages: `uv add <package>`. Never run `pip i
 
 ## Privacy & Local-First
 
-**I-16. Prioritize local LLM (Ollama) and local search (none/duckduckgo) by default.**
-Never introduce a new external API dependency (e.g., Tavily, OpenAI) without providing a local-first or privacy-preserving alternative.
+**I-16. The default path is local: a fresh install works with no account, no key and no network.**
+Ollama is the local runtime today and `WEB_SEARCH_PROVIDER` defaults to `none`. Neither name is the invariant — the invariant is that on-device inference and local search are the default path, and that every cloud provider is an opt-in alternative to a local path that already exists. Never introduce an external API dependency (Tavily, OpenAI, a hosted embedder) without shipping a local-first or privacy-preserving alternative alongside it. A feature that only works against a cloud provider does not ship as a default.
 
 **I-17. Never log or transmit user content (notes, documents) to external telemetry.**
 Arize Phoenix and Langfuse must be configured for local use only. Telemetry is for performance metrics and trace structure, not for content mirroring.
@@ -104,11 +223,21 @@ Kuzu takes an exclusive OS-level file lock that the kernel releases the instant 
 **I-26. The LLM intent classifier picks a retrieval strategy, never an interactive mode.**
 `teach_back`, `socratic`, `notes` and `notes_gap` change what the chat *does* with the message rather than where it looks: teach_back grades it as the learner's own explanation, socratic answers with a question, the notes modes read personal notes instead of the document. A mode is only ever right when the user's phrasing asks for it, and `classify_intent_heuristic` matches that phrasing at 0.95 and returns without calling the LLM. The LLM is therefore only consulted about messages that are *not* mode requests, so any mode it names is a misfire -- an analysis-shaped question came back `teach_back` and was answered with an empty correct/misconceptions/gaps card. `_llm_classify_fallback` chooses from `_LLM_SELECTABLE_INTENTS` only; anything else becomes `factual` (per I-25, a question always gets a real answer). Adding a mode means adding keywords, not loosening the whitelist.
 
-**I-27. One Ollama context window for every local call.**
-Ollama keys a loaded runner on `num_ctx`, so a call requesting a different window unloads llama-server and loads it again (~1s idle, far worse under GPU contention). `num_ctx` is a property of the model, not of the call site. Three per-site windows -- 2048 default, 4096 QA, 8192 generation -- made a single chat turn reload the model twice and a question asked during ingestion reload it repeatedly. `OLLAMA_NUM_CTX` is the only window: size it for the largest single prompt and never override it per call. `tests/test_single_local_context_window.py` fails CI on a second knob or a divergent call site.
+**I-27. One context window per loaded model, resolved from the model and never from the call site.**
+A local runtime keys its loaded runner on generation geometry: Ollama reloads llama-server when a call asks for a different `num_ctx` (~1s idle, far worse under contention). The window is a property of the model, not of the caller. Three per-site windows -- 2048 default, 4096 QA, 8192 generation -- made a single chat turn reload the model twice and a question asked during ingestion reload it repeatedly.
+
+The *value* belongs to the model and is read from its profile; the *rule* is that exactly one is in force for a loaded model at a time. Sizing it is a trade rather than a maximum: the window must fit the largest single prompt or that prompt is silently truncated, while every serving slot costs a full window of KV cache (I-31). A model advertising a 256K window is not a reason to ask for one — that number is a capability, not a budget.
+
+**The value half was unbuilt until 2026-08-18.** `usable_context` sat on every registry entry unread while one global `OLLAMA_NUM_CTX` applied to every model at once, so a more capable model could not be given a larger window without giving it to everything, and a smaller model could not be given a smaller one to save the KV cache it does not need. `model_registry.context_window_for(model_id)` is now the only thing that decides a window: it returns the model's `usable_context`, falling back to `OLLAMA_NUM_CTX` only for a model with no registry entry, which a user may legitimately select. Resolving from the model is *stronger* than the global constant, not weaker — the window is a pure function of the model, so two call sites cannot disagree about it even by accident. `_summary_num_ctx` resolves the same way, because the same number both requests the window and sizes the summary's input budget; pinning one to the global while the other followed the profile would ask for one window, reload the runner, and then truncate against the other.
+
+Changing a window is not free and not local: `resident_bytes` is weights plus one KV cache **measured at** `MEASURED_AT_NUM_CTX`, and that footprint is what decides whether a model is offered on a given machine. An entry whose window no longer matches what its footprint was measured at is reporting a memory cost the machine will not see — re-measure with `scripts/model_footprint.py` rather than editing the number. `tests/test_single_local_context_window.py` fails CI on a second knob, on any call site that *chooses* a window rather than plumbing or resolving one, on any module outside `config.py` and `model_registry.py` reading the global, on a window below the largest prompt, and on a window that diverges from the footprint's measurement point.
 
 **I-28. A generation prompt states the shape of what it wants, never the name of a taxonomy.**
-Suggested questions were generated by naming the Bloom level in the prompt ("6 questions at Bloom taxonomy level 5 (Evaluate)"). A small local model does not infer a pedagogy from its label; it pattern-matches the word to the register it has seen it in, and returns exam papers -- "Evaluate how X's reliance on Y can be advantageous" -- which no reader would type and which trips I-26 by reading as a learner's explanation. The level selects plain-language guidance in `_LEVEL_GUIDANCE`; the taxonomy word never reaches the model, and the wire key is `depth`, not `bloom_level`. The same rule covers few-shot context: prior questions reach the prompt as bare topic words (`_history_topics`), because injecting them verbatim under "avoid these" hands the model dozens of exemplars whose register it copies. `tests/test_suggestions.py` fails if any taxonomy term reappears in a rendered prompt.
+Suggested questions were generated by naming the Bloom level in the prompt ("6 questions at Bloom taxonomy level 5 (Evaluate)"). A label is not a specification: the model pattern-matches the word to the register it has seen it in, and the prompt returned exam papers -- "Evaluate how X's reliance on Y can be advantageous" -- which no reader would type and which trips I-26 by reading as a learner's explanation.
+
+The reason this is an invariant rather than a fix is portability. What a label resolves to is a property of the model reading it, so a prompt built on one means something different on the next model, and the difference is invisible in any output-quality score. Stating the observable shape instead is what makes the prompt survive a model change. The level selects plain-language guidance in `_LEVEL_GUIDANCE`; the taxonomy word never reaches the model, and the wire key is `depth`, not `bloom_level`. The same rule covers few-shot context: prior questions reach the prompt as bare topic words (`_history_topics`), because injecting them verbatim under "avoid these" hands the model dozens of exemplars whose register it copies.
+
+`tests/test_suggestions.py` fails if any taxonomy term reappears in a rendered prompt. That guard covers the suggestions surface only: `services/flashcard_prompts.py` still opens with "creating flashcards based on Bloom's Taxonomy" and enumerates L1-L6 by name, which is the same defect unguarded. Widening the guard to every rendered prompt requires a single render path to assert against.
 
 **I-29. The reader never reconstructs prose from retrieval chunks.**
 Chunks are sized for the embedder, not the eye: they cut mid-sentence, they overlap, and 90% of them contain no paragraph break at all (261 of 2,599 measured on `frankenstein` + `the_odyssey`). Re-joining them with `\n\n` fabricates a false paragraph break every few hundred characters and duplicates text at every overlap seam. Reading text comes from `sections.body`, which is uncapped; `sections.preview` is a 10,000-char snippet for section lists and flashcard context and is truncated mid-sentence on any longer section, so it is not reading text either. `GET /sections/{id}/content` returns `content_source` (`body` | `preview` | `chunks`) so a degraded tier is visible rather than silent -- `chunks` serves only documents ingested before the column existed, and those must be re-uploaded. `tests/test_section_content_reader.py` fails CI if the reader prefers a lossy tier over `body`. See `docs/universal-reader.md`.
@@ -116,8 +245,8 @@ Chunks are sized for the embedder, not the eye: they cut mid-sentence, they over
 **I-30. A heading is a label the source authored. Nothing invents one.**
 The reader draws a section heading only when the stored `heading` is non-empty and reads like a label (`hasAuthoredHeading`); an unlabelled section is rendered without one. Three sites used to fabricate headings and each produced the same artifact -- an oversized `<h2>` printing text that then repeated immediately below it, or an empty section under a swallowed line. `universal_parser._segment` stored a whole matched line as the heading, which for a transcript IS the utterance (`_is_marker` now sends prose to the body); `_segment_chat_grouped` synthesised "Transcript Part 2: Carol", naming whichever speaker opened the group; and `chunk.py` substituted `f"Section {n}"` for every empty heading. An empty heading is the signal that the source gave none, so nothing downstream may fill it -- `sectionTitle()` still derives a label, but only for the contents panel, which needs an entry to navigate with. Empty-bodied sections are dropped rather than filled with placeholder text: a document's contents page matches the same signature as its chapter openings, so half the sections found in `the_odyssey.txt` (23 of 49) were empty twins that used to read "(Empty Section)". `tests/test_universal_parser.py` and `sectionTitle.test.ts` fail CI if a heading is invented. See `docs/universal-reader.md`.
 
-**I-31. Enrichment concurrency comes from `OLLAMA_NUM_PARALLEL`, and enrichment cost is call count, not concurrency.**
-Ollama serves that many requests at once and queues the rest, so a wider app-side semaphore overlaps nothing -- it moves the wait into Ollama's queue, where it counts against the caller's request timeout instead of being invisible. A `web_refs` call queued behind a 4.3k-token prompt burned its (then 180s) timeout, and the worker's backoff restarted the whole 200-section handler. `diagram_extractor` held a `Semaphore(3)` around a call in a serial `for` loop, so the 3 described nothing.
+**I-31. Concurrency comes from the runtime's serving width, and inference cost is call count, not concurrency.**
+`OLLAMA_NUM_PARALLEL` is that width today. The runtime serves that many requests at once and queues the rest, so a wider app-side semaphore overlaps nothing -- it moves the wait into the runtime's queue, where it counts against the caller's request timeout instead of being invisible. A `web_refs` call queued behind a 4.3k-token prompt burned its (then 180s) timeout, and the worker's backoff restarted the whole 200-section handler. `diagram_extractor` held a `Semaphore(3)` around a call in a serial `for` loop, so the 3 described nothing.
 
 Measured, M3 Pro, llama3.2, 450-token generations:
 

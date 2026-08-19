@@ -5,14 +5,14 @@ import logging
 import re
 from functools import lru_cache
 
+from app.services.prompt_spec import render_for, tag_spec
+
 logger = logging.getLogger(__name__)
 
-_SYSTEM = (
-    "You are a tagging assistant. Given a note, suggest up to 5 short, lowercase tags "
-    "that best describe its topics. Tags should be 1-3 words, no punctuation. "
-    'Output ONLY a JSON array of strings, e.g. ["machine learning", "python"]. '
-    "Write no explanation, preamble, or markdown fences."
-)
+NOTE_TAG_SPEC = tag_spec("note")
+
+def _system() -> str:
+    return render_for(NOTE_TAG_SPEC, "background")
 
 _USER_TMPL = "Note:\n{content}\n\nTags (JSON array, at most 5):"
 
@@ -52,7 +52,7 @@ class NoteTaggerService:
         try:
             raw = await get_llm_service().complete(
                 messages=[
-                    {"role": "system", "content": _SYSTEM},
+                    {"role": "system", "content": _system()},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,

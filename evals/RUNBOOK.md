@@ -74,6 +74,39 @@ uv run --project backend python evals/run_topic_eval.py --dataset d2l \
   --backend-url http://localhost:7820 --assert-thresholds
 ```
 
+## 3b. Comparing two models
+
+`make eval-matrix MODELS=ollama/a,ollama/b` runs the model-sensitive evals against each candidate
+in turn and prints the structural tier — the only one allowed to decide a swap. It switches the
+backend's model per candidate, verifies the switch took, and restores the original afterwards.
+
+```bash
+# The default task set. Add TASKS=intent,flashcards,summary,qa for the answering path too.
+make eval-matrix MODELS=ollama/llama3.2,ollama/qwen3.5:4b
+
+# The instrument's own acceptance test: two models of different size must score differently.
+make eval-matrix MODELS=ollama/qwen3.5:0.8b,ollama/qwen3.5:4b ASSERT_SEPARATION=1
+```
+
+**The scaffolding-tax arm needs a backend restart**, because the prompt is rendered at import:
+
+```bash
+PROMPT_ARM=bare make dev            # in the backend's own shell
+make eval-matrix MODELS=... ARM=bare
+```
+
+It also flags any task whose every metric came out identical on both models — two models do not
+score the same to full precision on work that depends on them, so an identical task measured
+something else (the summary task did exactly this until `--force-refresh` was added: `/summarize`
+replays the stored summary, which belongs to whichever model wrote it first).
+
+The matrix refuses to run when the backend's arm is not the one asked for — a matrix that mixes
+arms measures neither. Same for the necessity check, one accommodation at a time:
+`PROMPT_DROP_ACCOMMODATIONS=no_fences`. Both are recorded in every run's environment block.
+
+Runs append to `evals/model_matrix_history.jsonl`, which is separate from `scores_history.jsonl`
+because a matrix row is a comparison rather than a measurement.
+
 ## 4. Where results show up
 
 Every run appends to `evals/scores_history.jsonl` **and** POSTs to the backend

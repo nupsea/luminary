@@ -16,6 +16,8 @@ from typing import Any
 import litellm
 
 from app.config import Settings, get_settings
+from app.model_registry import context_window_for
+from app.services.llm_admission import admit
 from app.telemetry import trace_llm_call
 
 logger = logging.getLogger(__name__)
@@ -108,7 +110,9 @@ def _local_model(settings: Settings) -> str:
 
         chosen = get_local_chat_model()
     except Exception:
-        chosen = settings.LITELLM_DEFAULT_MODEL
+        from app.model_registry import default_chat_model  # noqa: PLC0415
+
+        chosen = default_chat_model()
     return chosen if chosen.startswith("ollama/") else f"ollama/{chosen}"
 
 
@@ -215,9 +219,11 @@ class LLMService:
             # explicitly (Ollama defaults to 2048 and silently truncates beyond it).
             # num_ctx is a per-model property here, not a per-call one: overriding
             # it forces Ollama to unload and reload the runner, so leave it unset
-            # unless a call genuinely needs a different model instance.
+            # unless a call genuinely needs a different model instance. The value
+            # comes from the model's registry profile (I-27), which is what makes
+            # it impossible for two call sites to disagree about it.
             kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
-            kwargs["num_ctx"] = num_ctx or settings.OLLAMA_NUM_CTX
+            kwargs["num_ctx"] = num_ctx or context_window_for(model)
             # Thinking-capable models (qwen3+) auto-enable reasoning, which
             # streams as reasoning_content (never surfaced) and burns the
             # num_ctx generation budget BEFORE any answer tokens -- on real QA
@@ -309,7 +315,9 @@ class LLMService:
         except ValueError:
             raise
         except Exception:
-            return get_settings().LITELLM_DEFAULT_MODEL, None
+            from app.model_registry import default_chat_model  # noqa: PLC0415
+
+            return default_chat_model(), None
 
     async def complete(
         self,
@@ -353,7 +361,8 @@ class LLMService:
 
         with trace_llm_call("complete", model=effective_model) as span:
             try:
-                response = await litellm.acompletion(**kwargs)
+                async with admit(effective_model, background=background):
+                    response = await litellm.acompletion(**kwargs)
             except Exception as exc:
                 retry = (
                     self._offline_fallback_kwargs(
@@ -372,7 +381,8 @@ class LLMService:
                 )
                 effective_model = retry["model"]
                 span.set_attribute("llm.offline_fallback", True)
-                response = await litellm.acompletion(**retry)
+                async with admit(effective_model, background=background):
+                    response = await litellm.acompletion(**retry)
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
             prompt_tokens = 0
@@ -394,6 +404,7 @@ class LLMService:
         background: bool = False,
         temperature: float | None = None,
         timeout: float | None = None,
+        max_tokens: int | None = None,
         num_ctx: int | None = None,
     ) -> AsyncGenerator[str]:
         """Stream content deltas for the given message list."""
@@ -408,10 +419,12 @@ class LLMService:
         )
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         fallback = self._offline_fallback_kwargs(
             model, effective_model, kwargs, settings, num_ctx=num_ctx
         )
-        return self._token_stream(kwargs, fallback)
+        return self._token_stream(kwargs, fallback, background=background)
 
     async def generate(
         self,
@@ -424,6 +437,7 @@ class LLMService:
         response_format: dict | None = None,
         num_ctx: int | None = None,
         temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str | AsyncGenerator[str]:
         messages: list[dict] = []
         if system:
@@ -435,6 +449,7 @@ class LLMService:
                 model=model,
                 background=background,
                 timeout=timeout,
+                max_tokens=max_tokens,
                 num_ctx=num_ctx,
                 temperature=temperature,
             )
@@ -443,31 +458,46 @@ class LLMService:
             model=model,
             background=background,
             timeout=timeout,
+            max_tokens=max_tokens,
             response_format=response_format,
             num_ctx=num_ctx,
             temperature=temperature,
         )
 
     async def _token_stream(
-        self, kwargs: dict, fallback_kwargs: dict | None = None
+        self, kwargs: dict, fallback_kwargs: dict | None = None, *, background: bool = False
     ) -> AsyncGenerator[str]:
-        try:
-            response = await litellm.acompletion(stream=True, **kwargs)
-        except Exception as exc:
-            if fallback_kwargs is None or not _is_offline_error(exc):
-                raise
-            logger.warning(
-                "%s unreachable while streaming (%s); retrying on local model %s",
-                kwargs.get("model"),
-                type(exc).__name__,
-                fallback_kwargs["model"],
-            )
-            fallback_kwargs.pop("stream", None)
-            response = await litellm.acompletion(stream=True, **fallback_kwargs)
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        """Stream deltas, holding the admission gate while tokens are flowing.
+
+        A stream is not finished when its first token arrives -- the user is
+        still being served. But the gate must not depend on this generator being
+        closed either: a consumer that breaks out of the loop may never close
+        it. So each token refreshes the gate's activity clock, and an abandoned
+        stream stops applying pressure shortly after its last token.
+        """
+        async with admit(str(kwargs.get("model", "")), background=background) as keepalive:
+            try:
+                response = await litellm.acompletion(stream=True, **kwargs)
+            except Exception as exc:
+                if fallback_kwargs is None or not _is_offline_error(exc):
+                    raise
+                logger.warning(
+                    "%s unreachable while streaming (%s); retrying on local model %s",
+                    kwargs.get("model"),
+                    type(exc).__name__,
+                    fallback_kwargs["model"],
+                )
+                fallback_kwargs.pop("stream", None)
+                response = await litellm.acompletion(stream=True, **fallback_kwargs)
+            async for chunk in response:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    # Tells the gate the answer is still being delivered. Without
+                    # it, pressure is held by this generator's lifetime, and a
+                    # consumer that stops reading may never close it -- which
+                    # left the gate stuck and suspended every background call.
+                    keepalive()
+                    yield delta
 
 
 def _messages_to_text(messages: list[dict]) -> str:

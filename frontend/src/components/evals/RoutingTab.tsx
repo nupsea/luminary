@@ -1,12 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
 import type { EvalRunFull } from "./types"
+import { apiGet } from "@/lib/apiClient"
 
 async function fetchRoutingRuns(): Promise<EvalRunFull[]> {
-  const res = await fetch(`${API_BASE}/evals/runs?eval_kind=routing&limit=50`)
-  if (!res.ok) throw new Error("Failed to fetch routing runs")
-  return res.json() as Promise<EvalRunFull[]>
+  return apiGet<EvalRunFull[]>("/evals/runs", { eval_kind: "routing", limit: 50 })
 }
 
 function pct(v: number | null | undefined): string {

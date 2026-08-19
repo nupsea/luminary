@@ -7,6 +7,9 @@ import { DatasetDetail } from "@/components/evals/DatasetDetail"
 import { GenerateDatasetDialog } from "@/components/evals/GenerateDatasetDialog"
 import { RelinkDatasetDialog } from "@/components/evals/RelinkDatasetDialog"
 import { RunConsole } from "@/components/evals/RunConsole"
+import { KindMatrix } from "@/components/evals/KindMatrix"
+import { ModelLab } from "@/components/evals/ModelLab"
+import { ModelMatrix } from "@/components/evals/ModelMatrix"
 import { RunsTab } from "@/components/evals/RunsTab"
 import type {
   DatasetSize,
@@ -21,59 +24,44 @@ import type {
 type AnyRun = EvalRunSummary | EvalRunFull
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import { API_BASE } from "@/lib/config"
-import { errorFromResponse, toSelection, type DatasetSelection } from "@/components/evals/api"
+import { apiDelete, apiGet, apiPatch, apiPost, detailFromError } from "@/lib/apiClient"
+import { toSelection, type DatasetSelection } from "@/components/evals/api"
 import { metricColor, THRESHOLDS } from "@/components/evals/thresholds"
 
 // ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchDatasets(): Promise<GoldenDataset[]> {
-  const res = await fetch(`${API_BASE}/evals/datasets`)
-  if (!res.ok) throw new Error("Failed to fetch datasets")
-  return res.json() as Promise<GoldenDataset[]>
+const fetchDatasets = (): Promise<GoldenDataset[]> => apiGet<GoldenDataset[]>("/evals/datasets")
+
+const fetchDataset = (id: string): Promise<GoldenDatasetDetail> =>
+  apiGet<GoldenDatasetDetail>(`/evals/datasets/${id}`, { limit: 50 })
+
+const fetchDatasetRuns = (id: string): Promise<EvalRunSummary[]> =>
+  apiGet<EvalRunSummary[]>(`/evals/datasets/${id}/runs`)
+
+interface GoldenFilePage {
+  name: string
+  total: number
+  questions: FileQuestion[]
+  offset: number
+  limit: number
 }
 
-async function fetchDataset(id: string): Promise<GoldenDatasetDetail> {
-  const res = await fetch(`${API_BASE}/evals/datasets/${id}?limit=50`)
-  if (!res.ok) throw new Error("Failed to fetch dataset")
-  return res.json() as Promise<GoldenDatasetDetail>
-}
+const fetchGoldenFile = (name: string): Promise<GoldenFilePage> =>
+  apiGet<GoldenFilePage>(`/evals/golden/${name}`, { limit: 50 })
 
-async function fetchDatasetRuns(id: string): Promise<EvalRunSummary[]> {
-  const res = await fetch(`${API_BASE}/evals/datasets/${id}/runs`)
-  if (!res.ok) throw new Error("Failed to fetch dataset runs")
-  return res.json() as Promise<EvalRunSummary[]>
-}
-
-async function fetchGoldenFile(
-  name: string,
-): Promise<{ name: string; total: number; questions: FileQuestion[]; offset: number; limit: number }> {
-  const res = await fetch(`${API_BASE}/evals/golden/${name}?limit=50`)
-  if (!res.ok) throw new Error("Failed to fetch golden file")
-  return res.json() as Promise<{
-    name: string
-    total: number
-    questions: FileQuestion[]
-    offset: number
-    limit: number
-  }>
-}
-
-async function fetchFileRuns(name: string): Promise<EvalRunFull[]> {
-  const res = await fetch(`${API_BASE}/evals/runs?dataset_name=${encodeURIComponent(name)}&limit=50`)
-  if (!res.ok) throw new Error("Failed to fetch file runs")
-  return res.json() as Promise<EvalRunFull[]>
-}
+const fetchFileRuns = (name: string): Promise<EvalRunFull[]> =>
+  apiGet<EvalRunFull[]>("/evals/runs", { dataset_name: name, limit: 50 })
 
 const USABLE_STAGES = new Set(["embedding", "entity_extract", "indexing", "complete"])
 
 async function fetchDocuments(): Promise<DocumentOption[]> {
-  const params = new URLSearchParams({ sort: "newest", page: "1", page_size: "100" })
-  const res = await fetch(`${API_BASE}/documents?${params.toString()}`)
-  if (!res.ok) throw new Error("Failed to fetch documents")
-  const data = (await res.json()) as { items: DocumentOption[] }
+  const data = await apiGet<{ items: DocumentOption[] }>("/documents", {
+    sort: "newest",
+    page: 1,
+    page_size: 100,
+  })
   return data.items.filter((doc) => USABLE_STAGES.has(doc.stage))
 }
 
@@ -81,10 +69,20 @@ async function fetchDocuments(): Promise<DocumentOption[]> {
 // Tab nav types
 // ---------------------------------------------------------------------------
 
-type TabId = "datasets" | "results" | "runs"
+type TabId = "datasets" | "results" | "kinds" | "models" | "lab" | "runs"
 const TABS: { id: TabId; label: string }[] = [
   { id: "datasets", label: "Datasets" },
   { id: "results", label: "Results" },
+  // Retrieval scores differ by kind of writing more than by anything the funnel
+  // does, so the per-kind table is a first-class view rather than a filter.
+  { id: "kinds", label: "By kind" },
+  // Which model produced which numbers. Its own view because the metrics that
+  // may decide a model swap are a strict subset of the ones on every other tab.
+  { id: "models", label: "By model" },
+  // Launching a comparison, as opposed to reading one: it owns the model
+  // selection while it runs, so it is a deliberate place you go rather than a
+  // button on a results table.
+  { id: "lab", label: "Model lab" },
   { id: "runs", label: "Runs" },
 ]
 
@@ -137,15 +135,15 @@ export default function Quality() {
     let cancelled = false
     async function poll() {
       try {
-        const res = await fetch(`${API_BASE}/evals/in-flight`)
-        if (!res.ok) return
-        const rows = (await res.json()) as Array<{
-          key: string
-          run_id: string
-          status: "running" | "failed" | "done"
-          error: string | null
-          finished_at: number | null
-        }>
+        const rows = await apiGet<
+          Array<{
+            key: string
+            run_id: string
+            status: "running" | "failed" | "done"
+            error: string | null
+            finished_at: number | null
+          }>
+        >("/evals/in-flight")
         if (cancelled) return
         const anyRunning = rows.some((r) => r.status === "running")
         if (anyRunning) markEvalRunning()
@@ -242,13 +240,11 @@ export default function Quality() {
       generator_model?: string
       question_count?: number
     }) => {
-      const res = await fetch(`${API_BASE}/evals/datasets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error("Failed to create dataset")
-      return res.json() as Promise<{ id: string; status: string }>
+      try {
+        return await apiPost<{ id: string; status: string }>("/evals/datasets", payload)
+      } catch (err) {
+        throw detailFromError(err, "Failed to create dataset")
+      }
     },
     onSuccess: (data) => {
       setGenerateOpen(false)
@@ -261,13 +257,14 @@ export default function Quality() {
 
   const relinkMutation = useMutation({
     mutationFn: async (payload: { dataset_id: string; document_id: string }) => {
-      const res = await fetch(`${API_BASE}/evals/datasets/${payload.dataset_id}/relink`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: payload.document_id }),
-      })
-      if (!res.ok) throw await errorFromResponse(res, "Failed to re-link dataset")
-      return res.json() as Promise<{ relinked_questions: number }>
+      try {
+        return await apiPatch<{ relinked_questions: number }>(
+          `/evals/datasets/${payload.dataset_id}/relink`,
+          { document_id: payload.document_id },
+        )
+      } catch (err) {
+        throw detailFromError(err, "Failed to re-link dataset")
+      }
     },
     onSuccess: (data) => {
       setRelinkTarget(null)
@@ -280,8 +277,11 @@ export default function Quality() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`${API_BASE}/evals/datasets/${id}`, { method: "DELETE" })
-      if (!res.ok) throw new Error("Failed to delete dataset")
+      try {
+        await apiDelete(`/evals/datasets/${id}`)
+      } catch (err) {
+        throw detailFromError(err, "Failed to delete dataset")
+      }
     },
     onSuccess: () => {
       setSelectedId(null)
@@ -559,6 +559,9 @@ export default function Quality() {
         )}
 
         {activeTab === "results" && <ResultsDashboard selection={consoleSel} />}
+        {activeTab === "kinds" && <KindMatrix />}
+        {activeTab === "models" && <ModelMatrix />}
+        {activeTab === "lab" && <ModelLab />}
         {activeTab === "runs" && <RunsTab polling={evalRunning} />}
       </main>
 

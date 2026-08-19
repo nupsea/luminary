@@ -34,6 +34,7 @@ from app.services import (
 )
 from app.services.llm import LLMUnavailableError, get_llm_service, missing_model_from
 from app.services.llm_json import parse_llm_json_object, salvage_llm_json_object
+from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for, step_decomposition
 from app.services.settings_service import get_vision_model
 
 logger = logging.getLogger(__name__)
@@ -41,26 +42,43 @@ logger = logging.getLogger(__name__)
 # Transcription-first prompting: forcing the model to commit to the labels it
 # can actually read before describing anchors the description in legible
 # content and measurably curbs invented node names on dense diagrams.
-_VISION_PROMPT = (
-    "You are analyzing an image extracted from a document.\n"
-    "Step 1 -- transcribe the text labels that are legible in the image, "
-    "exactly as written. Never guess or invent labels; omit any you cannot "
-    "read clearly.\n"
-    "Step 2 -- classify the image as one of: architecture_diagram, "
-    "sequence_diagram, er_diagram, flowchart, code_screenshot, table, chart, "
-    "photo, other.\n"
-    "Step 3 -- describe what the image shows and what it is for. For "
-    "diagrams, describe the structure: which labeled components exist and how "
-    "they connect or flow.\n"
-    "The image is the primary evidence. Any document context provided may be "
-    "vague, incomplete, or unrelated -- weigh it against what you see. When "
-    "the image is clear, describe it confidently even if the context says "
-    "little; use the context to supply names the image alone cannot (such as "
-    "what a figure or system is called), and only when it matches what you "
-    "see.\n"
-    'Reply ONLY with JSON: {"image_type": "...", "labels": ["..."], '
-    '"description": "..."}'
+VISION_SPEC = PromptSpec(
+    task="vision",
+    contract=(
+        "You are analyzing an image extracted from a document.\n"
+        "Transcribe the text labels that are legible in the image, exactly as "
+        "written. Never guess or invent labels; omit any you cannot read "
+        "clearly.\n"
+        "Classify the image as one of: architecture_diagram, sequence_diagram, "
+        "er_diagram, flowchart, code_screenshot, table, chart, photo, other.\n"
+        "Describe what the image shows and what it is for. For diagrams, "
+        "describe the structure: which labeled components exist and how they "
+        "connect or flow.\n"
+        "The image is the primary evidence. Any document context provided may "
+        "be vague, incomplete, or unrelated -- weigh it against what you see. "
+        "When the image is clear, describe it confidently even if the context "
+        "says little; use the context to supply names the image alone cannot "
+        "(such as what a figure or system is called), and only when it matches "
+        "what you see.\n"
+        'Reply with JSON: {"image_type": "...", "labels": ["..."], '
+        '"description": "..."}'
+    ),
+    accommodations=(
+        step_decomposition(
+            "Work in three steps: transcribe the labels, then classify, then describe.",
+            introduced_for="ollama/qwen2.5vl:7b",
+            because=(
+                "descriptions invented labels the image did not contain until "
+                "transcription was made an explicit first step (I-33's sibling "
+                "failure on the vision path)"
+            ),
+        ),
+        NO_FENCES,
+    ),
 )
+
+def _vision_prompt() -> str:
+    return render_for(VISION_SPEC, "vision")
 
 _CONTEXT_TMPL = "Document context:\n{context}\n\n"
 
@@ -211,7 +229,14 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
     back to LITELLM_DEFAULT_MODEL (e.g. a cloud model) if it is not Ollama-based.
     """
     vision_model: str = get_vision_model()
-    default_model: str = settings.LITELLM_DEFAULT_MODEL  # type: ignore[attr-defined]
+    # The background route, not the interactive one. Enrichment runs on the
+    # user's own documents during ingestion, and in hybrid mode the interactive
+    # route is the cloud -- resolving "chat" here would base64 figures out of a
+    # private PDF to a provider, which is the leak class the background= audit
+    # closed.
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    default_model: str = resolve("background").model
 
     # Build list of models to try: primary first, then cloud fallback if primary is Ollama.
     models_to_try: list[str] = [vision_model]
@@ -247,7 +272,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                                     "text": (
                                         _CONTEXT_TMPL.format(context=context) if context else ""
                                     )
-                                    + _VISION_PROMPT,
+                                    + _vision_prompt(),
                                 },
                                 {
                                     "type": "image_url",
@@ -260,6 +285,13 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                     temperature=0.0,
                     timeout=300.0,
                     api_base=api_base,
+                    # Release the largest resident model soon after the last
+                    # figure instead of holding it for OLLAMA_KEEP_ALIVE.
+                    extra=(
+                        {"keep_alive": settings.VISION_KEEP_ALIVE}
+                        if model.startswith("ollama/")
+                        else None
+                    ),
                 )
             ).strip()
             if model != vision_model:

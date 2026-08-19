@@ -3,8 +3,12 @@
   "DATA/books/alice_in_wonderland.txt": "fd13649e-37ef-4994-b438-4c3152e164fd",
   "DATA/books/the_odyssey.txt": "b42ddf64-b039-447e-9d1d-ecc7891ed3e3",
   "DATA/books/d2l_dive_into_deep_learning.md": "f2176ac9-56a3-4087-ac94-98487412a49e",
-  "DATA/papers/art_of_unix.txt": "d209fa1f-95aa-44ab-b30d-0b006ed549bc",
   "DATA/notes/ml_notes.txt": "0f173f27-453d-4602-9e3e-b4aae2b7c39f",
   "DATA/conversations/engineering_sync.txt": "629af881-239d-4f30-bfe8-96b644663ca0",
-  "DATA/books/frankenstein.txt": "ac2b1e63-1224-4d3e-8212-903ba77f3386"
+  "DATA/books/frankenstein.txt": "ac2b1e63-1224-4d3e-8212-903ba77f3386",
+  "DATA/papers/art_of_unix.txt": "97f6376d-329b-48f3-bed6-8a5a091ea2f7",
+  "DATA/legal/federalist_papers.txt": "fa6e1ca4-ea86-414e-86dc-cc87637791d3",
+  "DATA/plays/hamlet.txt": "02acff68-b6bb-4efa-a5af-d6a8d3d9e465",
+  "DATA/study/sutton_barto_rl.pdf": "109f17f3-332a-479b-9d5b-ff5f7c01a2c5",
+  "DATA/daily_thoughts_2026.txt": "d6e6957f-898f-4bca-822e-f9918c830486"
 }

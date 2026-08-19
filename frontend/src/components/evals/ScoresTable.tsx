@@ -33,13 +33,19 @@ function rowScores(run: EvalRunSummary | EvalRunFull) {
       }
     }
   }
-  const rawNdcg = "extra_metrics" in run ? run.extra_metrics?.ndcg_10 : null
   return {
     hr5: run.hit_rate_5,
     mrr: run.mrr,
-    ndcg: typeof rawNdcg === "number" ? rawNdcg : null,
+    ndcg: numeric(run, "ndcg_10"),
     kind: run.eval_kind ?? "—",
   }
+}
+
+// ndcg_10, answer_rate and citation_coverage have no dedicated DB column; they
+// ride in extra_metrics (evals/lib/store.py forwards anything outside the fixed set).
+function numeric(run: EvalRunSummary | EvalRunFull, key: string): number | null {
+  const v = run.extra_metrics?.[key]
+  return typeof v === "number" ? v : null
 }
 
 export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull> }) {
@@ -58,6 +64,15 @@ export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull
             <TableHead>HR@5</TableHead>
             <TableHead>MRR@5</TableHead>
             <TableHead>nDCG@10</TableHead>
+            <TableHead title="Fraction of shown citations that support a claim the answer makes">
+              Support
+            </TableHead>
+            <TableHead title="Fraction of answers carrying at least one source">
+              Coverage
+            </TableHead>
+            <TableHead title="Fraction of golden questions that got an answer rather than a decline">
+              Ans rate
+            </TableHead>
             <TableHead>Faith</TableHead>
           </TableRow>
         </TableHeader>
@@ -81,6 +96,25 @@ export function ScoresTable({ runs }: { runs: Array<EvalRunSummary | EvalRunFull
                 </TableCell>
                 <TableCell className={cn(metricColor(s.ndcg, THRESHOLDS.ndcg_10))}>
                   {fmt(s.ndcg)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    metricColor(run.citation_support_rate, THRESHOLDS.citation_support_rate),
+                  )}
+                >
+                  {fmt(run.citation_support_rate)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    metricColor(numeric(run, "citation_coverage"), THRESHOLDS.citation_coverage),
+                  )}
+                >
+                  {fmt(numeric(run, "citation_coverage"))}
+                </TableCell>
+                <TableCell
+                  className={cn(metricColor(numeric(run, "answer_rate"), THRESHOLDS.answer_rate))}
+                >
+                  {fmt(numeric(run, "answer_rate"))}
                 </TableCell>
                 <TableCell className={cn(metricColor(run.faithfulness, THRESHOLDS.faithfulness))}>
                   {fmt(run.faithfulness)}

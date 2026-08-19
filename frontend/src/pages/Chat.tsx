@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Cpu, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, ChevronDown, Globe, Info, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
+import { ModelSelector } from "@/components/ModelSelector"
+import { fetchLLMSettings } from "@/lib/llmSettings"
 import { ChatSessionList } from "@/components/chat/ChatSessionList"
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import {
@@ -28,10 +30,10 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
-import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, shortModelLabel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 
 // ---------------------------------------------------------------------------
 // SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
@@ -58,12 +60,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
   const { data: cached } = useQuery<SuggestionsResponse>({
     queryKey: ["chat-suggestions-cached", documentId],
     queryFn: async () => {
-      const url = documentId
-        ? `${API_BASE}/chat/suggestions/cached?document_id=${encodeURIComponent(documentId)}`
-        : `${API_BASE}/chat/suggestions/cached`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to fetch cached suggestions")
-      return res.json() as Promise<SuggestionsResponse>
+      return apiGet<SuggestionsResponse>("/chat/suggestions/cached", {
+        document_id: documentId || undefined,
+      })
     },
     staleTime: 30_000,
   })
@@ -72,12 +71,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
   const { data: fresh } = useQuery<SuggestionsResponse>({
     queryKey: ["chat-suggestions", documentId],
     queryFn: async () => {
-      const url = documentId
-        ? `${API_BASE}/chat/suggestions?document_id=${encodeURIComponent(documentId)}`
-        : `${API_BASE}/chat/suggestions`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to fetch suggestions")
-      const result = res.json() as Promise<SuggestionsResponse>
+      const result = apiGet<SuggestionsResponse>("/chat/suggestions", {
+        document_id: documentId || undefined,
+      })
       // Once fresh data arrives, also update the cached query so next switch is instant
       result.then((data) => {
         qc.setQueryData(["chat-suggestions-cached", documentId], data)
@@ -111,7 +107,9 @@ function SuggestionPills({ documentId, onSuggest }: SuggestionPillsProps) {
             key={s.id || s.text}
             onClick={() => {
               if (s.id) {
-                fetch(`${API_BASE}/chat/suggestions/${s.id}/asked`, { method: "POST" }).catch(() => { /* fire-and-forget: suggestion tracking is best-effort */ })
+                apiPost(`/chat/suggestions/${s.id}/asked`).catch(() => {
+                  /* fire-and-forget: suggestion tracking is best-effort */
+                })
               }
               onSuggest(s.text)
             }}
@@ -131,9 +129,11 @@ interface DocListItem {
 }
 
 async function fetchDocList(): Promise<DocListItem[]> {
-  const res = await fetch(`${API_BASE}/documents?sort=last_accessed&page=1&page_size=100`)
-  if (!res.ok) return []
-  const data = (await res.json()) as { items: DocListItem[] }
+  const data = await apiGet<{ items: DocListItem[] }>("/documents", {
+    sort: "last_accessed",
+    page: 1,
+    page_size: 100,
+  })
   return data.items ?? []
 }
 
@@ -215,29 +215,6 @@ interface SessionPlanItem {
 interface SessionPlanResponse {
   total_minutes: number
   items: SessionPlanItem[]
-}
-
-interface CloudProvider {
-  name: string
-  available: boolean
-}
-
-interface LLMSettings {
-  processing_mode: string
-  active_model: string
-  available_local_models: string[]
-  cloud_providers: CloudProvider[]
-  // Raw saved config (present in the response) — used to show/resolve the
-  // effective chat model and to offer the right cloud models.
-  mode?: string
-  provider?: string
-  model?: string
-}
-
-async function fetchLLMSettings(): Promise<LLMSettings> {
-  const res = await fetch(`${API_BASE}/settings/llm`)
-  if (!res.ok) throw new Error("Failed to fetch LLM settings")
-  return res.json() as Promise<LLMSettings>
 }
 
 function persistedToChatMessage(p: PersistedMessage): ChatMessage {
@@ -322,62 +299,6 @@ function TransparencyPanel({ transparency }: { transparency: TransparencyInfo })
 }
 
 // ---------------------------------------------------------------------------
-// ChatModelSelector -- header dropdown showing/overriding the model for this chat
-// ---------------------------------------------------------------------------
-
-interface ChatModelSelectorProps {
-  value: string // per-request override; "" = use the app default
-  onChange: (model: string) => void
-  localModels: string[]
-  cloudModels: string[]
-  effectiveDefault: string
-}
-
-function ChatModelSelector({
-  value,
-  onChange,
-  localModels,
-  cloudModels,
-  effectiveDefault,
-}: ChatModelSelectorProps) {
-  const current = value ? shortModelLabel(value) : shortModelLabel(effectiveDefault)
-  return (
-    <label
-      className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors"
-      title="Model answering this chat. 'Auto' follows your Settings; pick another to override just this conversation."
-    >
-      <Cpu size={13} className="shrink-0 text-muted-foreground" />
-      <span className="text-muted-foreground">Model:</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="max-w-[160px] cursor-pointer truncate bg-transparent font-medium text-foreground focus:outline-none"
-      >
-        <option value="">Auto · {shortModelLabel(effectiveDefault)}</option>
-        {localModels.length > 0 && (
-          <optgroup label="Local (Ollama)">
-            {localModels.map((m) => (
-              <option key={m} value={m}>
-                {shortModelLabel(m)}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {cloudModels.length > 0 && (
-          <optgroup label="Cloud">
-            {cloudModels.map((m) => (
-              <option key={m} value={m}>
-                {shortModelLabel(m)}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
-      {value && <span className="sr-only">{current}</span>}
-    </label>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // DocumentScopeCombobox -- inline document scope selector in Chat header (S186)
 // ---------------------------------------------------------------------------
@@ -547,6 +468,18 @@ export default function Chat() {
     staleTime: 30_000,
   })
 
+  // A selected document that is no longer in the library must not scope a search.
+  // chatSelectedDocId is persisted, and deleting a document never cleared it, so a
+  // chat could stay pointed at a document that had been gone for days: the header
+  // showed "All documents" (a missing id has no title to render) while every
+  // question was filtered down to that one dead id and answered nothing.
+  useEffect(() => {
+    if (!docList || !selectedDocId) return
+    if (docList.some((d) => d.id === selectedDocId)) return
+    setSelectedDocId(null)
+    setScope("all")
+  }, [docList, selectedDocId, setSelectedDocId, setScope])
+
   // Pre-populate from global store when user arrives from Learning tab.
   // Use a ref to avoid re-populating after the user explicitly clears
   // the document selection (clicking the X button).
@@ -607,11 +540,7 @@ export default function Chat() {
 
   const { data: webSearchSettings } = useQuery<WebSearchSettings>({
     queryKey: ["web-search-settings"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/settings/web-search`)
-      if (!res.ok) throw new Error("Failed to fetch web search settings")
-      return res.json() as Promise<WebSearchSettings>
-    },
+    queryFn: () => apiGet<WebSearchSettings>("/settings/web-search"),
     staleTime: 300_000,
     refetchOnWindowFocus: false,
   })
@@ -623,11 +552,7 @@ export default function Chat() {
     refetch: refetchPlan,
   } = useQuery<SessionPlanResponse>({
     queryKey: ["session-plan"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/study/session-plan?minutes=20`)
-      if (!res.ok) throw new Error("Failed to fetch session plan")
-      return res.json() as Promise<SessionPlanResponse>
-    },
+    queryFn: () => apiGet<SessionPlanResponse>("/study/session-plan", { minutes: 20 }),
     enabled: showPlanPanel,
     staleTime: 60_000,
   })
@@ -796,9 +721,19 @@ export default function Chat() {
     // Read scope/doc from the store, not the render closure: callers like the
     // reader "Ask" flow set these via state and immediately invoke sendMessage,
     // so the closure values would be stale and retrieval would run unscoped.
+    //
+    // The document comes from the chat's own selection and nowhere else. It used
+    // to fall back to activeDocumentId -- the file last opened in the reader --
+    // which is not a chat scope: with chatScope left at "single" and nothing
+    // selected here, a question went out scoped to whatever document the user had
+    // just opened or uploaded, while the header chip (which reads selectedDocId,
+    // not scope) said "All documents". Seen 2026-08-17: a library question landed
+    // on a PDF 40 seconds into ingestion and came back empty. If the scope says
+    // single but this chat has no document, the chip is right and the scope is
+    // stale -- ask the whole library, which is what the user is being shown.
     const st = useAppStore.getState()
-    const effScope = st.chatScope
-    const effSelectedDocId = st.chatSelectedDocId ?? st.activeDocumentId
+    const effSelectedDocId = st.chatSelectedDocId
+    const effScope = st.chatScope === "single" && !effSelectedDocId ? "all" : st.chatScope
 
     // Resolve / create the persisted session before we start streaming, so we have
     // a stable id to attach both the user turn and the assistant turn to.
@@ -850,6 +785,9 @@ export default function Chat() {
         .slice(-6)
         .map((m) => ({ role: m.role, content: m.text }))
 
+      // SSE stream: tokens arrive via res.body.getReader(); apiClient's
+      // JSON path doesn't apply.
+      // eslint-disable-next-line no-restricted-syntax
       const res = await fetch(`${API_BASE}/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -938,14 +876,15 @@ export default function Chat() {
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
+              // Only llm_unavailable is reworded here, because the right wording
+              // depends on llmMode, which is client state. Retrieval failures
+              // carry a server message that names which of them happened.
               const errorMsg =
                 errorCode === "llm_unavailable"
                   ? (llmMode === "private"
                       ? "Ollama is not running. Start it with: ollama serve"
                       : "LLM service is unreachable. Please check your internet connection or settings.")
-                  : errorCode === "no_context"
-                    ? "No relevant content found. Make sure at least one document has been ingested."
-                    : fallbackMsg
+                  : fallbackMsg
               setIsStreaming(false)
               setMessages((m) =>
                 m.map((msg) =>
@@ -1140,7 +1079,7 @@ export default function Chat() {
 
         {/* Inline model indicator + per-conversation override */}
         {!llmLoading && llmSettings && (
-          <ChatModelSelector
+          <ModelSelector
             value={model}
             onChange={(m) => {
               setModel(m)

@@ -122,3 +122,69 @@ def test_salvage_repairs_illegal_escapes():
     salvaged = salvage_llm_json_object(raw)
     assert salvaged is not None
     assert "sigma" in salvaged["description"]
+
+
+# What the counters mean. These exist because `first_pass_rate` read 0.0000 on a
+# 3B model and on a 14B one, and the reason was this module's attempt order
+# rather than anything either model did.
+
+
+def _moved(fn, raw):
+    from app.services import llm_output_stats as stats
+
+    before = dict(stats.snapshot()["counts"])
+    result = fn(raw)
+    after = stats.snapshot()["counts"]
+    return result, {k: after[k] - before.get(k, 0) for k in after if after[k] - before.get(k, 0)}
+
+
+def test_a_compliant_object_is_not_an_array_surrounded_by_prose():
+    """`{"flashcards": [...]}` is the shape the flashcard prompt demands. Slicing
+    to the inner array made the wrapper look like prose, so every compliant
+    generation was recorded as repaired."""
+    from app.services.flashcard_parsers import _parse_llm_response
+
+    raw = '{"flashcards": [{"question": "Q", "answer": "A"}]}'
+    cards, moved = _moved(lambda r: _parse_llm_response(r, "doc", expect="object"), raw)
+
+    assert len(cards) == 1
+    assert moved.get("parses_first_pass") == 1
+    assert "repair_surrounded_by_prose" not in moved
+    assert "shape_deviations" not in moved
+
+
+def test_the_other_shape_parses_cleanly_and_is_counted_as_a_deviation():
+    """A bare array where an object was specified needed no repair -- but it is
+    not what the prompt asked for, and that difference is the model's."""
+    from app.services.flashcard_parsers import _parse_llm_response
+
+    raw = '[{"question": "Q", "answer": "A"}]'
+    cards, moved = _moved(lambda r: _parse_llm_response(r, "doc", expect="object"), raw)
+
+    assert len(cards) == 1
+    assert moved.get("parses_first_pass") == 1
+    assert moved.get("shape_deviations") == 1
+
+
+def test_real_prose_around_the_json_is_still_counted_as_a_repair():
+    from app.services.flashcard_parsers import _parse_llm_response
+
+    raw = 'Here are your cards:\n[{"question": "Q", "answer": "A"}]\nHope that helps!'
+    cards, moved = _moved(lambda r: _parse_llm_response(r, "doc", expect="array"), raw)
+
+    assert len(cards) == 1
+    assert moved.get("repair_surrounded_by_prose") == 1
+    assert "parses_first_pass" not in moved
+
+
+def test_one_completion_is_counted_once_whatever_shape_it_arrived_in():
+    """Two attempts at one completion must not become two parses: the denominator
+    of every rate on this path is `parses`."""
+    from app.services.flashcard_parsers import _parse_llm_response
+
+    _, moved = _moved(
+        lambda r: _parse_llm_response(r, "doc", expect="array"),
+        '{"flashcards": [{"question": "Q", "answer": "A"}]}',
+    )
+
+    assert moved.get("parses") == 1

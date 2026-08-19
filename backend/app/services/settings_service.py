@@ -187,19 +187,41 @@ def _with_ollama_prefix(model: str) -> str:
     return model if "/" in model else f"ollama/{model}"
 
 
-def get_local_chat_model() -> str:
-    """The on-device chat model, as chosen in Settings or configured."""
-    from app.config import get_settings  # noqa: PLC0415
+def configured_chat_override() -> str | None:
+    """An explicit chat choice from Settings, or None when nobody chose.
 
-    return _with_ollama_prefix(_cache["local_chat_model"] or get_settings().LITELLM_DEFAULT_MODEL)
+    Mirrors `configured_vision_override`, and exists for the same reason: a
+    chosen model is honoured as-is, while the *default* is free to resolve to
+    whatever the machine can hold. `get_local_chat_model()` cannot answer which
+    of the two happened -- it has already substituted the default.
+    """
+    chosen = _cache["local_chat_model"]
+    return _with_ollama_prefix(chosen) if chosen else None
+
+
+def get_local_chat_model() -> str:
+    """The on-device chat model: what Settings holds, else the registry default."""
+    from app.model_registry import default_chat_model  # noqa: PLC0415
+
+    return configured_chat_override() or default_chat_model()
+
+
+def configured_vision_override() -> str | None:
+    """An explicit vision choice from Settings, or None when nobody chose.
+
+    The distinction is load-bearing: a chosen model is honoured even when it does
+    not fit the host, while the *default* is free to resolve to whatever the
+    machine can actually hold.
+    """
+    chosen = _cache["vision_model"]
+    return _with_ollama_prefix(chosen) if chosen else None
 
 
 def get_vision_model() -> str:
-    """The model that reads figures, as chosen in Settings or configured."""
-    from app.config import get_settings  # noqa: PLC0415
+    """The model that reads figures: Settings, else the registry default."""
+    from app.model_registry import default_vision_model  # noqa: PLC0415
 
-    chosen = _cache["vision_model"]
-    return _with_ollama_prefix(chosen) if chosen else get_settings().VISION_MODEL
+    return configured_vision_override() or default_vision_model()
 
 
 async def update_llm_settings(

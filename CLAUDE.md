@@ -11,11 +11,12 @@ This file is a table of contents. The system of record is `docs/`.
 | Before you… | Read |
 |---|---|
 | proposing or scoping work | `docs/roadmap.md` — the only doc carrying status |
-| any backend change | `docs/invariants.md` (31 hard rules, each from a real incident) |
+| any backend change | `docs/invariants.md` (35 hard rules, each from a real incident) |
 | a structural change | `docs/architecture.md` (6-layer rule, stores, directories) |
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |
 | a retrieval change | `docs/retrieval-funnel.md`, then the `retrieval-change` skill |
+| an eval change, or quoting an eval number | `docs/eval-coverage.md`, then the `eval-integrity` skill |
 | writing docs | the `project-docs` skill |
 
 Never state a dependency version in prose — point at `package.json` / `pyproject.toml`.
@@ -48,6 +49,9 @@ produced GitHub-only failures. Markers `slow`, `e2e` and `unstable` are excluded
 These are the ones that get violated by an agent working from general priors rather than
 from this repo. The full set is in `docs/invariants.md`.
 
+- **Nothing the system supplies may satisfy a check on the system's output.** Prompt examples,
+  placeholders and defaults are not evidence; a verification the product can pass with its own
+  text verifies nothing. `.claude/rules/common/product-integrity.md`.
 - **`uv` only.** Never `pip`, never `poetry`. Add packages with `uv add`. (I-15)
 - **All LLM calls go through LiteLLM.** Never a provider SDK directly.
 - **Services and repos raise `LuminaryError` subclasses, never `HTTPException`.** One handler

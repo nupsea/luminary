@@ -26,6 +26,7 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "backend"):
 
 from app.services.topic_service import is_junk_heading  # noqa: E402
 from evals.lib.manifest import ensure_ingested, load_manifest, resolve_backend_base  # noqa: E402
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 from evals.lib.topic_metrics import compute_topic_metrics  # noqa: E402
@@ -86,7 +87,14 @@ def main() -> None:
         violations.append(f"junk_rate {metrics['junk_rate']:.3f} > {THRESHOLDS['junk_rate_max']}")
 
     passed = not violations
-    append_history(args.dataset, "no-llm", metrics, passed, eval_kind="topic")
+    append_history(
+        args.dataset,
+        "no-llm",
+        metrics,
+        passed,
+        eval_kind="topic",
+        environment=capture_environment(args.backend_url),
+    )
     store_results(args.backend_url, args.dataset, "no-llm", metrics, eval_kind="topic")
 
     if violations and args.assert_thresholds:

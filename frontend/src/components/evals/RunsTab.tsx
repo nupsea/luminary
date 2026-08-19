@@ -1,10 +1,10 @@
 import { Fragment, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
-import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { metricColor, shippedAblationArm, THRESHOLDS } from "./thresholds"
 import type { AblationArm, EvalRunFull } from "./types"
+import { apiGet } from "@/lib/apiClient"
 
 async function fetchEvalRuns(params: {
   dataset_name?: string
@@ -12,13 +12,12 @@ async function fetchEvalRuns(params: {
   model?: string
   limit: number
 }): Promise<EvalRunFull[]> {
-  const q = new URLSearchParams({ limit: String(params.limit) })
-  if (params.dataset_name) q.set("dataset_name", params.dataset_name)
-  if (params.eval_kind) q.set("eval_kind", params.eval_kind)
-  if (params.model) q.set("model", params.model)
-  const res = await fetch(`${API_BASE}/evals/runs?${q.toString()}`)
-  if (!res.ok) throw new Error("Failed to fetch eval runs")
-  return res.json() as Promise<EvalRunFull[]>
+  return apiGet<EvalRunFull[]>("/evals/runs", {
+    limit: params.limit,
+    dataset_name: params.dataset_name || undefined,
+    eval_kind: params.eval_kind || undefined,
+    model: params.model || undefined,
+  })
 }
 
 function pct(v: number | null | undefined): string {

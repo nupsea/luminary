@@ -11,9 +11,16 @@ export interface EvalRunSummary {
   answer_relevance?: number | null
   context_precision?: number | null
   context_recall?: number | null
+  citation_support_rate?: number | null
   eval_kind?: string | null
   status?: "complete" | "failed"
   error_message?: string | null
+  // answer_rate, citation_coverage and the citation attribution counts have no
+  // dedicated DB column; they ride in extra_metrics (see evals/lib/store.py).
+  // `unknown` because the blob also carries nested objects -- `environment`
+  // (corpus fingerprint and resolved models) and `output_repairs` -- and typing
+  // it as scalars made every consumer cast instead of narrowing.
+  extra_metrics?: Record<string, unknown> | null
 }
 
 export interface GoldenDataset {
@@ -82,7 +89,7 @@ export interface EvalRunFull {
   eval_kind: string | null
   model_used: string
   citation_support_rate: number | null
-  extra_metrics: Record<string, number | boolean | string> | null
+  extra_metrics: Record<string, unknown> | null
   status?: "complete" | "failed"
   error_message?: string | null
 }

@@ -1,9 +1,29 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
 
+# The text model every eval target judges with. One variable, not six copies:
+# `make eval-gen EVAL_TEXT_MODEL=ollama/llama3.2` switches the whole suite.
+# A machine with a single model uses it for answering AND judging -- legal, and
+# recorded as `self_judged` because a judge is not neutral about its own output.
+# The vision model is resolved by the backend (Settings), never by the eval, and
+# is recorded per run; `make eval-models` prints both before anything runs.
+EVAL_TEXT_MODEL ?= ollama/qwen2.5:14b-instruct
+
 LUMINARY_PORT ?= 7820
+
+models:  ## what the current model configuration costs on this machine
+	@cd backend && uv run python -c "\
+from app.services.model_router import residency_report, warn_if_configuration_exceeds_host; \
+r = residency_report(); \
+print(f\"profile {r['profile']}  host {r['host_ram_gb']}GB  keeps {r['max_resident']} loaded\"); \
+[print(f\"  {role:<11} {v['model']:<28} {v['resident_gb'] or '?'}GB\") for role, v in r['roles'].items()]; \
+print(f\"  resident: {r['resident_count']} model(s), {r['resident_gb']}GB\"); \
+w = warn_if_configuration_exceeds_host(); \
+[print(f'  WARNING: {line}') for line in w] or print('  no warnings'); \
+print('  (.env + registry defaults; a model chosen in Settings is stored in the'); \
+print('   database and only shows at GET /settings/models on a running server)')"
 
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
@@ -190,10 +210,152 @@ smoke:
 	@echo "Running smoke tests (requires backend on :7820)..."
 	bash scripts/smoke/all.sh
 
+# Footprint + interactive-latency baseline. FILE= ingests and samples through it;
+# without FILE it samples idle. Backend must be running.
+mem-profile:
+	@echo "Profiling footprint (requires backend on :7820)..."
+	cd backend && uv run python ../scripts/mem_profile.py $(if $(FILE),--ingest $(FILE),) \
+		--summary evals/mem_profile_history.jsonl $(MEM_ARGS)
+
+# Compare two GLiNER models on the live corpus before changing NER_MODEL.
+# Agreement only -- the deciding gate is `make eval` under each model.
+ner-compare:
+	@echo "Comparing entity models (requires backend on :7820)..."
+	cd backend && uv run python ../scripts/ner_compare.py $(NER_ARGS)
+
+# Intent routing: does the chat graph send each message to the right strategy?
+# The graph routes every message by intent, so a misroute makes every downstream
+# number describe a question the user did not ask (I-25, I-26). Fast -- no
+# generation, just classification.
+eval-intent:
+	@echo "Intent routing accuracy (backend must be running)..."
+	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
+	@echo "Adversarial phrasing, heuristic only -- the floor, not the routing..."
+	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+		--dataset intents_adversarial --backend-url $(BACKEND_URL)
+	@echo "Adversarial phrasing, heuristic + LLM fallback -- what a user gets..."
+	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
+		--dataset intents_adversarial --backend-url $(BACKEND_URL) --llm-fallback
+
+# Ingestion fidelity: how much of each source document survives into chunks.
+# Deterministic, LLM-free, no backend needed -- it reads the dev database directly.
+# Retrieval scores what was indexed and cannot report what never arrived, so this
+# is the ceiling every downstream number sits under. Run it before trusting a
+# retrieval or generation figure on a corpus that was re-ingested.
+# ALL=1 measures every complete document in the library grouped by format --
+# epub, docx and scraped articles each reach chunks through a different parse
+# path, and the 12 manifest documents cover only txt, md and one PDF.
+eval-ingest:
+	@echo "Ingestion fidelity across every manifest document..."
+	uv run --project $(CURDIR)/backend python evals/run_ingest_eval.py --assert-thresholds \
+		$(if $(ALL),--all-documents,)
+
+# Every document kind under DATA. `thoughts` is deliberately absent: 4 rows over a
+# 7-chunk document scores 1.000 by construction, so it is measured, not gated.
 eval:
 	@echo "Running retrieval quality evals (backend must be running on :7820)..."
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset legal --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset play --backend-url $(BACKEND_URL) --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset study --backend-url $(BACKEND_URL) --assert-thresholds
+
+# Generation quality on the shipped answering path: faithfulness (HHEM), answer
+# relevance, citation support, answer rate and citation coverage -- all asserted.
+# Slow: /qa runs sequentially because a local Ollama serves one generation at a
+# time. This is the only target that exercises answering; `make eval` is retrieval
+# only, which is why every faithfulness column in the UI read "-" before it existed.
+eval-gen:
+	@echo "Generation quality eval on book + paper (local judge, asserted -- slow)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
+
+# Repeated generation eval: mean and sd over N runs in ONE library state, gated
+# on the mean. A single generation run cannot resolve a change below ~0.10 on
+# book or ~0.05 on paper, so this is the only honest way to A/B a change that
+# touches answering. RUNS= and COMPARE= (an earlier run_group) are optional.
+eval-variance:
+	@echo "Repeated generation eval on $(or $(DATASET),book) (slow -- N full runs)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_variance.py \
+		--dataset $(or $(DATASET),book) --runs $(or $(RUNS),4) \
+		$(if $(COMPARE),--compare-to $(COMPARE),) \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
+		--check-citations --assert-thresholds
+
+# The prompt a task actually sends, and why each part is in it. The PromptSpec
+# refactor makes the real prompt exist only at runtime; this is what replaces
+# reading the string in the file.
+prompt-dump:
+	cd backend && uv run python ../scripts/prompt_dump.py \
+		--task $(or $(TASK),flashcards) $(if $(MODEL),--model $(MODEL),)
+
+# Which models a run will use, and whether they are installed. Cheap, and the
+# only place the one-model / text+vision split is stated before a run rather
+# than inferred from a failure.
+eval-models:
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python check_models.py \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
+
+# The model matrix: run the model-sensitive evals across candidates and report
+# the structural tier, which is the only one allowed to decide a swap. Switches
+# the backend's model per candidate and restores it afterwards. ARM=bare needs
+# the backend restarted with PROMPT_ARM=bare; the matrix refuses to straddle
+# arms. MODELS is required -- there is no default worth guessing.
+eval-matrix:
+	@echo "Model matrix over $(MODELS) (arm=$(or $(ARM),shipped))..."
+	uv run --project $(CURDIR)/backend python evals/run_model_matrix.py \
+		--models $(MODELS) --backend-url $(BACKEND_URL) \
+		$(if $(TASKS),--tasks $(TASKS),) $(if $(ARM),--arm $(ARM),) \
+		$(if $(ASSERT_SEPARATION),--assert-separation,)
+
+# Flashcard quality. SKIP_JUDGE=1 reports the structural half only -- cards
+# asked for against cards delivered, and what the parser had to repair. Those
+# are deterministic and model-sensitive, which is what gates a model swap; the
+# judged scores are neither, and on a one-model machine the judge is grading its
+# own cards.
+eval-flashcards:
+	@echo "Flashcard eval across content kinds..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_flashcard_eval.py \
+		--backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) \
+		$(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
+
+# Rebuild the flashcard golden by sampling passages from the live index. Fixed
+# seed, balanced across content types; no model authors anything, because the
+# passage is the ground truth the cards are judged against.
+golden-flashcards:
+	uv run --project $(CURDIR)/backend python evals/build_flashcard_golden.py \
+		--per-kind $(or $(PER_KIND),7)
+
+# Cross-document routing: does retrieval pick the right DOCUMENT, unscoped, the
+# way real "All documents" chat runs. `make eval` pins each row to its source,
+# so it cannot see a routing failure at all. No floor yet -- this records the
+# baseline; a threshold needs numbers first, in one library state.
+ROUTING_DATASETS ?= book,paper,legal,play,study
+eval-routing:
+	@echo "Corpus-wide routing (unscoped) on $(ROUTING_DATASETS)..."
+	uv run --project $(CURDIR)/backend python evals/run_corpus_routing.py \
+		--datasets $(ROUTING_DATASETS) --backend-url $(BACKEND_URL) $(if $(TYPO),--typo,)
+
+# Summary quality. `summary_grounding` (HHEM) needs no LLM; `no_hallucination`
+# needs the judge, so SKIP_JUDGE=1 gives the deterministic half on a machine
+# with no model to spare.
+eval-summary:
+	@echo "Summary eval (mode=$(or $(MODE),executive))..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_summary_eval.py \
+		--mode $(or $(MODE),executive) --backend-url $(BACKEND_URL) \
+		--judge-model $(EVAL_TEXT_MODEL) $(if $(SKIP_JUDGE),--skip-judge,) --assert-thresholds
+
+# Everything, in the order the stages constrain each other: ingestion is the
+# ceiling on retrieval, retrieval is the ceiling on generation. Running them in
+# any other order attributes a regression to the wrong stage.
+eval-all:
+	$(MAKE) eval-models
+	$(MAKE) eval-ingest
+	$(MAKE) eval
+	$(MAKE) eval-routing
+	$(MAKE) eval-gen
+	$(MAKE) eval-intent
+	$(MAKE) eval-topics
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
@@ -210,7 +372,7 @@ eval-d2l-rerank:
 # Slow (one judge call per question); separate from the fast HR/MRR target above.
 eval-d2l-gen:
 	@echo "Generation eval on d2l (RAGAS, local judge — slow)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model ollama/qwen2.5:14b-instruct
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL)
 
 # Topic-generation eval (precision/recall/F1 + junk-rate). Uses the backend venv.
 eval-topics:
@@ -220,12 +382,63 @@ eval-topics:
 # Regenerate the d2l golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites d2l.jsonl.
 golden-d2l:
 	@echo "Regenerating d2l golden (GPT-5.4 generate + cross-model verify)..."
-	uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
 		--source DATA/books/d2l_dive_into_deep_learning.md \
 		--out evals/golden/d2l.jsonl \
 		--generator-model openai/gpt-5.4 \
 		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
 		--verify-axes answerable answer_correct --target 50
+
+# Regenerate the paper golden Q&A (ONE-TIME, needs OPENAI_API_KEY + Ollama). Overwrites
+# paper.jsonl. The source is a site scrape, so the generator reads it through
+# source_text.read_source_text -- the same furniture removal ingestion applies. Reading it
+# raw is how 17 of the previous 40 questions came to ask about the site's 404 page.
+golden-paper:
+	@echo "Regenerating paper golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/papers/art_of_unix.txt \
+		--out evals/golden/paper.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 40
+
+# Goldens for the document kinds that had none. `study` is the only PDF dataset,
+# so it is the only thing measuring the PDF parse path.
+golden-legal:
+	@echo "Regenerating legal golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/legal/federalist_papers.txt \
+		--out evals/golden/legal.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-play:
+	@echo "Regenerating play golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/plays/hamlet.txt \
+		--out evals/golden/play.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-study:
+	@echo "Regenerating study golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/study/sutton_barto_rl.pdf \
+		--out evals/golden/study.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 60
+
+golden-thoughts:
+	@echo "Regenerating thoughts golden (GPT-5.4 generate + cross-model verify)..."
+	LUMINARY_ENV_FILE=$(CURDIR)/backend/.env uv run --project $(CURDIR)/backend python evals/generate_golden.py \
+		--source DATA/daily_thoughts_2026.txt \
+		--out evals/golden/thoughts.jsonl \
+		--generator-model openai/gpt-5.4 \
+		--verify-models openai/gpt-5.1 ollama/qwen2.5:14b-instruct \
+		--verify-axes answerable answer_correct --target 20
 
 luminary:
 	bash scripts/luminary.sh
@@ -285,6 +498,7 @@ endif
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit
+	cd frontend && npm run lint
 	@echo "CI passed."
 
 regen-api-types:

@@ -14,6 +14,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The server's own `detail` message from a failed request, or a fallback.
+ *
+ * FastAPI puts the actionable text in `detail`; `ApiError.message` is
+ * `HTTP 409: {"detail":"..."}`, which is not something to show a user. Lives
+ * here because every caller of `request` gets an `ApiError` and needs the same
+ * unwrapping — it was written twice before this, once against `Response` and
+ * once against `ApiError`.
+ */
+export function detailFromError(err: unknown, fallback: string): Error {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { detail?: unknown }
+      if (typeof parsed.detail === "string" && parsed.detail) return new Error(parsed.detail)
+    } catch {
+      // body wasn't JSON
+    }
+    return new Error(fallback)
+  }
+  return err instanceof Error ? err : new Error(fallback)
+}
+
 export type QueryParams = Record<
   string,
   string | number | boolean | null | undefined

@@ -133,6 +133,9 @@ export function buildErrorMessage(errorCode: string, fallback: string): string {
       ? "Ollama is not running. Start it with: ollama serve"
       : "LLM service is unreachable. Please check your internet connection or settings."
   }
-  if (errorCode === "no_context") return "No relevant content found. Make sure at least one document has been ingested."
+  // Every other code carries a server message that names the actual situation --
+  // still indexing, nothing in this document, search failed, empty library. The
+  // client used to answer all of them with "make sure a document has been
+  // ingested", which was wrong for a user holding 52 documents.
   return fallback
 }

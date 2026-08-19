@@ -5,6 +5,10 @@ _llm_classify_fallback    — async, calls LiteLLM when heuristic confidence < 0
 """
 
 import logging
+import re
+from functools import lru_cache
+
+from app.services.prompt_spec import Accommodation, PromptSpec, render_for
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +143,27 @@ _SUMMARY_KWS: frozenset[str] = frozenset(
         "what is the book about",
         "what is the document about",
         "what covers",
+        # Summary words that lived only in qa.py's parallel list. Two sets for one
+        # concept disagreed: "Recap the document" routed to search here while
+        # counting as summary intent there.
+        "recap",
+        "gist",
+        "tldr",
+        "tl;dr",
     }
+)
+
+# Some intents are a sentence shape rather than a phrase. "What is <this|the>
+# <noun> about?" is combinatorial in the determiner and in the noun -- and the
+# noun is whatever the user calls their own document, which no corpus can
+# enumerate. Matching the shape generalises to documents the goldens never saw;
+# listing the phrasings only ever fits the goldens.
+_SUMMARY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\bwhat(?:'s|s| is| are)\s+(?:this|that|the|it|these|those)\b"
+        r"[\w\s-]{0,24}\babout\b"
+    ),
+    re.compile(r"\bwhat\s+(?:is|are)\s+[\w\s-]{0,24}\b(?:mainly|broadly|generally)\s+about\b"),
 )
 
 _RELATIONAL_KWS: frozenset[str] = frozenset(
@@ -149,8 +173,15 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
         "relationship between",
         "connection between",
         "what is the relationship",
+        # "what <relation verb>" — a family, completed. The set already held
+        # connects/links while "ties" existed only as the noun "ties between", so
+        # "What ties X to Y?" matched nothing and fell through to search.
         "what connects",
         "what links",
+        "what ties",
+        "what relates",
+        "what binds",
+        "what joins",
         # "related to" / "connected to"
         "related to",
         "connected to",
@@ -159,13 +190,73 @@ _RELATIONAL_KWS: frozenset[str] = frozenset(
         "ties between",
         "bond between",
         "interaction between",
-        # How-phrased relational queries
+        # How-phrased relational queries. These are question openers rather than
+        # relationship words, and they carry graph queries that name no relation
+        # word ("how are the Eloi and the Morlocks connected" is caught by
+        # "connected to", but many are not). Removing them cost graph recall
+        # 0.9231 -> 0.6154, so they stay: the defect was never that they exist,
+        # only that first-match-wins let "how do" outrank the longer, more
+        # specific "how do they differ".
         "how are",
         "how is",
         "how do",
         "how does",
         "how did",
     }
+)
+
+# Some intents are a sentence shape, not a phrase. These carry the questions that
+# state an intent WITHOUT its keyword -- a comparison with no "compare", a
+# relation with no "connect" -- which fell through to search: on the adversarial
+# routing set, comparative recall was 0.29 and graph 0.33 while both held perfect
+# precision, the signature of a trigger that only fires on its own word.
+#
+# Slots are bounded and stop at "?" so a shape cannot span two questions. Each
+# one names a structure, never a subject: what a user calls their own topics is
+# not enumerable, which is the whole reason keywords ran out.
+_COMPARATIVE_SHAPES: tuple[re.Pattern[str], ...] = (
+    # "Which of X and Y ...", "which one of X or Y ..." -- choosing between
+    # named alternatives is a comparison whatever verb follows.
+    re.compile(r"\bwhich (?:one )?of\b[^?]{0,70}\b(?:and|or)\b"),
+    # "if I had to choose between X and Y", "deciding between X and Y".
+    re.compile(
+        r"\b(?:choose|choosing|chose|decide|deciding|pick|picking|select|prefer)\b"
+        r"[^?]{0,30}\bbetween\b"
+    ),
+    # A bare polar question containing "or" is NOT a shape. "Does the author
+    # mention Alice or her sister?" and "Was it built in 1895 or later?" are
+    # lookups, and a shape firing at 0.8 puts them above the LLM fallback with
+    # no recourse. Explicit choices are covered above; the ambiguous rest is
+    # exactly what the fallback is for.
+    # Two subjects and a verb of (dis)agreement: "where do X and Y disagree",
+    # "the points where A and B diverge". The family completed the way the
+    # relation verbs were -- `differ` was already a keyword, its siblings were
+    # not.
+    re.compile(
+        r"\b(?:and|or)\b[^?]{0,50}\b(?:disagree|agrees?|agreed|diverge[sd]?|"
+        r"converge[sd]?|overlaps?|conflict|clash)\b"
+    ),
+)
+
+_RELATIONAL_SHAPES: tuple[re.Pattern[str], ...] = (
+    # A verb of position before "between": "what sits between X and Y", "what
+    # lies between them". Bare `between ... and` is a range -- "how many years
+    # passed between 1895 and 1900", "the steps between installing and running"
+    # -- and claiming those at 0.8 denied them the LLM fallback.
+    re.compile(r"\b(?:sits?|lie|lies|stands?|comes?|falls?|goes)\s+between\b"),
+    # The relation-verb family, extended from "what connects" to the same verbs
+    # used in the middle of a sentence: "X leads into Y", "how A feeds into B".
+    re.compile(
+        r"\b(?:leads?|led|feeds?|fed|flows?|points?|ties?|links?|connects?|relates?|"
+        r"contributes?|builds?|follows?)\s+(?:in)?to\b"
+    ),
+    # "What does X have to do with Y" -- an idiom whose slots are the subjects,
+    # matched as a shape for the same reason "what is <this> <noun> about" is.
+    re.compile(r"\b(?:have|has|had|having)\s+to\s+do\s+with\b"),
+    # A path between two things: "from X through to Y", "from A into B". Plain
+    # "from X to Y" is deliberately excluded -- it is how page and date ranges
+    # are written, and it would take ordinary lookups into the graph route.
+    re.compile(r"\bfrom\b[^?]{0,60}\b(?:through to|into|onto|towards?)\b"),
 )
 
 _COMPARATIVE_KWS: frozenset[str] = frozenset(
@@ -175,13 +266,20 @@ _COMPARATIVE_KWS: frozenset[str] = frozenset(
         "comparison",
         "compare and contrast",
         "contrast",
-        # Difference
+        # Difference. The word forms are listed rather than a "differ" stem
+        # because matching is word-boundary anchored, and they are what catches a
+        # comparison of named subjects: the set previously held only the pronoun
+        # phrasings ("how do THEY differ"), so "How are Penelope and Minerva
+        # different?" matched nothing here and fell to the relational openers.
+        "differ",
+        "differs",
+        "different",
         "difference between",
         "differences between",
         "what distinguishes",
-        "how do they differ",
-        "how are they different",
         # Similarity
+        "similarity",
+        "similarities",
         "similarities between",
         "what do they have in common",
         "in common",
@@ -288,6 +386,103 @@ _FACTUAL_KWS: frozenset[str] = frozenset(
 )
 
 
+# A keyword only routes when nothing negates it. "I don't need the whole
+# overview, just tell me what year it was published" asked for a fact and got a
+# summary, because `overview` matched and the `don't` in front of it did not
+# count. Negation is a rule about the sentence, not a phrase to add to a list:
+# any of these markers governing any keyword suppresses that occurrence.
+_NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|none|don'?t|doesn'?t|didn'?t|won'?t|can'?t|cannot|"
+    r"skip|forget|omit|avoid|besides|rather than|instead of|other than|without)\b"
+)
+
+# Negation reaches only to the end of its own clause. Without this, "I don't
+# understand this document, can you summarise it?" would read as a negated
+# summary request, when the negation governs `understand` and the request that
+# follows the comma is exactly what it asks for.
+_CLAUSE_BREAK_RE = re.compile(r"[,;:.!?]|\bbut\b|\bjust\b|\bhowever\b|\balthough\b|\byet\b")
+
+# How far back a negation reaches inside its clause, in words. Five covers
+# "don't give me the long summary" without spanning a whole sentence.
+_NEGATION_WINDOW_WORDS = 5
+
+
+def _is_negated_at(text: str, start: int) -> bool:
+    """True when a negation governs the keyword occurrence beginning at *start*."""
+    prefix = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(prefix))
+    clause = prefix[breaks[-1].end() :] if breaks else prefix
+    recent = " ".join(clause.split()[-_NEGATION_WINDOW_WORDS:])
+    return bool(_NEGATION_RE.search(recent))
+
+
+def mentions(text: str, pattern: re.Pattern[str]) -> bool:
+    """True when *pattern* matches somewhere it is not negated.
+
+    Every occurrence has to be negated for the mention to be suppressed: "no
+    summary of chapter 1, give me the summary of chapter 2" still asks for a
+    summary.
+    """
+    return any(not _is_negated_at(text, m.start()) for m in pattern.finditer(text))
+
+
+@lru_cache(maxsize=512)
+def _inflected_regex(keyword: str) -> re.Pattern[str]:
+    """A keyword on word boundaries, allowing its own plural.
+
+    The summary keywords are written singular and must catch the plural --
+    "outline" has to match "outlines", "central theme" has to match "central
+    themes". Plain substring matching did that and much more: `gist` is inside
+    register, registry and logistics, so "How do I register a new account?"
+    routed to summary at confidence 0.9, above the threshold where the LLM
+    would have corrected it.
+    """
+    return re.compile(rf"\b{re.escape(keyword)}(?:e?s)?\b")
+
+
+def mentions_substring(text: str, keyword: str) -> bool:
+    """A keyword occurrence, in its own right and not negated."""
+    return any(
+        not _is_negated_at(text, m.start()) for m in _inflected_regex(keyword).finditer(text)
+    )
+
+
+@lru_cache(maxsize=512)
+def _kw_regex(kw: str) -> re.Pattern[str]:
+    """Word-boundary matcher for one keyword.
+
+    Bare `kw in question` matches inside a longer word: "ties between" is a
+    substring of "similari|ties between", which routed every "similarities
+    between X and Y" question to relational. The boundary is only asserted on the
+    side where the keyword itself ends in a word character, so entries like
+    "vs " and "vs." keep matching what they were written to match.
+    """
+    pre = r"(?<![a-z0-9])" if kw[:1].isalnum() else ""
+    post = r"(?![a-z0-9])" if kw[-1:].isalnum() else ""
+    return re.compile(pre + re.escape(kw) + post)
+
+
+def matches_summary_request(question: str) -> bool:
+    """True when the question asks for the document as a whole.
+
+    The one predicate for "is this a summary request". `qa.py` decides whether to
+    attach the executive summary from this plus a few looser words; keeping that
+    a superset of this is what stops the two from disagreeing, as they did when
+    each carried its own list and "Recap the document" was a summary to one and a
+    search to the other.
+    """
+    q = question.lower()
+    return any(mentions_substring(q, kw) for kw in _SUMMARY_KWS) or any(
+        mentions(q, p) for p in _SUMMARY_PATTERNS
+    )
+
+
+def _best_match(question: str, keywords: frozenset[str]) -> str | None:
+    """Longest keyword matching *question* on word boundaries, or None."""
+    hits = [kw for kw in keywords if mentions(question, _kw_regex(kw))]
+    return max(hits, key=len) if hits else None
+
+
 def classify_intent_heuristic(question: str) -> tuple[str, float]:
     """Pure function — no imports from other app layers.
 
@@ -317,17 +512,72 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
         return ("notes_gap", 0.95)
     if any(kw in q for kw in _NOTES_KWS):
         return ("notes", 0.95)
-    if any(kw in q for kw in _SUMMARY_KWS):
+    if matches_summary_request(question):
         return ("summary", 0.9)
-    if any(kw in q for kw in _RELATIONAL_KWS):
+    # Relational and comparative share a confidence, so set order was deciding
+    # between them: "how do" (relational) outranked "how do they differ"
+    # (comparative) purely by being checked first. The more specific keyword wins
+    # instead, which is order-independent and survives either set growing.
+    relational = _best_match(q, _RELATIONAL_KWS)
+    comparative = _best_match(q, _COMPARATIVE_KWS)
+    # A shape decides only when neither family matched a keyword: a keyword names
+    # the intent outright, a shape infers it from structure, and an inference
+    # must not outrank a statement.
+    comparative_shape = any(mentions(q, p) for p in _COMPARATIVE_SHAPES)
+    relational_shape = any(mentions(q, p) for p in _RELATIONAL_SHAPES)
+    if relational or comparative:
+        if comparative and (relational is None or len(comparative) >= len(relational)):
+            return ("comparative", 0.85)
         return ("relational", 0.85)
-    if any(kw in q for kw in _COMPARATIVE_KWS):
-        return ("comparative", 0.85)
+    if comparative_shape or relational_shape:
+        # Comparative first: "which of X and Y" is also "between X and Y" read
+        # loosely, and choosing between two things is the narrower reading.
+        return ("comparative" if comparative_shape else "relational", 0.8)
     if any(kw in q for kw in _FACTUAL_KWS):
         return ("factual", 0.8)
     if any(kw in q for kw in _GENERATIVE_KWS):
         return ("exploratory", 0.75)
     return ("exploratory", 0.5)
+
+
+# Below this the heuristic is guessing and the LLM decides. Shared so the chat
+# graph and anything measuring it cannot drift apart.
+LLM_FALLBACK_BELOW = 0.7
+
+
+# The classifier prompt as a contract plus what this model needed to follow it.
+# The bare-topic rule carries a corpus entity as its example, which is the
+# hardcoded-example rule's own counter-case: the observation is real, so it is
+# tagged rather than deleted, and the example goes when the matrix says the rule
+# holds without it.
+INTENT_CLASSIFY_SPEC = PromptSpec(
+    task="intent",
+    contract=(
+        "The user has asked a question about their documents. Decide how to "
+        "look the answer up. Reply with exactly one word: "
+        "summary, factual, relational, comparative, or exploratory. "
+        "Use 'summary' ONLY when the user explicitly asks to summarize, or "
+        "for an overview of a whole body of work. Breadth of scope is not a "
+        "request for a summary. "
+        "Use 'factual' for questions about specific people, facts, concepts, "
+        "or entities, even if phrased as what they 'discuss' or 'explain'. "
+        "A bare topic or entity name with no verb is 'factual', whatever the scope."
+    ),
+    accommodations=(
+        Accommodation(
+            id="bare_topic_example",
+            kind="example",
+            text="For example, a two-word product name on its own is 'factual', not 'summary'.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "a bare entity name under scope='all' classified as 'summary', "
+                "returning the library summary instead of what the library says "
+                "about that entity"
+            ),
+            drop_when="the matrix shows bare topics classified as factual without it",
+        ),
+    ),
+)
 
 
 async def _llm_classify_fallback(question: str, default: str, scope: str = "all") -> str:
@@ -364,19 +614,8 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        f"{scope_hint} "
-                        "The user has asked a question about their documents. Decide how to "
-                        "look the answer up. Reply with exactly one word: "
-                        "summary, factual, relational, comparative, or exploratory. "
-                        "Use 'summary' ONLY when the user explicitly asks to summarize, or "
-                        "for an overview of a whole body of work. Breadth of scope is not a "
-                        "request for a summary. "
-                        "Use 'factual' for questions about specific people, facts, concepts, "
-                        "or entities, even if phrased as what they 'discuss' or 'explain'. "
-                        "A bare topic or entity name with no verb (e.g. 'Apache Iceberg') is "
-                        "'factual', whatever the scope."
-                    ),
+                    "content": f"{scope_hint} "
+                    + render_for(INTENT_CLASSIFY_SPEC, "chat"),
                 },
                 {"role": "user", "content": question},
             ],

@@ -26,11 +26,11 @@ import logging
 import re
 from pathlib import Path
 
-import chardet
 import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
+from app.services.source_text import read_source_text
 from app.services.universal_parser import _drop_bodyless
 from app.types import ParsedDocument, Section
 
@@ -362,10 +362,7 @@ class BookParser:
         return None
 
     def _parse_txt(self, file_path: Path) -> ParsedDocument | None:
-        raw_bytes = file_path.read_bytes()
-        detected = chardet.detect(raw_bytes)
-        encoding = detected.get("encoding") or "utf-8"
-        raw_text = raw_bytes.decode(encoding, errors="replace")
+        raw_text = read_source_text(file_path)
         clean_text, raw_no_meta = self._strip_gutenberg(raw_text)
         sections = self._segment_chapters(clean_text)
         if sections is None:

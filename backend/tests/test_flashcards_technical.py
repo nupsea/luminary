@@ -185,7 +185,7 @@ async def test_generate_technical_warning_admonition_produces_definition(test_db
             {
                 "question": "What should you never do while iterating over an object?",
                 "answer": "Delete it — this causes undefined behaviour.",
-                "source_excerpt": "Never delete an object while iterating.",
+                "source_excerpt": "Never delete an object while iterating over it",
                 "flashcard_type": "definition",
                 "bloom_level": 1,
             }
@@ -249,7 +249,7 @@ async def test_generate_technical_tradeoff_heading_produces_design_decision(test
                     "Choose a tuple when the data is fixed and must not change; "
                     "its immutability signals intent and allows hashing."
                 ),
-                "source_excerpt": "Lists are mutable; tuples are immutable.",
+                "source_excerpt": "Lists are mutable sequences; tuples are immutable",
                 "flashcard_type": "design_decision",
                 "bloom_level": 5,
             }
@@ -321,7 +321,7 @@ async def test_generate_technical_stores_type_and_bloom_level(test_db):
             {
                 "question": "What is Big-O for binary search?",
                 "answer": "O(log n) — the search space halves each step.",
-                "source_excerpt": "Binary search halves the search space.",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "complexity",
                 "bloom_level": 5,
             }
@@ -364,7 +364,7 @@ async def test_generate_technical_endpoint_returns_201_with_type_fields(test_db)
             {
                 "question": "What is the output of print(2 ** 3)?",
                 "answer": "8 -- the ** operator raises 2 to the power 3.",
-                "source_excerpt": "2 ** 3",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "trace",
                 "bloom_level": 4,
             }
@@ -403,6 +403,7 @@ async def test_generate_technical_backfills_gated_cards(test_db):
         [
             {"question": "What does the ** operator do in Python?",
              "answer": "It raises the left operand to the power of the right operand.",
+             "source_excerpt": "def add(a, b):",
              "flashcard_type": "definition", "bloom_level": 2},
             {"question": "What is the output of print(2 ** 3)?", "answer": "8",
              "flashcard_type": "trace", "bloom_level": 4},
@@ -412,6 +413,7 @@ async def test_generate_technical_backfills_gated_cards(test_db):
         [
             {"question": "How does floor division // differ from / in Python?",
              "answer": "// discards the fractional part and returns an integer-valued result.",
+             "source_excerpt": "def add(a, b):",
              "flashcard_type": "definition", "bloom_level": 2},
         ]
     )
@@ -434,8 +436,16 @@ async def test_generate_technical_backfills_gated_cards(test_db):
 # bloom_level string coercion
 
 
-async def test_generate_technical_coerces_string_bloom_level(test_db):
-    """generate_technical() coerces bloom_level string '4' to int 4."""
+async def test_generate_technical_derives_the_level_from_the_card_type(test_db):
+    """The level comes from the type, not from what the model says it is.
+
+    This used to assert that a model returning `"bloom_level": "4"` had it
+    coerced to 4. The prompt no longer asks for a level at all (I-28: it named a
+    taxonomy the model pattern-matches to a register), and the type-to-level
+    mapping was already written down in that prompt -- so the model's number is
+    now ignored in favour of the mapping the codebase owns. Here the type is
+    `code_completion`, which is level 3, and the model claims 4.
+    """
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
@@ -451,7 +461,7 @@ async def test_generate_technical_coerces_string_bloom_level(test_db):
             {
                 "question": "Apply the map function to double each element.",
                 "answer": "list(map(lambda x: x * 2, items))",
-                "source_excerpt": "map(lambda x: x * 2, items)",
+                "source_excerpt": "def add(a, b):",
                 "flashcard_type": "code_completion",
                 "bloom_level": "4",
             }
@@ -470,8 +480,12 @@ async def test_generate_technical_coerces_string_bloom_level(test_db):
                 session=session,
             )
 
+    from app.services.flashcard_prompts import TYPE_TO_BLOOM
+
     assert len(cards) == 1
-    assert cards[0].bloom_level == 4
+    assert cards[0].bloom_level == TYPE_TO_BLOOM["code_completion"] == 3, (
+        "the card's type fixes its level; the model claiming 4 does not change it"
+    )
     assert isinstance(cards[0].bloom_level, int)
 
 
@@ -482,8 +496,11 @@ def test_tech_flashcard_system_constant_defined():
     """AC2: TECH_FLASHCARD_SYSTEM constant is defined in flashcard.py."""
     from app.services.flashcard import TECH_FLASHCARD_SYSTEM
 
-    assert "Bloom's Taxonomy" in TECH_FLASHCARD_SYSTEM
-    assert "bloom_level" in TECH_FLASHCARD_SYSTEM
+    # No taxonomy name and no level ask (I-28) -- guarded in full by
+    # tests/test_no_taxonomy_in_prompts.py. What the prompt still carries is the
+    # card *shapes*, which are instructions a model can act on.
+    assert "Bloom" not in TECH_FLASHCARD_SYSTEM
+    assert "bloom_level" not in TECH_FLASHCARD_SYSTEM
     assert "trace" in TECH_FLASHCARD_SYSTEM
     assert "design_decision" in TECH_FLASHCARD_SYSTEM
     assert "code_completion" in TECH_FLASHCARD_SYSTEM
@@ -517,7 +534,11 @@ async def test_generate_technical_uses_tech_system_prompt_not_general(test_db):
 
     assert mock_llm.captured_systems, "LLM should have been called"
     system_used = mock_llm.captured_systems[0]
-    assert "Bloom's Taxonomy" in system_used
+    # Discriminates on a card type only the technical prompt offers: the two
+    # prompts used to be told apart by the words "Bloom's Taxonomy", which I-28
+    # removed.
+    assert "design_decision" in system_used
+    assert "syntax_recall" in system_used
     # Must NOT be the general literature system
     assert "characters" not in system_used
     assert "plot" not in system_used

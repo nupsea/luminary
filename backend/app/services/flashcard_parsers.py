@@ -9,6 +9,13 @@ import json
 import logging
 import re
 
+from app.services import llm_output_stats
+from app.services.llm_json import (
+    parse_array_with_repairs,
+    parse_object_with_repairs,
+    top_level_shape,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,44 +55,56 @@ def _parse_concept_extract(raw: str) -> tuple[str, list[dict]]:
     return "", []
 
 
-def _parse_llm_response(raw: str, document_id: str) -> list[dict]:
-    """Extract a JSON array from the LLM response.
+def _parse_llm_response(
+    raw: str, document_id: str, *, expect: str | None = None
+) -> list[dict]:
+    """Extract flashcards from the LLM response, whichever shape it arrived in.
 
-    Handles:
-    - Clean JSON array responses
-    - Responses wrapped in markdown code fences
-    - Responses with preamble prose before the array
-    - Responses with trailing text after the array
+    Handles clean arrays, `{"flashcards": [...]}` objects, markdown fences,
+    preamble or trailing prose, illegal escapes and truncation.
+
+    **Dispatched on the shape the completion actually opens with, and counted
+    once.** Trying the array parser first was not a harmless ordering: against
+    the object the flashcard prompt asks for, it sliced out the inner array and
+    recorded the `{"flashcards":` wrapper as prose around it. Every compliant
+    generation was counted as repaired, so `first_pass_rate` read 0.0000 on a 3B
+    model and on a 14B one -- a measurement of this function, not of either
+    model.
+
+    *expect* is the shape the prompt asked for, when the caller knows it. A
+    clean parse in the other shape is a real deviation and is counted as one --
+    separately from the repairs, because nothing had to be rewritten.
     """
-    raw = raw.strip()
+    shape = top_level_shape(raw)
+    attempts = (
+        (_from_object, _from_array) if shape == "object" else (_from_array, _from_object)
+    )
 
-    # Strip markdown code fences
-    raw = re.sub(r"^```[^\n]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
-    raw = raw.strip()
+    first_repairs: frozenset[str] = frozenset()
+    for i, attempt in enumerate(attempts):
+        cards, repairs, got = attempt(raw)
+        if i == 0:
+            first_repairs = repairs
+        if cards is not None:
+            llm_output_stats.record_parse(ok=True, repairs=repairs)
+            if expect is not None and got != expect:
+                llm_output_stats.record_shape_deviation()
+            return cards
 
-    # Try the whole thing as JSON: an array, or (json-mode models) an object wrapping the array
-    # like {"flashcards": [...]}, or even a single card object.
-    try:
-        coerced = _coerce_cards(json.loads(raw))
-        if coerced is not None:
-            return coerced
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Fall back: find the first '[' and last ']' and parse that slice
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(raw[start : end + 1])
-            if isinstance(data, list):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            pass
-
+    llm_output_stats.record_parse(ok=False, repairs=first_repairs)
     logger.warning("Flashcard JSON parse failed for doc %s: %r", document_id, raw[:200])
     return []
+
+
+def _from_array(raw: str) -> tuple[list[dict] | None, frozenset[str], str]:
+    parsed, repairs = parse_array_with_repairs(raw)
+    return (parsed if parsed else None), repairs, "array"
+
+
+def _from_object(raw: str) -> tuple[list[dict] | None, frozenset[str], str]:
+    parsed, repairs = parse_object_with_repairs(raw)
+    cards = _coerce_cards(parsed) if parsed is not None else None
+    return (cards or None), repairs, "object"
 
 
 def _coerce_cards(data: object) -> list | None:
@@ -106,10 +125,16 @@ def _coerce_cards(data: object) -> list | None:
 
 def card_field(item: dict, *names: str) -> str:
     """First non-empty string among the given keys -- tolerates local models that use alternate
-    field names (front/back, q/a, term/definition) instead of question/answer."""
-    for n in names:
+    field names (front/back, q/a, term/definition) instead of question/answer.
+
+    An alternate name is counted: the JSON was valid but the shape was not the
+    one the prompt asked for, and that difference is otherwise erased here.
+    """
+    for index, n in enumerate(names):
         v = item.get(n)
         if isinstance(v, str) and v.strip():
+            if index:
+                llm_output_stats.record_key_alias()
             return v.strip()
     return ""
 
@@ -142,6 +167,14 @@ _MIN_ANSWER_WORDS = 2
 _BLOATED_QUESTION_WORDS = 22
 _TRIVIAL_ANSWER_WORDS = 3
 
+# Two or more enumerated items make the answer a list, and a list is several cards
+# wearing one question -- the primary defect in a flashcard (rules 4, 9 and 10 of
+# the card-writing canon). Measured 2026-08-17: with the prompt asking for bulleted
+# answers, the atomicity floor was 0.7778 and 9 of 12 sampled cards carried
+# bullets. One item is a lead sentence plus its detail and stays allowed.
+_MAX_ENUMERATED_ITEMS = 1
+_ENUM_LINE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+\S")
+
 # Source-referencing / deictic phrases that make no sense on a standalone card.
 _LEADING_PHRASES = (
     "in this passage",
@@ -167,35 +200,221 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text))
 
 
-def card_rejection_reason(question: str, answer: str) -> str | None:
-    """Why this Q/A card is low quality, or None if it passes the gate.
+# Stable kinds for the gate's verdicts. The message carries the specifics for a
+# log line; the kind is what gets counted, so a metric survives a reworded
+# message.
+REJECT_EMPTY_FIELD = "empty_field"
+REJECT_SHORT_ANSWER = "short_answer"
+REJECT_DEICTIC = "deictic"
+REJECT_BLOATED = "bloated"
+REJECT_ENUMERATED = "enumerated"
+REJECT_UNGROUNDED = "ungrounded"
+
+# A quote has to be specific enough that finding it in the text means something.
+# Counting words alone fails code: `def factorial(n):` is a precise, checkable
+# quote in two whitespace tokens, and requiring four dropped signatures, formulas
+# and API names -- the most quotable lines a technical passage has. Characters
+# carry that specificity where words do not. The floor sits between the shortest
+# quote worth having and the longest phrase that proves nothing: "def add(a, b):"
+# is 14 characters and checkable, "the author" is 10 and appears in any text.
+_MIN_EXCERPT_CHARS = 12
+_MIN_EXCERPT_TOKENS = 2
+
+# Curly quotes, dashes and ellipses differ between a model's output and the text
+# it was given, and none of those differences mean the quote is invented.
+_QUOTE_CHARS = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+    "\u2013": "-", "\u2014": "-", "\u2026": "...",
+})
+
+
+def _normalise_for_match(text: str) -> str:
+    """Lowercased, whitespace-collapsed, punctuation-unified -- for quote matching."""
+    return re.sub(r"\s+", " ", (text or "").translate(_QUOTE_CHARS)).strip().lower()
+
+
+# A model closes the sentence it quoted. Measured over the 392 checkable cards in
+# a real library, 4 of the 129 rejections differed from the document by exactly one
+# trailing character -- `.`, `"` or `)` -- on a span whose other 297 characters
+# were verbatim. Stripping one such character cannot turn a content mismatch into a
+# match: the cases that bracket this are "...netflix prize]." against a document
+# ending "...netflix prize]" (formatting, must pass) and "...five moves on average."
+# against a document containing none of it (22 characters of content, must fail).
+_EXCERPT_EDGE = "\"'\u201c\u201d\u2018\u2019"
+_EXCERPT_TAIL = ".,;:!?)]\"'"
+
+
+def _trim_edges(part: str) -> str:
+    """Drop a wrapping quote and one trailing terminal character."""
+    trimmed = part.strip().strip(_EXCERPT_EDGE).strip()
+    if trimmed and trimmed[-1] in _EXCERPT_TAIL:
+        trimmed = trimmed[:-1].strip()
+    return trimmed
+
+
+def excerpt_is_verbatim(excerpt: str, source_text: str) -> bool:
+    """Whether *excerpt* is really a span of *source_text*.
+
+    A model that must quote the passage has to look at it. This does not prove the
+    answer follows from the quote -- that needs a judge -- but it does prove the
+    card is anchored to text that exists, which a fabricated card cannot be.
+
+    An excerpt elided with "..." is checked part by part: models shorten long
+    quotes that way, and each surviving part must still be real.
+
+    Callers that need to distinguish "no text to check against" from "checked and
+    real" must use `grounding_state`; this returns True for the former.
+    """
+    haystack = _normalise_for_match(source_text)
+    if not haystack:
+        return True  # nothing to check against; not the card's fault
+    parts = [p for p in _normalise_for_match(excerpt).split("...") if p.strip()]
+    if not parts:
+        return False
+    # Whitespace differs between a quote and its source wherever notation is
+    # involved -- "G ( n, p )" against "G(n,p)" is the same span, and rejecting it
+    # loses real cards from mathematical and code-heavy passages. Fabrication does
+    # not survive this comparison; formatting does.
+    squeezed = haystack.replace(" ", "")
+    return all(
+        part in haystack or part.replace(" ", "") in squeezed
+        for part in (_trim_edges(p) for p in parts)
+        if len(part.split()) >= 2
+    )
+
+
+# Where a card's answer came from, as a state rather than a boolean. A boolean
+# collapses the two cases that must never be confused: a card whose quote was
+# checked and found, and a card nothing could be checked against. 46% of the cards
+# in a real library carry no quote at all -- calling those `False` slanders them and
+# calling them `True` is the exact shortcut `product-integrity.md` forbids.
+GROUNDING_UNCHECKED = "unchecked"
+GROUNDING_VERIFIED = "verified"
+GROUNDING_UNSUPPORTED = "unsupported"
+GROUNDING_UNVERIFIABLE = "unverifiable"
+
+GROUNDING_STATES = frozenset(
+    {GROUNDING_UNCHECKED, GROUNDING_VERIFIED, GROUNDING_UNSUPPORTED, GROUNDING_UNVERIFIABLE}
+)
+
+
+def grounding_state(source_excerpt: str | None, source_text: str | None) -> str:
+    """Whether this card can prove where it came from.
+
+    `unsupported` is the strong claim and is reserved for it: the card produced a
+    quote and that quote is not in the text. A card with no quote, or one whose
+    source text no longer exists, is `unverifiable` -- unproven, which is not the
+    same as disproven and must not be reported as either verified or false.
+
+    Never returns `unchecked`; that is the state of a row nobody has looked at.
+    """
+    excerpt = (source_excerpt or "").strip()
+    if not source_text or not source_text.strip():
+        return GROUNDING_UNVERIFIABLE
+    if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
+        return GROUNDING_UNVERIFIABLE
+    from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
+
+    if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+        return GROUNDING_UNSUPPORTED
+    if excerpt_is_verbatim(excerpt, source_text):
+        return GROUNDING_VERIFIED
+    return GROUNDING_UNSUPPORTED
+
+
+def card_rejection(
+    question: str,
+    answer: str,
+    source_excerpt: str | None = None,
+    source_text: str | None = None,
+) -> tuple[str, str] | None:
+    """(kind, message) for a low-quality Q/A card, or None if it passes.
 
     Catches the failure modes the generation prompt forbids but weak models
     still produce: empty fields, one-word answers (which includes bare yes/no),
-    source-referencing/leading questions, and bloated leading questions paired
-    with a trivial answer. Cloze cards use a separate builder and are
-    intentionally not run through this gate.
+    source-referencing/leading questions, answers that carry a list of facts
+    instead of one, and bloated leading questions paired with a trivial answer.
+
+    When the caller passes the text the card was generated from, two grounding
+    rules also apply: the card must quote that text verbatim, and any number it
+    asserts must appear there. Measured 2026-08-17: 27% of delivered cards were
+    unsupported by their passage, unchanged by rewriting the prompt, because a
+    model asked for a well-shaped card will still write what it already believes
+    about a famous text. Quoting is the part it cannot do from memory.
+    Cloze cards use a separate builder and are intentionally not run through this
+    gate -- a cloze is one deletion by construction.
+
+    The verdict used to be computed, logged and dropped. It is the one signal on
+    this path that is deterministic, needs no judge, and measures whether the
+    model followed the contract rather than whether its JSON parsed -- so it is
+    counted now.
     """
     q = question.strip()
     a = answer.strip()
     if not q or not a:
-        return "empty question or answer"
+        return REJECT_EMPTY_FIELD, "empty question or answer"
 
     q_words = _word_count(q)
     a_words = _word_count(a)
 
     if a_words < _MIN_ANSWER_WORDS:
-        return f"answer too short ({a_words} word)"
+        return REJECT_SHORT_ANSWER, f"answer too short ({a_words} word)"
 
     q_lower = q.lower()
     for phrase in _LEADING_PHRASES:
         if phrase in q_lower:
-            return f"leading/deictic phrase in question ({phrase!r})"
+            return REJECT_DEICTIC, f"leading/deictic phrase in question ({phrase!r})"
+
+    enumerated = sum(1 for line in a.splitlines() if _ENUM_LINE.match(line))
+    if enumerated > _MAX_ENUMERATED_ITEMS:
+        return (
+            REJECT_ENUMERATED,
+            f"answer lists {enumerated} items; split it into one card each",
+        )
 
     if q_words >= _BLOATED_QUESTION_WORDS and a_words <= _TRIVIAL_ANSWER_WORDS:
-        return f"bloated question ({q_words}w) with trivial answer ({a_words}w)"
+        return (
+            REJECT_BLOATED,
+            f"bloated question ({q_words}w) with trivial answer ({a_words}w)",
+        )
 
+    # Grounding is only checkable when the caller knows which text the card came
+    # from. Generators that build cards from concepts or gaps rather than a
+    # passage pass nothing and skip these two rules.
+    if source_text:
+        excerpt = (source_excerpt or "").strip()
+        if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
+            return (
+                REJECT_UNGROUNDED,
+                f"no usable source quote ({len(excerpt)} chars)",
+            )
+        # Text the prompt supplied can never be a card's evidence, even if a
+        # passage happens to contain it. A verification the system can satisfy
+        # with its own material verifies nothing.
+        from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
+
+        if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+            return (
+                REJECT_UNGROUNDED,
+                "source quote is the prompt's own example, not the document",
+            )
+        if not excerpt_is_verbatim(excerpt, source_text):
+            return (
+                REJECT_UNGROUNDED,
+                f"source quote is not in the text ({excerpt[:60]!r})",
+            )
     return None
+
+
+def card_rejection_reason(
+    question: str,
+    answer: str,
+    source_excerpt: str | None = None,
+    source_text: str | None = None,
+) -> str | None:
+    """The gate's message alone, for callers that only report it."""
+    verdict = card_rejection(question, answer, source_excerpt, source_text)
+    return verdict[1] if verdict else None
 
 
 def _parse_gap_flashcard(raw: str, gap: str) -> dict | None:
@@ -238,7 +457,7 @@ def _parse_cloze_llm_response(raw: str) -> list[dict]:
     Filters out any element whose cloze_text has no {{}} markers (malformed).
     Returns only valid elements.
     """
-    items = _parse_llm_response(raw, "cloze")
+    items = _parse_llm_response(raw, "cloze", expect="array")
     valid = []
     for item in items:
         if not isinstance(item, dict):

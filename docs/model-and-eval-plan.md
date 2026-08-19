@@ -1,0 +1,1780 @@
+---
+description: The single plan for model footprint, scheduling, substitutability, and the eval baseline that gates the switch. Six stages. Delete when the last one ships.
+---
+
+# Model switch and eval baseline
+
+Four problems arrived as one user report on 0.5.0 ("uses a lot of memory, my Mac Air crashed
+loading a PDF, ~16GB") and three independent eval audits. They have different causes, different
+fixes, and one dependency: **nothing about the model can be decided until the measurement is
+trustworthy.**
+
+| | Problem | Cause | Stage |
+|---|---|---|---|
+| Memory | ~15.3GB peak on a 16GB host | Bundle never caps resident model count | 1 |
+| Measurement | No number survives being compared across a change | Runs record nothing about what produced them; one run is not a measurement; part of the suite is invalid or ungated | 2, 3 |
+| Adaptability | Better models do not move eval numbers | Prompts, parsers and budgets tuned to llama3.2; no metric sees the difference | 3, 4, 5 |
+| Latency | An Ask queues behind ingestion | Background LLM work has no scheduling priority | 5 |
+
+Runtime findings baselined against `ba0c1db` (0.6.1); eval findings against `39e6bf1`. Estimates
+are marked as such — Stage 1 replaces the footprint estimates with measurements.
+
+## What 0.6.1 already fixed
+
+Do not re-solve these.
+
+- `1195f4f` — `DocumentParser.parse` moved into `asyncio.to_thread`. Event-loop freeze on a 23MB
+  PDF: 44.9s → 3.96s. In public mode the backend also serves the SPA, so that freeze stopped lazy
+  route chunks arriving and the UI could not navigate.
+- `1195f4f` — `OLLAMA_NUM_PARALLEL` sized from physical RAM by every install path including
+  `supervisor.rs`, which passes the same value to Ollama and the backend so they cannot disagree.
+  **Copy this mechanism for `OLLAMA_MAX_LOADED_MODELS`; it was the one variable left out of it.**
+- `49c8806` — section summaries deferred behind `stage='complete'`. Large book to readable:
+  17min → 86s. Per-unit cap now shrinks as a document grows.
+
+0.6.1 moved the heavy work off the critical path. It did not make it cheaper: deferred summaries
+and enrichment still issue LLM calls into the slots an Ask needs.
+
+## Stages
+
+Order is: **stop the crash, make numbers comparable, make the model visible, extract the seams,
+schedule and calibrate, then swap.** Last time the swap came first, which is why there was
+nothing to see it with.
+
+| Stage | Contains | Exit gate |
+|---|---|---|
+| 1. Stop the crash | P0, P1 | Footprint baseline reproduces the ~16GB peak; post-fix delta measured; `make ci`, `make smoke` |
+| 2. Make numbers comparable | E5, E4, E3, E6 | Two runs from different library states are visibly non-comparable; a frozen build reproduces its mean within its own sd |
+| 3. Make the model visible | P2, E2, E9, E11 | Repair counters non-zero on llama3.2; scoped and unscoped arms both baselined; flashcard and routing targets in the gate |
+| 4. Extract the seams | P3, P4, E7, E8 | No service reads `LITELLM_*`; rendered-prompt snapshots exist; holdout recorded and never used to select |
+| 5. Schedule and calibrate | P5, P6 | TTFT under ingest load per profile; the matrix separates `qwen3.5:0.8b` from `4b` — **both met 2026-08-18** |
+| 6. Switch and lean out | P7, P8, E10 | All three gates on all three profiles; both ratchets below `ba0c1db` |
+
+`P` items are the model/runtime track and keep the phase numbers work has already been branched
+under. `E` items are the eval substrate, numbered from the audit consolidation. A stage may not
+start before its predecessor's exit gate, except Stage 1, which ships alone and blocks nothing.
+
+---
+
+## Stage 1 — Stop the crash
+
+Ships alone as a patch release. **No answer changes, so no re-evaluation** — this is why it does
+not wait for Stage 2.
+
+### P0 — Measurement harness
+
+`scripts/mem_profile.py`. Samples backend RSS, each Ollama runner via `/api/ps`, and system memory
+**per ingestion stage rather than at steady state**, plus a latency probe issuing an Ask during
+ingest and recording time to first token. Baseline commits as JSONL beside
+`evals/scores_history.jsonl`.
+
+Verified by: re-runs agree within ~10% on the same machine, and the baseline reproduces the
+reported ~16GB peak on a 16GB host.
+
+**Measured 2026-08-14** on a 36GB host, `OLLAMA_MAX_LOADED_MODELS` unset, backend 0.6.1, library
+51 → 52 documents / 71,864 → 207,047 chunks. Rows in `evals/mem_profile_history.jsonl`; source is
+a 43MB PDF that produced 135,183 chunks and took 2,412s to `stage=complete`.
+
+| Arm | Peak backend + Ollama | Backend alone | Ask TTFT |
+|---|---|---|---|
+| idle | 13,026MB | — | 0.56 – 0.64s |
+| ingest | **14,619MB** (at `entity_extract`) | 4,726MB | 79.8s, 115.6s |
+| library Ask under that ingest | 13,950MB | 4,138MB | 1.3s, 75.0s, 92.6s |
+| after `complete`, enrichment running | 11,166MB | 806MB | 114.3s |
+
+Peak is `entity_extract`, not enrichment, and ~10GB of every figure is one resident
+`qwen2.5:14b-instruct` left over from eval work — D1 with a number on it. **Interactive latency
+under ingest load is 75–115s against 0.6s idle**, not the 10–20s this plan estimated from I-31's
+throughput table; P5 is the user-visible half of the problem, not an optimisation after residency.
+
+Not measured: the 16GB single-runner regime the crash came from. This host has 36GB and no
+residency cap, so it is a different regime and the ~16GB peak claim stands unreproduced.
+
+Falsifier: if peak is not dominated by the two Ollama runners, the diagnosis is wrong and P1 must
+be re-derived. Check `_VECTOR_RENDER_DPI=150` with `_MAX_DIM=4000` (`image_extractor.py`) — a
+4000×4000 RGB pixmap is ~48MB and up to 4 are taken per page — and the enrichment worker for a
+leak.
+
+A second contention channel is unmeasured and belongs in the same probe: embedding and reranking
+are CPU-bound through `run_in_executor(None, …)` (`ingestion_nodes/embed.py:60`), so a large
+ingest slows the query embed and the ~510ms cross-encoder even when nothing is queued behind the
+LLM. Residency does not touch this.
+
+Two product defects the probe found, both open:
+
+- **An Ask over the library returns an empty stream under load.** 8 of 15 probes ended with no
+  token; manual calls under the same load answered normally, so it is intermittent rather than a
+  probe artifact. The probe now records whether a `done` event ever arrived and what the last
+  event was, which is what separates a slow answer from a stream that closes on the user with no
+  answer and no error.
+- **An Ask scoped to a document still being ingested answers `{"error": "no_context"}`
+  immediately**, without reaching the model. That is a readiness signal, not latency, and it is
+  why probes default to library scope (`--probe-scope`).
+
+### P1 — Residency and lifecycle
+
+1. `supervisor.rs`: set `OLLAMA_MAX_LOADED_MODELS` alongside `OLLAMA_NUM_PARALLEL`, sized from
+   `total_memory_gb()` — 1 under 24GB, 2 above. **Done.**
+2. Vision calls pass `VISION_KEEP_ALIVE` (60s) so the runner releases when enrichment drains
+   instead of holding ~6.5GB for the global 30m. **Done.**
+3. `NER_MODEL` becomes a setting, replacing the model id hardcoded in three places. **Done** —
+   `scripts/ner_compare.py` compares two entity models on the live corpus.
+
+Verified by: P0 before/after; `make ci`; `make smoke`; a test asserting the bundle passes
+`MAX_LOADED`.
+
+#### The entity model cannot be unloaded
+
+`retriever_strategies.py` skips `graph_expand` whenever `EntityExtractor._model is None`,
+returning the query unexpanded:
+
+```
+if extractor._model is None:
+    logger.info("graph_expand: GLiNER model not loaded yet; skipping expansion")
+    return query
+```
+
+The guard is deliberate — it refuses to pay a 1.1GB load inside a search — but it means deferring
+the model at boot, or reaping it after idle, **silently changes retrieval** rather than only
+freeing memory. Both were the original items 3 and 4 of this phase; both are withdrawn.
+
+The lever is a smaller model that stays resident, not a large one that does not. The current
+default is `gliner_multi-v2.1` fine-tuned onto a synthetic PII dataset across six languages, while
+`ENTITY_TYPES` asks for PERSON, ORGANIZATION, PLACE, CONCEPT, EVENT, TECHNOLOGY, DATE, LIBRARY,
+DESIGN_PATTERN, ALGORITHM, DATA_STRUCTURE, PROTOCOL, API_ENDPOINT — none of them PII, and the
+corpus is English. `gliner_small-v2.1` is 336MB against 1126MB.
+
+Decide it in two steps, in this order:
+
+1. `make ner-compare` — agreement, yield, type distribution, resident cost. Reports disagreements
+   to read, not a score: neither model is ground truth.
+2. `make eval` under each `NER_MODEL`, comparing hit_rate/MRR. **This is the gate.** Entities exist
+   to serve retrieval, so retrieval is what must not regress.
+
+If the small model holds retrieval, it becomes the default everywhere rather than only on small
+machines — the size win is then incidental to using a model that matches the label vocabulary. If
+it does not, the entity model stays large and resident, and its memory comes out of Stage 6's role
+collapse instead.
+
+**This decision now depends on Stage 2.** A `make eval` comparison across two `NER_MODEL` values
+is exactly the comparison E5 says is currently unrecordable: re-ingesting one document has moved
+an untouched document's MRR by the same magnitude as an entity-model change. Run the comparison
+in one library state, or run it after E5 and record the fingerprint.
+
+---
+
+## Stage 2 — Make numbers comparable
+
+Nothing downstream can be trusted before this. These four items change no product behaviour; they
+change what a number means.
+
+### E5 — A run does not record what produced it
+
+`append_history` writes dataset, model, kind, metrics and `passed`
+(`evals/lib/scoring_history.py:26`); `store_results` posts the same shape. Retrieval rows record
+`model: "no-llm"`. Nothing records the embedder, the reranker id, the answering model the backend
+actually used, the judge, or the state of the library.
+
+That last one is not hypothetical. Re-ingesting `paper` moved `book`'s MRR from 0.4104 to 0.3979
+with nothing about `book` touched, both values bit-reproducible on either side — the same
+magnitude as the entity-model difference being measured at the time, which made that difference
+indistinguishable from a library-state change.
+
+The coupling is not universal and its mechanism is **not established**: ingesting three further
+documents (~4,870 chunks) moved `book` and `paper` by zero. Two candidates sit in the code and
+neither has been isolated — `bm25(chunks_fts)` scores over the whole FTS table with the
+`document_id` filter applied to matched rows (`retriever.py:225`), and graph expansion reads an
+entity graph that every ingest rewrites.
+
+**Shipped 2026-08-14.** `GET /evals/environment` (`services/eval_environment.py`) reports the
+build, the resolved models and the corpus fingerprint; `evals/lib/environment.py` captures it with
+the eval git sha and the run's own flags; every gated runner stores it. Models resolve through
+`get_effective_routing`, which is what the backend would actually call — the first version read
+`llm_mode` and recorded `gpt-5-mini` for a `private`-mode backend that answers locally.
+
+**Fix**: an environment block per run, persisted in the history row and in `/evals/store`.
+
+| Field | Source | Why |
+|---|---|---|
+| Eval git sha, backend version | git, `/health` | Metric definitions change |
+| Embedder id and dimension | config, I-9 | Changing it is a re-embed, not a swap |
+| `RERANK_MODEL`, rerank on/off, strategy | config, run flags | Partially recorded already (`rerank`) |
+| Chat / generation / judge ids **as resolved** | backend, not the CLI flag | Two of five call sites bypass the settings service today |
+| Library fingerprint: documents, per-document chunk counts | DB | A corpus change re-ranks untouched documents |
+| Run-group id, run index of N | E4 | A single generation run is not a measurement |
+| Scoped / unscoped arm | E2 | Two regimes, not one number |
+
+Two runs whose fingerprints differ are reported as non-comparable, never averaged.
+
+Verified by: two runs from different library states are visibly non-comparable in
+`scores_history.jsonl` without reading a commit log.
+
+### E4 — No variance protocol in the harness
+
+Generation metrics carry sd 0.052 (`book`) and 0.025 (`paper`) across four runs of one frozen
+build, so a single run cannot resolve a change below ~0.10 / ~0.05. The number is documented in
+`run_eval.py` and `eval-coverage.md`; the tooling to act on it does not exist — no repeat flag, no
+run-group key, nothing comparing distributions.
+
+**Shipped 2026-08-14.** `make eval-variance DATASET= RUNS= [COMPARE=<run_group>]` →
+`evals/run_variance.py`. Runs the eval N times in separate processes — how the committed variance
+figures were taken — sharing one `run_group`, aggregates from the rows the runs themselves wrote,
+and gates on the **mean** rather than on any single run. `COMPARE=` reports each delta against the
+noisier of the two series' sd and prints `inside noise` below 2sd. Three refusals rather than an
+average: a series whose runs measured different systems (`same_conditions`), a comparison across
+different systems, and a series with a missing run. `hit_rate_5`/`mrr`/`ndcg_10` moving inside one
+series is reported as a corpus or funnel change, since they are bit-reproducible on a fixed corpus.
+
+**Fix**: `--runs N` against one library state, each run recorded individually under a shared
+run-group id with mean and sd; a comparison mode reporting the delta against recorded sd rather
+than against a point.
+
+Verified by: a frozen build reproduces its committed mean within its own sd, and a deliberate
+no-op change reports "inside noise".
+
+### E3 — The summary metric is invalid as written
+
+`run_summary_eval.py:38-42` reads the source with `path.read_text(errors="ignore")[:8000]` and
+hands it to `judge_hallucination_counts` (`:117`). Two independent failures in one line:
+
+- **8,000 characters is ~1,500 words.** Every claim a summary draws from later in a book is judged
+  against text the judge cannot see, so `no_hallucination` penalises correct summaries.
+- **Raw bytes, not the ingested text.** The `eval-integrity` rule is explicit: read the corpus
+  through `app.services.universal_parser.read_document_text`. On a PDF, `read_text` returns
+  `%PDF-1.5 /FlateDecode`. `backend/tests/test_golden_integrity.py:89` already does this
+  correctly; the summary runner does not.
+
+The runner has no make target, which is the only reason this number has never been spent on a
+decision.
+
+**Shipped 2026-08-15.** Grounding is retrieved per claim (`/search` scoped to the document,
+3 chunks per claim, 12k chars) instead of read off the front of the file, which is the only shape
+that scales — the manual indexes 135k chunks. The judge scores that grounding, and
+`summary_grounding` (HHEM over the same passages) is computed alongside it, so a machine with no
+model to spare still gets an honest summary number. `make eval-summary` exists; floors stay unset
+until a distribution is measured.
+
+**What the fixed metric found immediately**: `/summarize/{doc}?mode=one_sentence` on
+`ollama/qwen2.5:14b-instruct` returns 2,271 characters of conversational recap of two chapters —
+"It seems like you've provided an excellent summary of the key events in Chapters XI and XII" —
+against a prompt reading "Summarize in a single sentence of at most 30 words"
+(`summarizer.py:47`). theme_coverage 0.333, conciseness 3.8x target, grounding 0.090. This is the
+M4 thesis with a measurement under it, and it was invisible while the metric was invalid.
+
+**Fix**: read through `read_document_text`; judge claims against the document rather than a prefix
+— claim-level NLI over its chunks is cheaper, deterministic, and already exists in
+`evals/lib/runners.py`. Then `make eval-summary`, a baseline, and a floor derived from measured
+variance.
+
+Verified by: a PDF row scores non-zero theme coverage, and a claim from the last chapter of `book`
+is not counted as a hallucination.
+
+### E6 — Hint matching is coupled to chunking
+
+A hit is the hint normalised and truncated to 80 characters (`evals/lib/retrieval_metrics.py:30`),
+substring-matched against a retrieved chunk.
+
+- **A chunk boundary inside that window scores a miss** even when both halves are returned at ranks
+  1 and 2. Any chunking change therefore moves HR@5 for a reason that is not retrieval quality.
+- **The offline guard and the runtime metric normalise differently.**
+  `test_golden_integrity.py:89` applies `html.unescape` and `\xa0` folding before `_norm`;
+  `retrieval_metrics._norm` does not. A hint that passes the integrity test can be unmatchable at
+  runtime on content carrying entities or non-breaking spaces.
+
+**Shipped 2026-08-15.** `retrieval_metrics._norm` now unescapes entities and folds `\xa0`, and
+`test_golden_integrity` uses that one function instead of its own copy. `count_boundary_misses`
+reports misses whose hint reassembles across adjacent retrieved chunks, joined both with and
+without a space — a whitespace-splitting chunker and the character-splitter fallback break
+differently. **HR@5's definition is unchanged**: widening it would move every committed baseline
+without retrieval changing, so the counter sits beside the metric as the evidence that a chunking
+change moved a score.
+
+**Fix**: one shared normaliser for both paths; match against adjacent retrieved chunks joined in
+rank order, and record a `boundary_miss` count alongside HR@5 so a split reads as a split rather
+than as a retrieval failure.
+
+Verified by: a hint deliberately straddling a chunk boundary scores as a hit with `boundary_miss`
+incremented, and the two normalisers are the same function.
+
+---
+
+## Stage 3 — Make the model visible
+
+Stage 2 makes a number comparable. This stage makes it **sensitive to the thing being changed**.
+
+### P2 — Output instrumentation — **shipped 2026-08-15**
+
+- `parse_llm_json_*` returns `repairs: frozenset[str]` — `fenced`, `bad_escape`, `truncated`,
+  `key_alias` — set as attributes on the existing `trace_llm_call` span.
+- Collapse the duplicate parser ladder in `flashcard_parsers.py` into `llm_json.py`. One
+  implementation.
+- Counters for first-pass acceptance rate, retries per generation, requested-versus-delivered
+  count.
+- Time to first token recorded separately for interactive and background calls.
+
+`app/services/llm_output_stats.py` holds process-wide monotonic counters; `llm_json` records
+`fenced`, `bad_escape`, `truncated` and `surrounded_by_prose` per parse plus first-pass acceptance;
+`card_field` records `key_alias`; `_collect_with_backfill` records requested/delivered/attempts.
+`flashcard_parsers._parse_llm_response` now calls `llm_json` instead of re-implementing the ladder,
+which both removes the duplicate and makes flashcard repairs visible. `GET /evals/output-stats`
+exposes the snapshot and `run_eval` records the delta per run — no reset endpoint, because a diff
+cannot be lost by a concurrent reader the way a reset can.
+
+**First reading, `qwen2.5:14b-instruct`, 3 cards requested and 3 delivered**: `parses: 1`,
+`parses_repaired: 1`, `repair_surrounded_by_prose: 1`, `first_pass_rate: 0.0`. The model wrapped
+its array in prose and the parser carried it — invisible before this, because the cards came out
+identical either way. That is the P2 acceptance criterion met: a non-zero repair count on the
+shipped path.
+
+Behaviour-neutral, a few dozen lines, and everything downstream argues from the numbers it
+produces.
+
+Verified by: `make ci`, plus a test that a known-bad completion yields the expected repair set. On
+llama3.2 the repair counters must read **non-zero** — the parsers demonstrably exist for a reason,
+so a zero reading means the instrumentation is wrong.
+
+Falsifier: if repair rates really are near-zero in production, the tolerant parsers are dead weight
+rather than a laundering channel. That is also a useful finding — delete them in P8 rather than
+build around them.
+
+#### Why this is the load-bearing item
+
+Four mechanisms, all present in the tree, each of which independently flattens the difference
+between a weak model and a strong one. They are why the last model comparison returned no signal.
+
+| | Mechanism |
+|---|---|
+| M1 | `hit_rate_5`, `mrr` and `ndcg_10` are functions of bge-small and the L-12 cross-encoder. They contain **no generation-model term** |
+| M2 | Two tolerant-JSON implementations plus `card_field` alternate keys make clean JSON and fenced, mis-keyed, truncated JSON produce **byte-identical downstream objects**. Nothing counts the repairs |
+| M3 | `card_rejection_reason` plus retry-to-backfill guarantees N cards. A weaker model retries more: same quality number, different call count |
+| M4 | `QA_CONTEXT_TOKEN_BUDGET = 1500` on a 256K-context model makes its advantage structurally unreachable; `FLASHCARD_USER_TMPL` carries a hardcoded worked example a strong model regresses toward |
+
+M1 is why retrieval metrics are excluded from the model matrix. M2 and M3 are closed by P2. M4 is
+closed by P4.
+
+### E2 — Every gated arm runs scoped
+
+`make eval` pins `source_document_id` per row, which `search_chunks` turns into `document_id` +
+`limit=20` (`run_eval.py:265`). That measures ranking *within* the correct document. Real "All
+documents" chat has no such pin, and `run_corpus_routing.py` exists because routing fails
+differently — one mistyped proper noun collapses a query into the wrong corpus. It has no make
+target.
+
+**The stated reason not to run unscoped is stale.** The function warns that unscoped calls flatten
+`/search`'s per-document groups without restoring rank order (`:274`), then sorts `all_matches` by
+`global_rank` at `:319`, which is that restoration.
+
+**Shipped 2026-08-15.** The stale warning is gone, `run_eval.py --unscoped` drops the pin for the
+retrieval call while keeping it for `/qa` (scope must match the filter or the classifier routes to
+library-wide synthesis), and `make eval-routing` records routing. Measured in one library state
+(52 documents, 207,047 chunks — the 43MB manual is 65% of it):
+
+| dataset | scoped HR@5 | unscoped HR@5 | route@1 | route@5 |
+|---|---|---|---|---|
+| book | 0.5250 | 0.5000 | 0.70 | 0.85 |
+| paper | 0.8500 | **0.5500** | 0.75 | 0.80 |
+| legal | 0.5500 | 0.5167 | 0.93 | 0.97 |
+| play | — | — | 0.92 | 0.93 |
+| study | — | — | 0.88 | 0.90 |
+
+**The gap is dataset-dependent, not a constant.** `paper` loses 0.30 while `book` and `legal` lose
+~0.03. `paper` is 146 chunks of Unix-philosophy prose competing against 135k chunks of a MySQL
+manual; topical interference, not a funnel property. **route@1 0.70–0.93 means 7–30% of questions
+put the wrong document first** — the failure `make eval` cannot see by construction. Routing runs
+with rerank on and the scoped/unscoped arms above ran with it off, so the two tables are not
+directly comparable. No floor yet: one measurement in one library state is a baseline, not a bar.
+
+**Fix**: delete the stale warning; add an unscoped arm to `run_eval.py` and a `make eval-routing`
+target over `run_corpus_routing.py` on datasets clearing the 20-row floor. Record `route@1`,
+`route@5` and unscoped HR@5 as baselines. No threshold until the numbers exist.
+
+Verified by: both arms on the same rows in one run, both recorded. A gap is expected; an
+*unrecorded* gap is the defect.
+
+### Intent routing: 1.0000 on the golden, 0.5862 on hard phrasing
+
+`golden/intents.jsonl` measures 1.0000, so it cannot show a regression — a saturated metric has
+no headroom in either direction. `golden/intents_adversarial.jsonl` holds the same four routes and
+makes the **phrasing** hard rather than the subject novel: terse fragments ("TL;DR?", "X vs Y?"),
+verbose wrappers, negated openings, and intents stated without their keyword — a comparison with
+no "compare", a summary with no "summarise", a relation with no "connect". Subjects are the
+invented, corpus-free set the generalisation suite uses, so a route that depends on a corpus
+entity fails here instead of passing from memory.
+
+Hand-authored, 29 rows. Multi-intent questions are deliberately excluded: no single label is
+defensible for "summarise X and compare it to Y", so such a row would measure the labeller rather
+than the router.
+
+| | accuracy | precision | recall |
+|---|---|---|---|
+| overall | **0.5862** | | |
+| summary | | 0.833 | 0.625 |
+| graph | | 1.000 | **0.333** |
+| comparative | | 1.000 | **0.429** |
+| search | | **0.389** | 0.875 |
+
+**Search is the sink: 11 of 12 misroutes land there.** `graph` and `comparative` have perfect
+precision and poor recall — they fire only on their explicit keyword, and everything else falls
+through to search. The twelfth misroute goes the other way and is a different bug: *"I don't need
+the whole overview, just tell me what year the Ostrek cipher was published"* routes to summary,
+because the keyword fires and the negation in front of it does not.
+
+**Deliberately not fixed here.** Adding keywords for "elevator pitch", "have to do with" and
+"better fit" would fit the router to rows I wrote this afternoon, which is the failure this
+dataset exists to detect. The repo's own precedent is the rule: route by sentence shape and prove
+it generalises. A fix belongs with a shape rule plus cases in `test_intent_generalisation.py`,
+measured against this set afterwards — never tuned against it. Negation is the exception worth
+taking first: "not a summary, just X" is a general rule, not a phrasing.
+
+Run report-only by `make eval-intent`, alongside the gated 50-row arm. No floor: a known-open
+finding is recorded, not used to fail a build.
+
+### Flashcards: what the first structural run found
+
+`evals/build_flashcard_golden.py` samples passages from the live index — fixed seed, balanced
+across content types, middle 80% of each document's chunk sequence, 400–1500 characters. **No
+model authors anything**: the eval judges generated cards against the source passage, so the
+passage is the ground truth. `expected_facts` was authored on the old 6-row file and never read by
+anything, which is why sampling replaces it rather than extending it.
+
+First run, judge off, `qwen2.5:14b-instruct`, 35 passages × 3 cards:
+
+| | |
+|---|---|
+| cards delivered | **90 of 105** (0.857) |
+| first-pass parse rate | **0.0000** — 36 of 36 parses repaired, every one `surrounded_by_prose` |
+| retries | 1 generation retried, 1 finished short |
+
+| content type | delivered / requested |
+|---|---|
+| book | 19 / 21 |
+| conversation | 19 / 21 |
+| paper | 19 / 21 |
+| tech_article | 18 / 21 |
+| **tech_book** | **15 / 21** |
+
+**Not one clean JSON emission in 36 attempts.** The tolerant parser repaired every generation, and
+before P2 that was invisible: the cards arrive either way. This is the M2 laundering channel with a
+number on it, and it is the first number in this repo that would move under a model swap without
+any judge involved.
+
+**Delivery is kind-dependent too**: technical books deliver 71% of requested cards against 90% for
+narrative and conversation. The generation-side counterpart of the retrieval table above.
+
+**Chased: the 103-vs-90 gap is a near-duplicate filter, and it makes the API count unusable as a
+metric.** After `_collect_with_backfill` returns candidates, `generate` embeds each question and
+drops any that is close to a card the document already holds
+(`flashcard_generators.py:598`). So the number the API returns depends on what is already in the
+library, not on the model.
+
+Proven rather than inferred: a passage that produced cards during the eval was re-sent twice with
+the same count and **returned 0 both times**, with the document's stored card count unchanged.
+Re-running the eval therefore yields fewer cards every time and converges to zero.
+
+Three consequences, all now handled:
+
+- `cards_returned` is recorded but is **not** a model metric and must never gate or be compared
+  across models.
+- `cards_generated` / `generation_rate` come from the pre-dedup counter — what the model actually
+  produced — and that is the comparable number.
+- `items_deduped` is counted where the filter runs, so the gap is attributable instead of being
+  the difference between two numbers that mean different things.
+
+Confirmed by re-running the same 35 rows against the now-warmer library:
+
+| | run 1 | run 2 | |
+|---|---|---|---|
+| `cards_generated` (model) | 103 | **104** | stable — 0.99 of requested |
+| `cards_returned` (library) | 90 | **44** | halved, with nothing about the model changed |
+| `cards_deduped` | (not counted) | **60** | 104 − 60 = 44, the gap closes exactly |
+| `first_pass_rate` | 0.0000 | **0.0000** | 40 of 40 parses repaired, all `surrounded_by_prose` |
+| `generations_retried` | 1 | 4 | retries rise as dedup removes cards and backfill tries again |
+
+**The model's number reproduced to within one card while the library's number halved.** That is
+the split working: `generation_rate` is a property of `qwen2.5:14b-instruct`, `cards_returned` is a
+property of a corpus that already had flashcards in it, and before this they were one number.
+
+The per-kind returned/requested breakdown is likewise dominated by dedup on a warm library and
+says nothing about the model; read the per-kind split only on generated counts, and only in a
+library state recorded with the run.
+
+**`first_pass_rate` 0.0000 across two independent runs is the first reproducible model-quality
+number in this repo.** This model never emitted parseable JSON for a flashcard batch in 76
+attempts; the parser carried every one.
+
+### Furniture collapse deleted repeated content, and the fix is a margin not a number
+
+`source_text.normalise` collapses runs of recurring lines, and it runs on every text ingest —
+`.txt` and `.md`, not just the saved scrape it was built for. Its docstring claimed losing content
+was impossible by construction; that holds at document scale and not at position scale, because the
+surviving instance is wherever the line first appeared. Reproduced: three functions sharing a
+three-line `try/except` idiom come back with the second and third **bodies deleted**.
+
+Measured before choosing a fix. On the real corpus only the intended document loses anything —
+`art_of_unix.txt` 404 lines, every book 0, `d2l` 0 — so nothing shipped is damaged today, but the
+mechanism is live for any document with a repeated block.
+
+Frequency cannot separate the two: chrome lines occur 16–44 times, the destroyed idiom 3, and a
+sweep found no threshold that both preserves the scrape and spares the idiom (4 → 370 lines
+collapsed, 8 → 298, against 404 at the current 3). **The left margin separates them exactly**: 0
+of 516 recurring lines in the scrape carry indentation, and every line of a code idiom does. An
+indented line is now never furniture.
+
+`art_of_unix` still collapses exactly 404 lines, so the indexed corpus is unchanged and `paper`'s
+baseline holds. Residual risk, stated: unindented content repeated three times in a run of three
+consecutive lines is still collapsed — the run requirement is what keeps a verse refrain safe.
+
+### Retrieval by content kind
+
+Scoped, rerank off, one library state (52 documents / 207,047 chunks), measured 2026-08-15. Every
+row is a different kind of writing against the same funnel.
+
+| golden | kind | HR@5 | MRR | nDCG@10 |
+|---|---|---|---|---|
+| notes | personal notes | 1.0000 | 0.9042 | 0.9281 |
+| paper | essay / article | 0.8500 | 0.6783 | 0.7276 |
+| d2l | technical book (md) | 0.8400 | 0.6413 | 0.7240 |
+| play | script (verse dialogue) | 0.6500 | 0.4317 | 0.5082 |
+| book_alice | novel | 0.6000 | 0.4067 | 0.5118 |
+| study | technical book (PDF) | 0.5667 | 0.4186 | 0.4903 |
+| legal | legal / political essays | 0.5500 | 0.3789 | 0.4487 |
+| book | novel (Wells) | 0.5250 | 0.3792 | 0.4878 |
+| odyssey | epic verse | 0.4500 | 0.3454 | 0.4122 |
+| book_frankenstein | novel (epistolary) | 0.3500 | 0.2267 | 0.2891 |
+
+**Retrieval quality is a property of the writing, and the spread is 0.35 to 1.00 on one funnel.**
+Expository and structured text scores highest; narrative fiction is the hard class, and the four
+novels occupy four of the bottom five rows. `book` was already documented as "the hardest dataset,
+not the typical one" — the generalisation is that *fiction* is the hard kind, and Frankenstein is
+half of d2l.
+
+Two consequences for the plan. Tuning retrieval against a fiction-heavy gate optimises the worst
+case for a product whose users mostly load technical documents; and a model or funnel change that
+moves one kind may not move another, so a per-kind table is the honest unit of comparison rather
+than a mean across datasets. Nothing is gated on these except the five already in `make eval`;
+they are baselines in one state, and the fingerprint is recorded with each.
+
+### Where the per-kind table leads: a model chosen for what someone reads
+
+Not a stage yet, and it cannot become one before P6 — but it is what the per-kind table is for,
+so it is written down where the numbers are.
+
+Retrieval scores 0.35 to 1.00 across kinds on one funnel, and the same is expected of generation
+once the matrix runs per kind rather than per dataset mean. If a candidate model is better on
+technical prose and worse on narrative, that is not a tie to be averaged away: it is a choice that
+depends on what a particular person loads. A reader whose library is manuals and papers and one
+whose library is novels are different products wearing one binary.
+
+What has to exist first, in this order:
+
+1. **P6 reports per kind**, not per dataset mean. The matrix already runs the model-sensitive
+   runners; grouping their output by kind is the difference between "model A scored 0.71" and
+   "model A is better on tech and worse on fiction".
+2. **A library profile.** The content type of what a user has actually ingested is already
+   stored, so the profile is a query, not a new model: `tech_book`/`tech_article`/`paper` against
+   `book`/`conversation`.
+3. **P3's registry carries per-kind calibration.** `ModelProfile` already holds capability; a
+   per-kind score vector is the same shape of fact, produced by the matrix rather than authored.
+4. **The recommendation is a proposal, never an automatic switch.** A model change alters every
+   answer a user has learned to expect; Settings proposes with the evidence — "your library is 80%
+   technical; candidate B scores higher there" — and the person decides.
+
+The falsifier is worth stating: **if the per-kind spread between candidate models is smaller than
+the run-to-run variance measured in E4, there is nothing to choose between them** and this whole
+direction is a dead end. Measure that gap before building any of it.
+
+### E9 — Coverage holes that block the switch specifically
+
+**Ingestion fidelity now measured per document kind** (`make eval-ingest ALL=1` →
+`run_ingest_eval.py --all-documents`), over every complete document in the library rather than the
+12 manifest ones. Measured 2026-08-15, 47 documents:
+
+| format | docs | min retention | mean | max duplication |
+|---|---|---|---|---|
+| txt | 15 | 94.2% | 98.5% | 1.41 |
+| md | 13 | 87.2% | 97.7% | 1.60 |
+| pdf | 18 | 88.6% | 97.5% | **3.58** |
+| epub | 1 | 100.0% | 100.0% | 1.09 |
+| wav | 4 | — | — | — |
+
+By content type — the chunker and prompt path the product chose, which is a
+different partition from format:
+
+| content type | docs | min retention | mean | max duplication |
+|---|---|---|---|---|
+| book | 17 | 94.2% | 98.8% | 3.58 |
+| conversation | 4 | 97.5% | 98.9% | 1.41 |
+| paper | 4 | 91.9% | 97.4% | 2.01 |
+| tech_article | 14 | 87.2% | 97.5% | 2.68 |
+| tech_book | 8 | 88.6% | 96.7% | 3.20 |
+
+**A play, a legal corpus and a novel all arrive as `book`.** The product has six content types
+and the goldens distinguish nine kinds, so any difference between a script and a statute is
+emergent from the text, not chosen by the pipeline. That is worth knowing before attributing a
+score to a "legal path" that does not exist.
+
+Three findings the manifest-only run could not have produced:
+
+- **EPUB first read 0.3% retention, and the defect was the reader.** `read_document_text` — the
+  function the eval-integrity rule names as the one true way to read a corpus — dispatched only on
+  `.pdf` and decoded everything else as bytes, so an EPUB returned
+  `PK\x03\x04 … application/epub+zip`. Fixed by extracting through ingestion's own `_epub_text`;
+  the same hole was open for `.docx` and is closed with it. Re-measured: **100.0%**. A golden
+  generated from an EPUB before this would have asked questions about the zip container, which is
+  exactly the PDF failure that produced this rule in the first place.
+- **The PDF path chunks 2–3.6× denser than text.** `matrix_calculus_for_dl`: 602 chunks of median
+  45 tokens over a 12,277-token source. Diagnosed rather than assumed — only 6 distinct tokens
+  appear in chunks and not in the source, so this is overlap, not text the reader missed. DDIA
+  carries 11,431 chunks per copy at 3.58×.
+- **Audio is unmeasurable by this method and says so.** Four `wav` documents reach chunks through
+  transcription, so the file on disk holds no text to compare against. Reported as a coverage gap
+  rather than scored 0%.
+
+If the switch fails, it fails on JSON-emitting generation — the paths with tolerant parsers behind
+them, which are the least measured part of the suite.
+
+| Surface | State | Needed |
+|---|---|---|
+| Flashcards | **Done 2026-08-15.** 35 rows over 5 content types, `make eval-flashcards`, structural metrics wired | — |
+| Summaries | Invalid (E3) | Fixed in Stage 2; target and baseline here |
+| Corpus routing | Runner exists, no target | Target (E2) |
+| Intent | **Done 2026-08-15.** `golden/intents_adversarial.jsonl`, 29 rows, measured **0.5862** | — |
+| Concepts, tagging, vision JSON | Only topics gated, on `d2l` | Structural tier per path |
+| `code` dataset | 5 rows, and **the product cannot ingest its source** | Reproduced 2026-08-15: `POST /documents/ingest` with `DATA/code/embedder.py` returns 400, "Unsupported file type '.py'" (`documents.py:134`). The reported 0/5 was not a chunking defect — the document could never have been indexed. Decide whether `.py` becomes a supported kind or the dataset is regenerated against code as it actually reaches the product, inside markdown. Do not gate it either way until then |
+| Socratic, teach-back, Feynman, FSRS, multi-turn, graph | No runner | Out of scope for the switch; named so the gap is not mistaken for coverage |
+
+### E11 — The eval cannot see a dropped citation — **already shipped**
+
+Closed before this stage opened, and verified rather than rebuilt: `/qa` reports
+`citations_proposed`, `citations_gated` and `citations_dropped` in its `done` event under
+`include_context` (`qa.py:1092-1096`), and `run_eval` records all three. Confirmed on a live
+answer — 2 proposed, 0 gated, 0 dropped. The plan entry was stale.
+
+---
+
+## Stage 4 — Extract the seams
+
+### P3 — Model registry and role router — **shipped 2026-08-15**
+
+`app/model_registry.py` (Config layer) holds `ModelProfile` with both halves — footprint
+(resident bytes, licence, `min_ram_gb`) and capability (`usable_context`,
+`supports_json_schema`, `thinking_default`, `multimodal`, `accommodations_needed`).
+`accommodations_needed` is empty on every entry and means **unmeasured**, not "needs nothing":
+Phase 6 fills it.
+
+`app/services/model_router.resolve(role, *, background)` is the one entry point, over four roles.
+Generation follows Settings unless `LITELLM_GENERATION_MODEL` is explicitly set. **Corrected
+2026-08-16, the first claim here was overstated**: the original code returned `None` when no
+override was configured, and `LLMService` then routed it through Settings itself. The real defect
+was narrower — a configured override could never be superseded by Settings, and the value was read
+in two service files rather than one.
+
+The correction matters because returning a concrete id instead of `None` broke two things a
+review caught: a pinned model skips `LLMService`'s routing, which is what supplies the API key the
+Settings UI stores (so cloud mode with no key in `.env` failed every generation while chat worked)
+and what reroutes to Ollama when a provider goes offline. `ModelChoice.explicit` now distinguishes
+"pin this model" from "route normally".
+
+Six config readers migrated (`flashcard.py`, `flashcard_generators.py`, `image_enricher.py`,
+`monitoring.py`, `main.py`, `eval_environment.py`) and two more moved to registry defaults
+(`settings_service.py`, `llm.py`). `tests/test_model_registry.py` greps `app/` and fails if any
+module outside the registry reads a model name from config. `resident_models()` is the set Phase
+7's residency test asserts against. Smoke S230 checks the roles resolve consistently on a live
+backend.
+
+Not visible on this machine's numbers: `LITELLM_DEFAULT_MODEL` happens to equal the Settings
+choice here, so the defect was silent rather than wrong. It is the tests that prove the fix.
+
+
+
+Model choice resolves in five places today, and two bypass the settings service entirely
+(`services/flashcard.py:102`, `services/flashcard_generators.py:78`), so **a model chosen in
+Settings does not apply to flashcard generation.**
+
+- `app/model_registry.py` at the Config layer — frozen `ModelProfile` entries carrying both halves:
+  *footprint* (resident bytes, licence, `min_ram_gb`) and *capability* (`supports_json_schema`,
+  `thinking_default`, `usable_context`, `recommended_ctx`, `accommodations_needed`).
+- `app/services/model_router.py` — one entry point, `resolve(role, *, background=False)`.
+- `LLMService` gains `role=`; callers stop passing model strings. Roles: `chat`, `generation`,
+  `background`, `vision`.
+- `components.CATALOGUE` becomes a projection of the registry, which is what its docstring already
+  promises.
+- Delete the direct readers at `image_enricher.py:214`, `flashcard.py:102`,
+  `flashcard_generators.py:78`, `llm.py:111`, `llm.py:312`, `routers/monitoring.py:196`.
+
+Verified by: `make ci` with `layer_linter`'s `KNOWN_VIOLATIONS` not growing; a test that no service
+module reads `LITELLM_*` from config; a smoke script proving a Settings model change reaches
+flashcard generation.
+
+Falsifier: if four roles prove too coarse, **add a role, never a per-call-site model override** —
+the point is that call sites name work. If too fine, collapse to interactive/background and keep
+vision as a capability flag.
+
+### P4 — Prompt contracts and accommodations — **mechanism shipped 2026-08-16, one path converted**
+
+`app/services/prompt_spec.py`: a `PromptSpec` is a contract plus typed
+`Accommodation`s, each naming the model it was added for, the observation that justified it, and
+the condition under which it can go. `render(spec, profile)` emits the contract plus only what
+that model still needs. `make prompt-dump TASK=… MODEL=…` prints the rendered prompt and every
+accommodation with its verdict — it ships with the refactor, because making the real prompt exist
+only at runtime is otherwise a straight loss for anyone doing prompt work.
+
+**An accommodation is dropped only on measured evidence.** The shortcut that looked obvious —
+drop format policing for a model that declares `supports_json_schema` — is measurably wrong: that
+flag is true for `qwen2.5:14b-instruct`, which wrapped every one of 40 flashcard generations in
+prose. What a model *can* do and what it *does* are different measurements, and `ModelProfile`
+now carries `accommodations_measured` so "unmeasured" and "needs nothing" cannot be confused.
+
+Converted so far: the flashcard user prompt, with its two accommodations tagged
+(`json_escape_hint`, `worked_example` — both introduced for llama3.2). The rendered output is
+identical to the previous template except that the escape hint occupies its own line rather than
+being spliced into the sentence before it, which is the minimum change that makes it removable. A
+snapshot test holds the render, and the move was re-measured rather than assumed: `cards_generated`
+104, `generation_rate` 0.9905 and `first_pass_rate` 0.0000 are identical either side of it. Only
+`cards_returned` moved (44 → 32), which is the near-duplicate filter on a warmer library and not a
+fact about the model.
+
+**All JSON-emitting paths converted 2026-08-16**: flashcards, concepts, both taggers, vision,
+intent, and both suggestion prompts — eight specs, each registered in `make prompt-dump`.
+
+The dedup fell out of the tagging: `"No explanation, no preamble, no markdown fences"` was the
+same sentence in five prompts, so it is now one `NO_FENCES` object with one observation behind it
+(40 of 40 flashcard generations needed the `surrounded_by_prose` repair). Copying that sentence
+into every prompt is what made it look like part of each task's contract.
+
+Three accommodations were found in the process, each with its observation recorded:
+`step_decomposition` on vision (transcription had to be an explicit first step or descriptions
+invented labels) and on concepts (the domain was being read from the notes' setting rather than
+their subject), and `bare_topic_example` on intent — a corpus entity hardcoded in a prompt, which
+the no-hardcoded-examples rule forbids, kept because the observation behind it is real and now
+carrying an exit condition.
+
+`tests/test_prompt_spec.py` fails if a module defines a spec that `prompt_dump` does not register,
+or if any accommodation lacks a model, an observation and an exit.
+
+Still open: the I-28 widening — `flashcard_prompts.py` opens with "creating flashcards based on
+Bloom's Taxonomy", and the guard covers suggestions only.
+
+**Per-model rendering, closed 2026-08-16.** Every spec was rendered at import against
+`profile_for(default_chat_model())` — the configured default, not the model that would answer — so
+a model chosen in Settings received another model's accommodations, and `accommodations_needed` on
+a registry entry would have been read for a model nobody was going to call. Invisible while
+nothing is measured, and wrong the moment the matrix fills one in. `render_for(spec, role)` now
+resolves the profile through `model_router` at call time, and nine sites use the role their own
+call already passes: flashcards and notes-concept extraction `generation`, both taggers and both
+suggestion prompts `background`, intent `chat`, vision `vision`. Rendered per call and never
+cached, because the model changes under a running process — Settings, and the matrix switching
+candidates. `tests/test_prompt_spec.py` fails if any module renders against a configured default
+again, and a second test patches the router to a measured profile and asserts the accommodations
+disappear.
+
+
+
+`PromptSpec` carries the contract; `Accommodation` records each compensation with its `kind`,
+`introduced_for`, `because` and `drop_when`. `render(spec, profile)` emits the contract plus only
+what that model still needs — inverting today's default, where the prompt is written for the
+weakest model and every model inherits the crutches. Native `response_format` replaces English
+format-policing where the profile supports it (only 2 of ~28 sites use it today).
+
+Starting inventory to tag: the hardcoded worked example and `'\n'`-escape hint in
+`FLASHCARD_USER_TMPL`; the `'vs'` and `warning` routing rules in `TECH_FLASHCARD_USER_TMPL`; the
+`STEP 1 / STEP 2` decomposition in `NOTES_CONCEPT_EXTRACT_SYSTEM`; the "no markdown fences"
+policing throughout; the `card_field` key aliases.
+
+Scope discipline: 28 service files carry prompts. **Convert only the JSON-emitting generation
+paths** — flashcards, concepts, topics, tagging, intent, vision. Leave prose-only prompts alone
+until there is evidence they cap anything. This refactor makes the real prompt exist only at
+runtime, which is a genuine regression in debuggability: `make prompt-dump TASK=… MODEL=…` ships in
+the same PR or the change is net-negative for anyone doing prompt work.
+
+Verified by: golden rendered-prompt snapshots per (task, profile); the widened I-28 taxonomy guard,
+which immediately catches `flashcard_prompts.py:140`; `make ci` and `make smoke`.
+
+Bright line if tagging turns into an argument: anything that exists because of observed model
+behaviour rather than a product requirement is an accommodation — and if nobody can name the
+observation, it is dead code, so delete it.
+
+#### The root cause this closes
+
+**Luminary has no way to tell an invariant of the domain from an accommodation for a model.** Both
+are prose in the same file with the same authority. I-28 says a generation prompt states the shape
+of what it wants, never the name of a taxonomy, guarded by `tests/test_suggestions.py`; meanwhile
+`services/flashcard_prompts.py:140` opens with "creating flashcards based on Bloom's Taxonomy" and
+enumerates L1–L6 — the same defect, unguarded, because the invariant was written about one screen
+rather than as a property of every prompt. Accommodations therefore never expire, and one that
+never expires is a ceiling. The goal is not model-agnostic prompts, which is wishful; it is making
+every compensation **typed, attributed and expiring**, so adopting a model is an audit rather than
+an act of hope.
+
+### E7 — The tuning set is the gate set
+
+`RERANK_MODEL` and `RERANK_BLEND_ALPHA` were selected by a 12-document sweep over the goldens that
+gate, on constraints naming specific datasets — best mean HR@5, "no dataset >1 question below
+no-rerank" (which `time_machine` decided), and lifting `hamlet` from .567 to .667
+(`backend/app/config.py:92-98`). That is documented model selection, not a hard-coded favour. The
+defect is narrower and real: **there is no held-out data**, so nothing distinguishes a retrieval
+improvement from a fit to twelve documents.
+
+**Shipped 2026-08-15.** `evals/lib/split.py` declares TUNE (book, book_time_machine, paper, legal,
+play, study, d2l) and HOLDOUT (book_alice, book_frankenstein, odyssey, notes, conversation).
+`run_eval.py` refuses an ablation sweep on a holdout dataset and records `split` in the run's
+environment.
+
+**Today's holdout is provisional, and the plan must not forget it.** The sweep that chose
+`RERANK_MODEL` ran over all twelve manifest documents, so every dataset above was visible to it.
+The split freezes from here; a genuinely clean holdout needs a dataset built from a document no
+sweep has seen, and the next one generated is the first that can claim it.
+
+Verified by: re-running the reranker sweep reproduces the current default on the tune set, and the
+holdout numbers are committed as a separate baseline.
+
+### E8 — Golden provenance is not recorded
+
+`evals/realign_hints.py` dumps the top-5 chunks for rows whose hint is not retrieved, so a
+corrected hint can be picked by hand. Replacing a non-verbatim hint with a verbatim one is correct;
+picking among verbatim candidates by what the retriever surfaced makes the retriever define its own
+target. Nothing records which happened.
+
+The exposure is bounded — `test_golden_integrity.py` already requires every hint to resolve in the
+source as ingestion reads it, and ratchets ambiguous-hint counts (`paper: 2`, `odyssey: 2`) down
+only. What is missing is provenance.
+
+**Fix**: per-row provenance in each `*.meta.json` (`generated`, `corrected-verbatim`, `realigned`),
+and no realignment on a gated dataset without a recorded reason. A dataset carrying `realigned`
+rows is reported at the top of its run.
+
+---
+
+## Stage 5 — Schedule and calibrate
+
+### P5 — Scheduling and admission control — **shipped 2026-08-16, measured 2026-08-17**
+
+`app/services/llm_admission.py` is a priority gate in front of the local runtime's slots, applied
+inside `LLMService.complete` and `_token_stream` so `background=True` is the whole of what a caller
+says. Interactive calls never wait; a background call waits for interactive pressure to clear
+before issuing its next one, since one completed call is the finest yield granularity Ollama
+offers. A stream holds the gate until it is exhausted or closed — a stream is not finished when its
+first token lands.
+
+**The reserve is derived from the serving width, not from a profile knob.** The plan said `low`
+hard-suspends, `standard` reserves a slot, `performance` separates physically; `LUMINARY_PROFILE`
+is an installer variable the backend never reads, and `LUMINARY_MEMORY_PROFILE` does not exist
+until P7. `background_reserve() = OLLAMA_NUM_PARALLEL - 1` produces the same three cases from the
+number the installer already sizes from host RAM: one slot means no slot to give, so background
+suspends outright; two or more keeps one free for an Ask and lets the rest serve ingestion. P7 then
+has one fewer knob to reconcile. Physical separation stays a runtime property (each loaded model
+gets its own runner, I-31), not something the app can express.
+
+Two bounds keep the gate from becoming a wedge, and they are different quantities:
+
+- `LLM_ADMISSION_MAX_DEFER_SECONDS` (60s) — a held call is admitted anyway and counted as a forced
+  admission. Someone who keeps chatting must not stop ingestion for ever.
+- `_STALE_INTERACTIVE_SECONDS` (180s) — pressure decays from a call's **last activity**, not from
+  when it started: a stream bumps it on every token, so a live answer keeps yielding to the user
+  however long it runs, while one the client walked away from stops counting shortly after its last
+  token. A start-time-only rule could not tell those apart, and did not: one abandoned stream left
+  `interactive_inflight` at 1 and suspended every background call behind it (`9b8c13a`). Sized
+  above the worst first-token latency measured under ingest load (88s) so a slow answer is never
+  mistaken for an abandoned one. This matters beyond tidiness: a deferring background call may hold
+  a lock an interactive request needs, and both bounds mean that resolves itself rather than
+  hanging.
+
+Cloud calls pass straight through — they contend for nothing on this machine.
+
+The UI state is `paused_for_interaction` on `GET /documents/{id}/status`, which the ingesting
+placeholder already polls every 2s, rendered as "Paused while you're asking". It is true only while
+a background call is actually being held, not merely while a question is in flight — I-10 wants an
+explicit state, not a plausible one. `GET /monitoring/metrics` carries the counters
+(`deferred_calls`, `deferred_seconds`, `forced_admissions`), which are what separate "the Ask was
+fast" from "the Ask was fast *and* the gate engaged". `tests/test_llm_admission.py` holds the
+ordering properties; smoke S231 holds the wire contract.
+
+**The call-site audit found no unbounded background prompt.** Every one of the 27 `background=True`
+sites slices its input: 600–3,000 chars at most of them, `TEXT_HARD_CAP` 10,000 chars in
+`section_summarizer`, `_MAP_BATCH_TOKENS` 3,000 tokens per map batch in `summarizer`, 6×800 chars
+of grounding in `suggestion_service`, 250 sampled headings in `topic_service`. The one site with no
+explicit slice is `reference_enricher._extract_references`, which passes a section summary the
+summarizer generated — bounded by what a 2-3 sentence prompt emits rather than by construction. So
+**the worst-case interactive wait is set by generation length, not prompt length**, and adding
+prompt caps would not have moved it. The audit put that length at ~16s of decode against ~0.4s of
+prefill (I-31); the measurement below found the deferred summary chain generating for minutes, so
+that figure was an inference from prompt size, never a measurement of output length.
+
+**Measured 2026-08-17, both arms on the same document.** `mem_profile.py --probe-window 150:800`
+asks back to back through the deferred-work window — one Ask in flight, the next issued the moment
+the last returns — because in that window an Ask takes most of a minute, so a fixed schedule mostly
+reports `skipped` and yields four points rather than a sample. Same 449KB text differing by one
+byte, same host, nothing else resident, model pre-warmed, a fresh backend per arm;
+`LLM_ADMISSION_ENABLED=false` is the un-gated arm. Both rows are in `evals/mem_profile_history.jsonl`
+at schema 3, which carries the gate counters, so a row says whether the gate engaged instead of
+leaving that to be inferred from the latency beside it.
+
+| | un-gated | gated |
+|---|---|---|
+| Asks answered in the window | 23 | 34 |
+| TTFT p50 | 19.43s | 10.08s |
+| TTFT p90 | 44.50s | 18.85s |
+| TTFT worst | 104.25s | 172.94s |
+| `web_refs` enrichment job | 677.8s | 792.8s |
+| deferred / held / forced | — | 6 calls / 360.0s / 6 |
+
+**The gate halves typical latency for 17% of ingest wall clock.** p50 and p90 both roughly halve,
+and half again as many questions are answered in the same window because each costs less. Deferred
+enrichment finished in both arms — the failure the defer bound exists to prevent did not occur — at
+699s un-gated against 815s gated.
+
+**Every deferral was force-admitted, each after exactly the full 60s.** Not one was released by
+pressure clearing, so under continuous questioning it is `LLM_ADMISSION_MAX_DEFER_SECONDS`, not the
+pressure signal, that schedules background work: the gate's real behaviour under a chatting user is
+one background call per 60s. That is the bound working as specified, and the counters are the only
+place it is visible.
+
+**The tail is not the gate. It is one background call that cannot be preempted.** The worst Ask in
+each arm was waiting for `summarizer.pregenerate mode=detailed`: un-gated it produced its first
+token at 13:33:55 against that call's 13:33:56 completion, gated at 13:49:07 against 13:49:02. The
+same call over the same 12,481-char input ran 107s in one arm and 179s in the other. The gate cannot
+help here by construction — yield granularity is one completed call, and this one was admitted
+before the Ask arrived. The lever is call size, not scheduling policy.
+
+#### The tail, chased to three causes — 2026-08-17
+
+| gated arm, same document and protocol | `detailed` call | worst Ask | p50 | p90 |
+|---|---|---|---|---|
+| as shipped | 179s | 172.94s | 10.08s | 18.85s |
+| `max_tokens` cap on pregeneration | 106s | 52.05s | 13.10s | 23.16s |
+| `detailed` assembled | 0.001s | 56.82s | 13.45s | 23.64s |
+| + library summary served stale | 0.001s | 48.80s | 13.84s | 22.98s |
+
+**A generation cap was tried and rejected.** `max_tokens=1200` cut the wait but truncated the
+stored summary mid-word at 1,001 words, dropping half the document's sections — the model wrote
+long per-section prose regardless of an instruction not to. A latency bound that silently deletes
+content is not a bound worth having.
+
+**`detailed` is assembled, not generated.** The section summarizer already writes one summary per
+section during ingestion, and `_build_section_summary_input` renders exactly the heading-plus-body
+shape this mode asks a model to produce. Generating it spent the longest call in the pipeline
+paraphrasing text that was already a summary: 1,840 words out of a 1,903-word input in one run and
+4,991 in another, the second ending in degenerate repetition. Assembling costs one database read,
+covers all 24 sections verbatim, and is deterministic. Where no section summaries exist the mode is
+generated one batch of paragraphs at a time — per-section output is the only mode that splits
+without changing meaning, and every batch is summarised so coverage is never the thing traded away.
+
+**A question no longer waits for the library summary it triggered.** Ingestion used to *delete*
+every `LibrarySummaryModel` row, so the next question found none, fired the regeneration itself and
+queued behind it — 54.5s to first token, and routed through retrieval rather than the summary path,
+so the answer differed in kind. Ingestion now refreshes in place and readers keep serving the
+previous summary until the replacement is stored. Confirmed in the re-measurement: zero questions
+hit the no-summary branch, and the served summary moved from 5,449 to 5,740 chars mid-run with no
+gap. The warm-up call was also mislabelled — `stream_library_summary` never passed `background`, so
+a refresh nobody was waiting on outranked the question that started it.
+
+**What sets the tail now: the library synthesis itself**, ~52s of generation for 5-7 themes across
+60 documents, as ordinary background work an Ask can still land behind. That is the same pattern for
+the third time — **a background call that states no output length becomes the worst-case Ask
+latency** — and the remaining lever is bounding that prompt, which shortens the library overview a
+user reads.
+
+p50 across five gated runs: 16.47, 10.08, 13.10, 13.45, 13.84. A 3s move is inside that spread; the
+124s taken off the tail is not.
+
+Not measured: generated tokens per arm (`llm_calls` reads 0 without Phoenix, so throughput here is
+wall-clock only), any host other than this 36GB machine, and variance across repeated pairs — one
+pair per arm. An earlier pair run under unequal memory pressure agreed on every sign, including the
+worse tail, but not on the magnitudes.
+
+Also untouched, and still open from P0: embedding and reranking are CPU-bound through
+`run_in_executor(None, …)`, so a large ingest slows the query embed and the ~510ms cross-encoder
+even when no LLM call is queued. Admission control has no term for that channel.
+
+
+
+**Single residency fixes memory and makes contention worse.** I-31 states it directly: each loaded
+model gets its own runner with its own slots, so text and vision do not contend. Two runners is an
+isolation property; collapsing roles onto one model spends that isolation to buy back ~6GB.
+
+From the benchmark in `1195f4f` and the table in I-31 — M3 Pro, 450-token generations — at 1 slot
+with 4 callers, aggregate throughput stays ~55 tok/s and per-call latency staircases: 4.5 / 8.9 /
+13.5 / 17.8s. Background calls are large (a whole section; a recorded 4.3k-token prompt) with ~0.4s
+of prefill against ~16s of decode, so an Ask arriving during the deferred window waits roughly one
+background call — 10 to 20 seconds — before its *first token*. On the low profile that is the
+default, not the worst case. **Residency is a memory control with no latency term in it: left
+alone, the plan trades a crash for a stall.**
+
+- `background=` already annotates call sites across the services (`document_tagger`, `note_tagger`,
+  `prereq_extractor`, `gap_detector`, `concept_linker`, `flashcard_audit`, and more) but carries
+  only routing meaning. Give it scheduling meaning — a change inside `LLMService`, not at thirty
+  callers.
+- `app/services/llm_admission.py` — a priority gate in front of the runtime's slots. Interactive
+  acquires immediately; background checks interactive pressure before issuing its *next* call. A
+  grace window (~5s) after an interactive call so a multi-turn chat is not interleaved.
+- Background call-size caps are largely already built (`49c8806` shrinks the per-unit cap as a
+  document grows; `1195f4f` added `WEB_REFS_MAX_SECTIONS`). What is missing is the framing: yield
+  granularity is one completed call, so **worst-case interactive wait equals the longest background
+  call**. Those caps are a latency bound, not only the cost control I-31 describes. Audit the
+  remaining background call sites for an unbounded prompt rather than adding new caps.
+- Profile-conditioned policy: `low` hard-suspends, `standard` reserves a slot, `performance`
+  separates physically.
+- An explicit "Indexing paused while you're asking" state in the UI — I-10 requires an explicit
+  state anyway, and a stated pause reads as control where a silent one reads as broken.
+
+Verified by: P0's latency probe on all three profiles — interactive TTFT under ingest load within
+*N*× of idle, with *N* taken from the baseline rather than invented — plus a test that a background
+call yields under interactive pressure. **Measure ingestion throughput too**, or you trade a stall
+for an ingest that never finishes.
+
+Falsifier: if hard-suspend on `low` makes ingest unacceptable for people who upload and walk away,
+suspend only while a chat is actively streaming and resume on idle. If yielding between calls is
+still too coarse, the lever is call size, not preemption — Ollama exposes no preemption primitive.
+
+### P6 — Eval matrix and calibration — **acceptance test passed 2026-08-18**
+
+`evals/run_model_matrix.py` switches the backend's model per candidate, runs the model-sensitive
+runners against it, takes the repair counters around every task, and reports the three tiers from
+`evals/lib/matrix.py`. `make eval-matrix MODELS=a,b` is the entry point; every run appends to
+`evals/model_matrix_history.jsonl` with the full environment block per arm.
+
+Four refusals, because a matrix that produces a number it cannot defend is worse than no matrix:
+it refuses to run when the backend is in a different prompt arm from the one asked for, refuses a
+model it could not verify the switch to, refuses a model that is not installed, and restores the
+original model even when a task fails. `--assert-separation` is the instrument's own acceptance
+test — it fails unless the structural tier tells the first two models apart, and prints that this
+is a finding about the instrument rather than about the models.
+
+**The two arms are backend settings, not runner flags.** `PROMPT_ARM=bare` renders the contract
+alone; `PROMPT_DROP_ACCOMMODATIONS=<ids>` withholds them one at a time for the necessity check.
+Both are read where `render()` is called, which is at import, so switching arms means restarting
+the backend — and that is the property that makes a run unable to straddle two arms. Both appear
+in `/evals/environment` as `prompt_arm` and `prompt_accommodations_dropped`, so every history row
+records which prompt produced it (E5).
+
+**Metric tiering is where the judgement lives**, and two entries are worth naming. `routing_accuracy`
+gates: its ground truth is hand-labelled, so it is not the style artifact a judged score is.
+`cards_returned` and `cards_deduped` are structural in shape but contaminated by library state —
+the near-duplicate filter drops candidates resembling cards the document already has — so they are
+reported and never allowed to decide a separation. `hit_rate`, `MRR` and `nDCG` never appear at all.
+
+**A P4 gap this work found, and the reason `accommodations_needed` cannot yet do anything.** Every
+spec is rendered at import time against `profile_for(default_chat_model())` — the *configured
+default*, not the model that will answer. Today that is invisible, because no registry entry has
+`accommodations_measured` set and so every model gets every accommodation. The moment the matrix
+fills `accommodations_needed` for one model, the value will be read for the wrong model or not at
+all. Rendering per resolved model is therefore a prerequisite for the necessity check's output to
+mean anything, and it belongs in P4 rather than being smuggled into the matrix.
+
+#### First run: separated, on one metric out of nine
+
+`llama3.2:latest` (2.0GB) against `qwen2.5:14b-instruct` (9.0GB), shipped arm, tasks intent +
+flashcards + summary, one library state (52 documents), 2026-08-16. Not the `qwen3.5:0.8b` /
+`4b` pair the plan names — those numbers still do not exist — but a wider size gap, which is the
+stronger test of whether the instrument can see a model at all.
+
+| structural | llama3.2 | qwen2.5:14b |
+|---|---|---|
+| intent.routing_accuracy | 0.8621 | **0.9655** |
+| flashcards.first_pass_rate | 0.0000 | 0.0000 |
+| flashcards.generation_rate | 1.0000 | 1.0000 |
+| flashcards.parse_failure_rate | 0.0000 | 0.0000 |
+| flashcards.cards_generated | 105 | 105 |
+| flashcards.parses / repaired | 39 / 39 | 38 / 38 |
+
+**The instrument is not blind, but it is nearly blind.** One metric separated a 3B model from a
+14B one. Everything the flashcard path reports is identical, and `parses` differing by one is
+noise below the margin.
+
+**`first_pass_rate` 0.0000 on both models was the harness, not the models — corrected 2026-08-16.**
+A metric pinned at 0.0000 everywhere has no more headroom than one pinned at 1.0000, and this one
+was measuring `_parse_llm_response`'s attempt order. It tried the array parser first; the flashcard
+prompt asks for `{"flashcards": [...]}` and the call passes `response_format={"type":"json_object"}`,
+so a fully compliant completion was sliced between the first `[` and the last `]` and its
+`{"flashcards":` wrapper counted as prose around an array. Every compliant generation was recorded
+as repaired, on every model, by construction.
+
+Three fixes, all of which change what future numbers mean:
+
+- **Parse the whole completion before slicing.** Valid JSON end to end needed no repair whatever
+  shape it is (`llm_json._strict`). Slicing is now the fallback, so `surrounded_by_prose` means
+  actual prose.
+- **Dispatch on the shape the completion opens with, and count one parse per completion**
+  (`top_level_shape`, `parse_array_with_repairs`). Trying both shapes used to record two parses,
+  which is the denominator of every rate on the path.
+- **A clean parse in the other shape is a deviation, not a repair.** `shape_deviations` counts it
+  separately: nothing had to be rewritten, but the model did not return the shape the prompt
+  specified. `expect=` is passed at each of the six flashcard call sites, taken from what that
+  site's own prompt asks for.
+
+Verified on the four cases: the compliant object is a first pass with no repairs; a bare array is a
+first pass plus one `shape_deviation`; prose around the JSON is a repair; a fenced object is a
+repair. **The 0.0000 numbers above are void** and the comparison needs re-running.
+
+**The summary task measured neither model, and that is the finding worth keeping.** All three
+summary metrics came back bit-identical to four decimals (`theme_coverage` 0.7833,
+`conciseness_pct` 2.4781, `summary_grounding` 0.3274). `POST /summarize/{id}` returns the stored
+summary unless asked to refresh, so the run scored whichever model wrote it first — a number that
+looks like a model comparison and is not one. Fixed two ways: `run_summary_eval.py --force-refresh`
+(recorded in the run's environment, and always passed by the matrix), and
+`matrix.unmeasured_tasks`, which flags any task whose every metric is identical across two models,
+because two models do not produce the same float to full precision on work that depends on them.
+
+#### Metrics added because saturation is not a measurement
+
+The flashcard structural tier was three saturated numbers — `generation_rate` 1.0000,
+`parse_failure_rate` 0.0000, `first_pass_rate` 0.0000 — and one that worked. A tier that cannot
+move cannot decide anything, so two signals that already existed but were thrown away are now
+counted:
+
+- **`card_reject_rate`** and the per-reason counts (`card_reject_deictic`, `_short_answer`,
+  `_empty_field`, `_bloated`). `_gate_cards` already ran `card_rejection_reason` on every generated
+  card, logged the verdict and dropped it. That gate checks exactly what the prompt forbids —
+  deictic questions, one-word answers, empty fields, a bloated question with a trivial answer — so
+  it reads instruction-following with no judge in the loop, which is the rarest thing in this
+  suite. The verdict now carries a stable kind so the counter survives a reworded message.
+- **`shape_deviation_rate`**, above.
+
+Both are in the structural tier, in `make eval-flashcards`, and in the matrix. Neither can saturate
+the way a parse-success rate does, because both measure content the model chose.
+
+#### Where these show up
+
+Per-run structural metrics already reach the Quality dashboard: anything outside the fixed column
+set rides in `extra_metrics` (`evals/lib/store.py`) and the Runs tab renders it generically. What
+did not exist was the comparison — the matrix wrote a local JSONL and nothing else. **Quality →
+By model** now pivots stored runs by resolved model, one column per model, structural tier only,
+carrying the same two refusals as the runner: columns measured against different corpora are
+labelled rather than ranked, and a metric identical across models is flagged `did not move` rather
+than read as the models being equivalent.
+
+#### P6 on the low profile, 2026-08-18: separated, and it does not reproduce the earlier ranking
+
+`LUMINARY_MEMORY_PROFILE=low` in force, so all four roles resolve to one model. Candidates are the
+two generalists — the only models that can fill every role on that profile. Structural tier,
+judge skipped, 35-row flashcard golden + 29-row intent golden.
+
+| | qwen3.5:4b | gemma3:4b |
+|---|---|---|
+| intent.routing_accuracy | **0.8966** | 0.8621 |
+| flashcards.generation_rate | 0.7143 | **0.9143** |
+| flashcards.cards_generated | 75 | **96** |
+| flashcards.card_reject_rate | 0.3125 | **0.2826** |
+| flashcards.card_reject_deictic | **4** | 11 |
+| flashcards.card_reject_ungrounded | 31 | 28 |
+| flashcards.atomicity / first_pass_rate | 1.0000 / 1.0000 | 1.0000 / 1.0000 |
+
+**`qwen3.5:4b` does not lead every gating metric here, and the 2026-08-16 claim that it did no
+longer holds.** `gemma3:4b` delivered more cards and had the lower overall reject rate. What
+survives for `qwen3.5:4b`: routing, deictic instruction-following (4 rejections against 11, the
+same 3x gap seen in August), figure accuracy, and 0.4GB less resident.
+
+The shape of the comparison also changed under both models: `card_reject_ungrounded` (31 and 28)
+did not exist in August and now dominates rejections, so reject rates across the two runs are not
+comparable. Single runs on both sides.
+
+`memory_profile`, `max_resident_models`, `host_ram_gb` and the resolved `resident_models` are now
+in every run's environment block — without them a low-profile run was indistinguishable in the
+history from one on a 32GB desktop, which is E5's defect on the axis that decides which models are
+resolvable at all. `vision_model` reports the *resolved* model rather than the configured one, for
+the same reason.
+
+**What this run is not.** Setting the profile changes the role map, not the machine. The structural
+tier is portable — it measures what a model produces — but P0 footprint and P5 latency under the
+low profile still need 8GB hardware.
+
+#### The low profile had no feasible assignment, and the cause was two wrong flags
+
+Measured 2026-08-18, by enumerating every assignment of a registry model to the four roles under
+`max_resident_models` and the half-the-machine memory policy:
+
+| profile | host | max resident | feasible assignments, before | after |
+|---|---|---|---|---|
+| low | 8GB | 1 | **0** | 2 |
+| standard | 16GB | 2 | 1 | 45 |
+| performance | 32GB | 2 | 29 | 101 |
+
+**Zero** meant a machine in the target class could not run the product: the vision role resolved
+to `qwen2.5vl:7b`, 6.81GB and `min_ram_gb=16`, and nothing else in the registry declared
+`multimodal`. The first symptom would have been a crash during ingestion, which is the failure
+this phase exists to convert into a refusal at the point of choosing.
+
+The cause was not the memory policy. `qwen3.5:4b` and `gemma3:4b` both read images and were both
+recorded `multimodal=False` — a capability written by hand with nothing to disagree with.
+`tests/test_registry_matches_runtime.py` now checks every entry's `multimodal` and
+`thinking_default` against what Ollama reports (marked `e2e`, and it calls `/api/show` only, so it
+runs no inference).
+
+**One model fills all four roles on an 8GB host: `qwen3.5:4b`, 3.21GB.** Vision costs it nothing
+resident — `/api/ps` reported 3.21GB with an image loaded, the same as its text footprint. The two
+rankings agree on it independently: `GENERALIST_PREFERENCE` is P6's text order intersected with the
+figure probe below, and both put it first, so there is no trade-off to weigh.
+
+Vision quality was measured on real library figures rather than inferred from the capability flag,
+because it does not track size:
+
+| | decision tree (root x₂, ± leaves) | Intel SDM operand-encoding table |
+|---|---|---|
+| `qwen3.5:4b` (3.21GB) | correct, named the root | correct: "x86", four operand fields |
+| `qwen2.5vl:7b` (6.81GB) | correct, root unidentified | structure right, invented "Move Register"/"Move Immediate" |
+| `gemma3:4b` (3.62GB) | **"Boolean logic circuit with addition and subtraction gates"** | **"ARM Cortex-M4"** |
+
+`gemma3:4b` is 4x faster than the other two and fabricated on both — it answers short and wrong,
+which matches its worst-in-class text behaviour below (13 deictic rejections, 4x the others).
+`VISION_PREFERENCE` encodes this ranking so a multimodal model nobody has measured cannot be
+handed a figure ahead of one that has been.
+
+**n=2 checkable figures.** Enough to disqualify `gemma3:4b`, not enough to retire `qwen2.5vl:7b`:
+sharing is therefore a remedy for a host that cannot hold two models, never a preference. A
+machine with room keeps its dedicated reader.
+
+#### The 8GB class, measured 2026-08-16
+
+Footprints are measured (`scripts/model_footprint.py`, Ollama `/api/ps` after a real generation at
+the deployed `num_ctx`), so the registry offers an 8GB host four text models instead of one. The
+matrix then ran all four on intent + flashcards, shipped arm, one library state.
+
+| | llama3.2 | qwen3.5:4b | phi4-mini | gemma3:4b |
+|---|---|---|---|---|
+| routing_accuracy | 0.8621 | 0.8966 | **0.9310** | 0.8621 |
+| card_reject_rate | 0.0463 | **0.0278** | 0.0374 | **0.1161** |
+| — deictic rejects | 3 | 2 | 2 | **13** |
+| generation_rate | 0.9714 | **1.0000** | 0.9810 | 0.9238 |
+| LLM calls / 35 generations | 40 | 41 | **61** | 41 |
+| resident | 2.88GB | 3.21GB | 3.45GB | 3.62GB |
+| wall clock | **212s** | 450s | 336s | 406s |
+
+`qwen3.5:4b` and `phi4-mini` are the two credible candidates. phi4-mini leads on routing but needed
+18 retries against 4–6, which on a laptop is a latency and battery cost no quality metric shows —
+the reason `parses` belongs in the tier. `gemma3:4b` is the laggard on the one metric that reads
+instruction-following: 13 deictic rejections, 4× the others, on a rule the prompt states outright.
+Spot-checked against the gate's own log — the rejects are real ("Why does *the author* describe…"),
+not a misfiring gate.
+
+**Not a basis for a switch yet.** Single runs; n=29 for routing and ~108 for cards, so a 1–3 event
+difference is noise and only gemma3's reject rate and phi4-mini's call count are actionable.
+`first_pass_rate`, `parse_failure_rate` and `shape_deviation_rate` read 1.0000/0.0000/0.0000 on all
+four — the json-mode saturation, not agreement between models.
+
+Two instrument limits this run exposed, both open:
+
+- **The separation block compares only the first two arms.** With four models it silently ignores
+  the rest.
+- **`cards_generated` absorbs repeated questions.** `_collect_with_backfill` caps delivery at the
+  requested count and drops questions the model repeated within a generation, so llama3.2 lost 1
+  card and gemma3 lost 2 with nothing reporting it. A model repeating itself is exactly the
+  structural weakness this tier should show; it wants a `duplicate_question_rate`.
+
+#### The answering path decides it, and it reverses the flashcard ranking
+
+`make eval-matrix` gained `--qa-datasets`, so the answering task runs once per content kind with
+metrics namespaced per dataset. Measured on the two credible candidates, 3 kinds × 40 questions ×
+2 models = 240 scored answers.
+
+| | qwen3.5:4b | phi4-mini |
+|---|---|---|
+| book — answer_rate / citation_coverage | 0.9750 / **0.7179** | 0.9500 / **0.1842** |
+| legal — answer_rate / citation_coverage | 1.0000 / **0.7250** | 0.9500 / **0.1842** |
+| study — answer_rate / citation_coverage | 1.0000 / **0.6750** | 1.0000 / **0.2000** |
+| citations proposed (book/legal/study) | 66 / 100 / 85 | 8 / 9 / 8 |
+| uncited answers | 11 / 11 / 13 | 31 / 31 / 32 |
+| faithfulness *(report only)* | 0.549 / 0.602 / 0.441 | 0.629 / 0.685 / 0.540 |
+
+**13 metrics separated the two models, where the flashcard task separated one.** The answering path
+is the most discriminating instrument in the suite, and running it per content kind is what makes
+the result unarguable: the same 4× citation gap appears on prose fiction, a contract and a
+textbook, so it cannot be read as a genre effect.
+
+phi4-mini won routing accuracy on the flashcard run and **fails the product's core contract here**,
+leaving 3 of 4 answers unverifiable. Verified with a live call rather than inferred from the
+counter: its answer ends as prose and emits no citations block at all — it is not producing
+malformed markers that get dropped, it ignores the contract. The identical 0.1842 on two datasets
+is a real coincidence (both landed on 38 answered and 31 uncited; `citations_proposed` differs),
+not a replayed artifact.
+
+**Recommendation for the 8–16GB profile: `qwen3.5:4b`** — 3.21GB, leads every gating metric across
+both tasks. Not yet a switch: single runs, and P5's latency behaviour under ingest is unmeasured.
+
+**Do not read the faithfulness row as favouring phi4-mini.** It is the report-only tier, and a
+cross-model HHEM delta is exactly the style artifact that cost this repo a model decision once
+already. Shorter uncited answers plausibly hug the retrieved context more closely; that is a
+hypothesis, not a measurement.
+
+Still unrun: both prompt arms on this class, and P5's latency probe on any of them.
+
+
+
+`evals/run_model_matrix.py` drives the model-sensitive runners (`run_intent_eval`,
+`run_flashcard_eval`, `run_summary_eval`, `/qa`) across candidates, with two arms the previous
+attempt lacked:
+
+- a **scaffolding-tax arm** — shipped prompt versus bare contract. If a model scores higher on the
+  bare contract, the accommodation set is its ceiling.
+- an **accommodation necessity check**, whose output is `accommodations_needed` on the registry
+  entry.
+
+Metric tiers apply from here onward:
+
+| Tier | Metrics | Role |
+|---|---|---|
+| Structural | Raw parse rate before repair, repair-kind counts, schema conformance, requested-count adherence, first-pass acceptance, citation validity, non-empty answer rate | Gates a model swap |
+| Quality | Faithfulness/HHEM, judged answer quality | Report only — cross-model deltas are style artifacts |
+| Excluded | hit_rate, MRR, nDCG | No generation-model term; including them lets retrieval noise be blamed on a model |
+
+Verified by: re-running on llama3.2 reproduces committed numbers, then the phase's own acceptance
+test — **the matrix must visibly separate `qwen3.5:0.8b` from `qwen3.5:4b`.** Two models that
+different must not score alike.
+
+Falsifier: if it cannot separate them, the instrument is still blind. Go back to P2 and add metrics
+until it can. **Do not choose a model on a blind instrument.** That is exactly what happened last
+time.
+
+#### The acceptance test, run 2026-08-18: separated on 8 metrics
+
+`ollama/qwen3.5:0.8b` (1.04GB) against `ollama/qwen3.5:4b` (3.39GB), shipped arm, tasks intent +
+flashcards, one library state, judge skipped. The pair the plan names, whose numbers did not exist
+until now.
+
+| structural | qwen3.5:0.8b | qwen3.5:4b |
+|---|---|---|
+| intent.routing_accuracy | 0.8276 | **0.8966** |
+| flashcards.generation_rate | 0.3905 | **0.7905** |
+| flashcards.cards_generated | 41 | **83** |
+| flashcards.card_reject_rate | 0.5905 | **0.3538** |
+| flashcards.cards_rejected | 62 | 46 |
+| flashcards.atomicity | 0.9412 | **1.0000** |
+| flashcards.first_pass_rate | 0.9655 | **1.0000** |
+| flashcards.shape_deviation_rate | 0.0345 | **0.0000** |
+| flashcards.parses_repaired / repair_truncated | 2 / 2 | 0 / 0 |
+| flashcards.duplicate_question_rate | 0.0000 | 0.0000 |
+
+**Stage 5's exit gate is met.** The 0.8B delivers 41 of 105 requested cards against the 4B's 83,
+and more than half of what it produces the deterministic gate throws away. That is a model
+difference visible without a judge anywhere in the loop.
+
+Three things this run settled about the instrument itself:
+
+- **`first_pass_rate` is alive.** It read 0.0000 on every model until the parse dispatch was fixed,
+  which voided the 2026-08-16 numbers. It now reads 0.9655 against 1.0000 and separates.
+- **`atomicity` was not saturated, only unchallenged.** It had read 1.0000 on every run since the
+  prompt change; the 0.8B is the first model to move it (0.9412). A metric with no observed
+  headroom is not the same as one with none, and the way to tell them apart is a weaker arm.
+- **`duplicate_question_rate` did not fire.** Added for this run on the hypothesis that a small
+  model repeats itself, it read 0.0000 on both. Verified it *can* move
+  (`tests/test_duplicate_question_metric.py` drives a repeat through `_collect_with_backfill` and
+  asserts the counter), so this is a measurement and not a dead metric. The hypothesis was simply
+  wrong for this pair.
+
+Two instrument limits from the previous run are closed: separation now compares **every pair**
+rather than `arms[0]` against `arms[1]` (with four models it silently ignored the rest, so a run
+could print SEPARATED while two candidates were indistinguishable), and `--assert-separation`
+fails if any pair is unseparated. Every pair's verdict is written to history as `separation_pairs`.
+
+**`qwen3.5:0.8b` has no registry entry**, so `profile_for` returns None and this run carries no
+measured footprint. That is tolerated by design — callers degrade — but it means the run answers
+"can the instrument see the difference" and contributes nothing to the Stage 6 switch. Measuring
+it with `scripts/model_footprint.py` is the prerequisite if it is ever a candidate rather than a
+control.
+
+---
+
+## Stage 6 — Switch and lean out
+
+### P7 — Memory profile and the model switch — **registry made load-bearing 2026-08-16; the switch is not made**
+
+`app/memory_profile.py` detects host RAM and resolves the active profile;
+`model_router.residency_report()` answers what the current configuration costs on this machine;
+`GET /settings/models` and `/settings/models/catalogue` expose both. Smoke S232.
+
+**The gap this closed is that the registry was inert.** `min_ram_gb` and `resident_bytes` had been
+on every entry since P3 and nothing read them, so a 10GB model was selectable on a 16GB laptop and
+the first symptom was a crash during ingestion rather than a refusal at the point of choosing.
+Three numbers were each knowable and never put together: host RAM, how many *distinct* models the
+four roles resolve to, and what those models weigh.
+
+Verified by firing the check rather than by a clean pass — a check that has never returned False is
+unverified. This machine's actual configuration, evaluated against a 16GB host: profile `low`,
+2 models resident against a limit of 1, 16.0GB of models, `qwen2.5:14b-instruct` flagged oversized.
+That is the reported crash, predicted from config alone.
+
+**Advisory in the backend, authoritative at install time.** `install.sh` and `supervisor.rs` size
+`OLLAMA_MAX_LOADED_MODELS` and `OLLAMA_NUM_PARALLEL` from the same RAM reading and pass them to
+Ollama as well; I-31 is explicit that a backend disagreeing with the runtime leaves the extra slots
+idle. Nothing here overrides them. The thresholds match `install.sh:_default_profile` deliberately —
+two detectors disagreeing about what machine this is would be worse than one occasionally wrong.
+
+One vocabulary, one alias: `install.sh` called the small profile `public`, which collides with
+`LUMINARY_MODE=public`, a surface-curation concept on an unrelated axis. `low` is the name;
+`public` is read as a legacy alias so an installed `.env` keeps working.
+
+Still open in this phase, and none of it is a detail:
+
+- **The profile picks the role map on a single-resident host** — shipped 2026-08-18. Fixing the
+  vision role alone was not enough and the gap was invisible: with vision host-aware but chat still
+  defaulting to text-only `llama3.2`, an 8GB host resolved chat to one model and vision to another,
+  which is two models on a profile allowed one. The failure had moved rather than gone.
+  `default_chat_model` now narrows to a `generalist_candidates` entry — multimodal, fits the host —
+  whenever `max_resident_models() <= 1`, and `default_vision_model` reuses it. A fresh 8GB install
+  resolves all four roles to `qwen3.5:4b`, 3.21GB, one resident model.
+
+  Only *defaults* are narrowed. An explicit choice in Settings is honoured and reported as
+  oversized by `residency_report()`, and a host with room keeps a text-only default and a dedicated
+  reader.
+
+  **Room is the residency limit, not host RAM** — gating on RAM alone left a 36GB machine running
+  the low profile resolving two models against a limit of one, which is exactly what the bundled
+  app does when it sizes itself down. Found by running the profile rather than by reading the code.
+
+  **A smaller window is measured and rejected.** `context_window_for` made per-model windows
+  possible, so the saving was measured on `qwen3.5:4b` (`/api/ps`, reproducible to 0MB across
+  repeats): 8192 → 3.21GB, 6144 → 3.15GB, 4096 → 3.00GB. Shrinking to 6144 buys 60MB, 0.7% of an
+  8GB machine, and cuts flashcard headroom from ~3,800 tokens to ~1,700. The only saving worth
+  having is at 4096, which does not hold the largest prompt (~3,177 prompt + ~1,200 output) and
+  truncates instead of erroring. The mechanism stays; no model gets a different window, and
+  `tests/test_window_fits_the_largest_prompt.py` fails any entry that tries.
+
+  Still open: the profile does not choose between two models that both fit.
+- **Runtime geometry is still partly global.** The context window is no longer: I-27's value half
+  shipped 2026-08-18 as `model_registry.context_window_for`, which reads the model's
+  `usable_context` and falls back to `OLLAMA_NUM_CTX` only for an unregistered model. Every entry
+  still declares 8192, so nothing moves in production until a model is measured at a different
+  window — the mechanism exists, the calibration does not. `QA_CONTEXT_TOKEN_BUDGET` is still 1500
+  for everyone and `think=False` is still unconditional; both were sized for llama3.2.
+- **`accommodations_needed` is empty on all three entries and nothing writes it.** P6 now produces
+  the evidence; there is no path from a matrix run to a calibrated profile.
+- **Three registry entries.** The four models in the 8–16GB class that are installed on this
+  machine — `phi4-mini`, `gemma3:4b`, `qwen3.5:4b` alongside `llama3.2` — have no entries, so the
+  catalogue cannot recommend them and the matrix cannot report their footprint.
+- **The exit gate is unmet**: P0 footprint, P5 latency and P6 structural on all three profiles.
+
+`LUMINARY_MEMORY_PROFILE: low | standard | performance`, defaulted from host RAM. Reuse
+`total_memory_gb()` and `_mem_gb()` rather than adding a third detector. The profile picks the role
+map **and** the slot policy from P5 — footprint and latency isolation move together. `vision_model`
+retires as a first-class knob and becomes the `vision` role's resolution. The I-31 amendment lands
+here, in the PR that makes it true.
+
+Verified by: all three gates together, on all three profiles — P0 footprint, P5 latency, P6
+structural — plus the residency test `len({resolve(r).model for r in ROLES}) <= max_resident[profile]`.
+
+Falsifier: if `qwen3.5:4b` fails a structural gate, **swap the id in the registry and re-run — do
+not patch prompts.** But if *every* candidate fails a gate that llama3.2 passes, that gate is
+encoding a llama3.2 accommodation and belongs in P4's audit, not in the gate set.
+
+### P8 — Lean-out and surfacing
+
+- Delete accommodations the calibration proved unnecessary. This is the payoff of P4's attribution:
+  deletion becomes evidence-driven rather than nervous.
+- Delete tolerant-parser paths if P2 showed near-zero repairs on the shipped model.
+- Bloom labels: render the verb, not a bare `L3`, at `DeckHealthPanel.tsx:55` and `:159`.
+- Surface resident models, their measured size, and the active profile in Settings.
+- **Do not touch the embedder.** bge-small is 0.13GB and I-9 pins 384 dimensions; replacing it is a
+  full corpus re-embed behind a migration to save ~100MB.
+
+Verified by: `make ci`, `make smoke`, surface-manifest coverage, and a footprint delta from P0.
+
+Falsifier: feature deletion is irreversible in practice. Each removal needs explicit sign-off, and
+no deletion ships inside a refactor PR — if the refactor is reverted, the deletion must not come
+back with it.
+
+### E10 — No labelled data, so no quality bar anywhere
+
+Every generation floor is a collapse detector derived as `mean - 3sd`. `faithfulness` sits at 0.30
+because the observed distribution is unimodal, with no gap between grounded and hallucinated
+answers to place a bar in. The citation judge scores its own notion of support and nothing
+establishes that notion is right.
+
+**Fix**: 60–100 answers labelled grounded / not-grounded, and the same answers' citations labelled
+supported / not. That one set validates the judge, makes a real faithfulness bar derivable, and
+anchors the structural tier.
+
+Last because it is the only item needing human labelling time, and everything above it is decidable
+without one. It can start in parallel at any point. **Do not raise the faithfulness floor without
+it** — 0.65 would have failed 11 of 12 healthy answers.
+
+---
+
+## Reference — footprint
+
+Estimates from published quantised weight sizes plus measured figures in this repo. P0 replaces
+them with measurements.
+
+| Component | Source | Resident |
+|---|---|---|
+| Ollama chat runner, llama3.2 Q4 + KV@8192 | `components.py` `chat_model` | ~2.5GB |
+| Ollama vision runner, qwen2.5vl:7b Q4 + ViT + KV | `config.py:124` | ~6.5GB |
+| GLiNER `gliner_multi_pii-v1` | `model_prefetch.py` spec, 1126MB | ~1.2GB |
+| Cross-encoder L-12 + bge-small | `config.py:98`, `embedder.py` | ~0.3GB |
+| Python + torch + PyMuPDF baseline | | ~1.3GB |
+| Tauri WebKit | | ~0.5GB |
+| macOS baseline | | ~3.0GB |
+
+Both Ollama runners are resident simultaneously because `spawn_ollama` sets
+`OLLAMA_KEEP_ALIVE=30m` but never `OLLAMA_MAX_LOADED_MODELS`, whose Ollama default is 3.
+`scripts/install.sh:198` and `scripts/bootstrap.sh:257` both cap it; the DMG path does not.
+
+Summed against a 16GB host: **~15.3GB during a PDF ingest today, projected ~8.1GB after P1 and
+P7** — one runner instead of two, and the vision runner released rather than held for 30 minutes.
+Both figures are estimates until P0 measures them; they are good enough to choose a direction and
+not good enough to commit to a threshold.
+
+## Reference — profiles
+
+A memory profile is a constraint on the role→model map **and** a latency-isolation policy. Two
+roles resolving to different model ids cost two resident runners whatever
+`OLLAMA_MAX_LOADED_MODELS` says.
+
+| Profile | RAM | chat / generation / background / vision | Slots | Contention |
+|---|---|---|---|---|
+| low | <12GB | all `qwen3.5:2b` | 1 | Background suspends while a session is active |
+| standard | 12–24GB | all `qwen3.5:4b` | 2 | One slot reserved for interactive |
+| performance | ≥24GB | `9b` / `9b` / `0.8b` / `4b` | 2–4 | Background on its own runner |
+
+A slot costs a full `OLLAMA_NUM_CTX` of KV cache — 896MiB for a 3B (I-31), so ~1.2GB for a 4B at
+8192. The reserved lane in `standard` is only affordable once the 6.5GB vision runner is gone,
+which is why P7 pays for P5.
+
+Qwen 3.5 is the only family that makes this table buildable: every variant 0.8b–9b is natively
+multimodal at 256K context, so one family covers all four roles at three sizes. Kimi has no
+self-hostable variant. DeepSeek's small variants are reasoning distills, which conflict with the
+global `think=False` (`llm.py:227`) that exists because thinking traces burn `num_ctx` before any
+answer token. Gemma 4 / Gemma 3 4B is the fallback candidate, gated on JSON validity rate — its
+documented weakness is strict instruction adherence, and Luminary's non-chat surface is almost
+entirely JSON-shaped.
+
+## Reference — what the suite can decide today
+
+| Change under test | Decidable | Binding limit |
+|---|---|---|
+| Embedder, reranker, fusion weights (scoped) | with care | Tuning set is the gate set (E7); hint matching is coupled to chunking (E6) |
+| Chunking or parse change | no | HR@5 moves on chunk boundaries for non-retrieval reasons (E6) |
+| Cross-document routing | no | Every gated arm pins `document_id` (E2) |
+| Answering-model swap | no | No structural metric (P2); one run cannot resolve the delta (E4) |
+| Generation prompt change | partial | Floors on `book` + `paper` only; ±0.10 on book is noise |
+| Summaries | no | The metric is invalid as written (E3) |
+| Flashcards, topics, tagging under a new model | no | Flashcard runner has no target; intent saturated at 1.0 (E9) |
+| Interactive modes, FSRS, concept graph, enrichment | no | No runner exists |
+
+## Reference — measured baselines
+
+One library state, bit-reproducible on re-run. **Compare a change against these, never against a
+floor.** Every number here predates E5, so its library state is recorded in prose rather than in
+the run.
+
+### Retrieval
+
+| dataset | source | rows | flagged | chunks | HR@5 / MRR / nDCG@10 |
+|---|---|---|---|---|---|
+| book | time_machine.txt | 40 | 2 | ~1.6k | 0.5750 / 0.3979 / 0.5074 |
+| paper | art_of_unix.txt | 40 | 3 | 146 | 0.8500 / 0.7025 / 0.7461 |
+| legal | federalist_papers.txt | 60 | 0 | 2537 | 0.5333 / 0.3728 / 0.4508 |
+| play | hamlet.txt | 60 | 5 | 394 | 0.6500 / 0.4406 / 0.5263 |
+| study (PDF) | sutton_barto_rl.pdf | 60 | 17 | 1939 | 0.5833 / 0.4136 / 0.4832 |
+| thoughts | daily_thoughts_2026.txt | 4 | 0 | 7 | 1.0000 / 1.0000 / 1.0000 |
+
+`study` is the only measurement of the **PDF parse path**; before 2026-08-12 `generate_golden.py`
+read sources as bytes, so a PDF produced questions about `%PDF-1.5 /FlateDecode`. `thoughts` reads
+1.000 because top-5 over a 7-chunk document returns most of it — a property of a 2,944-char source,
+not of retrieval, which is why it is measured and never gated. `make eval` covers the other five.
+
+`paper` was not fit to gate on and was regenerated 2026-08-12: `art_of_unix.txt` is a scrape
+carrying site chrome interleaved with prose (460 of 2166 lines, 118 of 248 chunks). Fixed in
+ingestion, not in the corpus — `app/services/source_text.py` collapses repeating furniture and
+`generate_golden.py` reads through it, so generator and ingestion see one document.
+
+| | before | after |
+|---|---|---|
+| chrome-sourced questions | 17 / 40 | **0** |
+| ambiguous hints | 18 / 40 | **2** |
+| distinct hints | 32 | 39 |
+| index | 248 chunks | 146 chunks |
+| MRR across re-runs | drifted 0.0125 | bit-identical |
+
+Before and after are not comparable — different questions against a different index. What is
+established is that the dataset now measures the book, reproducibly. Hint integrity is verified:
+40/40 hints and 40/40 graded passages resolve in the corpus for both `book` and `paper`.
+
+### Generation — the standing baseline
+
+Marker citations: `pack_context_indexed` labels each emitted passage `[S<n>]`, the model cites
+`{"source":"S1"}`, and the backend fills the excerpt from that chunk — verbatim by construction,
+carrying the `chunk_id` that makes the chip deep-linkable. Measured 2026-08-13, judge
+`ollama/qwen2.5:14b-instruct`, retrieval bit-identical to the table above.
+
+| | book | paper |
+|---|---|---|
+| faithfulness (HHEM) | 0.6855 | 0.7012 |
+| answer_relevance | 0.6729 | 0.8527 |
+| citation_support_rate | 0.6754 | 0.7449 |
+| citation_coverage | 0.8571 | 0.9744 |
+| answer_rate | 0.8750 | 0.9750 |
+| citations proposed / gated / dropped | 63 / 6 / 0 | 49 / 0 / 0 |
+
+`make eval-gen` has not been re-run as a distribution against this design, so **the floors stay
+untouched**: one measurement per dataset is not a distribution, and a bar set now would be
+calibrated against a design that has already changed. E4 is what makes the re-run meaningful.
+
+All six kinds, one run each on the marker build (`book`/`paper` are the 4-run means):
+
+| dataset | HR@5 | support | coverage | answer_rate | faithfulness | answer_relevance |
+|---|---|---|---|---|---|---|
+| book | 0.5750 | 0.6491 | 0.8245 | 0.9250 | 0.6888 | 0.6729 |
+| paper | 0.8500 | 0.7089 | 0.9679 | 0.9750 | 0.6802 | 0.8527 |
+| legal | 0.5333 | 0.7476 | 0.9500 | 1.0000 | 0.7375 | 0.7376 |
+| play | 0.6500 | 0.7338 | 0.9286 | 0.9333 | 0.5660 | 0.7321 |
+| study (PDF) | 0.5833 | 0.7167 | 0.9000 | 1.0000 | 0.6145 | 0.7852 |
+| thoughts | 1.0000 | 1.0000 | 0.7500 | 1.0000 | 0.6309 | 0.8759 |
+
+Every kind clears every derived floor and `citations_dropped` is 0 everywhere: no ungrounded
+excerpt reached a user on any corpus. **`book` is the weakest dataset, not the representative one**
+— the other five score 0.72–1.00 on citation support against book's 0.65, so the citation work was
+tuned against the hardest case. `play` carries the lowest faithfulness (0.5660) because Hamlet is
+verse and dialogue while HHEM scores prose entailment, the same style artifact that bars
+cross-model faithfulness comparison. `study` recorded `judge_failed_calls: 1` of ~90; a number
+quoted from that row should say so.
+
+### Variance, and the floors derived from it
+
+Four runs per dataset on one frozen build, same corpus, bit-identical retrieval:
+
+| | citation_support_rate | citation_coverage | answer_rate | faithfulness |
+|---|---|---|---|---|
+| book | 0.6491 ± 0.0521 | 0.8245 ± 0.0628 | 0.9250 ± 0.0354 | 0.6888 ± 0.0120 |
+| paper | 0.7089 ± 0.0254 | 0.9679 ± 0.0323 | 0.9750 ± 0.0000 | 0.6802 ± 0.0168 |
+
+**A single run cannot resolve a change smaller than ~0.10 on book or ~0.05 on paper.** book's
+support rate ranged 0.5893–0.7065 across identical runs and `citations_proposed` ranged 49–71: the
+model's citation volume is itself unstable, which is most of the spread. Two structural changes
+were credited with moving this metric by less than that band; both were inside the noise and
+neither claim survives. Retrieval metrics are exempt — bit-reproducible on a fixed corpus.
+
+Floors are `mean - 3sd` for the weaker dataset, rounded down to 0.05: `citation_support_rate` 0.45,
+`citation_coverage` 0.60, `answer_rate` 0.75. They replace 0.80s that were invented with no
+derivation. Support at 0.65 is not good; it is what this build scores.
+
+### What these numbers cost to learn
+
+Three findings that will otherwise be re-derived:
+
+- **`citation_support_rate` had never once computed.** Two independent reasons each hid the other:
+  it paired claims by splitting prose on `[N]` markers the product never emits, and `judge_citation`
+  imports `litellm`, absent from the `evals` project, so every call raised `ModuleNotFoundError`
+  into a swallowed counter. I-32 is what surfaced both.
+- **The 0.485 first measurement was two stacked defects.** The product fabricated quotes (closed by
+  I-33: excerpts are verified against the grounding and dropped when absent), and the judge prompt
+  demanded each excerpt "fully support the claim", which no single excerpt can do — it scored `no`
+  on a verbatim correct citation while giving a fabricated commentary chip a `yes`. Scores recorded
+  before that change are not comparable to scores after it.
+- **The metric was measuring the excerpt window, not the citation.** 12 of 15 `book` chips were
+  head cuts of their chunk; judged on the full chunk the same chips scored 0.8667 against 0.5667,
+  8 of 15 verdicts flipping and none the other way. Selecting the window against the answer moved
+  support 0.5000 → 0.6754 (book) and 0.4500 → 0.7449 (paper) with retrieval, prompt and proposals
+  unchanged. The lesson is the metric's own: **judge what the product shows, and confirm the metric
+  scores the object you think it does before optimising against it.**
+
+## Reference — corrections to the audit reports
+
+Acting on these as written would waste work or make the harness worse.
+
+| Claim | Status |
+|---|---|
+| Unscoped eval is unreliable because `/search` group-flattening breaks rank order | **Stale.** `run_eval.py:319` sorts by `global_rank`. The warning at `:274` is wrong and goes with E2 |
+| Small datasets (`code` 5, `thoughts` 4, `conversation` 18) produce false CI signals | **Already prevented.** `_TOO_SMALL_TO_GATE` records and never gates them; `make eval` runs five datasets, none small. The real defect is that those surfaces are unmeasured (E9) |
+| Metrics can be defaulted or fabricated to fill a gap | **Already closed.** I-32; `run_eval.py:1009-1060` fails a requested-but-uncomputed metric and skips only what was never requested |
+| Raise the faithfulness floor to ~0.55 | **Reject.** No labelled data to derive a bar from, a unimodal distribution, and cross-model HHEM deltas are style artifacts. Build E10 first |
+| Reranker choice is benchmark favouritism | **Overstated.** Documented selection on a sweep. The defect is the missing holdout (E7) |
+| `paper` is corrupt and scores above `book` | **Fixed 2026-08-12**, see the regeneration table. Pre- and post-fix numbers are not comparable |
+| Per-dataset pass rates from `audit_golden.py --all` (`book_frankenstein` 47.5%, `code` 0/5) | **Not reproduced.** They need a live backend in a known library state. Reproduce with an E5 fingerprint attached before treating any as a finding |
+
+## Reference — duplication removed by these stages
+
+Measured on `ba0c1db`.
+
+| Finding | Evidence | Stage |
+|---|---|---|
+| `_splitter_cls` triplicated verbatim | `tech_book_chunker.py`, `paper_chunker.py`, `ingestion_nodes/chunk.py` — identical docstring and body | standalone chore |
+| Two tolerant-JSON implementations | `llm_json.py` (149 lines) plus a second ladder in `flashcard_parsers.py` (254 lines) | 3 (P2) |
+| Five model-resolution paths | Two bypass `settings_service` | 4 (P3) |
+| 28 cross-module private-name imports | Worst: `settings_service._cache` from `main.py:67` and `routers/settings.py:293` | 4 (P3) |
+| RAM detection written three times | `install.sh:_mem_gb`, `bootstrap.sh:MEM_GB`, `supervisor.rs:total_memory_gb()` | 6 (P7) |
+| ~~Entity model id hardcoded in three places~~ | `ner.py` ×2 plus `model_prefetch.py`; now `NER_MODEL` | done, P1 |
+
+Checked and cleared: `_fire_and_forget` in four modules is a one-line alias over a shared helper.
+The graph cluster (2524 lines, 7 files) is a decomposition by concern.
+
+Unassigned: the flashcard cluster is 3233 lines over 9 files and the generators extraction is
+half-done — `FlashcardService` thin-delegates per its docstring but still imports `_CLOZE_BLANK_RE`
+from `flashcard_parsers`. That needs a decision about what `FlashcardService` is for, not a task.
+
+**Do not add a cleanup phase. Add a ratchet.** The repo already trusts this mechanism:
+`layer_linter.py`'s `KNOWN_VIOLATIONS` may only shrink. Apply the same shape to quality — a
+private-cross-import check with a frozen allowlist and a duplicate-block count, both wired into
+`make ci`. The per-stage rule is then simple: a PR leaves its touched area with no new duplicate
+and no new private cross-import, and removes the duplication lying in its own path.
+
+## Reference — invariants
+
+Reworded on this branch; all five describe things that already exist.
+
+| | Change |
+|---|---|
+| I-9 | Dimension is a stored property of the corpus. The embedder is not pluggable the way a generation model is; replacing it is a re-embed behind a migration |
+| I-16 | "Prioritize Ollama" → a fresh install works with no account, key or network |
+| I-27 | One context window per loaded model, resolved from the model. A 256K capability is not a budget |
+| I-28 | Rationale is portability, not "a small local model does not infer a pedagogy". Names the guard's gap: `flashcard_prompts.py` still enumerates Bloom levels |
+| I-31 | Heading generalised to "the runtime's serving width". The text/vision isolation sentence is deliberately untouched — amending it now would document a role collapse that does not exist yet |
+
+Warranted but not yet written, because each needs its guard first. Adding them early would break
+the standard that makes the file worth reading.
+
+| Rule | Stage | Guard |
+|---|---|---|
+| Model choice resolves through the registry; no service reads a model name from config | 4 (P3) | Config-read test |
+| A compensation for model behaviour is a typed, attributed, expiring accommodation — never an invariant, never an inline prompt string | 4 (P4) | Render-path guard |
+| Background LLM work yields to interactive work; `background=` is a scheduling priority | 5 (P5) | Yield test + latency gate |
+| A memory profile constrains the role→model map; roles resolving to distinct ids cost distinct runners | 6 (P7) | Residency test |
+| An eval run records the environment that produced it; runs with differing fingerprints are not compared | 2 (E5) | Provenance test |
+| I-31 amendment: collapsing roles spends text/vision isolation | 6 (P7) | Lands with the collapse |
+
+## Branches
+
+| Branch | Carries | Notes |
+|---|---|---|
+| `fix/ollama-model-residency` | P0, P1 | Ships first and alone. The reported crash is not blocked by anything below |
+| `feat/eval-run-provenance` | E5, E4 | Behaviour-neutral. Nothing else is comparable until it lands |
+| `fix/eval-summary-and-hints` | E3, E6 | Two invalid-measurement fixes; no product change |
+| `feat/llm-output-instrumentation` | P2 | Behaviour-neutral. Everything downstream argues from its numbers |
+| `feat/eval-unscoped-and-coverage` | E2, E9, E11 | New make targets; expands goldens |
+| `refactor/model-registry` | P3 | Both halves of `ModelProfile`; five direct config readers deleted |
+| `refactor/prompt-contracts` | P4 | JSON paths only. Ships with `make prompt-dump` and the widened taxonomy guard |
+| `feat/eval-holdout-split` | E7, E8 | Freezes tune/holdout; records golden provenance |
+| `feat/llm-admission-control` | P5 | Delivers value on today's two-runner setup too, and must precede P7 |
+| `feat/model-eval-matrix` | P6 | Must land before a model is chosen. This is the step that was missing last time |
+| `refactor/memory-profile` | P7 | The actual switch, made against evidence |
+| `chore/lean-out` | P8 | Split per deletion. Sign-off required; never bundled with a refactor |
+| `feat/grounding-labels` | E10 | Human labelling; can run in parallel from any point |
+
+## Done when
+
+**Measurement**
+
+- A retrieval run and a generation run each carry an environment block, and two runs from different
+  library states are visibly non-comparable without reading a commit log.
+- `make eval` reports scoped and unscoped arms, both baselined.
+- A generation comparison is reported as a distribution against recorded sd, never as two points.
+- Every gated dataset clears 20 rows and carries hint provenance.
+- `make eval-summary`, `make eval-routing` and a flashcard target exist and are in the gate.
+- The holdout set has never been used to select a value.
+- The structural tier separates two models of different size, on the same corpus, in one run.
+
+**Product**
+
+- Good performance on any machine: three profiles sized from host RAM, each with a residency *and*
+  a latency policy, each gated by a measured threshold on real hardware.
+- Leaner code: one tolerant parser instead of two; five model-resolution paths become one;
+  `_splitter_cls` once instead of three times; the vision-model knob retired; accommodations deleted
+  once calibration proves them unnecessary. Both `make ci` ratchets strictly lower than at
+  `ba0c1db` — 28 private cross-imports and the duplicate-block count are the committed starting
+  numbers.
+- Pluggable models: adding a model is write a registry entry, run the matrix, commit the calibrated
+  profile. **Check by onboarding a second family (Gemma) end to end without touching a prompt
+  file.** If that requires a prompt change, the refactor is not finished.
+- Better experience: the crash is gone; an Ask during an upload answers promptly or says plainly why
+  it is waiting; Settings shows what is resident and how large; card levels read as verbs.
+
+The last check is the one that matters: **the 0.5.0 reporter's exact workflow — open the app, upload
+a PDF, ask a question mid-ingest — on a 16GB Air.** Everything above is instrumentation for it.

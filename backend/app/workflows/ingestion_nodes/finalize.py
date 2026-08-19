@@ -52,9 +52,11 @@ async def _run_pregenerate(doc_id: str) -> None:
             exc_info=exc,
         )
     finally:
-        # Always invalidate library cache — a new document was ingested regardless
+        # Always refresh the library summary — a new document was ingested regardless
         # of whether its individual summaries could be generated (e.g. Ollama offline).
-        await svc.invalidate_library_cache()
+        # Refreshed here rather than left for the next question to trigger: that put a
+        # whole library synthesis in front of an Ask that had to wait for it.
+        await svc.refresh_library_summary()
 
 
 async def _run_deferred_section_summaries(doc_id: str) -> None:

@@ -13,8 +13,35 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+# Resolved after the profile is known: on a host that may keep only ONE model
+# loaded, the chat model has to be the one that also reads figures, or vision has
+# no model that machine can hold. See PUBLIC_GENERALIST below.
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-}"
 VISION_MODEL="${LUMINARY_VISION_MODEL:-}"
+
+# One model, every role, on an 8-16GB laptop. Must stay equal to
+# `model_registry.GENERALIST_PREFERENCE[0]`; `tests/test_installer_models.py`
+# fails if the two drift, because the backend resolves to that model whether or
+# not this pulled it.
+PUBLIC_GENERALIST="qwen3.5:4b"
+# The dedicated reader, pulled where the profile can hold a second model. Left
+# optional before, which put the install and the backend in disagreement: the
+# backend resolves vision to this on a host with room whether or not it is on
+# disk, and figure analysis then fails quietly.
+# The strongest text model, pulled only on `performance` -- 9.67GB resident, and
+# it does not read figures, so it is always a second model alongside the reader.
+LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
+# The band is a policy choice; this is a measurement. The backend keeps a
+# resident set to half of RAM, and this model plus the generalist is 12.88GB, so
+# the pair needs 25.76GB -- 25GB fails and 26GB fits. Below this the installer
+# would download 9.67GB the backend then refuses to load.
+# test_installer_models.py recomputes this from the registry and fails on drift.
+LARGE_TEXT_MIN_RAM_GB=26
+# Used where two models can be resident. Same id as the generalist today: the
+# structural matrix put it ahead of llama3.2 on every metric it measured, and
+# llama3.2 held the default only on an HHEM comparison this repo ruled
+# inadmissible for choosing a model.
+DEFAULT_CHAT_MODEL="qwen3.5:4b"
 
 _info()  { printf '\033[0;36m[install]\033[0m %s\n' "$*"; }
 _warn()  { printf '\033[0;33m[install]\033[0m %s\n' "$*"; }
@@ -153,7 +180,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Performance profile — sizes Ollama residency/parallelism + vision concurrency.
-# public=1/1/1 (under 24GB), standard=2/2/2 (24GB+), performance=2/4/4 (opt-in).
+# public=1/1/1 (under 16GB), standard=2/2/2 (16-24GB), performance=2/4/4 (over 24GB).
 # ---------------------------------------------------------------------------
 # Physical RAM in GB, 0 when unreadable. The profile is a memory decision, so
 # an unknown box must not be guessed into "standard".
@@ -172,16 +199,31 @@ _mem_gb() {
 _default_profile() {
     _gb="$(_mem_gb)"
     if   [ "$_gb" -eq 0 ];  then echo "public"      # unknown: assume small
-    elif [ "$_gb" -lt 24 ]; then echo "public"
-    else                         echo "standard"
+    elif [ "$_gb" -lt 16 ]; then echo "public"
+    elif [ "$_gb" -le 24 ]; then echo "standard"
+    else                         echo "performance"
     fi
 }
 
 PROFILE="${LUMINARY_PROFILE:-}"
+# `low` is the backend's canonical name for the small profile and the one it
+# logs, so refusing it sent anyone following the backend's own vocabulary to an
+# exit 1. Normalised to `public` here because that is what the bands below and
+# the pull logic are written in; the .env write converts it back.
+[ "$PROFILE" = "low" ] && PROFILE="public"
+case "${PROFILE:-public}" in
+    public|standard|performance) ;;
+    *)
+        _err "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
+        _err "It would be written to backend/.env, where the backend rejects it and"
+        _err "re-sizes from host RAM -- so the installer and the app would disagree."
+        exit 1
+        ;;
+esac
 if [ -z "$PROFILE" ]; then
     _suggested="$(_default_profile)"
     if [ -t 0 ]; then
-        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/8-16GB  [2] standard/24GB+  [3] performance  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
+        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/under 16GB  [2] standard/16-24GB  [3] performance/over 24GB  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
         read -r _p || _p=""
         case "$_p" in
             1|public)      PROFILE="public" ;;
@@ -202,6 +244,38 @@ esac
 export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL
 _info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
 
+# The chat model follows the profile, because on `public` the runtime keeps one
+# model loaded. Pulling a text-only model there left the vision role with nothing
+# the machine could hold: the backend would resolve it to a second model, and
+# OLLAMA_MAX_LOADED_MODELS=1 means loading it evicts the one answering questions.
+# `qwen3.5:4b` reads figures at 3.21GB resident -- the same as its text footprint.
+if [ -z "$CHAT_MODEL" ]; then
+    if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
+        CHAT_MODEL="$PUBLIC_GENERALIST"
+        _info "Profile '$PROFILE' keeps one model loaded: using $CHAT_MODEL for chat AND figures"
+    else
+        # `performance` is the only band with room for a text model that cannot
+        # read figures. Everywhere else one model does both, which is what the
+        # backend resolves to -- pulling anything else downloads a model that
+        # never loads.
+        if [ "$PROFILE" = "performance" ] && [ "$(_mem_gb)" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
+            CHAT_MODEL="$LARGE_TEXT_MODEL"
+        else
+            CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+        fi
+    fi
+fi
+
+# Outside the block above on purpose. While it was nested inside
+# `if [ -z "$CHAT_MODEL" ]`, setting LUMINARY_CHAT_MODEL alone skipped it, and a
+# `performance` host with room for a reader pulled none -- figures then failed
+# quietly, which is the exact mode this profile exists to avoid.
+if [ -z "$VISION_MODEL" ] && [ "$OLLAMA_MAX_LOADED_MODELS" -gt 1 ] \
+   && [ "$CHAT_MODEL" != "$PUBLIC_GENERALIST" ]; then
+    VISION_MODEL="$PUBLIC_GENERALIST"
+fi
+_info "Profile '$PROFILE': $CHAT_MODEL for text${VISION_MODEL:+, $VISION_MODEL for figures}"
+
 # Persist the app-side knobs so the backend (which reads backend/.env) picks them
 # up. OLLAMA_NUM_PARALLEL goes in too, not just the server env: the backend
 # sizes its enrichment concurrency from it.
@@ -216,6 +290,22 @@ _upsert_env() {
 }
 _upsert_env ENRICHMENT_VISION_CONCURRENCY "$VISION_CONCURRENCY"
 _upsert_env OLLAMA_NUM_PARALLEL "$OLLAMA_NUM_PARALLEL"
+# The profile itself, in the backend's vocabulary. Without it the backend sized
+# its own profile from host RAM and could disagree with the one chosen here: pick
+# `public` on a 32GB machine and the backend would resolve chat and vision to two
+# models this install never pulled. `low` is the canonical name; `public` is read
+# as a legacy alias, so writing the canonical one keeps old .env files working
+# without adding a second spelling.
+case "$PROFILE" in
+    public) _upsert_env LUMINARY_MEMORY_PROFILE "low" ;;
+    *)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE" ;;
+esac
+# The models this installer actually pulled. Leaving them unset let the backend
+# resolve a model that is not on disk, which fails at the first question instead
+# of here; it also left `start.sh` with nothing to read, so its "model isn't
+# pulled" pre-flight silently checked nothing on the primary install path.
+_upsert_env LITELLM_DEFAULT_MODEL "ollama/$CHAT_MODEL"
+_upsert_env VISION_MODEL "ollama/${VISION_MODEL:-$CHAT_MODEL}"
 
 # Start ollama if it's not already serving.
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
@@ -243,9 +333,9 @@ fi
 # Pull models only if not already cached.
 _pulled() { ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"; }
 
-# Optional vision model (powers image/figure analysis). Not prompted for — the
-# install stays non-interactive and the closing banner tells the user how to add
-# it later. Set LUMINARY_VISION_MODEL to pull one during install.
+# The vision model is pulled only where the profile can keep a second model
+# loaded; on the single-model profile the chat model reads figures itself.
+# Set LUMINARY_VISION_MODEL to override which one.
 for model in "$CHAT_MODEL" "$VISION_MODEL"; do
     [ -z "$model" ] && continue
     if _pulled "$model" || _pulled "${model}:latest"; then
@@ -277,14 +367,29 @@ fi
 _info "Building production SPA..."
 make build
 
-cat <<'EOF'
+if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
+cat <<EOF
 
 [install] Done.
 
   Next:  make start
   Open:  http://localhost:7820
 
-  Optional: image/figure analysis needs a vision model (~6GB download).
-  Add it any time with:  ollama pull qwen2.5vl:7b
+  $CHAT_MODEL answers questions and reads figures, so image analysis works
+  already. This profile keeps one model loaded: adding a second one does not
+  give you both, it evicts the first.
 
 EOF
+else
+cat <<EOF
+
+[install] Done.
+
+  Next:  make start
+  Open:  http://localhost:7820
+
+  Models pulled: $CHAT_MODEL${VISION_MODEL:+ and $VISION_MODEL}.
+  ${VISION_MODEL:-$CHAT_MODEL} reads figures.
+
+EOF
+fi

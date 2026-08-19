@@ -186,15 +186,21 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
         session.add(_make_chunk(chunk_id=chunk_id, doc_id=doc_id, section_id=section_id))
         await session.commit()
 
-    # LLM returns one card at the target bloom level
+    # LLM returns one card at the target bloom level. The excerpt quotes the seeded
+    # chunk: gap-fill cards go through the same grounding gate as every other path,
+    # so a stub that invents a quote is testing the gate, not the audit.
     llm_response = json.dumps(
         [
             {
                 "question": "How would you apply X in production?",
                 "answer": "Use X by following steps A, B, C.",
-                "source_excerpt": "X is used in production.",
-                "flashcard_type": "concept_explanation",
-                "bloom_level": 3,
+                "source_excerpt": "Sample chunk text for Bloom's audit tests.",
+                # The type fixes the level now (I-28: the prompt names none), and
+                # `concept_explanation` is a level-2 shape. This stub used to
+                # claim level 3 while naming a level-2 type; the code resolves
+                # that in favour of the type, so the fixture states a type whose
+                # level is what the gap being filled asked for.
+                "flashcard_type": "trace",
             }
         ]
     )
@@ -218,6 +224,7 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
 
     async with factory() as session:
         from sqlalchemy import select as sa_select
+        from sqlalchemy import text as sa_text
 
         result = await session.execute(
             sa_select(FlashcardModel)
@@ -225,4 +232,60 @@ async def test_fill_gaps_creates_l3_plus_cards(test_db):
             .where(FlashcardModel.bloom_level >= 3)
         )
         high_bloom_cards = result.scalars().all()
+        # A card that never enters the FTS index exists and cannot be found: this
+        # path inserted without indexing, so every gap-fill card was unsearchable.
+        indexed = await session.execute(
+            sa_text("SELECT COUNT(*) FROM flashcards_fts_content WHERE c2 = :fid"),
+            {"fid": high_bloom_cards[0].id},
+        )
+        assert indexed.scalar_one() == 1, "a gap-fill card must be searchable"
     assert len(high_bloom_cards) >= 2
+
+
+@pytest.mark.asyncio
+async def test_gap_fill_shows_the_model_the_section_text(test_db):
+    """A card cannot be written from a heading.
+
+    This path used to prompt with the section *heading* and nothing else, while the
+    system prompt asked for a `source_excerpt` -- so every quote it produced was
+    necessarily invented, and the card entered the deck under a "Source" blockquote
+    with no way to tell. The passage has to be in the prompt, and the quote has to
+    be in the passage.
+    """
+    _, factory, _ = test_db
+    doc_id = "doc-audit-4"
+    section_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_section(section_id=section_id, doc_id=doc_id, heading="Test Section"))
+        session.add(_make_chunk(chunk_id=str(uuid.uuid4()), doc_id=doc_id, section_id=section_id))
+        await session.commit()
+
+    invented = json.dumps(
+        [
+            {
+                "question": "How would you apply X in production?",
+                "answer": "Use X by following steps A, B, C.",
+                "source_excerpt": "a sentence that appears nowhere in the section",
+                "flashcard_type": "concept_explanation",
+                "bloom_level": 3,
+            }
+        ]
+    )
+    mock_llm = MockLLMService(response=invented)
+    gaps = [
+        {
+            "section_id": section_id,
+            "section_heading": "Test Section",
+            "missing_bloom_levels": [3],
+        }
+    ]
+    with patch("app.services.flashcard_audit.get_llm_service", return_value=mock_llm):
+        async with factory() as session:
+            created = await FlashcardAuditService().fill_gaps(doc_id, gaps, session)
+
+    assert created == 0, "a gap-fill card whose quote is not in the section must not be kept"
+    assert "Sample chunk text for Bloom's audit tests." in mock_llm.last_prompt, (
+        "the section text must reach the model -- otherwise it is asked to quote "
+        "a passage it has never seen"
+    )

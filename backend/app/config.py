@@ -66,6 +66,25 @@ class Settings(BaseSettings):
     # Ollama rather than overlap (I-31). Costs one KV cache per slot, so 1 is
     # the floor for an unmeasured machine; installers raise it from host RAM.
     OLLAMA_NUM_PARALLEL: int = 1
+    # Admission control: background LLM work yields to interactive work at the
+    # granularity of one completed call (Ollama has no preemption). The reserve
+    # is derived from OLLAMA_NUM_PARALLEL rather than configured -- at one slot
+    # background suspends, at two or more one slot stays free for an Ask. Off
+    # only to reproduce the un-gated latency baseline.
+    # low | standard | performance, or empty to size from host RAM. Constrains
+    # how many models may stay resident and which the registry will recommend.
+    # The installer already sizes OLLAMA_MAX_LOADED_MODELS / OLLAMA_NUM_PARALLEL
+    # from the same RAM reading and passes them to Ollama too -- this never
+    # overrides those, because a backend disagreeing with the runtime about slot
+    # count leaves the extra slots idle (I-31). `public` is read as `low`.
+    LUMINARY_MEMORY_PROFILE: str = ""
+    LLM_ADMISSION_ENABLED: bool = True
+    # Hold the reserve this long after an interactive call ends, so a background
+    # call is not admitted between two turns of the same conversation.
+    LLM_ADMISSION_GRACE_SECONDS: float = 5.0
+    # Starvation bound. Someone who keeps chatting must not stop ingestion
+    # for ever: a background call held this long is admitted anyway and logged.
+    LLM_ADMISSION_MAX_DEFER_SECONDS: float = 60.0
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept
@@ -106,10 +125,37 @@ class Settings(BaseSettings):
     # regression. Per-request override via /search?spell_correct=.
     QUERY_SPELL_CORRECT: bool = True
     LOG_LEVEL: str = "INFO"
-    LITELLM_DEFAULT_MODEL: str = "ollama/llama3.2"
+    # qwen3.5:4b since 2026-08-18. llama3.2 held this by inheritance: it was
+    # chosen on an HHEM faithfulness comparison, and a cross-model HHEM delta is
+    # a style artifact that may not decide a model. The structural matrix put
+    # qwen3.5:4b ahead on all three of its metrics (routing 0.8966 vs 0.8621,
+    # card_reject_rate 0.0278 vs 0.0463, generation_rate 1.0000 vs 0.9714), and
+    # it reads figures, which is what lets one model serve every role where only
+    # one may be resident. Single runs, so this ranks a default, not a swap.
+    LITELLM_DEFAULT_MODEL: str = "ollama/qwen3.5:4b"
     # Model for high-quality generation (flashcards, etc).
     # Falls back to DEFAULT_MODEL when empty.
     LITELLM_GENERATION_MODEL: str = ""
+    # Model that checks whether a generated card's answer follows from its
+    # passage. Empty = the check does not run, and cards are recorded
+    # `unchecked` rather than passed. There is deliberately no small-model
+    # default: measured on 59 live cards, phi4-mini passed 54 and granite3.2:8b
+    # passed 53, agreeing with a 14B on the pass/fail call 0.41 and 0.42 of the
+    # time -- a gate built on either certifies exactly what it was added to
+    # catch. What re-enables a small checker is a measurement showing it
+    # separates supported from unsupported on this corpus, not a smaller model
+    # appearing. Must not equal the generation model (self-judging).
+    FLASHCARD_FACTUALITY_MODEL: str = ""
+    # Prompt arm for the model matrix (P6). `shipped` renders the contract plus
+    # the accommodations a model still needs; `bare` renders the contract alone.
+    # A model that scores HIGHER on `bare` is telling you the accommodation set
+    # is its ceiling. This changes what every generation prompt says, so it is a
+    # restart-level knob, and every eval run records the arm that produced it.
+    PROMPT_ARM: Literal["shipped", "bare"] = "shipped"
+    # Comma-separated accommodation ids to withhold, for the necessity check:
+    # drop one, re-measure, and what survives is what `accommodations_needed` on
+    # the registry entry should name.
+    PROMPT_DROP_ACCOMMODATIONS: str = ""
     # Opt-in: Phoenix is a dev observability server (launches on :6006, persists
     # phoenix.db, instruments every LLM call). A local-first/offline runtime
     # shouldn't pay that cost or its serializer noise by default — set
@@ -121,7 +167,25 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     WHISPER_MODEL_SIZE: str = "base"
-    VISION_MODEL: str = "ollama/qwen2.5vl:7b"
+    # qwen3.5:4b since 2026-08-18. It read two real library figures correctly
+    # where the 6.81GB qwen2.5vl:7b invented mnemonic expansions on one, and it
+    # costs 3.21GB resident with an image loaded -- the same as its text
+    # footprint, so on a single-model host vision is free. The dedicated reader
+    # stays selectable in Settings and is honoured when chosen.
+    #
+    # n=2 figures. Enough to stop paying 6.81GB for a second model by default;
+    # not a finding that the specialist is worse. A larger figure sample is the
+    # measurement that would settle it either way.
+    VISION_MODEL: str = "ollama/qwen3.5:4b"
+    # How long the vision runner stays resident after its last image, overriding
+    # OLLAMA_KEEP_ALIVE for this path only. The vision model is the largest thing
+    # Luminary loads (~6GB for a 7B VLM) and it is used in bursts: a document's
+    # figures, then nothing until the next upload. Inheriting the global 30m held
+    # that 6GB for half an hour after enrichment drained, which is what put a
+    # 16GB machine into swap. Long enough to serve a run of images back to back,
+    # short enough to release soon after; "0" would unload between every image
+    # and pay the reload each time. Not a num_ctx change, so I-27 is untouched.
+    VISION_KEEP_ALIVE: str = "60s"
     # Max concurrent vision (image_analyze) LLM calls across all documents. Default
     # 1 = one-at-a-time (safe on 8GB). Raise (e.g. 2-4) on a host with headroom and
     # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
@@ -133,6 +197,20 @@ class Settings(BaseSettings):
     # on a machine where enrichment throughput matters more than figure coverage.
     PDF_VECTOR_FIGURES: bool = True
     GLINER_ENABLED: bool = True  # Set to false on memory-constrained machines (avoids OOM)
+    # The entity model, and the second-largest thing Luminary loads (1126MB).
+    # Turning it off is not the memory lever it looks like: `graph_expand` in
+    # retriever_strategies skips query expansion whenever this model is not
+    # resident, so an unloaded entity model silently changes retrieval rather
+    # than only freeing memory. A smaller model that stays resident is therefore
+    # worth more than a large one that does not.
+    #
+    # The default is `gliner_multi-v2.1` fine-tuned onto a synthetic PII dataset
+    # and six languages, while ENTITY_TYPES in ner.py asks for PERSON,
+    # ORGANIZATION, CONCEPT, TECHNOLOGY, ALGORITHM and friends -- none of which
+    # is PII. Whether a smaller general model is better here as well as lighter
+    # is measured by `scripts/ner_compare.py`, not assumed; the default stays put
+    # until those numbers say otherwise.
+    NER_MODEL: str = "urchade/gliner_multi_pii-v1"
     # 2D.2: seed document auto-tags with entities from the graph extraction.
     # On by default -- no extra LLM calls; uses entities already populated by
     # entity_extract_node. Requires GLINER_ENABLED at ingestion time for old docs

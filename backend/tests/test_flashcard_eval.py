@@ -31,16 +31,31 @@ def test_clarity_avg_mean():
     assert compute_clarity_avg([5, 4, 3]) == pytest.approx(4.0)
 
 
-def test_score_flashcards_with_mocked_judge():
-    cards = [{"question": "q1", "answer": "a1"}, {"question": "q2", "answer": "a2"}]
+def test_score_flashcards_takes_atomicity_from_the_answer_not_the_judge():
+    """A judge that calls a bulleted list atomic must not be able to say so.
+
+    Measured 2026-08-17: asked for `atomic` with the term undefined, phi4-mini
+    returned true for every card in a set that was two thirds bulleted
+    multi-point answers. Atomicity is structural, so it is counted from the
+    answer; the judge's opinion is kept only as a disagreement rate.
+    """
+    cards = [
+        {"question": "q1", "answer": "One single assertion."},
+        {"question": "q2", "answer": "Lead in.\n- first fact\n- second fact"},
+    ]
     judgments = iter([
         {"factuality": "yes", "atomic": True, "clarity": 5},
-        {"factuality": "partial", "atomic": False, "clarity": 3},
+        {"factuality": "partial", "atomic": True, "clarity": 3},
     ])
     metrics = score_flashcards(cards, "source", judge=lambda card, chunk: next(judgments))
     assert metrics["factuality"] == pytest.approx(0.75)
-    assert metrics["atomicity"] == pytest.approx(0.5)
+    assert metrics["atomicity"] == pytest.approx(0.5), (
+        "the bulleted card is not atomic however the judge voted"
+    )
     assert metrics["clarity_avg"] == pytest.approx(4.0)
+    assert metrics["judge_atomicity_disagreement"] == pytest.approx(0.5), (
+        "the judge called a two-fact answer atomic; that gap must be visible"
+    )
 
 
 def test_flashcard_history_persists_metrics(tmp_path):

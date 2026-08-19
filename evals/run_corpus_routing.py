@@ -34,7 +34,9 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "backend"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.retrieval_metrics import _extract_hint_norms, _norm  # noqa: E402
+from evals.lib.scoring_history import append_history  # noqa: E402
 from evals.lib.store import store_results  # noqa: E402
 from evals.run_eval import (  # noqa: E402
     load_golden,
@@ -121,6 +123,14 @@ def main():
     tokens = [t.strip() for t in args.datasets.split(",") if t.strip()]
     arms = ["clean", "typo"] if args.typo else ["clean"]
 
+    # Captured after resolving datasets, not before: resolve_rows can ingest a
+    # missing document, and a fingerprint taken first records a smaller library
+    # than the run measured -- which then groups it with the wrong runs.
+    def _environment():
+        return capture_environment(
+            args.backend_url, scope="unscoped", arms=",".join(arms)
+        )
+
     hdr = "  ".join(f"{a} route@1/route@5/HR@5" for a in arms)
     print(f"{'dataset':<20} {hdr}")
     agg = {a: {"r1": [], "r5": [], "hr": []} for a in arms}
@@ -152,6 +162,8 @@ def main():
                     metrics.update({"route_1_typo": tr1, "route_5_typo": tr5, "hr_5_typo": thr})
                 store_results(args.backend_url, label, "no-llm", metrics,
                               eval_kind="corpus_routing")
+                append_history(label, "no-llm", metrics, True, eval_kind="corpus_routing",
+                               environment=_environment())
 
     print()
     for arm in arms:

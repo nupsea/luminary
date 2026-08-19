@@ -52,6 +52,8 @@ from app.schemas.flashcards import (
     DeckItem,
     EntityPairPreview,
     EntityPairsResponse,
+    FactualityAuditRequest,
+    FactualityReport,
     FillGapsResponse,
     FillUncoveredRequest,
     FillUncoveredResponse,
@@ -63,6 +65,9 @@ from app.schemas.flashcards import (
     FromGapsResponse,
     GenerateFromGraphRequest,
     GenerateTechnicalRequest,
+    GroundingAuditRequest,
+    GroundingReport,
+    RepairReport,
     ReviewRequest,
     SourceContextResponse,
     TraceFlashcardRequest,
@@ -78,6 +83,8 @@ from app.services.flashcard import (
     get_flashcard_service,
 )
 from app.services.flashcard_audit import FlashcardAuditService, get_flashcard_audit_service
+from app.services.flashcard_grounding import audit_factuality, audit_grounding
+from app.services.flashcard_repair import repair_flashcard_tables
 from app.services.flashcards_router_service import (
     cards_to_csv as _cards_to_csv,
 )
@@ -107,6 +114,8 @@ __all__ = [
     "DeckItem",
     "EntityPairPreview",
     "EntityPairsResponse",
+    "FactualityAuditRequest",
+    "FactualityReport",
     "FillGapsResponse",
     "FillUncoveredRequest",
     "FillUncoveredResponse",
@@ -118,6 +127,9 @@ __all__ = [
     "FromGapsResponse",
     "GenerateFromGraphRequest",
     "GenerateTechnicalRequest",
+    "GroundingAuditRequest",
+    "GroundingReport",
+    "RepairReport",
     "ReviewRequest",
     "SourceContextResponse",
     "TraceFlashcardRequest",
@@ -173,6 +185,69 @@ async def search_flashcards(
     )
 
 
+@router.get("/grounding", response_model=GroundingReport)
+async def grounding_summary(
+    document_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+) -> GroundingReport:
+    """How many cards can prove where they came from, as last audited.
+
+    Reads the stored verdicts; it does not recompute. `unchecked` is reported as
+    its own number rather than folded into a pass rate -- a card nobody has
+    audited is not a card that passed.
+    """
+    stmt = select(FlashcardModel.grounding, func.count()).group_by(FlashcardModel.grounding)
+    if document_id is not None:
+        stmt = stmt.where(FlashcardModel.document_id == document_id)
+    counts = dict((await session.execute(stmt)).all())
+    return GroundingReport(scanned=sum(counts.values()), **counts)
+
+
+@router.post("/grounding/audit", response_model=GroundingReport)
+async def audit_card_grounding(
+    req: GroundingAuditRequest,
+    session: AsyncSession = Depends(get_db),
+) -> GroundingReport:
+    """Recompute every card's grounding verdict against its document's text.
+
+    Deterministic and model-free: it looks for each card's `source_excerpt` in the
+    chunks the card came from. Cards generated before the grounding gate existed
+    are `unchecked` until this runs.
+    """
+    report = await audit_grounding(session, req.document_id)
+    return GroundingReport(**report)
+
+
+@router.post("/factuality/audit", response_model=FactualityReport)
+async def audit_card_factuality(
+    req: FactualityAuditRequest,
+    session: AsyncSession = Depends(get_db),
+) -> FactualityReport:
+    """Check whether existing cards' answers follow from the passage they came from.
+
+    Only cards whose passage is recoverable (`source_chunk_ids`) are eligible --
+    judged against a passage reconstructed from `chunk_id` instead, a 60-card
+    sample scored 0.3333 and the number was an artefact of the reconstruction.
+    Bounded and resumable: keep calling while `remaining` is above zero.
+    """
+    return FactualityReport(**await audit_factuality(
+        session, limit=req.limit, document_id=req.document_id
+    ))
+
+
+@router.post("/repair", response_model=RepairReport)
+async def repair_flashcards(
+    session: AsyncSession = Depends(get_db),
+) -> RepairReport:
+    """Reconcile the search index and card-scoped tables with the cards that exist.
+
+    Removes index rows and child rows naming a deleted card, and indexes any card
+    that was inserted without being indexed. Deletes no flashcard, and leaves
+    `review_events` alone -- an event with no card records a review that happened.
+    """
+    return RepairReport(**await repair_flashcard_tables(session))
+
+
 @router.post("/generate", response_model=list[FlashcardResponse], status_code=201)
 async def generate_flashcards(
     req: FlashcardGenerateRequest,
@@ -188,6 +263,7 @@ async def generate_flashcards(
             "count": req.count,
             "difficulty": req.difficulty,
             "has_context": bool(req.context),
+            "model": req.model or "auto",
         },
     )
     try:
@@ -199,6 +275,7 @@ async def generate_flashcards(
             difficulty=req.difficulty,
             session=session,
             context=req.context,
+            model=req.model,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(
@@ -319,6 +396,7 @@ async def generate_technical_flashcards(
             section_heading=req.section_heading,
             count=req.count,
             session=session,
+            model=req.model,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(

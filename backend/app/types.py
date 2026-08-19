@@ -95,6 +95,10 @@ class ChatState(TypedDict):
     # Set by strategy nodes
     chunks: list[dict]
     section_context: str | None
+    # True when retrieval raised rather than returning nothing. Without it, a
+    # failed search and an empty library are the same downstream state, and the
+    # user is told to ingest a document while their library sits there.
+    retrieval_failed: bool
 
     # Set by synthesize_node
     answer: str
@@ -132,6 +136,11 @@ class ChatState(TypedDict):
     # Separate from 'citations' (LLM-extracted prose citations) to avoid field collision.
     # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
+
+    # chunks actually emitted into the prompt, in [S<n>] marker order, set by
+    # synthesize_node. Resolves a marker citation to the chunk it names, so the
+    # excerpt is filled from that chunk instead of retyped by the model (I-33).
+    cited_chunks: list[dict]
 
     # retrieval transparency metadata set by synthesize_node.
     # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.

@@ -1,4 +1,4 @@
-import { ApiError, apiGet, apiPost } from "@/lib/apiClient"
+import { apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 
 export type ContentTypeValue =
   | "book"
@@ -18,25 +18,14 @@ export interface IngestionStatus {
   stage: string
   progress_pct: number
   done: boolean
+  /** Background indexing is being held back for an in-flight question. */
+  paused_for_interaction?: boolean
   error_message: string | null
 }
 
 export interface KindleIngestResult {
   document_ids: string[]
   book_count: number
-}
-
-function detailFromError(err: unknown, fallback: string): Error {
-  if (err instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(err.body) as { detail?: string }
-      if (parsed.detail) return new Error(parsed.detail)
-    } catch {
-      // body wasn't JSON
-    }
-    return new Error(fallback)
-  }
-  return err instanceof Error ? err : new Error(fallback)
 }
 
 export async function submitFile(

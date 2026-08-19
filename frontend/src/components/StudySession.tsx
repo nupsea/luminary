@@ -14,6 +14,8 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+
+import { isDoubted, sourceNote } from "@/lib/cardSourceNote"
 import {
   Check,
   ChevronDown,
@@ -159,6 +161,24 @@ const QUALITY_CLASS: Record<SourceQuality, string> = {
   unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800/60 dark:text-gray-400",
 }
 
+function SourceExcerpt({ card }: { card: Flashcard }) {
+  const note = sourceNote(card)
+  return (
+    <div className="flex flex-col gap-1">
+      <blockquote
+        className={`border-l-2 pl-3 text-xs italic ${
+          isDoubted(card)
+            ? "border-amber-500/60 text-muted-foreground/80"
+            : "border-border text-muted-foreground"
+        }`}
+      >
+        {card.source_excerpt}
+      </blockquote>
+      <p className={`pl-3 text-[11px] ${note.className}`}>{note.text}</p>
+    </div>
+  )
+}
+
 function SourcePanel({ card }: { card: Flashcard }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -187,11 +207,7 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
       {expanded && (
         <div className="flex flex-col gap-3 px-4 pb-4">
-          {card.source_excerpt && (
-            <blockquote className="border-l-2 border-border pl-3 text-xs text-muted-foreground italic">
-              {card.source_excerpt}
-            </blockquote>
-          )}
+          {card.source_excerpt && <SourceExcerpt card={card} />}
 
           {!card.section_id ? (
             <p className="text-xs text-muted-foreground">No web references for this card.</p>

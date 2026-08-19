@@ -1,0 +1,8 @@
+{
+  "name": "intents",
+  "generated_at": "2026-08-14T00:00:00+00:00",
+  "generator_model": null,
+  "rows": 50,
+  "row_provenance": "hand",
+  "note": "Hand-written rows naming entities from the dev corpus. Read as a regression check: it measures 1.0000, so it has no headroom to show a regression. intents_adversarial.jsonl and tests/test_intent_generalisation.py carry that job."
+}

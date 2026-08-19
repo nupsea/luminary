@@ -3,12 +3,12 @@ import logging
 import re
 from pathlib import Path
 
-import chardet
 import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services.book_parser import BookParser
+from app.services.source_text import read_source_text
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
 
@@ -279,7 +279,11 @@ class DocumentParser:
         toc = doc.get_toc()  # [[level, title, page_num (1-based)], ...]
 
         if toc:
-            logger.info("PDF TOC (%d entries): %s", len(toc), toc)
+            # The entries themselves are not logged: a 1,017-entry manual wrote a
+            # single INFO record thousands of lines long on every ingest, which
+            # buries everything else in the log it shares.
+            logger.info("PDF TOC: %d entries", len(toc))
+            logger.debug("PDF TOC entries: %s", toc)
             # Use the full TOC hierarchy to build sections directly.
             # Trust the TOC structure -- it reflects what the author intended.
             # Font-based sub-heading detection is skipped here to avoid
@@ -543,10 +547,7 @@ class DocumentParser:
             return result
 
         # Fallback: paragraph-split (for unstructured text files)
-        raw_bytes = file_path.read_bytes()
-        detected = chardet.detect(raw_bytes)
-        encoding = detected.get("encoding") or "utf-8"
-        text = raw_bytes.decode(encoding, errors="replace")
+        text = read_source_text(file_path)
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
         sections = [
             Section(

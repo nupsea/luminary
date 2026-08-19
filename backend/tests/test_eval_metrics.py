@@ -62,10 +62,23 @@ def _sample(question: str, hint: str, chunks: list[str], ground_truth: str = "GT
 
 def test_cross_domain_datasets_and_thresholds_are_configured():
     assert {"paper", "conversation", "notes", "code"} <= set(VALID_DATASETS)
-    assert DATASET_THRESHOLDS["paper"]["hit_rate_5"] == pytest.approx(0.45)
     assert DATASET_THRESHOLDS["conversation"]["mrr"] == pytest.approx(0.40)
     assert thresholds_for_dataset("notes")["hit_rate_5"] == pytest.approx(0.60)
     assert thresholds_for_dataset("book_alice")["hit_rate_5"] == THRESHOLDS["hit_rate_5"]
+
+
+def test_an_override_exists_only_where_it_differs_from_the_default():
+    """A dataset restating the default is dead config that reads as a decision.
+
+    `paper` carried 0.45/0.30 because 17 of its 40 questions asked about scrape
+    furniture; the floor had been lowered instead of the data fixed. Regenerated
+    clean it measures 0.850/0.703, so it takes the default like everything else.
+    """
+    for dataset, overrides in DATASET_THRESHOLDS.items():
+        differing = {k: v for k, v in overrides.items() if THRESHOLDS.get(k) != v}
+        assert differing == overrides, f"{dataset} restates the default for {overrides}"
+
+    assert thresholds_for_dataset("paper")["hit_rate_5"] == THRESHOLDS["hit_rate_5"]
 
 
 # HR@5 tests

@@ -94,4 +94,9 @@ export interface LLMSettings {
   active_model: string
   available_local_models: string[]
   cloud_providers: CloudProvider[]
+  // Raw saved config (present in the response) -- used to resolve the effective
+  // model and to offer the right cloud models.
+  mode?: string
+  provider?: string
+  model?: string
 }

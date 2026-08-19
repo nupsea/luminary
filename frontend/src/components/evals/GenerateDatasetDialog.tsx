@@ -27,8 +27,8 @@ const FALLBACK_MODEL_OPTIONS = [
   "openai/gpt-5.1",
   "openai/gpt-4.1",
   "openai/gpt-4o-mini",
-  "ollama/llama3.2",
-  "ollama/mistral",
+  "ollama/qwen3.5:4b",
+  "ollama/qwen2.5:14b-instruct",
 ]
 
 const fetchModels = () => apiGet<{ local: string[]; frontier: string[] }>("/evals/models")

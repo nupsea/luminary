@@ -1,0 +1,17 @@
+{
+  "name": "intents_adversarial",
+  "generated_at": "2026-08-15T00:00:00+00:00",
+  "generator_model": null,
+  "rows": 29,
+  "authored_by": "hand",
+  "why": "golden/intents.jsonl measures 1.0000, so it cannot show a regression. These rows hold the same four routes but make the PHRASING hard rather than the subject novel: terse fragments, verbose wrappers, negated openings, and intents stated without their keyword (a comparison with no 'compare', a summary with no 'summarise', a relation with no 'connect').",
+  "subjects": "Invented and corpus-free, the same set the generalisation suite uses, so a route that depends on a corpus entity fails here rather than passing by memory.",
+  "excluded": "Multi-intent questions ('summarise X and compare it to Y'). No single label is defensible, so such a row would measure the labeller rather than the router.",
+  "by_route": {
+    "summary": 8,
+    "comparative": 7,
+    "graph": 6,
+    "search": 8
+  },
+  "row_provenance": "hand"
+}

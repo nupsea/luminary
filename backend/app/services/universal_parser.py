@@ -13,8 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import chardet
-
+from app.services.source_text import read_source_text
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -92,6 +91,60 @@ class Signature:
     def __post_init__(self):
         if self.matches is None:
             self.matches = []
+
+
+def read_document_text(file_path: Path) -> str:
+    """Text of a source document, read the way ingestion reads it.
+
+    Dispatches on suffix so a caller needs no knowledge that a PDF is extracted
+    while a text file is decoded and stripped of scrape furniture. Anything
+    sampling a document to reason about what ingestion will produce -- the eval
+    golden generator above all -- must come through here: reading a PDF as bytes
+    yields `%PDF-1.5 /FlateDecode`, and a golden generated from that asks
+    questions about the container.
+    """
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
+        return UniversalParser._read_pdf_text(file_path)
+    if suffix == ".epub":
+        return _read_epub_text(file_path)
+    if suffix == ".docx":
+        return _read_docx_text(file_path)
+    return read_source_text(file_path).replace("\r\n", "\n")
+
+
+def _read_epub_text(file_path: Path) -> str:
+    """EPUB reading text, extracted the way `_parse_epub` extracts it.
+
+    An EPUB is a zip, so byte decoding returns `PK\x03\x04 ... mimetype
+    application/epub+zip` -- the same failure the PDF branch exists to prevent,
+    and with the same consequence: a golden generated from it asks about the
+    container, and an integrity check reports every hint unresolved.
+    """
+    import ebooklib  # noqa: PLC0415
+    from ebooklib import epub  # noqa: PLC0415
+
+    from app.services.parser import _epub_text  # noqa: PLC0415
+
+    book = epub.read_epub(str(file_path), options={"ignore_ncx": True})
+    parts: list[str] = []
+    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+        # Navigation documents are structure, not reading text; ingestion skips
+        # them, so counting them here would report loss that did not happen.
+        if any(k in item.get_name().lower() for k in ("nav", "toc", "ncx")):
+            continue
+        text = _epub_text(item.get_content().decode("utf-8", errors="replace"))
+        if text.strip():
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _read_docx_text(file_path: Path) -> str:
+    """DOCX reading text. Also a zip, and so also unreadable as bytes."""
+    from docx import Document as DocxDocument  # noqa: PLC0415
+
+    document = DocxDocument(str(file_path))
+    return "\n\n".join(p.text for p in document.paragraphs if p.text.strip())
 
 
 class UniversalParser:
@@ -219,13 +272,7 @@ class UniversalParser:
             return None
 
     def _read_text(self, file_path: Path) -> str:
-        suffix = file_path.suffix.lower()
-        if suffix == ".pdf":
-            return self._read_pdf_text(file_path)
-        raw_bytes = file_path.read_bytes()
-        detected = chardet.detect(raw_bytes)
-        encoding = detected.get("encoding") or "utf-8"
-        return raw_bytes.decode(encoding, errors="replace").replace("\r\n", "\n")
+        return read_document_text(file_path)
 
     @staticmethod
     def _read_pdf_text(file_path: Path) -> str:

@@ -54,11 +54,14 @@ fi
 # Non-fatal LLM pre-flight: the moat loop (card generation, chat, teach-back) needs
 # a local model. Warn — never block — so the app's own first-run guide stays the
 # primary path. Uses the Ollama HTTP API so it doesn't depend on the CLI being on PATH.
-CHAT_MODEL="${LUMINARY_CHAT_MODEL:-llama3.2}"
+# Read from the .env the installer wrote rather than named here: a warning
+# that names the wrong model tells the user to pull something the app will
+# never load. Empty means 'cannot tell', and the check below is skipped.
+CHAT_MODEL="${LUMINARY_CHAT_MODEL:-$(sed -n 's|^LITELLM_DEFAULT_MODEL=ollama/||p' "$(dirname "$0")/../backend/.env" 2>/dev/null | tail -1)}"
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
     _warn "  Ollama isn't running — card generation, chat, and teach-back are unavailable."
     _warn "  Start it with:  ollama serve   (or re-run:  make install)"
-elif ! curl -sf --max-time 2 http://localhost:11434/api/tags 2>/dev/null | grep -q "\"${CHAT_MODEL}"; then
+elif [ -n "$CHAT_MODEL" ] && ! curl -sf --max-time 2 http://localhost:11434/api/tags 2>/dev/null | grep -q "\"${CHAT_MODEL}"; then
     _warn "  Ollama is up but the default model isn't pulled."
     _warn "  Pull it with:  ollama pull ${CHAT_MODEL}"
 fi

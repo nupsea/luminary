@@ -1,0 +1,17 @@
+{
+  "name": "flashcards_small",
+  "generated_at": "2026-08-15T07:20:21.728739+00:00",
+  "generator_model": null,
+  "selection": "first two usable passages per content kind, file order",
+  "rows": 35,
+  "by_content_type": {
+    "book": 7,
+    "conversation": 7,
+    "paper": 7,
+    "tech_article": 7,
+    "tech_book": 7
+  },
+  "row_provenance": "sampled",
+  "derived_from": "flashcards",
+  "size": 10
+}

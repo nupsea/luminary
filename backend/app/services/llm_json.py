@@ -11,6 +11,8 @@ so already-valid JSON is never rewritten.
 import json
 import re
 
+from app.services import llm_output_stats as stats
+
 # A backslash pair is consumed intact; a lone backslash not opening a legal
 # JSON escape is doubled so the string parses instead of failing.
 _BAD_ESCAPE_RE = re.compile(r'(\\\\)|\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})')
@@ -20,12 +22,32 @@ def _repair_escapes(text: str) -> str:
     return _BAD_ESCAPE_RE.sub(lambda m: m.group(1) or "\\\\", text)
 
 
-def _strip_fences(text: str) -> str:
+def _strip_fences(text: str) -> tuple[str, bool]:
+    """(cleaned, was_fenced). The flag is counted, not just consumed."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
-        cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
-    return cleaned
+        if len(lines) > 2:
+            return "\n".join(lines[1:-1]), True
+        return cleaned, True
+    return cleaned, False
+
+
+def _strict(text: str) -> object | None:
+    """The whole completion as JSON, or None.
+
+    Tried before any slicing. A completion that is valid JSON end to end needed
+    no repair whatever shape it is, and slicing first was not a detail: an
+    object wrapping an array -- `{"flashcards": [...]}`, exactly what the
+    flashcard prompt asks for -- looked to the array parser like an array with
+    prose on both sides. Every compliant generation was recorded as repaired,
+    which pinned `first_pass_rate` at 0.0000 for every model and made the metric
+    a fact about the parser's attempt order.
+    """
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
 
 
 def _skip(text: str, i: int, chars: str = " \t\r\n") -> int:
@@ -58,6 +80,38 @@ def _salvage_elements(text: str) -> list:
     return items
 
 
+def parse_object_with_repairs(raw: str) -> tuple[dict | None, frozenset[str]]:
+    """Parse, and report which repairs the completion needed to be usable.
+
+    The repair set is the model-quality signal: clean output and output that
+    was fenced, mis-escaped or truncated produce identical objects downstream,
+    so without this the difference between models is unobservable.
+    """
+    cleaned, fenced = _strip_fences(raw)
+    repairs: set[str] = {stats.FENCED} if fenced else set()
+    whole = _strict(cleaned)
+    if whole is not None:
+        return (whole if isinstance(whole, dict) else None), frozenset(repairs)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end < start:
+        return None, frozenset(repairs)
+    candidate = cleaned[start : end + 1]
+    # Prose around the object is a deviation from the format the prompt asked
+    # for, whether or not json.loads then succeeds.
+    if candidate.strip() != cleaned.strip():
+        repairs.add("surrounded_by_prose")
+    for attempt, text in enumerate((candidate, _repair_escapes(candidate))):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            continue
+        if attempt:
+            repairs.add(stats.BAD_ESCAPE)
+        return (parsed if isinstance(parsed, dict) else None), frozenset(repairs)
+    return None, frozenset(repairs)
+
+
 def parse_llm_json_object(raw: str) -> dict | None:
     """Extract a JSON object from an LLM completion, tolerating markdown
     fences, surrounding prose, and illegal escape sequences.
@@ -65,19 +119,9 @@ def parse_llm_json_object(raw: str) -> dict | None:
     All-or-nothing: a truncated object returns None here. Callers willing to
     accept a partial result opt into salvage_llm_json_object instead.
     """
-    cleaned = _strip_fences(raw)
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start == -1 or end < start:
-        return None
-    candidate = cleaned[start : end + 1]
-    for text in (candidate, _repair_escapes(candidate)):
-        try:
-            parsed = json.loads(text)
-        except ValueError:
-            continue
-        return parsed if isinstance(parsed, dict) else None
-    return None
+    parsed, repairs = parse_object_with_repairs(raw)
+    stats.record_parse(ok=parsed is not None, repairs=repairs)
+    return parsed
 
 
 def salvage_llm_json_object(raw: str) -> dict | None:
@@ -90,9 +134,16 @@ def salvage_llm_json_object(raw: str) -> dict | None:
 
     Returns None when not even one pair is recoverable.
     """
-    text = _repair_escapes(_strip_fences(raw))
+    cleaned, fenced = _strip_fences(raw)
+    text = _repair_escapes(cleaned)
+    repairs: set[str] = {stats.TRUNCATED}
+    if fenced:
+        repairs.add(stats.FENCED)
+    if text != cleaned:
+        repairs.add(stats.BAD_ESCAPE)
     start = text.find("{")
     if start == -1:
+        stats.record_parse(ok=False, repairs=frozenset(repairs))
         return None
 
     decoder = json.JSONDecoder()
@@ -123,7 +174,57 @@ def salvage_llm_json_object(raw: str) -> dict | None:
             break
         if isinstance(key, str):
             out[key] = value
+    stats.record_parse(ok=bool(out), repairs=frozenset(repairs))
     return out or None
+
+
+def top_level_shape(raw: str) -> str | None:
+    """Which JSON shape the completion opens with: "object", "array", or neither.
+
+    What a caller dispatches on, so a completion is parsed once by the parser
+    that fits it instead of being tried array-first and mis-counted.
+    """
+    cleaned, _ = _strip_fences(raw)
+    obj, arr = cleaned.find("{"), cleaned.find("[")
+    if obj == -1 and arr == -1:
+        return None
+    if arr == -1 or (obj != -1 and obj < arr):
+        return "object"
+    return "array"
+
+
+def parse_array_with_repairs(raw: str) -> tuple[list | None, frozenset[str]]:
+    """Parse, and report which repairs the completion needed. None on failure.
+
+    The array counterpart of `parse_object_with_repairs`, and for the same
+    reason: a caller that tries both shapes must record one parse for one
+    completion, not one per attempt.
+    """
+    cleaned, fenced = _strip_fences(raw)
+    repairs: set[str] = {stats.FENCED} if fenced else set()
+    whole = _strict(cleaned)
+    if whole is not None:
+        return (whole if isinstance(whole, list) else None), frozenset(repairs)
+    start = cleaned.find("[")
+    if start == -1:
+        return None, frozenset(repairs)
+    end = cleaned.rfind("]")
+    if end <= start:
+        repairs.add(stats.TRUNCATED)
+    candidate = cleaned[start : end + 1] if end > start else cleaned[start:]
+    if candidate.strip() != cleaned.strip():
+        repairs.add("surrounded_by_prose")
+    for attempt, text in enumerate((candidate, _repair_escapes(candidate))):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            continue
+        if attempt:
+            repairs.add(stats.BAD_ESCAPE)
+        return (parsed if isinstance(parsed, list) else None), frozenset(repairs)
+    salvaged = _salvage_elements(_repair_escapes(candidate))
+    repairs.add(stats.TRUNCATED)
+    return (salvaged or None), frozenset(repairs)
 
 
 def parse_llm_json_array(raw: str) -> list:
@@ -133,16 +234,6 @@ def parse_llm_json_array(raw: str) -> list:
     Returns [] when no array content is recoverable. Truncation recovery
     keeps every complete element and drops the partial trailing one.
     """
-    cleaned = _strip_fences(raw)
-    start = cleaned.find("[")
-    if start == -1:
-        return []
-    end = cleaned.rfind("]")
-    candidate = cleaned[start : end + 1] if end > start else cleaned[start:]
-    for text in (candidate, _repair_escapes(candidate)):
-        try:
-            parsed = json.loads(text)
-        except ValueError:
-            continue
-        return parsed if isinstance(parsed, list) else []
-    return _salvage_elements(_repair_escapes(candidate))
+    parsed, repairs = parse_array_with_repairs(raw)
+    stats.record_parse(ok=parsed is not None, repairs=repairs)
+    return parsed if parsed is not None else []

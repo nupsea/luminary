@@ -3,51 +3,62 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from typing import Literal
 
 Verdict = Literal["yes", "no", "partial"]
 
-_CITATION_RE = re.compile(r"\[(\d+)\]")
-_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+def pair_answer_with_citations(
+    answer_text: str, citations: list[object]
+) -> list[tuple[str, str]]:
+    """Pair an answer with each citation excerpt returned beside it.
 
+    The QA endpoint emits prose followed by a JSON citations block, never inline
+    ``[N]`` markers (`app/services/qa.py`), so no claim can be attributed to one
+    specific citation. Attributing them anyway would be inventing a link the
+    product never made.
 
-def parse_claims_with_citations(answer_text: str) -> list[tuple[str, int]]:
-    """Extract ``(claim_text, citation_index)`` pairs from prose.
+    What is measurable is the property a reader actually depends on: every source
+    chip shown under an answer should support what the answer said. So each
+    citation is judged against the whole answer, and the rate is the fraction of
+    shown citations that hold up.
 
-    Citation indexes are returned as zero-based integers so they can address
-    the API's ``citations`` list directly. A sentence with multiple citation
-    markers produces one pair per marker.
+    An earlier version of this metric split prose on ``[N]`` markers. It scored
+    `None` in all 285 recorded runs, because the product has never emitted them.
     """
-    pairs: list[tuple[str, int]] = []
-    for sentence in _SENTENCE_RE.split(answer_text.strip()):
-        sentence = sentence.strip()
-        if not sentence:
+    answer = " ".join(answer_text.split())
+    if not answer:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for citation in citations:
+        if not isinstance(citation, dict):
             continue
-        matches = list(_CITATION_RE.finditer(sentence))
-        if not matches:
-            continue
-        claim = _CITATION_RE.sub("", sentence).strip()
-        claim = re.sub(r"\s+", " ", claim)
-        claim = re.sub(r"\s+([.!?,;:])", r"\1", claim)
-        if not claim:
-            continue
-        for match in matches:
-            citation_num = int(match.group(1))
-            if citation_num > 0:
-                pairs.append((claim, citation_num - 1))
+        excerpt = str(citation.get("text") or citation.get("excerpt") or "").strip()
+        if excerpt:
+            pairs.append((answer, excerpt))
     return pairs
 
 
 def judge_citation(claim: str, chunk: str, judge_model: str) -> Verdict:
-    """Judge whether *chunk* supports *claim* using LiteLLM strict JSON output."""
+    """Judge whether *chunk* supports *claim* using LiteLLM strict JSON output.
+
+    *claim* is the whole answer, because the product emits no per-claim markers
+    to attribute a citation to (see ``pair_answer_with_citations``). The prompt
+    must therefore ask what a reader asks -- does this chip support something the
+    answer said -- not whether one excerpt carries the entire answer. An earlier
+    prompt demanded the citation "fully supports the claim" against that whole
+    answer, which no single excerpt can do: measured over book chips, it scored
+    `no` on a verbatim correct citation and `partial` on two more (0.500 vs 0.750
+    on identical chips). Scores from before that fix are not comparable to scores
+    after it.
+    """
     import litellm  # noqa: PLC0415
 
     prompt = (
-        "Decide whether the citation text supports the claim. "
-        "Return only JSON with this exact shape: {\"verdict\":\"yes|no|partial\"}.\n\n"
-        f"Claim:\n{claim}\n\nCitation text:\n{chunk}"
+        "Decide whether the citation text supports at least one claim made in the "
+        "answer. Return only JSON with this exact shape: "
+        "{\"verdict\":\"yes|no|partial\"}.\n\n"
+        f"Answer:\n{claim}\n\nCitation text:\n{chunk}"
     )
     response = litellm.completion(
         model=judge_model,
@@ -55,9 +66,14 @@ def judge_citation(claim: str, chunk: str, judge_model: str) -> Verdict:
             {
                 "role": "system",
                 "content": (
-                    "You are a strict citation-grounding judge. Use yes only when "
-                    "the citation fully supports the claim, partial when it supports "
-                    "some but not all of it, and no when it does not support it."
+                    "You are a citation-grounding judge. An answer may make several "
+                    "claims and cite several sources; each source is expected to "
+                    "support part of the answer, not all of it. Use yes when the "
+                    "citation text supports at least one specific claim the answer "
+                    "makes, partial when it is on-topic but supports no specific "
+                    "claim, and no when it is irrelevant to the answer, contradicts "
+                    "it, or is commentary about the context rather than a quote "
+                    "from it."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -87,9 +103,10 @@ def compute_citation_support_rate(
 
     if not pairs:
         print(
-            "WARNING: citation_support_rate skipped -- no [N]-style citation "
-            "markers found in any answer. Check that the QA endpoint emits "
-            "bracketed citations.",
+            "WARNING: citation_support_rate skipped -- no answer carried a "
+            "citation with an excerpt. Every answer was uncited, which "
+            "citation_coverage reports as a product result rather than a gap "
+            "in the measurement.",
             file=sys.stderr,
         )
         return None

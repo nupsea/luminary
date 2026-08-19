@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
+from app.services import llm_output_stats
 from app.services.background import fire_and_forget
 from app.services.dataset_generator_service import (
     count_questions,
@@ -31,11 +32,13 @@ from app.services.dataset_generator_service import (
     delete_dataset,
     latest_run_for_dataset,
 )
+from app.services.eval_environment import collect_environment
 from app.services.golden_quality import golden_dataset_quality
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evals", tags=["evals"])
+
 
 # Repo root: 4 levels up from app/routers/evals.py
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -48,7 +51,6 @@ _background_tasks: set[asyncio.Task] = set()
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     fire_and_forget(coro, _background_tasks, label="background eval task")
-
 
 
 # In-flight + recently-completed eval run tracker.
@@ -93,7 +95,8 @@ def _record_run_finish(key: str, *, error: str | None) -> None:
 def _prune_in_flight() -> None:
     cutoff = _time.time() - _RUN_RETENTION_SECONDS
     stale = [
-        k for k, v in _in_flight_runs.items()
+        k
+        for k, v in _in_flight_runs.items()
         if v["status"] != "running" and (v.get("finished_at") or 0) < cutoff
     ]
     for k in stale:
@@ -134,8 +137,10 @@ async def _persist_failed_run(
     except Exception:
         logger.exception("could not persist failed eval run for %s", dataset_name)
 
+
 # Luminary backend always runs on port 7820; eval subprocess needs this to call /search etc.
 _BACKEND_URL = "http://localhost:7820"
+
 
 class EvalResultItem(BaseModel):
     dataset: str
@@ -285,9 +290,14 @@ async def _run_eval_subprocess(
     generate: bool = False,
 ) -> None:
     cmd = [
-        "uv", "run", "python", "run_eval.py",
-        "--dataset", dataset,
-        "--backend-url", _BACKEND_URL,
+        "uv",
+        "run",
+        "python",
+        "run_eval.py",
+        "--dataset",
+        dataset,
+        "--backend-url",
+        _BACKEND_URL,
     ]
     if assert_thresholds:
         cmd.append("--assert-thresholds")
@@ -319,17 +329,19 @@ async def _run_eval_subprocess(
         if result.returncode != 0:
             logger.warning(
                 "eval subprocess FAILED: dataset=%s returncode=%d\nSTDOUT:\n%s\nSTDERR:\n%s",
-                dataset, result.returncode, stdout_tail, stderr_tail,
+                dataset,
+                result.returncode,
+                stdout_tail,
+                stderr_tail,
             )
             error = (stderr_tail.strip().splitlines() or ["eval subprocess failed"])[-1][:500]
         else:
-            logger.info(
-                "eval subprocess finished OK: dataset=%s\n%s", dataset, stdout_tail
-            )
+            logger.info("eval subprocess finished OK: dataset=%s\n%s", dataset, stdout_tail)
             if stderr_tail.strip():
                 logger.debug(
                     "eval subprocess (rc=0) STDERR for dataset=%s:\n%s",
-                    dataset, stderr_tail,
+                    dataset,
+                    stderr_tail,
                 )
     except Exception as exc:
         logger.exception("eval subprocess raised: dataset=%s", dataset)
@@ -364,9 +376,14 @@ async def _run_generated_eval_subprocess(
     generate: bool = False,
 ) -> None:
     cmd = [
-        "uv", "run", "python", "run_eval.py",
-        "--dataset-id", dataset_id,
-        "--backend-url", _BACKEND_URL,
+        "uv",
+        "run",
+        "python",
+        "run_eval.py",
+        "--dataset-id",
+        dataset_id,
+        "--backend-url",
+        _BACKEND_URL,
     ]
     if model:
         cmd.extend(["--model", model])
@@ -395,18 +412,20 @@ async def _run_generated_eval_subprocess(
         if result.returncode != 0:
             logger.warning(
                 "eval subprocess FAILED: dataset_id=%s returncode=%d\nSTDOUT:\n%s\nSTDERR:\n%s",
-                dataset_id, result.returncode, stdout_tail, stderr_tail,
+                dataset_id,
+                result.returncode,
+                stdout_tail,
+                stderr_tail,
             )
             error = (stderr_tail.strip().splitlines() or ["eval subprocess failed"])[-1][:500]
         else:
-            logger.info(
-                "eval subprocess finished OK: dataset_id=%s\n%s", dataset_id, stdout_tail
-            )
+            logger.info("eval subprocess finished OK: dataset_id=%s\n%s", dataset_id, stdout_tail)
             if stderr_tail.strip():
                 # rc=0, so this is RAGAS/tqdm progress, not a fault.
                 logger.debug(
                     "eval subprocess (rc=0) STDERR for dataset_id=%s:\n%s",
-                    dataset_id, stderr_tail,
+                    dataset_id,
+                    stderr_tail,
                 )
     except Exception as exc:
         logger.exception("eval subprocess raised: dataset_id=%s", dataset_id)
@@ -551,6 +570,71 @@ def _file_golden_question_count(path: Path) -> int | None:
     if not (first.get("question") and first.get("context_hint") and first.get("source_file")):
         return None
     return count
+
+
+class EvalLibraryFingerprint(BaseModel):
+    documents: int
+    chunks: int
+
+
+class EvalEnvironmentResponse(BaseModel):
+    """The build, models and corpus a run measures. See `eval_environment.py`."""
+
+    backend_version: str
+    embedding_model: str
+    embedding_dim: int
+    chunk_vector_table: str
+    rerank_model: str
+    rerank_depth: int
+    rerank_blend_alpha: float | None
+    query_spell_correct: bool
+    llm_mode: str
+    chat_model: str
+    background_model: str
+    local_chat_model: str
+    generation_model: str
+    vision_model: str
+    # Which prompt produced the run: `shipped` or the matrix's `bare` arm, plus
+    # any accommodations withheld one at a time for the necessity check.
+    prompt_arm: str = "shipped"
+    prompt_accommodations_dropped: list[str] = []
+    # The machine class the run measured. Stage 6 gates on all three profiles,
+    # which is unverifiable if a stored run does not say which one it was.
+    memory_profile: str = "unknown"
+    memory_profile_explicit: bool = False
+    max_resident_models: int = 0
+    host_ram_gb: int = 0
+    resident_models: list[str] = []
+    library: EvalLibraryFingerprint
+
+
+class OutputStatsResponse(BaseModel):
+    """What model output needed before it could be used. See `llm_output_stats`."""
+
+    counts: dict[str, int]
+    first_pass_rate: float | None
+    attempts_per_generation: float | None
+
+
+@router.get("/output-stats", response_model=OutputStatsResponse)
+async def output_stats() -> OutputStatsResponse:
+    """Repair counters, monotonic since process start.
+
+    An eval snapshots this before and after a run and takes the difference.
+    There is deliberately no reset: a reset is a mutation two concurrent
+    readers can lose, and a diff cannot be.
+    """
+    return OutputStatsResponse(**llm_output_stats.snapshot())
+
+
+@router.get("/environment", response_model=EvalEnvironmentResponse)
+async def eval_environment(db: AsyncSession = Depends(get_db)) -> EvalEnvironmentResponse:
+    """What produced a number: build, resolved models, and the corpus fingerprint.
+
+    Recorded with every eval run so two runs can be compared, or shown to be
+    incomparable, without reading a commit log.
+    """
+    return EvalEnvironmentResponse(**await collect_environment(db))
 
 
 @router.get("/runs", response_model=list[EvalRunListItem])
@@ -811,6 +895,7 @@ async def get_golden_file(
         raise HTTPException(status_code=500, detail="Could not read golden file") from exc
     total = len(rows)
     page = rows[offset : offset + limit]
+
     def _str_hint(raw: object) -> str | None:
         if raw is None:
             return None
@@ -1020,9 +1105,7 @@ async def relink_golden_dataset(
         )
         .values(source_document_id=req.document_id, source_chunk_id="")
     )
-    new_source_ids = [
-        d for d in (dataset.source_document_ids or []) if d not in old_ids
-    ]
+    new_source_ids = [d for d in (dataset.source_document_ids or []) if d not in old_ids]
     if req.document_id not in new_source_ids:
         new_source_ids.append(req.document_id)
     dataset.source_document_ids = new_source_ids
@@ -1103,6 +1186,7 @@ async def run_generated_dataset_eval(
             err = _validate_model_available(candidate, settings)
             if err:
                 raise HTTPException(status_code=422, detail=err)
+    _refuse_if_lab_running()
     run_id = f"generated-{dataset_id}-{len(_background_tasks) + 1}"
     _record_run_start(
         dataset_id,
@@ -1228,6 +1312,7 @@ async def run_eval(req: EvalRunRequest) -> dict:
         req.judge_model = ""
         req.model = None
         req.generate = False
+    _refuse_if_lab_running()
     settings = get_settings()
     for candidate in (req.judge_model, req.model):
         if candidate:
@@ -1256,7 +1341,10 @@ async def run_eval(req: EvalRunRequest) -> dict:
     )
     logger.info(
         "eval run started: dataset=%s assert_thresholds=%s rerank=%s ablation=%s",
-        req.dataset, req.assert_thresholds, req.rerank, req.ablation,
+        req.dataset,
+        req.assert_thresholds,
+        req.rerank,
+        req.ablation,
     )
     return {"status": "started", "dataset": req.dataset}
 
@@ -1274,14 +1362,24 @@ class GoldenGenerateRequest(BaseModel):
 async def _run_golden_generation_subprocess(req: GoldenGenerateRequest) -> None:
     out = _EVALS_DIR / "golden" / f"{req.name}.jsonl"
     cmd = [
-        "uv", "run", "--project", str(REPO_ROOT / "backend"), "python",
+        "uv",
+        "run",
+        "--project",
+        str(REPO_ROOT / "backend"),
+        "python",
         str(_EVALS_DIR / "generate_golden.py"),
-        "--source", str(REPO_ROOT / req.source_file),
-        "--out", str(out),
-        "--generator-model", req.generator_model,
-        "--target", str(req.target),
-        "--source-file-label", req.source_file,
-        "--verify-models", *req.verify_models,
+        "--source",
+        str(REPO_ROOT / req.source_file),
+        "--out",
+        str(out),
+        "--generator-model",
+        req.generator_model,
+        "--target",
+        str(req.target),
+        "--source-file-label",
+        req.source_file,
+        "--verify-models",
+        *req.verify_models,
     ]
     logger.info("golden generation starting: name=%s cmd=%s", req.name, cmd)
     error: str | None = None
@@ -1316,6 +1414,31 @@ def _ollama_models(settings) -> tuple[set[str], str | None]:
 # arbitrary-file read/write primitive. Enforce a strict provider/name shape so
 # no argv token can begin with "-" or carry separators.
 _MODEL_ID_RE = re.compile(r"^(ollama|openai|anthropic|gemini)/[A-Za-z0-9._:-]+$")
+
+
+def _refuse_if_lab_running() -> None:
+    """Refuse an eval while a model comparison holds the model selection.
+
+    Not politeness about CPU. A comparison switches the selected model between
+    candidates for its whole duration, so an eval started alongside one would be
+    answered by whichever model the lab happened to have loaded at that moment,
+    and would record that model's environment as its own. The number would look
+    ordinary and mean nothing.
+    """
+    from app.services import model_lab  # noqa: PLC0415
+
+    running = model_lab.current_run()
+    if running is None:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "A model comparison is running and owns the model selection "
+            f"({' vs '.join(running.models)}). An eval started now would be answered "
+            "by whichever candidate is loaded and would record the wrong model. "
+            "Wait for it to finish, or stop it from Quality → Model lab."
+        ),
+    )
 
 
 def _validate_model_available(model: str, settings) -> str | None:

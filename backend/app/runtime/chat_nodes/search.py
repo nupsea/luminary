@@ -22,6 +22,28 @@ from app.types import ChatState, ScoredChunk
 logger = logging.getLogger(__name__)
 
 
+READY_STAGE = "complete"
+
+
+async def _searchable_document_ids() -> tuple[set[str], int]:
+    """(ids that can actually be searched, total document count).
+
+    A document is searchable only if it exists and has finished ingesting. Both
+    halves were live defects on 2026-08-17:
+
+    - A document 90 seconds into a 52,331-chunk ingest has its chunk rows in
+      SQLite but no vectors, so it returns nothing while still consuming the
+      result window.
+    - A chat scoped to a *deleted* document returned nothing for nine days. The
+      id came from the browser store and matched no row at all, so every question
+      in that chat was filtered down to a document that did not exist.
+    """
+    async with get_session_factory()() as session:
+        rows = await session.execute(select(DocumentModel.id, DocumentModel.stage))
+        pairs = [(str(r[0]), r[1]) for r in rows]
+    return {doc_id for doc_id, stage in pairs if stage == READY_STAGE}, len(pairs)
+
+
 async def _fetch_section_summaries(
     doc_heading_pairs: list[tuple[str, str]],
 ) -> dict[tuple[str, str], str]:
@@ -143,6 +165,31 @@ async def search_node(state: ChatState) -> dict:
                 len(effective_doc_ids) if effective_doc_ids else "all",
             )
 
+    # Only documents that exist and have finished ingesting are searched, whatever
+    # the scope asked for. A missing or half-ingested document contributes nothing
+    # and can only displace documents that do; when the scope named nothing else,
+    # the rest of the library answers, because the question is about material the
+    # user has rather than about the id their chat happened to be holding.
+    searchable, total_documents = await _searchable_document_ids()
+    unsearchable_exist = len(searchable) != total_documents
+    if effective_doc_ids:
+        kept = [d for d in effective_doc_ids if d in searchable]
+        if not kept:
+            logger.info(
+                "search_node: none of the %d requested document(s) are searchable "
+                "(missing or still indexing) — searching the rest of the library",
+                len(effective_doc_ids),
+            )
+            effective_doc_ids = None
+        elif len(kept) != len(effective_doc_ids):
+            logger.info(
+                "search_node: dropped %d unsearchable document(s) from the filter",
+                len(effective_doc_ids) - len(kept),
+            )
+            effective_doc_ids = kept
+    if effective_doc_ids is None and unsearchable_exist:
+        effective_doc_ids = sorted(searchable) or None
+
     logger.info(
         "search_node: query=%r scope=%s filter_docs=%s",
         q[:80],
@@ -168,6 +215,7 @@ async def search_node(state: ChatState) -> dict:
 
     chunks_dicts: list[dict] = []
     image_ids: list[str] = []
+    retrieval_failed = False
     try:
         t_ret = time.perf_counter()
         retriever = get_retriever()
@@ -215,6 +263,11 @@ async def search_node(state: ChatState) -> dict:
                     "chunk_id": c.chunk_id,
                     "document_id": c.document_id,
                     "text": augmented_text,
+                    # The chunk as it appears in the document. `text` above is
+                    # what the model reads and carries a generated section
+                    # summary, so a citation excerpt cut from it can quote prose
+                    # the document does not contain (I-33).
+                    "source_text": expanded_text,
                     "section_heading": c.section_heading,
                     "section_summary": section_summary,
                     "page": c.page,
@@ -224,6 +277,10 @@ async def search_node(state: ChatState) -> dict:
             )
     except Exception:
         logger.warning("search_node: retrieval failed", exc_info=True)
+        retrieval_failed = True
+
+    if unsearchable_exist and chunks_dicts:
+        chunks_dicts = [c for c in chunks_dicts if c.get("document_id") in searchable]
 
     # For scope='all': cap at 2 chunks per document so no single doc dominates
     # context. Skip the cap when routing deliberately narrowed to a doc set --
@@ -233,4 +290,8 @@ async def search_node(state: ChatState) -> dict:
         chunks_dicts = _cap_per_document(chunks_dicts, max_per_doc=2)
 
     logger.info("search_node: returning %d chunks, %d image_ids", len(chunks_dicts), len(image_ids))
-    return {"chunks": chunks_dicts, "image_ids": image_ids}
+    return {
+        "chunks": chunks_dicts,
+        "image_ids": image_ids,
+        "retrieval_failed": retrieval_failed,
+    }

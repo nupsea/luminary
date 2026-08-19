@@ -23,14 +23,20 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import DocumentModel, QAHistoryModel
+from app.runtime.chat_nodes._shared import _COMPARATIVE_SYSTEM, _RELATIONAL_SYSTEM
 from app.services.qa import (
     NOT_FOUND_SENTINEL,
     QA_CREATIVE_SYSTEM_PROMPT,
     QA_CREATIVE_TEMPERATURE,
+    QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
     QAService,
     _build_context,
+    _drop_ungrounded_citations,
     _enrich_citation_titles,
+    _excerpt_from_chunk,
+    _gate_and_rank_citations,
+    _resolve_marker_citations,
     _should_use_summary,
     _split_response,
 )
@@ -235,6 +241,191 @@ def test_split_response_drops_placeholder_citations():
     assert answer == "An answer."
     assert len(citations) == 1
     assert citations[0]["document_title"] == "the_odyssey"
+
+
+_TIME_MACHINE_GROUNDING = [
+    "Within was a small apartment, and on a raised place in the corner of this was "
+    "the Time Machine. I had the model fragments in my pocket.",
+    "At once, like a lash across the face, came the possibility of losing my own age, "
+    "of being left helpless in this strange new world.",
+]
+
+
+def test_drop_ungrounded_keeps_verbatim_excerpt():
+    """A quote copied from the grounding is what a citation is supposed to be."""
+    citations = [
+        {"excerpt": "on a raised place in the corner of this was the Time Machine"}
+    ]
+    assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == citations
+
+
+def test_drop_ungrounded_drops_model_narration():
+    """Measured: the model wrote its own summary of events into `excerpt`, which
+    renders as a source chip quoting a sentence the book does not contain."""
+    citations = [
+        {
+            "excerpt": (
+                "After the mysterious disappearance of the time machine, everyone is "
+                "silent for a moment. Filby expresses disbelief."
+            )
+        }
+    ]
+    assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == []
+
+
+def test_drop_ungrounded_drops_commentary_about_the_context():
+    """Measured, and the worst of the class: the chip quotes the model talking
+    about its own retrieval. The eval judge scored this one `yes`."""
+    citations = [
+        {
+            "excerpt": (
+                "The context does not provide specific details about the physical "
+                "layout of the dining area. However, given that..."
+            )
+        }
+    ]
+    assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == []
+
+
+def test_drop_ungrounded_drops_source_text_absent_from_the_grounding():
+    """Real prose from the document, recited from the model's own memory rather
+    than retrieved. The answer was not grounded on it and no chunk links to it."""
+    citations = [
+        {
+            "excerpt": (
+                "You can move about in all directions of space but cannot move "
+                "about in time."
+            )
+        }
+    ]
+    assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == []
+
+
+def test_drop_ungrounded_tolerates_repunctuation_and_ellipsis():
+    """Models re-punctuate and stitch quotes; a contiguous run still identifies
+    the passage, and demanding an exact string would drop real citations."""
+    citations = [
+        {"excerpt": "came the possibility of losing my own age ... left helpless"}
+    ]
+    assert len(_drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING)) == 1
+
+
+def test_drop_ungrounded_keeps_everything_when_there_is_no_grounding():
+    """With no grounding text there is nothing to verify against, and the
+    pass-through path never retrieved chunks in the first place."""
+    citations = [{"excerpt": "Anything at all."}]
+    assert _drop_ungrounded_citations(citations, []) == citations
+
+
+def test_drop_ungrounded_keeps_citation_without_an_excerpt():
+    """A chip carrying only a heading makes no quoting claim to falsify."""
+    citations = [{"document_title": "the_odyssey", "section_heading": "Book I"}]
+    assert _drop_ungrounded_citations(citations, _TIME_MACHINE_GROUNDING) == citations
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        QA_SYSTEM_PROMPT,
+        QA_CREATIVE_SYSTEM_PROMPT,
+        QA_FACTUAL_SYSTEM_PROMPT,
+        _RELATIONAL_SYSTEM,
+        _COMPARATIVE_SYSTEM,
+    ],
+)
+def test_every_citation_prompt_cites_by_marker(prompt):
+    """All five citation-bearing prompts, not just the three in this module: the
+    relational and comparative prompts live in chat_nodes/_shared.py and kept the
+    old free-text excerpt format after the first pass at I-33."""
+    assert '{"source":"S1"}' in prompt
+    assert "Do not copy the passage text" in prompt
+    assert '"excerpt":"..."' not in prompt
+
+
+_MARKER_CHUNKS = [
+    {
+        "chunk_id": "c1",
+        "document_id": "d1",
+        "text": (
+            "The Time Traveller smiled. Within was a small apartment, and on a raised "
+            "place in the corner of this was the Time Machine."
+        ),
+        "section_heading": "XII",
+        "page": 7,
+    },
+    {
+        "chunk_id": "c2",
+        "document_id": "d1",
+        "text": "Fruit, by the bye, was all their diet.",
+        "section_heading": "IV",
+        "page": 3,
+    },
+]
+
+
+def test_marker_citation_fills_excerpt_from_the_named_chunk():
+    """The model names a source; the excerpt comes from that chunk, so it is
+    verbatim by construction rather than by instruction."""
+    resolved, unresolved = _resolve_marker_citations(
+        [{"source": "S2"}], _MARKER_CHUNKS, {"d1": "the_time_machine"}
+    )
+    assert unresolved == 0
+    assert resolved[0]["excerpt"] == "Fruit, by the bye, was all their diet."
+    assert resolved[0]["chunk_id"] == "c2"
+    assert resolved[0]["page"] == 3
+    assert resolved[0]["document_title"] == "the_time_machine"
+
+
+def test_marker_citation_quote_only_locates_never_supplies_text():
+    """A quote the model types is a pointer into the chunk. Even when it is a
+    paraphrase, what reaches the user is the chunk's own words. A chunk within the
+    length budget is shown whole -- cropping a short passage hides context for no
+    gain, and the window only has to be chosen when the budget forces a choice."""
+    resolved, _ = _resolve_marker_citations(
+        [{"source": "S1", "quote": "a raised place in the corner"}],
+        _MARKER_CHUNKS,
+        {},
+    )
+    assert "a raised place in the corner" in resolved[0]["excerpt"]
+    assert resolved[0]["excerpt"] in " ".join(_MARKER_CHUNKS[0]["text"].split())
+
+
+def test_marker_citation_naming_a_nonexistent_source_is_dropped():
+    """`[S9]` when 2 passages were shown claims a source that does not exist."""
+    resolved, unresolved = _resolve_marker_citations(
+        [{"source": "S9"}], _MARKER_CHUNKS, {}
+    )
+    assert resolved == []
+    assert unresolved == 1
+
+
+def test_marker_citation_accepts_bare_and_bracketed_forms():
+    """Small models write S1, 1, and [S1] interchangeably."""
+    for form in ("S1", "1", "[S1]", " s1 "):
+        resolved, unresolved = _resolve_marker_citations(
+            [{"source": form}], _MARKER_CHUNKS, {}
+        )
+        assert unresolved == 0, form
+        assert resolved[0]["chunk_id"] == "c1", form
+
+
+def test_legacy_excerpt_citation_passes_through_untouched():
+    """Prompts and models outside this path still emit excerpt citations; those
+    stay on the I-33 verification path rather than being dropped as unresolvable."""
+    legacy = [{"document_title": "the_odyssey", "excerpt": "Ithaca is fertile."}]
+    resolved, unresolved = _resolve_marker_citations(legacy, _MARKER_CHUNKS, {})
+    assert resolved == legacy
+    assert unresolved == 0
+
+
+def test_marker_citation_is_not_mistaken_for_a_placeholder():
+    """A marker citation carries neither title nor excerpt until it is resolved,
+    which is exactly the shape the placeholder guard drops."""
+    full_text = "An answer." + json.dumps(
+        {"citations": [{"source": "S1"}], "confidence": "high"}
+    )
+    _, citations, _ = _split_response(full_text)
+    assert citations == [{"source": "S1"}]
 
 
 def test_split_response_truncated_style_a_keeps_prose_with_medium_confidence():
@@ -520,7 +711,11 @@ async def test_endpoint_returns_sse_content_type(test_db):
 
 @pytest.mark.asyncio
 async def test_endpoint_not_found_response(test_db):
-    """No chunks → no_context error event."""
+    """No chunks, and nothing in the library → no_documents.
+
+    The error names which of the four reasons applied; on an empty library the
+    honest one is that there is nothing to search.
+    """
     _engine, factory, tmp_path = test_db
 
     result = _make_graph_result(answer="", not_found=True, chunks=[])
@@ -534,7 +729,7 @@ async def test_endpoint_not_found_response(test_db):
     events = [line for line in resp.text.splitlines() if line.startswith("data: ")]
     assert len(events) == 1
     payload = json.loads(events[0][len("data: ") :])
-    assert payload["error"] == "no_context"
+    assert payload["error"] == "no_documents"
     assert payload["done"] is True
 
 
@@ -564,7 +759,7 @@ async def test_endpoint_all_scope_produces_answer(test_db):
 
 @pytest.mark.asyncio
 async def test_qa_no_context(test_db):
-    """Graph returns not_found=True with no chunks → 1 SSE event with error='no_context'."""
+    """not_found with no chunks on an empty library → one event naming that reason."""
     _engine, factory, tmp_path = test_db
 
     result = _make_graph_result(answer="", not_found=True, chunks=[])
@@ -579,7 +774,7 @@ async def test_qa_no_context(test_db):
     data_lines = [e for e in events if e.startswith("data: ")]
     assert len(data_lines) == 1
     payload = json.loads(data_lines[0][len("data: ") :])
-    assert payload["error"] == "no_context"
+    assert payload["error"] == "no_documents"
     assert payload["done"] is True
 
 
@@ -946,3 +1141,241 @@ async def test_default_mode_preserves_grounded_prompt_and_no_temperature(test_db
     assert len(calls) == 1
     assert calls[0]["system"] == QA_SYSTEM_PROMPT
     assert calls[0]["temperature"] is None
+
+
+def test_repeated_marker_yields_one_chip():
+    """Two markers naming the same passage are one source, not two chips."""
+    resolved, unresolved = _resolve_marker_citations(
+        [{"source": "S1"}, {"source": "S1"}, {"source": "S2"}], _MARKER_CHUNKS, {}
+    )
+    assert [c["chunk_id"] for c in resolved] == ["c1", "c2"]
+    assert unresolved == 0
+
+
+def test_citation_cap_matches_the_sources_panel():
+    """Relieved of retyping the quote the model cites freely -- a 737-character
+    answer came back with 12 chips. Both lists under one answer share the cap."""
+    from app.services.qa import MAX_CITATIONS
+
+    assert MAX_CITATIONS == 5
+    many = [
+        {
+            "chunk_id": f"c{i}",
+            "document_id": "d1",
+            "text": f"Passage number {i} of the source material.",
+            "section_heading": "H",
+            "page": i,
+        }
+        for i in range(1, 13)
+    ]
+    resolved, _ = _resolve_marker_citations(
+        [{"source": f"S{i}"} for i in range(1, 13)], many, {}
+    )
+    # The resolver dedupes; the cap itself is applied where both paths merge.
+    assert len(resolved) == 12
+    assert len(resolved[:MAX_CITATIONS]) == 5
+
+
+_SCORED_CHUNKS = [
+    {"chunk_id": "hi", "document_id": "d1", "text": "Strongly relevant passage.",
+     "section_heading": "A", "page": 1, "score": 0.030},
+    {"chunk_id": "mid", "document_id": "d1", "text": "Moderately relevant passage.",
+     "section_heading": "B", "page": 2, "score": 0.020},
+    {"chunk_id": "weak", "document_id": "d1", "text": "Barely related passage.",
+     "section_heading": "C", "page": 3, "score": 0.004},
+]
+
+
+def _resolve_and_gate(sources):
+    resolved, _ = _resolve_marker_citations(
+        [{"source": s} for s in sources], _SCORED_CHUNKS, {}
+    )
+    return _gate_and_rank_citations(resolved)
+
+
+def test_gate_drops_chips_far_below_the_best_source():
+    """`paper` cited every answer it gave (coverage 1.0000) while under half the
+    chips supported anything: the model cites what it was shown, not what carries
+    the claim. The sources panel has always gated on relevance; chips now do too."""
+    kept = _resolve_and_gate(["S1", "S2", "S3"])
+    assert [c["chunk_id"] for c in kept] == ["hi", "mid"]
+
+
+def test_gate_ranks_by_retrieval_score_not_citation_order():
+    """The cap must keep the strongest sources, so ranking has to happen first --
+    capping the model's emission order keeps whichever it happened to name first."""
+    kept = _resolve_and_gate(["S3", "S2", "S1"])
+    assert [c["chunk_id"] for c in kept] == ["hi", "mid"]
+
+
+def test_gate_always_keeps_the_single_best_source():
+    """An answer that retrieved something must never show zero sources because
+    the gate was strict -- same rule source_citations follows."""
+    only_weak = [dict(_SCORED_CHUNKS[2])]
+    resolved, _ = _resolve_marker_citations([{"source": "S1"}], only_weak, {})
+    kept = _gate_and_rank_citations(resolved)
+    assert [c["chunk_id"] for c in kept] == ["weak"]
+
+
+def test_gate_caps_at_max_citations():
+    many = [
+        {"chunk_id": f"c{i}", "document_id": "d1", "text": f"Passage {i}.",
+         "section_heading": "H", "page": i, "score": 0.030}
+        for i in range(1, 13)
+    ]
+    resolved, _ = _resolve_marker_citations(
+        [{"source": f"S{i}"} for i in range(1, 13)], many, {}
+    )
+    assert len(_gate_and_rank_citations(resolved)) == 5
+
+
+def test_gate_keeps_unrankable_legacy_citations():
+    """A free-text excerpt citation carries no score and cannot be ranked; scoring
+    it as zero would let the gate delete every citation from a non-marker prompt."""
+    legacy = [{"document_title": "the_odyssey", "excerpt": "Ithaca is fertile."}]
+    assert _gate_and_rank_citations(legacy) == legacy
+
+
+def test_gate_strips_the_internal_score_key():
+    """`_score` is plumbing for ranking, never part of the wire payload."""
+    kept = _resolve_and_gate(["S1", "S2"])
+    assert all("_score" not in c for c in kept)
+
+
+_LONG_CHUNK = (
+    "The Psychologist opened the discussion with a digression about the weather in "
+    "Richmond, which had been unkind all that week and gave everyone something to "
+    "complain about over dinner. The company argued for some minutes about nothing "
+    "in particular, as companies do. Then the Time Traveller said the machine had "
+    "travelled into futurity, and that the levers controlled the direction of its "
+    "flight through time. He showed them the small ivory lever that sent it forward. "
+    "Afterwards the conversation turned again to trivial matters and the fire."
+)
+
+
+def test_excerpt_shows_the_part_that_bears_on_the_answer():
+    """A chunk is sized for the embedder, so the sentence carrying the claim sits
+    anywhere in it. Cutting the head showed the wrong text: measured over `book`
+    chips, 12 of 15 excerpts were head cuts and judging them scored 0.5667 against
+    0.8667 for the same chips judged on their full chunk."""
+    answer = "The levers controlled the direction of the machine's flight through time."
+    excerpt = _excerpt_from_chunk(_LONG_CHUNK, "", answer)
+    assert "levers controlled the direction" in excerpt
+    assert "weather in Richmond" not in excerpt
+
+
+def test_excerpt_prefers_the_models_own_pointer():
+    """The quote hint outweighs general answer overlap: it is the model saying
+    which sentence it meant."""
+    answer = "They discussed several things over dinner."
+    excerpt = _excerpt_from_chunk(_LONG_CHUNK, "small ivory lever", answer)
+    assert "ivory lever" in excerpt
+
+
+def test_excerpt_is_always_verbatim_from_the_chunk():
+    """The hint and the answer only choose a window; neither may put words into
+    the source. A paraphrased hint costs relevance, never fidelity."""
+    excerpt = _excerpt_from_chunk(_LONG_CHUNK, "levers steered it forwards in time", "")
+    body = excerpt.lstrip(".").strip().rstrip(".")
+    assert body[:80] in " ".join(_LONG_CHUNK.split())
+
+
+def test_excerpt_returns_short_chunks_whole():
+    short = "Fruit, by the bye, was all their diet."
+    assert _excerpt_from_chunk(short, "", "anything") == short
+
+
+def test_excerpt_respects_the_length_budget():
+    long_text = " ".join(f"Sentence number {i} about the subject." for i in range(200))
+    assert len(_excerpt_from_chunk(long_text, "", "subject")) <= 340
+
+
+def test_a_citation_excerpt_never_quotes_the_generated_section_summary():
+    """I-33 says an excerpt is a quote the grounding contains. The packed `text`
+    is not the grounding: `search_node` prefixes it with a machine-written
+    section summary, so an excerpt cut from `text` can be presented to the reader
+    as a quote from their document when the document never contained it."""
+    from app.services.qa import _excerpt_from_chunk
+
+    summary = "This section argues that redundancy masks independent faults."
+    document = "The Eloi were small, and their manner was that of children."
+    packed = f"### Chapter II\n{summary}\n---\n{document}"
+
+    chunk = {"text": packed, "source_text": document}
+
+    excerpt = _excerpt_from_chunk(
+        chunk.get("source_text") or chunk.get("text", ""), "", "What were the Eloi like?"
+    )
+
+    assert excerpt
+    assert excerpt in document
+    assert "redundancy masks" not in excerpt
+
+
+# One message used to cover four situations, and it named the least likely one:
+# "make sure at least one document has been ingested", shown to a user holding 52
+# documents while a 53rd was indexing (2026-08-17).
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_names_the_document_when_scoped(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason(
+        "single", [doc_id], retrieval_failed=False
+    )
+
+    assert code == "no_match_in_document"
+    assert "the_odyssey" in msg
+    assert "all documents" in msg, "the user needs to be told what to try next"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_for_a_library_that_simply_has_no_match(test_db):
+    _engine, factory, tmp_path = test_db
+    await _insert_doc(factory, tmp_path, str(uuid.uuid4()), title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason("all", None, retrieval_failed=False)
+
+    assert code == "no_context"
+    assert "ingest" not in msg.lower(), "the library is not empty; do not tell them to ingest"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_when_every_document_is_still_indexing(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id, title="ibm-sdm-vol-2")
+    async with factory() as session:
+        doc = await session.get(DocumentModel, doc_id)
+        doc.stage = "embedding"
+        await session.commit()
+
+    code, _ = await QAService()._no_context_reason("all", None, retrieval_failed=False)
+
+    assert code == "still_indexing"
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_distinguishes_a_failed_search(test_db):
+    """A search that raised is not a library that is empty."""
+    code, msg = await QAService()._no_context_reason("all", None, retrieval_failed=True)
+
+    assert code == "retrieval_failed"
+    assert "again" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_no_context_reason_names_a_deleted_document(test_db):
+    """Scoped to an id that resolves to nothing: say that, not "your library"."""
+    _engine, factory, tmp_path = test_db
+    await _insert_doc(factory, tmp_path, str(uuid.uuid4()), title="the_odyssey")
+
+    code, msg = await QAService()._no_context_reason(
+        "single", [str(uuid.uuid4())], retrieval_failed=False
+    )
+
+    assert code == "document_missing"
+    assert "no longer in your library" in msg

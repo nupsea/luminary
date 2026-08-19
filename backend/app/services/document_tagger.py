@@ -29,6 +29,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services.llm_json import parse_llm_json_array
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
+from app.services.prompt_spec import render_for, tag_spec
 
 logger = logging.getLogger(__name__)
 
@@ -109,13 +110,10 @@ TAG_STOPLIST: frozenset[str] = frozenset(
     }
 )
 
-_SYSTEM = (
-    "You are a tagging assistant. Given a document, suggest up to 5 short, "
-    "lowercase tags that best describe its topics. Tags should be 1-3 words, "
-    "no punctuation. Output ONLY a JSON array of strings, e.g. "
-    '["machine learning", "python"]. Write no explanation, preamble, or '
-    "markdown fences."
-)
+DOCUMENT_TAG_SPEC = tag_spec("document")
+
+def _system() -> str:
+    return render_for(DOCUMENT_TAG_SPEC, "background")
 
 _USER_TMPL = (
     "Title:\n{title}\n\nSummary:\n{summary}\n\nExcerpt:\n{excerpt}\n\n"
@@ -148,7 +146,7 @@ class DocumentTaggerService:
         try:
             raw = await get_llm_service().complete(
                 messages=[
-                    {"role": "system", "content": _SYSTEM},
+                    {"role": "system", "content": _system()},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,

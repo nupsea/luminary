@@ -70,7 +70,8 @@ def test_generate_endpoint_201(client):
     )
     card_resp = (
         '[{"question": "What can the Cheshire Cat do?", '
-        '"answer": "Vanish leaving its smile", "source_excerpt": "..."}]'
+        '"answer": "Vanish leaving its smile", '
+        '"source_excerpt": "can vanish leaving only its smile"}]'
     )
     mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
     with patch("app.services.llm.LLMService.generate", mock_llm):
@@ -105,7 +106,8 @@ def test_generate_from_notes_by_ids(client):
     )
     card_resp = (
         '[{"question": "Who is always late?", '
-        '"answer": "The White Rabbit", "source_excerpt": "..."}]'
+        '"answer": "The White Rabbit", '
+        '"source_excerpt": "The White Rabbit is always late"}]'
     )
     mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
     with patch("app.services.llm.LLMService.generate", mock_llm):
@@ -147,9 +149,10 @@ def test_alice_notes_flashcards(all_books_ingested):
         )
         card_resp = (
             '[{"question": "Who did Alice follow?", '
-            '"answer": "The White Rabbit", "source_excerpt": "Alice followed..."}, '
+            '"answer": "The White Rabbit", '
+            '"source_excerpt": "fell down a rabbit hole into Wonderland"}, '
             '{"question": "What remains after the Cheshire Cat vanishes?", '
-            '"answer": "Its grin", "source_excerpt": "grin remains"}]'
+            '"answer": "Its grin", "source_excerpt": "can vanish leaving only its smile"}]'
         )
         mock_llm = AsyncMock(side_effect=[concept_resp, card_resp])
         with patch("app.services.llm.LLMService.generate", mock_llm):

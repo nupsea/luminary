@@ -12,4 +12,7 @@ dependencies = [
     "langchain-huggingface>=0.1.0",
     "sentence-transformers>=3.0.0",
     "transformers>=4.40,<5",  # HHEM remote code breaks on transformers 5.x
+    # judge_citation calls LiteLLM directly. Without it here every citation
+    # judge call raised ModuleNotFoundError and the metric scored None.
+    "litellm>=1.0",
 ]

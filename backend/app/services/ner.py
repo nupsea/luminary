@@ -1,6 +1,6 @@
 """EntityExtractor: GLiNER-based zero-shot named entity recognition.
 
-Loads 'urchade/gliner_multi_pii-v1' on first use and caches to DATA_DIR/models/gliner/.
+Loads `NER_MODEL` on first use and caches to DATA_DIR/models/gliner/.
 Extracts entities from chunk texts with custom entity types, then applies layered
 post-extraction filters to remove pronouns, possessive phrases, generic geographic
 terms, bare-number dates, and other common noise patterns from literary/prose text.
@@ -402,13 +402,20 @@ def get_entity_extractor() -> "EntityExtractor":
 class EntityExtractor:
     _model = None
 
-    def __init__(self, data_dir: str) -> None:
+    def __init__(self, data_dir: str, model_id: str | None = None) -> None:
         self._model_dir = Path(data_dir).expanduser() / "models" / "gliner"
         self._model_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("EntityExtractor created", extra={"model_dir": str(self._model_dir)})
+        # Two models can share this directory: the HuggingFace cache keys on
+        # `models--org--name`, so switching NER_MODEL fetches alongside rather
+        # than over the top, and switching back does not re-download.
+        self._model_id = model_id or get_settings().NER_MODEL
+        logger.info(
+            "EntityExtractor created",
+            extra={"model_dir": str(self._model_dir), "model_id": self._model_id},
+        )
 
     def _load_model(self):
-        """Lazy-load GLiNER model, caching to DATA_DIR/models/gliner/."""
+        """Lazy-load the GLiNER model, caching to DATA_DIR/models/gliner/."""
         # The lock must span the construction itself, not just the None check --
         # see app/services/model_loading.py.
         with MODEL_LOAD_LOCK:
@@ -417,11 +424,11 @@ class EntityExtractor:
 
             from gliner import GLiNER  # noqa: PLC0415
 
-            logger.info("Loading GLiNER model", extra={"model_dir": str(self._model_dir)})
+            logger.info("Loading GLiNER model", extra={"model_id": self._model_id})
             # Try loading locally first to prevent blocking name resolution attempts offline
             try:
                 self._model = GLiNER.from_pretrained(
-                    "urchade/gliner_multi_pii-v1",
+                    self._model_id,
                     cache_dir=str(self._model_dir),
                     local_files_only=True,
                 )
@@ -433,7 +440,7 @@ class EntityExtractor:
                 )
                 try:
                     self._model = GLiNER.from_pretrained(
-                        "urchade/gliner_multi_pii-v1",
+                        self._model_id,
                         cache_dir=str(self._model_dir),
                         local_files_only=False,
                     )

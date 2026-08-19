@@ -234,3 +234,49 @@ async def test_interactive_modes_still_reachable_by_keyword():
         got, confidence = classify_intent_heuristic(question)
         assert got == intent, question
         assert confidence >= 0.7, question
+
+
+# Comparative vs relational: measured at 0.7500 comparative recall before this,
+# and every failure came from the heuristic rather than the LLM.
+
+
+def test_comparison_of_named_subjects_beats_a_question_opener():
+    """"How are X and Y different?" is a comparison that happens to open with
+    "how are". The opener is a relational keyword, so first-match-wins routed it
+    to relational before any comparison word was considered."""
+    assert classify_intent_heuristic("How are Penelope and Minerva different?")[0] == (
+        "comparative"
+    )
+
+
+def test_similarities_between_is_not_ties_between():
+    """`kw in question` matched "ties between" inside "similari|ties between",
+    routing every "similarities between X and Y" question to relational."""
+    assert classify_intent_heuristic("Similarities between the Sirens and Calypso")[0] == (
+        "comparative"
+    )
+
+
+def test_more_specific_keyword_wins_over_a_shorter_one():
+    """"how do they differ" and "how do" both match; the longer, more specific
+    keyword decides, so set order no longer arbitrates between equal confidences."""
+    assert classify_intent_heuristic("How do they differ?")[0] == "comparative"
+
+
+def test_question_openers_still_carry_relational_queries():
+    """The openers were not the defect and must stay: removing them cost graph
+    recall 0.9231 -> 0.6154 on the routing golden."""
+    assert classify_intent_heuristic("How are the Eloi and the Morlocks connected?")[0] == (
+        "relational"
+    )
+    assert classify_intent_heuristic("How is this linked to the earlier chapter?")[0] in (
+        "relational",
+        "comparative",
+    )
+
+
+def test_word_boundary_matching_does_not_fire_inside_a_longer_word():
+    """The boundary is only asserted where the keyword itself ends in a word
+    character, so entries written with trailing punctuation still match."""
+    assert classify_intent_heuristic("Achilles vs. Hector")[0] == "comparative"
+    assert classify_intent_heuristic("cats vs dogs")[0] == "comparative"

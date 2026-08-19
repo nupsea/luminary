@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from app.services.qa import (
+    CITATION_RULE,
     NOT_FOUND_SENTINEL,
     QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
@@ -38,8 +39,8 @@ _RELATIONAL_SYSTEM = (
     "Do not speculate. "
     "Write your answer as Markdown prose. "
     "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
+    '{"citations":[{"source":"S1"}],"confidence":"high|medium|low"}\n'
+    f"{CITATION_RULE}"
 )
 
 _COMPARATIVE_SYSTEM = (
@@ -49,8 +50,8 @@ _COMPARATIVE_SYSTEM = (
     "Do not speculate. "
     "Write your answer as Markdown prose. "
     "Then on a new line write this JSON: "
-    '{"citations":[{"document_title":"...","section_heading":"...","page":0,"excerpt":"..."}],'
-    '"confidence":"high|medium|low"}'
+    '{"citations":[{"source":"S1"}],"confidence":"high|medium|low"}\n'
+    f"{CITATION_RULE}"
 )
 
 

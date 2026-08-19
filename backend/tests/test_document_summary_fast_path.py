@@ -1,7 +1,9 @@
 """Tests for S76: Document summary fast-path using section summaries.
 
 (a) test_fast_path_used_when_section_summaries_exist:
-    10 SectionSummaryModel rows → pregenerate() calls LLM exactly once per mode (3 total).
+    10 SectionSummaryModel rows → pregenerate() calls the LLM once per *generated*
+    mode (2 total). `detailed` is assembled from the section summaries themselves,
+    which is the shape that mode asks the model to produce, so it costs no call.
 
 (b) test_slow_path_fallback_when_no_section_summaries:
     No SectionSummaryModel rows + chunks with total tokens > MAP_TOKEN_THRESHOLD
@@ -22,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
+import app.services.summarizer as summarizer
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
@@ -122,7 +125,7 @@ def _make_mock_llm(return_text: str = "Generated summary.") -> AsyncMock:
 
 @pytest.mark.asyncio
 async def test_fast_path_used_when_section_summaries_exist(test_db):
-    """When >= 3 SectionSummaryModel rows exist, pregenerate makes exactly 3 LLM calls."""
+    """When >= 3 SectionSummaryModel rows exist, only the synthesising modes call the LLM."""
     _, factory, _ = test_db
     doc_id = str(uuid.uuid4())
     await _insert_document(factory, doc_id)
@@ -134,10 +137,11 @@ async def test_fast_path_used_when_section_summaries_exist(test_db):
         svc = SummarizationService()
         await svc.pregenerate(doc_id)
 
-    # Fast path: one LLM call per mode (one_sentence, executive, detailed) = 3 total.
+    # Fast path: one LLM call each for one_sentence and executive. `detailed` is
+    # assembled from the stored section summaries, so it costs no call at all.
     # No map-reduce calls.
-    assert mock_llm.generate.call_count == 3, (
-        f"Expected 3 LLM calls (one per mode), got {mock_llm.generate.call_count}"
+    assert mock_llm.generate.call_count == 2, (
+        f"Expected 2 LLM calls (one_sentence, executive), got {mock_llm.generate.call_count}"
     )
 
 
@@ -235,3 +239,87 @@ async def test_fast_path_skipped_with_fewer_than_3_units(test_db):
     assert mock_llm.generate.call_count >= 3, (
         f"Expected >= 3 LLM calls for 3 modes via slow path, got {mock_llm.generate.call_count}"
     )
+
+
+# (e) test_detailed_is_assembled_from_section_summaries
+
+
+@pytest.mark.asyncio
+async def test_detailed_is_assembled_from_section_summaries(test_db):
+    """`detailed` reproduces every section, without an LLM call and without loss.
+
+    An Ask that arrives while a background call is generating waits for that call
+    to finish -- Ollama cannot preempt, and the admission gate cannot touch a call
+    it has already admitted. Generating `detailed` ran 107s and 179s on a
+    24-section document and was the slowest Ask in both arms of the 2026-08-17
+    latency pair, to paraphrase text the section summarizer had already written.
+    Assembling removes the call; this asserts it removes no content with it.
+    """
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+    await _insert_section_summaries(factory, doc_id, count=10)
+
+    mock_llm = _make_mock_llm()
+
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        svc = SummarizationService()
+        await svc.pregenerate(doc_id)
+
+    async with factory() as session:
+        stored = (
+            await session.execute(
+                select(SummaryModel)
+                .where(SummaryModel.document_id == doc_id)
+                .where(SummaryModel.mode == "detailed")
+            )
+        ).scalar_one()
+        units = list(
+            (
+                await session.execute(
+                    select(SectionSummaryModel)
+                    .where(SectionSummaryModel.document_id == doc_id)
+                    .order_by(SectionSummaryModel.unit_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert stored.content != "Generated summary.", "detailed must not come from the LLM"
+    for unit in units:
+        assert unit.heading in stored.content, f"section {unit.heading!r} missing from detailed"
+        assert unit.content in stored.content, f"body of {unit.heading!r} lost in detailed"
+
+
+# (f) test_detailed_without_section_summaries_covers_every_batch
+
+
+@pytest.mark.asyncio
+async def test_detailed_without_section_summaries_covers_every_batch(test_db):
+    """With no section summaries, `detailed` is generated one batch at a time.
+
+    Splitting bounds how long a single background call runs. It must never bound
+    how much of the document is covered, so every batch is summarised and the
+    parts are joined in document order.
+    """
+    svc = SummarizationService()
+    text = "\n\n".join(f"## Section {i}\n{'word ' * 900}" for i in range(6))
+    batches = summarizer._split_for_detail(text)
+
+    assert len(batches) > 1, "a document this long must split into more than one call"
+    assert "".join(batches).replace("\n", "") == text.replace("\n", ""), (
+        "splitting must lose no text"
+    )
+
+    mock_llm = _make_mock_llm()
+    mock_llm.generate = AsyncMock(side_effect=[f"summary {i}" for i in range(len(batches))])
+    with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
+        joined = await svc._generate_detailed(text, None)
+
+    assert mock_llm.generate.call_count == len(batches), "every batch gets exactly one call"
+    for i in range(len(batches)):
+        assert f"summary {i}" in joined, f"batch {i} dropped from the joined summary"
+    for call in mock_llm.generate.call_args_list:
+        assert call.kwargs["max_tokens"] == summarizer._DETAILED_BATCH_MAX_TOKENS
+        assert call.kwargs["background"] is True

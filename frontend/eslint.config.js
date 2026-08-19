@@ -45,7 +45,11 @@ export default defineConfig([
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/lib/**'],
     rules: {
-      'no-restricted-syntax': ['warn', NO_RAW_FETCH], // WP5
+      // An error, not a warning: as a warning it sat inside the --max-warnings
+      // budget and the count roughly doubled while nothing ever failed. Every
+      // legitimate exception carries an inline disable comment and a reason, so
+      // adding one is a decision someone makes rather than a number that drifts.
+      'no-restricted-syntax': ['error', NO_RAW_FETCH],
     },
   },
 ])

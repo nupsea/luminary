@@ -5,10 +5,26 @@ The router re-exports these names verbatim via `__all__` so existing
 imports in `routers/study.py` and `schemas/study.py` keep working.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# provider/name, the shape LiteLLM routes on. Validated rather than passed
+# through so a typo fails loudly here instead of silently falling back to the
+# configured default, which would make a model comparison in the UI a lie.
+_MODEL_ID_RE = re.compile(r"^(ollama|openai|anthropic|gemini)/[A-Za-z0-9._:-]+$")
+
+
+def _validate_model_id(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if not _MODEL_ID_RE.match(value):
+        raise ValueError(
+            "model must look like 'provider/name', e.g. ollama/qwen3.5:4b"
+        )
+    return value
 
 
 class FlashcardGenerateRequest(BaseModel):
@@ -18,6 +34,14 @@ class FlashcardGenerateRequest(BaseModel):
     count: int = 10
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     context: str | None = None  # selected text from reader; used directly when provided
+    # None follows the model chosen in Settings, exactly as /qa does when its
+    # selector reads "Auto". A concrete id overrides it for this request only.
+    model: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str | None) -> str | None:
+        return _validate_model_id(value)
 
 
 class FromGapsRequest(BaseModel):
@@ -61,6 +85,12 @@ class GenerateTechnicalRequest(BaseModel):
     scope: Literal["full", "section"] = "full"
     section_heading: str | None = None
     count: int = 10
+    model: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str | None) -> str | None:
+        return _validate_model_id(value)
 
 
 class FlashcardResponse(BaseModel):
@@ -91,8 +121,77 @@ class FlashcardResponse(BaseModel):
     chunk_classification: str | None = None
     # section heading for source grounding display
     section_heading: str | None = None
+    # unchecked | verified | unsupported | unverifiable -- whether this card's
+    # source_excerpt was found in the text the card came from. The review UI needs
+    # it to decide whether it may present that excerpt as a source.
+    grounding: str = "unchecked"
+    # unchecked | supported | unsupported | unverifiable -- whether the answer
+    # follows from the passage. Distinct from `grounding`: a real quote does not
+    # make the answer true.
+    factuality: str = "unchecked"
 
     model_config = {"from_attributes": True}
+
+    @field_validator("grounding", "factuality", mode="before")
+    @classmethod
+    def _default_grounding(cls, value: str | None) -> str:
+        """A card read before its row was flushed has no verdict yet, not a passing
+        one. Coerced here so every reader sees the same four states."""
+        return value or "unchecked"
+
+
+class GroundingAuditRequest(BaseModel):
+    """Body for POST /flashcards/grounding/audit."""
+
+    document_id: str | None = Field(
+        default=None, description="Audit one document's cards; omit to audit the library."
+    )
+
+
+class GroundingReport(BaseModel):
+    """Counts by grounding state. Every state is reported, including the ones that
+    mean 'not proven' -- collapsing those into a pass rate is what made an
+    unverifiable card indistinguishable from a verified one."""
+
+    scanned: int
+    changed: int = 0
+    verified: int = 0
+    unsupported: int = 0
+    unverifiable: int = 0
+    unchecked: int = 0
+
+
+class FactualityAuditRequest(BaseModel):
+    """Body for POST /flashcards/factuality/audit."""
+
+    document_id: str | None = None
+    # One model call per card, so a whole library is minutes of inference. The
+    # audit is resumable: call it again while `remaining` is above zero.
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class FactualityReport(BaseModel):
+    """What one bounded pass of the factuality audit judged.
+
+    `skipped_no_passage` is reported rather than folded into a rate: a card whose
+    passage cannot be rebuilt was not judged, and counting it either way would
+    invent a verdict.
+    """
+
+    judged: int
+    skipped_no_passage: int
+    remaining: int
+    supported: int = 0
+    unsupported: int = 0
+    unverifiable: int = 0
+
+
+class RepairReport(BaseModel):
+    """What POST /flashcards/repair actually changed. Zeroes on a healthy library."""
+
+    index_rows_removed: int
+    cards_indexed: int
+    orphan_rows_removed: int
 
 
 class CoverageReportResponse(BaseModel):

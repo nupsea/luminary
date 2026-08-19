@@ -21,8 +21,13 @@ from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel, ImageModel
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
-from app.services.context_packer import pack_context
-from app.services.qa import _should_use_summary
+from app.services.context_packer import pack_context_indexed
+from app.services.qa import (
+    CITATION_MIN_SCORE,
+    CITATION_REL_RATIO,
+    MAX_CITATIONS,
+    _should_use_summary,
+)
 from app.services.summarizer import get_summarization_service
 from app.types import ChatState, TransparencyInfo
 
@@ -33,9 +38,8 @@ logger = logging.getLogger(__name__)
 # and drop low-relevance sources, but always keep the single best source so a
 # grounded answer never shows zero citations. RRF fusion scores top out ~0.033;
 # a chunk far below the best (or below a small absolute floor) is noise.
-_MAX_CITATIONS = 5
-_CITATION_REL_RATIO = 0.5
-_CITATION_MIN_SCORE = 0.01
+# MAX_CITATIONS is shared with the LLM-authored chips so both lists under one
+# answer obey the same cap.
 
 
 # Cap injected visual descriptions so they inform the answer without crowding out
@@ -204,9 +208,15 @@ async def synthesize_node(state: ChatState) -> dict:
     )
 
 
-    # Assemble chunk context using the pure context packer (dedup + section grouping)
+    # Assemble chunk context using the pure context packer (dedup + section grouping).
+    # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
+    # it came from and have its excerpt filled in from that chunk (I-33).
     token_budget = get_settings().QA_CONTEXT_TOKEN_BUDGET
-    chunks_context = pack_context(chunks_dicts, token_budget=token_budget) if chunks_dicts else ""
+    chunks_context, cited_chunks = (
+        pack_context_indexed(chunks_dicts, token_budget=token_budget)
+        if chunks_dicts
+        else ("", [])
+    )
 
     # section_context (graph results, executive summary) capped at 1000 tokens
     context_parts: list[str] = []
@@ -333,7 +343,7 @@ async def synthesize_node(state: ChatState) -> dict:
         # small absolute floor) but always keep the single best source.
         ranked = sorted(chunks_dicts, key=lambda c: c.get("score", 0.0), reverse=True)
         top_score = ranked[0].get("score", 0.0)
-        floor = max(_CITATION_MIN_SCORE, top_score * _CITATION_REL_RATIO)
+        floor = max(CITATION_MIN_SCORE, top_score * CITATION_REL_RATIO)
 
         chunk_ids = [c["chunk_id"] for c in ranked if c.get("chunk_id")]
         chunk_meta = await _fetch_section_ids_and_pages_for_chunks(chunk_ids)
@@ -341,7 +351,7 @@ async def synthesize_node(state: ChatState) -> dict:
 
         seen_dedup_keys: set[str] = set()
         for c in ranked:
-            if len(source_citations_out) >= _MAX_CITATIONS:
+            if len(source_citations_out) >= MAX_CITATIONS:
                 break
             # Always keep the best source; gate the rest on relevance.
             if source_citations_out and c.get("score", 0.0) < floor:
@@ -431,5 +441,6 @@ async def synthesize_node(state: ChatState) -> dict:
         "_system_prompt": system_prompt,
         "confidence": retrieval_confidence,
         "source_citations": source_citations_out,
+        "cited_chunks": cited_chunks,
         "transparency": transparency_info,
     }

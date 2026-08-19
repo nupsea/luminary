@@ -198,7 +198,15 @@ async def test_generate_from_collection_processes_changed_content(test_db):
         "domain": "Python",
         "concepts": [{"concept": "Python basics", "type": "concept"}],
     }
-    fake_cards = [{"question": "New Q?", "answer": "New A.", "source_excerpt": "ex"}]
+    # The excerpt quotes the seeded note: collection cards go through the same
+    # grounding gate as every other path, so an invented quote tests the gate.
+    fake_cards = [
+        {
+            "question": "New Q?",
+            "answer": "New A.",
+            "source_excerpt": "a test note about Python",
+        }
+    ]
     llm_patch = "app.services.llm.LLMService.generate"
 
     async with test_db() as session:

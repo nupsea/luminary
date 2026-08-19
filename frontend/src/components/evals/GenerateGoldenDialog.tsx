@@ -10,18 +10,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { API_BASE } from "@/lib/config"
+import { apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 
 interface Models {
   local: string[]
   frontier: string[]
 }
 
-async function fetchModels(): Promise<Models> {
-  const res = await fetch(`${API_BASE}/evals/models`)
-  if (!res.ok) throw new Error("Failed to fetch models")
-  return res.json() as Promise<Models>
-}
+const fetchModels = (): Promise<Models> => apiGet<Models>("/evals/models")
 
 interface Props {
   open: boolean
@@ -80,22 +76,17 @@ export function GenerateGoldenDialog({
   const mut = useMutation({
     mutationFn: async () => {
       const verify_models = [verify1, verify2].filter((m, i, a) => m && a.indexOf(m) === i)
-      const res = await fetch(`${API_BASE}/evals/golden/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        return await apiPost("/evals/golden/generate", {
           name,
           source_file: sourceFile,
           generator_model: generator,
           verify_models,
           target,
-        }),
-      })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { detail?: string }
-        throw new Error(body.detail ?? "Failed to start generation")
+        })
+      } catch (err) {
+        throw detailFromError(err, "Failed to start generation")
       }
-      return res.json()
     },
     onSuccess: () => {
       onOpenChange(false)

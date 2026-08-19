@@ -41,6 +41,7 @@ from app.routers.graph import router as graph_router
 from app.routers.home import router as home_router
 from app.routers.images import router as images_router
 from app.routers.mastery import router as mastery_router
+from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
 from app.routers.pomodoro import router as pomodoro_router
@@ -114,6 +115,18 @@ async def lifespan(app: FastAPI):
         status.set_state("db", "failed", str(exc))
         raise
     status.set_state("db", "ready")
+
+    # Say it out loud at boot, not only at GET /settings/models. An oversized
+    # configuration's first symptom was a crash during ingestion, which is the
+    # least useful moment to learn that the models do not fit.
+    try:
+        from app.services.model_router import warn_if_configuration_exceeds_host
+
+        warn_if_configuration_exceeds_host()
+    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
+        # warning, not debug: this swallowed a TypeError in the check itself for
+        # as long as the check existed, so the advisory never ran and nothing said so.
+        logger.warning("model residency check failed", exc_info=True)
     # NOTE: the one-time concept backfill is a manual offline step (with the server
     # stopped so it can hold the Kuzu lock and not starve the event loop):
     #   make backfill-concepts
@@ -196,6 +209,47 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
+    # An ingestion that was running when the process died cannot resume: its task
+    # is gone and nothing owns the document any more. It used to keep its last
+    # stage for ever, so the UI showed a progress card that would never finish --
+    # seen twice on 2026-08-17, when a code reload under `uvicorn --reload` killed
+    # a 52,331-chunk embed at 70%. An interrupted ingest is now marked failed at
+    # startup, which is a state the user can act on (I-10).
+    try:
+        from sqlalchemy import update  # noqa: PLC0415
+
+        from app.models import DocumentModel  # noqa: PLC0415
+
+        _terminal_stages = ("complete", "error")
+        async with get_session_factory()() as _session:
+            result = await _session.execute(
+                update(DocumentModel)
+                .where(DocumentModel.stage.notin_(_terminal_stages))
+                .values(
+                    stage="error",
+                    error_message=(
+                        "Ingestion was interrupted before it finished. "
+                        "Delete this document and upload it again."
+                    ),
+                )
+            )
+            await _session.commit()
+        if result.rowcount:
+            logger.warning(
+                "marked %d interrupted ingestion(s) as failed at startup", result.rowcount
+            )
+    except Exception:
+        logger.warning("could not reconcile interrupted ingestions", exc_info=True)
+
+    # Model-lab comparisons take hours; without this they exist only for the
+    # life of the process, and `uvicorn --reload` restarts on every edit.
+    try:
+        from app.services.model_lab import load_history  # noqa: PLC0415
+
+        load_history()
+    except Exception:
+        logger.warning("Failed to load model-lab history", exc_info=True)
+
     # Start pre-loading/warming up models in the background (skipped in test runs)
     import sys
 
@@ -233,6 +287,13 @@ async def lifespan(app: FastAPI):
         _background_tasks.clear()
 
     shutdown_model_executor()
+
+
+def _resolve_chat_model() -> str:
+    """What a chat would actually be served by, resolved not configured."""
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    return resolve("chat").model
 
 
 def _restrict_permissions(data_dir: Path) -> None:
@@ -311,6 +372,7 @@ ROUTER_REGISTRY = {
     "graph": graph_router,
     "home": home_router,
     "images": images_router,
+    "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
     "pomodoro": pomodoro_router,
@@ -377,7 +439,9 @@ async def read_settings(settings: Settings = Depends(get_settings)):
         "DATA_DIR": settings.DATA_DIR,
         "OLLAMA_URL": settings.OLLAMA_URL,
         "LOG_LEVEL": settings.LOG_LEVEL,
-        "LITELLM_DEFAULT_MODEL": settings.LITELLM_DEFAULT_MODEL,
+        # The model that would actually serve a chat, which is not always the
+        # configured default: Settings can point elsewhere.
+        "chat_model": _resolve_chat_model(),
         "PHOENIX_ENABLED": settings.PHOENIX_ENABLED,
         "OPENAI_API_KEY": mask(settings.OPENAI_API_KEY),
         "ANTHROPIC_API_KEY": mask(settings.ANTHROPIC_API_KEY),

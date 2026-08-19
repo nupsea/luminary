@@ -94,6 +94,7 @@ from app.services.epub_service import (
     get_toc_async,
 )
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.llm_admission import paused_for_interaction
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
@@ -1350,6 +1351,9 @@ async def get_document_status(document_id: str):
         "stage": stage,
         "progress_pct": progress_pct,
         "done": stage == "complete",
+        # I-10: a pause the user cannot see reads as a hang. True only while a
+        # background LLM call is actually being held for interactive work.
+        "paused_for_interaction": paused_for_interaction(),
         "error_message": (doc.error_message or "Ingestion failed. Please try again.")
         if stage == "error"
         else None,

@@ -10,7 +10,6 @@ from typing import Any, Literal
 from sqlalchemy import false, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     ChunkModel,
     FlashcardModel,
@@ -18,6 +17,7 @@ from app.models import (
 )
 from app.services.flashcard_parsers import (
     _CLOZE_BLANK_RE,
+    GROUNDING_UNVERIFIABLE,
     _build_cloze_question,
     _parse_cloze_llm_response,
     _parse_cloze_text,
@@ -32,19 +32,19 @@ from app.services.flashcard_prompts import (
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
     FLASHCARD_SYSTEM,
-    FLASHCARD_USER_TMPL,
     GAP_FLASHCARD_SYSTEM,
     GAP_FLASHCARD_USER_TMPL,
     GRAPH_FLASHCARD_SYSTEM,
     GRAPH_FLASHCARD_USER_TMPL,
     NOTES_CARD_FROM_CONCEPTS_SYSTEM,
     NOTES_CARD_FROM_CONCEPTS_TMPL,
-    NOTES_CONCEPT_EXTRACT_SYSTEM,
     NOTES_CONCEPT_EXTRACT_TMPL,
     TECH_FLASHCARD_SYSTEM,
     TECH_FLASHCARD_USER_TMPL,
     _build_genre_system_prompt,
     _infer_genre,
+    flashcard_user_tmpl,
+    notes_concept_extract_system,
 )
 from app.services.flashcard_search import (
     FlashcardSearchService,
@@ -63,14 +63,12 @@ __all__ = [
     "CLOZE_SYSTEM",
     "CLOZE_USER_TMPL",
     "FLASHCARD_SYSTEM",
-    "FLASHCARD_USER_TMPL",
     "GAP_FLASHCARD_SYSTEM",
     "GAP_FLASHCARD_USER_TMPL",
     "GRAPH_FLASHCARD_SYSTEM",
     "GRAPH_FLASHCARD_USER_TMPL",
     "NOTES_CARD_FROM_CONCEPTS_SYSTEM",
     "NOTES_CARD_FROM_CONCEPTS_TMPL",
-    "NOTES_CONCEPT_EXTRACT_SYSTEM",
     "NOTES_CONCEPT_EXTRACT_TMPL",
     "TECH_FLASHCARD_SYSTEM",
     "TECH_FLASHCARD_USER_TMPL",
@@ -91,16 +89,30 @@ __all__ = [
     "_parse_llm_response",
     "_sanitize_fts5_query",
     "_sync_flashcard_fts",
+    "flashcard_user_tmpl",
     "get_flashcard_service",
+    "notes_concept_extract_system",
 ]
 
 logger = logging.getLogger(__name__)
 
 
 def _get_generation_model() -> str | None:
-    """Return the model override for generation tasks, or None to use default."""
-    m = get_settings().LITELLM_GENERATION_MODEL
-    return m if m else None
+    """The model generation runs on, resolved rather than read from config.
+
+    Reading `LITELLM_GENERATION_MODEL` here meant a model chosen in Settings
+    never reached flashcard generation. The router applies the override when one
+    is configured and Settings otherwise.
+    """
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    choice = resolve("generation")
+    # None when nothing overrides: LLMService then routes it itself, which is
+    # what supplies the API key the Settings UI stores and what keeps the
+    # offline reroute available. Returning a concrete id here pins the model and
+    # loses both -- in cloud mode with the key only in Settings, every
+    # generation would fail authentication while chat kept working.
+    return choice.model if choice.explicit else None
 
 
 # Keep well within mistral's 8K-token context (~4 chars/token, reserve ~2K for prompt+response)
@@ -180,15 +192,18 @@ async def _get_entity_names_for_document(
 def _build_enriched_text(
     chunks: list[ChunkModel],
     section_ctx: dict[str, tuple[str, str | None]],
-) -> tuple[str, str]:
+) -> tuple[str, str, list[str]]:
     """Build combined text with section heading prefixes for context.
 
-    Returns (enriched_text, first_chunk_id).
+    Returns (enriched_text, first_chunk_id, used_chunk_ids). The third element is
+    the card's passage; this loop stops at `_CHUNK_CHAR_LIMIT`, so it is a prefix
+    of *chunks* and not all of them.
     """
     if not chunks:
-        return "", ""
+        return "", "", []
 
     parts: list[str] = []
+    used: list[str] = []
     total = 0
     for c in chunks:
         if total >= _CHUNK_CHAR_LIMIT:
@@ -199,9 +214,10 @@ def _build_enriched_text(
             prefix = f"[{parent} > {heading}]\n" if parent else f"[{heading}]\n"
         part = prefix + c.text
         parts.append(part)
+        used.append(c.id)
         total += len(part)
 
-    return "\n\n".join(parts), chunks[0].id
+    return "\n\n".join(parts), chunks[0].id, used
 
 
 def _resolve_section_heading(
@@ -310,57 +326,114 @@ async def _fetch_chunks(
     return all_chunks
 
 
-def _build_text(chunks: list[ChunkModel]) -> tuple[str, str]:
+def _build_text(chunks: list[ChunkModel]) -> tuple[str, str, list[str]]:
     """Build combined text from chunks.
 
     If the total text exceeds _CHUNK_CHAR_LIMIT, it samples chunks from the
     beginning, middle, and end to provide better coverage of the entire document.
-    Returns (combined_text, first_chunk_id).
+
+    Returns (combined_text, first_chunk_id, used_chunk_ids). The third element is
+    what makes a card's passage recoverable later, and it is the *sampled* subset
+    rather than every chunk of the scope: over the limit this function drops the
+    text between its three windows, so recording the full list would name text the
+    model was never shown. `first_chunk_id` is NOT that passage -- it is the first
+    chunk of the scope, and mistaking it for the card's source is what made a
+    retrospective factuality measurement read 0.3333 (the judge was shown a passage
+    without the card's own quote in it 56 times out of 60).
     """
     if not chunks:
-        return "", ""
+        return "", "", []
 
     total_chars = sum(len(c.text) for c in chunks)
     if total_chars <= _CHUNK_CHAR_LIMIT:
-        return "\n\n".join(c.text for c in chunks), chunks[0].id
+        return "\n\n".join(c.text for c in chunks), chunks[0].id, [c.id for c in chunks]
 
     # Sampling strategy:
     # 1. Take first 25% of the limit from the beginning
     # 2. Take 50% from the middle
-    # 3. Take 25% from the end
-    target_len = _CHUNK_CHAR_LIMIT
-    segment_size = target_len // 4
+    # Windows spread across the whole document, not three contiguous runs.
+    #
+    # Measured on `the_odyssey`: begin/middle/end gave a prompt of 9,345 chars --
+    # 1.3% of the book -- spanning 3 of its 24 sections, and every card generated
+    # from it came from those three places. Ten cards requested from one corner of
+    # a book are ten cards about that corner: three of ten were the same fact
+    # about Penelope's weaving, reworded.
+    #
+    # Same budget, same single call, more of the document. A window is aligned to
+    # a section when the chunks carry one, so a window is a passage rather than an
+    # arbitrary cut.
+    windows = _sample_windows(chunks, _CHUNK_CHAR_LIMIT)
+    used = [c.id for window in windows for c in window]
+    combined = "\n\n[...]\n\n".join(
+        "\n\n".join(c.text for c in window) for window in windows
+    )
+    # dict.fromkeys rather than set(): the order is the reading order of the
+    # passage, and rebuilding it out of order breaks any quote spanning a seam.
+    return combined, chunks[0].id, list(dict.fromkeys(used))
 
-    def get_segment(chunk_list: list[ChunkModel], max_chars: int) -> str:
-        parts: list[str] = []
-        current = 0
-        for c in chunk_list:
-            if current + len(c.text) > max_chars:
+
+# How many places in the document one generation draws from. Six against the
+# previous three: a card asks for one fact, so N cards want at least a few
+# distinct passages, and the budget divided much further stops being a passage --
+# 10,000 chars across 6 windows is ~1,600 each, about a scene.
+_SAMPLE_WINDOWS = 6
+
+
+def _sample_windows(chunks: list[ChunkModel], budget: int) -> list[list[ChunkModel]]:
+    """Contiguous runs of chunks taken from evenly spaced points in the document.
+
+    Prefers to start each window at a section boundary, so a window reads as a
+    passage rather than as a cut. Falls back to even spacing by index when the
+    chunks carry no sections.
+    """
+    if not chunks:
+        return []
+    per_window = max(1, budget // _SAMPLE_WINDOWS)
+
+    starts: list[int] = []
+    seen_sections: set[str] = set()
+    for i, chunk in enumerate(chunks):
+        if chunk.section_id and chunk.section_id not in seen_sections:
+            seen_sections.add(chunk.section_id)
+            starts.append(i)
+    if len(starts) < _SAMPLE_WINDOWS:
+        # Too few sections to spread across: fall back to even index spacing.
+        step = max(1, len(chunks) // _SAMPLE_WINDOWS)
+        starts = list(range(0, len(chunks), step))
+    if len(starts) > _SAMPLE_WINDOWS:
+        # Spread the picks across the whole list rather than taking the first N,
+        # which would be the same front-of-the-book bias in a new shape.
+        stride = len(starts) / _SAMPLE_WINDOWS
+        starts = [starts[int(i * stride)] for i in range(_SAMPLE_WINDOWS)]
+
+    windows: list[list[ChunkModel]] = []
+    for begin in starts[:-1]:
+        window: list[ChunkModel] = []
+        size = 0
+        for chunk in chunks[begin:]:
+            if window and size + len(chunk.text) > per_window:
                 break
-            parts.append(c.text)
-            current += len(c.text)
-        return "\n\n".join(parts)
+            window.append(chunk)
+            size += len(chunk.text)
+        if window:
+            windows.append(window)
 
-    # Beginning
-    beginning = get_segment(chunks, segment_size)
-
-    # Middle
-    mid_idx = len(chunks) // 2
-    middle = get_segment(chunks[mid_idx:], segment_size * 2)
-
-    # End
-    # For the end, we iterate backwards to get a segment, then reverse it
-    end_parts: list[str] = []
-    end_current = 0
-    for c in reversed(chunks):
-        if end_current + len(c.text) > segment_size:
+    # The last window is taken backwards from the end, so the close of the
+    # document is always in the prompt. Spacing the starts evenly does not
+    # guarantee that -- the final start landed one window short of the end and
+    # the last chapters were never sampled, which the previous begin/middle/end
+    # sampler did get right.
+    tail: list[ChunkModel] = []
+    size = 0
+    for chunk in reversed(chunks):
+        if tail and size + len(chunk.text) > per_window:
             break
-        end_parts.append(c.text)
-        end_current += len(c.text)
-    end = "\n\n".join(reversed(end_parts))
-
-    combined = f"{beginning}\n\n[...]\n\n{middle}\n\n[...]\n\n{end}"
-    return combined, chunks[0].id
+        tail.append(chunk)
+        size += len(chunk.text)
+    tail.reverse()
+    if tail and (not windows or tail[0].id != windows[-1][0].id):
+        windows.append(tail)
+    return windows
 
 
 # Chunk classifier helpers
@@ -531,11 +604,12 @@ class FlashcardService(FlashcardSearchService):
         session: AsyncSession,
         difficulty: Literal["easy", "medium", "hard"] = "medium",
         context: str | None = None,
+        model: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
         return await _gen(
-            document_id, scope, section_heading, count, session, difficulty, context
+            document_id, scope, section_heading, count, session, difficulty, context, model
         )
 
     async def generate_from_notes(
@@ -612,7 +686,12 @@ class FlashcardService(FlashcardSearchService):
                     deck=deck,
                     question=item["front"].strip(),
                     answer=item["back"].strip(),
+                    # The gap phrase, not a passage: this path writes a card from a
+                    # named knowledge gap and never sees the document. Recorded as
+                    # unverifiable so the review UI stops presenting it as a source
+                    # quote, and so an audit does not mistake a label for a bad one.
                     source_excerpt=gap,
+                    grounding=GROUNDING_UNVERIFIABLE,
                     fsrs_state="new",
                     fsrs_stability=0.0,
                     fsrs_difficulty=0.0,
@@ -715,12 +794,15 @@ class FlashcardService(FlashcardSearchService):
         section_heading: str | None,
         count: int,
         session: AsyncSession,
+        model: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import (  # noqa: PLC0415
             generate_technical as _gen_technical,
         )
 
-        return await _gen_technical(document_id, scope, section_heading, count, session)
+        return await _gen_technical(
+            document_id, scope, section_heading, count, session, model
+        )
 
     async def generate_cloze(
         self,

@@ -554,16 +554,18 @@ def test_prompts_carry_no_taxonomy_verb():
     and answered with an empty teach-back card.
     """
     from app.services.suggestion_service import (
-        _CROSS_DOC_SYSTEM,
         _LEVEL_GUIDANCE,
-        _SYSTEM_PROMPT,
         _USER_PROMPT,
+        _cross_doc_system,
+        _system_prompt,
     )
 
     rendered = " ".join(
         [
-            _SYSTEM_PROMPT.format(guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"),
-            _CROSS_DOC_SYSTEM.format(guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"),
+            _system_prompt().format(guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"),
+            _cross_doc_system().format(
+                guidance=_LEVEL_GUIDANCE[5], bloom_level=5, history="(none)"
+            ),
             _USER_PROMPT.format(passages="p", entities="e"),
         ]
     ).lower()

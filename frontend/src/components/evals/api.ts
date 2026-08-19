@@ -43,12 +43,3 @@ export function toSelection(dataset: GoldenDataset): DatasetSelection | null {
 
 // Surface the backend's `detail` (e.g. the dead-source-document 409 with its
 // re-link guidance) instead of a generic failure string.
-export async function errorFromResponse(res: Response, fallback: string): Promise<Error> {
-  try {
-    const body = (await res.json()) as { detail?: unknown }
-    if (typeof body.detail === "string" && body.detail) return new Error(body.detail)
-  } catch {
-    // non-JSON body — fall through
-  }
-  return new Error(fallback)
-}

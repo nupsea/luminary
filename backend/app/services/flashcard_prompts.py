@@ -9,65 +9,217 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from app.services.prompt_spec import (
+    NO_FENCES,
+    Accommodation,
+    PromptSpec,
+    render_for,
+    step_decomposition,
+)
+
 if TYPE_CHECKING:
     from app.models import DocumentModel
 
 
+# The quote inside the worked example. It is named because the gate has to refuse
+# it: a model shown a plausible excerpt pastes it as its own evidence, measured on
+# 2026-08-17 when this exact string came back as the "source quote" for two
+# unrelated technical documents. It is harmless today only because it happens not
+# to appear in those passages -- luck, not a mechanism. Nothing the prompt supplies
+# may satisfy a check that the prompt's own output has to pass.
+EXAMPLE_SOURCE_EXCERPT = (
+    "hardware faults are random and independent, whereas software faults are "
+    "correlated across nodes"
+)
+
+
 FLASHCARD_SYSTEM = (
     "You are a learning assistant that writes flashcards for active recall. Each card is a "
-    "self-contained question testing understanding of one idea, plus a concise, complete "
-    "answer -- both grounded only in the provided text.\n"
+    "self-contained question testing understanding of exactly one idea, plus the shortest "
+    "complete answer -- both grounded only in the provided text.\n"
     "QUESTION: match it to the knowledge type -- causal knowledge asks why or what causes; a "
     "comparison asks how two things differ; a role/process asks what X enables in Y; a "
-    "definition asks what X is. Name the concept directly and prefer why/how/apply over recall. "
+    "definition asks what X is. Name the concept directly, and prefer why, how and "
+    "what-would-happen questions over recall. "
     "AVOID trivia about wording, yes/no questions, answers that are a bare list, and asking "
     "which specific example or analogy the text used. The question must stand alone -- never "
     "say 'in this passage', 'according to the text', or 'the author'; it must make sense "
     "without the source.\n"
-    "ANSWER: lead with one sentence that directly answers the question, then add a short "
-    "markdown bullet list ('- ...') only when it has several distinct points. Keep it tight -- "
-    "no filler, and no chapter/section reference.\n"
-    'Include a "bloom_level" integer 1-6 (1=remember ... 6=create); aim for level 3+ '
-    "(apply/analyze/evaluate) where the material allows."
+    "ANSWER: one sentence, the shortest that is still complete. If the text lists several "
+    "items, write one card per item rather than one card listing them -- an answer carrying a "
+    "list is several cards wearing a single question, and it is the hardest kind to recall. "
+    "Two sentences only when the question compares two things and both sides must be stated. "
+    "Every claim must be supported by the text: if you cannot point at the sentence that "
+    "backs it, leave it out. No filler, no chapter/section reference.\n"
+    "SOURCE_EXCERPT: copy the sentence from the text below that proves the answer, word for "
+    "word, at least four words long. It must come from that text and from nowhere else -- not "
+    "from any example, and not from memory. A card whose quote is not in the text is "
+    "discarded. Use '...' if you need to shorten a long sentence.\n"
+    "DEPTH: label each card with one word describing what it asks the reader to do:\n"
+    "  fact    -- state something the text says\n"
+    "  explain -- put an idea in their own words\n"
+    "  use     -- work the idea through a concrete situation\n"
+    "  relate  -- connect two ideas, or say why the text chose one over another\n"
+    "  limit   -- say where an approach breaks down, or what it costs\n"
+    "  build   -- put together something the text does not state outright\n"
+    "Prefer `use`, `relate` and `limit` where the material allows."
 )
 
-FLASHCARD_USER_TMPL = (
-    "Write {count} {difficulty}-level flashcards from the text below.\n"
-    "Difficulty: {difficulty_guidelines}\n"
-    "{extra_instructions}"
-    "Return a JSON object, using '\\n' for line breaks inside a string:\n"
-    '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
-    '"bloom_level": N}}]}}\n'
-    "Example card with a multi-point answer:\n"
-    '{{"flashcards": [{{"question": "How do random hardware faults and systematic software '
-    'errors differ for fault tolerance?", "answer": "They fail differently, so they need '
-    'different defences.\\n- Hardware faults are largely independent -- redundancy masks '
-    'them.\\n- Software errors are correlated and can fail many nodes at once -- they need '
-    'testing and isolation.", "source_excerpt": "", "bloom_level": 4}}]}}\n\n'
-    "Text:\n{text}\n\n"
-    "JSON object:"
+# The taxonomy never reaches the model (I-28). A level label is not a
+# specification: the model pattern-matches the word to the register it has seen
+# it in, which is how "Bloom taxonomy level 5 (Evaluate)" produced exam papers on
+# the suggestions surface. What a label resolves to is a property of the model
+# reading it, so a prompt built on one means something different on the next
+# model -- and the difference is invisible in any output-quality score.
+#
+# The wire word is `depth`, and the mapping to the stored `bloom_level` lives
+# here rather than in the prompt.
+DEPTH_TO_BLOOM: dict[str, int] = {
+    "fact": 1,
+    "explain": 2,
+    "use": 3,
+    "relate": 4,
+    "limit": 5,
+    "build": 6,
+}
+
+# The technical path names a card *type*, which is a shape rather than a taxonomy
+# label, so the level is derived from it and never asked for. These are the same
+# pairings the prompt used to spell out as "(L1)" ... "(L6)".
+TYPE_TO_BLOOM: dict[str, int] = {
+    "definition": 1,
+    "syntax_recall": 1,
+    "concept_explanation": 2,
+    "analogy": 2,
+    "code_completion": 3,
+    "api_signature": 3,
+    "trace": 4,
+    "pattern_recognition": 4,
+    "design_decision": 5,
+    "complexity": 5,
+    "implementation": 6,
+}
+
+
+def bloom_from(item: dict) -> int | None:
+    """The stored level for a generated card, derived rather than asked for.
+
+    Order matters: a technical card names its type and the type fixes the level,
+    so the model never has a say in it. A generic card carries `depth`, one of a
+    handful of plain words. A bare `bloom_level` is still honoured because cards
+    generated before this exist and the audit reads the column.
+    """
+    kind = str(item.get("flashcard_type") or "").strip().lower()
+    if kind in TYPE_TO_BLOOM:
+        return TYPE_TO_BLOOM[kind]
+    depth = str(item.get("depth") or "").strip().lower()
+    if depth in DEPTH_TO_BLOOM:
+        return DEPTH_TO_BLOOM[depth]
+    raw = item.get("bloom_level")
+    if isinstance(raw, (int, float)) and 1 <= int(raw) <= 6:
+        return int(raw)
+    if isinstance(raw, str) and raw.strip().isdigit() and 1 <= int(raw) <= 6:
+        return int(raw)
+    return None
+
+# The user-side flashcard prompt as a contract plus its compensations. Rendering
+# it reproduces FLASHCARD_USER_TMPL exactly today: both accommodations still
+# apply, because nothing has measured that any model can go without them. The
+# separation is what makes deleting one an audit rather than a guess.
+FLASHCARD_USER_SPEC = PromptSpec(
+    task="flashcards",
+    contract=(
+        "Write {count} {difficulty}-level flashcards from the text below.\n"
+        "Difficulty: {difficulty_guidelines}\n"
+        "{extra_instructions}"
+        "Return a JSON object:\n"
+        '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '
+        '"depth": "fact|explain|use|relate|limit|build"}}]}}'
+    ),
+    accommodations=(
+        Accommodation(
+            id="json_escape_hint",
+            kind="format",
+            text="Use '\\n' for line breaks inside a string.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "raw newlines inside JSON strings made the completion unparseable, "
+                "which the tolerant parser then repaired silently"
+            ),
+            drop_when=(
+                "the model emits schema-valid JSON natively, or the measured "
+                "bad_escape repair count is zero across a matrix run"
+            ),
+        ),
+        Accommodation(
+            id="atomic_answer_example",
+            kind="example",
+            text=(
+                "Example card:\n"
+                '{{"flashcards": [{{"question": "Why do independent hardware faults need a '
+                'different defence from systematic software errors?", "answer": "Hardware '
+                "faults are largely independent so redundancy can mask them, while software "
+                'errors are correlated and can fail many nodes at once.", '
+                '"source_excerpt": "' + EXAMPLE_SOURCE_EXCERPT + '", '
+                '"depth": "relate"}}]}}'
+            ),
+            introduced_for="ollama/qwen3.5:4b",
+            because=(
+                "it replaces `worked_example`, which existed to turn one-sentence "
+                "answers into multi-point bulleted ones. That was the wrong target: "
+                "rules 4, 9 and 10 of the card-writing canon make a list the primary "
+                "defect in a card, and the measured atomicity floor was 0.7778 with "
+                "the old example in place"
+            ),
+            drop_when=(
+                "atomicity holds at 1.0 across a matrix run without it -- an example "
+                "sets the register a model regresses toward, in either direction"
+            ),
+        ),
+    ),
 )
 
-NOTES_CONCEPT_EXTRACT_SYSTEM = (
-    "You are a learning analyst. Given a learner's notes, your job is two steps. "
-    "STEP 1 -- DOMAIN: Identify the primary subject domain of the notes in a single short phrase. "
-    "The domain is what the learner is actively trying to understand or remember. "
-    "It is never the setting, date, location, or context in which the notes were written. "
-    "STEP 2 -- CONCEPTS: Extract atomic, learnable concepts that are directly about that domain. "
-    "A concept must be an insight, claim, argument, principle, or relationship within the domain. "
-    "STRICT GROUNDING: extract only what is explicitly stated or directly implied by the notes. "
-    "Never introduce knowledge from outside the notes. "
-    "REJECT any concept that is about: "
-    "the physical setting (weather, environment, location, surroundings); "
-    "people or events incidental to the subject; "
-    "bare enumerations with no explanatory content; "
-    "meta-commentary about the notes. "
-    "For each accepted concept, assign a type: "
-    "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
-    'Output ONLY a JSON object with keys "domain" (string) and '
-    '"concepts" (array of {"concept": "...", "type": "..."}). '
-    "No explanation, no preamble, no markdown fences."
+def flashcard_user_tmpl() -> str:
+    """The user prompt, rendered for the model that will generate the cards."""
+    return render_for(FLASHCARD_USER_SPEC, "generation") + "\nText:\n{text}\n\nJSON object:"
+
+NOTES_CONCEPT_EXTRACT_SPEC = PromptSpec(
+    task="concepts",
+    contract=(
+        "You are a learning analyst. Given a learner's notes, identify the primary "
+        "subject domain and extract atomic, learnable concepts about it. "
+        "The domain is what the learner is actively trying to understand or remember. "
+        "It is never the setting, date, location, or context in which the notes were written. "
+        "A concept must be an insight, claim, argument, principle, or relationship within "
+        "the domain. "
+        "STRICT GROUNDING: extract only what is explicitly stated or directly implied by "
+        "the notes. Never introduce knowledge from outside the notes. "
+        "REJECT any concept that is about: "
+        "the physical setting (weather, environment, location, surroundings); "
+        "people or events incidental to the subject; "
+        "bare enumerations with no explanatory content; "
+        "meta-commentary about the notes. "
+        "For each accepted concept, assign a type: "
+        "causal-claim, comparison, process-role, factual-definition, or speculative-claim. "
+        'Output a JSON object with keys "domain" (string) and '
+        '"concepts" (array of {"concept": "...", "type": "..."}).'
+    ),
+    accommodations=(
+        step_decomposition(
+            "Work in two steps: STEP 1 -- DOMAIN, then STEP 2 -- CONCEPTS.",
+            introduced_for="ollama/llama3.2",
+            because=(
+                "without an explicit first step the domain was inferred from the "
+                "notes' setting -- the weather and the place -- rather than their "
+                "subject, and every concept followed it"
+            ),
+        ),
+        NO_FENCES,
+    ),
 )
+
+def notes_concept_extract_system() -> str:
+    return render_for(NOTES_CONCEPT_EXTRACT_SPEC, "generation")
 
 NOTES_CONCEPT_EXTRACT_TMPL = (
     "Identify the domain and extract up to {max_concepts} learnable concepts from these notes.\n\n"
@@ -139,11 +291,14 @@ _BOOK_CONTENT_GUIDELINE = (
 )
 
 TECH_FLASHCARD_SYSTEM = (
-    "You are a technical learning assistant creating flashcards based on Bloom's Taxonomy. "
+    "You are a technical learning assistant writing flashcards. "
+    # No taxonomy name and no level annotations (I-28). The type is a shape the
+    # model can act on; the level it maps to is derived in code (TYPE_TO_BLOOM)
+    # and is none of the model's business.
     "For each card choose exactly one of these flashcard types: "
-    "definition (L1), syntax_recall (L1), concept_explanation (L2), analogy (L2), "
-    "code_completion (L3), api_signature (L3), trace (L4), pattern_recognition (L4), "
-    "design_decision (L5), complexity (L5), implementation (L6). "
+    "definition, syntax_recall, concept_explanation, analogy, "
+    "code_completion, api_signature, trace, pattern_recognition, "
+    "design_decision, complexity, implementation. "
     "Choose the type that best matches what the card asks the learner to do. "
     "For code_completion cards: show a code block with a blank rendered as ____ where the "
     "learner must supply the missing part. "
@@ -154,8 +309,7 @@ TECH_FLASHCARD_SYSTEM = (
     "NEVER use phrases like 'in this passage' or 'in this text'. "
     "Output a JSON array starting with [ and ending with ]. "
     'Each element: {"question": "...", "answer": "...", '
-    '"source_excerpt": "...", "flashcard_type": "...", "bloom_level": N}. '
-    "bloom_level is an integer 1-6. "
+    '"source_excerpt": "...", "flashcard_type": "..."}. '
     "Write no explanation, preamble, or markdown fences."
 )
 
@@ -245,6 +399,36 @@ _TECH_TITLE_KEYWORDS = re.compile(
 )
 
 
+# What to ask of each kind of material. Distilled from the card-writing canon
+# (SuperMemo's 20 rules, which Anki's manual defers to) and pointed at the failure
+# each kind actually shows: narrative cards drift into "which word was used",
+# technical cards into restating prose instead of the rule, academic cards into
+# "who wrote it", and transcript cards into facts that go stale unread.
+_GENRE_STRATEGY = {
+    "narrative": (
+        "Ask about cause and consequence, what a character wanted, or what a choice cost. "
+        "Never ask which words the text used or which example illustrated a point."
+    ),
+    "non-fiction": (
+        "Ask what a claim asserts, why it holds, and what it rules out."
+    ),
+    "technical": (
+        "Ask the invariant, the failure mode, when one option beats another, and what a "
+        "parameter controls. Where the text gives syntax, a signature or a formula, quote "
+        "its exact form in the answer rather than describing it."
+    ),
+    "academic": (
+        "Ask what was claimed, how it was measured, what the evidence was, and what "
+        "limitation the work states. Never ask who wrote it or where it was published."
+    ),
+    "conversation": (
+        "Ask what was decided, who owns it, and why the alternative was rejected. Anything "
+        "that will go stale -- a date, a version, a headcount -- must carry its date in the "
+        "answer so a card reviewed months later is still checkable."
+    ),
+}
+
+
 def _infer_genre(doc: DocumentModel | None) -> str:
     """Infer document genre for system prompt tuning.
 
@@ -263,15 +447,25 @@ def _infer_genre(doc: DocumentModel | None) -> str:
         return "academic"
     if content_type == "book":
         return "technical" if _TECH_TITLE_KEYWORDS.search(title) else "non-fiction"
-    # transcripts / notes / unknown: non-fiction recall prompt is safer than narrative
+    # A transcript's value is the decision and its owner, which the non-fiction
+    # prompt does not ask for; it also holds the most volatile facts in a library.
+    if content_type in ("conversation", "transcript", "meeting", "audio", "video"):
+        return "conversation"
+    # notes / unknown: non-fiction recall prompt is safer than narrative
     return "non-fiction"
 
 
 def _build_genre_system_prompt(genre: str) -> str:
-    """The single flashcard system prompt, prefixed with a one-line genre hint.
+    """The single flashcard system prompt plus what to ask of this kind of material.
 
-    One source of truth (FLASHCARD_SYSTEM) drives generation; the hint just nudges
-    tone for technical/academic/non-fiction material.
+    One source of truth (FLASHCARD_SYSTEM) drives generation. The genre block used
+    to be the sentence "This is a {genre} document.", which named the material and
+    asked for nothing: cards from a meeting transcript and cards from a textbook
+    came out the same shape. Each strategy below says what a good card *asks* for
+    that kind, which is the part a model cannot infer from the label.
     """
-    hint = f"This is a {genre} document. " if genre != "narrative" else ""
-    return hint + FLASHCARD_SYSTEM
+    article = "an" if genre[:1] in "aeiou" else "a"
+    label = f"This is {article} {genre} document. " if genre != "narrative" else ""
+    strategy = _GENRE_STRATEGY.get(genre, "")
+    prefix = f"{label}{strategy}\n" if strategy else label
+    return prefix + FLASHCARD_SYSTEM

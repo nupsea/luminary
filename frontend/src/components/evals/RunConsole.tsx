@@ -2,10 +2,8 @@ import { useMemo, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Play } from "lucide-react"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import {
-  errorFromResponse,
   fetchEvalModels,
   isExternalJudge,
   judgeOptionsFrom,
@@ -13,6 +11,7 @@ import {
   type DatasetSelection,
 } from "./api"
 import type { GoldenDataset } from "./types"
+import { apiPost, detailFromError } from "@/lib/apiClient"
 
 type Mode = "retrieval" | "generation" | "ablation"
 
@@ -85,20 +84,16 @@ export function RunConsole({
         generate: generation,
         max_questions: maxQuestions,
       }
-      const res =
-        selection.source === "db"
-          ? await fetch(`${API_BASE}/evals/datasets/${selection.key}/run`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...payload, check_citations: false }),
+      try {
+        return selection.source === "db"
+          ? await apiPost(`/evals/datasets/${selection.key}/run`, {
+              ...payload,
+              check_citations: false,
             })
-          : await fetch(`${API_BASE}/evals/run`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...payload, dataset: selection.key }),
-            })
-      if (!res.ok) throw await errorFromResponse(res, "Failed to start eval")
-      return res.json()
+          : await apiPost("/evals/run", { ...payload, dataset: selection.key })
+      } catch (err) {
+        throw detailFromError(err, "Failed to start eval")
+      }
     },
     onSuccess: () => {
       const cfg = ablation

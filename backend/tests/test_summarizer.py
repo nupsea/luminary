@@ -246,9 +246,12 @@ async def test_completed_summary_stored_in_sqlite(test_db):
 
     mock_llm = _MockLLMService(tokens=["A", " summary"])
 
+    # A streaming mode on purpose: this guards that what was streamed is what was
+    # stored. `detailed` no longer streams -- it is assembled from the section
+    # summaries, or generated batch by batch when none exist.
     with patch("app.services.summarizer.get_llm_service", return_value=mock_llm):
         svc = SummarizationService()
-        events = [e async for e in svc.stream_summary(doc_id, "detailed", None)]
+        events = [e async for e in svc.stream_summary(doc_id, "executive", None)]
 
     done_payload = json.loads(events[-1][len("data: ") :])
     summary_id = done_payload["summary_id"]
@@ -259,7 +262,7 @@ async def test_completed_summary_stored_in_sqlite(test_db):
 
     assert stored is not None
     assert stored.document_id == doc_id
-    assert stored.mode == "detailed"
+    assert stored.mode == "executive"
     assert stored.content == "A summary"
 
 

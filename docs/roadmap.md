@@ -21,8 +21,9 @@ The named doc is the live contract. The plan that produced the work is gone.
 
 | Capability | Where its contract lives |
 |---|---|
+| Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 31 hard invariants | `invariants.md` |
+| The 35 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -32,6 +33,8 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Client-side routing verification | `router-verification.md` |
 | Notes: CodeMirror 6 editor, wiki-links, backlinks | `architecture.md` (nav section) |
 | Hub recommender + misconception lifecycle | `recommender_service.py`, `misconceptions.py` |
+| Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
+| Flashcard factuality gate + recorded passage (`source_chunk_ids`) | `invariants.md` I-35 |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -39,28 +42,7 @@ adequately described by `architecture.md` plus the code. Their specs were delete
 
 ## Open
 
-### 1. The frontend lint gate is not in CI
-
-`make lint` runs `npm run lint`; `make ci` does not — it runs only `npm run build` and
-`npx tsc --noEmit`. So the ESLint rules, including the `no-restricted-syntax` guard that forbids
-raw `fetch()`, are advisory: nothing fails when they are violated.
-
-Fix: add `npm run lint` to the `ci` target, then fix the fallout. Do this before item 2 — that
-one is the measured consequence of this gate not running, and it will regrow if the gate stays
-advisory. Items 3-5 are independent of it.
-
-### 2. `apiClient` is bypassed by raw `fetch()`
-
-**55 bare `fetch(` calls across 20 files** in `frontend/src`, of which 8 carry a justified
-`eslint-disable`. Measured with `grep -rnE '(^|[^a-zA-Z.])fetch\('` — a naive `fetch(` search
-reports 77 because it also matches `refetch(`/`prefetch(`, which are TanStack Query and are fine.
-
-The 2026 quality audit measured 29 (`git show master:docs/refactor-quality-plan.md`, finding S6),
-so this roughly doubled while the guard in item 1 was unenforced. Each bypasses `apiClient`'s
-central error handling and base-URL resolution — the latter is what broke param-bearing GETs
-under a relative `/api` base in production once already.
-
-### 3. String-interpolated SQL
+### 1. String-interpolated SQL
 
 Six sites build `IN (...)` clauses by quoting values into the string rather than binding them:
 
@@ -75,7 +57,7 @@ primitive that one change in id provenance turns live, and it defeats statement 
 `graph_view.py:208,283,339,428` and `graph_tech.py:464` already bind `$name` placeholders and
 are the pattern to copy. Do not "fix" those — they are already correct.
 
-### 4. OKF is a grounding service, not yet a projection
+### 2. OKF is a grounding service, not yet a projection
 
 `okf.md` describes a folder of Markdown files — one per concept, plus `index.md` and `log.md` —
 as an export/import/grounding layer. Only the grounding half exists: `services/okf_context.py`
@@ -85,7 +67,7 @@ no file projection, no export endpoint, and no import path.
 I-21 already governs the unbuilt half (OKF is a projection, never a transport and never a source
 of truth), so build it against that invariant when it is built. `okf.md` is marked accordingly.
 
-### 5. The `unstable` test quarantine
+### 3. The `unstable` test quarantine
 
 **28 tests across 15 files** carry `@pytest.mark.unstable` and are excluded from the default
 run by `addopts`. Run them with `uv run pytest -m unstable`.
@@ -103,10 +85,63 @@ needs the background work (`test_e2e_upload` does).
 Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
 marker over two causes is why this has stalled twice.
 
+### 4. Model footprint, scheduling, substitutability, and the eval baseline that gates them
+
+A 0.5.0 user reported ~16GB resident and a crash ingesting a PDF. `spawn_ollama` in
+`src-tauri/src/supervisor.rs` sets `OLLAMA_KEEP_ALIVE=30m` but never
+`OLLAMA_MAX_LOADED_MODELS`, whose Ollama default is 3, so chat and vision runners co-reside
+for half an hour. `scripts/install.sh:198` and `scripts/bootstrap.sh:257` both cap it; the
+DMG path does not.
+
+Two further problems share the fix. Deferred summaries and enrichment issue LLM calls into
+the slots an interactive Ask needs, with no scheduling priority between them. And model
+substitution (#48) does not move eval numbers, because prompts, parsers and budgets are
+sized for llama3.2 and no metric distinguishes a model that emits clean JSON from one whose
+output is repaired — there are two tolerant parsers and nothing counts a repair.
+
+A fourth problem gates all three. Three independent eval audits (2026-08-14) found that no
+number in the suite survives being compared across a change: a run records nothing about the
+embedder, model or library state that produced it, one generation run cannot resolve a change
+below ~0.10, `run_summary_eval.py:38` judges summaries against 8,000 raw bytes, and every gated
+arm pins `document_id` so cross-document routing is unmeasured.
+
+Plan, six stages: `model-and-eval-plan.md`. Delete it when the last stage ships.
+
+### 5. An existing install is never moved to the model its host should run
+
+Changing the default model moves new installs only. There is no path that carries an existing
+one across, and for two of the three install routes the result is that chat stops answering.
+
+`scripts/install.sh` before 2026-08-19 pulled `llama3.2` and never wrote
+`LITELLM_DEFAULT_MODEL`, and the desktop app writes no `.env` at all —
+`supervisor.rs:298` only reads `OLLAMA_NUM_PARALLEL` and `OLLAMA_MAX_LOADED_MODELS` back out.
+Both therefore resolve the host-aware default, which is not the model on disk:
+`warmup.py:125` reports `chat_model: missing`, and `components.py:285` lists catalogue entries
+only, so the setup screen offers a 3.21GB download and never mentions the working 2.88GB model
+the user already has. `bootstrap.sh` wrote the pin, so those installs keep working and are the
+only ones that do.
+
+The primitives exist. `POST /setup/components/model:<ref>/install` installs any registry entry
+with streamed progress, `PATCH /settings/llm {local_chat_model}` switches, and `settings` is a
+key/value table (`models.py:439`), so remembering a dismissal needs no migration. What is
+missing is the comparison — what is in play against what this host would pick, and whether that
+is installed — and one surface for it.
+
+Two constraints decide the design:
+
+- **Frame it as fit, never quality.** `TEXT_PREFERENCE` is ranked on single runs and says so;
+  it ranks a default and does not gate a swap. "This machine can hold a larger model" is
+  measured. "This model is better" is not, and claiming it is the failure
+  `.claude/rules/common/product-integrity.md` exists to prevent.
+- **The download completes before the pin flips.** Switching to a model that is not on disk is
+  what the silent host-aware upgrade did before `_named_by_a_human` gated it, and it fails at
+  the user's first question rather than at the point of choosing.
+
+Removing the superseded model is a separate step, default off, and confirmed.
+
 ## Deferred — decided, not scheduled
 
-- **8GB low-footprint memory profile.** A profile plus model lifecycle management, explicitly
-  *not* quantization. Write-only until someone commits to it.
+Nothing currently deferred.
 
 ## Abandoned — do not restore
 

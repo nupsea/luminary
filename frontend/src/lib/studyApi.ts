@@ -22,6 +22,14 @@ export interface Flashcard {
   cloze_text: string | null
   fsrs_stability: number
   reps: number
+  // unchecked | verified | unsupported | unverifiable -- whether source_excerpt was
+  // found in the document the card came from. Optional so a response from an older
+  // backend does not silently read as verified.
+  grounding?: string
+  // unchecked | supported | unsupported | unverifiable -- whether the answer
+  // follows from that passage. Orthogonal to grounding: a real quote does not make
+  // the answer true.
+  factuality?: string
 }
 
 export interface SourceContext {

@@ -20,7 +20,6 @@ from typing import Literal
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     ChunkModel,
     CollectionMemberModel,
@@ -30,14 +29,26 @@ from app.models import (
     NoteModel,
     SectionModel,
 )
+from app.services import llm_output_stats
+from app.services.enrichment_concurrency import get_enrichment_llm_semaphore
+from app.services.flashcard_factuality import (
+    FACTUALITY_UNCHECKED,
+    FACTUALITY_UNSUPPORTED,
+    check_answer,
+    effective_generation_model,
+    factuality_model,
+    is_self_judging,
+)
 from app.services.flashcard_parsers import (
+    GROUNDING_UNCHECKED,
     _build_cloze_question,
     _parse_cloze_llm_response,
     _parse_cloze_text,
     _parse_concept_extract,
     _parse_llm_response,
     card_field,
-    card_rejection_reason,
+    card_rejection,
+    grounding_state,
     strip_source_ref,
 )
 from app.services.flashcard_prompts import (
@@ -45,17 +56,18 @@ from app.services.flashcard_prompts import (
     _DIFFICULTY_GUIDELINES,
     CLOZE_SYSTEM,
     CLOZE_USER_TMPL,
-    FLASHCARD_USER_TMPL,
     GRAPH_FLASHCARD_SYSTEM,
     GRAPH_FLASHCARD_USER_TMPL,
     NOTES_CARD_FROM_CONCEPTS_SYSTEM,
     NOTES_CARD_FROM_CONCEPTS_TMPL,
-    NOTES_CONCEPT_EXTRACT_SYSTEM,
     NOTES_CONCEPT_EXTRACT_TMPL,
     TECH_FLASHCARD_SYSTEM,
     TECH_FLASHCARD_USER_TMPL,
     _build_genre_system_prompt,
     _infer_genre,
+    bloom_from,
+    flashcard_user_tmpl,
+    notes_concept_extract_system,
 )
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
@@ -75,8 +87,16 @@ def _get_llm_service():
 
 
 def _generation_model() -> str | None:
-    m = get_settings().LITELLM_GENERATION_MODEL
-    return m if m else None
+    """See `flashcard._get_generation_model`: resolved, not read from config."""
+    from app.services.model_router import resolve  # noqa: PLC0415
+
+    choice = resolve("generation")
+    # None when nothing overrides: LLMService then routes it itself, which is
+    # what supplies the API key the Settings UI stores and what keeps the
+    # offline reroute available. Returning a concrete id here pins the model and
+    # loses both -- in cloud mode with the key only in Settings, every
+    # generation would fail authentication while chat kept working.
+    return choice.model if choice.explicit else None
 
 
 async def generate_technical(
@@ -85,6 +105,7 @@ async def generate_technical(
     section_heading: str | None,
     count: int,
     session: AsyncSession,
+    model: str | None = None,
 ) -> list[FlashcardModel]:
     """Generate Bloom's-taxonomy-typed flashcards for tech_book/tech_article documents.
 
@@ -118,7 +139,7 @@ async def generate_technical(
         if sec:
             admonition_type = sec.admonition_type
 
-    combined_text, first_chunk_id = _build_text(chunks)
+    combined_text, first_chunk_id, passage_chunk_ids = _build_text(chunks)
     if not combined_text:
         return []
 
@@ -132,9 +153,15 @@ async def generate_technical(
         ) + _avoid_suffix(avoid)
         raw = await llm.generate(
             prompt, system=TECH_FLASHCARD_SYSTEM,
-            model=_generation_model(), stream=False,
+            model=model or _generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, document_id))
+        return await _screen_factuality(
+            _gate_cards(
+                _parse_llm_response(raw, document_id, expect="array"),
+                source_text=combined_text,
+            ),
+            combined_text,
+        )
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -157,14 +184,10 @@ async def generate_technical(
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
         flashcard_type = str(item.get("flashcard_type", "definition")).strip()
-        raw_bloom = item.get("bloom_level")
-        # Coerce bloom_level defensively: LLM may return int, float, or "4" string
-        if isinstance(raw_bloom, (int, float)):
-            bloom_level: int | None = int(raw_bloom)
-        elif isinstance(raw_bloom, str) and raw_bloom.isdigit():
-            bloom_level = int(raw_bloom)
-        else:
-            bloom_level = None
+        # Derived from the card's own type or depth word, not asked for as a
+        # number: the prompt no longer names a taxonomy (I-28), and the level a
+        # type maps to is a decision this codebase owns rather than the model.
+        bloom_level: int | None = bloom_from(item)
         card = FlashcardModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
@@ -182,6 +205,9 @@ async def generate_technical(
             created_at=now,
             flashcard_type=flashcard_type,
             bloom_level=bloom_level,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
+            factuality=item.get("factuality", FACTUALITY_UNCHECKED),
+            source_chunk_ids=passage_chunk_ids,
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -227,7 +253,7 @@ async def generate_cloze(
     document_id = chunks[0].document_id
     first_chunk_id = chunks[0].id
 
-    combined_text, _ = _build_text(chunks)
+    combined_text, _, passage_chunk_ids = _build_text(chunks)
     if not combined_text:
         return []
 
@@ -293,6 +319,14 @@ async def generate_cloze(
             flashcard_type="cloze",
             bloom_level=None,
             cloze_text=cloze_text,
+            # A cloze IS its passage, so the sentence stands in for a quote when the
+            # model gave none -- a cloze whose sentence is not in the section was
+            # written from memory, and that is checkable without a judge.
+            grounding=grounding_state(
+                source_excerpt or _build_cloze_question(cloze_text).replace("[____]", ""),
+                combined_text,
+            ),
+            source_chunk_ids=passage_chunk_ids,
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -319,26 +353,90 @@ def _avoid_suffix(avoid: list[str]) -> str:
     return f"\nDo NOT repeat or paraphrase these already-written questions: {listed}\n"
 
 
-def _gate_cards(parsed: list) -> list[dict]:
+def _gate_cards(parsed: list, source_text: str | None = None) -> list[dict]:
     """Normalize parsed LLM items to {question, answer, source_excerpt, ...} and
     drop any that fail the quality gate. Extra fields (bloom_level,
-    flashcard_type) pass through untouched for the caller to persist."""
+    flashcard_type) pass through untouched for the caller to persist.
+
+    *source_text* is the passage the cards were generated from. Passing it turns
+    on the grounding rules -- the card must quote that text and may not invent
+    figures. Generators that build cards from concepts or gaps have no single
+    passage to quote and pass nothing."""
     kept: list[dict] = []
     for item in parsed:
         if not isinstance(item, dict):
             continue
         q = card_field(item, "question", "front", "q", "term", "prompt")
         a = strip_source_ref(card_field(item, "answer", "back", "a", "definition", "response"))
-        reason = card_rejection_reason(q, a)
-        if reason:
-            logger.info("flashcard: dropped low-quality card (%s): %r", reason, q[:80])
+        excerpt = card_field(item, "source_excerpt", "source", "excerpt")
+        verdict = card_rejection(q, a, excerpt, source_text)
+        llm_output_stats.record_card_gate(verdict[0] if verdict else None)
+        if verdict:
+            logger.info("flashcard: dropped low-quality card (%s): %r", verdict[1], q[:80])
             continue
+        # The gate already decided this; persisting it is what lets a reviewer ask
+        # later which cards proved their source, instead of the answer being lost
+        # the moment the request returns.
         kept.append({
             **item,
             "question": q,
             "answer": a,
-            "source_excerpt": card_field(item, "source_excerpt", "source", "excerpt"),
+            "source_excerpt": excerpt,
+            "grounding": grounding_state(excerpt, source_text),
         })
+    return kept
+
+
+async def _screen_factuality(cards: list[dict], source_text: str | None) -> list[dict]:
+    """Drop cards whose answer does not follow from the passage they were written from.
+
+    Runs only when a checker is configured. It is a second model on a runtime that
+    serves one at a time (I-27/I-31), so the checks are batched after generation
+    rather than interleaved with it: one model switch per batch instead of one per
+    card. Cost is stated in `docs/model-and-eval-plan.md`.
+
+    A card the checker could not judge is kept and recorded `unverifiable`. Failing
+    closed would let an unreachable checker silently empty the deck, which is a
+    worse failure than an honestly-labelled card -- and the label is on the wire,
+    so the reviewer can see it.
+    """
+    checker = factuality_model()
+    if not checker or not source_text or not cards:
+        return cards
+    if is_self_judging(checker, effective_generation_model()):
+        # A model asked whether its own card follows from a passage agrees with
+        # itself. Refusing is the only honest option; passing everything is not.
+        logger.error(
+            "flashcard: factuality checker %s is also the generation model; "
+            "skipping the check rather than letting a model grade its own cards",
+            checker,
+        )
+        return cards
+
+    llm = _get_llm_service()
+    semaphore = get_enrichment_llm_semaphore()
+
+    async def _one(card: dict) -> str:
+        async with semaphore:
+            return await check_answer(
+                card.get("question", ""),
+                card.get("answer", ""),
+                source_text,
+                checker=checker,
+                llm=llm,
+            )
+
+    verdicts = await asyncio.gather(*[_one(c) for c in cards])
+    kept: list[dict] = []
+    for card, verdict in zip(cards, verdicts, strict=True):
+        llm_output_stats.record_factuality(verdict)
+        if verdict == FACTUALITY_UNSUPPORTED:
+            logger.info(
+                "flashcard: dropped card whose answer is not in the passage: %r",
+                card.get("question", "")[:80],
+            )
+            continue
+        kept.append({**card, "factuality": verdict})
     return kept
 
 
@@ -360,6 +458,11 @@ async def _collect_with_backfill(
         for c in batch:
             key = c["question"].lower()
             if key in seen:
+                # The model was told which questions it had already produced and
+                # produced one of them again. Dropping it silently hid exactly the
+                # structural weakness a small model shows first: `cards_generated`
+                # absorbed the repeat and nothing reported it.
+                llm_output_stats.record_duplicate_question()
                 continue
             seen.add(key)
             candidates.append(c)
@@ -371,6 +474,11 @@ async def _collect_with_backfill(
             "flashcard: %d/%d usable cards after %d attempt(s) (model=%s)",
             len(candidates), count, attempts, _generation_model() or "default",
         )
+    # Retry-to-backfill is where a weaker model shows up as call count rather
+    # than as quality: N cards are delivered either way, and only `attempts`
+    # differs. Counted here so the difference is a number.
+    delivered = min(len(candidates), count)
+    llm_output_stats.record_generation(requested=count, delivered=delivered, attempts=attempts)
     return candidates[:count]
 
 
@@ -399,7 +507,13 @@ async def _generate_concept_cards(
             prompt, system=NOTES_CARD_FROM_CONCEPTS_SYSTEM,
             model=_generation_model(), stream=False,
         )
-        return _gate_cards(_parse_llm_response(raw, parse_ctx))
+        return await _screen_factuality(
+            _gate_cards(
+                _parse_llm_response(raw, parse_ctx, expect="array"),
+                source_text=combined_text,
+            ),
+            combined_text,
+        )
 
     # cards are grounded one-per-concept, so the achievable count is bounded by
     # how many concepts were extracted -- never retry past that
@@ -414,6 +528,7 @@ async def generate(
     session: AsyncSession,
     difficulty: Literal["easy", "medium", "hard"] = "medium",
     context: str | None = None,
+    model: str | None = None,
 ) -> list[FlashcardModel]:
     """Generate flashcards from document chunks using LLM.
 
@@ -452,6 +567,10 @@ async def generate(
     section_ctx: dict[str, tuple[str, str | None]] = {}
     resolved_section_heading: str | None = None
     eligible_chunks: list[ChunkModel] = []
+    # [] rather than None: the passage was supplied text (a reader selection), so
+    # there is nothing in the library to rebuild it from -- which is a different
+    # fact from "we never recorded it" and has to stay distinguishable.
+    passage_chunk_ids: list[str] = []
     if context and context.strip():
         combined_text = context.strip()[:_CHUNK_CHAR_LIMIT]
         # Still need a chunk_id (NOT NULL) -- grab the first chunk for the document.
@@ -489,9 +608,11 @@ async def generate(
             )
 
         if section_ctx:
-            combined_text, first_chunk_id = _build_enriched_text(eligible_chunks, section_ctx)
+            combined_text, first_chunk_id, passage_chunk_ids = _build_enriched_text(
+                eligible_chunks, section_ctx
+            )
         else:
-            combined_text, first_chunk_id = _build_text(eligible_chunks)
+            combined_text, first_chunk_id, passage_chunk_ids = _build_text(eligible_chunks)
         if not combined_text:
             return []
 
@@ -524,7 +645,7 @@ async def generate(
             )
 
     async def _batch(want: int, avoid: list[str]) -> list[dict]:
-        batch_prompt = FLASHCARD_USER_TMPL.format(
+        batch_prompt = flashcard_user_tmpl().format(
             count=want,
             difficulty=difficulty,
             difficulty_guidelines=_DIFFICULTY_GUIDELINES.get(difficulty, ""),
@@ -533,10 +654,16 @@ async def generate(
         ) + _avoid_suffix(avoid)
         raw = await llm.generate(
             batch_prompt, system=system_prompt,
-            model=_generation_model(), stream=False,
+            model=model or _generation_model(), stream=False,
             response_format={"type": "json_object"},
         )
-        return _gate_cards(_parse_llm_response(raw, document_id))
+        return await _screen_factuality(
+            _gate_cards(
+                _parse_llm_response(raw, document_id, expect="object"),
+                source_text=combined_text,
+            ),
+            combined_text,
+        )
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -566,7 +693,8 @@ async def generate(
 
     if not candidates:
         logger.warning(
-            "flashcard.generate: 0 usable cards (model=%s)", _generation_model() or "default"
+            "flashcard.generate: 0 usable cards (model=%s)",
+            model or _generation_model() or "default",
         )
 
     if candidates and existing_vecs is not None:
@@ -584,6 +712,7 @@ async def generate(
         cand_vecs = None
 
     pool_vecs = existing_vecs
+    deduped = 0
     flashcards: list[FlashcardModel] = []
     for i, item in enumerate(candidates):
         question = str(item.get("question", "")).strip()
@@ -595,13 +724,13 @@ async def generate(
                     "flashcard.generate: skipping near-duplicate question: %r",
                     question[:80],
                 )
+                deduped += 1
                 continue
             pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
-        card_bloom_level = item.get("bloom_level")
-        if isinstance(card_bloom_level, int) and 1 <= card_bloom_level <= 6:
-            pass
-        else:
-            card_bloom_level = None
+        # Derived from the card's own type or depth word, not asked for as a
+        # number: the prompt no longer names a taxonomy (I-28), and the level a
+        # type maps to is a decision this codebase owns rather than the model.
+        card_bloom_level = bloom_from(item)
 
         card = FlashcardModel(
             id=str(uuid.uuid4()),
@@ -621,10 +750,22 @@ async def generate(
             chunk_classification=chunk_classification,
             bloom_level=card_bloom_level,
             section_heading=resolved_section_heading,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
+            factuality=item.get("factuality", FACTUALITY_UNCHECKED),
+            source_chunk_ids=passage_chunk_ids,
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
         flashcards.append(card)
+
+    if deduped:
+        llm_output_stats.record_items_deduped(deduped)
+        logger.info(
+            "flashcard.generate: %d of %d candidates removed as near-duplicates of cards "
+            "this document already has",
+            deduped,
+            len(candidates),
+        )
 
     if flashcards:
         await session.commit()
@@ -686,7 +827,7 @@ async def generate_from_notes(
 
         raw_concepts = await llm.generate(
             extract_prompt,
-            system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+            system=notes_concept_extract_system(),
             model=_generation_model(), stream=False,
         )
         domain, concepts = _parse_concept_extract(raw_concepts)
@@ -722,6 +863,8 @@ async def generate_from_notes(
             reps=0,
             lapses=0,
             created_at=now,
+            grounding=item.get("grounding", GROUNDING_UNCHECKED),
+            factuality=item.get("factuality", FACTUALITY_UNCHECKED),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -803,7 +946,7 @@ async def generate_from_collection(
                 max_concepts=max(count_per_note, 8),
                 text=combined_text,
             ),
-            system=NOTES_CONCEPT_EXTRACT_SYSTEM,
+            system=notes_concept_extract_system(),
             model=_generation_model(),
             stream=False,
         )
@@ -840,6 +983,8 @@ async def generate_from_collection(
                 reps=0,
                 lapses=0,
                 created_at=now,
+                grounding=item.get("grounding", GROUNDING_UNCHECKED),
+                factuality=item.get("factuality", FACTUALITY_UNCHECKED),
             )
             session.add(card)
             await _sync_flashcard_fts(card, session)
@@ -897,6 +1042,7 @@ async def generate_from_graph(
 
             ctx = "\n\n".join(c.text for c in scored_chunks)[:_CHUNK_CHAR_LIMIT]
             first_chunk_id = scored_chunks[0].chunk_id
+            passage_ids = [c.chunk_id for c in scored_chunks]
 
             prompt = GRAPH_FLASHCARD_USER_TMPL.format(
                 name_a=name_a,
@@ -909,7 +1055,7 @@ async def generate_from_graph(
                 prompt, system=GRAPH_FLASHCARD_SYSTEM,
                 model=_generation_model(), stream=False,
             )
-            cards_data = _parse_llm_response(raw, document_id)
+            cards_data = _parse_llm_response(raw, document_id, expect="array")
 
             now = datetime.now(UTC)
             cards: list[FlashcardModel] = []
@@ -919,10 +1065,10 @@ async def generate_from_graph(
                 question = str(item.get("question", "")).strip()
                 answer = str(item.get("answer", "")).strip()
                 source_excerpt = str(item.get("source_excerpt", "")).strip()
-                reason = card_rejection_reason(question, answer)
-                if reason:
+                verdict = card_rejection(question, answer, source_excerpt, ctx)
+                if verdict:
                     logger.info(
-                        "flashcard: dropped low-quality card (%s): %r", reason, question[:80]
+                        "flashcard: dropped low-quality card (%s): %r", verdict[1], question[:80]
                     )
                     continue
                 cards.append(
@@ -943,6 +1089,8 @@ async def generate_from_graph(
                         reps=0,
                         lapses=0,
                         created_at=now,
+                        grounding=grounding_state(source_excerpt, ctx),
+                        source_chunk_ids=passage_ids,
                     )
                 )
             return cards

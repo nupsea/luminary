@@ -121,6 +121,95 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
     )
 
 
+class RoleResolution(BaseModel):
+    model: str
+    local: bool
+    # None when the model is not in the registry: unmeasured, which is not the
+    # same as weightless and must not be rendered as 0.
+    resident_gb: float | None = None
+    fallback_reason: str | None = None
+
+
+class ModelResidencyResponse(BaseModel):
+    """What this configuration costs on this machine, and whether it fits.
+
+    Every number here was knowable before and none was put together, so a model
+    too large for the host was selectable and the first symptom was a crash
+    during ingestion rather than a refusal at the point of choosing.
+    """
+
+    profile: str
+    profile_explicit: bool
+    profile_suits_host: bool
+    host_ram_gb: int
+    roles: dict[str, RoleResolution]
+    resident_models: list[str]
+    resident_count: int
+    max_resident: int
+    within_residency_limit: bool
+    resident_gb: float
+    unmeasured_models: list[str]
+    oversized_models: list[str]
+    # Roles where the host overruled the configured model, keyed by role, each
+    # carrying `configured`, `resolved` and `reason`. Empty when every configured
+    # model was honoured. A narrowed model is absent from `oversized_models`
+    # because it is not in play at all, so without this the report described a
+    # model the user never chose and flagged nothing.
+    narrowed_defaults: dict[str, dict[str, str]] = {}
+    # The half-of-RAM budget the registry sizes every model against, applied to
+    # the set that actually resolves. `within_residency_limit` counts runners,
+    # which is a different question from whether the machine can hold them.
+    resident_budget_gb: float | None = None
+    resident_set_fits: bool = True
+
+
+class InstallableModel(BaseModel):
+    id: str
+    resident_gb: float
+    min_ram_gb: int
+    licence: str
+    multimodal: bool
+    usable_context: int
+    # False means the model matrix has never run against this entry, so
+    # `accommodations_needed` being empty means nobody looked.
+    accommodations_measured: bool
+    fits_host: bool
+
+
+@router.get("/models", response_model=ModelResidencyResponse)
+async def get_model_residency() -> ModelResidencyResponse:
+    """The active memory profile, what each role resolves to, and the footprint."""
+    from app.services.model_router import residency_report  # noqa: PLC0415
+
+    return ModelResidencyResponse(**residency_report())
+
+
+@router.get("/models/catalogue", response_model=list[InstallableModel])
+async def get_model_catalogue() -> list[InstallableModel]:
+    """Every registry entry with its footprint, smallest first.
+
+    Includes models this host cannot hold, flagged rather than hidden: a user
+    choosing a machine or deciding what to pull is better served by seeing what
+    exists and what it would need.
+    """
+    from app.model_registry import REGISTRY, fits_host  # noqa: PLC0415
+
+    entries = sorted(REGISTRY.values(), key=lambda p: p.resident_bytes)
+    return [
+        InstallableModel(
+            id=p.id,
+            resident_gb=p.resident_gb,
+            min_ram_gb=p.min_ram_gb,
+            licence=p.licence,
+            multimodal=p.multimodal,
+            usable_context=p.usable_context,
+            accommodations_measured=p.accommodations_measured,
+            fits_host=fits_host(p),
+        )
+        for p in entries
+    ]
+
+
 @router.get("/llm", response_model=LLMSettingsResponse)
 async def get_llm_settings_endpoint(
     db: AsyncSession = Depends(get_db),

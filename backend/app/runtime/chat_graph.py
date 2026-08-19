@@ -76,7 +76,11 @@ from app.runtime.chat_nodes.synthesize import (
     _fetch_section_ids_and_pages_for_chunks,  # noqa: F401  re-exported for back-compat
     synthesize_node,  # noqa: F401  re-exported for back-compat
 )
-from app.services.intent import _llm_classify_fallback, classify_intent_heuristic
+from app.services.intent import (
+    LLM_FALLBACK_BELOW,
+    _llm_classify_fallback,
+    classify_intent_heuristic,
+)
 from app.services.qa import (
     _maybe_rewrite_query,
 )
@@ -222,7 +226,7 @@ async def classify_node(state: ChatState) -> dict:
     intent, confidence = classify_intent_heuristic(question)
     source = "heuristic"
 
-    if confidence < 0.7:
+    if confidence < LLM_FALLBACK_BELOW:
         t_clf = time.perf_counter()
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"

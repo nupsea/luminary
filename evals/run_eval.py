@@ -40,18 +40,20 @@ if str(_BACKEND_DIR) not in sys.path:
 from evals.lib.citation_metrics import (  # noqa: E402
     compute_citation_support_rate,
     judge_citation,
-    parse_claims_with_citations,
+    pair_answer_with_citations,
 )
+from evals.lib.environment import capture as capture_environment  # noqa: E402
+from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
     GOLDEN_DIR,
     MANIFEST_PATH,
     REPO_ROOT,
+    BackendUnreachableError,
     ensure_ingested,
     ingest_document,
     is_document_alive,
-    BackendUnreachableError,
     load_manifest,
     lookup_document_by_filename,
     require_backend,
@@ -65,10 +67,12 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
     compute_mrr,
     compute_ndcg_10,
     compute_recall_at,
+    count_boundary_misses,
 )
 from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
+from evals.lib.split import refuse_if_holdout, split_of  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
 from evals.lib.store import store_results as _lib_store_results  # noqa: E402
 
@@ -86,6 +90,12 @@ VALID_DATASETS = [
     "conversation",
     "notes",
     "code",
+    # Kinds added 2026-08-12 so every document type under DATA is measured.
+    # `study` is a PDF: the parse path no other dataset exercises.
+    "legal",
+    "play",
+    "study",
+    "thoughts",
 ]
 
 # Per-/qa timeout for generation runs. A local answering model (Ollama, CPU)
@@ -109,20 +119,57 @@ QA_REQUEST_TIMEOUT = 300.0
 # below every observed answer and only fires when the metric genuinely collapses
 # (retrieval dies, context vanishes, scoring regresses). Raise it only from labelled
 # data; do not read it as "0.30 is good enough".
+# Generation floors are DERIVED from measured run-to-run variance, not chosen.
+# Four runs per dataset on one frozen build, 2026-08-13/14 (`scores_history.jsonl`,
+# eval_kind=citation), same corpus and bit-identical retrieval throughout:
+#
+#            citation_support_rate      citation_coverage        answer_rate
+#   book     mean .6491  sd .0521       mean .8245  sd .0628     mean .9250 sd .0354
+#   paper    mean .7089  sd .0254       mean .9679  sd .0323     mean .9750 sd .0000
+#
+# Each floor is (mean - 3sd) for the weaker dataset, rounded down to 0.05. They are
+# COLLAPSE DETECTORS: they fire when a leg of the pipeline dies, and say nothing
+# about quality. Support at 0.65 is not good -- it is merely what this build scores,
+# and the number to beat is the measured mean, never the floor.
+#
+# The variance is the load-bearing part. book's support rate ranged 0.5893-0.7065
+# across identical runs, so **a single run cannot resolve a change smaller than
+# ~0.10 on book or ~0.05 on paper**. Two structural changes were once credited with
+# moving this metric by less than that; both were inside the noise. A/B anything
+# generation-side over repeated runs, and compare distributions rather than points.
+# Retrieval metrics are exempt: they are bit-reproducible on a fixed corpus.
 THRESHOLDS = {
     "hit_rate_5": 0.50,
     "mrr": 0.35,
     "ndcg_10": 0.40,
     "faithfulness": 0.30,
     "answer_relevance": 0.50,
-    "citation_support_rate": 0.80,
+    "citation_support_rate": 0.45,
+    # Goldens are cross-verified answerable, so a decline is a product failure.
+    "answer_rate": 0.75,
+    # An answer with no source is unverifiable by the reader.
+    "citation_coverage": 0.60,
 }
 
+# Floors are collapse detectors, not quality bars -- see the `eval-integrity` skill.
+# A dataset appears here only when its floor must differ from the default; `paper`
+# used to, at 0.45/0.30, because 17 of its 40 questions asked about scrape furniture.
+# Regenerated clean 2026-08-12 it measures 0.850/0.703, so it carries the default.
+#
+# Retrieval baselines, measured 2026-08-12 in ONE library state (9 documents),
+# bit-reproducible across re-runs. Compare a change against these, never the floor.
+#   book      HR@5 0.5750  MRR 0.3979  nDCG 0.5074   40 rows,  ~1.6k chunks
+#   paper     HR@5 0.8500  MRR 0.7025  nDCG 0.7461   40 rows,   146 chunks
+#   legal     HR@5 0.5333  MRR 0.3728  nDCG 0.4508   60 rows,  2537 chunks
+#   play      HR@5 0.6500  MRR 0.4406  nDCG 0.5263   60 rows,   394 chunks
+#   study     HR@5 0.5833  MRR 0.4136  nDCG 0.4832   60 rows,  1939 chunks (PDF)
+#   thoughts  HR@5 1.0000  MRR 1.0000  nDCG 1.0000    4 rows,     7 chunks
+# `thoughts` reads 1.000 because top-5 over a 7-chunk document returns most of it.
+# That is a property of the document, not of retrieval, which is why a 4-row
+# dataset is recorded and never gated (tests/test_golden_integrity.py).
 DATASET_THRESHOLDS: dict[str, dict[str, float]] = {
-    "paper": {"hit_rate_5": 0.45, "mrr": 0.30},
     "conversation": {"hit_rate_5": 0.55, "mrr": 0.40},
     "notes": {"hit_rate_5": 0.60, "mrr": 0.45},
-    "code": {"hit_rate_5": 0.50, "mrr": 0.35},
 }
 
 
@@ -222,18 +269,13 @@ def search_chunks(
         params["document_id"] = document_id
         params["limit"] = "20"
     else:
-        # Unscoped calls flatten /search's per-document groups WITHOUT restoring
-        # global rank order (a top document's tail matches shadow other docs'
-        # best chunks), so ranking metrics for this row are unreliable. Reaching
-        # this branch means the golden row failed to resolve a document_id
-        # (missing source_document_id and no manifest mapping) -- fix the
-        # dataset/manifest rather than trusting this run.
-        print(
-            f"  WARNING: search_chunks has no document_id for {question[:60]!r} "
-            "-- unscoped group flattening breaks rank order; fix the golden "
-            "row's manifest/source_document_id mapping.",
-            file=sys.stderr,
-        )
+        # No pin: /search's per-document groups are flattened and re-sorted by
+        # global_rank below, which IS the retriever's final order, so an
+        # unscoped run measures the regime real chat uses. (An earlier warning
+        # here claimed the opposite and was wrong -- the sort it says is missing
+        # is forty lines down.) What it cannot do is attribute a miss to routing
+        # versus ranking; run_corpus_routing.py separates those.
+        params["limit"] = str(limit or 20)
     if limit is not None:
         params["limit"] = str(limit)
     if not expand_context:
@@ -325,12 +367,27 @@ def print_table(dataset: str, model: str, metrics: dict) -> None:
     print(f"  RAGAS evaluation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
     for key, val in metrics.items():
+        if key == "environment":
+            continue
         if val is None:
             print(f"  {key:<22}  n/a")
         elif isinstance(val, float):
             print(f"  {key:<22}  {val:.4f}")
         else:
             print(f"  {key:<22}  {val}")
+    env = metrics.get("environment")
+    if env:
+        lib = env.get("library") or {}
+        print(f"{'-' * 56}")
+        if env.get("capture_error"):
+            print(f"  environment            UNRECORDED: {env['capture_error']}")
+        else:
+            docs, chunks = lib.get("documents"), lib.get("chunks")
+            print(f"  corpus                 {docs} docs, {chunks} chunks")
+            print(f"  embedder               {env.get('embedding_model')}")
+            print(f"  reranker               {env.get('rerank_model')}")
+            print(f"  chat / generation      {env.get('chat_model')} / {env.get('generation_model')}")
+        print(f"  build                  {env.get('backend_version')} @ {env.get('eval_git_sha')}")
     print(f"{'=' * 56}\n")
 
 
@@ -359,31 +416,31 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
 
 
 __all__ = [
+    "DATASET_THRESHOLDS",
     "GOLDEN_DIR",
-    "GoldenEntry",
     "MANIFEST_PATH",
     "REPO_ROOT",
     "SCORES_HISTORY_PATH",
-    "DATASET_THRESHOLDS",
     "THRESHOLDS",
     "VALID_DATASETS",
+    "BackendUnreachableError",
+    "GoldenEntry",
     "_extract_hint_norms",
     "_norm",
-    "compute_recall_at",
     "append_history",
     "compute_hit_rate_5",
     "compute_mrr",
     "compute_ndcg_10",
+    "compute_recall_at",
     "ensure_ingested",
     "ingest_document",
     "is_document_alive",
     "load_golden",
-    "BackendUnreachableError",
     "load_manifest",
-    "require_backend",
     "lookup_document_by_filename",
     "post_qa",
     "print_table",
+    "require_backend",
     "save_manifest",
     "search_chunks",
     "store_results",
@@ -496,6 +553,15 @@ def main() -> None:
     )
     parser.add_argument("--hyde", action="store_true", help="Enable HyDE-style query expansion.")
     parser.add_argument(
+        "--unscoped",
+        action="store_true",
+        help=(
+            "Search the whole library instead of pinning each row to its source "
+            "document. This is the regime real 'All documents' chat uses; the "
+            "gated arm is scoped, so run both and record the gap."
+        ),
+    )
+    parser.add_argument(
         "--rerank", action="store_true", help="Enable cross-encoder reranking."
     )
     parser.add_argument(
@@ -581,6 +647,13 @@ def main() -> None:
         print("ERROR: pass exactly one of --dataset or --dataset-id", file=sys.stderr)
         sys.exit(1)
 
+    # An ablation compares arms so one can be chosen; that is selection, and
+    # selection on the holdout is what leaves nothing to detect a fit with.
+    if args.ablation:
+        refusal = refuse_if_holdout(args.dataset or "", "an ablation sweep")
+        if refusal:
+            print(f"ERROR: {refusal}", file=sys.stderr)
+            sys.exit(2)
     if args.rerank_depths and not args.ablation:
         print("ERROR: --rerank-depths requires --ablation", file=sys.stderr)
         sys.exit(1)
@@ -771,12 +844,16 @@ def main() -> None:
         context_hint = row.get("context_hint", "")
         source_file = row.get("source_file", "")
         doc_id = row.get("source_document_id") or source_to_doc_id.get(source_file)
+        # The unscoped arm keeps doc_id for /qa (scope must match the filter, or
+        # the classifier can route to library-wide synthesis and return zero
+        # context) and drops it only for the retrieval call being measured.
+        search_doc_id = None if args.unscoped else doc_id
 
         print(f"  [{i}/{len(rows)}] Searching: {question[:60]}...")
         chunks = search_chunks(
             args.backend_url,
             question,
-            doc_id,
+            search_doc_id,
             hyde=args.hyde,
             rerank=args.rerank,
             rerank_depth=args.rerank_depth,
@@ -821,6 +898,10 @@ def main() -> None:
     # only dropped answers — run generation rows sequentially. (A hosted
     # answering model could parallelise, but the app default is local; correctness
     # over speed for a background batch job.)
+    # Repair counters before the first question: the difference after the run
+    # is what THIS run's completions needed to be usable.
+    stats_before = output_stats(args.backend_url)
+
     max_workers = 1 if needs_qa else 6
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         samples = list(pool.map(_process_row, enumerate(rows, start=1)))
@@ -894,14 +975,9 @@ def main() -> None:
         for sample in samples:
             qa_resp = sample.get("qa_response") or {}
             answer_text = qa_resp.get("answer") or sample.get("answer", "")
-            citations = qa_resp.get("citations") or []
-            for claim, citation_idx in parse_claims_with_citations(answer_text):
-                if 0 <= citation_idx < len(citations):
-                    citation = citations[citation_idx]
-                    if isinstance(citation, dict):
-                        chunk = citation.get("text") or citation.get("excerpt") or ""
-                        if chunk:
-                            citation_pairs.append((claim, chunk))
+            citation_pairs.extend(
+                pair_answer_with_citations(answer_text, qa_resp.get("citations") or [])
+            )
         citation_support_rate = compute_citation_support_rate(
             citation_pairs,
             judge=lambda claim, chunk: judge_citation(claim, chunk, args.judge_model),
@@ -911,6 +987,9 @@ def main() -> None:
         "hit_rate_5": hr5,
         "mrr": mrr,
         "ndcg_10": ndcg10,
+        # Misses that are chunk splits rather than absent passages. A chunking
+        # change moves HR@5 through this number without retrieval changing.
+        "boundary_misses": count_boundary_misses(samples),
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
@@ -922,40 +1001,109 @@ def main() -> None:
     if needs_qa:
         # Provenance: which model authored the judged answers. "app-default"
         # means the product's own /qa pipeline default -- the shipped path.
+        answered_n = len(samples) - len(qa_empty)
         metrics["answer_model"] = args.model or "app-default"
         metrics["qa_failed_calls"] = qa_failed
         metrics["qa_not_found_calls"] = qa_not_found
-        metrics["qa_answered_calls"] = len(samples) - len(qa_empty)
+        metrics["qa_answered_calls"] = answered_n
         metrics["qa_total_calls"] = len(samples)
+        # Every golden question was cross-verified as answerable from its own
+        # source by two independent models, so a decline here is the product
+        # failing to answer a question that has an answer -- not a hard question.
+        # Nothing measured this before: the counts existed, the rate did not, so
+        # a run could decline half the corpus and still report healthy HR@5.
+        metrics["answer_rate"] = answered_n / len(samples) if samples else None
+        # Of the answers given, how many carried at least one source. An uncited
+        # answer is unverifiable by the reader, which is the whole product claim.
+        cited = sum(
+            1
+            for s in samples
+            if s["answer"].strip() and (s.get("qa_response") or {}).get("citations")
+        )
+        metrics["citation_coverage"] = cited / answered_n if answered_n else None
+        # Coverage alone cannot say WHY an answer carried no source: the model named
+        # none, or the ones it named were ungrounded and removed. /qa reports the
+        # removals under include_context so the two are separable in one run.
+        metrics["citations_dropped"] = sum(
+            int((s.get("qa_response") or {}).get("citations_dropped") or 0)
+            for s in samples
+        )
+        uncited = answered_n - cited
+        metrics["uncited_answers"] = uncited
+        # How many chips the model proposed against how many the relevance gate
+        # kept. Without these, a coverage move cannot be attributed to the model
+        # citing differently or to the gate cutting differently.
+        metrics["citations_proposed"] = sum(
+            int((s.get("qa_response") or {}).get("citations_proposed") or 0)
+            for s in samples
+        )
+        metrics["citations_gated"] = sum(
+            int((s.get("qa_response") or {}).get("citations_gated") or 0)
+            for s in samples
+        )
     if faithfulness_model:
         metrics["faithfulness_model"] = faithfulness_model
 
     threshold_violations: list[str] = []
     thresholds = thresholds_for_dataset(dataset_label)
-    if hr5 < thresholds["hit_rate_5"]:
-        threshold_violations.append(f"HR@5 {hr5:.4f} < {thresholds['hit_rate_5']}")
-    if mrr < thresholds["mrr"]:
-        threshold_violations.append(f"MRR {mrr:.4f} < {thresholds['mrr']}")
-    # Faithfulness fires only on collapse, never on drift -- see THRESHOLDS. `None`
-    # means no answers were generated (retrieval-only run), which is not a violation.
-    faith = ragas_scores.get("faithfulness")
-    if faith is not None and faith < thresholds["faithfulness"]:
+
+    def _check(
+        label: str, value: float | None, key: str, *, requested: bool, note: str = ""
+    ) -> None:
+        """Score a metric, distinguishing "did not run" from "ran and produced nothing".
+
+        A `None` that is skipped records `passed: true` for a run that measured
+        nothing -- an NLI model that failed to load, a judge that errored, a `/qa`
+        that timed out. Requested-but-uncomputed is therefore a violation; a metric
+        nobody asked for is a skip. 166 history rows were written under the old
+        skip-on-None rule, one of them a generation run whose faithfulness was null.
+        """
+        if value is None:
+            if requested:
+                threshold_violations.append(
+                    f"{label} was requested but could not be computed -- the run "
+                    "measured nothing for it. Scroll up for the reason."
+                )
+            return
+        if value < thresholds[key]:
+            threshold_violations.append(f"{label} {value:.4f} < {thresholds[key]}{note}")
+
+    _check("HR@5", hr5, "hit_rate_5", requested=True)
+    _check("MRR", mrr, "mrr", requested=True)
+    # Faithfulness fires only on collapse, never on drift -- see THRESHOLDS. The NLI
+    # scorer runs on any generated answer, judge or not, so answers are what request it.
+    _check(
+        "Faithfulness",
+        ragas_scores.get("faithfulness"),
+        "faithfulness",
+        requested=bool(answered),
+        note=" (collapse detector -- retrieval or grounding is broken, not a quality dip)",
+    )
+    _check(
+        "AnswerRelevance",
+        ragas_scores.get("answer_relevance"),
+        "answer_relevance",
+        requested=judge_attempted,
+    )
+    _check(
+        "CitationSupport",
+        citation_support_rate,
+        "citation_support_rate",
+        requested=bool(args.check_citations),
+    )
+    _check("AnswerRate", metrics.get("answer_rate"), "answer_rate", requested=needs_qa)
+    _check(
+        "CitationCoverage",
+        metrics.get("citation_coverage"),
+        "citation_coverage",
+        requested=needs_qa,
+    )
+    # Asking for generation and getting no answers at all measures nothing about
+    # generation, however healthy the retrieval half of the run looks.
+    if needs_qa and not answered:
         threshold_violations.append(
-            f"Faithfulness {faith:.4f} < {thresholds['faithfulness']} "
-            "(collapse detector -- retrieval or grounding is broken, not a quality dip)"
-        )
-    answer_rel = ragas_scores.get("answer_relevance")
-    if answer_rel is not None and answer_rel < thresholds["answer_relevance"]:
-        threshold_violations.append(
-            f"AnswerRelevance {answer_rel:.4f} < {thresholds['answer_relevance']}"
-        )
-    if (
-        citation_support_rate is not None
-        and citation_support_rate < thresholds["citation_support_rate"]
-    ):
-        threshold_violations.append(
-            "CitationSupport "
-            f"{citation_support_rate:.4f} < {thresholds['citation_support_rate']}"
+            "Generation was requested but /qa produced no answers "
+            f"({qa_failed} failed, {qa_not_found} declined of {len(samples)})"
         )
 
     passed = len(threshold_violations) == 0
@@ -969,7 +1117,48 @@ def main() -> None:
     )
     history_model = args.model or args.judge_model or "no-llm"
 
-    _lib_append_history(dataset_label, history_model, metrics, passed, eval_kind=eval_kind)
+    # Captured after the run so the corpus fingerprint reflects what was
+    # measured: `ensure_ingested` can add documents before the first query.
+    # A repeated series shares one group id so its runs can be aggregated, and
+    # so a run that landed in a different library state is visible rather than
+    # averaged in. run_variance.py sets these; a single run carries neither.
+    environment = capture_environment(
+        args.backend_url,
+        run_group=os.environ.get("LUMINARY_RUN_GROUP") or None,
+        run_index=int(os.environ.get("LUMINARY_RUN_INDEX", "0")) or None,
+        scope="unscoped" if args.unscoped else "scoped",
+        split=split_of(dataset_label),
+        rerank=bool(args.rerank),
+        hyde=bool(args.hyde),
+        judge_model=args.judge_model or None,
+        check_citations=bool(args.check_citations),
+    )
+    moved = stats_delta(stats_before, output_stats(args.backend_url))
+    if moved and moved["counts"]:
+        metrics["output_repairs"] = moved["counts"]
+        metrics["first_pass_rate"] = moved["first_pass_rate"]
+
+    same_model = self_judging(environment)
+    environment["self_judged"] = bool(same_model)
+    if same_model:
+        print(
+            f"  WARNING: {same_model} both answered and judged this run. A judge "
+            "scoring its own output is not a neutral rater; the judged metrics "
+            "(answer_relevance, citation_support_rate) are biased upward and are "
+            "not comparable to a run judged by a different model.",
+            file=sys.stderr,
+        )
+
+    metrics["environment"] = environment
+
+    _lib_append_history(
+        dataset_label,
+        history_model,
+        metrics,
+        passed,
+        eval_kind=eval_kind,
+        environment=environment,
+    )
 
     print_table(dataset_label, history_model, metrics)
 
