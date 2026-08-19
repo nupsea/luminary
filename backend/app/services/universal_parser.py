@@ -53,6 +53,17 @@ _RE_NON_SPEAKER = re.compile(
 )
 
 
+# Authored markdown headings that make a document structured rather than
+# incidentally heading-bearing. Below this a chat signature may still win.
+#
+# Bracketing cases: a transcript exported to markdown carries a title and
+# perhaps a date, and must still segment as a transcript; an article divides its
+# body and must segment on those divisions. The article that forced this had 21
+# headings against 57 lines reading "Perplexity: 30" -- the captions of its
+# interactive figures, which have the shape of dialogue and none of the meaning.
+_MIN_AUTHORED_HEADINGS = 3
+
+
 # A heading labels a section; it is not a sentence. Terminal punctuation alone
 # does not separate the two, so length carries the decision. The word bound
 # applies only to candidates that end like a sentence.
@@ -72,11 +83,21 @@ def _drop_bodyless(sections: list[Section]) -> list[Section]:
     return kept or sections
 
 
-def _is_marker(candidate: str) -> bool:
-    """Whether a matched line is a section label rather than a line of prose."""
+def _is_marker(candidate: str, *, authored: bool = False) -> bool:
+    """Whether a matched line is a section label rather than a line of prose.
+
+    `authored` means the source marked it as a heading itself, as markdown `##`
+    does. Then the only question left is whether a serializer promoted a
+    paragraph into a heading, which length already answers -- an authored
+    heading is free to end in a full stop, and one that reads
+    "4. Random noise doesn't always look random." was losing its title to the
+    sentence rule.
+    """
     text = candidate.strip()
     if not text or len(text) > _MARKER_MAX_CHARS:
         return False
+    if authored:
+        return True
     return not (text[-1] in ".?!" and len(text.split()) > _MARKER_MAX_SENTENCE_WORDS)
 
 
@@ -387,6 +408,17 @@ class UniversalParser:
         if not scored_sigs:
             return None
 
+        # Explicit structure beats inferred structure. A markdown heading is
+        # what the author wrote to divide the document; a "Name: value" line is
+        # a guess from shape, and figure captions, settings tables and
+        # glossaries all share that shape. Scoring alone cannot separate them --
+        # the guess is often far more frequent than the headings it buries --
+        # and losing this contest costs every heading in the document, because
+        # a transcript is segmented by turn and carries no section titles.
+        authored = next((s for s in scored_sigs if s.id == "markdown_header"), None)
+        if authored and len(authored.matches) >= _MIN_AUTHORED_HEADINGS:
+            scored_sigs = [s for s in scored_sigs if s.doc_type != "chat"]
+
         return max(scored_sigs, key=lambda s: s.score)
 
     def _is_monotonic(self, matches: list[re.Match[str]]) -> bool:
@@ -455,10 +487,11 @@ class UniversalParser:
             return self._segment_chat_grouped(text, matches)
 
         for i, m in enumerate(matches):
-            heading = m.group(1).strip() if sig.id == "markdown_header" else m.group(0).strip()
+            is_markdown = sig.id == "markdown_header"
+            heading = m.group(1).strip() if is_markdown else m.group(0).strip()
             # A match that swallowed prose is content, not a label; the section
             # then carries no heading rather than an invented one (I-30).
-            if _is_marker(heading):
+            if _is_marker(heading, authored=is_markdown):
                 start_pos = m.end()
             else:
                 heading = ""
@@ -511,10 +544,18 @@ class UniversalParser:
             else:
                 body = body_chunk.strip()
 
+            # Markdown states its own depth. Flattening every heading to level 1
+            # makes a figure's inner label a peer of the chapter it sits in, so
+            # the contents list reads as a run of unrelated sections.
+            level = 1
+            if is_markdown:
+                raw = m.group(0)
+                level = len(raw) - len(raw.lstrip("#")) or 1
+
             sections.append(
                 Section(
                     heading=heading,
-                    level=1,
+                    level=level,
                     text=body,
                     page_start=0,
                     page_end=0,

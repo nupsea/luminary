@@ -293,3 +293,98 @@ def test_structure_type_is_surfaced_for_each_layout(tmp_path):
         )
     )
     assert up.parse(paper, "txt").structure_type == "paper"
+
+
+def test_an_article_whose_captions_look_like_dialogue_keeps_its_headings(tmp_path):
+    """Authored headings outrank a "Name: value" shape, however frequent.
+
+    An interactive article's figure captions read "Perplexity: 30" -- the shape
+    of a chat turn and none of the meaning. Scoring on frequency alone made the
+    captions win 57 matches to 21, and a transcript is segmented by turn and
+    carries no section titles, so every heading in the document was lost.
+    """
+    captions = "\n".join(f"Perplexity: {n}\nA plot at that setting.\n" for n in range(30))
+    text = (
+        "# How to Read a Plot\n\n"
+        "Some opening prose about the technique.\n\n"
+        f"{captions}\n"
+        "## 1. The settings really matter\n\n"
+        "Body of the first lesson.\n\n"
+        "## 2. Cluster sizes mean nothing\n\n"
+        "Body of the second lesson.\n\n"
+        "## Conclusion\n\n"
+        "Closing thoughts.\n"
+    )
+    f = tmp_path / "article.md"
+    f.write_text(text)
+
+    result = up.parse(f, "md")
+
+    assert result is not None
+    assert result.structure_type == "paper", "captions must not make this a transcript"
+    headings = [s.heading for s in result.sections if s.heading]
+    assert "1. The settings really matter" in headings
+    assert "2. Cluster sizes mean nothing" in headings
+    assert "Conclusion" in headings
+
+
+def test_a_transcript_without_headings_is_still_a_transcript(tmp_path):
+    """The precedence rule needs authored headings, and a chat has none.
+
+    Guards the fix above from swallowing the case it was carved out of.
+    """
+    text = "\n".join(f"{'Alice' if i % 2 == 0 else 'Bob'}: This is message {i}." for i in range(40))
+    f = tmp_path / "chat.md"
+    f.write_text(text)
+
+    result = up.parse(f, "md")
+
+    assert result is not None
+    assert result.structure_type == "chat"
+    assert all(s.heading == "" for s in result.sections)
+
+
+def test_an_authored_heading_may_end_in_a_full_stop(tmp_path):
+    """`##` already says it is a heading; punctuation does not overrule that.
+
+    The sentence rule exists for signatures that *infer* a heading from prose
+    shape. Applied to markdown it silently blanked titles like the one below.
+    """
+    text = (
+        "# Title\n\nOpening.\n\n"
+        "## 4. Random noise doesn't always look random.\n\nBody of that lesson.\n\n"
+        "## 5. Shapes are sometimes real\n\nBody of the next one.\n"
+    )
+    f = tmp_path / "stops.md"
+    f.write_text(text)
+
+    result = up.parse(f, "md")
+
+    assert result is not None
+    headings = [s.heading for s in result.sections if s.heading]
+    assert "4. Random noise doesn't always look random." in headings
+
+
+def test_markdown_heading_depth_survives_segmentation(tmp_path):
+    """A nested label is not a peer of the section that contains it.
+
+    Flattening every heading to level 1 made a figure's inner caption sit
+    alongside the chapter it belongs to, so the contents read as a run of
+    unrelated sections.
+    """
+    text = (
+        "# Doc\n\nOpening.\n\n"
+        "## Outer section\n\nOuter body.\n\n"
+        "### Inner label\n\nInner body.\n\n"
+        "## Second outer\n\nMore body.\n"
+    )
+    f = tmp_path / "levels.md"
+    f.write_text(text)
+
+    result = up.parse(f, "md")
+
+    assert result is not None
+    by_heading = {s.heading: s.level for s in result.sections if s.heading}
+    assert by_heading["Outer section"] == 2
+    assert by_heading["Inner label"] == 3
+    assert by_heading["Second outer"] == 2
