@@ -6,6 +6,7 @@ Settings applied to chat and silently did not apply to the cards -- a defect no
 test could see, because both paths type-check and both return a model.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -151,10 +152,19 @@ def test_the_configured_override_carries_a_provider_prefix():
 # records which model an accommodation was discovered on. It is a historical
 # fact, not a selection, and rewriting it when the default moves would destroy
 # the only thing it is for.
-_PROVENANCE = re.compile(r"introduced_for\s*=|measured_on\s*=|#")
+_PROVENANCE_KEYWORDS = {"introduced_for", "measured_on"}
 
+# Matched against a string's *value*, over the AST, rather than against a line of
+# source. The line version exempted any line containing `#`, meaning to skip
+# comments -- but `#` is also the shell-style operator it never needed to care
+# about, so a trailing comment exempted the code beside it. The one line this
+# guard exists for, `_HYDE_MODEL = "ollama/llama3.2:3b"  # fast and local`, walked
+# straight past it. Over the AST there are no comments to confuse it with.
+#
+# A full match, so prose that merely mentions a model ("qwen3.5:4b plus the
+# 6.81GB reader") is not a model name written down. Only a string that *is* one.
 _LITERAL_MODEL = re.compile(
-    r"""["']((?:ollama/)?(?:llama|qwen|gemma|phi|granite|mistral|deepseek)[\w.]*(?::[\w.-]+)?)["']"""
+    r"(?:ollama/)?(?:llama|qwen|gemma|phi|granite|mistral|deepseek)[\w.]*(?::[\w.-]+)?"
 )
 
 # `config.py` is where a shipped default belongs -- it is the settings surface
@@ -164,18 +174,35 @@ _LITERAL_MODEL = re.compile(
 _MAY_NAME_A_MODEL = {"model_registry.py", "config.py", "evals.py"}
 
 
+def _exempt_string_nodes(tree: ast.AST) -> set[int]:
+    """Strings that are documentation or provenance, not a selection."""
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg in _PROVENANCE_KEYWORDS:
+            exempt.update(id(n) for n in ast.walk(node.value))
+        # A docstring is prose. It cannot route a call.
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                exempt.add(id(first.value))
+    return exempt
+
+
 def test_no_module_outside_the_registry_writes_a_model_name_down():
     """One place decides which model runs, and it is not a string in a service."""
     offenders = []
     for path in _APP.rglob("*.py"):
         if path.name in _MAY_NAME_A_MODEL:
             continue
-        for i, line in enumerate(path.read_text().splitlines(), start=1):
-            if _PROVENANCE.search(line):
+        tree = ast.parse(path.read_text())
+        exempt = _exempt_string_nodes(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
                 continue
-            match = _LITERAL_MODEL.search(line)
-            if match:
-                offenders.append(f"{path.relative_to(_APP)}:{i} names {match.group(1)!r}")
+            if id(node) in exempt:
+                continue
+            if _LITERAL_MODEL.fullmatch(node.value):
+                offenders.append(f"{path.relative_to(_APP)}:{node.lineno} names {node.value!r}")
 
     assert offenders == [], (
         "these decide a model by writing its name down instead of asking the "
