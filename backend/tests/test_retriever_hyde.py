@@ -150,3 +150,28 @@ async def test_retrieve_with_hyde_falls_back_when_llm_fails():
 
     assert vec_mock.call_args[0][0] == "What happened?"
     assert results  # graceful degradation -- retrieval still succeeded
+
+
+@pytest.mark.asyncio
+async def test_hyde_borrows_the_resident_model_instead_of_naming_one():
+    """A hypothetical is optional; a second resident model is not.
+
+    Naming a model here loaded one no profile budgeted for and evicted the one
+    answering (I-27). Resolving one from the registry is the same defect a step
+    removed: `default_chat_model()` is not what a user picked in Settings, so on
+    a single-resident host HyDE went straight back to evicting on every expanded
+    query. `background=True` is the only expression of "whatever is already
+    loaded" that cannot drift from it, and in hybrid mode it also keeps the
+    user's query off the cloud.
+    """
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value="a hypothetical answer")
+
+    with patch("app.services.llm.get_llm_service", return_value=mock_llm):
+        await _hyde_expand("Who was the Eloi girl?")
+
+    kwargs = mock_llm.generate.await_args.kwargs
+    assert kwargs.get("model") is None, (
+        f"HyDE pinned {kwargs.get('model')!r}; routing must pick the resident model"
+    )
+    assert kwargs.get("background") is True, "HyDE must route as background work"
