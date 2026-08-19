@@ -258,7 +258,14 @@ class TestOneModelServesEveryRole:
         monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
         monkeypatch.setattr(
             "app.model_registry.get_settings",
-            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b"})(),
+            # An empty `model_fields_set` is the load-bearing half: it means
+            # nobody named this model, so upgrading it is a decision made in the
+            # absence of a choice rather than over one.
+            lambda: type(
+                "S",
+                (),
+                {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b", "model_fields_set": set()},
+            )(),
         )
         assert default_chat_model() == TEXT_PREFERENCE[0]
 
@@ -268,7 +275,14 @@ class TestOneModelServesEveryRole:
         monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
         monkeypatch.setattr(
             "app.model_registry.get_settings",
-            lambda: type("S", (), {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b"})(),
+            # An empty `model_fields_set` is the load-bearing half: it means
+            # nobody named this model, so upgrading it is a decision made in the
+            # absence of a choice rather than over one.
+            lambda: type(
+                "S",
+                (),
+                {"LITELLM_DEFAULT_MODEL": "ollama/qwen3.5:4b", "model_fields_set": set()},
+            )(),
         )
         assert default_chat_model() == "ollama/qwen3.5:4b"
 
@@ -393,3 +407,101 @@ def test_a_narrowed_default_is_warned_about_at_boot():
 
     assert len(warnings) == 1
     assert "qwen2.5:14b-instruct" in warnings[0] and "qwen3.5:4b" in warnings[0]
+
+
+def test_a_pin_the_router_overrules_is_reported(monkeypatch):
+    """The narrowing `model_registry` cannot see.
+
+    Two resolvers narrow: the registry on `min_ram_gb`, and `model_router` on
+    whether a pair fits together. `narrowed_defaults` re-derived from config, so
+    it only ever saw the first -- a `.env` pinning the 6.81GB reader on a 16GB
+    host ran the generalist, with `fallback_reason` null, an empty
+    `narrowed_defaults` and no warning at boot.
+    """
+    from app import memory_profile
+    from app.config import get_settings
+
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
+    monkeypatch.setenv("VISION_MODEL", "ollama/qwen2.5vl:7b")
+    get_settings.cache_clear()
+    try:
+        from app.services.model_router import (
+            narrowed_defaults,
+            resolve,
+            warn_if_configuration_exceeds_host,
+        )
+
+        choice = resolve("vision")
+        # The registry keeps it -- it fits the host on its own.
+        from app.model_registry import default_vision_model
+
+        assert default_vision_model() == "ollama/qwen2.5vl:7b"
+        # The router does not, because it cannot be resident beside the text model.
+        assert choice.model != "ollama/qwen2.5vl:7b"
+        assert choice.fallback_reason, "the router narrowed and said nothing"
+
+        narrowed = narrowed_defaults()
+        assert "vision" in narrowed, "the user was overruled and told nothing"
+        assert narrowed["vision"]["configured"] == "ollama/qwen2.5vl:7b"
+        assert narrowed["vision"]["resolved"] == choice.model
+        assert any("qwen2.5vl:7b" in w for w in warn_if_configuration_exceeds_host())
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_model_named_by_a_human_is_not_upgraded(monkeypatch):
+    """An upgrade applied over an explicit choice is an overrule.
+
+    The host-aware upgrade exists so a shipped default sized for a small machine
+    does not cap a large one. Applied to a pin it silently replaced `llama3.2`
+    with a 9.67GB model on a 32GB host, and reported a clean bill of health.
+    """
+    from app import memory_profile
+    from app.config import get_settings
+
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 32)
+    monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/llama3.2")
+    get_settings.cache_clear()
+    try:
+        from app.model_registry import default_chat_model
+
+        assert default_chat_model() == "ollama/llama3.2", (
+            "a model the user named was replaced by one they did not"
+        )
+    finally:
+        get_settings.cache_clear()
+
+
+def test_the_resident_set_is_checked_against_the_budget_not_just_the_runner_count(
+    monkeypatch,
+):
+    """`within_residency_limit` counts runners; nothing weighed them.
+
+    On 25GB the resolved pair is 12.88GB against a 12.50GB budget, each model
+    fits alone, and every field in the report said the configuration was fine.
+    """
+    from app import memory_profile
+    from app.config import get_settings
+
+    monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
+    monkeypatch.setenv("VISION_MODEL", "ollama/qwen3.5:4b")
+    monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "performance")
+    get_settings.cache_clear()
+    try:
+        from app.services.model_router import (
+            residency_report,
+            warn_if_configuration_exceeds_host,
+        )
+
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 25)
+        tight = residency_report()
+        assert tight["within_residency_limit"], "the runner count is not the question"
+        assert tight["resident_set_fits"] is False
+        assert tight["resident_gb"] > tight["resident_budget_gb"]
+        assert any("budget" in w for w in warn_if_configuration_exceeds_host())
+
+        # One GB more and the same pair fits: the check moves in both directions.
+        monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 26)
+        assert residency_report()["resident_set_fits"] is True
+    finally:
+        get_settings.cache_clear()

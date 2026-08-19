@@ -364,6 +364,35 @@ def generalist_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
     return _multimodal_ranked(GENERALIST_PREFERENCE, ram_gb)
 
 
+def _with_provider_prefix(model: str) -> str:
+    return model if "/" in model else f"ollama/{model}"
+
+
+def configured_chat_model() -> str:
+    """The chat model as configured, before the host narrows it.
+
+    The pre-narrowing value is what makes "is the model in play the one that was
+    asked for" answerable. `default_chat_model()` cannot answer it: it *is* the
+    narrowed value.
+    """
+    return _with_provider_prefix(get_settings().LITELLM_DEFAULT_MODEL)
+
+
+def configured_vision_model() -> str:
+    """The vision model as configured, before the host narrows it."""
+    return _with_provider_prefix(get_settings().VISION_MODEL)
+
+
+def _named_by_a_human(field: str) -> bool:
+    """Whether a human set *field*, rather than it carrying the shipped default.
+
+    `model_fields_set` is pydantic's own record of which fields a source
+    supplied, so this separates `.env` naming a model from the field default
+    happening to be the same string -- which a value comparison cannot do.
+    """
+    return field in get_settings().model_fields_set
+
+
 def _resolve_chat_model() -> tuple[str, str | None]:
     """(model, why the configured one was overruled) -- None when it was kept.
 
@@ -374,8 +403,7 @@ def _resolve_chat_model() -> tuple[str, str | None]:
     """
     from app.memory_profile import max_resident_models  # noqa: PLC0415
 
-    configured = get_settings().LITELLM_DEFAULT_MODEL
-    configured = configured if "/" in configured else f"ollama/{configured}"
+    configured = configured_chat_model()
     profile = profile_for(configured)
 
     if profile is None:
@@ -398,8 +426,14 @@ def _resolve_chat_model() -> tuple[str, str | None]:
     # the shipped default is sized for the machine that cannot. The pair is
     # chosen together (`recommended_assignment`) because the strongest text model
     # is not multimodal: picking it alone can leave vision with nothing that fits.
+    #
+    # Only when nobody named a model. Upgrading a *default* is a decision made on
+    # the user's behalf in the absence of one; doing it over an explicit choice is
+    # an overrule, and it was silent -- `.env` pinning `llama3.2` on a 32GB host
+    # ran a 9.67GB model instead, three times slower, with `narrowed_defaults`
+    # empty and a clean bill of health. A pin is a preference, not a starting bid.
     recommended = recommended_assignment()
-    if recommended is not None:
+    if recommended is not None and not _named_by_a_human("LITELLM_DEFAULT_MODEL"):
         text_id, _ = recommended
         if _text_rank(text_id) < _text_rank(configured):
             # An upgrade, not an overrule: the host can hold something stronger.
@@ -469,8 +503,7 @@ def vision_candidates(ram_gb: int | None = None) -> list[ModelProfile]:
 
 def _resolve_vision_model() -> tuple[str, str | None]:
     """(model, why the configured one was overruled) -- None when it was kept."""
-    configured = get_settings().VISION_MODEL
-    configured = configured if "/" in configured else f"ollama/{configured}"
+    configured = configured_vision_model()
     profile = profile_for(configured)
     if profile is None or fits_host(profile):
         return configured, None
@@ -494,30 +527,20 @@ def default_vision_model() -> str:
     return _resolve_vision_model()[0]
 
 
-def narrowed_defaults() -> dict[str, dict[str, str]]:
-    """Roles where the host overruled the configured model, and why.
+def default_chat_model_reason() -> str | None:
+    """Why this module overruled the configured chat model, else None.
 
-    Empty when every configured model was honoured. `residency_report` builds
-    its `oversized_models` from the models actually in play, so a model that was
-    narrowed *away* is absent from that list entirely -- configuring a 14B on a
-    single-resident profile reported a clean bill of health for a 4B the user
-    never chose.
+    Only this module's half of the answer. The router narrows again, on whether a
+    pair can be resident together, so a report built from this alone described a
+    machine that does not exist -- `model_router.narrowed_defaults()` is what
+    compares the model asked for against the model that actually resolves.
     """
-    narrowed: dict[str, dict[str, str]] = {}
-    for role, resolve in (("chat", _resolve_chat_model), ("vision", _resolve_vision_model)):
-        model, reason = resolve()
-        if reason is not None:
-            configured = (
-                get_settings().LITELLM_DEFAULT_MODEL
-                if role == "chat"
-                else get_settings().VISION_MODEL
-            )
-            narrowed[role] = {
-                "configured": configured if "/" in configured else f"ollama/{configured}",
-                "resolved": model,
-                "reason": reason,
-            }
-    return narrowed
+    return _resolve_chat_model()[1]
+
+
+def default_vision_model_reason() -> str | None:
+    """Why this module overruled the configured vision model, else None."""
+    return _resolve_vision_model()[1]
 
 
 def configured_factuality_checker() -> str:

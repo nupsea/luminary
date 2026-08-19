@@ -31,13 +31,13 @@ from typing import Any
 
 from app.model_registry import (
     _GB,
+    _RESIDENT_SET_FRACTION,
     ROLES,
     ModelProfile,
     Role,
     configured_generation_override,
     fits_host,
     fits_together,
-    narrowed_defaults,
     profile_for,
     vision_candidates,
 )
@@ -105,7 +105,23 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
         if fits and room_for_two and together:
             return ModelChoice(role, configured, None, profile)
         model = _shared_vision_model() or _reader_that_fits(text_profile) or configured
-        return ModelChoice(role, model, None, profile_for(model))
+        # Reported, per this field's own contract. It was left unset here, so the
+        # one narrowing decision this module makes that the registry cannot see
+        # was invisible to every caller: a `.env` pinning a dedicated reader on a
+        # 16GB host ran the generalist with `fallback_reason` null, an empty
+        # `narrowed_defaults` and no warning at boot.
+        reason = None
+        if model != configured:
+            if not fits:
+                reason = f"{configured} does not fit this host"
+            elif not room_for_two:
+                reason = (
+                    f"this profile keeps one model resident, which {model} already is"
+                )
+            else:
+                other = text_profile.id if text_profile is not None else "the text model"
+                reason = f"{configured} and {other} cannot both be resident on this host"
+        return ModelChoice(role, model, None, profile_for(model), fallback_reason=reason)
 
     if role == "generation":
         override = configured_generation_override()
@@ -166,6 +182,54 @@ def _reader_that_fits(text_profile: ModelProfile | None) -> str | None:
     return None
 
 
+def narrowed_defaults() -> dict[str, dict[str, str]]:
+    """Roles where the model in play is not the one that was asked for, and why.
+
+    Read off what `resolve` actually returned, never re-derived from config.
+    Two things narrow -- `model_registry`, on whether a model fits the host at
+    all, and this module, on whether a pair fits *together* -- and a report built
+    from only the first described a machine that does not exist. It also read the
+    config default rather than the Settings choice, so on a machine where a user
+    had picked a model it named two models, neither of them the one running.
+
+    Comparing the resolution against the request is what makes it impossible to
+    narrow somewhere new and forget to report it.
+    """
+    from app.model_registry import (  # noqa: PLC0415
+        configured_chat_model,
+        configured_vision_model,
+        default_chat_model_reason,
+        default_vision_model_reason,
+    )
+
+    asked: dict[Role, tuple[str, str | None]] = {
+        "chat": (
+            settings_service.configured_chat_override() or configured_chat_model(),
+            default_chat_model_reason(),
+        ),
+        "vision": (
+            settings_service.configured_vision_override() or configured_vision_model(),
+            default_vision_model_reason(),
+        ),
+    }
+
+    narrowed: dict[str, dict[str, str]] = {}
+    for role, (configured, registry_reason) in asked.items():
+        choice = resolve(role)
+        if choice.model == configured:
+            continue
+        narrowed[role] = {
+            "configured": configured,
+            "resolved": choice.model,
+            # A reason is what makes the warning actionable, so never report the
+            # difference without one.
+            "reason": choice.fallback_reason
+            or registry_reason
+            or f"{configured} is not what this host resolves for {role}",
+        }
+    return narrowed
+
+
 def resident_models() -> set[str]:
     """Distinct models the current configuration would keep loaded.
 
@@ -192,11 +256,33 @@ def warn_if_configuration_exceeds_host() -> list[str]:
     # TypeError, which the boot-time caller catches and logs at debug -- so this
     # warning had never once fired on a machine that needed it.
     for model_id in report.get("oversized_models") or []:
-        needs = (p.min_ram_gb if (p := profile_for(model_id)) else None)
+        # `oversized_models` only ever holds models with a profile, so the else
+        # arm is unreachable -- but "needs NoneGB" is not a sentence, and a
+        # warning nobody can act on is the failure mode this whole function had.
+        profile = profile_for(model_id)
+        needs = f"{profile.min_ram_gb}GB" if profile is not None else "more memory than"
         warnings.append(
-            f"{model_id} needs {needs}GB and this machine has "
+            f"{model_id} needs {needs} and this machine has "
             f"{report.get('host_ram_gb')}GB -- it will swap under load"
         )
+
+    if not report.get("resident_set_fits", True):
+        models = ", ".join(report["resident_models"])
+        budget = report.get("resident_budget_gb")
+        if budget is None:
+            # RAM unreadable. `fits_together` calls such a host small and allows
+            # one model, so there is no budget to quote here -- and quoting the
+            # None would be the same unactionable sentence as "needs NoneGB".
+            warnings.append(
+                f"{models} are two resident models on a machine whose memory could "
+                f"not be read -- an unknown box is assumed small"
+            )
+        else:
+            warnings.append(
+                f"{models} together are {report['resident_gb']}GB against a {budget}GB "
+                f"budget on this {report.get('host_ram_gb')}GB machine -- each model fits "
+                f"alone, the set does not, and the machine swaps rather than refusing"
+            )
 
     for role, detail in (report.get("narrowed_defaults") or {}).items():
         warnings.append(
@@ -265,6 +351,17 @@ def residency_report() -> dict[str, Any]:
         }
     )
 
+    # The budget the whole registry is built on, applied to the set that actually
+    # resolves. Nothing did this: `within_residency_limit` counts runners against
+    # `OLLAMA_MAX_LOADED_MODELS`, which is a different question from whether the
+    # machine can hold them. On 25GB the resolved pair is 12.88GB against a
+    # 12.50GB budget and every other field reported a clean bill of health.
+    #
+    # Unmeasured models are absent from this sum, so a False here is reliable and
+    # a True is only as good as `unmeasured_models` is empty.
+    resident_profiles = tuple(p for m in sorted(local) if (p := profile_for(m)) is not None)
+    set_fits = fits_together(resident_profiles, ram or None)
+
     return {
         "profile": profile_name,
         "profile_explicit": profile_is_explicit(),
@@ -284,6 +381,8 @@ def residency_report() -> dict[str, Any]:
         "max_resident": limit,
         "within_residency_limit": len(local) <= limit,
         "resident_gb": round(measured_bytes / _GB, 2),
+        "resident_budget_gb": round(ram * _RESIDENT_SET_FRACTION, 2) if ram else None,
+        "resident_set_fits": set_fits,
         "unmeasured_models": unmeasured,
         "oversized_models": oversized,
         # A model narrowed away is not in `oversized`: it is not in play at all.

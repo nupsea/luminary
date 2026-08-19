@@ -156,6 +156,11 @@ class ModelResidencyResponse(BaseModel):
     # because it is not in play at all, so without this the report described a
     # model the user never chose and flagged nothing.
     narrowed_defaults: dict[str, dict[str, str]] = {}
+    # The half-of-RAM budget the registry sizes every model against, applied to
+    # the set that actually resolves. `within_residency_limit` counts runners,
+    # which is a different question from whether the machine can hold them.
+    resident_budget_gb: float | None = None
+    resident_set_fits: bool = True
 
 
 class InstallableModel(BaseModel):
