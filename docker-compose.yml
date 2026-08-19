@@ -57,7 +57,12 @@ services:
     entrypoint:
       - sh
       - -c
-      - 'M="${LITELLM_DEFAULT_MODEL:-qwen3.5:4b}"; M="${M#ollama/}"; until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; echo "pulling $M"; ollama pull "$M"'
+      # `$$` is an escaped `$`: compose interpolates every bare `${...}` itself
+      # before the shell runs, and `${M#ollama/}` is not a form it accepts -- it
+      # failed the whole file with "invalid interpolation format". Only
+      # LITELLM_DEFAULT_MODEL is meant for compose to substitute, from the host
+      # env or .env; M is the shell's and stays escaped.
+      - 'M="${LITELLM_DEFAULT_MODEL:-qwen3.5:4b}"; M="$${M#ollama/}"; until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; echo "pulling $$M"; ollama pull "$$M"'
     restart: "no"
     profiles:
       - ai

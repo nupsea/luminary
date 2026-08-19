@@ -222,6 +222,48 @@ def test_compose_pulls_the_configured_model_without_the_provider_prefix():
     )
 
 
+# Compose interpolates every un-escaped `${...}` in the file itself, before any
+# shell sees it, and accepts only `${NAME}` and `${NAME:-default}`. A shell
+# parameter expansion left un-escaped is therefore not a shell expression at all
+# -- it is a compose syntax error that fails the entire file. `${M#ollama/}`
+# shipped exactly that way, and the assertion above stayed green because the
+# substring it looks for is present in a file docker refuses to load.
+_SHELL_EXPANSION_IN_COMPOSE = re.compile(r"(?<!\$)\$\{[A-Za-z_][A-Za-z0-9_]*[#%^,/]")
+
+
+def test_compose_escapes_shell_expansions_it_does_not_want_interpolated():
+    """A `$` meant for the container's shell must be written `$$`."""
+    offenders = [
+        line.strip()
+        for line in _COMPOSE.read_text().splitlines()
+        # Full-line comments only. Matching any line *containing* a `#` would
+        # exempt every line this is meant to check, since `#` is the shell
+        # expansion operator it looks for.
+        if not line.lstrip().startswith("#") and _SHELL_EXPANSION_IN_COMPOSE.search(line)
+    ]
+    assert not offenders, (
+        "compose will reject these with 'invalid interpolation format' -- "
+        f"double the `$` to pass them to the shell: {offenders}"
+    )
+
+
+def test_compose_file_actually_loads():
+    """The check the string assertions cannot make. Skipped without docker."""
+    import shutil
+    import subprocess
+
+    if shutil.which("docker") is None:
+        pytest.skip("docker not installed")
+    proc = subprocess.run(
+        ["docker", "compose", "--profile", "ai", "config"],
+        cwd=_COMPOSE.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, f"docker compose cannot load the file:\n{proc.stderr}"
+
+
 def test_no_installer_writes_the_legacy_profile_alias():
     """`public` is the installers' word; the backend's is `low`.
 
@@ -366,4 +408,58 @@ def test_ps1_guards_the_vision_pull_on_ollama_being_present():
     condition = text.rindex("if (", 0, pull)
     assert guard > condition - 200, (
         "the vision pull is not guarded by a Test-CommandExists check"
+    )
+
+
+def test_install_sh_records_the_models_it_pulled(sh):
+    """`start.sh` reads `LITELLM_DEFAULT_MODEL` out of the .env this writes.
+
+    It was never written, so the pre-flight's `sed` found nothing, `CHAT_MODEL`
+    came back empty, and the guard that skips the check when it cannot tell
+    skipped it on every machine installed this way -- the primary path.
+    """
+    assert re.search(r'_upsert_env LITELLM_DEFAULT_MODEL "ollama/\$CHAT_MODEL"', sh), (
+        "install.sh does not record the chat model it pulled"
+    )
+    assert re.search(r"_upsert_env VISION_MODEL", sh), (
+        "install.sh does not record the vision model it pulled"
+    )
+
+
+@pytest.mark.parametrize("script", ["sh", "ps1", "bootstrap"])
+def test_every_installer_accepts_the_backends_name_for_the_small_profile(script):
+    """`low` is what the backend calls it and what it logs; `public` is the
+    installers' word. Refusing `low` sent anyone reading the backend to exit 1."""
+    text = {"sh": _SH, "ps1": _PS1, "bootstrap": _SCRIPTS / "bootstrap.sh"}[script].read_text()
+    assert "low" in text and re.search(r'(-ceq "low"|= "low" \])', text), (
+        f"{script} does not accept `low` as a name for the small profile"
+    )
+
+
+def test_bootstrap_gates_the_large_text_model_on_actual_ram():
+    """`LUMINARY_PROFILE=performance` is a supported override, so the profile
+    alone does not mean the machine can hold the 9.67GB model."""
+    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    assert "LARGE_TEXT_MIN_RAM_GB" in text, "bootstrap.sh pulls the large model ungated"
+    assert re.search(r'MEM_GB" -ge "\$LARGE_TEXT_MIN_RAM_GB', text), (
+        "bootstrap.sh names the threshold but does not compare RAM against it"
+    )
+    assert _assign(text, r"^LARGE_TEXT_MIN_RAM_GB=(\d+)") == _assign(
+        _SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"
+    ), "bootstrap.sh and install.sh disagree about the band"
+
+
+def test_bootstrap_refuses_an_unknown_profile():
+    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    assert re.search(r"_die \"LUMINARY_PROFILE=", text), (
+        "bootstrap.sh writes an unvalidated profile into .env, where the backend rejects it"
+    )
+
+
+def test_bootstrap_does_not_write_a_key_the_template_already_sets():
+    """The template sets these uncommented, so appending duplicated them and a
+    user editing the first occurrence saw no effect."""
+    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    assert re.search(r"grep -vE '\^\(LITELLM_DEFAULT_MODEL\|VISION_MODEL", text), (
+        "bootstrap.sh appends model keys without stripping the template's copies"
     )
