@@ -140,19 +140,31 @@ Two constraints decide the design:
 
 Removing the superseded model is a separate step, default off, and confirmed.
 
-### 6. The Hub is not the page issue #51 describes
+### 6. The Hub sketch needs per-activity time, which nothing records
 
-`frontend/src/pages/Hub.tsx` is the recommender surface. Issue #51 asks for a "continue where
-you left off" landing page, sketched in the issue. Nothing of that layout is built.
+Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
+quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
+active collections and a week summary, all from one fetch of `GET /home/overview`
+(`routers/home.py:58`).
 
-Its prerequisite is missing rather than hard: **no table records time on task**. There is no
-`reading_session`, `time_on_task` or `seconds_spent` column in `models.py`, so "where you left
-off" and every duration on the Progress page have no source. Instrument first, or the page
-reports numbers it cannot compute — the failure `metrics.md` was written to close.
+Two gaps remain against the sketch.
 
-`GET /progress/summary` already returns each metric with its sample size, definition and basis;
-`metrics.md` is its contract. What remains is the rest of the Progress rebuild and the Hub
-layout, both of which consume instrumentation that does not exist.
+**The "This week" pie has no source.** It splits a weekly total four ways — notes, docs, review,
+study. `WeeklyStats` (`schemas/home.py:125`) carries `minutes_studied`, `cards_reviewed`,
+`notes_written`, `docs_touched`: one duration and three counts. Only study time is real, derived
+from `study_sessions.started_at..ended_at` (`routers/home.py:447`). Time spent *reading a
+document* and *editing a note* is recorded nowhere — `content_activity` stores
+`last_meaningful_at`, which is when, never how long. A four-way split cannot be computed from
+counts, and inventing one would be the failure `metrics.md` exists to prevent.
+
+**"Continue where you left off" covers documents only.** `ContinueReadingItem`
+(`schemas/home.py:101`) is keyed by `document_id`. The sketch shows three lanes — notes, docs and
+study. Notes have the data already (`content_activity` tracks `member_type='note'`); study needs
+the last unfinished session.
+
+The second is buildable now. The first needs a duration signal, and the design decision it
+carries is where time is measured: a client heartbeat is the only honest source for reading and
+editing, since the server sees requests, not attention.
 
 ### 7. Three reader and study defects, reported and not yet filed
 

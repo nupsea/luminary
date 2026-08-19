@@ -6844,6 +6844,21 @@ export interface components {
             mastery: number;
         };
         /**
+         * ContinueNoteItem
+         * @description A note the user was writing and has not come back to.
+         */
+        ContinueNoteItem: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Last Meaningful At
+             * Format: date-time
+             */
+            last_meaningful_at: string;
+        };
+        /**
          * ContinueReadingItem
          * @description A doc the user has momentum on -- started, not finished, recently touched.
          */
@@ -6859,6 +6874,27 @@ export interface components {
              * Format: date-time
              */
             last_meaningful_at: string;
+        };
+        /**
+         * ContinueStudyItem
+         * @description A study session left open, which `planned_card_ids` can resume.
+         *
+         *     `cards_remaining` counts the planned queue the session has not reached, not
+         *     the cards due now: re-querying due cards would pull in cards that became due
+         *     after the session began, which is the reason the queue is stored at all.
+         */
+        ContinueStudyItem: {
+            /** Session Id */
+            session_id: string;
+            /** Mode */
+            mode: string;
+            /** Cards Remaining */
+            cards_remaining: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
         };
         /** ConversationMessage */
         ConversationMessage: {
@@ -8320,6 +8356,12 @@ export interface components {
              * @default []
              */
             continue_reading: components["schemas"]["ContinueReadingItem"][];
+            /**
+             * Continue Notes
+             * @default []
+             */
+            continue_notes: components["schemas"]["ContinueNoteItem"][];
+            continue_study?: components["schemas"]["ContinueStudyItem"] | null;
             /**
              * Fading Items
              * @default []

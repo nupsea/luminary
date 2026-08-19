@@ -15,6 +15,7 @@ import {
   Crosshair,
   Dumbbell,
   FileText,
+  GraduationCap,
   FolderPlus,
   Hourglass,
   Loader2,
@@ -43,6 +44,8 @@ import type { components } from "@/types/api"
 
 type HomeOverview = components["schemas"]["HomeOverviewResponse"]
 type ContinueReadingItem = components["schemas"]["ContinueReadingItem"]
+type ContinueNoteItem = components["schemas"]["ContinueNoteItem"]
+type ContinueStudyItem = components["schemas"]["ContinueStudyItem"]
 type FadingItem = components["schemas"]["FadingItem"]
 type ActiveCollection = components["schemas"]["ActiveCollection"] & {
   due_card_count?: number
@@ -88,7 +91,10 @@ export default function Hub() {
   if (isEmpty) return <HubEmpty />
 
   const hasRecommendations = (data.recommendations?.length ?? 0) > 0
-  const hasContinue = (data.continue_reading?.length ?? 0) > 0
+  const hasContinue =
+    (data.continue_reading?.length ?? 0) > 0 ||
+    (data.continue_notes?.length ?? 0) > 0 ||
+    data.continue_study != null
   const hasFading = (data.fading_items?.length ?? 0) > 0
 
   return (
@@ -102,7 +108,13 @@ export default function Hub() {
         <div className="flex flex-col gap-6 lg:col-span-2">
           {data.today_action && <TodayHero action={data.today_action} />}
           {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
-          {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
+          {hasContinue && (
+            <ContinueReadingCard
+              items={data.continue_reading ?? []}
+              notes={data.continue_notes ?? []}
+              study={data.continue_study ?? null}
+            />
+          )}
           <DecayDebtWidget />
         </div>
 
@@ -592,8 +604,88 @@ function LaneShell({
   )
 }
 
-function ContinueReadingCard({ items }: { items: ContinueReadingItem[] }) {
+// A labelled group inside the continue lane. Issue #51 sketches three of them --
+// notes, docs and study -- under one heading rather than three separate cards.
+function LaneGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </div>
+  )
+}
+
+function ContinueNoteRows({ items }: { items: ContinueNoteItem[] }) {
   const navigate = useNavigate()
+  return (
+    <ul className="flex flex-col gap-1">
+      {items.map((item) => (
+        <li key={item.note_id}>
+          <button
+            onClick={() => navigate("/notes", { state: { from: "/" } })}
+            className="group/row flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-background"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
+              <StickyNote size={12} className="text-muted-foreground" />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm text-foreground/90">{item.title}</span>
+              <span className="text-xs text-muted-foreground">
+                {sinceLabel(item.last_meaningful_at)}
+              </span>
+            </div>
+            <ArrowRight
+              size={13}
+              className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
+            />
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ContinueStudyRow({ item }: { item: ContinueStudyItem }) {
+  const navigate = useNavigate()
+  // Routed to the Study page rather than deep-linked into the session: Study
+  // owns resume (it takes a resumeSessionId) but reads neither search params nor
+  // route state, so a deep link would silently start a fresh session instead.
+  return (
+    <button
+      onClick={() => navigate("/study", { state: { from: "/" } })}
+      className="group/row flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-background"
+    >
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
+        <GraduationCap size={12} className="text-muted-foreground" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm text-foreground/90">
+          {item.cards_remaining} card{item.cards_remaining === 1 ? "" : "s"} left in your{" "}
+          {item.mode} session
+        </span>
+        <span className="text-xs text-muted-foreground">{sinceLabel(item.started_at)}</span>
+      </div>
+      <ArrowRight
+        size={13}
+        className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
+      />
+    </button>
+  )
+}
+
+function ContinueReadingCard({
+  items,
+  notes = [],
+  study = null,
+}: {
+  items: ContinueReadingItem[]
+  notes?: ContinueNoteItem[]
+  study?: ContinueStudyItem | null
+}) {
+  const navigate = useNavigate()
+  const isEmpty = items.length === 0 && notes.length === 0 && study === null
   return (
     <LaneShell
       variant="continue"
@@ -607,11 +699,24 @@ function ContinueReadingCard({ items }: { items: ContinueReadingItem[] }) {
         )
       }
     >
-      {items.length === 0 ? (
+      {isEmpty ? (
         <p className="py-3 text-sm text-muted-foreground">
           Nothing in progress — open a doc and you'll see it here.
         </p>
       ) : (
+        <div className="flex flex-col gap-3">
+          {notes.length > 0 && (
+            <LaneGroup label="Notes">
+              <ContinueNoteRows items={notes} />
+            </LaneGroup>
+          )}
+          {study && (
+            <LaneGroup label="Study">
+              <ContinueStudyRow item={study} />
+            </LaneGroup>
+          )}
+          {items.length > 0 && (
+          <LaneGroup label="Docs">
         <ul className="flex flex-col gap-1">
           {items.map((item) => (
             <li key={item.document_id}>
@@ -639,6 +744,9 @@ function ContinueReadingCard({ items }: { items: ContinueReadingItem[] }) {
             </li>
           ))}
         </ul>
+          </LaneGroup>
+          )}
+        </div>
       )}
     </LaneShell>
   )

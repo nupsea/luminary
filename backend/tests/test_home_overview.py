@@ -381,3 +381,66 @@ async def test_weekly_stats_count_recent_activity(test_db):
         # Cards and minutes should be zero in a fresh DB.
         assert stats["cards_reviewed"] == 0
         assert stats["minutes_studied"] == 0
+
+
+@pytest.mark.anyio
+async def test_continue_lane_carries_notes_and_an_open_study_session(test_db):
+    """Issue #51's sketch shows three lanes; the contract carried only documents."""
+    _, factory = test_db
+    note_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    async with factory() as s:
+        await s.execute(
+            text(
+                "INSERT INTO notes (id, content, tags, title, archived, "
+                "created_at, updated_at, title_auto_generated) "
+                "VALUES (:id, 'Body text.', '[]', 'Daily Thoughts', 0, "
+                ":now, :now, 0)"
+            ),
+            {"id": note_id, "now": datetime.now(UTC)},
+        )
+        # Two planned, none reviewed: one queue with cards left to reach.
+        await s.execute(
+            text(
+                "INSERT INTO study_sessions (id, mode, started_at, ended_at, "
+                "cards_reviewed, cards_correct, planned_card_ids) "
+                "VALUES (:id, 'flashcard', :now, NULL, 0, 0, :planned)"
+            ),
+            {"id": session_id, "now": datetime.now(UTC), "planned": '["a", "b"]'},
+        )
+        await s.commit()
+        await ActivityService(s).record_note_edit(note_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        body = (await c.get("/home/overview")).json()
+
+    assert [n["title"] for n in body["continue_notes"]] == ["Daily Thoughts"]
+    study = body["continue_study"]
+    assert study is not None
+    assert study["session_id"] == session_id
+    assert study["cards_remaining"] == 2
+
+
+@pytest.mark.anyio
+async def test_a_finished_study_session_is_not_offered_to_resume(test_db):
+    """A queue the user reached the end of is finished but for bookkeeping.
+
+    Brackets the rule above: `ended_at IS NULL` alone would offer a session
+    with nothing left in it.
+    """
+    _, factory = test_db
+    async with factory() as s:
+        await s.execute(
+            text(
+                "INSERT INTO study_sessions (id, mode, started_at, ended_at, "
+                "cards_reviewed, cards_correct, planned_card_ids) "
+                "VALUES (:id, 'flashcard', :now, NULL, 2, 2, :planned)"
+            ),
+            {"id": str(uuid.uuid4()), "now": datetime.now(UTC), "planned": '["a", "b"]'},
+        )
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        body = (await c.get("/home/overview")).json()
+
+    assert body["continue_study"] is None

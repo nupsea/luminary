@@ -107,6 +107,28 @@ class ContinueReadingItem(BaseModel):
     last_meaningful_at: datetime
 
 
+class ContinueNoteItem(BaseModel):
+    """A note the user was writing and has not come back to."""
+
+    note_id: str
+    title: str
+    last_meaningful_at: datetime
+
+
+class ContinueStudyItem(BaseModel):
+    """A study session left open, which `planned_card_ids` can resume.
+
+    `cards_remaining` counts the planned queue the session has not reached, not
+    the cards due now: re-querying due cards would pull in cards that became due
+    after the session began, which is the reason the queue is stored at all.
+    """
+
+    session_id: str
+    mode: str
+    cards_remaining: int
+    started_at: datetime
+
+
 class FadingItem(BaseModel):
     """Content the user engaged with 7-21 days ago and not since.
 
@@ -138,6 +160,10 @@ class HomeOverviewResponse(BaseModel):
     recent_tags: list[RecentTag]
     # Coach-shaped additions (post-2E.7 redesign).
     continue_reading: list[ContinueReadingItem] = []
+    # The sketch in issue #51 shows one "continue where you left off" block with
+    # three lanes. These are additive so the document lane keeps its contract.
+    continue_notes: list[ContinueNoteItem] = []
+    continue_study: ContinueStudyItem | None = None
     fading_items: list[FadingItem] = []
     weekly_stats: WeeklyStats | None = None
     # evidence-scored next-best-actions after the hero (docs/recommender-spec.md)
