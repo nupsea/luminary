@@ -35,6 +35,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Hub recommender + misconception lifecycle | `recommender_service.py`, `misconceptions.py` |
 | Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
 | Flashcard factuality gate + recorded passage (`source_chunk_ids`) | `invariants.md` I-35 |
+| Learner-facing metrics carrying sample size, definition and basis | `metrics.md` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -138,6 +139,63 @@ Two constraints decide the design:
   the user's first question rather than at the point of choosing.
 
 Removing the superseded model is a separate step, default off, and confirmed.
+
+### 6. The Hub is not the page issue #51 describes
+
+`frontend/src/pages/Hub.tsx` is the recommender surface. Issue #51 asks for a "continue where
+you left off" landing page, sketched in the issue. Nothing of that layout is built.
+
+Its prerequisite is missing rather than hard: **no table records time on task**. There is no
+`reading_session`, `time_on_task` or `seconds_spent` column in `models.py`, so "where you left
+off" and every duration on the Progress page have no source. Instrument first, or the page
+reports numbers it cannot compute — the failure `metrics.md` was written to close.
+
+`GET /progress/summary` already returns each metric with its sample size, definition and basis;
+`metrics.md` is its contract. What remains is the rest of the Progress rebuild and the Hub
+layout, both of which consume instrumentation that does not exist.
+
+### 7. Three reader and study defects, reported and not yet filed
+
+Reported by the user, evidence gathered, **no GitHub issue exists for any of them**.
+They belong in the tracker under the rule at the foot of this file; they are recorded here only
+so they are not lost between report and filing.
+
+- **A citation's page number does not locate the passage.** An Ask answer cited p324 of a PDF
+  whose quoted text is on p336. The reader jumps to the cited page, so the citation is precise
+  and wrong, which is worse than absent (I-33 governs the quote, not the page).
+- **`Study` lands on the last document rather than a chooser.** `Study.tsx:146` falls back to
+  `lastReadyDocumentId` via `useEffectiveActiveDocument()`, so opening Study resumes the most
+  recent collection instead of offering the higher-level list the user expects.
+- **The PDF find UI flickers, and the page numbers along the bottom are unverified.** Same
+  surface as the citation defect and likely the same page-index provenance.
+
+### 8. Formats other than HTML and PDF are unmeasured
+
+`universal-reader.md` is the contract for the reader. Region selection, the Markdown serialiser,
+webview rendering and `documents.extraction_report` shipped after it was written, so it does not
+yet describe them.
+
+- `md`, `epub`, `docx` and `txt` have **no post-`body`-column documents**, so those paths are
+  unmeasured rather than known good. Ingest one of each and compare stored `body` against source
+  before changing anything.
+- `pymupdf4llm>=1.28.2` is a **core dependency with no importer** (`pyproject.toml:41`, no
+  reference anywhere under `backend/`). It was added for the PDF-to-Markdown path, which is not
+  built. Either build that path or drop the dependency; a shipped dependency nothing imports is
+  weight in every install.
+- Two known losses remain on an interactive article measured at 13 headings: the site name
+  leaks as a one-word line, and a 205-character standfirst is `<h2>` in the source and therefore
+  renders as a heading. Demoting it means the serialiser overruling the author's markup, which
+  is a decision, not a bug fix.
+
+### 9. Rendering reaches only the platform with a shell
+
+`render_page` (`src-tauri/src/render.rs`) uses the webview the desktop shell embeds, so it
+exists only where that shell runs — macOS today. The browser dev server, Docker and the script
+installs take the static fetch, which measured full prose and headings on eight of nine test
+articles; the ninth returned 0 images statically against 78 rendered.
+
+Windows (#24) and Linux need their own shell before rendering follows. Canvas-drawn figures are
+not covered on any platform: they need an element screenshot, not a DOM capture.
 
 ## Deferred — decided, not scheduled
 
