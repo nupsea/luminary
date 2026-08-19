@@ -102,3 +102,20 @@ class TestBlocks:
         out = _md("<p>Real text.</p><script>var x=1</script><style>.a{color:red}</style>")
         assert "Real text." in out
         assert "var x" not in out and "color:red" not in out
+
+    def test_a_heading_marked_as_a_caption_labels_a_figure_not_a_section(self):
+        """13 of one article's 17 headings were the word "Original".
+
+        Each was the label under a comparison image, and each became a section
+        in the contents beside the real chapters. The text is content and is
+        kept; only its promotion to a heading is wrong.
+        """
+        out = _md('<h3 class="caption">Original</h3><p>Body text.</p>')
+        assert "Original" in out
+        assert "### Original" not in out
+        assert "Body text." in out
+
+    def test_an_ordinary_heading_is_still_a_heading(self):
+        """Brackets the rule above: only a caption class demotes a heading."""
+        out = _md("<h3>Real Section</h3><p>Body text.</p>")
+        assert "### Real Section" in out

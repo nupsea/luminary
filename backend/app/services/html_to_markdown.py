@@ -27,6 +27,14 @@ _INLINE_WRAP = {"strong": "**", "b": "**", "em": "*", "i": "*", "del": "~~", "s"
 # Callout containers keep their text but lose their box; the words are what matter.
 _CALLOUT_HINT = re.compile(r"callout|admonition|note|warning|tip|caution|info-box", re.I)
 
+# A class naming an element a caption is the author saying it labels a figure.
+_CAPTION_HINT = re.compile(r"caption", re.I)
+
+
+def _is_caption(node: Tag) -> bool:
+    """Whether the author marked this element as a figure caption."""
+    return any(_CAPTION_HINT.search(name) for name in (node.get("class") or []))
+
 
 def _collapse(text: str) -> str:
     """Collapse whitespace runs WITHOUT trimming the ends.
@@ -136,7 +144,16 @@ class MarkdownSerializer:
         name = node.name
         if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
             text = self._children_inline(node)
-            return [f"{'#' * int(name[1])} {text}"] if text else []
+            if not text:
+                return []
+            # A heading the author marked as a caption labels a figure, not a
+            # section of the document. One article carried 13 of them, all
+            # reading "Original" -- the label under each comparison image -- and
+            # each became a section in the contents beside the real chapters.
+            # The text is kept: it is what names the figure.
+            if _is_caption(node):
+                return [text]
+            return [f"{'#' * int(name[1])} {text}"]
         if name == "p":
             text = self._children_inline(node)
             return [text] if text else []

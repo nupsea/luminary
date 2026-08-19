@@ -37,7 +37,14 @@ _FURNITURE_TAGS = (
 _FURNITURE_HINT = re.compile(
     r"nav|menu|sidebar|footer|header|breadcrumb|share|social|comment|related|"
     r"recirc|subscribe|newsletter|cookie|consent|banner|promo|advert|sponsor|"
-    r"paywall|popup|modal|skip-link|screen-reader|visually-hidden",
+    r"paywall|popup|modal|skip-link|screen-reader|visually-hidden|"
+    # An interactive figure's controls sit inside the article, so tag-based
+    # stripping never reaches them: an explorable explainer contributed
+    # "Step 1 Points Per Side 20 Perplexity 10 Epsilon 5" to its own prose,
+    # every slider label and value read out as a sentence. `byline` covers the
+    # author/affiliation/date/citation block that custom-element pages wrap in
+    # a plain div inside a tag no tag list can anticipate.
+    r"controls|slider|byline",
     re.I,
 )
 
