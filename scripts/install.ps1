@@ -298,8 +298,13 @@ $LumProfile = $env:LUMINARY_PROFILE
 # written verbatim to backend/.env, where the backend rejects it and re-sizes
 # from host RAM -- installer and app disagreeing with nothing said. Matched
 # case-sensitively so this agrees with install.sh, whose `case` is exact.
+# `low` is the backend's canonical name for the small profile and the one it
+# logs; `public` is the installers'. Accept both, then normalise to the name the
+# bands below are written in -- refusing `low` sent anyone following the
+# backend's own vocabulary to an exit 1.
+if ($LumProfile -ceq "low") { $LumProfile = "public" }
 if ($LumProfile -and -not ($LumProfile -cin @("public", "standard", "performance"))) {
-    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: public, standard, performance." -ForegroundColor Red
+    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: low, public, standard, performance." -ForegroundColor Red
     Write-Host "[install] It would be written to backend/.env, where the backend rejects it and" -ForegroundColor Red
     Write-Host "[install] re-sizes from host RAM -- so the installer and the app would disagree." -ForegroundColor Red
     exit 1

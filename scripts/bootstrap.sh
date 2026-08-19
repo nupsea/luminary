@@ -254,12 +254,29 @@ _step "Sizing for this machine"
 # fails when either drifts from the registry.
 #   under 16GB  one model resident, so it must be one that also reads figures
 #   16-24GB     two slots, generalist for both roles
-#   over 24GB   the large text model, with the generalist kept for figures
+#   over 24GB   two slots, and at 26GB+ the large text model with the
+#               generalist kept for figures -- see LARGE_TEXT_MIN_RAM_GB below
 PUBLIC_GENERALIST="qwen3.5:4b"
 LARGE_TEXT_MODEL="qwen2.5:14b-instruct"
 DEFAULT_CHAT_MODEL="qwen3.5:4b"
+# Mirrors LARGE_TEXT_MIN_RAM_GB in install.sh, for the same measured reason: the
+# large text model plus the generalist is 12.88GB against a half-of-RAM budget,
+# so the pair needs 25.76GB. Without this gate `LUMINARY_PROFILE=performance` on
+# a small Mac pulled 9.67GB the backend then refuses to load.
+LARGE_TEXT_MIN_RAM_GB=26
 
 MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+# `low` is the backend's canonical name for the small profile; `public` is this
+# script's. Accept both, then validate -- an unrecognised value used to fall into
+# the `*)` arm, take standard knobs, and be written to .env verbatim, where the
+# backend rejects it and re-sizes. Installer and app disagreeing, silently.
+[ "$PROFILE" = "low" ] && PROFILE="public"
+case "${PROFILE:-public}" in
+    public|standard|performance) ;;
+    *)
+        _die "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
+        ;;
+esac
 if [ -z "$PROFILE" ]; then
     if   [ "$MEM_GB" -lt 16 ]; then PROFILE="public"
     elif [ "$MEM_GB" -le 24 ]; then PROFILE="standard"
@@ -273,8 +290,15 @@ case "$PROFILE" in
         ;;
     performance)
         MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4
-        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$LARGE_TEXT_MODEL"
-        [ -z "$VISION_MODEL" ] && VISION_MODEL="$PUBLIC_GENERALIST"
+        if [ -z "$CHAT_MODEL" ]; then
+            if [ "$MEM_GB" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
+                CHAT_MODEL="$LARGE_TEXT_MODEL"
+            else
+                CHAT_MODEL="$DEFAULT_CHAT_MODEL"
+            fi
+        fi
+        [ -z "$VISION_MODEL" ] && [ "$CHAT_MODEL" != "$PUBLIC_GENERALIST" ] \
+            && VISION_MODEL="$PUBLIC_GENERALIST"
         ;;
     *)
         MAX_LOADED=2; NUM_PARALLEL=2; VISION_CONCURRENCY=2
@@ -327,10 +351,14 @@ if [ -n "$SRC" ]; then
         -e "s|@@VISION_CONCURRENCY@@|$VISION_CONCURRENCY|g" \
         -e "s|@@OLLAMA_NUM_PARALLEL@@|$NUM_PARALLEL|g" \
         "$SRC" > "$ENV_FILE"
-    # The template ships the knobs commented out so a human can read it. The
-    # models are appended rather than templated because this installer *pulled*
-    # specific ones: leaving them unset lets the app resolve a model that is not
-    # on disk, which fails at the first question instead of at install time.
+    # Appended rather than templated because this installer *pulled* specific
+    # models: leaving them unset lets the app resolve one that is not on disk,
+    # which fails at the first question instead of at install time. The template
+    # sets these keys itself, so strip them first -- appending alone left the
+    # file carrying each key twice with different values, and a user editing the
+    # first occurrence saw no effect.
+    grep -vE '^(LITELLM_DEFAULT_MODEL|VISION_MODEL|LUMINARY_MEMORY_PROFILE)=' \
+        "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
     cat >> "$ENV_FILE" <<EOF
 
 # Written by bootstrap.sh from the sized profile. Edit freely -- these are

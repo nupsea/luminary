@@ -206,10 +206,15 @@ _default_profile() {
 }
 
 PROFILE="${LUMINARY_PROFILE:-}"
+# `low` is the backend's canonical name for the small profile and the one it
+# logs, so refusing it sent anyone following the backend's own vocabulary to an
+# exit 1. Normalised to `public` here because that is what the bands below and
+# the pull logic are written in; the .env write converts it back.
+[ "$PROFILE" = "low" ] && PROFILE="public"
 case "${PROFILE:-public}" in
     public|standard|performance) ;;
     *)
-        _err "LUMINARY_PROFILE='$PROFILE' is not one of: public, standard, performance."
+        _err "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
         _err "It would be written to backend/.env, where the backend rejects it and"
         _err "re-sizes from host RAM -- so the installer and the app would disagree."
         exit 1
@@ -295,6 +300,12 @@ case "$PROFILE" in
     public) _upsert_env LUMINARY_MEMORY_PROFILE "low" ;;
     *)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE" ;;
 esac
+# The models this installer actually pulled. Leaving them unset let the backend
+# resolve a model that is not on disk, which fails at the first question instead
+# of here; it also left `start.sh` with nothing to read, so its "model isn't
+# pulled" pre-flight silently checked nothing on the primary install path.
+_upsert_env LITELLM_DEFAULT_MODEL "ollama/$CHAT_MODEL"
+_upsert_env VISION_MODEL "ollama/${VISION_MODEL:-$CHAT_MODEL}"
 
 # Start ollama if it's not already serving.
 if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; then
