@@ -1762,6 +1762,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/engagement/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heartbeat
+         * @description Sample of foreground attention, sent by a surface while it is visible.
+         *
+         *     The server cannot measure this itself: a reader who opens a document and
+         *     reads for twenty minutes issues one request. What is recorded is time with
+         *     the page open and visible, which is not the same as time spent reading, and
+         *     `docs/metrics.md` requires it be reported as the former.
+         */
+        post: operations["heartbeat_engagement_heartbeat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/engagement/focus/start": {
         parameters: {
             query?: never;
@@ -8331,6 +8356,27 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HeartbeatRequest */
+        HeartbeatRequest: {
+            /** Activity */
+            activity: string;
+            /** Member Id */
+            member_id?: string | null;
+        };
+        /**
+         * HeartbeatResponse
+         * @description What this beat was worth, and how often to send the next one.
+         *
+         *     `seconds_credited` is 0 for the first beat of a stretch and for one arriving
+         *     after a gap too long to be continuous. The client does not need to act on
+         *     it; it is returned so the accrual is observable rather than opaque.
+         */
+        HeartbeatResponse: {
+            /** Seconds Credited */
+            seconds_credited: number;
+            /** Heartbeat Seconds */
+            heartbeat_seconds: number;
+        };
         /** HeatmapCellOut */
         HeatmapCellOut: {
             /** Chapter */
@@ -10509,6 +10555,13 @@ export interface components {
             notes_written: number;
             /** Docs Touched */
             docs_touched: number;
+            /**
+             * Seconds By Activity
+             * @default {}
+             */
+            seconds_by_activity: {
+                [key: string]: number;
+            };
         };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
@@ -13760,6 +13813,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heartbeat_engagement_heartbeat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HeartbeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeartbeatResponse"];
                 };
             };
             /** @description Validation Error */

@@ -151,6 +151,13 @@ class WeeklyStats(BaseModel):
     cards_reviewed: int
     notes_written: int
     docs_touched: int
+    # Seconds of foreground time per activity over the same 7 days, zero-filled
+    # so a missing slice cannot be read as a measured zero. This is time with
+    # the surface open and visible, sampled by heartbeat -- not a claim about
+    # attention, and deliberately a different basis from `minutes_studied`,
+    # which is study-session wall clock. The two are not interchangeable and
+    # must not be drawn as one number.
+    seconds_by_activity: dict[str, int] = {}
 
 
 class HomeOverviewResponse(BaseModel):

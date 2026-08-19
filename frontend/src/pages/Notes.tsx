@@ -36,6 +36,7 @@ import { ViewToggle } from "@/components/library/ViewToggle"
 import { logger } from "@/lib/logger"
 import { downloadNoteMarkdown } from "@/lib/noteExport"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
+import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import { stripMarkdown } from "@/lib/utils"
 import { formatDate, relativeDate } from "@/components/library/utils"
 import { useAppStore } from "@/store"
@@ -691,6 +692,11 @@ type FilterState =
   | { type: "tag"; name: string }
 
 export default function NotesPage() {
+  // No single note is focused at page level, so the time is the surface's. The
+  // schema allows a null member for exactly this: attributing it to whichever
+  // note happened to be open would be a guess reported as a measurement.
+  useTimeOnTask("note", null)
+
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
   const blogsEnabled = isSurfaceVisible("blog")
   const [isCreating, setIsCreating] = useState(false)

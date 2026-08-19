@@ -56,6 +56,7 @@ import {
 
 // Document list for the in-tab picker
 
+import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
@@ -164,6 +165,16 @@ export default function Study() {
   // Per-surface model override; "" follows Settings, exactly as Ask does.
   const [studyModel, setStudyModel] = useState("")
   const [studyPhase, setStudyPhase] = useState<StudyPhase>({ phase: "idle" })
+
+  // The hub draws review and study as separate slices, so a running flashcard
+  // session is attributed to review and everything else on this page to study.
+  // Both are sampled the same way as reading, rather than derived from
+  // study_sessions wall clock: one pie needs one basis, or the slices are not
+  // parts of the same whole.
+  useTimeOnTask(
+    studyPhase.phase === "ready" && studyPhase.mode === "flashcard" ? "review" : "study",
+    null,
+  )
 
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
     queryKey: ["collections-list"],

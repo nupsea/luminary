@@ -140,7 +140,7 @@ Two constraints decide the design:
 
 Removing the superseded model is a separate step, default off, and confirmed.
 
-### 6. The Hub sketch needs per-activity time, which nothing records
+### 6. The Hub sketch, and what is still approximate in it
 
 Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
 quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
@@ -149,22 +149,20 @@ active collections and a week summary, all from one fetch of `GET /home/overview
 
 Two gaps remain against the sketch.
 
-**The "This week" pie has no source.** It splits a weekly total four ways — notes, docs, review,
-study. `WeeklyStats` (`schemas/home.py:125`) carries `minutes_studied`, `cards_reviewed`,
-`notes_written`, `docs_touched`: one duration and three counts. Only study time is real, derived
-from `study_sessions.started_at..ended_at` (`routers/home.py:447`). Time spent *reading a
-document* and *editing a note* is recorded nowhere — `content_activity` stores
-`last_meaningful_at`, which is when, never how long. A four-way split cannot be computed from
-counts, and inventing one would be the failure `metrics.md` exists to prevent.
+Both gaps against the sketch are now closed: the continue lane carries notes and an open study
+session, and `time_on_task` records per-activity duration for the weekly ring (`metrics.md`
+carries its contract).
 
-**"Continue where you left off" covers documents only.** `ContinueReadingItem`
-(`schemas/home.py:101`) is keyed by `document_id`. The sketch shows three lanes — notes, docs and
-study. Notes have the data already (`content_activity` tracks `member_type='note'`); study needs
-the last unfinished session.
+What remains is smaller and worth stating rather than assuming.
 
-The second is buildable now. The first needs a duration signal, and the design decision it
-carries is where time is measured: a client heartbeat is the only honest source for reading and
-editing, since the server sees requests, not attention.
+- **The ring's slices are foreground samples; `minutes_studied` beside them is session wall
+  clock.** Two bases on one card. They measure different things and are labelled so, but a
+  future edit that averages or sums them would produce a number meaning nothing.
+- **A study interval spanning local midnight lands on the day it began**, matching
+  EngagementService's approximation rather than splitting the interval.
+- **`Study` cannot be deep-linked to resume a session.** The hub's study row routes to the page
+  because `Study.tsx` reads neither search params nor route state, so a session id in the URL
+  would silently start a fresh session.
 
 ### 7. Three reader and study defects, reported and not yet filed
 

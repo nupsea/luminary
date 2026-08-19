@@ -31,6 +31,7 @@ from app.schemas.home import (
     WeeklyStats,
 )
 from app.services import recommender_service
+from app.services.time_on_task_service import TimeOnTaskService
 
 logger = logging.getLogger(__name__)
 
@@ -567,9 +568,11 @@ async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
             )
         )
     ).first()
+    seconds_by_activity = await TimeOnTaskService(session).seconds_by_activity(days=7)
     return WeeklyStats(
         minutes_studied=round(float(minutes_row[0] or 0)) if minutes_row else 0,
         cards_reviewed=int(cards_row[0] or 0) if cards_row else 0,
         notes_written=int(notes_row[0] or 0) if notes_row else 0,
         docs_touched=int(docs_row[0] or 0) if docs_row else 0,
+        seconds_by_activity=seconds_by_activity,
     )

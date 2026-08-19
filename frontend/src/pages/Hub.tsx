@@ -891,7 +891,103 @@ function StatPill({ label, value }: { label: string; value: number }) {
 
 // -- Weekly stats ------------------------------------------------------------
 
+// The four slices the week splits into, with the colour each is drawn in.
+const _ACTIVITY_SLICES: { key: string; label: string; colour: string }[] = [
+  { key: "note", label: "Notes", colour: "hsl(160 60% 45%)" },
+  { key: "document", label: "Docs", colour: "hsl(217 75% 58%)" },
+  { key: "review", label: "Review", colour: "hsl(38 85% 55%)" },
+  { key: "study", label: "Study", colour: "hsl(265 60% 60%)" },
+]
+
+function durationLabel(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${hours} hr` : `${hours} hr, ${rest}min`
+}
+
+/**
+ * Where the week's foreground time went.
+ *
+ * Drawn only from `seconds_by_activity`, which is one basis across all four
+ * slices. `minutes_studied` beside it is study-session wall clock and is a
+ * different measurement of a different thing; mixing them would make the
+ * wedges add up to something that is not the total.
+ */
+function ActivitySplit({ byActivity }: { byActivity: Record<string, number> }) {
+  const slices = _ACTIVITY_SLICES.map((s) => ({ ...s, seconds: byActivity[s.key] ?? 0 }))
+  const total = slices.reduce((sum, s) => sum + s.seconds, 0)
+
+  if (total === 0) {
+    return (
+      <div className="flex flex-col gap-1 border-t border-border/60 pt-3">
+        <span className="text-[11px] text-muted-foreground">
+          No time recorded yet — this fills in as you read, write and review.
+        </span>
+      </div>
+    )
+  }
+
+  // One ring, each wedge a dash on the circumference. An SVG arc needs no
+  // charting dependency for four numbers. Offsets are accumulated up front
+  // rather than during the map, so nothing is reassigned mid-render.
+  const radius = 26
+  const circumference = 2 * Math.PI * radius
+  const wedges = slices.reduce<{ slice: (typeof slices)[number]; dash: number; offset: number }[]>(
+    (acc, slice) => {
+      const dash = (slice.seconds / total) * circumference
+      const offset = acc.length === 0 ? 0 : acc[acc.length - 1].offset + acc[acc.length - 1].dash
+      acc.push({ slice, dash, offset })
+      return acc
+    },
+    [],
+  )
+
+  return (
+    <div className="flex items-center gap-4 border-t border-border/60 pt-3">
+      <svg width="72" height="72" viewBox="0 0 72 72" className="shrink-0" role="img"
+           aria-label={`Time this week: ${slices
+             .filter((s) => s.seconds > 0)
+             .map((s) => `${s.label} ${durationLabel(s.seconds)}`)
+             .join(", ")}`}>
+        <g transform="rotate(-90 36 36)">
+          {wedges.map(({ slice, dash, offset }) => (
+            <circle
+              key={slice.key}
+              cx="36"
+              cy="36"
+              r={radius}
+              fill="none"
+              stroke={slice.colour}
+              strokeWidth="10"
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeDashoffset={-offset}
+            />
+          ))}
+        </g>
+      </svg>
+      <ul className="flex min-w-0 flex-1 flex-col gap-1">
+        {slices.map((slice) => (
+          <li key={slice.key} className="flex items-center gap-2 text-[11px]">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: slice.colour }}
+            />
+            <span className="flex-1 truncate text-muted-foreground">{slice.label}</span>
+            <span className="tabular-nums text-foreground/90">
+              {durationLabel(slice.seconds)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
+  const byActivity = stats.seconds_by_activity ?? {}
+  const total = Object.values(byActivity).reduce((sum, s) => sum + (s ?? 0), 0)
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/50 p-5 backdrop-blur-sm">
       <div className="flex items-center gap-2">
@@ -899,6 +995,16 @@ function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
         <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
           This week
         </h2>
+        {total > 0 && (
+          <span
+            className="ml-auto text-[11px] tabular-nums text-muted-foreground"
+            // Named for what it is. This is time with a surface open and
+            // visible, sampled by heartbeat -- not a claim about attention.
+            title="Time with a Luminary surface open and visible"
+          >
+            {durationLabel(total)}
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-2.5">
         <BigStat value={`${stats.minutes_studied}m`} label="studied" accent="primary" />
@@ -906,6 +1012,7 @@ function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
         <BigStat value={stats.notes_written} label="notes" accent="emerald" />
         <BigStat value={stats.docs_touched} label="docs" accent="blue" />
       </div>
+      <ActivitySplit byActivity={byActivity} />
     </div>
   )
 }

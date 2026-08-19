@@ -12,6 +12,7 @@ import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
@@ -120,6 +121,10 @@ export function DocumentReader(props: DocumentReaderProps) {
 
 function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
+
+  // Reading time exists nowhere else: opening a document and reading it for
+  // twenty minutes is one request, so the server would record it as an instant.
+  useTimeOnTask("document", documentId)
 
   const { data: doc, isLoading, isError, refetch } = useQuery({
     queryKey: ["document", documentId],

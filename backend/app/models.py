@@ -1291,6 +1291,41 @@ class ChatMessageModel(Base):
     )
 
 
+class TimeOnTaskModel(Base):
+    """One continuous stretch of foreground attention on one thing.
+
+    What this measures, exactly: the surface was mounted and the tab was
+    visible, sampled by a client heartbeat. It is not proof of attention, and
+    the Progress surface must say so rather than call it "time studied".
+
+    A row is an *interval*, not a beat. Each heartbeat extends the open interval
+    for its (activity, member_id) when the gap since the last beat is small
+    enough to be continuous, and starts a new row when it is not -- so a session
+    costs about one row instead of one per sample, and a gap the user spent away
+    is never credited to anything.
+
+    `started_at` is UTC and buckets are computed at query time, matching
+    EngagementService: the timezone offset can change and the raw instant stays
+    true. An interval spanning local midnight is attributed to the day it began.
+    """
+
+    __tablename__ = "time_on_task"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # 'document' | 'note' | 'review' | 'study'
+    activity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # The document/note/session the time was spent on; null where the activity
+    # has no single member.
+    member_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
+    )
+    last_beat_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class ContentActivityModel(Base):
     """Last *meaningful* interaction per (member_id, member_type).
 

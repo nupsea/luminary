@@ -64,6 +64,39 @@ single 10-card session at 90% rendered as "90% mastery" on a fresh install. That
 scenario reproduced against this formula reads 7.1% — ten cards at 1.5 days'
 stability against a 21-day bar — which is what one sitting has actually bought.
 
+## Time on task
+
+`time_on_task`, written only by `TimeOnTaskService`, drawn as the hub's weekly
+split across `note`, `document`, `review` and `study`.
+
+**It measures time with a surface open and visible, which is not attention.**
+Nothing may relabel it "time studied" or "time reading". The server cannot
+measure this at all — a reader who opens a document and reads for twenty minutes
+issues one request — so the client samples every 15s from `useTimeOnTask`, and
+stops while the tab is hidden.
+
+Two rules keep the number from inventing time:
+
+- **Credit is the gap between consecutive beats, never the beat itself.** A first
+  beat is worth zero because nothing precedes it to measure from.
+- **A gap over `MAX_CREDITED_GAP_SECONDS` is credited as nothing.** Bracketing
+  cases sit next to the constant: 20s is one slow round trip on a busy machine and
+  is real; 60s means the tab was hidden or the user left. Without this ceiling a
+  backgrounded tab banks every second it was away.
+
+A row is an interval rather than a beat, so a session costs about one row. The
+weekly split is zero-filled across all four activities: a missing slice is
+indistinguishable from a measured zero otherwise.
+
+`WeeklyStats.minutes_studied` sits beside it and is **a different basis** —
+study-session wall clock from `study_sessions.started_at..ended_at`. The two are
+not interchangeable and the ring never mixes them, or its wedges would sum to
+something that is not its total.
+
+`backend/tests/test_time_on_task.py` fails CI if a discontinuous gap is credited,
+if the ceiling drifts outside its two bracketing cases, or if an unknown activity
+is recorded instead of refused. `scripts/smoke/S240.sh` checks the wire contract.
+
 ## Prediction calibration
 
 `GET /study/calibration-stats`. Study asks you to predict your grade before the
