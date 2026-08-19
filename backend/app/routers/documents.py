@@ -57,6 +57,8 @@ from app.schemas.documents import (
     PatchTagsRequest,
     PDFMetaResponse,
     ReadingPositionResponse,
+    ReparseRequest,
+    ReparseResponse,
     SavePositionRequest,
     SectionItem,
     UrlIngestRequest,
@@ -115,6 +117,7 @@ from app.workflows.ingestion import (
     _background_tasks,
     run_ingestion,
 )
+from app.workflows.ingestion_nodes._shared import _persist_extraction_report
 
 logger = logging.getLogger(__name__)
 
@@ -755,7 +758,9 @@ async def ingest_url(
 
         try:
             extractor = get_article_extractor()
-            parsed = await extractor.extract(body.url, doc_id=doc_id)
+            parsed = await extractor.extract(
+                body.url, doc_id=doc_id, rendered_html=body.rendered_html
+            )
         except Exception as exc:
             logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -812,7 +817,26 @@ async def ingest_url(
                 },
             ),
         )
-        logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
+        # Persisted here, not in parse_node. The URL path hands the graph a
+        # pre-parsed document AND a .md file, and parse_node re-parses that file --
+        # producing a fresh ParsedDocument with no report and overwriting this one.
+        # Fidelity is only known at the point of extraction, so it is stored here.
+        if parsed.extraction_report is not None:
+            await _persist_extraction_report(doc_id, parsed.extraction_report)
+
+        logger.info(
+            "Article ingestion started",
+            extra={
+                "doc_id": doc_id,
+                "url": body.url,
+                # Which path produced the HTML, so a silent fallback to the static
+                # fetch is visible in the log rather than inferred from word counts.
+                "fetch": (parsed.extraction_report or {}).get("fetch", "unknown"),
+                "rendered_html_supplied": bool(body.rendered_html),
+                "render_state": body.render_state or "not-reported",
+                "render_detail": body.render_detail or "",
+            },
+        )
         return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
     # 2. YouTube: Existing logic
@@ -907,6 +931,7 @@ async def get_document(document_id: str):
         format=doc.format,
         content_type=doc.content_type,
         structure_type=doc.structure_type,
+        extraction_report=doc.extraction_report,
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
@@ -1337,6 +1362,103 @@ async def delete_document(document_id: str):
     await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
+
+
+@router.post("/{document_id}/reparse", response_model=ReparseResponse)
+async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseResponse:
+    """Re-run parsing and chunking for a document that is already in the library.
+
+    Stored text cannot be repaired in place -- a parser fix only reaches a
+    document by parsing it again -- and `/documents/ingest` deduplicates on
+    `file_hash`, so re-uploading the same file silently returns the old row.
+
+    For a web article the stored raw file is the *extracted markdown*, not the
+    original page, so re-parsing it would only re-read the old extraction. Those
+    are re-fetched from `source_url` instead.
+
+    Call once with `confirm=false` to see what it costs, then again with
+    `confirm=true`.
+    """
+    svc = get_document_deletion_service()
+    async with get_session_factory()() as session:
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        source = "url" if doc.source_url else "file"
+        if source == "file" and not Path(doc.file_path).exists():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The original file is no longer on disk, "
+                    "so this document cannot be re-imported."
+                ),
+            )
+        anchored = await svc.count_anchored_rows(session, document_id)
+        source_url, file_path, fmt, content_type = (
+            doc.source_url,
+            doc.file_path,
+            doc.format,
+            doc.content_type,
+        )
+
+    if not body.confirm:
+        return ReparseResponse(
+            document_id=document_id,
+            status="preview",
+            source=source,
+            anchored=anchored,
+            detail=(
+                "Re-import rebuilds this document's sections and chunks. Your notes, "
+                "highlights, clips and flashcards are kept, but anything anchored to the "
+                "old sections will no longer point at a location in the text."
+            ),
+        )
+
+    cancelled = await get_ingestion_jobs().cancel(document_id)
+    if cancelled:
+        logger.info(
+            "Cancelled in-flight ingestion before re-parse",
+            extra={"document_id": document_id},
+        )
+
+    parsed_document = None
+    if source == "url":
+        parsed = await get_article_extractor().extract(source_url, doc_id=document_id)
+        parsed_document = {
+            "title": parsed.title,
+            "format": parsed.format,
+            "pages": parsed.pages,
+            "word_count": parsed.word_count,
+            "sections": [
+                {
+                    "heading": sec.heading,
+                    "level": sec.level,
+                    "text": sec.text,
+                    "page_start": sec.page_start,
+                    "page_end": sec.page_end,
+                }
+                for sec in parsed.sections
+            ],
+            "raw_text": parsed.raw_text,
+        }
+
+    async with get_session_factory()() as session:
+        cleared = await svc.delete_derived_for_reparse(session, document_id)
+        await session.commit()
+    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
+
+    get_ingestion_jobs().launch(
+        document_id,
+        run_ingestion(document_id, file_path, fmt, content_type, parsed_document=parsed_document),
+    )
+    logger.info("Re-parse started", extra={"document_id": document_id, "source": source})
+    return ReparseResponse(
+        document_id=document_id,
+        status="processing",
+        source=source,
+        anchored=anchored,
+        cleared=cleared,
+        detail="Re-import started. The document is unavailable until it finishes.",
+    )
 
 
 @router.get("/{document_id}/status")

@@ -70,6 +70,11 @@ class DocumentModel(Base):
     # Layout discovered while parsing: book|paper|script|chat. Combined with
     # content_type to pick a reading profile. Null when undiscovered.
     structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # What the importer captured and what it could not: {"captured": {...},
+    # "dropped": {...}, "notes": [...], "complete": bool}. Persisted so a
+    # partial import is visible to the reader rather than a silence they have
+    # no way to interpret. Null = the parser does not measure its own fidelity.
+    extraction_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 

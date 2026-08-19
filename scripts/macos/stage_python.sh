@@ -49,6 +49,20 @@ _step "Installing dependencies into the staged interpreter"
 # --system because this is not a venv: it is a private interpreter we own.
 uv pip sync --python "$PY" --system "$REQ"
 
+_step "Pruning bundled test suites"
+# Third-party test suites are never executed from the bundle. `testing` is NOT
+# in this list and must not be: `import torch` imports `torch.testing`, so
+# removing it breaks the interpreter this ships. Only directories literally
+# named `test`/`tests` go.
+pruned=0
+freed=0
+while IFS= read -r d; do
+    sz=$(du -sk "$d" 2>/dev/null | cut -f1)
+    rm -rf "$d" && pruned=$((pruned + 1)) && freed=$((freed + sz))
+done < <(find "$PY_STAGE/lib/python$PY_MINOR/site-packages" \
+             -type d \( -name tests -o -name test \) -prune -print 2>/dev/null)
+_info "removed $pruned test directories ($((freed / 1024)) MB)"
+
 _step "Putting the backend source on sys.path"
 SITE="$PY_STAGE/lib/python$PY_MINOR/site-packages"
 [ -d "$SITE" ] || _die "site-packages not at $SITE"

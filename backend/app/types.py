@@ -45,6 +45,10 @@ class ParsedDocument:
     # Layout discovered from the document's own markers: book|paper|script|chat.
     # None when the parser that ran does not discover structure.
     structure_type: str | None = None
+    # What the importer captured and what it could not, persisted so an
+    # incomplete import is visible to the reader instead of silent. None when
+    # the parser does not measure its own fidelity.
+    extraction_report: dict | None = None
 
 
 @dataclass

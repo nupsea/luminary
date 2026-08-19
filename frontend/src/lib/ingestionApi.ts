@@ -1,3 +1,4 @@
+import { renderPage } from "@/lib/pageRender"
 import { apiGet, apiPost, detailFromError } from "@/lib/apiClient"
 
 export type ContentTypeValue =
@@ -63,9 +64,21 @@ export interface UrlIngestResult {
 
 export async function submitUrl(url: string): Promise<UrlIngestResult> {
   try {
+    // Rendered here rather than in the backend: the desktop shell owns the
+    // webview, and the backend has no browser on any platform. Null on every
+    // other install, where the static fetch already handles the page.
+    const rendered = await renderPage(url)
     const data = await apiPost<{ document_id: string; warnings?: string[] }>(
       "/documents/ingest-url",
-      { url },
+      {
+        url,
+        // Reported even when null: the backend log is the only place the two
+        // reasons for a static import -- no shell, or a shell that failed -- can
+        // be told apart.
+        render_state: rendered.state,
+        ...(rendered.detail ? { render_detail: rendered.detail } : {}),
+        ...(rendered.html ? { rendered_html: rendered.html } : {}),
+      },
     )
     return { documentId: data.document_id, warnings: data.warnings ?? [] }
   } catch (err) {

@@ -21,7 +21,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -205,6 +205,68 @@ class DocumentDeletionService:
             )
         )
         await session.delete(doc)
+
+    async def delete_derived_for_reparse(
+        self, session: AsyncSession, document_id: str
+    ) -> dict[str, int]:
+        """Clear only what the parser produces, so ingestion can rebuild it.
+
+        Re-parsing is not deletion: notes, annotations, clips, flashcards,
+        collection membership and the learner record all survive. Sections and
+        chunks are rebuilt with fresh ids, which is the cost the caller has to
+        state up front -- anything anchored to a `section_id` or `chunk_id` from
+        the old parse no longer resolves.
+
+        Nothing here runs unless the caller has already established consent; the
+        endpoint reports the counts below before it is invoked a second time.
+        """
+        counts: dict[str, int] = {}
+        for model in (
+            ChunkModel,
+            SectionSummaryModel,
+            SectionModel,
+            SummaryModel,
+            ImageModel,
+            LearningObjectiveModel,
+            CodeSnippetModel,
+            WebReferenceModel,
+        ):
+            result = await session.execute(
+                delete(model).where(model.document_id == document_id)  # type: ignore[attr-defined]
+            )
+            counts[model.__tablename__] = result.rowcount or 0
+
+        # FTS shadow tables are not reached by an ORM delete.
+        await session.execute(
+            text("DELETE FROM chunks_fts WHERE document_id = :doc_id"),
+            {"doc_id": document_id},
+        )
+        await session.execute(
+            text("DELETE FROM images_fts WHERE document_id = :doc_id"),
+            {"doc_id": document_id},
+        )
+        return counts
+
+    async def count_anchored_rows(
+        self, session: AsyncSession, document_id: str
+    ) -> dict[str, int]:
+        """What a re-parse would strand, so the user can decide before it runs.
+
+        These rows are kept, but they point at section/chunk ids that the rebuild
+        replaces. Reporting zero when the answer is "your 40 highlights" would be
+        the silent kind of damage this codebase exists to avoid.
+        """
+        out: dict[str, int] = {}
+        for label, model in (
+            ("flashcards", FlashcardModel),
+            ("annotations", AnnotationModel),
+            ("clips", ClipModel),
+        ):
+            result = await session.execute(
+                select(func.count()).select_from(model).where(model.document_id == document_id)
+            )
+            out[label] = int(result.scalar_one() or 0)
+        return out
 
     def delete_lancedb_vectors(self, document_id: str) -> None:
         """Drop chunk + image vectors. Non-fatal: failures are logged."""

@@ -1383,6 +1383,37 @@ export interface paths {
         patch: operations["patch_document_tags_documents__document_id__tags_patch"];
         trace?: never;
     };
+    "/documents/{document_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reparse Document
+         * @description Re-run parsing and chunking for a document that is already in the library.
+         *
+         *     Stored text cannot be repaired in place -- a parser fix only reaches a
+         *     document by parsing it again -- and `/documents/ingest` deduplicates on
+         *     `file_hash`, so re-uploading the same file silently returns the old row.
+         *
+         *     For a web article the stored raw file is the *extracted markdown*, not the
+         *     original page, so re-parsing it would only re-read the old extraction. Those
+         *     are re-fetched from `source_url` instead.
+         *
+         *     Call once with `confirm=false` to see what it costs, then again with
+         *     `confirm=true`.
+         */
+        post: operations["reparse_document_documents__document_id__reparse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}/status": {
         parameters: {
             query?: never;
@@ -4123,6 +4154,49 @@ export interface paths {
         put?: never;
         /** Abandon */
         post: operations["abandon_pomodoro__session_id__abandon_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/progress/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Progress Summary
+         * @description Every headline number on the Progress page, each with its definition.
+         *
+         *     A metric that could not be computed returns `value=null` and says why; the
+         *     client renders an em dash. Nothing defaults to zero.
+         */
+        get: operations["get_progress_summary_progress_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/progress/notes-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notes Timeline
+         * @description Notes created per month, grouped in SQL.
+         */
+        get: operations["get_notes_timeline_progress_notes_timeline_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6934,6 +7008,10 @@ export interface components {
             content_type: string;
             /** Structure Type */
             structure_type?: string | null;
+            /** Extraction Report */
+            extraction_report?: {
+                [key: string]: unknown;
+            } | null;
             /** Word Count */
             word_count: number;
             /** Page Count */
@@ -8522,6 +8600,26 @@ export interface components {
             created_at: string;
         };
         /**
+         * Metric
+         * @description One number, with everything needed to defend it.
+         *
+         *     `value` is None when the metric could not be computed -- no data, or a sample
+         *     too small to mean anything. `basis` then says which, in the same words the UI
+         *     shows the user.
+         */
+        Metric: {
+            /** Value */
+            value: number | null;
+            /** Unit */
+            unit: string;
+            /** Sample Size */
+            sample_size: number;
+            /** Definition */
+            definition: string;
+            /** Basis */
+            basis: string;
+        };
+        /**
          * MetricRow
          * @description One metric across every arm, with the tier that decides whether it counts.
          */
@@ -8592,6 +8690,13 @@ export interface components {
                     [key: string]: string;
                 };
             };
+            /** Resident Budget Gb */
+            resident_budget_gb?: number | null;
+            /**
+             * Resident Set Fits
+             * @default true
+             */
+            resident_set_fits: boolean;
         };
         /** ModelUsageItem */
         ModelUsageItem: {
@@ -8937,6 +9042,26 @@ export interface components {
             /** Title */
             title?: string | null;
         };
+        /** NotesTimelinePoint */
+        NotesTimelinePoint: {
+            /** Month */
+            month: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * NotesTimelineResponse
+         * @description Notes created per month, grouped in SQL.
+         *
+         *     The page used to build this by downloading every note -- bodies included --
+         *     and bucketing them in the browser.
+         */
+        NotesTimelineResponse: {
+            /** Points */
+            points: components["schemas"]["NotesTimelinePoint"][];
+            /** Total Notes */
+            total_notes: number;
+        };
         /** OllamaPullRequest */
         OllamaPullRequest: {
             /** Model */
@@ -8999,6 +9124,25 @@ export interface components {
             metrics: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * ProgressSummaryResponse
+         * @description Every headline number on the Progress page, computed server-side.
+         *
+         *     Named fields rather than a list so the contract is checkable and the frontend
+         *     cannot silently render a metric that was removed.
+         */
+        ProgressSummaryResponse: {
+            retention_30d: components["schemas"]["Metric"];
+            mastery: components["schemas"]["Metric"];
+            mature_cards: components["schemas"]["Metric"];
+            due_today: components["schemas"]["Metric"];
+            current_streak: components["schemas"]["Metric"];
+            longest_streak: components["schemas"]["Metric"];
+            reviews_30d: components["schemas"]["Metric"];
+            gaps_closed: components["schemas"]["Metric"];
+            documents: components["schemas"]["Metric"];
+            notes: components["schemas"]["Metric"];
         };
         /** PurgeJunkResponse */
         PurgeJunkResponse: {
@@ -9208,6 +9352,39 @@ export interface components {
             cards_indexed: number;
             /** Orphan Rows Removed */
             orphan_rows_removed: number;
+        };
+        /**
+         * ReparseRequest
+         * @description `confirm=False` reports what a re-import would cost and changes nothing.
+         */
+        ReparseRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+        };
+        /** ReparseResponse */
+        ReparseResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Status */
+            status: string;
+            /** Source */
+            source: string;
+            /** Anchored */
+            anchored: {
+                [key: string]: number;
+            };
+            /**
+             * Cleared
+             * @default {}
+             */
+            cleared: {
+                [key: string]: number;
+            };
+            /** Detail */
+            detail: string;
         };
         /** RetrievalSettingsPatch */
         RetrievalSettingsPatch: {
@@ -10211,6 +10388,12 @@ export interface components {
         UrlIngestRequest: {
             /** Url */
             url: string;
+            /** Rendered Html */
+            rendered_html?: string | null;
+            /** Render State */
+            render_state?: string | null;
+            /** Render Detail */
+            render_detail?: string | null;
         };
         /** ValidateResponse */
         ValidateResponse: {
@@ -12959,6 +13142,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reparse_document_documents__document_id__reparse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReparseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReparseResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16383,6 +16601,9 @@ export interface operations {
                 group?: string | null;
                 tag?: string | null;
                 collection_id?: string | null;
+                page?: number;
+                /** @description Omit for the full list (the historical behaviour every caller relies on). Declared because FastAPI drops unknown query params silently, so a caller that passed page_size used to believe it had paginated when it had not. */
+                page_size?: number | null;
             };
             header?: never;
             path?: never;
@@ -17414,6 +17635,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["app__routers__pomodoro__SessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_progress_summary_progress_summary_get: {
+        parameters: {
+            query?: {
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). Buckets use the user's local date so a session at 11pm does not roll into tomorrow. */
+                tz_offset_minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notes_timeline_progress_notes_timeline_get: {
+        parameters: {
+            query?: {
+                months?: number;
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). Buckets use the user's local date so a session at 11pm does not roll into tomorrow. */
+                tz_offset_minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesTimelineResponse"];
                 };
             };
             /** @description Validation Error */

@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -345,6 +345,9 @@ interface ReadViewProps {
    *  loaded yet, which fall back to the article profile. */
   contentType?: string | null
   structureType?: string | null
+  /** What the importer captured and what it could not. Undefined means fidelity
+   *  was never measured for this document, which is not the same as clean. */
+  extractionReport?: ExtractionReport | null
 }
 
 export function ReadView({
@@ -354,6 +357,7 @@ export function ReadView({
   highlightsVisible = true,
   contentType,
   structureType,
+  extractionReport,
 }: ReadViewProps) {
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
@@ -607,12 +611,15 @@ export function ReadView({
             ["--reader-leading" as string]: spec.lineHeight,
           }}
         >
+          <ImportFidelityNotice report={extractionReport} documentId={documentId} />
           {degradedCount > 0 && (
-            <p className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-              {degradedCount} of {sections.length} sections were stored before Luminary kept
-              full section text, so their paragraph breaks are approximate. Re-upload this
-              document to read it as written.
-            </p>
+            <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              <p>
+                {degradedCount} of {sections.length} sections were stored before Luminary kept
+                full section text, so their paragraph breaks are approximate.
+              </p>
+              <ReimportAction documentId={documentId} />
+            </div>
           )}
           {sections.slice(0, listLimit).map((section, i) => (
             <LazySection
@@ -634,6 +641,138 @@ export function ReadView({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/** The importer's own account of what it could not capture.
+ *
+ *  A partial import that looks complete is the failure this exists to prevent:
+ *  the reader has no way to know a diagram was dropped, and no original to
+ *  compare against the way a PDF always has. Only `dropped` and `notes` are
+ *  rendered -- a clean import says nothing at all.
+ */
+export interface ExtractionReport {
+  captured?: Record<string, number>
+  dropped?: Record<string, number>
+  notes?: string[]
+  complete?: boolean
+}
+
+function ImportFidelityNotice({
+  report,
+  documentId,
+}: {
+  report?: ExtractionReport | null
+  documentId: string
+}) {
+  if (!report) return null
+  const dropped = Object.entries(report.dropped ?? {}).filter(([, n]) => n > 0)
+  const notes = report.notes ?? []
+  if (dropped.length === 0 && notes.length === 0) return null
+
+  return (
+    <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+      {dropped.length > 0 && (
+        <p>
+          This import is missing{" "}
+          {dropped
+            .map(([kind, n]) => `${n} ${kind}${n === 1 ? "" : "s"}`)
+            .join(" and ")}{" "}
+          the page contained. The text around them came through in full.
+        </p>
+      )}
+      {notes.map((note) => (
+        <p key={note} className={dropped.length > 0 ? "mt-1" : undefined}>
+          {note}
+        </p>
+      ))}
+      <ReimportAction documentId={documentId} />
+    </div>
+  )
+}
+
+interface ReparseResponse {
+  status: string
+  source: string
+  anchored: Record<string, number>
+  detail: string
+}
+
+/** Re-run the importer over this document.
+ *
+ *  Two steps on purpose. The first call only reports what the rebuild would
+ *  strand -- highlights and clips anchored to sections that are about to be
+ *  replaced -- because that is a cost the reader has to agree to, not one to
+ *  discover afterwards.
+ */
+function ReimportAction({ documentId }: { documentId: string }) {
+  const queryClient = useQueryClient()
+  const [preview, setPreview] = useState<ReparseResponse | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const call = async (confirm: boolean) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await apiPost<ReparseResponse>(`/documents/${documentId}/reparse`, { confirm })
+      if (confirm) {
+        setPreview(null)
+        await queryClient.invalidateQueries({ queryKey: ["document", documentId] })
+      } else {
+        setPreview(res)
+      }
+    } catch {
+      setError("Could not start the re-import.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const anchored = Object.entries(preview?.anchored ?? {}).filter(([, n]) => n > 0)
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {!preview ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void call(false)}
+          className="self-start text-xs font-medium text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+        >
+          {busy ? "Checking…" : "Re-import this document"}
+        </button>
+      ) : (
+        <>
+          <p>{preview.detail}</p>
+          {anchored.length > 0 && (
+            <p>
+              Anchored to the current sections:{" "}
+              {anchored.map(([kind, n]) => `${n} ${kind}`).join(", ")}.
+            </p>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void call(true)}
+              className="text-xs font-semibold text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {busy ? "Starting…" : "Re-import now"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreview(null)}
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {error && <p className="text-destructive">{error}</p>}
     </div>
   )
 }

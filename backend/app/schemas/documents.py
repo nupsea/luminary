@@ -92,6 +92,9 @@ class DocumentDetail(BaseModel):
     content_type: str
     # Layout discovered while parsing: book|paper|script|chat.
     structure_type: str | None = None
+    # What the importer captured and what it could not. Null means fidelity was
+    # never measured for this document -- which is not the same as a clean import.
+    extraction_report: dict | None = None
     word_count: int
     page_count: int
     stage: str
@@ -118,6 +121,19 @@ class ChunkItem(BaseModel):
 
 class UrlIngestRequest(BaseModel):
     url: str
+    # Post-JS DOM captured by the desktop shell's hidden webview, when it has
+    # one. Only pages that *compute* their content need it; everything else
+    # imports identically from the static fetch, which is the only path in dev,
+    # Docker and the script installs. Never required.
+    rendered_html: str | None = None
+    # Why the caller did or did not render: "ok" | "unavailable" | "failed".
+    # Logged, never trusted for behaviour -- the presence of rendered_html is
+    # what decides the path.
+    render_state: str | None = None
+    # The shell's own reason when render_state is "failed". Carried because the
+    # desktop shell has no console anyone reads, so this log line is the only
+    # place a rendering failure is visible at all.
+    render_detail: str | None = None
 
 
 class YouTubeIngestRequest(BaseModel):
@@ -234,3 +250,19 @@ class DocumentOverviewResponse(BaseModel):
 
 class AssignCollectionsRequest(BaseModel):
     collection_ids: list[str]
+
+
+class ReparseRequest(BaseModel):
+    """`confirm=False` reports what a re-import would cost and changes nothing."""
+
+    confirm: bool = False
+
+
+class ReparseResponse(BaseModel):
+    document_id: str
+    status: str  # preview | processing
+    source: str  # url | file
+    # Rows that survive the rebuild but whose section/chunk anchors will not resolve.
+    anchored: dict[str, int]
+    cleared: dict[str, int] = {}
+    detail: str

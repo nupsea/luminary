@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup, NavigableString
 
 from app.config import get_settings
 from app.full_extras import require_extra
+from app.services.html_region import region_is_plausible, select_region
+from app.services.html_to_markdown import to_markdown
 from app.types import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,79 @@ _JS_HYDRATION_MARKERS = (
 # unremarkable and must not trigger a warning.
 _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING = 200
 
+# Placeholder tokens for content restored after extraction. Letters and digits
+# only, and long enough that no article writes one by accident: trafilatura
+# normalises punctuation and drops paragraphs that read as bare symbols.
+_MARK_PREFIX = "LUMINARYPROTECTEDBLOCK"
+_MARK_SUFFIX = "ENDPROTECTED"
+
+# An <svg> is content only when it is drawn large in BOTH axes. Markup length is
+# a bad proxy and position alone is not enough: measured across seven real
+# articles, every inline <svg> that passed a 400-character floor was chrome --
+# a 12x6.13 nav chevron whose path data runs to 631 characters, Tailwind `h-5 w-5`
+# icons at 20px, and a 570x64 logo wordmark that is wide but only a strip tall.
+# Requiring both axes rejects the wordmark, which a single-axis rule would keep.
+# Not one of those pages carried a real inline-SVG diagram, so this path stays
+# silent by design rather than reporting furniture as lost figures.
+_SVG_CHROME_ANCESTORS = (*_BOILERPLATE_CONTAINERS, "button", "a", "form", "summary", "details")
+_MIN_SVG_DIMENSION = 200
+
+
+def _svg_dimensions(svg) -> tuple[float, float] | None:
+    """Rendered size from width/height, else the viewBox. None when undeclared."""
+
+    def _num(raw: str | None) -> float | None:
+        if not raw:
+            return None
+        match = re.match(r"\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$", raw)
+        return float(match.group(1)) if match else None
+
+    width, height = _num(svg.get("width")), _num(svg.get("height"))
+    if width and height:
+        return width, height
+    box = (svg.get("viewBox") or "").replace(",", " ").split()
+    if len(box) == 4:
+        try:
+            return abs(float(box[2])), abs(float(box[3]))
+        except ValueError:
+            return None
+    return None
+
+
+def _decoded(response) -> str:
+    """Decode the body by what it is, not by what HTTP defaults to.
+
+    RFC 9110 says a `text/*` response with no `charset` is ISO-8859-1, and
+    requests obeys it -- so a UTF-8 page that omits the parameter comes back with
+    every curly quote, dash and accent mangled. Measured on a real article:
+    a right single quote (U+2019) arrived as the three characters it encodes to
+    under latin-1, and 24 such sequences were stored as the document's text.
+
+    A declared charset is the server's own statement and is trusted. Only when
+    none is declared do we fall back to detection.
+    """
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "charset=" not in content_type:
+        detected = response.apparent_encoding
+        if detected:
+            response.encoding = detected
+    return response.text
+
+
+def _describe_block(markdown: str) -> str:
+    """Name a protected block by what it is, for the report the reader sees."""
+    if markdown.startswith("```"):
+        return "code block"
+    if markdown.startswith("!["):
+        return "diagram"
+    return "formula"
+
+
+def _wrap_tex(tex: str, display: bool) -> str:
+    """TeX as markdown math. Display math takes its own block."""
+    return f"$$\n{tex}\n$$" if display else f"${tex}$"
+
+
 _INLINE_MARKERS = {
     "strong": "**",
     "b": "**",
@@ -65,7 +140,9 @@ class ArticleExtractor:
     Unified article extraction for a high-fidelity reading experience.
     """
 
-    async def extract(self, url: str, doc_id: str | None = None) -> ParsedDocument:
+    async def extract(
+        self, url: str, doc_id: str | None = None, rendered_html: str | None = None
+    ) -> ParsedDocument:
         logger.info("Extracting unified article from URL: %s", url)
 
         require_extra("cloudscraper", "URL article extraction")
@@ -73,13 +150,23 @@ class ArticleExtractor:
         import cloudscraper
         import trafilatura
 
-        html_content = None
+        # HTML the caller already rendered, if any. The desktop shell can load a
+        # page in a hidden webview -- the OS one it already ships -- and hand the
+        # post-JS DOM here. That matters only for pages that *compute* their
+        # content: measured across four JS-heavy articles, rendering changed
+        # nothing on three, and on the fourth it was the difference between 0 and
+        # 78 figures. Everywhere else (dev, Docker, the script installs) this is
+        # None and the static fetch below is the whole story.
+        html_content = rendered_html or None
+        fetch_mode = "webview" if html_content else "static"
+
         # 1. Fetch with Cloudflare bypass
         try:
-            scraper = cloudscraper.create_scraper()
-            response = await asyncio.to_thread(scraper.get, url, timeout=15)
-            if response.status_code == 200:
-                html_content = response.text
+            if html_content is None:
+                scraper = cloudscraper.create_scraper()
+                response = await asyncio.to_thread(scraper.get, url, timeout=15)
+                if response.status_code == 200:
+                    html_content = _decoded(response)
         except Exception as e:
             logger.warning("cloudscraper failed for %s: %s", url, e)
 
@@ -99,14 +186,30 @@ class ArticleExtractor:
 
         # 3. Mirror Images AND Extract Markdown in one pass
         # We let trafilatura handle the extraction first to find the "real" content
-        markdown_text = trafilatura.extract(
-            self._prepare_html(html_content),
+        prepared_html, protected = self._prepare_html(html_content, doc_id)
+        reference = trafilatura.extract(
+            prepared_html,
             url=url,
             output_format="markdown",
             include_links=True,
             include_images=True,
             include_formatting=True,
+            include_tables=True,
+            # Recall over precision. A reading app can survive a stray line of
+            # furniture; it cannot survive losing a section of the article, and
+            # the reader has no original to compare against. Measured across
+            # seven articles: this recovers 502 words on a Next.js page whose
+            # <ol> sections were being pruned from inside <article> (63% -> 100%
+            # of prose), and leaves the other six byte-identical with no
+            # boilerplate pulled in.
+            favor_recall=True,
         )
+
+        # Serialise the article subtree ourselves; fall back to trafilatura's own
+        # output when our region cannot be trusted. It decides content well and
+        # structure badly -- on a custom-element page its pruned tree holds zero
+        # headings, so a page extracted through it reads as one unbroken wall.
+        markdown_text, serializer = self._serialize(prepared_html, reference or "")
 
         if not markdown_text:
             raise ValueError("Could not extract any meaningful content from the article.")
@@ -121,13 +224,29 @@ class ArticleExtractor:
         # src (/foo/bar.png) that must be resolved against the article URL.
         markdown_text = await self._mirror_markdown_images(markdown_text, doc_id, url)
 
-        # 5. Normalize Markdown (The "### Fix")
+        # 5. Measure fidelity BEFORE restoring, then restore. Order is
+        # load-bearing: restoration replaces every token with its content, so a
+        # report taken afterwards finds no tokens and calls a clean import a
+        # total loss. Restore after mirroring, never before -- a fenced block can
+        # legitimately contain an ![alt](url) line the mirror pass would fetch.
+        dropped = self._dropped_blocks(markdown_text, protected)
+        markdown_text = self._restore_protected(markdown_text, protected)
+
+        # 6. Normalize Markdown (The "### Fix")
         markdown_text = self._normalize_markdown(markdown_text)
 
         word_count = len(markdown_text.split())
         warnings = self._detect_uncaptured_visuals(html_content, markdown_text, word_count)
+        report = self._extraction_report(markdown_text, dropped, warnings)
+        # Two independent choices, recorded separately: how the HTML was obtained,
+        # and what turned it into Markdown. Collapsing them into one field makes a
+        # regression in either impossible to attribute.
+        report["fetch"] = fetch_mode
+        report["serializer"] = serializer
         for warning in warnings:
             logger.info("ArticleExtractor notice for %s: %s", url, warning)
+        if report["dropped"]:
+            logger.warning("ArticleExtractor dropped content for %s: %s", url, report["dropped"])
 
         # For Articles, we keep them as one primary "Section" to ensure unified flow in UI
         sections = [Section(heading=title, level=1, text=markdown_text, page_start=0, page_end=0)]
@@ -140,6 +259,7 @@ class ArticleExtractor:
             sections=sections,
             raw_text=markdown_text,
             warnings=warnings,
+            extraction_report=report,
         )
 
     def _detect_uncaptured_visuals(self, html: str, markdown: str, word_count: int) -> list[str]:
@@ -167,12 +287,211 @@ class ArticleExtractor:
             "charts or diagrams may be missing."
         ]
 
-    def _prepare_html(self, html: str) -> str:
-        """Repairs markup that trafilatura's extractor silently drops."""
+    def _prepare_html(self, html: str, doc_id: str) -> tuple[str, dict[str, str]]:
+        """Repairs markup that trafilatura's extractor silently drops.
+
+        Returns the repaired HTML plus a token -> markdown map for content that
+        cannot survive extraction as markup and is restored afterwards. Measured
+        losses that these passes exist to close: code blocks come back with every
+        leading space stripped and no language, inline math takes the words after
+        it with it, figure captions vanish, and an inline <svg> extracts as
+        nothing at all.
+        """
         soup = BeautifulSoup(html, "html.parser")
+        protected: dict[str, str] = {}
+        # Order matters: hydrate first so a lazy <img> inside a <figure> has a
+        # src before the figure is rewritten, and protect <pre> before the
+        # inline pass, which must never reach inside a code block.
         self._hydrate_lazy_images(soup)
+        self._inline_svg_to_img(soup, doc_id, protected)
+        self._promote_figcaptions(soup)
+        self._protect_code_blocks(soup, protected)
+        self._protect_math(soup, protected)
         self._flatten_inline_formatting(soup)
-        return str(soup)
+        return str(soup), protected
+
+    def _serialize(self, prepared_html: str, reference: str) -> tuple[str, str]:
+        """Our Markdown if the region holds up, else the reference extraction.
+
+        Returns the markdown and the name of what produced it, so the extraction
+        report can record which path a document came through instead of leaving
+        the difference invisible.
+        """
+        try:
+            region = select_region(prepared_html)
+            if region_is_plausible(region, reference):
+                mine = to_markdown(region)
+                if len(mine.split()) >= len(reference.split()) * 0.9:
+                    return mine, "region"
+                logger.info("region serialiser under-produced; using reference extraction")
+            else:
+                logger.info("region failed the plausibility check; using reference extraction")
+        except Exception:
+            logger.warning("region serialiser failed; using reference extraction", exc_info=True)
+        return reference, "trafilatura"
+
+    def _token(self, protected: dict[str, str], markdown: str) -> str:
+        """Mint a placeholder trafilatura will carry through as ordinary text.
+
+        Letters and digits only: any punctuation risks being normalised, and a
+        token that reads as a bare symbol invites the boilerplate heuristics to
+        drop the paragraph holding it.
+        """
+        token = f"{_MARK_PREFIX}{len(protected):04d}{_MARK_SUFFIX}"
+        protected[token] = markdown
+        return token
+
+    def _protect_code_blocks(self, soup: BeautifulSoup, protected: dict[str, str]) -> None:
+        """Fence each <pre> verbatim, keeping indentation and language.
+
+        trafilatura strips every leading space inside <pre><code>, which for
+        Python is not a cosmetic loss -- the code stops meaning what it said.
+        """
+        for pre in soup.find_all("pre"):
+            code = pre.find("code")
+            text = (code or pre).get_text()
+            text = text.replace("\r\n", "\n").strip("\n")
+            if not text.strip():
+                continue
+            lang = self._code_language(pre) or self._code_language(code)
+            fence = "```" + (lang or "") + "\n" + text + "\n```"
+            placeholder = soup.new_tag("p")
+            placeholder.string = self._token(protected, fence)
+            pre.replace_with(placeholder)
+
+    @staticmethod
+    def _code_language(tag) -> str | None:
+        """Language from a `language-x` / `lang-x` / bare `x` class, if any."""
+        if tag is None:
+            return None
+        for cls in tag.get("class") or []:
+            for prefix in ("language-", "lang-", "highlight-"):
+                if cls.startswith(prefix) and len(cls) > len(prefix):
+                    return cls[len(prefix) :]
+        return None
+
+    def _protect_math(self, soup: BeautifulSoup, protected: dict[str, str]) -> None:
+        """Keep the TeX, and the sentence it sits in.
+
+        A rendered KaTeX span is a tree of presentational elements; trafilatura
+        drops it and takes the rest of the text node with it, so `Loss <math>
+        here.` extracted as `Loss`. The formula is replaced inline by a token so
+        the surrounding prose is never orphaned.
+        """
+        for script in soup.find_all("script", attrs={"type": re.compile(r"math/tex")}):
+            tex = script.get_text().strip()
+            display = "mode=display" in (script.get("type") or "")
+            if tex:
+                script.replace_with(
+                    NavigableString(self._token(protected, _wrap_tex(tex, display)))
+                )
+
+        for node in soup.select(".katex, mjx-container"):
+            annotation = node.find("annotation", attrs={"encoding": "application/x-tex"})
+            tex = annotation.get_text().strip() if annotation else ""
+            if not tex:
+                continue
+            classes = node.get("class") or []
+            display = "katex-display" in classes or node.get("display") == "true"
+            node.replace_with(NavigableString(self._token(protected, _wrap_tex(tex, display))))
+
+    def _promote_figcaptions(self, soup: BeautifulSoup) -> None:
+        """Lift <figcaption> out of its <figure> so it survives as prose.
+
+        trafilatura emits the image and drops the caption, which in a technical
+        article is where the figure is actually explained.
+        """
+        for figure in soup.find_all("figure"):
+            caption = figure.find("figcaption")
+            if caption is None:
+                continue
+            text = caption.get_text(" ", strip=True)
+            caption.extract()
+            if not text:
+                continue
+            para = soup.new_tag("p")
+            para.append(soup.new_string(text))
+            figure.insert_after(para)
+
+    def _inline_svg_to_img(
+        self, soup: BeautifulSoup, doc_id: str, protected: dict[str, str]
+    ) -> None:
+        """Mirror inline <svg> to the document's image dir and link it.
+
+        An inline <svg> extracts as nothing whatsoever -- not the graphic, not a
+        placeholder -- so architecture diagrams disappear without trace. Writing
+        it out turns it into an ordinary image the rest of the pipeline handles.
+        """
+        svgs = soup.find_all("svg")
+        if not svgs:
+            return
+        images_dir = Path(get_settings().DATA_DIR).expanduser() / "images" / doc_id
+        for svg in svgs:
+            if any(p.name in _SVG_CHROME_ANCESTORS for p in svg.parents):
+                continue
+            size = _svg_dimensions(svg)
+            if size is None or min(size) < _MIN_SVG_DIMENSION:
+                continue
+            markup = str(svg)
+            name = hashlib.md5(markup.encode(), usedforsecurity=False).hexdigest() + ".svg"
+            try:
+                images_dir.mkdir(parents=True, exist_ok=True)
+                (images_dir / name).write_text(markup, encoding="utf-8")
+            except OSError as exc:
+                logger.warning("Could not mirror inline svg for %s: %s", doc_id, exc)
+                continue
+            # A token rather than an <img>: trafilatura validates the src and
+            # drops `__LUMINARY_IMG__/...`, which is a local convention and not a
+            # URL, so the mirrored diagram vanished exactly as the inline svg had.
+            alt = svg.get("aria-label") or "Diagram"
+            placeholder = soup.new_tag("p")
+            placeholder.string = self._token(
+                protected, f"![{alt}](__LUMINARY_IMG__/{doc_id}/{name})"
+            )
+            svg.replace_with(placeholder)
+
+    @staticmethod
+    def _restore_protected(markdown: str, protected: dict[str, str]) -> str:
+        """Put the protected blocks back where their tokens landed."""
+        for token, replacement in protected.items():
+            markdown = markdown.replace(token, replacement)
+        return markdown
+
+    @staticmethod
+    def _dropped_blocks(markdown: str, protected: dict[str, str]) -> list[str]:
+        """Protected blocks whose token never reached the output.
+
+        This is an exact signal, not a heuristic: we know precisely what was set
+        aside, so a token that is absent means extraction discarded the paragraph
+        holding it. Counting raw <img> or <pre> tags in the source instead would
+        charge us for every nav logo and share widget trafilatura correctly
+        removes, and a warning that cries wolf is not a warning.
+        """
+        return [
+            _describe_block(body) for token, body in protected.items() if token not in markdown
+        ]
+
+    def _extraction_report(self, markdown: str, dropped: list[str], notes: list[str]) -> dict:
+        """What arrived, and what did not.
+
+        Persisted with the document so an incomplete import is visible to whoever
+        reads it, rather than a silence the reader has no way to interpret.
+        `dropped` must be measured before restoration -- see the call site.
+        """
+        counts: dict[str, int] = {}
+        for kind in dropped:
+            counts[kind] = counts.get(kind, 0) + 1
+        return {
+            "captured": {
+                "code_blocks": markdown.count("```") // 2,
+                "images": len(re.findall(r"!\[[^\]]*\]\(", markdown)),
+                "tables": len(re.findall(r"^\|[-\s|:]+\|$", markdown, flags=re.M)),
+                "math": len(re.findall(r"\$[^$\n]+\$", markdown)),
+            },
+            "dropped": counts,
+            "notes": notes,
+            "complete": not counts and not notes,
+        }
 
     def _hydrate_lazy_images(self, soup: BeautifulSoup) -> None:
         """

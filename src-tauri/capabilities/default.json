@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The boot screen listens for progress events and calls the shell's own commands. Opening the browser and Finder is done from Rust, so no window is granted the ability to open arbitrary URLs.",
-  "windows": ["main"],
-  "permissions": ["core:default", "core:event:default"]
+  "description": "What the bundled boot page may do: listen for progress events and call the shell's own boot commands. Local origins only -- the SPA the backend serves over loopback is a remote origin and is granted separately, at runtime, for the one port it is actually on (see `grant_spa_render` in main.rs). Opening the browser and Finder is done from Rust, so no window is granted the ability to open arbitrary URLs. `render_page` is deliberately absent: the boot page has no use for it.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "allow-boot-state",
+    "allow-diagnostics",
+    "allow-report-issue",
+    "allow-retry-boot",
+    "allow-reveal-log"
+  ]
 }

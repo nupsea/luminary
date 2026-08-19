@@ -8,14 +8,21 @@ PAD = "padding sentence for extractor density. " * 20
 
 
 def _extract(html: str) -> str:
+    """The real pipeline: prepare, extract, then restore protected blocks."""
     extractor = ArticleExtractor()
-    return trafilatura.extract(
-        extractor._prepare_html(html),
+    prepared, protected = extractor._prepare_html(html, "testdoc")
+    markdown = trafilatura.extract(
+        prepared,
         output_format="markdown",
         include_links=True,
         include_images=True,
         include_formatting=True,
     )
+    return extractor._restore_protected(markdown or "", protected)
+
+
+def _prepared(html: str) -> str:
+    return ArticleExtractor()._prepare_html(html, "testdoc")[0]
 
 
 def _wrap(body: str) -> str:
@@ -80,17 +87,17 @@ class TestAnchorFlatteningScope:
     def test_anchors_in_prose_stay_real_links(self):
         """Flattened anchors are invisible to trafilatura's link-density heuristic."""
         html = _wrap('<p>See <a href="https://test.dev">the docs</a> for detail.</p>')
-        prepared = ArticleExtractor()._prepare_html(html)
+        prepared = _prepared(html)
         assert '<a href="https://test.dev">the docs</a>' in prepared
 
     def test_anchors_in_navigation_lists_are_untouched(self):
         html = _wrap('<nav><ul><li><a href="/home">Home</a></li></ul></nav>')
-        prepared = ArticleExtractor()._prepare_html(html)
+        prepared = _prepared(html)
         assert '<a href="/home">Home</a>' in prepared
 
     def test_anchors_in_content_list_items_are_flattened(self):
         html = _wrap('<ul><li><a href="https://test.dev">Planner</a> writes intent.</li></ul>')
-        prepared = ArticleExtractor()._prepare_html(html)
+        prepared = _prepared(html)
         assert "[Planner](https://test.dev)" in prepared
 
 
@@ -102,11 +109,12 @@ class TestInlineFormatting:
         )
         assert "Uses **fast** *slow* [policy](https://t.dev) here." in _extract(html)
 
-    def test_code_inside_pre_is_not_double_wrapped(self):
+    def test_a_pre_block_becomes_a_fence_not_inline_code(self):
+        """A code block is a block. Collapsing it to inline code was the defect."""
         html = _wrap("<pre><code>value = compute(1)</code></pre>")
         extracted = _extract(html)
-        assert "`value = compute(1)`" in extracted
-        assert "``" not in extracted
+        assert "```" in extracted
+        assert "value = compute(1)" in extracted
 
 
 class TestUncapturedVisualDetection:
@@ -151,3 +159,145 @@ class TestBestSrcsetUrl:
     )
     def test_picks_highest_width(self, srcset, expected):
         assert ArticleExtractor._best_srcset_url(srcset) == expected
+
+
+class TestImportFidelity:
+    """Each case below was a measured, silent loss before these passes existed.
+
+    trafilatura is a boilerplate remover, not a fidelity-preserving converter: it
+    normalises the text it keeps. Everything here is content a technical article
+    carries its meaning in, so losing it quietly is worse than failing loudly.
+    """
+
+    def test_code_keeps_its_indentation(self):
+        """Python without indentation is not ugly, it is a different program."""
+        html = _wrap(
+            '<pre><code class="language-python">class Value:\n'
+            "    def __init__(self, data):\n"
+            "        self.data = data\n"
+            "</code></pre>"
+        )
+        extracted = _extract(html)
+        assert "    def __init__(self, data):" in extracted
+        assert "        self.data = data" in extracted
+
+    def test_code_carries_its_language(self):
+        html = _wrap('<pre><code class="language-python">x = 1</code></pre>')
+        assert "```python" in _extract(html)
+
+    def test_inline_math_keeps_the_sentence_around_it(self):
+        """The formula mattered; the words after it mattered more.
+
+        A rendered KaTeX span used to take the rest of its text node with it, so
+        `Loss <math> here.` extracted as `Loss`.
+        """
+        html = _wrap(
+            '<p>Loss <span class="katex"><span class="katex-mathml"><math><semantics>'
+            '<annotation encoding="application/x-tex">L=\\sum_i y_i</annotation>'
+            "</semantics></math></span></span> here.</p>"
+        )
+        extracted = _extract(html)
+        assert "$L=\\sum_i y_i$" in extracted
+        assert "here." in extracted
+
+    def test_figure_caption_survives(self):
+        html = _wrap(
+            '<figure><img src="/d.png" alt="Arch">'
+            "<figcaption>Figure 1: The pipeline</figcaption></figure>"
+        )
+        extracted = _extract(html)
+        assert "Figure 1: The pipeline" in extracted
+        assert "![Arch](/d.png)" in extracted
+
+    def test_inline_svg_diagram_is_mirrored_and_referenced(self, tmp_path, monkeypatch):
+        """An inline <svg> used to extract as nothing at all -- no graphic, no mark."""
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        svg = '<svg width="600" height="400" aria-label="Architecture">' + (
+            '<rect x="1" y="2" width="30" height="40"/>' * 20
+        ) + "</svg>"
+        extracted = _extract(_wrap(f"<figure>{svg}<figcaption>Figure 2</figcaption></figure>"))
+        get_settings.cache_clear()
+        assert "__LUMINARY_IMG__/testdoc/" in extracted
+        assert ".svg)" in extracted
+        assert "Figure 2" in extracted
+        assert list((tmp_path / "images" / "testdoc").glob("*.svg"))
+
+    def test_a_large_svg_in_page_furniture_is_still_chrome(self, tmp_path, monkeypatch):
+        """Position decides, not size. This is the case that set the rule.
+
+        On a real article the site logo inside <a> is 2,425 characters and a nav
+        button icon 631, so a size floor alone reported nine pieces of chrome as
+        lost diagrams -- a warning that cries wolf is worse than none.
+        """
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        big = '<svg width="40" height="40">' + ('<path d="M0 0L1 1"/>' * 120) + "</svg>"
+        html = _wrap(f'<footer><ul><li><a href="/x">{big}</a></li></ul></footer>')
+        extracted = _extract(html)
+        get_settings.cache_clear()
+        assert len(big) > 400, "the guard must be tested above the size floor"
+        assert "__LUMINARY_IMG__" not in extracted
+        assert not (tmp_path / "images" / "testdoc").exists()
+
+    def test_a_small_svg_icon_is_left_as_chrome(self, tmp_path, monkeypatch):
+        """The other bracket: a glyph in prose is below the size floor."""
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        html = _wrap('<p>Next <svg width="8" height="8"><path d="M0 0"/></svg> item.</p>')
+        extracted = _extract(html)
+        get_settings.cache_clear()
+        assert "__LUMINARY_IMG__" not in extracted
+        assert not (tmp_path / "images" / "testdoc").exists()
+
+    def test_tables_still_survive(self):
+        """Guarding what already worked, so a future pass cannot quietly break it."""
+        html = _wrap(
+            "<table><thead><tr><th>Model</th><th>Score</th></tr></thead>"
+            "<tbody><tr><td>A</td><td>0.91</td></tr></tbody></table>"
+        )
+        extracted = _extract(html)
+        assert "| Model | Score |" in extracted
+        assert "| A | 0.91 |" in extracted
+
+
+class TestExtractionReport:
+    """The report is a measurement, and a measurement that cannot be wrong is not one.
+
+    The first version of `_extraction_report` ran after restoration, when every
+    token has already been replaced by its content -- so it found no tokens and
+    called a perfectly clean import a total loss. Both directions are pinned here.
+    """
+
+    def test_a_clean_import_reports_nothing_dropped(self):
+        extractor = ArticleExtractor()
+        markdown = "Prose LUMINARYPROTECTEDBLOCK0000ENDPROTECTED more prose."
+        protected = {"LUMINARYPROTECTEDBLOCK0000ENDPROTECTED": "```py\nx = 1\n```"}
+        dropped = extractor._dropped_blocks(markdown, protected)
+        report = extractor._extraction_report(markdown, dropped, [])
+        assert report["dropped"] == {}
+        assert report["complete"] is True
+
+    def test_a_token_that_never_arrived_is_reported(self):
+        extractor = ArticleExtractor()
+        markdown = "Prose with no tokens at all."
+        protected = {
+            "LUMINARYPROTECTEDBLOCK0000ENDPROTECTED": "```py\nx = 1\n```",
+            "LUMINARYPROTECTEDBLOCK0001ENDPROTECTED": "![Diagram](__LUMINARY_IMG__/d/a.svg)",
+        }
+        dropped = extractor._dropped_blocks(markdown, protected)
+        report = extractor._extraction_report(markdown, dropped, [])
+        assert report["dropped"] == {"code block": 1, "diagram": 1}
+        assert report["complete"] is False
+
+    def test_notes_alone_make_an_import_incomplete(self):
+        extractor = ArticleExtractor()
+        report = extractor._extraction_report("Prose.", [], ["figures drawn by JavaScript"])
+        assert report["dropped"] == {}
+        assert report["complete"] is False

@@ -17,7 +17,8 @@ import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
-import { LUMINARY_MODE } from "@/lib/surfaceManifest"
+import { LUMINARY_MODE, isSurfaceVisible } from "@/lib/surfaceManifest"
+
 import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
@@ -42,6 +43,10 @@ import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
+
+// The Feynman dialog talks to the `feynman` router, which only full mode mounts.
+// Gated on content type alone, the button shipped in public builds and answered 404.
+const FEYNMAN_VISIBLE = isSurfaceVisible("feynman")
 
 // Error Boundary
 
@@ -824,7 +829,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           searchSnippet={searchSnippetMap.get(section.id)}
           progressPct={progressBySectionId.get(section.id)}
           annotations={annotationsBySection.get(section.id) ?? []}
-          feynmanEnabled={doc.content_type === "tech_book" || doc.content_type === "tech_article"}
+          feynmanEnabled={FEYNMAN_VISIBLE && (doc.content_type === "tech_book" || doc.content_type === "tech_article")}
           isActive={activeSectionId === section.id}
           lastPracticedAt={lastPracticedBySection?.get(section.id)}
           childCount={sectionTree.descendantCount.get(section.id) ?? 0}
@@ -1249,6 +1254,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 highlightsVisible={highlightsVisible}
                 contentType={doc.content_type}
                 structureType={doc.structure_type}
+                extractionReport={doc.extraction_report}
               />
             )}
           </div>

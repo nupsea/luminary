@@ -21,6 +21,7 @@ from app.workflows.ingestion_nodes._shared import (
     _classify,
     _parser,
     _persist_content_type,
+    _persist_extraction_report,
     _persist_is_technical,
     _persist_structure_type,
     _update_stage,
@@ -60,6 +61,10 @@ async def parse_node(state: IngestionState) -> IngestionState:
             # whenever content_type was user-supplied.
             if parsed.structure_type:
                 await _persist_structure_type(state["document_id"], parsed.structure_type)
+            if parsed.extraction_report is not None:
+                await _persist_extraction_report(
+                    state["document_id"], parsed.extraction_report
+                )
             return {
                 **state,
                 "parsed_document": {
