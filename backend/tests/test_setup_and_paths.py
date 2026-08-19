@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import components as components_module
-from app.services.components import CATALOGUE, get_component, resolve_tool, tool_bin_dir
+from app.services.components import catalogue, get_component, resolve_tool, tool_bin_dir
 from app.services.startup_status import StartupStatus
 
 # --- paths -----------------------------------------------------------------
@@ -322,8 +322,8 @@ def test_retry_reruns_only_failed_phases(monkeypatch):
 
 
 def test_catalogue_entries_are_complete():
-    assert CATALOGUE, "the catalogue is the single source of truth for model names"
-    for comp in CATALOGUE:
+    assert catalogue(), "nothing is offered for install at all"
+    for comp in catalogue():
         assert comp.label and comp.description
         assert comp.size_bytes > 0, f"{comp.id} needs a size so the UI can warn before downloading"
         assert comp.licence, f"{comp.id} must declare a licence before it can be offered"
@@ -332,7 +332,7 @@ def test_catalogue_entries_are_complete():
 
 def test_copyleft_components_are_not_shipped():
     """Luminary is Apache-2.0, so GPL pieces may only ever be fetched on request."""
-    for comp in CATALOGUE:
+    for comp in catalogue():
         if "GPL" in comp.licence.upper():
             assert "not distributed" in comp.licence.lower(), (
                 f"{comp.id} is copyleft and must be marked as fetched at runtime"
@@ -380,25 +380,67 @@ def test_transcription_is_kept_out_of_the_bundle_dependency_set():
 
 
 @pytest.mark.parametrize(
-    "reported,expected",
+    "reported,installs",
     [
         # What settings hold.
-        ("ollama/qwen2.5vl:7b", "vision_model"),
+        ("ollama/qwen2.5vl:7b", "qwen2.5vl:7b"),
         # What the catalogue holds.
-        ("qwen2.5vl:7b", "vision_model"),
+        ("qwen2.5vl:7b", "qwen2.5vl:7b"),
         # What Ollama echoes back in the error -- it drops the tag.
-        ("qwen2.5vl", "vision_model"),
+        ("qwen2.5vl", "qwen2.5vl:7b"),
         # Not ours to install.
         ("gpt-4o", None),
         ("", None),
     ],
 )
-def test_a_model_name_resolves_to_the_component_that_installs_it(reported, expected):
-    """The name arrives three ways: with a provider prefix, with a tag, neither."""
-    from app.services.components import component_for_model
+def test_a_model_name_resolves_to_the_component_that_installs_it(reported, installs):
+    """Followed through the id, because the id is what the install path uses.
+
+    `install_component` and `remove_component` both re-look-up by id and act on
+    the `ref` they find there, so a component carrying one model's ref under
+    another's id names one model and installs another. Asserting the id alone
+    could not see that, and did not: it stayed green while the setup screen
+    reported `qwen2.5vl:7b` missing and its install button pulled the generalist,
+    after which the requeued job was skipped again for the same missing model.
+    """
+    from app.services.components import component_for_model, get_component
 
     comp = component_for_model(reported)
-    assert (comp.id if comp else None) == expected
+    if installs is None:
+        assert comp is None
+        return
+
+    assert comp is not None and comp.ref == installs
+    resolved = get_component(comp.id)
+    assert resolved is not None, f"{comp.id!r} is not installable"
+    assert resolved.ref == installs, (
+        f"component {comp.id!r} names {comp.ref!r} but installs {resolved.ref!r}"
+    )
+
+
+def test_every_registry_model_is_installable_under_the_id_it_reports():
+    """Over the whole registry, because which models the catalogue holds is a
+    property of the host.
+
+    Two of these are the catalogue's current picks on any given machine and
+    resolve trivially; the rest take the fallback, which is where the id and the
+    ref came apart. Pinning the case to one model name meant the test exercised
+    whichever path that machine happened to take -- green on a dev box whose
+    catalogue held the model, blind to the defect everywhere else.
+    """
+    from app.model_registry import REGISTRY
+    from app.services.components import component_for_model, get_component
+
+    for model_id in REGISTRY:
+        bare = model_id.split("/", 1)[-1]
+        comp = component_for_model(bare)
+        assert comp is not None, f"{bare} is in the registry but nothing installs it"
+        assert comp.ref == bare, f"asked for {bare}, got a component for {comp.ref}"
+        resolved = get_component(comp.id)
+        assert resolved is not None and resolved.ref == bare, (
+            f"{bare} is reported as component {comp.id!r}, which installs "
+            f"{resolved.ref if resolved else None!r}"
+        )
 
 
 @pytest.mark.parametrize("shape", ["bare", "tagged", "prefixed"])

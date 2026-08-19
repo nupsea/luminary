@@ -90,67 +90,119 @@ def _registry_licence(model_id: str) -> str:
     profile = profile_for(model_id)
     return profile.licence if profile is not None else "See the model's own licence"
 
-CATALOGUE: tuple[Component, ...] = (
-    Component(
-        id="chat_model",
-        label="Chat model",
-        description="Answers questions and generates flashcards, entirely on this machine.",
-        kind="ollama_model",
-        ref=_registry_tag(default_chat_model()),
-        size_bytes=_registry_size(default_chat_model(), 2 * _GB),
-        licence=_registry_licence(default_chat_model()),
-        default=True,
-        enables=("Ask", "Flashcard generation", "Summaries"),
-    ),
-    Component(
-        id="vision_model",
-        label="Vision model",
-        description="Reads figures, diagrams and screenshots inside your documents.",
-        kind="ollama_model",
-        ref=_registry_tag(default_vision_model()),
-        size_bytes=_registry_size(default_vision_model(), 6 * _GB),
-        licence=_registry_licence(default_vision_model()),
-        enables=("Figure captioning", "Diagram understanding"),
-    ),
-    Component(
-        id="transcription",
-        label="Speech to text",
-        description="Transcribes audio and video into searchable, studyable text.",
-        kind="python_extra",
-        ref="faster_whisper",
-        packages=("faster-whisper>=1.2.1",),
-        size_bytes=350 * _MB,
-        # faster-whisper pulls PyAV, whose wheels bundle libx264 and libx265.
-        # Apache-2.0 Luminary cannot ship those, so this is fetched from PyPI
-        # on request instead of travelling inside the installer.
-        licence="GPL-2.0-or-later components (not distributed with Luminary)",
-        enables=("Audio ingestion", "Video ingestion", "YouTube transcription"),
-    ),
-    Component(
-        id="ffmpeg",
-        label="Audio and video support",
-        description="Required to ingest MP4 video and to transcribe YouTube audio.",
-        kind="tool",
-        ref="ffmpeg",
-        size_bytes=80 * _MB,
-        # FFmpeg builds that carry x264/x265 are GPL, which is why this is never
-        # part of the installer and is only ever fetched on request.
-        licence="GPL-2.0-or-later (not distributed with Luminary)",
-        enables=("MP4 ingestion", "YouTube transcription"),
-    ),
-)
 
-_BY_ID = {c.id: c for c in CATALOGUE}
+def catalogue() -> tuple[Component, ...]:
+    """What the user can install, resolved against the registry *now*.
+
+    Built per call rather than held as a module constant. As a constant its two
+    model entries froze `get_settings()` and `host_ram_gb()` at import time, so
+    the catalogue advertised -- and installed -- whatever those read the moment
+    this module was first imported. Both are cached in-process, so it seldom
+    drifted in the app and was correspondingly hard to see; what it did do was
+    let import order decide what the tests measured, and a suite that pins the
+    model knobs in a fixture was still asserting against a catalogue built
+    before the pin.
+    """
+    return (
+        Component(
+            id="chat_model",
+            label="Chat model",
+            description="Answers questions and generates flashcards, entirely on this machine.",
+            kind="ollama_model",
+            ref=_registry_tag(default_chat_model()),
+            size_bytes=_registry_size(default_chat_model(), 2 * _GB),
+            licence=_registry_licence(default_chat_model()),
+            default=True,
+            enables=("Ask", "Flashcard generation", "Summaries"),
+        ),
+        Component(
+            id="vision_model",
+            label="Vision model",
+            description="Reads figures, diagrams and screenshots inside your documents.",
+            kind="ollama_model",
+            ref=_registry_tag(default_vision_model()),
+            size_bytes=_registry_size(default_vision_model(), 6 * _GB),
+            licence=_registry_licence(default_vision_model()),
+            enables=("Figure captioning", "Diagram understanding"),
+        ),
+        Component(
+            id="transcription",
+            label="Speech to text",
+            description="Transcribes audio and video into searchable, studyable text.",
+            kind="python_extra",
+            ref="faster_whisper",
+            packages=("faster-whisper>=1.2.1",),
+            size_bytes=350 * _MB,
+            # faster-whisper pulls PyAV, whose wheels bundle libx264 and libx265.
+            # Apache-2.0 Luminary cannot ship those, so this is fetched from PyPI
+            # on request instead of travelling inside the installer.
+            licence="GPL-2.0-or-later components (not distributed with Luminary)",
+            enables=("Audio ingestion", "Video ingestion", "YouTube transcription"),
+        ),
+        Component(
+            id="ffmpeg",
+            label="Audio and video support",
+            description="Required to ingest MP4 video and to transcribe YouTube audio.",
+            kind="tool",
+            ref="ffmpeg",
+            size_bytes=80 * _MB,
+            # FFmpeg builds that carry x264/x265 are GPL, which is why this is never
+            # part of the installer and is only ever fetched on request.
+            licence="GPL-2.0-or-later (not distributed with Luminary)",
+            enables=("MP4 ingestion", "YouTube transcription"),
+        ),
+    )
+
+
+# The id a registry model gets when it is not one of the catalogue's current
+# picks. Every install path re-looks-up by id -- `install_component` and
+# `remove_component` both call `get_component(component_id)` and act on the
+# `ref` they find there -- so a synthesized component that borrowed a catalogue
+# id named one model and installed another: the setup screen reported
+# `qwen2.5vl:7b` missing and its install button pulled the generalist, after
+# which `requeue_skipped_jobs()` skipped the job again, forever.
+_MODEL_ID_PREFIX = "model:"
 
 
 def get_component(component_id: str) -> Component | None:
-    return _BY_ID.get(component_id)
+    for comp in catalogue():
+        if comp.id == component_id:
+            return comp
+    if component_id.startswith(_MODEL_ID_PREFIX):
+        return _component_for_registry_model(component_id[len(_MODEL_ID_PREFIX) :])
+    return None
 
 
 def _bare_model_name(model: str) -> str:
     """Strip the LiteLLM provider prefix and a `:latest` tag."""
     name = model.split("/", 1)[-1].strip()
     return name[: -len(":latest")] if name.endswith(":latest") else name
+
+
+def _component_for_registry_model(wanted: str) -> Component | None:
+    """An installable component for a registry model, or None if unknown.
+
+    Built around the model asked for rather than the role's default, because the
+    returned component is what gets pulled. Its id round-trips through
+    `get_component`, which is what makes the component that *names* a model the
+    component that *installs* it.
+    """
+    for model_id, known in REGISTRY.items():
+        bare = _bare_model_name(model_id)
+        if not (wanted == bare or bare.startswith(f"{wanted}:") or wanted.startswith(f"{bare}:")):
+            continue
+        template = get_component("vision_model" if known.multimodal else "chat_model")
+        if template is None:  # unreachable: both ids are catalogue entries
+            return None
+        return replace(
+            template,
+            id=f"{_MODEL_ID_PREFIX}{bare}",
+            ref=bare,
+            size_bytes=known.resident_bytes,
+            licence=known.licence,
+            default=False,
+        )
+    return None
 
 
 def component_for_model(model: str) -> Component | None:
@@ -161,7 +213,7 @@ def component_for_model(model: str) -> Component | None:
     wanted = _bare_model_name(model)
     if not wanted:
         return None
-    for comp in CATALOGUE:
+    for comp in catalogue():
         if comp.kind != "ollama_model":
             continue
         ref = _bare_model_name(comp.ref)
@@ -175,22 +227,7 @@ def component_for_model(model: str) -> Component | None:
     # so on a machine that resolves vision to the generalist, `qwen2.5vl:7b` --
     # which the user may have chosen and Ollama may be complaining about -- matched
     # nothing and the UI offered no way to install it.
-    #
-    # Built around the model that actually failed rather than returning the
-    # role's default, because the returned component is what gets pulled.
-    for model_id, known in REGISTRY.items():
-        bare = _bare_model_name(model_id)
-        if not (wanted == bare or bare.startswith(f"{wanted}:") or wanted.startswith(f"{bare}:")):
-            continue
-        template = _BY_ID["vision_model" if known.multimodal else "chat_model"]
-        return replace(
-            template,
-            ref=bare,
-            size_bytes=known.resident_bytes,
-            licence=known.licence,
-            default=False,
-        )
-    return None
+    return _component_for_registry_model(wanted)
 
 
 def tool_bin_dir() -> Path:
@@ -249,7 +286,7 @@ async def component_status() -> list[dict]:
     installed_models = await _installed_ollama_models()
 
     out = []
-    for comp in CATALOGUE:
+    for comp in catalogue():
         if comp.kind == "ollama_model":
             # Ollama reports tags as "name:tag"; a bare ref means ":latest".
             ref = comp.ref if ":" in comp.ref else f"{comp.ref}:latest"
