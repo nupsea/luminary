@@ -107,6 +107,38 @@ arm pins `document_id` so cross-document routing is unmeasured.
 
 Plan, six stages: `model-and-eval-plan.md`. Delete it when the last stage ships.
 
+### 5. An existing install is never moved to the model its host should run
+
+Changing the default model moves new installs only. There is no path that carries an existing
+one across, and for two of the three install routes the result is that chat stops answering.
+
+`scripts/install.sh` before 2026-08-19 pulled `llama3.2` and never wrote
+`LITELLM_DEFAULT_MODEL`, and the desktop app writes no `.env` at all —
+`supervisor.rs:298` only reads `OLLAMA_NUM_PARALLEL` and `OLLAMA_MAX_LOADED_MODELS` back out.
+Both therefore resolve the host-aware default, which is not the model on disk:
+`warmup.py:125` reports `chat_model: missing`, and `components.py:285` lists catalogue entries
+only, so the setup screen offers a 3.21GB download and never mentions the working 2.88GB model
+the user already has. `bootstrap.sh` wrote the pin, so those installs keep working and are the
+only ones that do.
+
+The primitives exist. `POST /setup/components/model:<ref>/install` installs any registry entry
+with streamed progress, `PATCH /settings/llm {local_chat_model}` switches, and `settings` is a
+key/value table (`models.py:439`), so remembering a dismissal needs no migration. What is
+missing is the comparison — what is in play against what this host would pick, and whether that
+is installed — and one surface for it.
+
+Two constraints decide the design:
+
+- **Frame it as fit, never quality.** `TEXT_PREFERENCE` is ranked on single runs and says so;
+  it ranks a default and does not gate a swap. "This machine can hold a larger model" is
+  measured. "This model is better" is not, and claiming it is the failure
+  `.claude/rules/common/product-integrity.md` exists to prevent.
+- **The download completes before the pin flips.** Switching to a model that is not on disk is
+  what the silent host-aware upgrade did before `_named_by_a_human` gated it, and it fails at
+  the user's first question rather than at the point of choosing.
+
+Removing the superseded model is a separate step, default off, and confirmed.
+
 ## Deferred — decided, not scheduled
 
 Nothing currently deferred.
