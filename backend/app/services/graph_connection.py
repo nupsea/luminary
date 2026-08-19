@@ -15,6 +15,8 @@ from pathlib import Path
 
 import kuzu
 
+from app.exceptions import DependencyUnavailable
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,22 +24,54 @@ class GraphDatabaseLockedError(RuntimeError):
     """Another live process holds the Kuzu write lock."""
 
 
+class GraphDatabaseUnreadableError(DependencyUnavailable):
+    """The graph file exists but Kuzu cannot open it.
+
+    Distinct from a lock, which clears itself. This does not: every request
+    that touches the graph fails identically until the file is replaced.
+    """
+
+
+# Signatures of a graph Kuzu can find but not read, taken from the real failure:
+# "Load table failed: table 0 doesn't exist in catalog". Anything else -- a full
+# disk, a permissions fault -- is not ours to reinterpret and propagates
+# unchanged, so a genuine fault is never disguised as a rebuildable one.
+_UNREADABLE_MARKERS = ("load table failed", "catalog")
+
+
 def _open_database(db_path: str) -> kuzu.Database:
     try:
         return kuzu.Database(db_path)
     except RuntimeError as exc:
-        if "lock" not in str(exc).lower():
-            raise
-        # Kuzu takes an exclusive OS-level file lock, which the kernel drops the moment
-        # the holder dies -- verified against SIGKILL. So this is never a stale lock
-        # from a crash: some process is alive and holding it right now, most likely a
-        # second server or an offline script (`make concepts`). Killing the holder
-        # would interrupt a live write, which is how a graph DB gets corrupted.
-        raise GraphDatabaseLockedError(
-            f"The knowledge graph at {db_path} is locked by another running process. "
-            "Stop the other Luminary server or offline script (e.g. `make concepts`) "
-            "and retry. The lock releases on its own when that process exits."
-        ) from exc
+        message = str(exc).lower()
+
+        if "lock" in message:
+            # Kuzu takes an exclusive OS-level file lock, which the kernel drops the
+            # moment the holder dies -- verified against SIGKILL. So this is never a
+            # stale lock from a crash: some process is alive and holding it right now,
+            # most likely a second server or an offline script (`make concepts`).
+            # Killing the holder would interrupt a live write, which is how a graph DB
+            # gets corrupted.
+            raise GraphDatabaseLockedError(
+                f"The knowledge graph at {db_path} is locked by another running process. "
+                "Stop the other Luminary server or offline script (e.g. `make concepts`) "
+                "and retry. The lock releases on its own when that process exits."
+            ) from exc
+
+        if any(marker in message for marker in _UNREADABLE_MARKERS):
+            # Unlike a lock this never clears, and Kuzu reports it as a bare
+            # RuntimeError, which reached the client as a 500 with a stack trace on
+            # every document in the library. The graph is derived data -- entities and
+            # edges built during ingestion -- so it can be rebuilt; it is never
+            # rebuilt here, because silently recreating the file would discard the
+            # user's extracted graph without telling them it was gone.
+            raise GraphDatabaseUnreadableError(
+                f"The knowledge graph at {db_path} exists but cannot be opened ({exc}). "
+                "It is derived from your documents: move the file aside and re-ingest "
+                "to rebuild it. Nothing else in the library is affected."
+            ) from exc
+
+        raise
 
 
 class ThreadSafeKuzuConnection:
