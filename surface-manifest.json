@@ -142,7 +142,9 @@
         "component": "pages/Progress"
       },
       "backend": {
-        "routers": []
+        "routers": [
+          "progress"
+        ]
       },
       "labels": {
         "en": "Progress"
@@ -201,7 +203,8 @@
       "kind": "feature",
       "frontend": {
         "components": [
-          "components/blog/BlogPublishDialog"
+          "components/blog/BlogPublishDialog",
+          "lib/blogApi"
         ]
       },
       "backend": {
@@ -223,7 +226,8 @@
       "kind": "feature",
       "frontend": {
         "components": [
-          "components/Teachback"
+          "components/Teachback",
+          "components/reader/FeynmanDialog"
         ]
       },
       "backend": {
@@ -374,7 +378,8 @@
       "kind": "feature",
       "frontend": {
         "components": [
-          "components/FocusTimerPill"
+          "components/FocusTimerPill",
+          "lib/focusApi"
         ]
       },
       "backend": {
@@ -397,7 +402,11 @@
       "rail": "dev",
       "frontend": {
         "route": "/quality",
-        "component": "pages/Quality"
+        "component": "pages/Quality",
+        "components": [
+          "components/evals",
+          "lib/modelLabApi"
+        ]
       },
       "backend": {
         "routers": [

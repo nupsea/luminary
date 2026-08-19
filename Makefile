@@ -174,6 +174,7 @@ lint:
 	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	python3 scripts/check_public_surface_calls.py
 	bash scripts/check_powershell.sh
 
 test:
@@ -495,6 +496,7 @@ else
 endif
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	python3 scripts/check_public_surface_calls.py
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit

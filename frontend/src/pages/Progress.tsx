@@ -37,13 +37,8 @@ type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
 type DueCountResponse = components["schemas"]["DueCountResponse"]
 type SessionListResponse = components["schemas"]["SessionListResponse"]
 type MisconceptionStats = components["schemas"]["MisconceptionStatsResponse"]
+type ProgressSummary = components["schemas"]["ProgressSummaryResponse"]
 
-// Local-only: minimal subset of /monitoring/overview consumed by the
-// summary stats bar; the full MonitoringOverview has many more fields.
-interface MonitoringOverview {
-  total_documents: number
-  total_chunks: number
-}
 
 type Note = components["schemas"]["NoteResponse"]
 
@@ -59,8 +54,13 @@ const fetchDueCount = (): Promise<DueCountResponse> =>
 const fetchMisconceptionStats = (): Promise<MisconceptionStats> =>
   apiGet<MisconceptionStats>("/study/misconception-stats")
 
-const fetchOverview = (): Promise<MonitoringOverview> =>
-  apiGet<MonitoringOverview>("/monitoring/overview")
+// /monitoring/overview used to serve the Documents count. `monitoring` is a
+// full-mode surface, so in every shipped build (all of which run
+// LUMINARY_MODE=public) that request 404'd and the card rendered a confident 0.
+const fetchProgressSummary = (): Promise<ProgressSummary> =>
+  apiGet<ProgressSummary>("/progress/summary", {
+    tz_offset_minutes: new Date().getTimezoneOffset(),
+  })
 
 async function fetchDocList(): Promise<DocListItem[]> {
   try {
@@ -395,9 +395,8 @@ export default function Progress() {
   const [gapsLoading, setGapsLoading] = useState(true)
   const [gapsClosed, setGapsClosed] = useState<number>(0)
 
-  const [overviewLoading, setOverviewLoading] = useState(true)
-  const [overviewError, setOverviewError] = useState(false)
-  const [overview, setOverview] = useState<MonitoringOverview | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(true)
+  const [summary, setSummary] = useState<ProgressSummary | null>(null)
 
   const [notesLoading, setNotesLoading] = useState(true)
   const [notesError, setNotesError] = useState(false)
@@ -453,19 +452,16 @@ export default function Progress() {
         if (!cancelled) setGapsLoading(false)
       })
 
-    fetchOverview()
+    fetchProgressSummary()
       .then((d) => {
         if (!cancelled) {
-          setOverview(d)
-          setOverviewLoading(false)
+          setSummary(d)
+          setSummaryLoading(false)
         }
       })
       .catch((e: unknown) => {
-        logger.warn("[Progress] monitoring/overview failed", e)
-        if (!cancelled) {
-          setOverviewLoading(false)
-          setOverviewError(true)
-        }
+        logger.warn("[Progress] progress/summary failed", e)
+        if (!cancelled) setSummaryLoading(false)
       })
 
     fetchRecentNotes()
@@ -534,7 +530,6 @@ export default function Progress() {
 
   // Suppress unused variable warning for error states shown inline
   void notesError
-  void overviewError
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8">
@@ -619,9 +614,9 @@ export default function Progress() {
           />
           <StatCard
             label="Documents"
-            value={overview?.total_documents ?? 0}
+            value={summary?.documents.value ?? "—"}
             icon={BookOpen}
-            loading={overviewLoading}
+            loading={summaryLoading}
             accent="emerald"
           />
           <StatCard
