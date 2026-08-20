@@ -199,6 +199,13 @@ yet describe them.
 - `md`, `epub`, `docx` and `txt` have **no post-`body`-column documents**, so those paths are
   unmeasured rather than known good. Ingest one of each and compare stored `body` against source
   before changing anything.
+- **A parent section can store its descendants' text as well as its own.** Measured: on one
+  1,017-section manual the top section holds 5,063,040 characters, and 60 of 60 sampled
+  sections have their opening text inside it; `SysDesign_2024_Blue` puts 55% of its document in
+  one section with 26 of 40 contained. `DDIA` shows 0 of 40, so this is not every document and
+  not every parser path. The reader now bounds what it fetches, so the symptom is gone, but the
+  duplicated text is still stored and still costs the section it was copied from. Find the path
+  that assigns a parent its children's span before changing the reader further.
 - **Audio documents are retrievable and unreadable.** Measured on the four `wav` documents in
   one library: each is `stage=complete` with its whole transcript in chunks (2,948 to 15,301
   words, 28,991 in total), and each has **zero sections**, so `GET /sections/{id}/content`

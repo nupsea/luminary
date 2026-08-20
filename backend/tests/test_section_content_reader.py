@@ -96,7 +96,7 @@ async def test_content_endpoint_exposes_page_range_and_sanitises(test_db):
         resp = await client.get(f"/sections/{doc_id}/content")
 
     assert resp.status_code == 200
-    item = resp.json()[0]
+    item = resp.json()["items"][0]
     assert item["page_start"] == 3
     assert item["page_end"] == 4
     assert "trailing prose\n\n-" in item["content"]
@@ -150,7 +150,7 @@ async def _content(doc_id: str) -> dict:
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/sections/{doc_id}/content")
     assert resp.status_code == 200
-    return resp.json()[0]
+    return resp.json()["items"][0]
 
 
 @pytest.mark.asyncio
@@ -227,4 +227,107 @@ async def test_document_detail_caps_preview_but_reader_stays_uncapped(test_db):
 
     assert len(detail.json()["sections"][0]["preview"]) == WIRE_PREVIEW_CHARS
     # Reading text is untouched by the cap (I-29).
-    assert content.json()[0]["content"] == long_text
+    assert content.json()["items"][0]["content"] == long_text
+
+
+async def _seed_sections(factory, doc_id: str, bodies: list[str]) -> list[str]:
+    ids = []
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Manual",
+                format="pdf",
+                content_type="tech_book",
+                word_count=10,
+                page_count=5,
+                file_path="/tmp/m.pdf",
+                stage="complete",
+            )
+        )
+        for i, body in enumerate(bodies):
+            sid = str(uuid.uuid4())
+            ids.append(sid)
+            session.add(
+                SectionModel(
+                    id=sid,
+                    document_id=doc_id,
+                    heading=f"S{i}",
+                    level=1,
+                    page_start=i,
+                    page_end=i,
+                    section_order=i,
+                    body=body,
+                )
+            )
+        await session.commit()
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_the_window_is_bounded_and_says_how_much_it_left(test_db):
+    """Unbounded, this returned 20.2 MB over 1,017 sections on one manual.
+
+    Enough for a browser to report the page as unresponsive, which is how it
+    was found.
+    """
+    factory = test_db
+    doc_id = str(uuid.uuid4())
+    await _seed_sections(factory, doc_id, [f"body {i}" for i in range(10)])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        page = (await client.get(f"/sections/{doc_id}/content?offset=2&limit=3")).json()
+
+    assert [i["heading"] for i in page["items"]] == ["S2", "S3", "S4"]
+    assert page["total"] == 10, "total counts the document, not the window"
+    assert page["offset"] == 2
+    assert page["limit"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_huge_section_is_shortened_but_never_silently(test_db):
+    """A bound on the output is only honest when the rest stays reachable.
+
+    One section of the manual holds 5,063,040 characters, so the list cannot
+    carry it. `content_chars` is the length of the whole section, which is what
+    tells a client the text is shortened rather than short.
+    """
+    factory = test_db
+    doc_id = str(uuid.uuid4())
+    huge = "x" * 90_000
+    ids = await _seed_sections(factory, doc_id, [huge, "short one"])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        page = (await client.get(f"/sections/{doc_id}/content")).json()
+        whole = (await client.get(f"/sections/{doc_id}/content/{ids[0]}")).json()
+
+    big, small = page["items"]
+    assert big["truncated"] is True
+    assert big["content_chars"] == 90_000, "the full length, not the served length"
+    assert len(big["content"]) < 90_000
+
+    assert small["truncated"] is False
+    assert small["content_chars"] == len("short one")
+
+    # The other half of the bargain: the whole section is one call away.
+    assert whole["truncated"] is False
+    assert len(whole["content"]) == 90_000
+
+
+@pytest.mark.asyncio
+async def test_content_is_not_read_as_a_document_id(test_db):
+    """`content/{section_id}` is declared above the windowed route."""
+    factory = test_db
+    doc_id = str(uuid.uuid4())
+    ids = await _seed_sections(factory, doc_id, ["only body"])
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        ok = await client.get(f"/sections/{doc_id}/content/{ids[0]}")
+        missing = await client.get(f"/sections/{doc_id}/content/{uuid.uuid4()}")
+
+    assert ok.status_code == 200
+    assert ok.json()["heading"] == "S0"
+    assert missing.status_code == 404

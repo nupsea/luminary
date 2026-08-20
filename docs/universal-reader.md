@@ -186,11 +186,30 @@ immediately.
 
 ## Section window
 
-`listLimit` bounds how many sections are in the DOM and extends by 200 when its
-tail scrolls into view. It replaced a "Load next 500 sections" button: the
-window exists to bound the DOM, which is not the reader's problem, and a book
-that stops until you press something is the thing this reader is meant not to
-be.
+The reader is bounded on two axes, because a document can be long in two ways.
+
+| Call | Returns | Bound |
+|---|---|---|
+| `GET /sections/{id}` | every heading, no bodies | none — 253 KB for 1,017 sections |
+| `GET /sections/{id}/content?offset&limit` | a window of bodies | `limit` ≤ 200, default 40; each body ≤ 60,000 chars |
+| `GET /sections/{id}/content/{section_id}` | one section entire | none |
+
+The contents panel reads the first, the body reads the second, and the third is
+what keeps the second honest. Unbounded, the content call returned every
+section's full body: **20.2 MB over 1,017 sections** on a 2.9M-word manual, one
+section of which holds 5,063,040 characters because its parent stores its
+descendants' text as well as its own. A window of 40 is 300 KB — 1.5% of it.
+
+**A shortened body says so.** `content_chars` is the length of the whole
+section and `truncated` marks it, so a client can tell a short section from a
+shortened one, and `LazySection` offers the rest rather than showing less than
+the document without saying so. Bounding the output alone would be the mistake
+`product-integrity.md` names; the bound is on the call, and the text stays
+reachable.
+
+`listLimit` bounds how many sections are in the DOM and extends by `SECTION_PAGE`
+when its tail scrolls into view — the same number the fetch asks for, so the
+window on screen and the window on the wire cannot drift.
 
 Full virtualization was rejected. `LazySection` already defers markdown
 rendering until a section is near the viewport, so the remaining cost of an

@@ -4535,6 +4535,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sections/{document_id}/content/{section_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get One Section Content
+         * @description One section with its text entire, however long it is.
+         *
+         *     Declared above the windowed route so `content/{section_id}` is not matched by
+         *     it, and it is what keeps the bound on that route honest: text over the inline
+         *     limit is a second call away, never lost.
+         */
+        get: operations["get_one_section_content_sections__document_id__content__section_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sections/{document_id}/content": {
         parameters: {
             query?: never;
@@ -4544,7 +4568,13 @@ export interface paths {
         };
         /**
          * Get Section Content
-         * @description Return all sections with full text assembled from their chunks.
+         * @description A window of sections, each with its text.
+         *
+         *     Bounded on two axes because a reader renders neither all of a long
+         *     document's sections nor all of one huge section at once: `limit` bounds how
+         *     many sections come back, and `_INLINE_CONTENT_LIMIT` bounds each one. Text
+         *     over that limit is not dropped -- the item says so and names its full
+         *     length, and the whole section is one call away.
          */
         get: operations["get_section_content_sections__document_id__content_get"];
         put?: never;
@@ -9722,6 +9752,35 @@ export interface components {
              * @enum {string}
              */
             content_source: "body" | "preview" | "chunks" | "empty";
+            /**
+             * Content Chars
+             * @default 0
+             */
+            content_chars: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * SectionContentPage
+         * @description One window of a document's sections.
+         *
+         *     An envelope rather than a bare list because the reader has to know whether
+         *     more exists. The unbounded version returned every section's full body in one
+         *     response: measured at 20.2 MB over 1,017 sections on a 2.9M-word manual,
+         *     which is enough to make a browser report the page as unresponsive.
+         */
+        SectionContentPage: {
+            /** Items */
+            items: components["schemas"]["SectionContentItem"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
         };
         /** SectionHeatmapItem */
         SectionHeatmapItem: {
@@ -18330,9 +18389,44 @@ export interface operations {
             };
         };
     };
-    get_section_content_sections__document_id__content_get: {
+    get_one_section_content_sections__document_id__content__section_id__get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionContentItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_section_content_sections__document_id__content_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
             header?: never;
             path: {
                 document_id: string;
@@ -18347,7 +18441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SectionContentItem"][];
+                    "application/json": components["schemas"]["SectionContentPage"];
                 };
             };
             /** @description Validation Error */
