@@ -411,6 +411,23 @@ def test_ps1_guards_the_vision_pull_on_ollama_being_present():
     )
 
 
+def test_install_sh_checks_for_curl_and_make(sh):
+    """Every other dependency (uv, node, ollama) has a `_have` guard with a
+    clear error; curl and make did not, so a bare Ubuntu/Debian container died
+    on a raw "command not found" for curl, and a bare Fedora/Arch container got
+    all the way through the real install before dying the same way on `make
+    build`. Verified live in Docker across all four distros.
+    """
+    assert re.search(r"_have curl \|\|", sh), (
+        "install.sh does not check for curl before the first curl-dependent step"
+    )
+    assert re.search(r"_have make \|\|", sh), (
+        "install.sh does not check for make before calling `make build`"
+    )
+    # The curl guard must come before uv's install, the earliest curl use.
+    assert sh.index("_have curl ||") < sh.index("curl -LsSf https://astral.sh/uv/install.sh")
+
+
 def test_install_sh_records_the_models_it_pulled(sh):
     """`start.sh` reads `LITELLM_DEFAULT_MODEL` out of the .env this writes.
 

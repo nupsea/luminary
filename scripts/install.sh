@@ -67,6 +67,13 @@ if [ "$OS" = "Darwin" ] && [ "$ARCH" = "x86_64" ]; then
     exit 1
 fi
 
+# Every install path below assumes curl (uv's own installer, the Node tarball
+# fetch, ollama's installer script). Unlike uv/node/ollama themselves this had
+# no _have guard, so a bare container -- no desktop convenience layer installed
+# curl for it -- died on a raw "command not found" instead of this script's own
+# error convention. Measured on stock ubuntu:24.04 and debian:bookworm images.
+_have curl || { _err "curl is required and not on PATH. Install it and re-run."; exit 1; }
+
 # ---------------------------------------------------------------------------
 # uv — Python package + project manager
 # ---------------------------------------------------------------------------
@@ -365,6 +372,10 @@ if [ ! -d frontend/node_modules ] \
 fi
 
 _info "Building production SPA..."
+# Fedora and Arch base images carry curl but not make, so a bare container got
+# all the way through uv/node/ollama and the model pull before dying here on
+# the same raw "command not found" curl now has a guard against above.
+_have make || { _err "make is required and not on PATH. Install it (e.g. build-essential/base-devel) and re-run."; exit 1; }
 make build
 
 if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
