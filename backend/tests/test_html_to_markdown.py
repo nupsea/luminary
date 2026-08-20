@@ -119,3 +119,20 @@ class TestBlocks:
         """Brackets the rule above: only a caption class demotes a heading."""
         out = _md("<h3>Real Section</h3><p>Body text.</p>")
         assert "### Real Section" in out
+
+    def test_a_heading_linked_to_its_own_id_keeps_only_its_text(self):
+        """The anchor every docs generator emits is not a reference.
+
+        Left as a link the heading reads "[Why Databases Exist](#why-databases-
+        exist)" -- markdown syntax printed in the contents, and long enough to
+        push a real heading past the length that decides whether it is treated
+        as a heading at all.
+        """
+        out = _md('<h2 id="x"><a class="anchor" href="#x">Why Databases Exist</a></h2>')
+        assert "## Why Databases Exist" in out
+        assert "](#x)" not in out
+
+    def test_a_heading_citing_another_page_keeps_its_link(self):
+        """Brackets the rule above: only same-page fragments are affordances."""
+        out = _md('<h2>See <a href="/chapter/ch-05">the next chapter</a></h2>')
+        assert "[the next chapter](/chapter/ch-05)" in out

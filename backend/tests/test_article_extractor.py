@@ -301,3 +301,80 @@ class TestExtractionReport:
         report = extractor._extraction_report("Prose.", [], ["figures drawn by JavaScript"])
         assert report["dropped"] == {}
         assert report["complete"] is False
+
+
+class TestVisualWarningScope:
+    """The "figures may be missing" note reasons about the static path only."""
+
+    def _extractor(self):
+        from app.services.article_extractor import ArticleExtractor
+
+        return ArticleExtractor()
+
+    def test_a_static_js_page_with_no_images_is_still_warned_about(self):
+        """The original inference: scripts never ran, so figures may be absent."""
+        html = '<html><body><script>self.__next_f=[]</script><p>x</p></body></html>'
+        warnings = self._extractor()._detect_uncaptured_visuals(
+            html, "prose only", 500, "static"
+        )
+        assert warnings, "a static hydrated page with no images must still warn"
+
+    def test_a_rendered_page_with_no_canvas_is_not_warned_about(self):
+        """After rendering, "no images" means the page has none.
+
+        Inferring anyway told a reader content was missing from a chapter of
+        prose and code that had no figures at all, and a warning that fires when
+        nothing is wrong is one the reader learns to scroll past.
+        """
+        html = '<html><body><script>self.__next_f=[]</script><p>x</p></body></html>'
+        warnings = self._extractor()._detect_uncaptured_visuals(
+            html, "prose only", 500, "webview"
+        )
+        assert warnings == []
+
+    def test_a_rendered_page_with_a_canvas_is_warned_about(self):
+        """Brackets the rule: canvas pixels need a screenshot, not a DOM capture."""
+        html = "<html><body><canvas id='chart'></canvas><p>x</p></body></html>"
+        warnings = self._extractor()._detect_uncaptured_visuals(
+            html, "prose only", 500, "webview"
+        )
+        assert warnings, "a rendered canvas is a real, uncapturable figure"
+
+
+class TestPageSpecificTitle:
+    """A site that gives every page one og:title makes a library of identical rows."""
+
+    def _refine(self, title, html):
+        from app.services.article_extractor import _title_specific_to_this_page
+
+        return _title_specific_to_this_page(title, html)
+
+    def test_a_site_name_as_metadata_title_is_replaced_by_the_page_title(self):
+        html = (
+            "<html><head><title>Chapter 4: Databases &#x2014; Where Data Lives "
+            "&#x2014; The Builder&#x27;s Gita</title></head><body></body></html>"
+        )
+        assert (
+            self._refine("The Builder's Gita", html)
+            == "Chapter 4: Databases — Where Data Lives"
+        )
+
+    def test_a_correct_metadata_title_is_left_alone(self):
+        """The bracketing case: here the metadata is a prefix, not a suffix.
+
+        Taking the remainder would rename a correct title to the site's name.
+        """
+        html = "<html><head><title>Attention? Attention! | Lil&#39;Log</title></head></html>"
+        assert self._refine("Attention? Attention!", html) == "Attention? Attention!"
+
+    def test_a_title_matching_the_metadata_exactly_is_left_alone(self):
+        html = "<html><head><title>Understanding LSTM Networks</title></head></html>"
+        assert self._refine("Understanding LSTM Networks", html) == "Understanding LSTM Networks"
+
+    def test_a_remainder_too_short_to_be_a_title_is_refused(self):
+        """"Ch 4" is a fragment, and the metadata title is the safer answer."""
+        html = "<html><head><title>Ch 4 - The Builder&#x27;s Gita</title></head></html>"
+        assert self._refine("The Builder's Gita", html) == "The Builder's Gita"
+
+    def test_a_page_with_no_title_tag_keeps_its_metadata(self):
+        assert self._refine("Some Article", "<html><body>x</body></html>") == "Some Article"

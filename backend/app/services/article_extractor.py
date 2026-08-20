@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import re
+from html import unescape
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -135,6 +136,48 @@ _INLINE_MARKERS = {
 }
 
 
+# Separators sites put between a page title and the site name.
+_TITLE_SEPARATORS = " |-–—·»:"
+
+# Below this a recovered head is more likely a fragment than a title ("Ch 4"),
+# and keeping the metadata title is the safer answer.
+_MIN_RECOVERED_TITLE_CHARS = 12
+
+
+def _title_specific_to_this_page(title: str, html: str) -> str:
+    """Recover a page title that `og:title` gave over to the site name.
+
+    Metadata is trusted first because it is usually right. It is wrong in one
+    specific, common way: a site that sets one `og:title` for every page. Every
+    chapter of one book imported as "The Builder's Gita", so a library of them
+    was a list of identical rows and the reader could not tell which they had
+    opened.
+
+    The `<title>` tag still carried "Chapter 4: Databases — Where Data Lives —
+    The Builder's Gita". The site name conventionally goes **last**, so the
+    metadata title being a *suffix* of `<title>` is the signal that it named the
+    site rather than the page. Both cases that decide this are real:
+    "Attention? Attention! | Lil'Log" has its metadata as a *prefix* and is
+    already correct, so the rule must not fire there.
+    """
+    if not title or not html:
+        return title
+    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+    if not match:
+        return title
+
+    document_title = unescape(match.group(1)).strip()
+    metadata_title = unescape(title).strip()
+    if not document_title.lower().endswith(metadata_title.lower()):
+        return title
+    if len(document_title) <= len(metadata_title):
+        return title
+
+    head = document_title[: len(document_title) - len(metadata_title)]
+    head = head.strip().strip(_TITLE_SEPARATORS).strip()
+    return head if len(head) >= _MIN_RECOVERED_TITLE_CHARS else title
+
+
 class ArticleExtractor:
     """
     Unified article extraction for a high-fidelity reading experience.
@@ -179,6 +222,7 @@ class ArticleExtractor:
         # 2. Extract metadata
         metadata = trafilatura.metadata.extract_metadata(html_content)
         title = (metadata.title if metadata and metadata.title else "Untitled Article").strip()
+        title = _title_specific_to_this_page(title, html_content)
         # Mirror images under the caller's document_id so image_extract_handler
         # (which scans images/{document_id}) finds them. Fall back to a URL hash
         # only when called outside the ingestion flow.
@@ -236,7 +280,9 @@ class ArticleExtractor:
         markdown_text = self._normalize_markdown(markdown_text)
 
         word_count = len(markdown_text.split())
-        warnings = self._detect_uncaptured_visuals(html_content, markdown_text, word_count)
+        warnings = self._detect_uncaptured_visuals(
+            html_content, markdown_text, word_count, fetch_mode
+        )
         report = self._extraction_report(markdown_text, dropped, warnings)
         # Two independent choices, recorded separately: how the HTML was obtained,
         # and what turned it into Markdown. Collapsing them into one field makes a
@@ -262,7 +308,9 @@ class ArticleExtractor:
             extraction_report=report,
         )
 
-    def _detect_uncaptured_visuals(self, html: str, markdown: str, word_count: int) -> list[str]:
+    def _detect_uncaptured_visuals(
+        self, html: str, markdown: str, word_count: int, fetch_mode: str = "static"
+    ) -> list[str]:
         """Warns when a page's figures were almost certainly lost to static fetching.
 
         A static HTTP fetch cannot run JavaScript, so figures drawn by client-only
@@ -273,12 +321,30 @@ class ArticleExtractor:
         page that is a client-hydrated JS app. A plain static text-only article
         trips none of these (no hydration markers), and any page from which we did
         mirror an image is left alone -- keeping false positives rare.
+
+        **The inference only holds for the static path.** Once the page has been
+        rendered, its scripts have run and what the browser drew is what we saw,
+        so "no images" means the page has none rather than that we missed them.
+        Inferring anyway told a reader that content was missing from a chapter of
+        prose and code that had no figures at all -- and a warning that fires when
+        nothing is wrong is one the reader learns to scroll past, which costs the
+        warnings that are real. After rendering, only a `<canvas>` still justifies
+        it: its pixels need a screenshot, which a DOM capture does not take.
         """
         if word_count < _MIN_ARTICLE_WORDS_FOR_VISUAL_WARNING:
             return []
         if "![" in markdown:
             return []
         lowered = html.lower()
+        if fetch_mode == "webview":
+            return (
+                [
+                    "Some figures on this page are drawn onto a canvas by the browser "
+                    "and could not be captured. The text was imported in full."
+                ]
+                if "<canvas" in lowered
+                else []
+            )
         if not any(marker in lowered for marker in _JS_HYDRATION_MARKERS):
             return []
         return [

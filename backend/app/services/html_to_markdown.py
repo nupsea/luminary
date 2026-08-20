@@ -143,6 +143,17 @@ class MarkdownSerializer:
 
         name = node.name
         if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            # A heading linked to its own id is the deep-link affordance every
+            # docs generator emits, not a reference the reader follows. Left as
+            # a link it becomes "[Why Databases Exist](#why-databases-exist)" --
+            # markdown syntax printed in the contents panel, and long enough to
+            # push a real heading past the marker length that decides whether it
+            # is a heading at all, which silently blanked two on one page.
+            # Only fragment links are unwrapped; a heading citing another page
+            # keeps its link.
+            for link in node.find_all("a"):
+                if (link.get("href") or "").startswith("#"):
+                    link.unwrap()
             text = self._children_inline(node)
             if not text:
                 return []
