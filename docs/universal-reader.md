@@ -5,6 +5,23 @@ The Universal Reader (`frontend/src/components/reader/ReadView.tsx`, served by
 tech blogs, papers, transcripts, scripts, notes. The PDF Reader
 (`PDFViewer.tsx`) is a separate surface and is not covered here.
 
+## What a document opens on
+
+`readerLandingTab` (`frontend/src/components/reader/hooks/readerLandingTab.ts`)
+picks the left panel's tab when a document opens, in this order:
+
+| Document | Opens on |
+|---|---|
+| PDF | PDF viewer |
+| Deep link to a section, chunk or page | Read view |
+| EPUB | Book viewer |
+| Every other format | Read view |
+
+Sections is a table of contents, not a reading surface, so nothing lands on it.
+That includes the format-mismatch correction in `useReaderTabs`, which redirects
+a tab that cannot apply to the loaded document — pdfview while a non-PDF loads —
+to the Read view. The tab is reachable, never a landing.
+
 ## The rule that governs everything else
 
 **Retrieval chunks are for retrieval. The reader never reconstructs prose from

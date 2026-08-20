@@ -24,6 +24,7 @@ import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
+import { readerLandingTab } from "./hooks/readerLandingTab"
 import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
 import { useReaderTabs } from "./hooks/useReaderTabs"
@@ -432,20 +433,18 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [leftTab, scrollActiveSectionIntoView])
 
 
-  // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
+  // The tab a document opens on: its own viewer for PDF and EPUB, the Read
+  // view for a deep link and for every other format.
   useEffect(() => {
     if (!doc) return
-    if (doc.format === "pdf") {
-      setPdfViewVisited(true)
-      setLeftTab("pdfview")
-      if (initialSectionId) setReadSectionId(initialSectionId)
-    } else if (initialSectionId || initialChunkId || initialPage) {
-      if (initialSectionId) setReadSectionId(initialSectionId)
-      setLeftTab("read")
-    } else if (doc.format === "epub") {
-      setBookViewVisited(true)
-      setLeftTab("bookview")
-    }
+    const tab = readerLandingTab(
+      doc.format,
+      Boolean(initialSectionId || initialChunkId || initialPage),
+    )
+    if (initialSectionId) setReadSectionId(initialSectionId)
+    if (tab === "pdfview") setPdfViewVisited(true)
+    if (tab === "bookview") setBookViewVisited(true)
+    setLeftTab(tab)
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 
-export type ReaderTab = "sections" | "pdfview" | "bookview" | "read"
+import { readerLandingTab, type ReaderTab } from "./readerLandingTab"
+
+export type { ReaderTab }
 
 interface UseReaderTabsOpts {
   format: string | undefined
@@ -8,9 +10,9 @@ interface UseReaderTabsOpts {
 
 // Owns the left-panel tab state and the lazy-mount visited flags. Format
 // mismatches (e.g. user is on the pdfview tab but the document isn't a PDF)
-// are corrected automatically.
+// are corrected to the reader that format does have, never to the section list.
 export function useReaderTabs({ format }: UseReaderTabsOpts) {
-  const [leftTab, setLeftTab] = useState<ReaderTab>("sections")
+  const [leftTab, setLeftTab] = useState<ReaderTab>(() => readerLandingTab(format, false))
   // PDF View tab visited at least once -> mount and keep alive.
   const [pdfViewVisited, setPdfViewVisited] = useState(false)
   // Book View tab visited at least once -> mount and keep alive.
@@ -19,13 +21,13 @@ export function useReaderTabs({ format }: UseReaderTabsOpts) {
   useEffect(() => {
     if (leftTab === "pdfview") {
       if (format !== "pdf") {
-        setLeftTab("sections")
+        setLeftTab("read")
       } else {
         setPdfViewVisited(true)
       }
     } else if (leftTab === "bookview") {
       if (format !== "epub") {
-        setLeftTab("sections")
+        setLeftTab("read")
       } else {
         setBookViewVisited(true)
       }
