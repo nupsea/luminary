@@ -3,7 +3,7 @@ import * as pdfjsLib from "pdfjs-dist"
 import { AnnotationLayer, TextLayer } from "pdfjs-dist"
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist"
 import "pdfjs-dist/web/pdf_viewer.css"
-import { ChevronLeft, ChevronRight, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, ZoomIn } from "lucide-react"
+import { ChevronLeft, ChevronRight, Minus, Moon, PanelLeftClose, PanelLeftOpen, Plus, Search, Sun } from "lucide-react"
 import { API_BASE, PDFJS_WORKER_URL } from "@/lib/config"
 import { useIsDark } from "@/hooks/useIsDark"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
@@ -21,7 +21,7 @@ import {
 import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
-import { type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel } from "./pdfSearchUtils"
+import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel, stepZoom } from "./pdfSearchUtils"
 import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
 
 // Set worker once at module load
@@ -303,6 +303,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // The numbers printed on the sheets, when the PDF says they differ from
     // the sheets' positions. Null on a document that defines none.
     const [declaredLabels, setDeclaredLabels] = useState<string[] | null>(null)
+    // What the overlay currently shows, so an identical redraw is skipped.
+    const lastHighlightRef = useRef("")
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
@@ -749,7 +751,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setGlobalMatches(cached)
       if (cached.length > 0) setGlobalMatchIndex(0)
 
-      // Then progressively extract remaining pages
+      // Then progressively extract remaining pages. Once the whole document is
+      // cached there is nothing to progress through, and running the batch loop
+      // anyway republished the match list 62 times on a 600-page book -- for a
+      // second search that changes none of them.
+      if (pageTextCacheRef.current.size >= pdfDoc.numPages) {
+        setGlobalMatchIndex((prev) => (prev < 0 && cached.length > 0 ? 0 : prev))
+        return
+      }
+
       void (async () => {
         await extractAllPages(pdfDoc, q)
         if (!cancelled) {
@@ -761,6 +771,31 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
       return () => { cancelled = true }
     }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
+
+    // Fit the page to the window, the two zooms a reader actually reaches for.
+    // Measured from the page itself rather than a remembered number, so they
+    // stay correct after the panel is resized.
+    const fitTo = useCallback(
+      async (mode: "width" | "page") => {
+        if (!pdfDoc || !scrollAreaRef.current) return
+        try {
+          const page = await pdfDoc.getPage(currentPage)
+          const viewport = page.getViewport({ scale: 1.0 })
+          page.cleanup()
+          const availableWidth = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
+          const availableHeight = scrollAreaRef.current.clientHeight - 32
+          if (viewport.width <= 0 || availableWidth <= 0) return
+          const byWidth = availableWidth / viewport.width
+          const byHeight = viewport.height > 0 ? availableHeight / viewport.height : byWidth
+          setZoom(mode === "width" ? byWidth : Math.min(byWidth, byHeight))
+        } catch {
+          // Non-fatal: the zoom simply stays where it is.
+        }
+      },
+      [pdfDoc, currentPage],
+    )
+    const fitToWidth = useCallback(() => void fitTo("width"), [fitTo])
+    const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
     // Which match on this page is the active one. Derived here so the effect
     // below depends on a number rather than on the identity of `globalMatches`,
@@ -794,8 +829,17 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       if (!textDiv || !overlayDiv || textLayerVersion === 0) return
       if (!searchOpen || !searchQuery) {
         clearOverlays(overlayDiv, "data-search-highlight")
+        lastHighlightRef.current = ""
         return
       }
+
+      // Redrawing identical highlights is invisible work with a visible cost:
+      // every application clears the overlay first, and that gap is the flicker.
+      // React re-runs an effect whenever any dependency is merely recreated, so
+      // the guard is on what was actually drawn.
+      const signature = `${textLayerVersion}|${searchQuery}|${activePageMatchIndex}`
+      if (lastHighlightRef.current === signature) return
+      lastHighlightRef.current = signature
 
       applySearchHighlights(textDiv, overlayDiv, searchQuery, activePageMatchIndex)
     }, [textLayerVersion, searchOpen, searchQuery, activePageMatchIndex])
@@ -1048,7 +1092,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             </button>
             <input
               type="number"
-              className="w-12 text-center text-sm border rounded px-1 py-0.5"
+              // w-12 clipped a three-digit sheet: a 386-page book showed "34".
+              className="w-16 text-center text-sm tabular-nums border rounded px-1 py-0.5"
               value={pageInput}
               min={1}
               max={totalPages}
@@ -1060,10 +1105,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
             {printedLabel && (
               <span
-                className="text-xs text-muted-foreground tabular-nums"
-                title="The page number printed on this sheet. The box counts sheets in the file, which a book's front matter makes differ."
+                className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-foreground/80"
+                title="The number printed on this page. The box counts sheets in the file, which a book's separately numbered front matter makes differ."
               >
-                (p. {printedLabel})
+                p.{printedLabel}
               </span>
             )}
             <button
@@ -1092,32 +1137,67 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             >
               {darkPage ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            <div className="ml-auto relative" ref={zoomPopoverRef}>
+            {/* Zoom, as every PDF reader does it: the two common actions are one
+                click each and always visible, and the percentage opens the
+                presets. The old control was a popover slider capped at 200%,
+                which could not even represent the 287% that auto-fit produces --
+                so it showed a value it could not restore. */}
+            <div className="ml-auto flex items-center gap-0.5" ref={zoomPopoverRef}>
               <button
-                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-accent text-xs tabular-nums"
-                onClick={() => setZoomOpen((v) => !v)}
-                title="Zoom"
-                aria-label="Zoom level"
-                aria-expanded={zoomOpen}
+                className="p-1 rounded hover:bg-accent disabled:opacity-40"
+                onClick={() => setZoom(stepZoom(zoom, -1))}
+                disabled={zoom <= ZOOM_STOPS[0]}
+                title="Zoom out (Ctrl -)"
+                aria-label="Zoom out"
               >
-                <ZoomIn className="h-4 w-4" />
-                <span className="w-8 text-right">{Math.round(zoom * 100)}%</span>
+                <Minus className="h-4 w-4" />
               </button>
-              {zoomOpen && (
-                <div className="absolute right-0 bottom-full mb-2 z-30 flex items-center gap-2 px-3 py-2 border rounded-md bg-background shadow-md">
-                  <input
-                    type="range"
-                    min={50}
-                    max={200}
-                    step={10}
-                    value={Math.round(zoom * 100)}
-                    onChange={(e) => setZoom(parseInt(e.target.value, 10) / 100)}
-                    className="w-32"
-                    aria-label="Zoom level"
-                  />
-                  <span className="text-xs w-10 tabular-nums">{Math.round(zoom * 100)}%</span>
-                </div>
-              )}
+              <div className="relative">
+                <button
+                  className="min-w-[3.25rem] rounded px-1.5 py-1 text-xs tabular-nums hover:bg-accent"
+                  onClick={() => setZoomOpen((v) => !v)}
+                  title="Zoom presets"
+                  aria-label="Zoom presets"
+                  aria-expanded={zoomOpen}
+                >
+                  {Math.round(zoom * 100)}%
+                </button>
+                {zoomOpen && (
+                  <div className="absolute right-0 bottom-full mb-2 z-30 min-w-[9rem] overflow-hidden rounded-md border bg-background py-1 shadow-md">
+                    <button
+                      className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
+                      onClick={() => { fitToWidth(); setZoomOpen(false) }}
+                    >
+                      Fit width
+                    </button>
+                    <button
+                      className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
+                      onClick={() => { fitToPage(); setZoomOpen(false) }}
+                    >
+                      Fit page
+                    </button>
+                    <div className="my-1 border-t" />
+                    {ZOOM_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        className="block w-full px-3 py-1.5 text-left text-xs tabular-nums hover:bg-accent"
+                        onClick={() => { setZoom(preset); setZoomOpen(false) }}
+                      >
+                        {Math.round(preset * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                className="p-1 rounded hover:bg-accent disabled:opacity-40"
+                onClick={() => setZoom(stepZoom(zoom, 1))}
+                disabled={zoom >= ZOOM_STOPS[ZOOM_STOPS.length - 1]}
+                title="Zoom in (Ctrl +)"
+                aria-label="Zoom in"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
             </div>
           </div>
         </div>

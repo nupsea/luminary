@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel } from "./pdfSearchUtils"
+import { activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel, stepZoom } from "./pdfSearchUtils"
 
 describe("findMatchIndices", () => {
   it("returns empty for empty query", () => {
@@ -153,5 +153,29 @@ describe("printedPageLabel", () => {
   it("reports nothing outside the document", () => {
     expect(printedPageLabel(labels, 0)).toBeNull()
     expect(printedPageLabel(labels, 99)).toBeNull()
+  })
+})
+
+describe("zoom stepping", () => {
+  it("walks up and down the ladder of stops", () => {
+    expect(stepZoom(1, 1)).toBe(1.25)
+    expect(stepZoom(1, -1)).toBe(0.75)
+  })
+
+  it("snaps to the neighbouring stop from a value between them", () => {
+    // Auto-fit produces arbitrary values -- 2.87 was measured on a real book --
+    // so stepping must find the next stop rather than add a fixed delta.
+    expect(stepZoom(2.87, 1)).toBe(3)
+    expect(stepZoom(2.87, -1)).toBe(2.5)
+  })
+
+  it("clamps at both ends rather than running off the ladder", () => {
+    expect(stepZoom(4, 1)).toBe(4)
+    expect(stepZoom(0.25, -1)).toBe(0.25)
+  })
+
+  it("steps down from a value above every stop", () => {
+    // The old control capped at 200% and could not represent 287% at all.
+    expect(stepZoom(9, -1)).toBe(4)
   })
 })

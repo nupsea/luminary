@@ -136,3 +136,22 @@ export function printedPageLabel(
   if (!label || label === String(page)) return null
   return label
 }
+
+// The ladder the +/- buttons walk. Steps rather than a linear slider because a
+// fixed increment is coarse at 50% and useless at 300%; these are the stops
+// every PDF reader offers. Auto-fit can land between or above them, which is
+// why stepping searches for the neighbouring stop rather than adding a delta.
+export const ZOOM_STOPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]
+
+// Offered by name in the menu. Fit width and fit page are computed from the
+// page, so they are not in this list.
+export const ZOOM_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+export function stepZoom(current: number, direction: 1 | -1): number {
+  if (direction > 0) {
+    return ZOOM_STOPS.find((stop) => stop > current + 0.001) ?? ZOOM_STOPS[ZOOM_STOPS.length - 1]
+  }
+  const below = ZOOM_STOPS.filter((stop) => stop < current - 0.001)
+  return below.length ? below[below.length - 1] : ZOOM_STOPS[0]
+}
+
