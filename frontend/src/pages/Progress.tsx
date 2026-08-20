@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react"
-import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
+import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, Clock, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import {
   Bar,
@@ -598,6 +598,27 @@ export default function Progress() {
           />
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {/* Named for what is measured. This is a surface being open and
+              visible, sampled every 15s -- not time studied, and not attention.
+              An em dash rather than 0 when nothing has been recorded. */}
+          <StatCard
+            label="Time in Luminary (7d)"
+            value={
+              summary?.time_on_luminary.value != null
+                ? `${summary.time_on_luminary.value}m`
+                : "—"
+            }
+            icon={Clock}
+            loading={summaryLoading}
+            accent="primary"
+          />
+          <StatCard
+            label="Active Days (7d)"
+            value={summary?.active_days.value ?? "—"}
+            icon={CheckCircle2}
+            loading={summaryLoading}
+            accent="amber"
+          />
           <StatCard
             label="Reviews (30d)"
             value={totalReviewed}

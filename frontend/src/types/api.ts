@@ -9229,6 +9229,8 @@ export interface components {
             longest_streak: components["schemas"]["Metric"];
             reviews_30d: components["schemas"]["Metric"];
             gaps_closed: components["schemas"]["Metric"];
+            time_on_luminary: components["schemas"]["Metric"];
+            active_days: components["schemas"]["Metric"];
             documents: components["schemas"]["Metric"];
             notes: components["schemas"]["Metric"];
         };

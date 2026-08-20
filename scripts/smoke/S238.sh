@@ -37,6 +37,7 @@ body = json.load(sys.stdin)
 expected = {
     'retention_30d', 'mastery', 'mature_cards', 'due_today', 'current_streak',
     'longest_streak', 'reviews_30d', 'gaps_closed', 'documents', 'notes',
+    'time_on_luminary', 'active_days',
 }
 missing = expected - set(body)
 assert not missing, f'summary is missing metrics: {sorted(missing)}'

@@ -22,6 +22,7 @@ from app.models import (
     FlashcardModel,
     NoteModel,
     ReviewEventModel,
+    TimeOnTaskModel,
 )
 from app.schemas.progress import (
     Metric,
@@ -32,6 +33,7 @@ from app.schemas.progress import (
 from app.services.engagement_service import EngagementService
 from app.services.mastery_service import get_mastery_service
 from app.services.misconceptions import get_stats as get_misconception_stats
+from app.services.time_on_task_service import TimeOnTaskService
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,11 @@ _MIN_CARDS_FOR_MASTERY = 10
 # Bracketing cases: a card answered correctly once sits at ~2-4 days and is not
 # mature; a card at 21 days is one that survives a three-week gap.
 _MATURE_STABILITY_DAYS = 21.0
+
+# Window for the two activity metrics below. Shorter than the 30-day retention
+# window on purpose: "am I showing up" is a question about now, and a 30-day
+# count hides a fortnight away behind a busy fortnight before it.
+_ACTIVITY_WINDOW_DAYS = 7
 
 
 def _absent(unit: str, definition: str, basis: str, sample_size: int = 0) -> Metric:
@@ -257,6 +264,78 @@ class ProgressService:
             basis=f"{resolved} resolved, {open_count} still open.",
         )
 
+    async def _time_on_luminary(self) -> Metric:
+        """Minutes with a Luminary surface open and visible.
+
+        Named for what it measures rather than what a reader would like it to
+        mean. It is not time studied and not attention: the client samples every
+        15s while the tab is visible, and a gap too long to be continuous is
+        credited as nothing. See `docs/metrics.md`.
+        """
+        totals = await TimeOnTaskService(self._session).seconds_by_activity(
+            days=_ACTIVITY_WINDOW_DAYS
+        )
+        seconds = sum(totals.values())
+        definition = (
+            f"Minutes with a Luminary surface open and visible, last "
+            f"{_ACTIVITY_WINDOW_DAYS} days. Not a measure of attention."
+        )
+        if seconds == 0:
+            return _absent(
+                "minutes",
+                definition,
+                "Nothing recorded yet — this fills in as you read, write and review.",
+            )
+        # Under a minute, minutes round to zero -- which on screen is
+        # indistinguishable from nothing recorded, the one confusion this whole
+        # contract exists to prevent. The value stays truthful to its unit and
+        # the basis carries the seconds, so the reader can tell the two apart.
+        def _amount(value: int) -> str:
+            return f"{value}s" if seconds < 60 else f"{round(value / 60)}m"
+
+        split = ", ".join(
+            f"{name} {_amount(value)}" for name, value in sorted(totals.items()) if value
+        )
+        return Metric(
+            value=float(round(seconds / 60)),
+            unit="minutes",
+            sample_size=seconds,
+            definition=definition,
+            basis=f"Sampled every 15s while visible: {split}.",
+        )
+
+    async def _active_days(self) -> Metric:
+        """Days you turned up, counted from things that actually happened.
+
+        Deliberately not an "efficiency" or "focus" score. Both would divide by
+        the time above, whose denominator measures a surface being open rather
+        than work being done, and a ratio built on that reports a precision it
+        never had. A day is active if it carries a graded review or a recorded
+        interval — two direct observations, no interpolation.
+        """
+        cutoff = self._naive_cutoff(_ACTIVITY_WINDOW_DAYS)
+        review_days = await self._session.execute(
+            select(self._local_date_sql(ReviewEventModel.reviewed_at)).where(
+                ReviewEventModel.reviewed_at >= cutoff
+            )
+        )
+        task_days = await self._session.execute(
+            select(self._local_date_sql(TimeOnTaskModel.started_at)).where(
+                TimeOnTaskModel.started_at >= cutoff
+            )
+        )
+        days = {d for (d,) in review_days if d} | {d for (d,) in task_days if d}
+        return Metric(
+            value=float(len(days)),
+            unit="days",
+            sample_size=_ACTIVITY_WINDOW_DAYS,
+            definition=(
+                f"Days in the last {_ACTIVITY_WINDOW_DAYS} with a graded review or "
+                "recorded time."
+            ),
+            basis=f"{len(days)} of the last {_ACTIVITY_WINDOW_DAYS} days.",
+        )
+
     async def _documents(self) -> Metric:
         count = await self._scalar(select(func.count()).select_from(DocumentModel))
         return Metric(
@@ -292,6 +371,8 @@ class ProgressService:
             longest_streak=longest_streak,
             reviews_30d=await self._reviews_30d(),
             gaps_closed=await self._gaps_closed(),
+            time_on_luminary=await self._time_on_luminary(),
+            active_days=await self._active_days(),
             documents=await self._documents(),
             notes=await self._notes(),
         )
@@ -310,6 +391,17 @@ class ProgressService:
         points = [NotesTimelinePoint(month=str(r.month), count=int(r.count)) for r in rows]
         total = sum(p.count for p in points)
         return NotesTimelineResponse(points=points[-months:], total_notes=total)
+
+    def _local_date_sql(self, column):
+        """SQL expression: a UTC datetime column as the user's local date.
+
+        Same shift EngagementService applies, so a session at 11pm counts on the
+        day the user had it rather than rolling into tomorrow.
+        """
+        if self._tz_offset_minutes == 0:
+            return func.date(column)
+        modifier = f"{-self._tz_offset_minutes:+d} minutes"
+        return func.date(func.datetime(column, modifier))
 
     def _local_month_sql(self, column):
         """SQL expression: a UTC datetime column as the user's local YYYY-MM."""

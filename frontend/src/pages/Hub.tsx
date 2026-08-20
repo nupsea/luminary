@@ -922,8 +922,11 @@ function ActivitySplit({ byActivity }: { byActivity: Record<string, number> }) {
   if (total === 0) {
     return (
       <div className="flex flex-col gap-1 border-t border-border/60 pt-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Time in Luminary
+        </span>
         <span className="text-[11px] text-muted-foreground">
-          No time recorded yet — this fills in as you read, write and review.
+          Nothing recorded yet — this fills in as you read, write and review.
         </span>
       </div>
     )
@@ -945,7 +948,11 @@ function ActivitySplit({ byActivity }: { byActivity: Record<string, number> }) {
   )
 
   return (
-    <div className="flex items-center gap-4 border-t border-border/60 pt-3">
+    <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Time in Luminary
+      </span>
+      <div className="flex items-center gap-4">
       <svg width="72" height="72" viewBox="0 0 72 72" className="shrink-0" role="img"
            aria-label={`Time this week: ${slices
              .filter((s) => s.seconds > 0)
@@ -981,6 +988,7 @@ function ActivitySplit({ byActivity }: { byActivity: Record<string, number> }) {
           </li>
         ))}
       </ul>
+      </div>
     </div>
   )
 }
@@ -1000,7 +1008,7 @@ function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
             className="ml-auto text-[11px] tabular-nums text-muted-foreground"
             // Named for what it is. This is time with a surface open and
             // visible, sampled by heartbeat -- not a claim about attention.
-            title="Time with a Luminary surface open and visible"
+            title="Time in Luminary: a surface open and visible. Sampled, not a measure of attention."
           >
             {durationLabel(total)}
           </span>

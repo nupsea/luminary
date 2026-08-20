@@ -43,6 +43,9 @@ class ProgressSummaryResponse(BaseModel):
     longest_streak: Metric
     reviews_30d: Metric
     gaps_closed: Metric
+    # Named for what is measured, not for what a reader would like it to mean.
+    time_on_luminary: Metric
+    active_days: Metric
     documents: Metric
     notes: Metric
 

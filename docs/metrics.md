@@ -33,6 +33,8 @@ in for the first is the defect this contract exists to prevent. `MetricCard`
 | `current_streak` / `longest_streak` | stored on `study_streaks`, written by the assessment pipeline | — | always |
 | `reviews_30d` | count of `review_events` | 30 days | always |
 | `gaps_closed` | misconceptions with `status = 'resolved'` | all time | always |
+| `time_on_luminary` | sum of `time_on_task.seconds` | 7 days | 1 recorded second |
+| `active_days` | distinct local days carrying a review or a recorded interval | 7 days | always |
 | `documents` / `notes` | `COUNT(*)`, notes excluding archived | — | always |
 
 Thresholds live in `backend/app/services/progress_service.py`, each next to the
@@ -96,6 +98,27 @@ something that is not its total.
 `backend/tests/test_time_on_task.py` fails CI if a discontinuous gap is credited,
 if the ceiling drifts outside its two bracketing cases, or if an unknown activity
 is recorded instead of refused. `scripts/smoke/S240.sh` checks the wire contract.
+
+## What is deliberately not computed
+
+**There is no efficiency, focus or productivity score**, and the reason is the
+shape of the data rather than the difficulty of the formula.
+
+Every such score is a ratio with time underneath it — cards per minute, retention
+per hour, "focus %". The only time signal in the product measures *a surface being
+open and visible*, so any ratio built on it inherits a denominator that cannot
+tell reading from a tab left open behind a lunch break. The output would carry two
+decimal places and mean nothing, and it would be believed precisely because it
+looks computed. That is the failure `.claude/rules/common/product-integrity.md`
+exists to prevent, arriving as a feature rather than a bug.
+
+`active_days` is what survives the same question honestly: a day is active if it
+carries a graded review or a recorded interval. Both are direct observations,
+there is no weighting, and a reader can check it against their own week.
+
+If an effort-weighted mastery is wanted later, the honest version weights by
+**answers graded**, which is observed, and never by time, which is sampled. State
+that in the definition before building it.
 
 ## Prediction calibration
 

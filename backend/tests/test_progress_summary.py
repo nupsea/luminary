@@ -220,3 +220,107 @@ async def test_notes_timeline_groups_in_sql(test_db):
     assert body["total_notes"] == 3
     assert len(body["points"]) == 1
     assert body["points"][0]["count"] == 3
+
+
+@pytest.mark.anyio
+async def test_time_on_luminary_is_absent_not_zero_before_anything_is_recorded(test_db):
+    """"Nothing recorded" and "you spent zero minutes" are opposite statements.
+
+    A zero here would be the same defect this whole contract exists to prevent,
+    on the one metric a reader is most likely to check on day one.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        body = (await c.get("/progress/summary")).json()
+
+    metric = body["time_on_luminary"]
+    assert metric["value"] is None
+    assert metric["basis"].strip()
+    # Named for what it measures. "Time studied" would be a claim about
+    # attention that the sampling cannot support.
+    assert "attention" in metric["definition"].lower()
+
+
+@pytest.mark.anyio
+async def test_time_on_luminary_reports_the_minutes_actually_recorded(test_db):
+    _, factory = test_db
+    from app.models import TimeOnTaskModel
+
+    async with factory() as s:
+        s.add(
+            TimeOnTaskModel(
+                id=str(uuid.uuid4()),
+                activity="document",
+                member_id="doc-1",
+                started_at=datetime.now(UTC).replace(tzinfo=None),
+                last_beat_at=datetime.now(UTC).replace(tzinfo=None),
+                seconds=600,
+            )
+        )
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        body = (await c.get("/progress/summary")).json()
+
+    assert body["time_on_luminary"]["value"] == 10.0
+    assert body["time_on_luminary"]["unit"] == "minutes"
+
+
+@pytest.mark.anyio
+async def test_active_days_counts_days_that_carry_an_observation(test_db):
+    """One day with work in it is one active day, however many rows it holds."""
+    _, factory = test_db
+    from app.models import TimeOnTaskModel
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    async with factory() as s:
+        for _ in range(3):
+            s.add(
+                TimeOnTaskModel(
+                    id=str(uuid.uuid4()),
+                    activity="note",
+                    member_id=None,
+                    started_at=now,
+                    last_beat_at=now,
+                    seconds=60,
+                )
+            )
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        body = (await c.get("/progress/summary")).json()
+
+    assert body["active_days"]["value"] == 1.0
+    assert body["active_days"]["unit"] == "days"
+
+
+@pytest.mark.anyio
+async def test_a_sub_minute_recording_says_so_rather_than_reading_as_nothing(test_db):
+    """20s rounds to 0 minutes, which on screen looks like nothing recorded.
+
+    The value stays truthful to its unit; the basis is what distinguishes
+    "measured, under a minute" from "measured nothing".
+    """
+    _, factory = test_db
+    from app.models import TimeOnTaskModel
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    async with factory() as s:
+        s.add(
+            TimeOnTaskModel(
+                id=str(uuid.uuid4()),
+                activity="document",
+                member_id="doc-1",
+                started_at=now,
+                last_beat_at=now,
+                seconds=20,
+            )
+        )
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        metric = (await c.get("/progress/summary")).json()["time_on_luminary"]
+
+    assert metric["value"] == 0.0, "0 minutes is the truthful rounding of 20 seconds"
+    assert metric["value"] is not None, "measured-but-small is not absent"
+    assert "20s" in metric["basis"], f"basis hides the measurement: {metric['basis']!r}"
+    assert metric["sample_size"] == 20
