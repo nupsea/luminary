@@ -114,6 +114,12 @@ class ChunkModel(Base):
     # PDF page number (1-based) for chunks from PDF documents.
     # Null for non-PDF content types (txt, docx, epub, audio, code, etc.).
     pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The number printed on that sheet, when the PDF says it differs from the
+    # sheet's position -- a book numbers its front matter separately, so sheet
+    # 41 of one 613-page book is printed "19". Display only: navigation still
+    # uses pdf_page_number, because that is what the viewer scrolls to. Null
+    # when the PDF defines no labels, or the label is the sheet number already.
+    pdf_page_label: Mapped[str | None] = mapped_column(String, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)

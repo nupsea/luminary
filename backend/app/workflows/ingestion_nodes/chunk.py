@@ -285,6 +285,18 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
     return {**state, "chunks": chunks, "status": "embedding"}
 
 
+def _printed_label_for(page_labels: dict, page: int | None) -> str | None:
+    """The number printed on a sheet, when the PDF says it differs.
+
+    Keys survive the pipeline state as strings on one path and integers on
+    another, so both are tried rather than depending on which serialiser ran.
+    """
+    if page is None or not page_labels:
+        return None
+    label = page_labels.get(page) or page_labels.get(str(page))
+    return str(label) if label else None
+
+
 async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
     """Tech-book chunking: prose splits normally; code blocks are atomic (never sub-split).
 
@@ -377,6 +389,9 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             # began rather than where its sentence is.
             page_breaks: list[int] = s.get("page_breaks") or []
             page_search_start = 0
+            # Sheet -> printed page. Keyed by string after a round trip through
+            # the pipeline state, which JSON-encodes integer keys.
+            page_labels: dict = (pd.get("page_labels") if pd else None) or {}
 
             for chunk_dict in chunk_mixed_content(
                 section_text,
@@ -401,6 +416,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                             1 for offset in page_breaks if offset <= pos
                         )
                         page_search_start = pos
+                chunk_page_label = _printed_label_for(page_labels, chunk_pdf_page)
                 chunk_model = ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
@@ -414,6 +430,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                     code_language=chunk_dict["code_language"],
                     code_signature=chunk_dict["code_signature"],
                     pdf_page_number=chunk_pdf_page,
+                    pdf_page_label=chunk_page_label,
                     context_header=context_header,
                 )
                 chunk_models.append(chunk_model)

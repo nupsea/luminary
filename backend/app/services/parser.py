@@ -153,6 +153,30 @@ _MARGIN_FRACTION = 0.1
 _FURNITURE_MAX_CHARS = 80
 
 
+def _printed_page_labels(doc) -> dict[int, str]:
+    """Sheet number -> the number printed on it, where the two differ.
+
+    A book numbers its front matter separately, so a PDF carries page *labels*
+    beside sheet positions: measured on a 613-page book, sheet 41 is printed
+    "19" and sheet 6 is printed "iv". A citation naming the sheet therefore
+    disagrees with the page in the reader's hands by twenty for the whole body.
+
+    Only differing entries are kept: on three of four books in one library the
+    PDF defines no labels at all, and storing "5" for sheet 5 would be noise
+    that later code has to re-derive nothing from.
+    """
+    labels: dict[int, str] = {}
+    try:
+        for index in range(doc.page_count):
+            raw = (doc[index].get_label() or "").strip()
+            if raw and raw != str(index + 1):
+                labels[index + 1] = raw
+    except Exception:  # noqa: BLE001 - labels are a nicety; parsing must not fail for them
+        logger.warning("PDF page labels unavailable; citations will name sheet numbers")
+        return {}
+    return labels
+
+
 def _line_start_offsets(lines: list[str]) -> list[int]:
     """Character offset at which each line starts once joined by a newline."""
     offsets: list[int] = []
@@ -282,6 +306,9 @@ class DocumentParser:
         # better section boundaries than regex-based signature discovery.
         # UniversalParser is designed for plain text where font info is absent.
         total_pages = len(doc)
+        # Read once here so every return below carries them, including the
+        # fallback paths -- two of four books in one library take those.
+        page_labels = _printed_page_labels(doc)
 
         all_font_sizes: list[float] = []
         for page in doc:
@@ -388,6 +415,7 @@ class DocumentParser:
                     word_count=len(raw_text.split()),
                     sections=sections,
                     raw_text=raw_text,
+                    page_labels=page_labels,
                 )
 
         # No TOC available -- single-pass font-size scan preserving document order.
@@ -491,6 +519,7 @@ class DocumentParser:
                 word_count=len(raw_text.split()),
                 sections=sections,
                 raw_text=raw_text,
+                page_labels=page_labels,
             )
 
         doc.close()
@@ -515,6 +544,7 @@ class DocumentParser:
             word_count=len(raw_text.split()),
             sections=sections,
             raw_text=raw_text,
+            page_labels=page_labels,
         )
 
     # ------------------------------------------------------------------

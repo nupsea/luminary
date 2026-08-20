@@ -59,3 +59,34 @@ class TestPerChunkPage:
     def test_a_section_with_no_breaks_reports_its_own_page(self):
         """One-page sections are the case the old behaviour got right."""
         assert self._page_for(500, 12, []) == 12
+
+
+class TestPrintedLabel:
+    """A sheet's position is not the number printed on it."""
+
+    @staticmethod
+    def _label(labels, page):
+        from app.workflows.ingestion_nodes.chunk import _printed_label_for
+
+        return _printed_label_for(labels, page)
+
+    def test_the_printed_number_is_returned_when_one_exists(self):
+        # Measured on a 613-page book: sheet 41 is printed "19", sheet 6 "iv".
+        assert self._label({41: "19", 6: "iv"}, 41) == "19"
+        assert self._label({41: "19", 6: "iv"}, 6) == "iv"
+
+    def test_string_keys_survive_the_pipeline_state(self):
+        """State is JSON on one path, so integer keys come back as strings."""
+        assert self._label({"41": "19"}, 41) == "19"
+
+    def test_a_document_without_labels_reports_none(self):
+        """Three of four books in one library define no labels at all.
+
+        None is what makes the citation fall back to the sheet number, which is
+        the right answer there -- not an empty string rendered as a page.
+        """
+        assert self._label({}, 41) is None
+        assert self._label({41: "19"}, 99) is None
+
+    def test_a_chunk_with_no_page_has_no_label(self):
+        assert self._label({41: "19"}, None) is None

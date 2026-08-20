@@ -45,6 +45,10 @@ class ParsedDocument:
     raw_text: str = ""
     # Character offsets in raw_text where each new page begins
     page_breaks: list[int] = field(default_factory=list)
+    # Sheet number -> the number printed on that sheet, for PDFs that number
+    # their front matter separately. Only entries that differ from the sheet
+    # number are kept, so an empty map means counting sheets is already right.
+    page_labels: dict[int, str] = field(default_factory=dict)
     # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
     # static fetch could not capture). Empty when extraction was clean.
     warnings: list[str] = field(default_factory=list)
@@ -225,6 +229,9 @@ class SourceCitation(TypedDict):
     section_id: str | None
     section_heading: str
     pdf_page_number: int | None
+    # The number printed on that sheet, when it differs. Display only: the chip
+    # navigates by pdf_page_number, which is what the viewer scrolls to.
+    pdf_page_label: str | None
     section_preview_snippet: str  # first 150 chars of chunk text for hover tooltip
 
 

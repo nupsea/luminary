@@ -97,7 +97,7 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
 async def _fetch_section_ids_and_pages_for_chunks(
     chunk_ids: list[str],
 ) -> dict[str, tuple[str | None, int | None]]:
-    """Return {chunk_id: (section_id, pdf_page_number)} for the given chunk_ids.
+    """Return {chunk_id: (section_id, pdf_page_number, pdf_page_label)}.
 
     Used by synthesize_node to build SourceCitation entries from retrieved chunks.
     Returns {} on any DB error (non-fatal).
@@ -107,11 +107,17 @@ async def _fetch_section_ids_and_pages_for_chunks(
     try:
         async with get_session_factory()() as session:
             rows = await session.execute(
-                select(ChunkModel.id, ChunkModel.section_id, ChunkModel.pdf_page_number).where(
-                    ChunkModel.id.in_(chunk_ids)
-                )
+                select(
+                    ChunkModel.id,
+                    ChunkModel.section_id,
+                    ChunkModel.pdf_page_number,
+                    ChunkModel.pdf_page_label,
+                ).where(ChunkModel.id.in_(chunk_ids))
             )
-            return {row.id: (row.section_id, row.pdf_page_number) for row in rows}
+            return {
+                row.id: (row.section_id, row.pdf_page_number, row.pdf_page_label)
+                for row in rows
+            }
     except Exception:
         logger.warning("_fetch_section_ids_and_pages_for_chunks: DB lookup failed", exc_info=True)
         return {}
@@ -335,7 +341,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # collect SourceCitations from context chunks for post-stream emission.
     # Deduplicate by section_id (first occurrence wins); when section_id is None,
     # fall back to chunk_id so each unlinked chunk gets its own citation entry.
-    chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page); populated below if chunks present
+    chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page, pdf_page_label)
     source_citations_out: list[dict] = []
     if chunks_dicts:
         # Rank by retrieval score so the best sources lead and the cap keeps the
@@ -357,8 +363,8 @@ async def synthesize_node(state: ChatState) -> dict:
             if source_citations_out and c.get("score", 0.0) < floor:
                 continue
             cid = c.get("chunk_id", "")
-            meta = chunk_meta.get(cid, (None, None))
-            section_id, pdf_page = meta
+            meta = chunk_meta.get(cid, (None, None, None))
+            section_id, pdf_page, pdf_page_label = meta
             doc_id = c.get("document_id", "")
             doc_title = doc_titles_map.get(doc_id, "")
             section_heading = c.get("section_heading", "")
@@ -384,6 +390,11 @@ async def synthesize_node(state: ChatState) -> dict:
                     "section_id": section_id,
                     "section_heading": section_heading,
                     "pdf_page_number": pdf_page,
+                    # What the sheet is printed as, when the book numbers its
+                    # front matter separately. The chip shows this; it still
+                    # navigates by pdf_page_number, which is what the viewer
+                    # scrolls to.
+                    "pdf_page_label": pdf_page_label,
                     "section_preview_snippet": chunk_text[:150],  # hover tooltip preview
                 }
             )
