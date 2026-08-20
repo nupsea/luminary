@@ -32,11 +32,24 @@ _FURNITURE_TAGS = (
     "dialog",
 )
 
+# Names that also describe *content*: a paper's `related-work`, a `section-header`
+# heading block, a `commentary` aside. Substring matching cannot separate these
+# from `SiteHeader`, and neither can splitting into tokens -- both yield
+# `header`. Length can: furniture is a handful of words, a section is not.
+_AMBIGUOUS_HINT = re.compile(r"header|footer|comment|related|banner", re.I)
+
+# Above this many words, an element named only by an ambiguous hint is content.
+# Bracketing cases: a site header with a wordmark, eight nav items and a search
+# label measures about twenty words; the "Related work" section of a paper runs
+# to hundreds. Anything also matching an unambiguous hint is furniture at any
+# length -- `footer-nav` is navigation however much text it carries.
+_AMBIGUOUS_KEEP_WORDS = 60
+
 # Class/id names authors give to furniture. Matched as a substring, case-insensitively,
 # so `SiteHeader-module-scss__x` and `post-share-buttons` both hit.
-_FURNITURE_HINT = re.compile(
-    r"nav|menu|sidebar|footer|header|breadcrumb|share|social|comment|related|"
-    r"recirc|subscribe|newsletter|cookie|consent|banner|promo|advert|sponsor|"
+_UNAMBIGUOUS_HINT = re.compile(
+    r"nav|menu|sidebar|breadcrumb|share|social|"
+    r"recirc|subscribe|newsletter|cookie|consent|promo|advert|sponsor|"
     r"paywall|popup|modal|skip-link|screen-reader|visually-hidden|"
     # An interactive figure's controls sit inside the article, so tag-based
     # stripping never reaches them: an explorable explainer contributed
@@ -46,6 +59,10 @@ _FURNITURE_HINT = re.compile(
     # a plain div inside a tag no tag list can anticipate.
     r"controls|slider|byline",
     re.I,
+)
+
+_FURNITURE_HINT = re.compile(
+    f"{_UNAMBIGUOUS_HINT.pattern}|{_AMBIGUOUS_HINT.pattern}", re.I
 )
 
 # A region must hold at least this much text to be believed. Bracketing cases: a
@@ -60,8 +77,15 @@ def _strip_furniture(root: Tag) -> None:
     for attribute in ("class", "id"):
         for tag in root.find_all(attrs={attribute: _FURNITURE_HINT}):
             # A hint on the region itself is not licence to delete the article.
-            if tag is not root:
-                tag.decompose()
+            if tag is root or tag.decomposed:
+                continue
+            raw = tag.get(attribute) or ""
+            value = " ".join(raw) if isinstance(raw, list) else raw
+            if not _UNAMBIGUOUS_HINT.search(value) and (
+                len(tag.get_text().split()) > _AMBIGUOUS_KEEP_WORDS
+            ):
+                continue
+            tag.decompose()
 
 
 def select_region(html: str) -> Tag | None:

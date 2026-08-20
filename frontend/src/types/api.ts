@@ -9460,6 +9460,8 @@ export interface components {
              * @default false
              */
             confirm: boolean;
+            /** Rendered Html */
+            rendered_html?: string | null;
         };
         /** ReparseResponse */
         ReparseResponse: {

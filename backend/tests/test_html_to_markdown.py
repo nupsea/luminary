@@ -136,3 +136,21 @@ class TestBlocks:
         """Brackets the rule above: only same-page fragments are affordances."""
         out = _md('<h2>See <a href="/chapter/ch-05">the next chapter</a></h2>')
         assert "[the next chapter](/chapter/ch-05)" in out
+
+    def test_a_superscript_is_kept_as_a_superscript(self):
+        """`[^6]` is a footnote reference, and 10^6 is not a footnote.
+
+        Emitted as a reference with no definition to match it, the reading view
+        shows the literal text `10[^6]` -- and exponents and ordinals are what
+        <sup> mostly carries in the technical articles this serialiser exists
+        for.
+        """
+        out = _md("<p>Roughly 10<sup>6</sup> rows, on the 1<sup>st</sup> pass.</p>")
+        assert "10<sup>6</sup>" in out
+        assert "1<sup>st</sup>" in out
+        assert "[^" not in out
+
+    def test_a_footnote_marker_keeps_its_link(self):
+        """Brackets the rule above: a real marker is a link, and stays one."""
+        out = _md('<p>As shown<sup><a href="#fn1">1</a></sup>.</p>')
+        assert "(#fn1)" in out

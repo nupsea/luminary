@@ -91,8 +91,13 @@ class MarkdownSerializer:
             mark = _INLINE_WRAP[name]
             return f"{mark}{text}{mark}" if text else ""
         if name == "sup":
+            # `[^6]` is a footnote *reference*, and it needs a definition to be
+            # anything but literal text in the reading view. Most <sup> in a
+            # technical article is an exponent or an ordinal -- 10<sup>6</sup>,
+            # 1<sup>st</sup> -- so the tag is kept, which MarkdownRenderer
+            # renders through rehype-raw.
             text = self._children_inline(node)
-            return f"[^{text}]" if text else ""
+            return f"<sup>{text}</sup>" if text else ""
         return self._children_inline(node)
 
     def _children_inline(self, node: Tag) -> str:

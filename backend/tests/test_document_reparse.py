@@ -141,3 +141,57 @@ async def test_unknown_document_is_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.post(f"/documents/{uuid.uuid4()}/reparse", json={"confirm": False})
     assert r.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_a_confirmed_reparse_carries_the_render_and_refreshes_the_report(test_db):
+    """The fidelity notice offers this button, so it must not degrade the page.
+
+    Two defects met here. The extractor was called without `rendered_html`, so
+    a page whose content its scripts produce came back static -- the notice
+    naming missing figures would have cost the reader the rest of them. And the
+    stored `extraction_report` was never rewritten, so the notice described the
+    import it replaced, permanently.
+    """
+    _, factory, tmp_path = test_db
+    doc_id = await _seed(factory, tmp_path, with_url=True)
+    async with factory() as s:
+        doc = await s.get(DocumentModel, doc_id)
+        doc.extraction_report = {"dropped": {"diagram": 2}, "notes": []}
+        await s.commit()
+
+    seen: dict[str, object] = {}
+
+    class _Parsed:
+        title = "T"
+        format = "html"
+        pages = 1
+        word_count = 3
+        sections = []
+        raw_text = "new text"
+        extraction_report = {"dropped": {}, "notes": ["clean"]}
+
+    class _Extractor:
+        async def extract(self, url, doc_id=None, rendered_html=None):
+            seen["url"] = url
+            seen["rendered_html"] = rendered_html
+            return _Parsed()
+
+    import app.routers.documents as documents_router
+
+    original = documents_router.get_article_extractor
+    documents_router.get_article_extractor = lambda: _Extractor()
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post(
+                f"/documents/{doc_id}/reparse",
+                json={"confirm": True, "rendered_html": "<html>rendered</html>"},
+            )
+    finally:
+        documents_router.get_article_extractor = original
+
+    assert r.status_code == 200
+    assert seen["rendered_html"] == "<html>rendered</html>"
+    async with factory() as s:
+        doc = await s.get(DocumentModel, doc_id)
+        assert doc.extraction_report == {"dropped": {}, "notes": ["clean"]}

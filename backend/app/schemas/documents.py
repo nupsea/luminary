@@ -267,6 +267,10 @@ class ReparseRequest(BaseModel):
     """`confirm=False` reports what a re-import would cost and changes nothing."""
 
     confirm: bool = False
+    # The shell owns the webview, so a rendered page can only come from the
+    # client. Absent on every install without a shell, where the static fetch
+    # is what the original import used too.
+    rendered_html: str | None = None
 
 
 class ReparseResponse(BaseModel):

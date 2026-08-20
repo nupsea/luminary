@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { apiGet, apiPost } from "@/lib/apiClient"
+import { renderPage } from "@/lib/pageRender"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -348,6 +349,8 @@ interface ReadViewProps {
   /** What the importer captured and what it could not. Undefined means fidelity
    *  was never measured for this document, which is not the same as clean. */
   extractionReport?: ExtractionReport | null
+  /** Needed to re-render the page on a re-import; absent for non-URL sources. */
+  sourceUrl?: string | null
 }
 
 export function ReadView({
@@ -358,6 +361,7 @@ export function ReadView({
   contentType,
   structureType,
   extractionReport,
+  sourceUrl,
 }: ReadViewProps) {
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
@@ -611,14 +615,18 @@ export function ReadView({
             ["--reader-leading" as string]: spec.lineHeight,
           }}
         >
-          <ImportFidelityNotice report={extractionReport} documentId={documentId} />
+          <ImportFidelityNotice
+            report={extractionReport}
+            documentId={documentId}
+            sourceUrl={sourceUrl}
+          />
           {degradedCount > 0 && (
             <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
               <p>
                 {degradedCount} of {sections.length} sections were stored before Luminary kept
                 full section text, so their paragraph breaks are approximate.
               </p>
-              <ReimportAction documentId={documentId} />
+              <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
             </div>
           )}
           {sections.slice(0, listLimit).map((section, i) => (
@@ -663,9 +671,11 @@ export interface ExtractionReport {
 function ImportFidelityNotice({
   report,
   documentId,
+  sourceUrl,
 }: {
   report?: ExtractionReport | null
   documentId: string
+  sourceUrl?: string | null
 }) {
   if (!report) return null
   const dropped = Object.entries(report.dropped ?? {}).filter(([, n]) => n > 0)
@@ -688,7 +698,7 @@ function ImportFidelityNotice({
           {note}
         </p>
       ))}
-      <ReimportAction documentId={documentId} />
+      <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
     </div>
   )
 }
@@ -707,7 +717,7 @@ interface ReparseResponse {
  *  replaced -- because that is a cost the reader has to agree to, not one to
  *  discover afterwards.
  */
-function ReimportAction({ documentId }: { documentId: string }) {
+function ReimportAction({ documentId, sourceUrl }: { documentId: string; sourceUrl?: string | null }) {
   const queryClient = useQueryClient()
   const [preview, setPreview] = useState<ReparseResponse | null>(null)
   const [busy, setBusy] = useState(false)
@@ -717,7 +727,14 @@ function ReimportAction({ documentId }: { documentId: string }) {
     setBusy(true)
     setError(null)
     try {
-      const res = await apiPost<ReparseResponse>(`/documents/${documentId}/reparse`, { confirm })
+      // The same render the original import used. Without it a page whose
+      // content its scripts produce comes back static, and the re-import the
+      // fidelity notice offers would cost the reader the figures it named.
+      const rendered = confirm && sourceUrl ? await renderPage(sourceUrl) : null
+      const res = await apiPost<ReparseResponse>(`/documents/${documentId}/reparse`, {
+        confirm,
+        ...(rendered?.html ? { rendered_html: rendered.html } : {}),
+      })
       if (confirm) {
         setPreview(null)
         await queryClient.invalidateQueries({ queryKey: ["document", documentId] })

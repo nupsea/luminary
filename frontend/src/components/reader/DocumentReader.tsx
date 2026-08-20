@@ -1267,6 +1267,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 contentType={doc.content_type}
                 structureType={doc.structure_type}
                 extractionReport={doc.extraction_report}
+                sourceUrl={doc.source_url}
               />
             )}
           </div>

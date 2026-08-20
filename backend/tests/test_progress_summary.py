@@ -324,3 +324,36 @@ async def test_a_sub_minute_recording_says_so_rather_than_reading_as_nothing(tes
     assert metric["value"] is not None, "measured-but-small is not absent"
     assert "20s" in metric["basis"], f"basis hides the measurement: {metric['basis']!r}"
     assert metric["sample_size"] == 20
+
+
+@pytest.mark.anyio
+async def test_a_small_slice_of_a_large_week_keeps_its_own_unit(test_db):
+    """Brackets the rule above: the unit belongs to the value it labels.
+
+    Choosing it from the weekly total instead prints "review 0m" beside a
+    40-minute week -- the same "looks like nothing recorded" the sub-minute
+    case exists to prevent, reintroduced one level down in the basis string.
+    """
+    _, factory = test_db
+    from app.models import TimeOnTaskModel
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    async with factory() as s:
+        for activity, seconds in (("document", 2400), ("review", 30)):
+            s.add(
+                TimeOnTaskModel(
+                    id=str(uuid.uuid4()),
+                    activity=activity,
+                    member_id=f"{activity}-1",
+                    started_at=now,
+                    last_beat_at=now,
+                    seconds=seconds,
+                )
+            )
+        await s.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        metric = (await c.get("/progress/summary")).json()["time_on_luminary"]
+
+    assert "review 30s" in metric["basis"], f"slice lost its unit: {metric['basis']!r}"
+    assert "document 40m" in metric["basis"], f"total lost its unit: {metric['basis']!r}"

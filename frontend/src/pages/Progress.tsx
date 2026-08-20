@@ -40,7 +40,7 @@ type MisconceptionStats = components["schemas"]["MisconceptionStatsResponse"]
 type ProgressSummary = components["schemas"]["ProgressSummaryResponse"]
 
 
-type Note = components["schemas"]["NoteResponse"]
+type NotesTimeline = components["schemas"]["NotesTimelineResponse"]
 
 const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
   apiGet<DailyHistoryItem[]>("/study/history", {
@@ -75,26 +75,16 @@ async function fetchDocList(): Promise<DocListItem[]> {
   }
 }
 
-const fetchRecentNotes = (): Promise<Note[]> =>
-  apiGet<Note[]>("/notes", { page: 1, page_size: 100 })
+// Counting notes by downloading them cannot be right at any page size: no cap
+// is large enough to be a count, and any cap reports a smaller library as a
+// fact. Both numbers come from the server, which counts in SQL.
+const fetchNotesTimeline = (): Promise<NotesTimeline> =>
+  apiGet<NotesTimeline>("/progress/notes-timeline", {
+    tz_offset_minutes: new Date().getTimezoneOffset(),
+  })
 
 const fetchSessions = (): Promise<SessionListResponse> =>
   apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
-
-// Notes-over-time chart data builder (groups by month)
-
-function buildNotesOverTimeData(notes: Note[]): { month: string; count: number }[] {
-  const counts: Record<string, number> = {}
-  for (const n of notes) {
-    const d = new Date(n.created_at)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-    counts[key] = (counts[key] ?? 0) + 1
-  }
-  return Object.entries(counts)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-12)
-    .map(([month, count]) => ({ month, count }))
-}
 
 function SectionSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -400,7 +390,7 @@ export default function Progress() {
 
   const [notesLoading, setNotesLoading] = useState(true)
   const [notesError, setNotesError] = useState(false)
-  const [notes, setNotes] = useState<Note[]>([])
+  const [notesTimeline, setNotesTimeline] = useState<NotesTimeline | null>(null)
 
   const [docsLoading, setDocsLoading] = useState(true)
   const [docList, setDocList] = useState<DocListItem[]>([])
@@ -464,10 +454,10 @@ export default function Progress() {
         if (!cancelled) setSummaryLoading(false)
       })
 
-    fetchRecentNotes()
+    fetchNotesTimeline()
       .then((d) => {
         if (!cancelled) {
-          setNotes(d ?? [])
+          setNotesTimeline(d)
           setNotesLoading(false)
         }
       })
@@ -531,7 +521,7 @@ export default function Progress() {
 
   // Chart data: last 30 days, fill in missing dates with 0
   const activityData = buildActivityData(history, 30)
-  const notesOverTimeData = buildNotesOverTimeData(notes)
+  const notesOverTimeData = notesTimeline?.points ?? []
 
   // Suppress unused variable warning for error states shown inline
   void notesError
@@ -647,9 +637,9 @@ export default function Progress() {
           />
           <StatCard
             label="Notes"
-            value={notes.length}
+            value={summary?.notes.value ?? "—"}
             icon={StickyNote}
-            loading={notesLoading}
+            loading={summaryLoading}
             accent="amber"
           />
         </div>
@@ -689,7 +679,7 @@ export default function Progress() {
       <StudyHabitsSection />
 
       {/* Notes over time chart */}
-      {notes.length > 0 && (
+      {notesOverTimeData.length > 0 && (
         <section className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold text-foreground">Notes over time</h2>
           {notesLoading ? (

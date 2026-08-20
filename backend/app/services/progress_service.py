@@ -290,8 +290,10 @@ class ProgressService:
         # indistinguishable from nothing recorded, the one confusion this whole
         # contract exists to prevent. The value stays truthful to its unit and
         # the basis carries the seconds, so the reader can tell the two apart.
+        # Per value, not per total: a 30-second slice inside a 40-minute week
+        # reads "0m" if the total picks the unit, which is the confusion above.
         def _amount(value: int) -> str:
-            return f"{value}s" if seconds < 60 else f"{round(value / 60)}m"
+            return f"{value}s" if value < 60 else f"{round(value / 60)}m"
 
         split = ", ".join(
             f"{name} {_amount(value)}" for name, value in sorted(totals.items()) if value

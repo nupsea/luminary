@@ -50,6 +50,12 @@ _FADING_LIMIT = 3
 _FADING_MIN_DAYS = 7
 _FADING_MAX_DAYS = 21
 
+# An unfinished session stops being something to continue and becomes one the
+# user abandoned. Matches the outer edge of the decay window: past three weeks
+# every other lane has let an item go, and a six-month-old session pinning
+# "cards left in your session" to the hub is not a prompt, it is furniture.
+_CONTINUE_STUDY_MAX_DAYS = 21
+
 
 @router.get("/overview", response_model=HomeOverviewResponse)
 async def get_home_overview(
@@ -429,7 +435,8 @@ async def _fetch_continue_study(session: AsyncSession) -> ContinueStudyItem | No
 
     A session with no `ended_at` is one the user walked away from; its stored
     queue is what resume replays. A session whose queue is exhausted is finished
-    in everything but bookkeeping and is not offered.
+    in everything but bookkeeping and is not offered, and neither is one older
+    than the decay window.
     """
     row = (
         await session.execute(
@@ -438,10 +445,12 @@ async def _fetch_continue_study(session: AsyncSession) -> ContinueStudyItem | No
                 SELECT id, mode, planned_card_ids, cards_reviewed, started_at
                 FROM study_sessions
                 WHERE ended_at IS NULL
+                  AND started_at >= datetime('now', :max_age)
                 ORDER BY started_at DESC
                 LIMIT 1
                 """
-            )
+            ),
+            {"max_age": f"-{_CONTINUE_STUDY_MAX_DAYS} days"},
         )
     ).first()
     if row is None:

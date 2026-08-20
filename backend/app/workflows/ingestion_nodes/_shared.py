@@ -227,11 +227,14 @@ async def _persist_is_technical(document_id: str, is_technical: bool) -> None:
         await session.commit()
 
 
-async def _persist_extraction_report(document_id: str, report: dict) -> None:
+async def _persist_extraction_report(document_id: str, report: dict | None) -> None:
     """Store what the importer captured and what it could not.
 
     Null on the column means "fidelity was never measured", which is not the
-    same as a clean import -- so only write when a parser actually measured.
+    same as a clean import -- so the ingest path only writes when a parser
+    actually measured. A re-import writes whatever it measured including None,
+    because the stored report has to describe the import that is in the
+    database, not the one it replaced.
     """
     from sqlalchemy import update  # noqa: PLC0415
 

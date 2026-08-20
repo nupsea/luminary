@@ -931,22 +931,27 @@ async def get_document(document_id: str):
                 ChunkModel.pdf_page_label,
                 ChunkModel.pdf_page_number,
             )
-            .where(
-                ChunkModel.document_id == document_id,
-                ChunkModel.pdf_page_label.is_not(None),
-            )
+            .where(ChunkModel.document_id == document_id)
             .order_by(ChunkModel.chunk_index)
         )
         section_page_labels: dict[str, str] = {}
+        # A section's printed page is the one its *first* chunk sits on. Labels
+        # are stored only where they differ from the sheet, so filtering to
+        # labelled chunks first would hand a section that opens on an
+        # agreeing page the label of some later one -- a printed page from the
+        # middle of the section beside a page_start from its beginning.
+        labelled_sections: set[str] = set()
         # Sheet -> printed page for the whole document, so the viewer's footer
         # names the same page the citation that opened it did. pdf.js only sees
         # labels a PDF *declares*; a book that merely prints its numbers has
         # none, and that is the case this map exists for.
         page_labels: dict[str, str] = {}
         for section_id, label, sheet in label_rows:
-            if section_id and section_id not in section_page_labels:
-                section_page_labels[section_id] = label
-            if sheet is not None:
+            if section_id and section_id not in labelled_sections:
+                labelled_sections.add(section_id)
+                if label is not None:
+                    section_page_labels[section_id] = label
+            if sheet is not None and label is not None:
                 page_labels.setdefault(str(sheet), label)
 
     section_count = len(sections)
@@ -1450,7 +1455,14 @@ async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseRes
 
     parsed_document = None
     if source == "url":
-        parsed = await get_article_extractor().extract(source_url, doc_id=document_id)
+        # Without the render the re-import silently downgrades a page whose
+        # content its scripts produce -- measured at 0 figures against 78 --
+        # so the button offered by the fidelity notice would make the document
+        # worse than the notice it was meant to answer.
+        parsed = await get_article_extractor().extract(
+            source_url, doc_id=document_id, rendered_html=body.rendered_html
+        )
+        await _persist_extraction_report(document_id, parsed.extraction_report)
         parsed_document = {
             "title": parsed.title,
             "format": parsed.format,

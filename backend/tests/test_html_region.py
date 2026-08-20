@@ -111,3 +111,37 @@ class TestPlausibility:
 
     def test_no_region_is_never_plausible(self):
         assert not region_is_plausible(None, "anything")
+
+
+class TestAmbiguouslyNamedContent:
+    """`header`, `related` and `comment` name furniture *and* name content."""
+
+    def test_a_papers_related_work_section_survives(self):
+        section = (
+            '<section class="related-work"><h2>Related work</h2>'
+            + "<p>" + ("Prior systems approached this differently. " * 30) + "</p>"
+            + "</section>"
+        )
+        region = select_region(_page(f"<article>{PROSE}{section}</article>"))
+        assert "Related work" in region.get_text()
+        assert "Prior systems approached this differently." in region.get_text()
+
+    def test_a_site_header_is_still_removed(self):
+        """Brackets the rule above: furniture is short, which is the signal."""
+        header = '<div class="SiteHeader-module-scss__x">Home About Archive Search</div>'
+        region = select_region(_page(f"<article>{header}{PROSE}</article>"))
+        assert "Home About Archive Search" not in region.get_text()
+
+    def test_a_long_element_named_by_an_unambiguous_hint_is_still_removed(self):
+        """Length only rescues an element whose only hint is ambiguous.
+
+        `footer-nav` is navigation at any length; a wall of link text is the
+        shape a site footer takes, not a reason to believe it is prose.
+        """
+        footer = (
+            '<div class="footer-nav">'
+            + ("Careers Press Privacy Terms Status Security Blog Docs " * 20)
+            + "</div>"
+        )
+        region = select_region(_page(f"<article>{PROSE}{footer}</article>"))
+        assert "Careers Press Privacy" not in region.get_text()
