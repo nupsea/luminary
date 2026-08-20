@@ -20,7 +20,6 @@ import {
   Hourglass,
   Loader2,
   Pencil,
-  Quote,
   RefreshCw,
   Sparkles,
   StickyNote,
@@ -42,6 +41,7 @@ import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
 import { humanizeTitle } from "@/lib/humanizeTitle"
 import { readingTimeLabel } from "@/lib/readingTime"
+import { ACTIVITY_SLICES, buildWedges } from "./Hub/activityPie"
 import type { components } from "@/types/api"
 
 type HomeOverview = components["schemas"]["HomeOverviewResponse"]
@@ -111,8 +111,6 @@ export default function Hub() {
     <PageSurface>
       <HubHeader />
 
-      <DailyQuote />
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Primary column: things to act on now */}
         <div className="flex flex-col gap-6 lg:col-span-2">
@@ -155,7 +153,7 @@ export default function Hub() {
           {hasFading && <FadingCard items={data.fading_items ?? []} />}
 
           {data.recent_tags.length > 0 && (
-            <Section icon={Tag} title="What you've been into">
+            <Section icon={Tag} title="Topics">
               <TagCloud tags={data.recent_tags} />
             </Section>
           )}
@@ -171,33 +169,18 @@ const HUB_QUOTE_OFFSET = 7
 function DailyQuote() {
   const [quote] = useState(() => quoteOfTheDay(new Date(), HUB_QUOTE_OFFSET))
 
-  // Set in the app's own typeface throughout. What makes it read as a quote is
-  // the scale and the surface, not a second font family -- which would have to
-  // survive macOS, Windows and Linux without a bundled file.
+  // A full-width gradient block pushed every action item below the fold for a
+  // line nobody needs to act on. Ambient means quiet: an accent rule, two lines
+  // at most, and the full text on hover.
   return (
-    <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-7 shadow-lg shadow-primary/20">
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
-
-      <div className="relative z-10 flex flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
-            <Quote size={13} className="text-primary-foreground" />
-          </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
-            Thought for the day
-          </span>
-        </div>
-
-        <blockquote className="max-w-3xl text-xl font-medium leading-snug tracking-[-0.015em] text-gray-200 sm:text-2xl">
-          &ldquo;{quote.text}&rdquo;
-        </blockquote>
-
-        <figcaption className="text-xs text-primary-foreground/70">
-          <span className="font-semibold text-primary-foreground/85">{quote.author}</span>
-          <span> · {quote.source}</span>
-        </figcaption>
-      </div>
+    <figure
+      className="flex max-w-md flex-col gap-1 border-l-2 border-primary/40 pl-3"
+      title={`${quote.text} — ${quote.author}, ${quote.source}`}
+    >
+      <blockquote className="line-clamp-2 text-[13px] leading-snug text-foreground/75">
+        &ldquo;{quote.text}&rdquo;
+      </blockquote>
+      <figcaption className="text-[11px] text-muted-foreground">{quote.author}</figcaption>
     </figure>
   )
 }
@@ -227,16 +210,19 @@ function HubHeader() {
     day: "numeric",
   })
   return (
-    <header className="flex items-center gap-4">
-      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
-        <LuminaryGlyph size={40} className="text-primary" />
-      </span>
-      <div className="flex flex-col">
-        <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
-          {greetingHeadline()}
-        </h1>
-        <span className="text-sm text-muted-foreground">{dateLabel}</span>
+    <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-center gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
+          <LuminaryGlyph size={34} className="text-primary" />
+        </span>
+        <div className="flex flex-col">
+          <h1 className="text-2xl font-semibold leading-tight text-foreground">
+            {greetingHeadline()}
+          </h1>
+          <span className="text-sm text-muted-foreground">{dateLabel}</span>
+        </div>
       </div>
+      <DailyQuote />
     </header>
   )
 }
@@ -593,8 +579,8 @@ function RecommendedNext({ items }: { items: Recommendation[] }) {
   return (
     <Section
       icon={Compass}
-      title="Recommended next"
-      subtitle="Backed by your own review record"
+      title="Next"
+      subtitle="From your review record"
     >
       <div className="flex flex-col gap-2.5">
         {visible.map((rec) => {
@@ -776,7 +762,7 @@ function ContinueReadingCard({
     <LaneShell
       variant="continue"
       icon={BookOpen}
-      title="Pick up where you left off"
+      title="Continue"
       trailing={
         items.length > 0 && (
           <Link to="/library" className="text-[11px] text-muted-foreground hover:text-foreground">
@@ -787,7 +773,7 @@ function ContinueReadingCard({
     >
       {isEmpty ? (
         <p className="py-3 text-sm text-muted-foreground">
-          Nothing in progress — open a doc and you'll see it here.
+          Nothing in progress yet.
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -841,7 +827,7 @@ function ContinueReadingCard({
 function FadingCard({ items }: { items: FadingItem[] }) {
   const navigate = useNavigate()
   return (
-    <LaneShell variant="fading" icon={Hourglass} title="Worth a refresher?">
+    <LaneShell variant="fading" icon={Hourglass} title="Fading">
       {items.length === 0 ? (
         <p className="py-3 text-sm text-muted-foreground">
           Nothing fading right now — you've been keeping up.
@@ -980,13 +966,6 @@ function StatPill({ label, value }: { label: string; value: number }) {
 // -- Weekly stats ------------------------------------------------------------
 
 // The four slices the week splits into, with the colour each is drawn in.
-const _ACTIVITY_SLICES: { key: string; label: string; colour: string }[] = [
-  { key: "note", label: "Notes", colour: "hsl(160 60% 45%)" },
-  { key: "document", label: "Docs", colour: "hsl(217 75% 58%)" },
-  { key: "review", label: "Review", colour: "hsl(38 85% 55%)" },
-  { key: "study", label: "Study", colour: "hsl(265 60% 60%)" },
-]
-
 function durationLabel(seconds: number): string {
   const minutes = Math.round(seconds / 60)
   if (minutes < 60) return `${minutes}min`
@@ -995,88 +974,63 @@ function durationLabel(seconds: number): string {
   return rest === 0 ? `${hours} hr` : `${hours} hr, ${rest}min`
 }
 
-/**
- * Where the week's foreground time went.
- *
- * Drawn only from `seconds_by_activity`, which is one basis across all four
- * slices. `minutes_studied` beside it is study-session wall clock and is a
- * different measurement of a different thing; mixing them would make the
- * wedges add up to something that is not the total.
- */
 function ActivitySplit({ byActivity }: { byActivity: Record<string, number> }) {
-  const slices = _ACTIVITY_SLICES.map((s) => ({ ...s, seconds: byActivity[s.key] ?? 0 }))
-  const total = slices.reduce((sum, s) => sum + s.seconds, 0)
+  const { wedges, total } = buildWedges(byActivity, 36, 36, 34)
 
   if (total === 0) {
     return (
-      <div className="flex flex-col gap-1 border-t border-border/60 pt-3">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Time in Luminary
-        </span>
-        <span className="text-[11px] text-muted-foreground">
-          Nothing recorded yet — this fills in as you read, write and review.
-        </span>
-      </div>
+      <p className="border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
+        No time recorded yet.
+      </p>
     )
   }
 
-  // One ring, each wedge a dash on the circumference. An SVG arc needs no
-  // charting dependency for four numbers. Offsets are accumulated up front
-  // rather than during the map, so nothing is reassigned mid-render.
-  const radius = 26
-  const circumference = 2 * Math.PI * radius
-  const wedges = slices.reduce<{ slice: (typeof slices)[number]; dash: number; offset: number }[]>(
-    (acc, slice) => {
-      const dash = (slice.seconds / total) * circumference
-      const offset = acc.length === 0 ? 0 : acc[acc.length - 1].offset + acc[acc.length - 1].dash
-      acc.push({ slice, dash, offset })
-      return acc
-    },
-    [],
-  )
+  const byKey = new Map(wedges.map((w) => [w.key, w]))
 
   return (
-    <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Time in Luminary
-      </span>
-      <div className="flex items-center gap-4">
-      <svg width="72" height="72" viewBox="0 0 72 72" className="shrink-0" role="img"
-           aria-label={`Time this week: ${slices
-             .filter((s) => s.seconds > 0)
-             .map((s) => `${s.label} ${durationLabel(s.seconds)}`)
-             .join(", ")}`}>
-        <g transform="rotate(-90 36 36)">
-          {wedges.map(({ slice, dash, offset }) => (
-            <circle
-              key={slice.key}
-              cx="36"
-              cy="36"
-              r={radius}
-              fill="none"
-              stroke={slice.colour}
-              strokeWidth="10"
-              strokeDasharray={`${dash} ${circumference - dash}`}
-              strokeDashoffset={-offset}
+    <div className="flex items-center gap-4 border-t border-border/60 pt-3">
+      <svg
+        width="72"
+        height="72"
+        viewBox="0 0 72 72"
+        className="shrink-0"
+        role="img"
+        aria-label={`Time this week: ${wedges
+          .map((w) => `${w.label} ${durationLabel(w.seconds)}`)
+          .join(", ")}`}
+      >
+        {wedges.map((w) =>
+          w.path === null ? (
+            <circle key={w.key} cx="36" cy="36" r="34" fill={w.colour} />
+          ) : (
+            <path
+              key={w.key}
+              d={w.path}
+              fill={w.colour}
+              // A 2px gap in the surface colour separates adjacent fills.
+              stroke="hsl(var(--card))"
+              strokeWidth="2"
             />
-          ))}
-        </g>
+          ),
+        )}
       </svg>
       <ul className="flex min-w-0 flex-1 flex-col gap-1">
-        {slices.map((slice) => (
-          <li key={slice.key} className="flex items-center gap-2 text-[11px]">
-            <span
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: slice.colour }}
-            />
-            <span className="flex-1 truncate text-muted-foreground">{slice.label}</span>
-            <span className="tabular-nums text-foreground/90">
-              {durationLabel(slice.seconds)}
-            </span>
-          </li>
-        ))}
+        {ACTIVITY_SLICES.map((slice) => {
+          const seconds = byKey.get(slice.key)?.seconds ?? 0
+          return (
+            <li key={slice.key} className="flex items-center gap-2 text-[11px]">
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: slice.colour }}
+              />
+              <span className="flex-1 truncate text-muted-foreground">{slice.label}</span>
+              <span className="tabular-nums text-foreground/90">
+                {seconds > 0 ? durationLabel(seconds) : "—"}
+              </span>
+            </li>
+          )
+        })}
       </ul>
-      </div>
     </div>
   )
 }
@@ -1102,8 +1056,7 @@ function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        <BigStat value={`${stats.minutes_studied}m`} label="studied" accent="primary" />
+      <div className="grid grid-cols-3 gap-2.5">
         <BigStat value={stats.cards_reviewed} label="cards" accent="amber" />
         <BigStat value={stats.notes_written} label="notes" accent="emerald" />
         <BigStat value={stats.docs_touched} label="docs" accent="blue" />
