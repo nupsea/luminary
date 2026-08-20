@@ -148,10 +148,15 @@ active collections and a week summary, all from one fetch of `GET /home/overview
 (`routers/home.py:58`).
 
 Both gaps against the sketch are closed: the continue lane carries notes and an open study
-session, and `time_on_task` records per-activity duration for the weekly ring (`metrics.md`
-carries its contract). The hub opens on a choice between flow and recall — a resume card beside
-the day's review — and stored titles are rendered through `humanizeTitle`, because two thirds of
-one library's titles are the filename the document arrived as.
+session, and `time_on_task` records per-activity duration for the week (`metrics.md` carries its
+contract). Stored titles render through `humanizeTitle`, because two thirds of one library's
+titles are the filename the document arrived as.
+
+The page is now one 780px reading column rather than a two-column dashboard, following the
+`Luminary Home v2` design handoff: a single card for the decision the hub exists for — carry on
+reading, or start the review — then rows, then the week's shape two-up at the foot. The week
+split is labelled bars rather than a pie, because four magnitudes compared against each other is
+what a bar chart is for and a 72px pie made the small slices unreadable.
 
 What remains is smaller and worth stating rather than assuming.
 
