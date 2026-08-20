@@ -21,7 +21,7 @@ import {
 import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
-import { type PageMatch, buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
+import { type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel } from "./pdfSearchUtils"
 import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
 
 // Set worker once at module load
@@ -283,6 +283,9 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const pageTextCacheRef = useRef<Map<number, string>>(new Map())
     // Track how many pages have been extracted so far (for progressive search)
     const [extractedPageCount, setExtractedPageCount] = useState(0)
+    // The numbers printed on the sheets, when the PDF says they differ from
+    // the sheets' positions. Null on a document that defines none.
+    const [pageLabels, setPageLabels] = useState<string[] | null>(null)
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
@@ -307,6 +310,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setCurrentPage(1)
       setPageInput("1")
       setTotalPages(0)
+      setPageLabels(null)
       // Clear search state and text cache for new document
       pageTextCacheRef.current = new Map()
       setExtractedPageCount(0)
@@ -334,6 +338,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           // Defer auto-fit and TOC after a tick so the canvas renders first
           setTimeout(async () => {
             if (cancelled) return
+
+            // A book numbers its front matter separately, so the sheet's
+            // position is not the page number printed on it. Deferred with the
+            // rest: the footer is correct without it, just less specific.
+            try {
+              const labels = await doc.getPageLabels()
+              if (!cancelled) setPageLabels(labels)
+            } catch {
+              // non-fatal; the footer falls back to counting sheets
+            }
 
             // Auto-fit: compute zoom so the first page fills the scroll area width
             try {
@@ -723,7 +737,28 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => { cancelled = true }
     }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
 
-    // Apply search highlights as overlays whenever the page renders or match index changes
+    // Which match on this page is the active one. Derived here so the effect
+    // below depends on a number rather than on the identity of `globalMatches`,
+    // which progressive extraction replaces once per ten-page batch.
+    // What the sheet in view is printed as, when that differs from its position.
+    const printedLabel = useMemo(
+      () => printedPageLabel(pageLabels, currentPage),
+      [pageLabels, currentPage],
+    )
+
+    const activePageMatchIndex = useMemo(
+      () => activeMatchIndexForPage(globalMatches, globalMatchIndex, currentPage),
+      [globalMatches, globalMatchIndex, currentPage],
+    )
+
+    // Apply search highlights as overlays whenever the page renders or the
+    // active match changes.
+    //
+    // The dependency list is the fix for the flicker: this effect does not read
+    // the match list -- applySearchHighlights re-derives matches from the text
+    // layer -- it only needs to know which one is active. Depending on the array
+    // re-ran it 62 times on a 600-page book as extraction progressed, and every
+    // run clears all overlays before drawing the same highlights back.
     useEffect(() => {
       const textDiv = textLayerRef.current
       const overlayDiv = highlightOverlayRef.current
@@ -733,18 +768,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         return
       }
 
-      // Determine which page-local match index to highlight as active
-      const pageMatches = globalMatches.filter(m => m.page === currentPage)
-      let activePageIdx = -1
-      if (globalMatchIndex >= 0 && globalMatchIndex < globalMatches.length) {
-        const current = globalMatches[globalMatchIndex]
-        if (current.page === currentPage) {
-          activePageIdx = pageMatches.findIndex(m => m.index === current.index)
-        }
-      }
-
-      applySearchHighlights(textDiv, overlayDiv, searchQuery, activePageIdx)
-    }, [textLayerVersion, searchOpen, searchQuery, globalMatches, globalMatchIndex, currentPage])
+      applySearchHighlights(textDiv, overlayDiv, searchQuery, activePageMatchIndex)
+    }, [textLayerVersion, searchOpen, searchQuery, activePageMatchIndex])
 
     function handleSearchNext() {
       if (globalMatches.length === 0) return
@@ -1003,6 +1028,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               aria-label="Current page"
             />
             <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
+            {printedLabel && (
+              <span
+                className="text-xs text-muted-foreground tabular-nums"
+                title="The page number printed on this sheet. The box counts sheets in the file, which a book's front matter makes differ."
+              >
+                (p. {printedLabel})
+              </span>
+            )}
             <button
               className="p-1 rounded hover:bg-accent disabled:opacity-40"
               onClick={() => goToPage(currentPage + 1)}

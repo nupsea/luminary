@@ -57,6 +57,7 @@ import {
 // Document list for the in-tab picker
 
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
+import { studyScopeDocumentId } from "./studyScope"
 import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
@@ -147,7 +148,20 @@ export default function Study() {
   // When a collection is active, suppress the lastReadyDocumentId fallback so
   // the DocPicker shows no selection and startStudy doesn't mix a stale document
   // scope into a collection-scoped session.
-  const studyDocumentId = activeCollectionId ? null : effectiveDocumentId
+  //
+  // `rawActiveId` rather than `effectiveDocumentId` decides whether a document
+  // is open at all. The hook falls back to the last-read document so a surface
+  // always has something to render, which on Study meant the landing page --
+  // the due-review CTA, the session manager and the collection grid -- could
+  // not be reached: clicking the "Study" heading clears the selection, the
+  // fallback immediately supplied the most recent document, and the page
+  // reopened it. `effectiveDocumentId` still supplies the id, so a selection
+  // that is mid-ingestion keeps falling back to a readable one with its banner.
+  const studyDocumentId = studyScopeDocumentId(
+    activeCollectionId,
+    rawActiveId,
+    effectiveDocumentId,
+  )
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
