@@ -367,7 +367,7 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
             text(
                 """
                 SELECT
-                  d.id, d.title, ca.last_meaningful_at,
+                  d.id, d.title, ca.last_meaningful_at, d.word_count,
                   (SELECT COUNT(*) FROM sections WHERE document_id = d.id) AS total,
                   (SELECT COUNT(*) FROM reading_progress WHERE document_id = d.id) AS read
                 FROM content_activity ca
@@ -381,8 +381,8 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
     ).all()
     out: list[ContinueReadingItem] = []
     for row in rows:
-        total = int(row[3] or 0)
-        read = int(row[4] or 0)
+        total = int(row[4] or 0)
+        read = int(row[5] or 0)
         if total <= 0 or read <= 0 or read >= total:
             continue
         out.append(
@@ -391,6 +391,7 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
                 title=row[1] or "(untitled)",
                 reading_progress_pct=round(read / total, 3),
                 last_meaningful_at=row[2],
+                word_count=int(row[3] or 0) or None,
             )
         )
         if len(out) >= _CONTINUE_READING_LIMIT:

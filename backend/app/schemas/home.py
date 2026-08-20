@@ -105,6 +105,9 @@ class ContinueReadingItem(BaseModel):
     title: str
     reading_progress_pct: float  # 0..1
     last_meaningful_at: datetime
+    # For the client's "~N min left". None when the document never recorded one,
+    # which is the difference between "no estimate" and "a short document".
+    word_count: int | None = None
 
 
 class ContinueNoteItem(BaseModel):

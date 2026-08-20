@@ -40,6 +40,8 @@ import { launchStudy } from "@/lib/studyLauncher"
 import { quoteOfTheDay } from "@/lib/quotes"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
+import { humanizeTitle } from "@/lib/humanizeTitle"
+import { readingTimeLabel } from "@/lib/readingTime"
 import type { components } from "@/types/api"
 
 type HomeOverview = components["schemas"]["HomeOverviewResponse"]
@@ -91,8 +93,16 @@ export default function Hub() {
   if (isEmpty) return <HubEmpty />
 
   const hasRecommendations = (data.recommendations?.length ?? 0) > 0
+  // Promoted beside the hero, so the hub opens on a choice between flow and
+  // recall rather than on recall alone.
+  const resumeTarget = data.continue_reading?.[0] ?? null
+  const remainingReads = (data.continue_reading ?? []).filter(
+    (d) => d.document_id !== resumeTarget?.document_id,
+  )
+  // Counted after the promotion: a lane holding only the document already shown
+  // above would render "nothing in progress" over a library in progress.
   const hasContinue =
-    (data.continue_reading?.length ?? 0) > 0 ||
+    remainingReads.length > 0 ||
     (data.continue_notes?.length ?? 0) > 0 ||
     data.continue_study != null
   const hasFading = (data.fading_items?.length ?? 0) > 0
@@ -106,11 +116,19 @@ export default function Hub() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Primary column: things to act on now */}
         <div className="flex flex-col gap-6 lg:col-span-2">
-          {data.today_action && <TodayHero action={data.today_action} />}
+          {data.today_action &&
+            (resumeTarget ? (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <ResumeFlowCard item={resumeTarget} />
+                <TodayHero action={data.today_action} />
+              </div>
+            ) : (
+              <TodayHero action={data.today_action} />
+            ))}
           {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
           {hasContinue && (
             <ContinueReadingCard
-              items={data.continue_reading ?? []}
+              items={remainingReads}
               notes={data.continue_notes ?? []}
               study={data.continue_study ?? null}
             />
@@ -335,6 +353,72 @@ function TodayHero({ action }: { action: TodayAction }) {
       </div>
       <p className="max-w-2xl text-sm text-muted-foreground">{reason}</p>
     </button>
+  )
+}
+
+
+/** The other half of the choice the hub opens with.
+ *
+ *  The hero offers recall; this offers flow. Both were available and only one
+ *  was prominent, so returning to a half-read document meant scrolling past the
+ *  day's review to a list. Deliberately styled a step quieter than the hero:
+ *  two equal-weight primary cards compete rather than offer.
+ */
+function ResumeFlowCard({ item }: { item: ContinueReadingItem }) {
+  const navigate = useNavigate()
+  const pct = Math.round(item.reading_progress_pct * 100)
+  const timeLeft = readingTimeLabel(item.word_count, item.reading_progress_pct)
+
+  return (
+    <div className="group rounded-2xl border border-border/60 bg-card/50 px-6 py-5">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/5 ring-1 ring-border">
+            <BookOpen size={13} className="text-foreground/70" />
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/60">
+            Resume reading
+          </span>
+        </div>
+
+        <div className="flex items-start gap-3">
+          <ProgressRing pct={pct} />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h2
+              className="truncate text-lg font-bold tracking-tight text-foreground sm:text-xl"
+              title={item.title}
+            >
+              {humanizeTitle(item.title)}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {pct}% read · {sinceLabel(item.last_meaningful_at)}
+              {timeLeft && (
+                <>
+                  {" · "}
+                  <span title="Estimated at 200 words a minute, from the share of sections still unread.">
+                    {timeLeft}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            onClick={() =>
+              navigate(`/library?doc=${encodeURIComponent(item.document_id)}`, {
+                state: { from: "/" },
+              })
+            }
+            className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted"
+          >
+            Dive back in
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -631,7 +715,9 @@ function ContinueNoteRows({ items }: { items: ContinueNoteItem[] }) {
               <StickyNote size={12} className="text-muted-foreground" />
             </span>
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm text-foreground/90">{item.title}</span>
+              <span className="truncate text-sm text-foreground/90" title={item.title}>
+                {humanizeTitle(item.title)}
+              </span>
               <span className="text-xs text-muted-foreground">
                 {sinceLabel(item.last_meaningful_at)}
               </span>
@@ -729,7 +815,7 @@ function ContinueReadingCard({
                 <ProgressRing pct={item.reading_progress_pct * 100} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium text-foreground">
-                    {item.title}
+                    {humanizeTitle(item.title)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {Math.round(item.reading_progress_pct * 100)}% ·{" "}
@@ -781,7 +867,9 @@ function FadingCard({ items }: { items: FadingItem[] }) {
                     <Icon size={12} className="text-muted-foreground" />
                   </span>
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm text-foreground/90">{item.title}</span>
+                    <span className="truncate text-sm text-foreground/90" title={item.title}>
+                      {humanizeTitle(item.title)}
+                    </span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Clock size={9} />
                       {item.days_since} day{item.days_since === 1 ? "" : "s"} ago

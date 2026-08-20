@@ -4,6 +4,7 @@
 import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react"
 import { useState } from "react"
 
+import { humanizeTitle } from "@/lib/humanizeTitle"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -131,7 +132,7 @@ export function LibraryTable({ items, isLoading, isError, onRowClick, onRetry }:
                 onClick={() => onRowClick(doc.id)}
               >
                 <TableCell className="font-medium text-foreground">
-                  {doc.title}
+                  {humanizeTitle(doc.title)}
                 </TableCell>
                 <TableCell>
                   <Badge variant="gray" className="capitalize">

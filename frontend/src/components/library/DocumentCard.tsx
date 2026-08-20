@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
+import { humanizeTitle } from "@/lib/humanizeTitle"
 import { isDocumentErrored, isDocumentProcessing } from "@/lib/documentReadiness"
 import { 
   Book, 
@@ -355,7 +356,9 @@ export function DocumentCard({
             />
           )}
           <Icon size={16} className="shrink-0 text-muted-foreground" />
-          <h3 className="truncate text-sm font-semibold text-foreground">{doc.title}</h3>
+          <h3 className="truncate text-sm font-semibold text-foreground" title={doc.title}>
+            {humanizeTitle(doc.title)}
+          </h3>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {isProcessing ? (

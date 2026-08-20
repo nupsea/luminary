@@ -147,11 +147,11 @@ quote, today's focus, "continue where you left off", the fading/refresher lane, 
 active collections and a week summary, all from one fetch of `GET /home/overview`
 (`routers/home.py:58`).
 
-Two gaps remain against the sketch.
-
-Both gaps against the sketch are now closed: the continue lane carries notes and an open study
+Both gaps against the sketch are closed: the continue lane carries notes and an open study
 session, and `time_on_task` records per-activity duration for the weekly ring (`metrics.md`
-carries its contract).
+carries its contract). The hub opens on a choice between flow and recall — a resume card beside
+the day's review — and stored titles are rendered through `humanizeTitle`, because two thirds of
+one library's titles are the filename the document arrived as.
 
 What remains is smaller and worth stating rather than assuming.
 
@@ -163,6 +163,15 @@ What remains is smaller and worth stating rather than assuming.
 - **`Study` cannot be deep-linked to resume a session.** The hub's study row routes to the page
   because `Study.tsx` reads neither search params nor route state, so a session id in the URL
   would silently start a fresh session.
+- **"~N min left" stacks two approximations.** Reading speed is a convention (200 wpm, named in
+  `readingTime.ts`), and reading progress counts sections rather than words, so the words
+  remaining assume sections of roughly equal length. It is labelled with a tilde and carries its
+  basis on hover; it is not a measurement and must not be promoted to one.
+- **A quote carries no field of its own.** Tagging each with a subject would need a taxonomy
+  applied by hand across the whole set, so the card shows author and source instead.
+- **Nothing prefills a note from elsewhere in the app.** `Notes.tsx` reads neither search params
+  nor route state, so "reflect on this" affordances elsewhere can only link to the page, which
+  the sidebar already does.
 
 ### 7. What the reported reader and study defects left behind
 

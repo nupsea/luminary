@@ -6921,6 +6921,8 @@ export interface components {
              * Format: date-time
              */
             last_meaningful_at: string;
+            /** Word Count */
+            word_count?: number | null;
         };
         /**
          * ContinueStudyItem
@@ -12621,6 +12623,8 @@ export interface operations {
             query?: {
                 /** @description Comma-separated content types */
                 content_type?: string | null;
+                /** @description Comma-separated file formats. Distinct from content_type: an EPUB is format `epub` and content_type `book`, which is why filtering for e-books by type never matched one. */
+                format?: string | null;
                 /** @description Filter by tag value */
                 tag?: string | null;
                 /** @description Restrict to documents in this collection */
