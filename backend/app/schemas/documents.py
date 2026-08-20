@@ -44,6 +44,19 @@ class DocumentListItem(BaseModel):
     collections: list[CollectionRef] = []
 
 
+class DocumentFacetsResponse(BaseModel):
+    """How many documents each filter would match, over the whole library.
+
+    A filter offering zero results is not a filter, it is a dead end -- and the
+    library has carried several: `code` is not even a storable content type,
+    and `epub` is a format that no document carries as its type.
+    """
+
+    content_types: dict[str, int]
+    formats: dict[str, int]
+    total: int
+
+
 class DocumentListResponse(BaseModel):
     items: list[DocumentListItem]
     total: int

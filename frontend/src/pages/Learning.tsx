@@ -34,6 +34,7 @@ import {
   bulkDelete,
   deleteDocument,
   fetchDocuments,
+  fetchLibraryFacets,
   fetchRecentlyAccessed,
 } from "./Learning/api"
 import { LibraryStatsBar } from "./Learning/LibraryStatsBar"
@@ -116,6 +117,7 @@ export default function Learning() {
 
   const [search, setSearch] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
+  const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
   const [page, setPage] = useState(1)
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
@@ -136,6 +138,16 @@ export default function Learning() {
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const content_type = selectedTypes.size > 0 ? [...selectedTypes].join(",") : undefined
+  const format = selectedFormats.size > 0 ? [...selectedFormats].join(",") : undefined
+  const filtered = selectedTypes.size > 0 || selectedFormats.size > 0
+
+  // Counts for the filter bar. Whole-library, so a chip is offered only when it
+  // has something behind it.
+  const { data: facets } = useQuery({
+    queryKey: ["library-facets"],
+    queryFn: fetchLibraryFacets,
+    staleTime: 30_000,
+  })
 
   // Fetch the active collection's name + color so the chip in the active-
   // filter row can render legibly (slug != display name; users named it).
@@ -150,10 +162,20 @@ export default function Learning() {
   })
 
   const { data: pageData, isLoading, isError, isSuccess, refetch } = useQuery({
-    queryKey: ["documents", content_type, tagFilter, selectedCollectionId, sort, page, PAGE_SIZE],
+    queryKey: [
+      "documents",
+      content_type,
+      format,
+      tagFilter,
+      selectedCollectionId,
+      sort,
+      page,
+      PAGE_SIZE,
+    ],
     queryFn: () =>
       fetchDocuments({
         content_type,
+        format,
         tag: tagFilter ?? undefined,
         collection_id: selectedCollectionId ?? undefined,
         sort,
@@ -272,6 +294,11 @@ export default function Learning() {
   // Reset page when filters change
   function handleTypesChange(types: Set<ContentType>) {
     setSelectedTypes(types)
+    setPage(1)
+  }
+
+  function handleFormatsChange(formats: Set<string>) {
+    setSelectedFormats(formats)
     setPage(1)
   }
 
@@ -526,11 +553,17 @@ export default function Learning() {
             </div>
           )}
           <div className={libraryFiltersOpen ? "flex-1 min-w-0 flex flex-col gap-4" : "contents"}>
-          <FilterBar selected={selectedTypes} onChange={handleTypesChange} />
+          <FilterBar
+            selected={selectedTypes}
+            onChange={handleTypesChange}
+            selectedFormats={selectedFormats}
+            onFormatsChange={handleFormatsChange}
+            facets={facets}
+          />
 
           {isLoading && libraryView === "grid" ? (
             <LoadingSkeleton />
-          ) : isSuccess && total === 0 && !tagFilter && selectedTypes.size === 0 && !selectedCollectionId ? (
+          ) : isSuccess && total === 0 && !tagFilter && !filtered && !selectedCollectionId ? (
             <EmptyState onAdd={() => setUploadOpen()} />
           ) : (
             <>
@@ -556,7 +589,7 @@ export default function Learning() {
               )}
 
               {/* Stats bar -- compact single-row pills */}
-              {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+              {!filtered && !tagFilter && page === 1 && !selectMode && (
                 <LibraryStatsBar
                   totalDocuments={total}
                   isDocumentsLoading={isLoading}
@@ -565,7 +598,7 @@ export default function Learning() {
 
               {/* Today hero -- surfaces highest-leverage action: due cards (recall)
                   beats continue-reading (reception). Hides when no cards due AND no recent doc. */}
-              {selectedTypes.size === 0 && !tagFilter && page === 1 && !selectMode && (
+              {!filtered && !tagFilter && page === 1 && !selectMode && (
                 <TodayHero
                   recentItem={recentItems?.[0]}
                   onContinue={openReader}
@@ -578,7 +611,7 @@ export default function Learning() {
                     ? `Tagged: ${tagFilter}`
                     : selectedCollectionId
                     ? "In collection"
-                    : selectedTypes.size > 0
+                    : filtered
                     ? "Results"
                     : "All documents"}
                   {total > 0 && (

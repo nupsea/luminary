@@ -41,6 +41,7 @@ from app.schemas.documents import (
     CodeSnippetItem,
     DocumentDetail,
     DocumentDiagnostics,
+    DocumentFacetsResponse,
     DocumentListItem,
     DocumentListResponse,
     DocumentOverviewResponse,
@@ -179,6 +180,14 @@ __all__ = [
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     content_type: str | None = Query(default=None, description="Comma-separated content types"),
+    format: str | None = Query(
+        default=None,
+        description=(
+            "Comma-separated file formats. Distinct from content_type: an EPUB is "
+            "format `epub` and content_type `book`, which is why filtering for "
+            "e-books by type never matched one."
+        ),
+    ),
     tag: str | None = Query(default=None, description="Filter by tag value"),
     collection_id: str | None = Query(
         default=None, description="Restrict to documents in this collection"
@@ -301,6 +310,10 @@ async def list_documents(
 
         # Build WHERE filters pushed into SQL.
         where_clauses = []
+        if format:
+            formats = [f.strip() for f in format.split(",") if f.strip()]
+            if formats:
+                where_clauses.append(DocumentModel.format.in_(formats))
         if content_type:
             allowed = [t.strip() for t in content_type.split(",") if t.strip()]
             if allowed:
@@ -911,6 +924,21 @@ async def ingest_url(
     )
     logger.info("YouTube ingestion started", extra={"doc_id": doc_id, "url": body.url})
     return {"document_id": doc_id, "status": "processing"}
+
+
+@router.get("/facets", response_model=DocumentFacetsResponse)
+async def document_facets() -> DocumentFacetsResponse:
+    """Counts per content type and per format, for deciding which filters to show.
+
+    Declared above `/{document_id}` so the router does not read `facets` as an id.
+    """
+    async with get_session_factory()() as session:
+        by_type, by_format = await DocumentRepo(session).facet_counts()
+    return DocumentFacetsResponse(
+        content_types=by_type,
+        formats=by_format,
+        total=sum(by_type.values()),
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)

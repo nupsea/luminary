@@ -1041,6 +1041,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Document Facets
+         * @description Counts per content type and per format, for deciding which filters to show.
+         *
+         *     Declared above `/{document_id}` so the router does not read `facets` as an id.
+         */
+        get: operations["document_facets_documents_facets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -7126,6 +7148,26 @@ export interface components {
             /** Vector Count */
             vector_count: number;
         };
+        /**
+         * DocumentFacetsResponse
+         * @description How many documents each filter would match, over the whole library.
+         *
+         *     A filter offering zero results is not a filter, it is a dead end -- and the
+         *     library has carried several: `code` is not even a storable content type,
+         *     and `epub` is a format that no document carries as its type.
+         */
+        DocumentFacetsResponse: {
+            /** Content Types */
+            content_types: {
+                [key: string]: number;
+            };
+            /** Formats */
+            formats: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
         /** DocumentGroup */
         DocumentGroup: {
             /** Document Id */
@@ -12741,6 +12783,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_facets_documents_facets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentFacetsResponse"];
                 };
             };
         };

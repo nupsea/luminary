@@ -2,6 +2,7 @@
 // its sub-components wire them up via tanstack-query useQuery / useMutation.
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import type { LibraryFacets } from "@/components/library/FilterBar"
 import type {
   DocumentListItem,
   DocumentListResponse,
@@ -33,6 +34,7 @@ export async function fetchSearch(
 
 export const fetchDocuments = (params: {
   content_type?: string
+  format?: string
   tag?: string
   collection_id?: string
   sort: SortOption
@@ -44,9 +46,19 @@ export const fetchDocuments = (params: {
     page: params.page,
     page_size: params.page_size,
     content_type: params.content_type,
+    format: params.format,
     tag: params.tag,
     collection_id: params.collection_id,
   })
+
+/** How many documents each filter would match, over the whole library.
+ *
+ *  The filter bar offers a chip only when this says it has something behind it,
+ *  which a page of results cannot answer: matches for a filter can sit on
+ *  page two.
+ */
+export const fetchLibraryFacets = (): Promise<LibraryFacets> =>
+  apiGet<LibraryFacets>("/documents/facets")
 
 export async function fetchRecentlyAccessed(): Promise<DocumentListItem[]> {
   try {
