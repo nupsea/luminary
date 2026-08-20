@@ -9,7 +9,9 @@ import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
+import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
 import { ReportIssue } from "@/components/settings/ReportIssue"
+import type { components } from "@/types/api"
 
 // Types
 
@@ -51,6 +53,11 @@ interface StorageInfo {
 
 const fetchLLMSettings = (): Promise<LLMSettings> =>
   apiGet<LLMSettings>("/settings/llm")
+
+type ModelResidencyResponse = components["schemas"]["ModelResidencyResponse"]
+
+const fetchModelResidency = (): Promise<ModelResidencyResponse> =>
+  apiGet<ModelResidencyResponse>("/settings/models")
 
 const patchLLMSettings = (updates: {
   mode?: string
@@ -191,6 +198,12 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const { data: llm } = useQuery({
     queryKey: ["llm-settings"],
     queryFn: fetchLLMSettings,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  })
+  const { data: residency } = useQuery({
+    queryKey: ["settings-models"],
+    queryFn: fetchModelResidency,
     staleTime: 30_000,
     refetchInterval: 30_000,
   })
@@ -583,10 +596,16 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             </p>
             <ModelsAndComponents
               llm={llm}
+              narrowedDefaults={
+                residency?.narrowed_defaults as
+                  | Partial<Record<"chat" | "vision", ModelDrift>>
+                  | undefined
+              }
               onSave={async (updates) => {
                 await patchLLMSettings(updates)
                 await queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
                 await queryClient.invalidateQueries({ queryKey: ["setup"] })
+                await queryClient.invalidateQueries({ queryKey: ["settings-models"] })
               }}
             />
           </section>

@@ -426,6 +426,22 @@ def test_install_sh_records_the_models_it_pulled(sh):
     )
 
 
+def test_install_ps1_records_the_models_it_pulled(ps1):
+    """Mirrors `test_install_sh_records_the_models_it_pulled` for Windows.
+
+    install.ps1 pulled $chatModel/$visionModel with `ollama pull` but never
+    wrote them into backend\\.env, unlike install.sh and bootstrap.sh -- the
+    backend fell back to its own hardcoded default and could disagree with
+    what this script had just downloaded.
+    """
+    assert re.search(
+        r'Set-EnvLine \$EnvLines "LITELLM_DEFAULT_MODEL" "ollama/\$chatModel"', ps1
+    ), "install.ps1 does not record the chat model it pulled"
+    assert re.search(r'Set-EnvLine \$EnvLines "VISION_MODEL"', ps1), (
+        "install.ps1 does not record the vision model it pulled"
+    )
+
+
 @pytest.mark.parametrize("script", ["sh", "ps1", "bootstrap"])
 def test_every_installer_accepts_the_backends_name_for_the_small_profile(script):
     """`low` is what the backend calls it and what it logs; `public` is the

@@ -11,6 +11,7 @@ import { Check, Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
+import { ModelDriftNotice, type ModelDrift, type ModelRole } from "@/components/settings/ModelDriftNotice"
 import { useComponents } from "@/hooks/useSetup"
 import { formatBytes, uninstallComponent, type Component } from "@/lib/setupApi"
 import { cn } from "@/lib/utils"
@@ -24,6 +25,7 @@ interface ModelChoice {
 
 interface Props {
   llm: ModelChoice | undefined
+  narrowedDefaults?: Partial<Record<ModelRole, ModelDrift>>
   onSave: (updates: { local_chat_model?: string; vision_model?: string }) => Promise<void>
 }
 
@@ -139,7 +141,7 @@ function ModelPicker({
   )
 }
 
-export function ModelsAndComponents({ llm, onSave }: Props) {
+export function ModelsAndComponents({ llm, narrowedDefaults, onSave }: Props) {
   const { data: components = [], isLoading } = useComponents()
   const [chat, setChat] = useState("")
   const [vision, setVision] = useState("")
@@ -168,6 +170,11 @@ export function ModelsAndComponents({ llm, onSave }: Props) {
 
   return (
     <div className="space-y-4">
+      <ModelDriftNotice
+        narrowedDefaults={narrowedDefaults ?? {}}
+        availableLocalModels={options}
+        onSave={onSave}
+      />
       <div className="space-y-3">
         <ModelPicker
           label="Chat model"
