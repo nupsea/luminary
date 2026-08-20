@@ -160,7 +160,12 @@ pub(crate) fn parse_chunk(title: &str) -> Option<Chunk> {
     if total == 0 || index >= total {
         return None;
     }
-    Some(Chunk { index, total, declared_len, payload })
+    Some(Chunk {
+        index,
+        total,
+        declared_len,
+        payload,
+    })
 }
 
 /// Decode `encodeURIComponent` output. Hand-rolled to keep the shell free of a
@@ -213,12 +218,18 @@ struct Assembly {
 
 impl Assembly {
     fn new(done: SyncSender<Captured>) -> Self {
-        Self { parts: Vec::new(), done: Some(done) }
+        Self {
+            parts: Vec::new(),
+            done: Some(done),
+        }
     }
 
     /// Chunks in hand and chunks expected, for reporting a stalled transfer.
     fn progress(&self) -> (usize, usize) {
-        (self.parts.iter().filter(|p| p.is_some()).count(), self.parts.len())
+        (
+            self.parts.iter().filter(|p| p.is_some()).count(),
+            self.parts.len(),
+        )
     }
 
     fn finish(&mut self, outcome: Captured) {
@@ -292,11 +303,10 @@ pub async fn render_page(app: AppHandle, url: String) -> Result<String, String> 
         // chain, ad frame or tracker hop reaches the network.
         .on_navigation(move |candidate| same_site(candidate, &nav_guard))
         .on_document_title_changed(move |window, title| {
-            let Some(chunk) = parse_chunk(&title) else { return };
-            let wants_more = sink
-                .lock()
-                .map(|mut a| a.accept(chunk))
-                .unwrap_or(false);
+            let Some(chunk) = parse_chunk(&title) else {
+                return;
+            };
+            let wants_more = sink.lock().map(|mut a| a.accept(chunk)).unwrap_or(false);
             if wants_more {
                 let _ = window.eval("window.__luminaryNext && window.__luminaryNext()");
             }
@@ -335,7 +345,10 @@ pub async fn render_page(app: AppHandle, url: String) -> Result<String, String> 
 /// two concurrent renders not colliding.
 fn nanos() -> u128 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -345,7 +358,15 @@ mod tests {
     #[test]
     fn a_title_we_sent_parses() {
         let c = parse_chunk("LUMX:0:3:3:abc").unwrap();
-        assert_eq!(c, Chunk { index: 0, total: 3, declared_len: 3, payload: "abc".into() });
+        assert_eq!(
+            c,
+            Chunk {
+                index: 0,
+                total: 3,
+                declared_len: 3,
+                payload: "abc".into()
+            }
+        );
         assert!(c.intact());
     }
 
@@ -375,7 +396,12 @@ mod tests {
 
         // Widest header this protocol can emit: implausible index and total, so
         // the assertion holds for any document rather than a typical one.
-        let header = format!("{PREFIX}{}:{}:{}:", usize::MAX, usize::MAX, TITLE_PAYLOAD_CHARS);
+        let header = format!(
+            "{PREFIX}{}:{}:{}:",
+            usize::MAX,
+            usize::MAX,
+            TITLE_PAYLOAD_CHARS
+        );
         assert!(
             header.len() + TITLE_PAYLOAD_CHARS <= OBSERVED_TITLE_LIMIT,
             "a full title is {} characters, over the {OBSERVED_TITLE_LIMIT} the platform keeps",
@@ -454,8 +480,17 @@ mod tests {
     #[test]
     fn subdomains_are_the_same_site_but_lookalikes_are_not() {
         let page = Url::parse("https://anthropic.com/x").unwrap();
-        assert!(same_site(&Url::parse("https://www.anthropic.com/y").unwrap(), &page));
-        assert!(!same_site(&Url::parse("https://googletagmanager.com/g.js").unwrap(), &page));
-        assert!(!same_site(&Url::parse("https://anthropic.com.evil.test/x").unwrap(), &page));
+        assert!(same_site(
+            &Url::parse("https://www.anthropic.com/y").unwrap(),
+            &page
+        ));
+        assert!(!same_site(
+            &Url::parse("https://googletagmanager.com/g.js").unwrap(),
+            &page
+        ));
+        assert!(!same_site(
+            &Url::parse("https://anthropic.com.evil.test/x").unwrap(),
+            &page
+        ));
     }
 }

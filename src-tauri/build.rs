@@ -19,15 +19,15 @@ fn main() {
     //
     // Every command listed here now needs an explicit grant in some capability.
     // Omitting one breaks it from the boot page too, silently.
-    tauri_build::try_build(
-        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
             "boot_state",
             "diagnostics",
             "render_page",
             "report_issue",
             "retry_boot",
             "reveal_log",
-        ])),
-    )
+        ]),
+    ))
     .expect("failed to run tauri-build");
 }
