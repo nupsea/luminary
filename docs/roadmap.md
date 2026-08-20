@@ -167,13 +167,16 @@ What remains is smaller and worth stating rather than assuming.
 ### 7. What the reported reader and study defects left behind
 
 All three are fixed (per-chunk citation pages, the unreachable Study landing, the search-highlight
-flicker and the sheet-vs-printed page footer). Two smaller things surfaced while fixing them and
-are worth stating rather than rediscovering.
+flicker and the sheet-vs-printed page footer), as is the reader opening on its section list.
+Three smaller things surfaced while fixing them and are worth stating rather than rediscovering.
 
-- **A PDF's own page labels are only shown, never searched or cited.** `printedPageLabel` puts the
-  printed number in the reader's footer, but `chunks.pdf_page_number` and the page box still count
-  sheets. On a book whose body starts at sheet 22, a citation says 41 where the page says 19. The
-  honest fix is to carry the label alongside the index from ingestion, not to renumber either.
+- **The page box counts sheets, and it is the only surface that still does.** The footer chip,
+  the contents list and every citation read the document's sheet-to-printed map, but the page
+  field jumps by sheet: typing `19` on a book with twenty pages of front matter lands nowhere
+  near the page printed `19`. Entering a printed number, or searching for one, has no path.
+- **Opening the in-document search leaves the reader.** `InDocSearchBar` renders inside the
+  section list, so Cmd+F from the Read view switches tabs to reach it — the same move the
+  `?search=` deep link makes. The search belongs to the document, not to one tab.
 - **The no-TOC PDF path invents headings from font size**, and on one book produced sections
   titled `27` and `265` — page numbers picked up as headings. It does not lose text, so it is a
   reading-quality defect rather than a data one.
@@ -187,6 +190,14 @@ yet describe them.
 - `md`, `epub`, `docx` and `txt` have **no post-`body`-column documents**, so those paths are
   unmeasured rather than known good. Ingest one of each and compare stored `body` against source
   before changing anything.
+- **Audio documents are retrievable and unreadable.** Measured on the four `wav` documents in
+  one library: each is `stage=complete` with its whole transcript in chunks (2,948 to 15,301
+  words, 28,991 in total), and each has **zero sections**, so `GET /sections/{id}/content`
+  returns `[]` and the reader shows "No content available". The orphan-chunk fallback in
+  `sections.py` cannot cover this: it fires only when sections exist but are empty
+  (`all(not r.content for r in result) and result`), and here `result` is itself empty. The
+  transcript is chunked without ever being sectioned, so retrieval finds it and the reader
+  cannot show it.
 - `pymupdf4llm>=1.28.2` is a **core dependency with no importer** (`pyproject.toml:41`, no
   reference anywhere under `backend/`). It was added for the PDF-to-Markdown path, which is not
   built. Either build that path or drop the dependency; a shipped dependency nothing imports is
