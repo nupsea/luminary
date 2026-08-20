@@ -72,8 +72,11 @@ verify-stage:
 
 # The desktop shell's own tests. Needs macOS: the crate does not build anywhere
 # else, which is why ordinary `make ci` (ubuntu) cannot cover it.
+# fmt first, and in the same order CI runs it: the desktop-shell job checks
+# formatting before it tests, so a local gate without it reports green on a
+# branch CI will reject -- which is exactly how it got rejected.
 desktop-test:
-	cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings
+	cd src-tauri && cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings
 
 # Run the shell against build/stage without bundling. Requires `make stage`.
 desktop-dev:
@@ -174,6 +177,7 @@ lint:
 	cd frontend && npm run lint
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	python3 scripts/check_public_surface_calls.py
 	bash scripts/check_powershell.sh
 
 test:
@@ -495,10 +499,12 @@ else
 endif
 	python3 scripts/check_manifest_schema.py
 	python3 scripts/check_manifest_coverage.py
+	python3 scripts/check_public_surface_calls.py
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
+	cd frontend && npm test
 	@echo "CI passed."
 
 regen-api-types:

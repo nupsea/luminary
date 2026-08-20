@@ -71,12 +71,93 @@ interface UploadDialogProps {
   onClose: () => void
 }
 
+
+type ContentTypeOption = { value: ContentTypeValue; label: string; description: string }
+
+/** The document type, collapsed to the one line it usually is.
+ *
+ *  Seven options with a sentence each ran ~470px, so on the paste tab the
+ *  fields the user actually came to fill sat below the fold. The type is
+ *  auto-detected and rarely corrected, so the detected answer is what shows
+ *  and the list is one click away.
+ */
+function ContentTypePicker({
+  value,
+  onChange,
+  options,
+}: {
+  value: ContentTypeValue | null
+  onChange: (v: ContentTypeValue) => void
+  options: ContentTypeOption[]
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = options.find((o) => o.value === value) ?? null
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm font-medium text-foreground">Document type</span>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          {open ? "Done" : "Change"}
+        </button>
+      </div>
+
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-primary/50"
+        >
+          <p className="text-sm font-medium text-foreground">
+            {selected?.label ?? "Choose a type"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {selected?.description ?? "Auto-detected from what you add."}
+          </p>
+        </button>
+      ) : (
+        <div role="radiogroup" aria-label="Document type" className="grid gap-1.5 sm:grid-cols-2">
+          {options.map((opt) => (
+            <label
+              key={opt.value}
+              title={opt.description}
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 transition-colors",
+                value === opt.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50",
+              )}
+            >
+              <input
+                type="radio"
+                name="content_type"
+                value={opt.value}
+                checked={value === opt.value}
+                onChange={() => {
+                  onChange(opt.value)
+                  setOpen(false)
+                }}
+                className="accent-primary"
+              />
+              <span className="text-sm text-foreground">{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { track } = useIngestionTracker()
 
-  const [tab, setTab] = useState<DialogTab>("upload")
+  const [tab, setTab] = useState<DialogTab>("url")
   // What this install can actually ingest. Offering a format we cannot process
   // sends the user through an upload that only fails at the transcription step.
   const { data: caps } = useCapabilities()
@@ -89,7 +170,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     const cap = CONTENT_TYPE_CAPABILITY[o.value]
     return !cap || capabilityOf(caps, cap).available
   })
-  const availableTabs: DialogTab[] = canUrl ? ["upload", "paste", "url"] : ["upload", "paste"]
+  // Web URL leads: an article or a video is the most common thing to add and
+  // the only one with nothing to prepare first. A file is second, and pasted
+  // text -- which needs a title typed by hand -- is last.
+  const availableTabs: DialogTab[] = canUrl ? ["url", "upload", "paste"] : ["upload", "paste"]
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [rejection, setRejection] = useState<Rejection | null>(null)
@@ -167,12 +251,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const clearPendingUpload = useAppStore((s) => s.clearPendingUpload)
   useEffect(() => {
     if (!open || !pendingUpload) return
+    // A dropped file is a file, whatever tab leads.
     setTab("upload")
     setSelectedFile(pendingUpload)
     setRejection(null)
     if (!typeTouchedRef.current) setUploadType(detectContentType(pendingUpload.name))
     clearPendingUpload()
   }, [open, pendingUpload, clearPendingUpload])
+
+  useEffect(() => {
+    if (!canUrl && tab === "url") setTab("upload")
+  }, [canUrl, tab])
 
   function reset() {
     clearAutoClose()
@@ -185,7 +274,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setPasteType("notes")
     setUrl("")
     setUrlError("")
-    setTab("upload")
+    setTab(canUrl ? "url" : "upload")
     setMode("idle")
     setErrorMessage("")
     setDocTitle("")
@@ -376,49 +465,6 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const closeBlocked = mode === "uploading"
   const showProgress = mode === "uploading" || mode === "tracking"
 
-  function ContentTypeRadioGroup({
-    value,
-    onChange,
-  }: {
-    value: ContentTypeValue | null
-    onChange: (v: ContentTypeValue) => void
-  }) {
-    return (
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-foreground">
-          Document type{" "}
-          <span className="font-normal text-muted-foreground">— auto-detected, change if needed</span>
-        </label>
-        <div className="space-y-1.5">
-          {contentTypeOptions.map((opt) => (
-            <label
-              key={opt.value}
-              className={cn(
-                "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors",
-                value === opt.value
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50",
-              )}
-            >
-              <input
-                type="radio"
-                name="content_type"
-                value={opt.value}
-                checked={value === opt.value}
-                onChange={() => onChange(opt.value)}
-                className="mt-0.5 accent-primary"
-              />
-              <div>
-                <p className="text-sm font-medium text-foreground">{opt.label}</p>
-                <p className="text-xs text-muted-foreground">{opt.description}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
@@ -562,8 +608,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     </p>
                   </div>
                 ) : (
-                  <ContentTypeRadioGroup
+                  <ContentTypePicker
                     value={uploadType}
+                    options={contentTypeOptions}
                     onChange={(v) => {
                       typeTouchedRef.current = true
                       setUploadType(v)
@@ -660,7 +707,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                <ContentTypeRadioGroup value={pasteType} onChange={setPasteType} />
+                <ContentTypePicker
+                  value={pasteType}
+                  options={contentTypeOptions}
+                  onChange={setPasteType}
+                />
 
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">

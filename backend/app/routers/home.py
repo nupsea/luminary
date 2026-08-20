@@ -20,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.schemas.home import (
     ActiveCollection,
+    ContinueNoteItem,
     ContinueReadingItem,
+    ContinueStudyItem,
     FadingItem,
     HomeOverviewResponse,
     RecentItem,
@@ -29,6 +31,7 @@ from app.schemas.home import (
     WeeklyStats,
 )
 from app.services import recommender_service
+from app.services.time_on_task_service import TimeOnTaskService
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +42,19 @@ _RECENT_LIMIT = 10
 _ACTIVE_COLLECTIONS_LIMIT = 4
 _RECENT_TAGS_LIMIT = 6
 _CONTINUE_READING_LIMIT = 3
+_CONTINUE_NOTES_LIMIT = 3
 _FADING_LIMIT = 3
 # Decay window: items last touched between 7 and 21 days ago count as
 # fading. Inside 7d still feels "current"; past 21d the user has likely
 # moved on, surfacing it as a refresher gets noisy.
 _FADING_MIN_DAYS = 7
 _FADING_MAX_DAYS = 21
+
+# An unfinished session stops being something to continue and becomes one the
+# user abandoned. Matches the outer edge of the decay window: past three weeks
+# every other lane has let an item go, and a six-month-old session pinning
+# "cards left in your session" to the hub is not a prompt, it is furniture.
+_CONTINUE_STUDY_MAX_DAYS = 21
 
 
 @router.get("/overview", response_model=HomeOverviewResponse)
@@ -56,6 +66,8 @@ async def get_home_overview(
     active_collections = await _fetch_active_collections(session)
     recent_tags = await _fetch_recent_tags(session)
     continue_reading = await _fetch_continue_reading(session)
+    continue_notes = await _fetch_continue_notes(session)
+    continue_study = await _fetch_continue_study(session)
     fading_items = await _fetch_fading_items(session)
     weekly_stats = await _fetch_weekly_stats(session)
 
@@ -82,6 +94,8 @@ async def get_home_overview(
         active_collections=active_collections,
         recent_tags=recent_tags,
         continue_reading=continue_reading,
+        continue_notes=continue_notes,
+        continue_study=continue_study,
         fading_items=fading_items,
         weekly_stats=weekly_stats,
         recommendations=recommendations[1:],
@@ -353,7 +367,7 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
             text(
                 """
                 SELECT
-                  d.id, d.title, ca.last_meaningful_at,
+                  d.id, d.title, ca.last_meaningful_at, d.word_count,
                   (SELECT COUNT(*) FROM sections WHERE document_id = d.id) AS total,
                   (SELECT COUNT(*) FROM reading_progress WHERE document_id = d.id) AS read
                 FROM content_activity ca
@@ -367,8 +381,8 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
     ).all()
     out: list[ContinueReadingItem] = []
     for row in rows:
-        total = int(row[3] or 0)
-        read = int(row[4] or 0)
+        total = int(row[4] or 0)
+        read = int(row[5] or 0)
         if total <= 0 or read <= 0 or read >= total:
             continue
         out.append(
@@ -377,11 +391,90 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
                 title=row[1] or "(untitled)",
                 reading_progress_pct=round(read / total, 3),
                 last_meaningful_at=row[2],
+                word_count=int(row[3] or 0) or None,
             )
         )
         if len(out) >= _CONTINUE_READING_LIMIT:
             break
     return out
+
+
+async def _fetch_continue_notes(session: AsyncSession) -> list[ContinueNoteItem]:
+    """Notes touched recently, most recent first.
+
+    Ranked by content_activity rather than notes.updated_at: ActivityService
+    debounces note edits, so its row is the last *meaningful* edit where
+    updated_at moves on every autosave.
+    """
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT n.id, n.title, ca.last_meaningful_at
+                FROM content_activity ca
+                JOIN notes n ON n.id = ca.member_id
+                WHERE ca.member_type = 'note'
+                  AND n.archived = 0
+                ORDER BY ca.last_meaningful_at DESC
+                LIMIT :limit
+                """
+            ).bindparams(limit=_CONTINUE_NOTES_LIMIT)
+        )
+    ).all()
+    return [
+        ContinueNoteItem(
+            note_id=row[0],
+            title=row[1] or "(untitled)",
+            last_meaningful_at=row[2],
+        )
+        for row in rows
+    ]
+
+
+async def _fetch_continue_study(session: AsyncSession) -> ContinueStudyItem | None:
+    """The most recent study session that was never ended.
+
+    A session with no `ended_at` is one the user walked away from; its stored
+    queue is what resume replays. A session whose queue is exhausted is finished
+    in everything but bookkeeping and is not offered, and neither is one older
+    than the decay window.
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT id, mode, planned_card_ids, cards_reviewed, started_at
+                FROM study_sessions
+                WHERE ended_at IS NULL
+                  AND started_at >= datetime('now', :max_age)
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            ),
+            {"max_age": f"-{_CONTINUE_STUDY_MAX_DAYS} days"},
+        )
+    ).first()
+    if row is None:
+        return None
+
+    planned = row[2]
+    if isinstance(planned, str):
+        import json  # noqa: PLC0415
+
+        try:
+            planned = json.loads(planned)
+        except ValueError:
+            planned = None
+    remaining = len(planned or []) - int(row[3] or 0)
+    if remaining <= 0:
+        return None
+
+    return ContinueStudyItem(
+        session_id=row[0],
+        mode=row[1],
+        cards_remaining=remaining,
+        started_at=row[4],
+    )
 
 
 async def _fetch_fading_items(session: AsyncSession) -> list[FadingItem]:
@@ -485,9 +578,11 @@ async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
             )
         )
     ).first()
+    seconds_by_activity = await TimeOnTaskService(session).seconds_by_activity(days=7)
     return WeeklyStats(
         minutes_studied=round(float(minutes_row[0] or 0)) if minutes_row else 0,
         cards_reviewed=int(cards_row[0] or 0) if cards_row else 0,
         notes_written=int(notes_row[0] or 0) if notes_row else 0,
         docs_touched=int(docs_row[0] or 0) if docs_row else 0,
+        seconds_by_activity=seconds_by_activity,
     )

@@ -85,6 +85,10 @@ required = ["numpy", "scipy", "sklearn", "torch", "onnxruntime", "transformers",
 # (GPL-2.0-or-later) inside their wheels, and Luminary ships Apache-2.0 -- they
 # are installed after the fact as the `transcription` component, never bundled.
 # `optimum`/`onnx` are simply unused; they cost ~49MB when they crept in.
+# NOT sympy, though it is 72MB and arrives only as a torch dependency: `import
+# torch` does not load it, but `import transformers` pulls `torch.fx`, which
+# does. Dropping it from the shipping set broke transformers, sentence_transformers
+# and gliner at once -- this check is what caught it.
 forbidden = ["av", "faster_whisper", "ctranslate2", "optimum", "onnx"]
 
 bad = []

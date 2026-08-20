@@ -44,6 +44,19 @@ class DocumentListItem(BaseModel):
     collections: list[CollectionRef] = []
 
 
+class DocumentFacetsResponse(BaseModel):
+    """How many documents each filter would match, over the whole library.
+
+    A filter offering zero results is not a filter, it is a dead end -- and the
+    library has carried several: `code` is not even a storable content type,
+    and `epub` is a format that no document carries as its type.
+    """
+
+    content_types: dict[str, int]
+    formats: dict[str, int]
+    total: int
+
+
 class DocumentListResponse(BaseModel):
     items: list[DocumentListItem]
     total: int
@@ -71,6 +84,11 @@ class SectionItem(BaseModel):
     level: int
     page_start: int
     page_end: int
+    # What the section's first page is printed as, when the book numbers its
+    # front matter separately. Display only -- `page_start` is the sheet, and
+    # the sheet is what the viewer scrolls to. Without this the contents list
+    # said "p.328" beside a page printed 324 and a citation that also said 324.
+    page_label_start: str | None = None
     section_order: int
     preview: str
     admonition_type: str | None = None
@@ -92,12 +110,21 @@ class DocumentDetail(BaseModel):
     content_type: str
     # Layout discovered while parsing: book|paper|script|chat.
     structure_type: str | None = None
+    # What the importer captured and what it could not. Null means fidelity was
+    # never measured for this document -- which is not the same as a clean import.
+    extraction_report: dict | None = None
     word_count: int
     page_count: int
     stage: str
     tags: list[str]
     created_at: datetime
     last_accessed_at: datetime
+    # Sheet number -> the number printed on that sheet, for PDFs whose front
+    # matter is numbered separately. Derived at ingestion, so it covers books
+    # that print their page numbers without declaring PDF page labels -- which
+    # pdf.js cannot see, and which would otherwise leave the viewer's footer
+    # disagreeing with the citation that sent the reader there.
+    page_labels: dict[str, str] = {}
     sections: list[SectionItem]
     reading_progress_pct: float
     audio_duration_seconds: float | None = None
@@ -118,6 +145,19 @@ class ChunkItem(BaseModel):
 
 class UrlIngestRequest(BaseModel):
     url: str
+    # Post-JS DOM captured by the desktop shell's hidden webview, when it has
+    # one. Only pages that *compute* their content need it; everything else
+    # imports identically from the static fetch, which is the only path in dev,
+    # Docker and the script installs. Never required.
+    rendered_html: str | None = None
+    # Why the caller did or did not render: "ok" | "unavailable" | "failed".
+    # Logged, never trusted for behaviour -- the presence of rendered_html is
+    # what decides the path.
+    render_state: str | None = None
+    # The shell's own reason when render_state is "failed". Carried because the
+    # desktop shell has no console anyone reads, so this log line is the only
+    # place a rendering failure is visible at all.
+    render_detail: str | None = None
 
 
 class YouTubeIngestRequest(BaseModel):
@@ -234,3 +274,23 @@ class DocumentOverviewResponse(BaseModel):
 
 class AssignCollectionsRequest(BaseModel):
     collection_ids: list[str]
+
+
+class ReparseRequest(BaseModel):
+    """`confirm=False` reports what a re-import would cost and changes nothing."""
+
+    confirm: bool = False
+    # The shell owns the webview, so a rendered page can only come from the
+    # client. Absent on every install without a shell, where the static fetch
+    # is what the original import used too.
+    rendered_html: str | None = None
+
+
+class ReparseResponse(BaseModel):
+    document_id: str
+    status: str  # preview | processing
+    source: str  # url | file
+    # Rows that survive the rebuild but whose section/chunk anchors will not resolve.
+    anchored: dict[str, int]
+    cleared: dict[str, int] = {}
+    detail: str

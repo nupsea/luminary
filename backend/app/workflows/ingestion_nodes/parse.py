@@ -21,6 +21,7 @@ from app.workflows.ingestion_nodes._shared import (
     _classify,
     _parser,
     _persist_content_type,
+    _persist_extraction_report,
     _persist_is_technical,
     _persist_structure_type,
     _update_stage,
@@ -53,6 +54,7 @@ async def parse_node(state: IngestionState) -> IngestionState:
                     "text": s.text,
                     "page_start": s.page_start,
                     "page_end": s.page_end,
+                    "page_breaks": s.page_breaks,
                 }
                 for s in parsed.sections
             ]
@@ -60,6 +62,10 @@ async def parse_node(state: IngestionState) -> IngestionState:
             # whenever content_type was user-supplied.
             if parsed.structure_type:
                 await _persist_structure_type(state["document_id"], parsed.structure_type)
+            if parsed.extraction_report is not None:
+                await _persist_extraction_report(
+                    state["document_id"], parsed.extraction_report
+                )
             return {
                 **state,
                 "parsed_document": {
@@ -69,6 +75,9 @@ async def parse_node(state: IngestionState) -> IngestionState:
                     "word_count": parsed.word_count,
                     "sections": sections,
                     "raw_text": parsed.raw_text,
+                    # Sheet -> printed page, for PDFs that number front matter
+                    # separately. Empty when counting sheets is already right.
+                    "page_labels": parsed.page_labels,
                 },
                 "structure_type": parsed.structure_type,
                 "status": "classifying",

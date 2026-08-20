@@ -105,6 +105,31 @@ class ContinueReadingItem(BaseModel):
     title: str
     reading_progress_pct: float  # 0..1
     last_meaningful_at: datetime
+    # For the client's "~N min left". None when the document never recorded one,
+    # which is the difference between "no estimate" and "a short document".
+    word_count: int | None = None
+
+
+class ContinueNoteItem(BaseModel):
+    """A note the user was writing and has not come back to."""
+
+    note_id: str
+    title: str
+    last_meaningful_at: datetime
+
+
+class ContinueStudyItem(BaseModel):
+    """A study session left open, which `planned_card_ids` can resume.
+
+    `cards_remaining` counts the planned queue the session has not reached, not
+    the cards due now: re-querying due cards would pull in cards that became due
+    after the session began, which is the reason the queue is stored at all.
+    """
+
+    session_id: str
+    mode: str
+    cards_remaining: int
+    started_at: datetime
 
 
 class FadingItem(BaseModel):
@@ -129,6 +154,13 @@ class WeeklyStats(BaseModel):
     cards_reviewed: int
     notes_written: int
     docs_touched: int
+    # Seconds of foreground time per activity over the same 7 days, zero-filled
+    # so a missing slice cannot be read as a measured zero. This is time with
+    # the surface open and visible, sampled by heartbeat -- not a claim about
+    # attention, and deliberately a different basis from `minutes_studied`,
+    # which is study-session wall clock. The two are not interchangeable and
+    # must not be drawn as one number.
+    seconds_by_activity: dict[str, int] = {}
 
 
 class HomeOverviewResponse(BaseModel):
@@ -138,6 +170,10 @@ class HomeOverviewResponse(BaseModel):
     recent_tags: list[RecentTag]
     # Coach-shaped additions (post-2E.7 redesign).
     continue_reading: list[ContinueReadingItem] = []
+    # The sketch in issue #51 shows one "continue where you left off" block with
+    # three lanes. These are additive so the document lane keeps its contract.
+    continue_notes: list[ContinueNoteItem] = []
+    continue_study: ContinueStudyItem | None = None
     fading_items: list[FadingItem] = []
     weekly_stats: WeeklyStats | None = None
     # evidence-scored next-best-actions after the hero (docs/recommender-spec.md)

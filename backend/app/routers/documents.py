@@ -41,6 +41,7 @@ from app.schemas.documents import (
     CodeSnippetItem,
     DocumentDetail,
     DocumentDiagnostics,
+    DocumentFacetsResponse,
     DocumentListItem,
     DocumentListResponse,
     DocumentOverviewResponse,
@@ -57,6 +58,8 @@ from app.schemas.documents import (
     PatchTagsRequest,
     PDFMetaResponse,
     ReadingPositionResponse,
+    ReparseRequest,
+    ReparseResponse,
     SavePositionRequest,
     SectionItem,
     UrlIngestRequest,
@@ -115,6 +118,7 @@ from app.workflows.ingestion import (
     _background_tasks,
     run_ingestion,
 )
+from app.workflows.ingestion_nodes._shared import _persist_extraction_report
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +180,14 @@ __all__ = [
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     content_type: str | None = Query(default=None, description="Comma-separated content types"),
+    format: str | None = Query(
+        default=None,
+        description=(
+            "Comma-separated file formats. Distinct from content_type: an EPUB is "
+            "format `epub` and content_type `book`, which is why filtering for "
+            "e-books by type never matched one."
+        ),
+    ),
     tag: str | None = Query(default=None, description="Filter by tag value"),
     collection_id: str | None = Query(
         default=None, description="Restrict to documents in this collection"
@@ -298,6 +310,10 @@ async def list_documents(
 
         # Build WHERE filters pushed into SQL.
         where_clauses = []
+        if format:
+            formats = [f.strip() for f in format.split(",") if f.strip()]
+            if formats:
+                where_clauses.append(DocumentModel.format.in_(formats))
         if content_type:
             allowed = [t.strip() for t in content_type.split(",") if t.strip()]
             if allowed:
@@ -755,7 +771,9 @@ async def ingest_url(
 
         try:
             extractor = get_article_extractor()
-            parsed = await extractor.extract(body.url, doc_id=doc_id)
+            parsed = await extractor.extract(
+                body.url, doc_id=doc_id, rendered_html=body.rendered_html
+            )
         except Exception as exc:
             logger.exception("Article extraction failed for %s", body.url)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -812,7 +830,26 @@ async def ingest_url(
                 },
             ),
         )
-        logger.info("Article ingestion started", extra={"doc_id": doc_id, "url": body.url})
+        # Persisted here, not in parse_node. The URL path hands the graph a
+        # pre-parsed document AND a .md file, and parse_node re-parses that file --
+        # producing a fresh ParsedDocument with no report and overwriting this one.
+        # Fidelity is only known at the point of extraction, so it is stored here.
+        if parsed.extraction_report is not None:
+            await _persist_extraction_report(doc_id, parsed.extraction_report)
+
+        logger.info(
+            "Article ingestion started",
+            extra={
+                "doc_id": doc_id,
+                "url": body.url,
+                # Which path produced the HTML, so a silent fallback to the static
+                # fetch is visible in the log rather than inferred from word counts.
+                "fetch": (parsed.extraction_report or {}).get("fetch", "unknown"),
+                "rendered_html_supplied": bool(body.rendered_html),
+                "render_state": body.render_state or "not-reported",
+                "render_detail": body.render_detail or "",
+            },
+        )
         return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
     # 2. YouTube: Existing logic
@@ -889,6 +926,21 @@ async def ingest_url(
     return {"document_id": doc_id, "status": "processing"}
 
 
+@router.get("/facets", response_model=DocumentFacetsResponse)
+async def document_facets() -> DocumentFacetsResponse:
+    """Counts per content type and per format, for deciding which filters to show.
+
+    Declared above `/{document_id}` so the router does not read `facets` as an id.
+    """
+    async with get_session_factory()() as session:
+        by_type, by_format = await DocumentRepo(session).facet_counts()
+    return DocumentFacetsResponse(
+        content_types=by_type,
+        formats=by_format,
+        total=sum(by_type.values()),
+    )
+
+
 @router.get("/{document_id}", response_model=DocumentDetail)
 async def get_document(document_id: str):
     """Return document detail with sections list."""
@@ -897,6 +949,38 @@ async def get_document(document_id: str):
         doc = await repo.get_or_404(document_id)
         sections = list(await repo.sections_for_document(document_id))
         read_count = await repo.read_section_count(document_id)
+        # The printed page each section opens on, taken from its own first
+        # chunk rather than a second column: the chunk already records it, and
+        # a section's label is by definition its first chunk's. Empty for a
+        # document whose sheets and printed pages agree, which is most of them.
+        label_rows = await session.execute(
+            select(
+                ChunkModel.section_id,
+                ChunkModel.pdf_page_label,
+                ChunkModel.pdf_page_number,
+            )
+            .where(ChunkModel.document_id == document_id)
+            .order_by(ChunkModel.chunk_index)
+        )
+        section_page_labels: dict[str, str] = {}
+        # A section's printed page is the one its *first* chunk sits on. Labels
+        # are stored only where they differ from the sheet, so filtering to
+        # labelled chunks first would hand a section that opens on an
+        # agreeing page the label of some later one -- a printed page from the
+        # middle of the section beside a page_start from its beginning.
+        labelled_sections: set[str] = set()
+        # Sheet -> printed page for the whole document, so the viewer's footer
+        # names the same page the citation that opened it did. pdf.js only sees
+        # labels a PDF *declares*; a book that merely prints its numbers has
+        # none, and that is the case this map exists for.
+        page_labels: dict[str, str] = {}
+        for section_id, label, sheet in label_rows:
+            if section_id and section_id not in labelled_sections:
+                labelled_sections.add(section_id)
+                if label is not None:
+                    section_page_labels[section_id] = label
+            if sheet is not None and label is not None:
+                page_labels.setdefault(str(sheet), label)
 
     section_count = len(sections)
     reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
@@ -907,6 +991,7 @@ async def get_document(document_id: str):
         format=doc.format,
         content_type=doc.content_type,
         structure_type=doc.structure_type,
+        extraction_report=doc.extraction_report,
         word_count=doc.word_count,
         page_count=doc.page_count,
         stage=doc.stage,
@@ -920,6 +1005,7 @@ async def get_document(document_id: str):
                 level=s.level,
                 page_start=s.page_start,
                 page_end=s.page_end,
+                page_label_start=section_page_labels.get(s.id),
                 section_order=s.section_order,
                 preview=_wire_preview(s.preview),
                 admonition_type=s.admonition_type,
@@ -927,6 +1013,7 @@ async def get_document(document_id: str):
             )
             for s in sections
         ],
+        page_labels=page_labels,
         reading_progress_pct=reading_progress_pct,
         audio_duration_seconds=doc.audio_duration_seconds,
         source_url=doc.source_url,
@@ -1337,6 +1424,110 @@ async def delete_document(document_id: str):
     await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
     svc.delete_filesystem_assets(document_id)
     logger.info("Deleted document %s", document_id)
+
+
+@router.post("/{document_id}/reparse", response_model=ReparseResponse)
+async def reparse_document(document_id: str, body: ReparseRequest) -> ReparseResponse:
+    """Re-run parsing and chunking for a document that is already in the library.
+
+    Stored text cannot be repaired in place -- a parser fix only reaches a
+    document by parsing it again -- and `/documents/ingest` deduplicates on
+    `file_hash`, so re-uploading the same file silently returns the old row.
+
+    For a web article the stored raw file is the *extracted markdown*, not the
+    original page, so re-parsing it would only re-read the old extraction. Those
+    are re-fetched from `source_url` instead.
+
+    Call once with `confirm=false` to see what it costs, then again with
+    `confirm=true`.
+    """
+    svc = get_document_deletion_service()
+    async with get_session_factory()() as session:
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        source = "url" if doc.source_url else "file"
+        if source == "file" and not Path(doc.file_path).exists():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The original file is no longer on disk, "
+                    "so this document cannot be re-imported."
+                ),
+            )
+        anchored = await svc.count_anchored_rows(session, document_id)
+        source_url, file_path, fmt, content_type = (
+            doc.source_url,
+            doc.file_path,
+            doc.format,
+            doc.content_type,
+        )
+
+    if not body.confirm:
+        return ReparseResponse(
+            document_id=document_id,
+            status="preview",
+            source=source,
+            anchored=anchored,
+            detail=(
+                "Re-import rebuilds this document's sections and chunks. Your notes, "
+                "highlights, clips and flashcards are kept, but anything anchored to the "
+                "old sections will no longer point at a location in the text."
+            ),
+        )
+
+    cancelled = await get_ingestion_jobs().cancel(document_id)
+    if cancelled:
+        logger.info(
+            "Cancelled in-flight ingestion before re-parse",
+            extra={"document_id": document_id},
+        )
+
+    parsed_document = None
+    if source == "url":
+        # Without the render the re-import silently downgrades a page whose
+        # content its scripts produce -- measured at 0 figures against 78 --
+        # so the button offered by the fidelity notice would make the document
+        # worse than the notice it was meant to answer.
+        parsed = await get_article_extractor().extract(
+            source_url, doc_id=document_id, rendered_html=body.rendered_html
+        )
+        await _persist_extraction_report(document_id, parsed.extraction_report)
+        parsed_document = {
+            "title": parsed.title,
+            "format": parsed.format,
+            "pages": parsed.pages,
+            "word_count": parsed.word_count,
+            "sections": [
+                {
+                    "heading": sec.heading,
+                    "level": sec.level,
+                    "text": sec.text,
+                    "page_start": sec.page_start,
+                    "page_end": sec.page_end,
+                }
+                for sec in parsed.sections
+            ],
+            "raw_text": parsed.raw_text,
+        }
+
+    async with get_session_factory()() as session:
+        cleared = await svc.delete_derived_for_reparse(session, document_id)
+        await session.commit()
+    await asyncio.to_thread(svc.delete_lancedb_vectors, document_id)
+    await asyncio.to_thread(svc.delete_kuzu_nodes, document_id)
+
+    get_ingestion_jobs().launch(
+        document_id,
+        run_ingestion(document_id, file_path, fmt, content_type, parsed_document=parsed_document),
+    )
+    logger.info("Re-parse started", extra={"document_id": document_id, "source": source})
+    return ReparseResponse(
+        document_id=document_id,
+        status="processing",
+        source=source,
+        anchored=anchored,
+        cleared=cleared,
+        detail="Re-import started. The document is unavailable until it finishes.",
+    )
 
 
 @router.get("/{document_id}/status")

@@ -1,6 +1,7 @@
 import html
 import logging
 import re
+from collections import Counter
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -153,6 +154,111 @@ _MARGIN_FRACTION = 0.1
 _FURNITURE_MAX_CHARS = 80
 
 
+def _printed_page_labels(doc) -> dict[int, str]:
+    """Sheet number -> the number printed on it, where the two differ.
+
+    A book numbers its front matter separately, so a PDF carries page *labels*
+    beside sheet positions: measured on a 613-page book, sheet 41 is printed
+    "19" and sheet 6 is printed "iv". A citation naming the sheet therefore
+    disagrees with the page in the reader's hands by twenty for the whole body.
+
+    Only differing entries are kept: on three of four books in one library the
+    PDF defines no labels at all, and storing "5" for sheet 5 would be noise
+    that later code has to re-derive nothing from.
+    """
+    labels: dict[int, str] = {}
+    try:
+        for index in range(doc.page_count):
+            raw = (doc[index].get_label() or "").strip()
+            if raw and raw != str(index + 1):
+                labels[index + 1] = raw
+    except Exception:  # noqa: BLE001 - labels are a nicety; parsing must not fail for them
+        logger.warning("PDF page labels unavailable; citations will name sheet numbers")
+        return {}
+    return labels
+
+
+# How many lines at the top and bottom of a page count as its running header or
+# footer. A page number lives there; a number three lines in is content.
+_PAGE_NUMBER_BAND = 2
+
+# The share of a document's pages that must agree on one sheet-minus-printed
+# offset before the reading is trusted. Bracketing cases: a scanned book prints
+# its number on nearly every body page, so agreement is high; a slide deck with
+# a figure labelled "12" in the corner of one page agrees with nothing and must
+# yield no labels rather than a plausible-looking wrong one.
+_MIN_OFFSET_AGREEMENT = 0.4
+
+
+def _printed_numbers_from_text(doc) -> dict[int, str]:
+    """Recover printed page numbers from each page's own header or footer.
+
+    Used only when the PDF declares no page labels of its own. A book scanned
+    or typeset without them still prints the number on the page -- measured on
+    one 386-sheet volume, sheet 340 opens with the line "336" -- and that is the
+    number the reader sees, so it is the number a citation must name.
+
+    A bare integer in a header is not proof on its own: it could be a figure
+    number or a year. What makes this trustworthy is agreement. The offset
+    between sheet and printed number is constant through a book's body, so the
+    reading is accepted only where a dominant offset holds, and each page is
+    labelled from its own detected number rather than extrapolated.
+    """
+    detected: dict[int, int] = {}
+    offsets: Counter = Counter()
+    try:
+        for index in range(doc.page_count):
+            lines = [ln.strip() for ln in doc[index].get_text().splitlines() if ln.strip()]
+            if not lines:
+                continue
+            band = lines[:_PAGE_NUMBER_BAND] + lines[-_PAGE_NUMBER_BAND:]
+            for line in band:
+                # Four digits is a year in a header far more often than a page.
+                if line.isdigit() and 1 <= len(line) <= 3:
+                    sheet = index + 1
+                    detected[sheet] = int(line)
+                    offsets[sheet - int(line)] += 1
+                    break
+    except Exception:  # noqa: BLE001 - a nicety; parsing must not fail for it
+        return {}
+
+    if not offsets:
+        return {}
+    offset, agreeing = offsets.most_common(1)[0]
+    if agreeing < _MIN_OFFSET_AGREEMENT * doc.page_count:
+        logger.info(
+            "PDF printed-page scan: no dominant offset (%d/%d agree); citations name sheets",
+            agreeing,
+            doc.page_count,
+        )
+        return {}
+    return {
+        sheet: str(number)
+        for sheet, number in detected.items()
+        if sheet - number == offset and sheet != number
+    }
+
+
+def _line_start_offsets(lines: list[str]) -> list[int]:
+    """Character offset at which each line starts once joined by a newline."""
+    offsets: list[int] = []
+    running = 0
+    for line in lines:
+        offsets.append(running)
+        running += len(line) + 1  # the "\n" the lines are joined with
+    return offsets
+
+
+def _block_start_offsets(blocks: list[str]) -> list[int]:
+    """Character offset at which each block starts once joined by a blank line."""
+    offsets: list[int] = []
+    running = 0
+    for block in blocks:
+        offsets.append(running)
+        running += len(block) + 2  # the "\n\n" the blocks are joined with
+    return offsets
+
+
 def _is_page_furniture(block: dict, page_height: float) -> bool:
     bbox = block.get("bbox")
     if not bbox or len(bbox) < 4:
@@ -262,6 +368,9 @@ class DocumentParser:
         # better section boundaries than regex-based signature discovery.
         # UniversalParser is designed for plain text where font info is absent.
         total_pages = len(doc)
+        # Read once here so every return below carries them, including the
+        # fallback paths -- two of four books in one library take those.
+        page_labels = _printed_page_labels(doc) or _printed_numbers_from_text(doc)
 
         all_font_sizes: list[float] = []
         for page in doc:
@@ -303,8 +412,14 @@ class DocumentParser:
                 page_end = min(next_page - 1, total_pages)
 
                 texts: list[str] = []
+                # Index into `texts` at which each page after the first starts,
+                # so a per-chunk page can be recovered later. Without it every
+                # chunk in the section can only claim the section's start page.
+                page_start_blocks: list[int] = []
 
-                for pn in range(max(0, pg - 1), page_end):  # 0-based page index
+                for page_offset, pn in enumerate(range(max(0, pg - 1), page_end)):
+                    if page_offset > 0:
+                        page_start_blocks.append(len(texts))
                     page_obj = doc[pn]
                     page_height = float(page_obj.rect.height) or 1.0
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
@@ -327,7 +442,18 @@ class DocumentParser:
                 # Blocks are the layout's own paragraphs; a PDF text layer is
                 # hard-wrapped, so joining lines alone leaves no boundary and
                 # the reader renders a whole chapter as one block.
-                text = "\n\n".join(texts).strip()
+                joined = "\n\n".join(texts)
+                text = joined.strip()
+                # Offsets are measured on the joined string, then shifted by
+                # whatever the strip removed from the front, so they stay true to
+                # the text that is actually stored.
+                lead = len(joined) - len(joined.lstrip())
+                block_offsets = _block_start_offsets(texts)
+                page_breaks = [
+                    max(0, block_offsets[i] - lead)
+                    for i in page_start_blocks
+                    if i < len(block_offsets)
+                ]
                 raw_parts.append(text)
                 sections.append(
                     Section(
@@ -338,6 +464,7 @@ class DocumentParser:
                         text=text,
                         page_start=pg,
                         page_end=page_end,
+                        page_breaks=page_breaks,
                     )
                 )
 
@@ -350,6 +477,7 @@ class DocumentParser:
                     word_count=len(raw_text.split()),
                     sections=sections,
                     raw_text=raw_text,
+                    page_labels=page_labels,
                 )
 
         # No TOC available -- single-pass font-size scan preserving document order.
@@ -382,11 +510,20 @@ class DocumentParser:
         current_level = 1
         current_page_start = 1
         current_texts: list[str] = []
+        # Index into `current_texts` at which each later page of the current
+        # section begins. One entry per page even when a page contributes no
+        # lines, so counting entries below a position always yields the right
+        # page across a blank leaf between chapters.
+        current_page_marks: list[int] = []
 
         def flush_section(next_heading: str, next_level: int, next_page: int) -> None:
             nonlocal current_heading, current_level, current_page_start, current_texts
-            text = "\n".join(current_texts).strip()
+            nonlocal current_page_marks
+            joined = "\n".join(current_texts)
+            text = joined.strip()
             if text:
+                lead = len(joined) - len(joined.lstrip())
+                line_offsets = _line_start_offsets(current_texts)
                 sections.append(
                     Section(
                         heading=_norm_ws(current_heading),
@@ -394,14 +531,22 @@ class DocumentParser:
                         text=text,
                         page_start=current_page_start,
                         page_end=next_page - 1,
+                        page_breaks=[
+                            max(0, line_offsets[i] - lead)
+                            for i in current_page_marks
+                            if i < len(line_offsets)
+                        ],
                     )
                 )
             current_heading = next_heading
             current_level = next_level
             current_page_start = next_page
             current_texts = []
+            current_page_marks = []
 
         for page_num, page in enumerate(doc):
+            if page_num + 1 > current_page_start:
+                current_page_marks.append(len(current_texts))
             for block in page.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                 if block.get("type") != 0:
                     continue
@@ -436,6 +581,7 @@ class DocumentParser:
                 word_count=len(raw_text.split()),
                 sections=sections,
                 raw_text=raw_text,
+                page_labels=page_labels,
             )
 
         doc.close()
@@ -460,6 +606,7 @@ class DocumentParser:
             word_count=len(raw_text.split()),
             sections=sections,
             raw_text=raw_text,
+            page_labels=page_labels,
         )
 
     # ------------------------------------------------------------------

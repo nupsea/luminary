@@ -248,10 +248,18 @@ export const SectionListItem = memo(({
           {doc.format === "pdf" && section.page_start > 0 && (
             <button
               onClick={() => onPdfJump(section.page_start)}
-              title={`Open PDF at page ${section.page_start}`}
+              // The number printed on the page when the book numbers its front
+              // matter separately, so the contents agree with the page and with
+              // an Ask citation. The jump is still by sheet, which is what the
+              // viewer scrolls to.
+              title={
+                section.page_label_start
+                  ? `Open PDF at page ${section.page_label_start} (sheet ${section.page_start})`
+                  : `Open PDF at page ${section.page_start}`
+              }
               className="tabular-nums hover:text-foreground"
             >
-              p.{section.page_start}
+              p.{section.page_label_start || section.page_start}
             </button>
           )}
           {mediaStartTime !== null && (

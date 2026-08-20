@@ -1,34 +1,22 @@
-// Luminary home hub -- dashboard shape.
+// Luminary home hub -- one reading column.
 //
-// One fetch against /home/overview drives everything. The quote takes the
-// full-width gradient at the top; below it a two-column magazine layout splits
-// "act now" (primary column: today's focus, recommendations, continue reading,
-// decay debt) from ambient context (rail: stats, projects, fading, tags).
+// One fetch against /home/overview drives everything. The page is read top to
+// bottom once a day, so it is shaped like something read rather than a
+// dashboard: a 780px measure, one card for the decision the page exists for
+// ("where you left off": carry on, or sharpen), then rows, then the ambient
+// shape of the week two-up at the foot.
 
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import {
-  AlertTriangle,
   ArrowRight,
-  BookOpen,
-  Clock,
-  Compass,
-  Crosshair,
-  Dumbbell,
   FileText,
-  FolderPlus,
-  Hourglass,
+  GraduationCap,
   Loader2,
-  Pencil,
-  Quote,
   RefreshCw,
-  Sparkles,
   StickyNote,
-  Tag,
-  X,
-  Zap,
 } from "lucide-react"
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { FirstRunGuide } from "@/components/FirstRunGuide"
@@ -39,10 +27,16 @@ import { launchStudy } from "@/lib/studyLauncher"
 import { quoteOfTheDay } from "@/lib/quotes"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
+import { humanizeTitle } from "@/lib/humanizeTitle"
+import { readingTimeLabel } from "@/lib/readingTime"
+import { buildBars } from "./Hub/activityBars"
+import { HubRow, HubSection, MiniRow, SectionLabel } from "./Hub/HubPrimitives"
 import type { components } from "@/types/api"
 
 type HomeOverview = components["schemas"]["HomeOverviewResponse"]
 type ContinueReadingItem = components["schemas"]["ContinueReadingItem"]
+type ContinueNoteItem = components["schemas"]["ContinueNoteItem"]
+type ContinueStudyItem = components["schemas"]["ContinueStudyItem"]
 type FadingItem = components["schemas"]["FadingItem"]
 type ActiveCollection = components["schemas"]["ActiveCollection"] & {
   due_card_count?: number
@@ -87,50 +81,45 @@ export default function Hub() {
 
   if (isEmpty) return <HubEmpty />
 
-  const hasRecommendations = (data.recommendations?.length ?? 0) > 0
-  const hasContinue = (data.continue_reading?.length ?? 0) > 0
-  const hasFading = (data.fading_items?.length ?? 0) > 0
+  const resume = data.continue_reading?.[0] ?? null
+  const remainingReads = (data.continue_reading ?? []).filter(
+    (d) => d.document_id !== resume?.document_id,
+  )
+  const hasContinue =
+    remainingReads.length > 0 ||
+    (data.continue_notes?.length ?? 0) > 0 ||
+    data.continue_study != null
 
   return (
     <PageSurface>
       <HubHeader />
 
-      <DailyQuote />
+      <WhereYouLeftOff resume={resume} action={data.today_action ?? null} />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Primary column: things to act on now */}
-        <div className="flex flex-col gap-6 lg:col-span-2">
-          {data.today_action && <TodayHero action={data.today_action} />}
-          {hasRecommendations && <RecommendedNext items={data.recommendations ?? []} />}
-          {hasContinue && <ContinueReadingCard items={data.continue_reading ?? []} />}
-          <DecayDebtWidget />
-        </div>
+      {(data.recommendations?.length ?? 0) > 0 && (
+        <NextSection items={data.recommendations ?? []} />
+      )}
 
-        {/* Rail: ambient context */}
-        <aside className="flex flex-col gap-6">
-          {data.weekly_stats && <WeekStatsCard stats={data.weekly_stats} />}
+      {hasContinue && (
+        <ContinueSection
+          docs={remainingReads}
+          notes={data.continue_notes ?? []}
+          study={data.continue_study ?? null}
+        />
+      )}
 
-          <Section icon={Sparkles} title="Active projects">
-            {data.active_collections.length === 0 ? (
-              <OrganizeCallout />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {data.active_collections.slice(0, 5).map((c) => (
-                  <ActiveCollectionCard key={c.id} collection={c} />
-                ))}
-              </div>
-            )}
-          </Section>
+      <DecayDebtWidget />
 
-          {hasFading && <FadingCard items={data.fading_items ?? []} />}
-
-          {data.recent_tags.length > 0 && (
-            <Section icon={Tag} title="What you've been into">
-              <TagCloud tags={data.recent_tags} />
-            </Section>
-          )}
-        </aside>
-      </div>
+      {/* Ambient context, two up. Everything above is something to do; this is
+          the shape of the week behind it. */}
+      <section className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2">
+        {data.weekly_stats && <ThisWeek stats={data.weekly_stats} />}
+        <ActiveProjects collections={data.active_collections} />
+        {(data.fading_items?.length ?? 0) > 0 && (
+          <FadingBlock items={data.fading_items ?? []} />
+        )}
+        {data.recent_tags.length > 0 && <TopicsBlock tags={data.recent_tags} />}
+      </section>
     </PageSurface>
   )
 }
@@ -138,52 +127,20 @@ export default function Hub() {
 // Offset so the hub and the setup screen never show the same line on one day.
 const HUB_QUOTE_OFFSET = 7
 
-function DailyQuote() {
-  const [quote] = useState(() => quoteOfTheDay(new Date(), HUB_QUOTE_OFFSET))
-
-  // Set in the app's own typeface throughout. What makes it read as a quote is
-  // the scale and the surface, not a second font family -- which would have to
-  // survive macOS, Windows and Linux without a bundled file.
-  return (
-    <figure className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary/75 px-7 py-7 shadow-lg shadow-primary/20">
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
-      <div aria-hidden className="pointer-events-none absolute -left-8 -bottom-12 h-36 w-36 rounded-full bg-white/10 blur-3xl" />
-
-      <div className="relative z-10 flex flex-col gap-4">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
-            <Quote size={13} className="text-primary-foreground" />
-          </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-foreground/80">
-            Thought for the day
-          </span>
-        </div>
-
-        <blockquote className="max-w-3xl text-xl font-medium leading-snug tracking-[-0.015em] text-gray-200 sm:text-2xl">
-          &ldquo;{quote.text}&rdquo;
-        </blockquote>
-
-        <figcaption className="text-xs text-primary-foreground/70">
-          <span className="font-semibold text-primary-foreground/85">{quote.author}</span>
-          <span> · {quote.source}</span>
-        </figcaption>
-      </div>
-    </figure>
-  )
-}
-
-// -- Layout primitives -------------------------------------------------------
-
+/** One reading column, centred, with air between sections.
+ *
+ *  The two-column dashboard it replaces put eight competing surfaces on one
+ *  screen. A hub is read top to bottom once a day, so it is shaped like
+ *  something read: a single measure, a generous rhythm, and one card.
+ */
 function PageSurface({ children }: { children: React.ReactNode }) {
-  // A single soft glow anchored to the top gives depth without a heavy wash;
-  // low alphas read identically in light and dark.
   return (
     <div className="relative min-h-full overflow-hidden bg-background">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-primary/[0.07] via-primary/[0.02] to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-primary/[0.06] via-primary/[0.02] to-transparent"
       />
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 md:px-6 lg:py-10">
+      <div className="relative mx-auto flex w-full max-w-[780px] flex-col gap-14 px-6 pb-28 pt-12 sm:pt-16">
         {children}
       </div>
     </div>
@@ -193,48 +150,36 @@ function PageSurface({ children }: { children: React.ReactNode }) {
 function HubHeader() {
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: "long",
-    month: "long",
     day: "numeric",
+    month: "long",
   })
-  return (
-    <header className="flex items-center gap-4">
-      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/15">
-        <LuminaryGlyph size={40} className="text-primary" />
-      </span>
-      <div className="flex flex-col">
-        <h1 className="text-2xl font-semibold leading-tight text-foreground sm:text-3xl">
-          {greetingHeadline()}
-        </h1>
-        <span className="text-sm text-muted-foreground">{dateLabel}</span>
-      </div>
-    </header>
-  )
-}
+  const [quote] = useState(() => quoteOfTheDay(new Date(), HUB_QUOTE_OFFSET))
 
-function Section({
-  icon: Icon,
-  title,
-  subtitle,
-  children,
-}: {
-  icon: typeof Sparkles
-  title: string
-  subtitle?: string
-  children: React.ReactNode
-}) {
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <Icon size={13} className="text-muted-foreground" />
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h2>
-        {subtitle && (
-          <span className="text-xs text-muted-foreground/70">· {subtitle}</span>
-        )}
+    <header className="flex flex-col gap-5">
+      <div className="flex items-center gap-3.5">
+        <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-xl bg-accent">
+          <LuminaryGlyph size={20} className="text-foreground/75" />
+        </span>
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-[30px] font-semibold leading-none tracking-[-0.02em] text-foreground">
+            {greetingHeadline()}
+          </h1>
+          <span className="text-[13px] text-muted-foreground">{dateLabel}</span>
+        </div>
       </div>
-      {children}
-    </section>
+      {/* The quote is ambient: a rule, a serif line, an attribution. It used to
+          be a full-width gradient block that pushed every action below the fold. */}
+      <figure
+        className="flex max-w-[620px] flex-col gap-2 border-l-2 border-border pl-[18px]"
+        title={`${quote.text} — ${quote.author}, ${quote.source}`}
+      >
+        <blockquote className="font-serif text-[17px] leading-[1.55] text-foreground/[0.82]">
+          &ldquo;{quote.text}&rdquo;
+        </blockquote>
+        <figcaption className="text-xs text-muted-foreground">{quote.author}</figcaption>
+      </figure>
+    </header>
   )
 }
 
@@ -246,592 +191,364 @@ function greetingHeadline() {
   return "Good evening"
 }
 
-// -- Today hero --------------------------------------------------------------
-
-const _HERO_FALLBACK_REASON: Record<string, string> = {
-  continue_reading: "Pick up while the context is still warm — cold restarts cost more.",
-  resume_note: "A quick note while it's fresh tends to stick.",
-  drill_concept: "A focused drill now beats relearning it later.",
-  fix_misconception: "Correcting a wrong model pays more than new material.",
-  confidence_check: "You felt sure and missed — worth a recalibration pass.",
-}
-
-const _HERO_ICON: Record<string, typeof BookOpen> = {
-  continue_reading: BookOpen,
-  resume_note: Pencil,
-  drill_concept: Dumbbell,
-  fix_misconception: AlertTriangle,
-  confidence_check: Crosshair,
-}
-
-function TodayHero({ action }: { action: TodayAction }) {
-  const navigate = useNavigate()
-
-  if (action.kind === "review_cards") {
-    return <ReviewFocusHero action={action} />
-  }
-
-  // the recommender's evidence line wins over generic copy (docs/recommender-spec.md)
-  const reason =
-    action.reasons?.[0]?.detail ?? _HERO_FALLBACK_REASON[action.kind] ?? ""
-  const Icon = _HERO_ICON[action.kind] ?? BookOpen
-  const onClick = () => {
-    markRecommendationActed(action.recommendation_id)
-    switch (action.kind) {
-      case "continue_reading":
-        if (action.target_id) {
-          navigate(`/library?doc=${encodeURIComponent(action.target_id)}`, {
-            state: { from: "/" },
-          })
-        } else {
-          navigate("/library", { state: { from: "/" } })
-        }
-        break
-      case "drill_concept":
-      case "confidence_check":
-        launchStudy({ type: "concept", ref: action.target_id ?? "", label: action.label })
-        break
-      case "fix_misconception":
-        if (action.target_id) {
-          launchStudy({ type: "concept", ref: action.target_id, label: action.label })
-        } else if (action.document_id) {
-          launchStudy({ type: "doc", ref: action.document_id, label: action.label })
-        } else {
-          launchStudy({ type: "daily", label: "Today's pick" })
-        }
-        break
-      default:
-        navigate("/notes", { state: { from: "/" } })
-    }
-  }
-  return (
-    <button
-      onClick={onClick}
-      className="group flex w-full cursor-pointer select-none flex-col gap-2 rounded-2xl border border-primary/15 bg-primary/[0.06] px-6 py-5 text-left transition-colors hover:bg-primary/[0.09]"
-    >
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-          <Icon size={13} className="text-primary" />
-        </span>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-          Today
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-3">
-        <span className="truncate text-lg font-semibold text-foreground sm:text-xl">{action.label}</span>
-        <ArrowRight size={20} className="shrink-0 text-primary transition-transform group-hover:translate-x-0.5" />
-      </div>
-      <p className="max-w-2xl text-sm text-muted-foreground">{reason}</p>
-    </button>
-  )
-}
-
 const _SESSION_SIZE = 15
 
-function ReviewFocusHero({ action }: { action: TodayAction }) {
+/**
+ * The one card on the page: the document you were in, and the review waiting.
+ *
+ * Reading and recall were two separate heroes competing for the same glance.
+ * They are one card now because they are one decision -- carry on, or sharpen
+ * -- and the divider is what keeps them legible as two answers to it.
+ */
+function WhereYouLeftOff({
+  resume,
+  action,
+}: {
+  resume: ContinueReadingItem | null
+  action: TodayAction | null
+}) {
   const navigate = useNavigate()
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
-  const total = action.count ?? 0
-  const scoped = action.scoped_count ?? 0
+
+  const pct = resume ? Math.round(resume.reading_progress_pct * 100) : 0
+  const timeLeft = resume ? readingTimeLabel(resume.word_count, resume.reading_progress_pct) : null
+
+  const total = action?.count ?? 0
+  const scoped = action?.scoped_count ?? 0
   const focusCount = scoped > 0 ? scoped : total
   const sessionSize = Math.min(_SESSION_SIZE, focusCount)
   const estimatedMin = Math.max(1, Math.round(sessionSize * 0.9))
   const overflow = total - focusCount
 
+  const startSession = () => {
+    markRecommendationActed(action?.recommendation_id)
+    setActiveDocument(null)
+    setActiveCollectionId(action?.collection_id ?? null)
+    launchStudy(
+      action?.collection_id
+        ? {
+            type: "collection",
+            ref: action.collection_id,
+            label: action.collection_name ?? "this collection",
+          }
+        : { type: "daily", label: "Today's pick" },
+    )
+  }
+
   return (
-    <div className="group rounded-2xl border border-primary/15 bg-primary/[0.06] px-6 py-5">
-      <div className="flex flex-col gap-3">
-        {/* label row */}
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-            <Zap size={13} className="text-primary" />
-          </span>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">
-            Today's focus
-          </span>
-        </div>
-
-        {/* project name + due count */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
-            {action.collection_name ? (
-              <>
-                <div className="flex items-center gap-2">
-                  {action.collection_color && (
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/30"
-                      style={{ backgroundColor: action.collection_color }}
-                    />
-                  )}
-                  <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                    {action.collection_name}
-                  </h2>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {focusCount} card{focusCount !== 1 ? "s" : ""} due from this project
-                </p>
-              </>
-            ) : (
-              <>
-                <h2 className="text-lg font-bold text-foreground sm:text-xl">
-                  Your daily review
+    <HubSection label="Where you left off" accent gap="gap-5">
+      <div className="flex flex-col gap-6 rounded-3xl border border-border bg-card px-7 py-6 transition-colors hover:border-primary/35">
+        {resume ? (
+          <>
+            <div className="flex items-start gap-4">
+              <ProgressRing pct={pct} size={46} label={`${pct}%`} />
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <h2
+                  className="truncate text-[22px] font-semibold leading-tight tracking-[-0.015em] text-foreground"
+                  title={resume.title}
+                >
+                  {humanizeTitle(resume.title)}
                 </h2>
-                <p className="text-sm text-muted-foreground">
-                  {total} card{total !== 1 ? "s" : ""} ready to review
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* CTA */}
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <button
-            onClick={() => {
-              markRecommendationActed(action.recommendation_id)
-              setActiveDocument(null)
-              setActiveCollectionId(action.collection_id ?? null)
-              // route the daily call through the Study Launcher (docs/study-launcher.md)
-              launchStudy(
-                action.collection_id
-                  ? {
-                      type: "collection",
-                      ref: action.collection_id,
-                      label: action.collection_name ?? "this collection",
-                    }
-                  : { type: "daily", label: "Today's pick" },
-              )
-            }}
-            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-          >
-            Start {sessionSize}-card session
-            <ArrowRight size={14} />
-          </button>
-          <span className="text-xs text-muted-foreground">
-            ~{estimatedMin} min
-          </span>
-        </div>
-
-        {action.reasons?.[0]?.detail && (
-          <p className="text-xs text-muted-foreground">{action.reasons[0].detail}</p>
+                <span className="text-[13px] text-muted-foreground">
+                  {sinceLabel(resume.last_meaningful_at)}
+                  {timeLeft && (
+                    <span title="Estimated at 200 words a minute, from the share of sections still unread.">
+                      {" · "}
+                      {timeLeft}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3.5">
+              <button
+                onClick={() =>
+                  navigate(`/library?doc=${encodeURIComponent(resume.document_id)}`, {
+                    state: { from: "/" },
+                  })
+                }
+                className="flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
+              >
+                Dive back in
+                <ArrowRight size={15} />
+              </button>
+              <span className="text-[13px] text-muted-foreground">
+                or take a note while it&rsquo;s fresh
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="text-[15px] text-muted-foreground">
+            Nothing open. Add something to the library, or start a review below.
+          </p>
         )}
 
-        {/* overflow footnote */}
-        {overflow > 0 && (
-          <button
-            onClick={() => {
-              setActiveDocument(null)
-              setActiveCollectionId(null)
-              navigate("/study", { state: { from: "/" } })
-            }}
-            className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            +{overflow} more cards across your library
-          </button>
+        {action && total > 0 && (
+          <>
+            <div className="h-px bg-border" />
+            <div className="flex flex-wrap items-center justify-between gap-3.5">
+              <div className="flex min-w-0 items-center gap-2.5">
+                {action.collection_color && (
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: action.collection_color }}
+                    aria-hidden
+                  />
+                )}
+                <span className="truncate text-sm font-medium text-foreground">
+                  {action.collection_name ?? "Your daily review"}
+                </span>
+                <span className="shrink-0 text-[13px] text-muted-foreground">
+                  · {focusCount} card{focusCount === 1 ? "" : "s"} due
+                </span>
+              </div>
+              <button
+                onClick={startSession}
+                className="flex shrink-0 items-center gap-2 rounded-xl border border-border bg-transparent px-4 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:border-muted-foreground/40 hover:bg-accent active:translate-y-px"
+              >
+                Start {sessionSize}-card session
+                <span className="font-normal text-muted-foreground">~{estimatedMin} min</span>
+              </button>
+            </div>
+            {overflow > 0 && (
+              <span className="text-xs text-muted-foreground/80">
+                {total} cards due across your library
+              </span>
+            )}
+          </>
         )}
       </div>
-    </div>
+    </HubSection>
   )
 }
 
-// -- Recommended next stack ---------------------------------------------------
-
-const _REC_ICON: Record<Recommendation["kind"], typeof Zap> = {
-  overdue_reviews: Zap,
-  weak_concept: Dumbbell,
-  open_misconception: AlertTriangle,
-  calibration_blind_spot: Crosshair,
-  stalled_reading: BookOpen,
+const _REC_BADGE: Record<Recommendation["kind"], string> = {
+  overdue_reviews: "!",
+  weak_concept: "!",
+  open_misconception: "!",
+  calibration_blind_spot: "?",
+  stalled_reading: "↩",
 }
 
-function RecommendedNext({ items }: { items: Recommendation[] }) {
+function NextSection({ items }: { items: Recommendation[] }) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set())
-
-  const dismiss = (rec: Recommendation) => {
-    // optimistic hide; restore on failure
-    setHidden((prev) => new Set(prev).add(rec.id))
-    void apiPost<void>(`/home/recommendations/${rec.id}/dismiss`)
-      .then(() => queryClient.invalidateQueries({ queryKey: ["home-overview"] }))
-      .catch(() => {
-        setHidden((prev) => {
-          const next = new Set(prev)
-          next.delete(rec.id)
-          return next
-        })
-      })
-  }
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
 
   const open = (rec: Recommendation) => {
     markRecommendationActed(rec.id)
-    switch (rec.kind) {
-      case "overdue_reviews":
-        launchStudy({ type: "daily", label: "Today's pick" })
-        break
-      case "weak_concept":
-      case "calibration_blind_spot":
-        launchStudy({ type: "concept", ref: rec.concept_slug ?? rec.target_ref, label: rec.label })
-        break
-      case "open_misconception":
-        if (rec.concept_slug) {
-          launchStudy({ type: "concept", ref: rec.concept_slug, label: rec.label })
-        } else if (rec.document_id) {
-          launchStudy({ type: "doc", ref: rec.document_id, label: rec.label })
-        } else {
-          launchStudy({ type: "daily", label: "Today's pick" })
-        }
-        break
-      case "stalled_reading":
-        navigate(`/library?doc=${encodeURIComponent(rec.document_id ?? rec.target_ref)}`, {
-          state: { from: "/" },
-        })
-        break
+    if (rec.target_type === "document" && rec.target_ref) {
+      setActiveDocument(rec.target_ref)
+      navigate(`/library?doc=${encodeURIComponent(rec.target_ref)}`, { state: { from: "/" } })
+      return
     }
+    if (rec.target_ref) {
+      launchStudy({ type: "concept", ref: rec.target_ref, label: rec.label })
+      return
+    }
+    navigate("/study", { state: { from: "/" } })
   }
 
-  const visible = items.filter((r) => !hidden.has(r.id)).slice(0, 3)
-  if (visible.length === 0) return null
-
   return (
-    <Section
-      icon={Compass}
-      title="Recommended next"
-      subtitle="Backed by your own review record"
-    >
-      <div className="flex flex-col gap-2.5">
-        {visible.map((rec) => {
-          const Icon = _REC_ICON[rec.kind]
-          return (
-            <div
-              key={rec.id}
-              className="group relative flex items-center gap-3.5 overflow-hidden rounded-2xl border border-border/60 bg-card px-4 py-3.5 transition-all hover:border-primary/30 hover:shadow-sm"
-            >
-              <span
-                aria-hidden
-                className="absolute inset-y-0 left-0 w-1 bg-primary/40 opacity-0 transition-opacity group-hover:opacity-100"
-              />
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
-                <Icon size={15} />
-              </span>
-              <button
-                onClick={() => open(rec)}
-                className="flex min-w-0 flex-1 cursor-pointer flex-col text-left"
-              >
-                <span className="truncate text-sm font-medium text-foreground">{rec.label}</span>
-                {rec.reasons[0]?.detail && (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {rec.reasons[0].detail}
-                  </span>
-                )}
-              </button>
-              <ArrowRight
-                size={14}
-                className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-60"
-              />
-              <button
-                onClick={() => dismiss(rec)}
-                aria-label="Dismiss recommendation"
-                title="Dismiss"
-                className="shrink-0 rounded-full p-1.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )
-        })}
+    <HubSection label="Next" note="From your review record">
+      <div className="flex flex-col gap-2">
+        {items.map((rec) => (
+          <HubRow
+            key={rec.id}
+            bordered
+            badge={_REC_BADGE[rec.kind] ?? "•"}
+            title={rec.label}
+            meta={rec.reasons?.[0]?.detail ?? undefined}
+            onClick={() => open(rec)}
+          />
+        ))}
       </div>
-    </Section>
+    </HubSection>
   )
 }
 
-// -- Continue / Fading lanes -------------------------------------------------
-
-function LaneShell({
-  variant,
-  icon: Icon,
-  title,
-  trailing,
-  children,
+function ContinueSection({
+  docs,
+  notes,
+  study,
 }: {
-  variant: "continue" | "fading"
-  icon: typeof BookOpen
-  title: string
-  trailing?: React.ReactNode
-  children: React.ReactNode
+  docs: ContinueReadingItem[]
+  notes: ContinueNoteItem[]
+  study: ContinueStudyItem | null
 }) {
-  const tone =
-    variant === "continue"
-      ? "border-primary/20 bg-primary/[0.03]"
-      : "border-dashed border-muted-foreground/30 bg-muted/30"
-  const iconTone =
-    variant === "continue"
-      ? "bg-primary/10 text-primary ring-primary/15"
-      : "bg-muted-foreground/10 text-muted-foreground ring-muted-foreground/15"
-  return (
-    <div className={cn("flex flex-col gap-3 rounded-2xl border p-4 sm:p-5", tone)}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full ring-1",
-              iconTone,
-            )}
-          >
-            <Icon size={12} />
-          </span>
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/80">
-            {title}
-          </h2>
-        </div>
-        {trailing}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function ContinueReadingCard({ items }: { items: ContinueReadingItem[] }) {
   const navigate = useNavigate()
-  return (
-    <LaneShell
-      variant="continue"
-      icon={BookOpen}
-      title="Pick up where you left off"
-      trailing={
-        items.length > 0 && (
-          <Link to="/library" className="text-[11px] text-muted-foreground hover:text-foreground">
-            All →
-          </Link>
-        )
-      }
-    >
-      {items.length === 0 ? (
-        <p className="py-3 text-sm text-muted-foreground">
-          Nothing in progress — open a doc and you'll see it here.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {items.map((item) => (
-            <li key={item.document_id}>
-              <button
-                onClick={() =>
-                  navigate(`/library?doc=${encodeURIComponent(item.document_id)}`, { state: { from: "/" } })
-                }
-                className="group/row flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-background"
-              >
-                <ProgressRing pct={item.reading_progress_pct * 100} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {item.title}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {Math.round(item.reading_progress_pct * 100)}% ·{" "}
-                    {sinceLabel(item.last_meaningful_at)}
-                  </span>
-                </div>
-                <ArrowRight
-                  size={13}
-                  className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
-                />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </LaneShell>
-  )
-}
+  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
 
-function FadingCard({ items }: { items: FadingItem[] }) {
-  const navigate = useNavigate()
   return (
-    <LaneShell variant="fading" icon={Hourglass} title="Worth a refresher?">
-      {items.length === 0 ? (
-        <p className="py-3 text-sm text-muted-foreground">
-          Nothing fading right now — you've been keeping up.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {items.map((item) => {
-            const Icon = item.member_type === "document" ? FileText : StickyNote
-            const onClick = () => {
-              if (item.member_type === "document") {
-                navigate(`/library?doc=${encodeURIComponent(item.member_id)}`, { state: { from: "/" } })
-              } else {
-                navigate("/notes", { state: { from: "/" } })
-              }
+    <HubSection label="Continue">
+      <div className="flex flex-col">
+        {notes.map((n) => (
+          <HubRow
+            key={n.note_id}
+            icon={StickyNote}
+            title={n.title || "(untitled)"}
+            meta={sinceLabel(n.last_meaningful_at)}
+            trailing={<KindTag>Note</KindTag>}
+            onClick={() => {
+              setNotesDocumentId(null)
+              navigate("/notes", { state: { from: "/", noteId: n.note_id } })
+            }}
+          />
+        ))}
+        {study && (
+          <HubRow
+            icon={GraduationCap}
+            title={`${study.cards_remaining} card${study.cards_remaining === 1 ? "" : "s"} left in your session`}
+            meta={sinceLabel(study.started_at)}
+            trailing={<KindTag>Study</KindTag>}
+            onClick={() => navigate("/study", { state: { from: "/" } })}
+          />
+        )}
+        {docs.map((d) => (
+          <HubRow
+            key={d.document_id}
+            icon={FileText}
+            title={humanizeTitle(d.title)}
+            meta={`${Math.round(d.reading_progress_pct * 100)}% · ${sinceLabel(d.last_meaningful_at)}`}
+            trailing={<KindTag>Doc</KindTag>}
+            onClick={() =>
+              navigate(`/library?doc=${encodeURIComponent(d.document_id)}`, {
+                state: { from: "/" },
+              })
             }
-            return (
-              <li key={`${item.member_type}:${item.member_id}`}>
-                <button
-                  onClick={onClick}
-                  className="group/row flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-background"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-                    <Icon size={12} className="text-muted-foreground" />
-                  </span>
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm text-foreground/90">{item.title}</span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock size={9} />
-                      {item.days_since} day{item.days_since === 1 ? "" : "s"} ago
-                    </span>
-                  </div>
-                  <ArrowRight
-                    size={13}
-                    className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
-                  />
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </LaneShell>
-  )
-}
-
-// -- Tag cloud ---------------------------------------------------------------
-
-function TagCloud({ tags }: { tags: RecentTag[] }) {
-  const maxTotal = Math.max(
-    1,
-    ...tags.map((t) => t.document_count + t.note_count),
-  )
-  const setActiveTag = useAppStore((s) => s.setActiveTag)
-  return (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-2xl border border-border/60 bg-card/40 px-4 py-4 backdrop-blur-sm">
-      {tags.map((t) => {
-        const total = t.document_count + t.note_count
-        const weight = total / maxTotal
-        const sizeClass =
-          weight > 0.66
-            ? "text-base font-medium"
-            : weight > 0.33
-              ? "text-sm"
-              : "text-xs"
-        return (
-          <Link
-            key={t.id}
-            to={`/library?tag=${encodeURIComponent(t.id)}`}
-            onClick={() => setActiveTag(t.id)}
-            className={cn(
-              "flex items-baseline gap-1.5 rounded-full px-3 py-1 text-foreground/80 transition-colors hover:bg-primary/10 hover:text-primary",
-              sizeClass,
-            )}
-            title={`${t.document_count} documents · ${t.note_count} notes`}
-          >
-            <span className="text-muted-foreground/70">#</span>
-            {t.display_name}
-            <span className="text-[10px] text-muted-foreground">
-              {t.document_count}/{t.note_count}
-            </span>
-          </Link>
-        )
-      })}
-    </div>
-  )
-}
-
-// -- Active collection card --------------------------------------------------
-
-function ActiveCollectionCard({ collection }: { collection: ActiveCollection }) {
-  // The collection's own color anchors the card so the click through to
-  // /collections/:id feels like a thematic continuation, not a surface break.
-  return (
-    <Link
-      to={`/collections/${collection.id}`}
-      state={{ from: "/" }}
-      className="group relative flex items-center gap-3 overflow-hidden rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
-    >
-      <span
-        aria-hidden
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ backgroundColor: collection.color }}
-      />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-[0.07] blur-2xl transition-opacity group-hover:opacity-15"
-        style={{ backgroundColor: collection.color }}
-      />
-      <span
-        className="relative z-10 mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: collection.color }}
-      />
-      <h3 className="relative z-10 line-clamp-1 flex-1 text-sm font-semibold text-foreground">
-        {collection.name}
-      </h3>
-      <div className="relative z-10 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <StatPill label="d" value={collection.document_count} />
-        <StatPill label="n" value={collection.note_count} />
-        <StatPill label="c" value={collection.flashcard_count} />
+          />
+        ))}
       </div>
-    </Link>
+    </HubSection>
   )
 }
 
-function StatPill({ label, value }: { label: string; value: number }) {
+function KindTag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="flex items-baseline gap-0.5 rounded-md bg-muted/60 px-1.5 py-0.5">
-      <span className="font-semibold text-foreground">{value}</span>
-      <span className="text-muted-foreground/80">{label}</span>
+    <span className="shrink-0 text-[11px] uppercase tracking-[0.08em] text-muted-foreground/75">
+      {children}
     </span>
   )
 }
 
-// -- Weekly stats ------------------------------------------------------------
+function ThisWeek({ stats }: { stats: WeeklyStats }) {
+  const { bars, total } = buildBars(stats.seconds_by_activity ?? {})
 
-function WeekStatsCard({ stats }: { stats: WeeklyStats }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/50 p-5 backdrop-blur-sm">
-      <div className="flex items-center gap-2">
-        <Clock size={13} className="text-muted-foreground" />
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          This week
-        </h2>
+    <div className="flex flex-col gap-3.5">
+      <SectionLabel>This week</SectionLabel>
+      <div className="flex flex-col gap-2.5">
+        {bars.map((bar) => (
+          <div key={bar.key} className="flex items-center gap-3">
+            <span className="w-16 shrink-0 text-[13px] text-muted-foreground">{bar.label}</span>
+            <span className="h-1 flex-1 overflow-hidden rounded-sm bg-muted">
+              <span
+                className="block h-full rounded-sm bg-primary/75"
+                style={{ width: `${bar.pct}%` }}
+              />
+            </span>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-foreground/80">
+              {bar.seconds > 0 ? durationLabel(bar.seconds) : "—"}
+            </span>
+          </div>
+        ))}
       </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        <BigStat value={`${stats.minutes_studied}m`} label="studied" accent="primary" />
-        <BigStat value={stats.cards_reviewed} label="cards" accent="amber" />
-        <BigStat value={stats.notes_written} label="notes" accent="emerald" />
-        <BigStat value={stats.docs_touched} label="docs" accent="blue" />
+      <span className="text-xs text-muted-foreground/80">
+        {total > 0 ? `${durationLabel(total)} total` : "No time recorded yet"} ·{" "}
+        {stats.notes_written} note{stats.notes_written === 1 ? "" : "s"} · {stats.docs_touched} docs
+        touched
+      </span>
+    </div>
+  )
+}
+
+function ActiveProjects({ collections }: { collections: ActiveCollection[] }) {
+  const navigate = useNavigate()
+  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
+
+  return (
+    <div className="flex flex-col gap-3.5">
+      <SectionLabel>Active projects</SectionLabel>
+      {collections.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">
+          Group documents into a project to track them together.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {collections.slice(0, 5).map((c) => (
+            <MiniRow
+              key={c.id}
+              label={c.name}
+              dot={c.color}
+              value={`${c.document_count}d · ${c.note_count}n · ${c.flashcard_count}c`}
+              onClick={() => {
+                setActiveCollectionId(c.id)
+                navigate("/library", { state: { from: "/" } })
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FadingBlock({ items }: { items: FadingItem[] }) {
+  const navigate = useNavigate()
+  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
+
+  return (
+    <div className="flex flex-col gap-3.5">
+      <SectionLabel>Fading</SectionLabel>
+      <div className="flex flex-col gap-0.5">
+        {items.map((item) => (
+          <MiniRow
+            key={`${item.member_type}-${item.member_id}`}
+            label={humanizeTitle(item.title)}
+            value={`${item.days_since}d`}
+            onClick={() => {
+              if (item.member_type === "note") {
+                navigate("/notes", { state: { from: "/", noteId: item.member_id } })
+              } else {
+                setActiveDocument(item.member_id)
+                navigate(`/library?doc=${encodeURIComponent(item.member_id)}`, {
+                  state: { from: "/" },
+                })
+              }
+            }}
+          />
+        ))}
       </div>
     </div>
   )
 }
 
-function BigStat({
-  value,
-  label,
-  accent,
-}: {
-  value: number | string
-  label: string
-  accent: "primary" | "amber" | "emerald" | "blue"
-}) {
-  const dot = {
-    primary: "bg-primary",
-    amber: "bg-amber-500",
-    emerald: "bg-emerald-500",
-    blue: "bg-blue-500",
-  }[accent]
+function TopicsBlock({ tags }: { tags: RecentTag[] }) {
+  const navigate = useNavigate()
   return (
-    <div className="flex flex-col gap-0.5 rounded-xl bg-muted/40 px-3 py-2.5">
-      <div className="flex items-center gap-1.5">
-        <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
-        <span className="text-xl font-semibold text-foreground">{value}</span>
+    <div className="flex flex-col gap-3.5">
+      <SectionLabel>Topics</SectionLabel>
+      <div className="flex flex-wrap gap-1.5">
+        {tags.slice(0, 8).map((tag) => (
+          <button
+            key={tag.id}
+            onClick={() =>
+              navigate(`/library?tag=${encodeURIComponent(tag.id)}`, { state: { from: "/" } })
+            }
+            className="flex items-baseline gap-1.5 rounded-full bg-muted/60 px-3 py-1 text-[13px] text-foreground/80 transition-colors hover:bg-primary/10 hover:text-primary"
+          >
+            {tag.display_name}
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {tag.document_count + tag.note_count}
+            </span>
+          </button>
+        ))}
       </div>
-      <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   )
 }
 
-// -- Helpers + auxiliary states ---------------------------------------------
-
-function ProgressRing({ pct }: { pct: number }) {
-  const size = 32
+function ProgressRing({ pct, size = 32, label }: { pct: number; size?: number; label?: string }) {
   const r = (size - 4) / 2
   const circ = 2 * Math.PI * r
   const dashOffset = circ - (Math.min(100, Math.max(0, pct)) / 100) * circ
@@ -857,8 +574,26 @@ function ProgressRing({ pct }: { pct: number }) {
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
         className="stroke-primary"
       />
+      {label && (
+        <text
+          x={size / 2}
+          y={size / 2 + 4}
+          textAnchor="middle"
+          className="fill-foreground text-[11px] font-semibold"
+        >
+          {label}
+        </text>
+      )}
     </svg>
   )
+}
+
+function durationLabel(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${hours} hr` : `${hours} hr ${rest}`
 }
 
 function sinceLabel(iso: string): string {
@@ -871,42 +606,27 @@ function sinceLabel(iso: string): string {
   return `${weeks} week${weeks === 1 ? "" : "s"} ago`
 }
 
-function OrganizeCallout() {
-  return (
-    <Link
-      to="/library"
-      className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-card/60 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-    >
-      <FolderPlus size={16} className="shrink-0 text-primary" />
-      <span className="flex-1">No active projects yet.</span>
-      <span className="flex items-center gap-1 text-primary">
-        Organize
-        <ArrowRight size={12} />
-      </span>
-    </Link>
-  )
-}
-
 function HubLoading() {
   return (
     <PageSurface>
-      <div className="flex items-center gap-4">
-        <Skeleton className="h-14 w-14 rounded-2xl" />
-        <div className="flex flex-col gap-1.5">
-          <Skeleton className="h-7 w-44" />
-          <Skeleton className="h-4 w-32" />
+      <div className="flex flex-col gap-5">
+        <div className="flex items-center gap-3.5">
+          <Skeleton className="h-[34px] w-[34px] rounded-xl" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-44" />
+            <Skeleton className="h-3.5 w-32" />
+          </div>
         </div>
+        <Skeleton className="h-14 w-full max-w-[620px]" />
       </div>
-      <Skeleton className="h-32 w-full rounded-3xl" />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="flex flex-col gap-6 lg:col-span-2">
-          <Skeleton className="h-40 rounded-2xl" />
-          <Skeleton className="h-40 rounded-2xl" />
-        </div>
-        <div className="flex flex-col gap-6">
-          <Skeleton className="h-44 rounded-2xl" />
-          <Skeleton className="h-32 rounded-2xl" />
-        </div>
+      <Skeleton className="h-52 w-full rounded-3xl" />
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-16 rounded-2xl" />
+        <Skeleton className="h-16 rounded-2xl" />
+      </div>
+      <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2">
+        <Skeleton className="h-32" />
+        <Skeleton className="h-32" />
       </div>
     </PageSurface>
   )
@@ -938,10 +658,9 @@ function DecayDebtWidget() {
   if (!data || data.items.length === 0) return null
 
   return (
-    <Section
-      icon={RefreshCw}
-      title="Worth revisiting"
-      subtitle={`${data.total_at_risk} card${data.total_at_risk !== 1 ? "s" : ""} approaching the forgetting threshold`}
+    <HubSection
+      label="Worth revisiting"
+      note={`${data.total_at_risk} card${data.total_at_risk !== 1 ? "s" : ""} near the forgetting threshold`}
     >
       <div className="flex flex-col gap-2">
         {data.items.map((item) => {
@@ -978,7 +697,7 @@ function DecayDebtWidget() {
           </button>
         )}
       </div>
-    </Section>
+    </HubSection>
   )
 }
 

@@ -27,6 +27,12 @@ class Section:
     page_end: int
     admonition_type: str | None = None  # 'note'|'warning'|'tip'|'caution'|'important' or None
     parent_heading: str | None = None  # heading string of the logical parent section
+    # Character offsets in `text` where a new page begins, excluding the first
+    # page (whose number is `page_start`). Without this a chunk can only report
+    # the page its *section* began on: measured on one library, every section of
+    # every PDF reported a single page, one of them across 2,329 chunks, so a
+    # citation into a long chapter pointed a hundred pages from its own text.
+    page_breaks: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -39,12 +45,20 @@ class ParsedDocument:
     raw_text: str = ""
     # Character offsets in raw_text where each new page begins
     page_breaks: list[int] = field(default_factory=list)
+    # Sheet number -> the number printed on that sheet, for PDFs that number
+    # their front matter separately. Only entries that differ from the sheet
+    # number are kept, so an empty map means counting sheets is already right.
+    page_labels: dict[int, str] = field(default_factory=dict)
     # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
     # static fetch could not capture). Empty when extraction was clean.
     warnings: list[str] = field(default_factory=list)
     # Layout discovered from the document's own markers: book|paper|script|chat.
     # None when the parser that ran does not discover structure.
     structure_type: str | None = None
+    # What the importer captured and what it could not, persisted so an
+    # incomplete import is visible to the reader instead of silent. None when
+    # the parser does not measure its own fidelity.
+    extraction_report: dict | None = None
 
 
 @dataclass
@@ -215,6 +229,9 @@ class SourceCitation(TypedDict):
     section_id: str | None
     section_heading: str
     pdf_page_number: int | None
+    # The number printed on that sheet, when it differs. Display only: the chip
+    # navigates by pdf_page_number, which is what the viewer scrolls to.
+    pdf_page_label: str | None
     section_preview_snippet: str  # first 150 chars of chunk text for hover tooltip
 
 

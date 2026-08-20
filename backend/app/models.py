@@ -70,6 +70,11 @@ class DocumentModel(Base):
     # Layout discovered while parsing: book|paper|script|chat. Combined with
     # content_type to pick a reading profile. Null when undiscovered.
     structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # What the importer captured and what it could not: {"captured": {...},
+    # "dropped": {...}, "notes": [...], "complete": bool}. Persisted so a
+    # partial import is visible to the reader rather than a silence they have
+    # no way to interpret. Null = the parser does not measure its own fidelity.
+    extraction_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
@@ -109,6 +114,12 @@ class ChunkModel(Base):
     # PDF page number (1-based) for chunks from PDF documents.
     # Null for non-PDF content types (txt, docx, epub, audio, code, etc.).
     pdf_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The number printed on that sheet, when the PDF says it differs from the
+    # sheet's position -- a book numbers its front matter separately, so sheet
+    # 41 of one 613-page book is printed "19". Display only: navigation still
+    # uses pdf_page_number, because that is what the viewer scrolls to. Null
+    # when the PDF defines no labels, or the label is the sheet number already.
+    pdf_page_label: Mapped[str | None] = mapped_column(String, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -1284,6 +1295,41 @@ class ChatMessageModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
     )
+
+
+class TimeOnTaskModel(Base):
+    """One continuous stretch of foreground attention on one thing.
+
+    What this measures, exactly: the surface was mounted and the tab was
+    visible, sampled by a client heartbeat. It is not proof of attention, and
+    the Progress surface must say so rather than call it "time studied".
+
+    A row is an *interval*, not a beat. Each heartbeat extends the open interval
+    for its (activity, member_id) when the gap since the last beat is small
+    enough to be continuous, and starts a new row when it is not -- so a session
+    costs about one row instead of one per sample, and a gap the user spent away
+    is never credited to anything.
+
+    `started_at` is UTC and buckets are computed at query time, matching
+    EngagementService: the timezone offset can change and the raw instant stays
+    true. An interval spanning local midnight is attributed to the day it began.
+    """
+
+    __tablename__ = "time_on_task"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # 'document' | 'note' | 'review' | 'study'
+    activity: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # The document/note/session the time was spent on; null where the activity
+    # has no single member.
+    member_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True
+    )
+    last_beat_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class ContentActivityModel(Base):

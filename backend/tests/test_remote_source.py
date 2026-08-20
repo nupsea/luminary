@@ -290,7 +290,7 @@ async def test_ingest_url_still_creates_an_article_for_a_web_page(test_db, serve
     from app.types import ParsedDocument, Section
 
     class _Extractor:
-        async def extract(self, url, doc_id=None):
+        async def extract(self, url, doc_id=None, rendered_html=None):
             return ParsedDocument(
                 title="A Real Article",
                 format="md",

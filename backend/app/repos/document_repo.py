@@ -94,6 +94,28 @@ class DocumentRepo:
         )
         return {row[0]: row[1] for row in result.all()}
 
+    async def facet_counts(self) -> tuple[dict[str, int], dict[str, int]]:
+        """(content_type -> count, format -> count) across the whole library.
+
+        Grouped in SQL because the caller decides which filters to *offer* from
+        these numbers: counting a page of documents would hide a filter whose
+        matches happen to sit on page two.
+        """
+        by_type = await self.session.execute(
+            select(DocumentModel.content_type, func.count(DocumentModel.id)).group_by(
+                DocumentModel.content_type
+            )
+        )
+        by_format = await self.session.execute(
+            select(DocumentModel.format, func.count(DocumentModel.id)).group_by(
+                DocumentModel.format
+            )
+        )
+        return (
+            {row[0]: row[1] for row in by_type.all() if row[0]},
+            {row[0]: row[1] for row in by_format.all() if row[0]},
+        )
+
     async def read_section_count(self, document_id: str) -> int:
         result = await self.session.execute(
             select(func.count()).where(ReadingProgressModel.document_id == document_id)

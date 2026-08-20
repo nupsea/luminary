@@ -10,7 +10,23 @@ export interface SourceCitation {
   section_id: string | null
   section_heading: string
   pdf_page_number: number | null
+  /** What the sheet is printed as, when the book numbers front matter apart. */
+  pdf_page_label?: string | null
   section_preview_snippet: string // first 150 chars of chunk text
+}
+
+/**
+ * How a citation's page should read to someone holding the book.
+ *
+ * A PDF's sheet position is not the page printed on it: measured on a 613-page
+ * book, sheet 41 is printed "19", so a chip naming the sheet disagreed with the
+ * reader's own eyes by twenty for the whole body. The label is display only --
+ * the chip still navigates by sheet, which is what the viewer scrolls to.
+ */
+export function citationPageText(citation: SourceCitation): string {
+  const label = (citation.pdf_page_label ?? "").trim()
+  if (label) return ` p.${label}`
+  return Number(citation.pdf_page_number) > 0 ? ` p.${citation.pdf_page_number}` : ""
 }
 
 /**

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { deduplicateCitations } from "@/lib/citationUtils"
+import { citationPageText, deduplicateCitations } from "@/lib/citationUtils"
 import type { SourceCitation } from "@/lib/citationUtils"
 
 function makeCitation(overrides: Partial<SourceCitation> & { chunk_id: string }): SourceCitation {
@@ -60,5 +60,37 @@ describe("SourceCitationChips", () => {
       makeCitation({ chunk_id: "c3", section_id: null }),
     ])
     expect(result).toHaveLength(2)
+  })
+})
+
+describe("citationPageText", () => {
+  const base: SourceCitation = {
+    chunk_id: "c1",
+    document_id: "d1",
+    document_title: "A Book",
+    section_id: "s1",
+    section_heading: "Chapter",
+    pdf_page_number: 41,
+    section_preview_snippet: "",
+  }
+
+  it("prefers the number printed on the sheet", () => {
+    // Measured: sheet 41 of one 613-page book is printed "19", because the
+    // front matter is numbered separately. The chip must agree with the page
+    // in the reader's hands, not with the file's sheet count.
+    expect(citationPageText({ ...base, pdf_page_label: "19" })).toBe(" p.19")
+  })
+
+  it("falls back to the sheet number when the PDF defines no label", () => {
+    expect(citationPageText({ ...base, pdf_page_label: null })).toBe(" p.41")
+    expect(citationPageText(base)).toBe(" p.41")
+  })
+
+  it("shows no page at all for a document without one", () => {
+    expect(citationPageText({ ...base, pdf_page_number: null })).toBe("")
+  })
+
+  it("keeps a roman-numeral label rather than dropping it as non-numeric", () => {
+    expect(citationPageText({ ...base, pdf_page_number: 6, pdf_page_label: "iv" })).toBe(" p.iv")
   })
 })

@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
+import { renderPage } from "@/lib/pageRender"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -30,13 +31,21 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
   pink: "bg-pink-200/60 dark:bg-pink-500/30",
 }
 
+/** What the contents panel needs of a section: enough to label and place it. */
+interface TocEntry {
+  section_id: string
+  heading: string
+  level: number
+  content?: string | null
+}
+
 // Memoized individual section item in TOC to prevent full list re-renders on scroll
 const TocItem = memo(({
   section,
   isActive,
   onClick
 }: {
-  section: SectionContentItem;
+  section: TocEntry;
   isActive: boolean;
   onClick: (id: string) => void
 }) => {
@@ -59,6 +68,7 @@ const TocItem = memo(({
 TocItem.displayName = "TocItem"
 
 interface LazySectionProps {
+  documentId: string
   section: SectionContentItem
   annotations: AnnotationItem[]
   highlightsVisible: boolean
@@ -128,9 +138,15 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ section, annotations, highlightsVisible, images = [], spec, isLast }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  // A section over the inline limit arrives shortened. Never silently: the rest
+  // is one call away and the reader is told it is there.
+  const [whole, setWhole] = useState<string | null>(null)
+  const [loadingWhole, setLoadingWhole] = useState(false)
+  const body = whole ?? section.content
+  const stillShort = section.truncated && whole === null
 
   useEffect(() => {
     const el = containerRef.current
@@ -152,15 +168,15 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
   const showHeading = hasAuthoredHeading(section)
   const highlighted = useMemo(() => {
     if (!isVisible) return "" // defer processing
-    return applyHighlights(section.content, highlightsVisible ? annotations : [])
-  }, [isVisible, section.content, annotations, highlightsVisible])
+    return applyHighlights(body, highlightsVisible ? annotations : [])
+  }, [isVisible, body, annotations, highlightsVisible])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
     if (!isVisible || !spec.speakerTurns) return null
-    if (highlighted !== section.content) return null
-    return parseSpeakerTurns(section.content)
-  }, [isVisible, spec.speakerTurns, highlighted, section.content])
+    if (highlighted !== body) return null
+    return parseSpeakerTurns(body)
+  }, [isVisible, spec.speakerTurns, highlighted, body])
 
   return (
     <div
@@ -189,6 +205,28 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
             </MarkdownRenderer>
           )}
           <SectionFigures images={images} />
+          {stillShort && (
+            <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <p>
+                Showing the first {body.length.toLocaleString()} of{" "}
+                {section.content_chars.toLocaleString()} characters — this section is unusually
+                long.
+              </p>
+              <button
+                type="button"
+                disabled={loadingWhole}
+                onClick={() => {
+                  setLoadingWhole(true)
+                  void fetchWholeSection(documentId, section.section_id)
+                    .then((s) => setWhole(s.content))
+                    .finally(() => setLoadingWhole(false))
+                }}
+                className="mt-1 font-semibold text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                {loadingWhole ? "Loading…" : "Show the whole section"}
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-2 py-4">
@@ -202,8 +240,29 @@ const LazySection = memo(({ section, annotations, highlightsVisible, images = []
 })
 LazySection.displayName = "LazySection"
 
-const fetchSectionContent = (documentId: string): Promise<SectionContentItem[]> =>
-  apiGet<SectionContentItem[]>(`/sections/${documentId}/content`)
+type SectionContentPage = components["schemas"]["SectionContentPage"]
+type SectionMeta = components["schemas"]["SectionResponse"]
+
+// One window of section bodies. Unbounded, this was 20.2 MB over 1,017 sections
+// on a 2.9M-word manual -- enough for a browser to report the page as
+// unresponsive, which is how it was found.
+const SECTION_PAGE = 40
+// The server refuses a larger window; asking for more would 422.
+const MAX_SECTION_WINDOW = 200
+// A DOM ceiling for the contents panel, not a contract.
+const TOC_LIMIT = 2000
+
+const fetchSectionContent = (documentId: string, limit: number): Promise<SectionContentPage> =>
+  apiGet<SectionContentPage>(`/sections/${documentId}/content`, { offset: 0, limit })
+
+// Headings only, for the contents panel, which lists the whole document while
+// the body is a window: 253 KB against 20.2 MB for the same 1,017 sections.
+const fetchSectionMeta = (documentId: string): Promise<SectionMeta[]> =>
+  apiGet<SectionMeta[]>(`/sections/${documentId}`)
+
+/** One section entire, for a section too long to travel in the list. */
+const fetchWholeSection = (documentId: string, sectionId: string): Promise<SectionContentItem> =>
+  apiGet<SectionContentItem>(`/sections/${documentId}/content/${sectionId}`)
 
 const fetchDocumentImages = (documentId: string): Promise<DocumentImage[]> =>
   apiGet<{ items: DocumentImage[] }>(`/documents/${documentId}/images`).then((r) => r.items)
@@ -345,6 +404,11 @@ interface ReadViewProps {
    *  loaded yet, which fall back to the article profile. */
   contentType?: string | null
   structureType?: string | null
+  /** What the importer captured and what it could not. Undefined means fidelity
+   *  was never measured for this document, which is not the same as clean. */
+  extractionReport?: ExtractionReport | null
+  /** Needed to re-render the page on a re-import; absent for non-URL sources. */
+  sourceUrl?: string | null
 }
 
 export function ReadView({
@@ -354,6 +418,8 @@ export function ReadView({
   highlightsVisible = true,
   contentType,
   structureType,
+  extractionReport,
+  sourceUrl,
 }: ReadViewProps) {
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
@@ -368,7 +434,7 @@ export function ReadView({
   const contentRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
-  const [listLimit, setListLimit] = useState(200)
+  const [listLimit, setListLimit] = useState(SECTION_PAGE)
   const toc = useResizablePanel({
     storageKey: "luminary-read-toc",
     defaultWidth: 224,
@@ -377,13 +443,24 @@ export function ReadView({
     side: "right",
   })
 
-  const { data: sections, isLoading, error } = useQuery({
-    queryKey: ["section-content", documentId],
-    queryFn: () => fetchSectionContent(documentId),
+  const { data: page, isLoading, error } = useQuery({
+    queryKey: ["section-content", documentId, listLimit],
+    queryFn: () => fetchSectionContent(documentId, listLimit),
+    staleTime: 60_000,
+  })
+  const sections = useMemo(() => page?.items ?? [], [page])
+  const totalSections = page?.total ?? 0
+
+  const { data: sectionMeta } = useQuery({
+    queryKey: ["section-meta", documentId],
+    queryFn: () => fetchSectionMeta(documentId),
     staleTime: 60_000,
   })
 
-  const tocEntries = useMemo(() => usableSections(sections ?? []), [sections])
+  const tocEntries = useMemo(
+    () => usableSections((sectionMeta ?? []).map((m) => ({ ...m, section_id: m.id }))),
+    [sectionMeta],
+  )
 
   // Sections predating `sections.body` are served from chunks (I-29); the text
   // cannot be repaired in place, so say so rather than let it pass as authored.
@@ -483,7 +560,9 @@ export function ReadView({
     if (!el) return
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) setListLimit((prev) => prev + 200)
+        if (entry.isIntersecting) {
+          setListLimit((prev) => Math.min(prev + SECTION_PAGE, MAX_SECTION_WINDOW))
+        }
       },
       { rootMargin: "800px" },
     )
@@ -555,7 +634,7 @@ export function ReadView({
           </button>
         </div>
         <ul className="space-y-0.5">
-          {tocEntries.slice(0, listLimit).map((sec) => (
+          {tocEntries.slice(0, TOC_LIMIT).map((sec) => (
             <TocItem
               key={sec.section_id}
               section={sec}
@@ -563,9 +642,9 @@ export function ReadView({
               onClick={scrollToSection}
             />
           ))}
-          {sections.length > listLimit && (
-            <li className="mt-2 text-center text-[10px] text-muted-foreground italic">
-              (TOC truncated)
+          {tocEntries.length > TOC_LIMIT && (
+            <li className="mt-2 text-center text-[10px] italic text-muted-foreground">
+              {tocEntries.length - TOC_LIMIT} more sections
             </li>
           )}
         </ul>
@@ -607,33 +686,182 @@ export function ReadView({
             ["--reader-leading" as string]: spec.lineHeight,
           }}
         >
+          <ImportFidelityNotice
+            report={extractionReport}
+            documentId={documentId}
+            sourceUrl={sourceUrl}
+          />
           {degradedCount > 0 && (
-            <p className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-              {degradedCount} of {sections.length} sections were stored before Luminary kept
-              full section text, so their paragraph breaks are approximate. Re-upload this
-              document to read it as written.
-            </p>
+            <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              <p>
+                {degradedCount} of the {sections.length} sections loaded were stored before
+                Luminary kept full section text, so their paragraph breaks are approximate.
+              </p>
+              <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
+            </div>
           )}
-          {sections.slice(0, listLimit).map((section, i) => (
+          {sections.map((section, i) => (
             <LazySection
               key={section.section_id}
+              documentId={documentId}
               section={section}
               annotations={annotationsBySection.get(section.section_id) || []}
               highlightsVisible={highlightsVisible}
               images={imagesBySection.get(section.section_id)}
               spec={spec}
-              isLast={i === Math.min(sections.length, listLimit) - 1}
+              isLast={i === sections.length - 1}
             />
           ))}
           
           {/* The window bounds the DOM only; reaching its end extends it. */}
-          {sections.length > listLimit && (
+          {totalSections > sections.length && (
             <div ref={loadMoreRef} className="mb-20 mt-12 flex justify-center">
               <Loader2 size={16} className="animate-spin text-muted-foreground" />
             </div>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+/** The importer's own account of what it could not capture.
+ *
+ *  A partial import that looks complete is the failure this exists to prevent:
+ *  the reader has no way to know a diagram was dropped, and no original to
+ *  compare against the way a PDF always has. Only `dropped` and `notes` are
+ *  rendered -- a clean import says nothing at all.
+ */
+export interface ExtractionReport {
+  captured?: Record<string, number>
+  dropped?: Record<string, number>
+  notes?: string[]
+  complete?: boolean
+}
+
+function ImportFidelityNotice({
+  report,
+  documentId,
+  sourceUrl,
+}: {
+  report?: ExtractionReport | null
+  documentId: string
+  sourceUrl?: string | null
+}) {
+  if (!report) return null
+  const dropped = Object.entries(report.dropped ?? {}).filter(([, n]) => n > 0)
+  const notes = report.notes ?? []
+  if (dropped.length === 0 && notes.length === 0) return null
+
+  return (
+    <div className="mb-8 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+      {dropped.length > 0 && (
+        <p>
+          This import is missing{" "}
+          {dropped
+            .map(([kind, n]) => `${n} ${kind}${n === 1 ? "" : "s"}`)
+            .join(" and ")}{" "}
+          the page contained. The text around them came through in full.
+        </p>
+      )}
+      {notes.map((note) => (
+        <p key={note} className={dropped.length > 0 ? "mt-1" : undefined}>
+          {note}
+        </p>
+      ))}
+      <ReimportAction documentId={documentId} sourceUrl={sourceUrl} />
+    </div>
+  )
+}
+
+interface ReparseResponse {
+  status: string
+  source: string
+  anchored: Record<string, number>
+  detail: string
+}
+
+/** Re-run the importer over this document.
+ *
+ *  Two steps on purpose. The first call only reports what the rebuild would
+ *  strand -- highlights and clips anchored to sections that are about to be
+ *  replaced -- because that is a cost the reader has to agree to, not one to
+ *  discover afterwards.
+ */
+function ReimportAction({ documentId, sourceUrl }: { documentId: string; sourceUrl?: string | null }) {
+  const queryClient = useQueryClient()
+  const [preview, setPreview] = useState<ReparseResponse | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const call = async (confirm: boolean) => {
+    setBusy(true)
+    setError(null)
+    try {
+      // The same render the original import used. Without it a page whose
+      // content its scripts produce comes back static, and the re-import the
+      // fidelity notice offers would cost the reader the figures it named.
+      const rendered = confirm && sourceUrl ? await renderPage(sourceUrl) : null
+      const res = await apiPost<ReparseResponse>(`/documents/${documentId}/reparse`, {
+        confirm,
+        ...(rendered?.html ? { rendered_html: rendered.html } : {}),
+      })
+      if (confirm) {
+        setPreview(null)
+        await queryClient.invalidateQueries({ queryKey: ["document", documentId] })
+      } else {
+        setPreview(res)
+      }
+    } catch {
+      setError("Could not start the re-import.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const anchored = Object.entries(preview?.anchored ?? {}).filter(([, n]) => n > 0)
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {!preview ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void call(false)}
+          className="self-start text-xs font-medium text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+        >
+          {busy ? "Checking…" : "Re-import this document"}
+        </button>
+      ) : (
+        <>
+          <p>{preview.detail}</p>
+          {anchored.length > 0 && (
+            <p>
+              Anchored to the current sections:{" "}
+              {anchored.map(([kind, n]) => `${n} ${kind}`).join(", ")}.
+            </p>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void call(true)}
+              className="text-xs font-semibold text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {busy ? "Starting…" : "Re-import now"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreview(null)}
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {error && <p className="text-destructive">{error}</p>}
     </div>
   )
 }

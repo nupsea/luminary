@@ -7,7 +7,13 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.exceptions import InvalidInput
 from app.services.engagement_service import EngagementService
+from app.services.time_on_task_service import (
+    ACTIVITIES,
+    HEARTBEAT_SECONDS,
+    TimeOnTaskService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +23,25 @@ router = APIRouter(prefix="/engagement", tags=["engagement"])
 class FocusStartRequest(BaseModel):
     duration_minutes: int = 25
     session_type: str = "study"
+
+
+class HeartbeatRequest(BaseModel):
+    # 'document' | 'note' | 'review' | 'study'
+    activity: str
+    # The document/note/session the time is being spent on, where there is one.
+    member_id: str | None = None
+
+
+class HeartbeatResponse(BaseModel):
+    """What this beat was worth, and how often to send the next one.
+
+    `seconds_credited` is 0 for the first beat of a stretch and for one arriving
+    after a gap too long to be continuous. The client does not need to act on
+    it; it is returned so the accrual is observable rather than opaque.
+    """
+
+    seconds_credited: int
+    heartbeat_seconds: int
 
 
 class FocusSessionResponse(BaseModel):
@@ -87,6 +112,28 @@ async def get_recent_achievements(
 
 
 # Focus session endpoints
+
+
+@router.post("/heartbeat")
+async def heartbeat(
+    req: HeartbeatRequest,
+    session: AsyncSession = Depends(get_db),
+) -> HeartbeatResponse:
+    """Sample of foreground attention, sent by a surface while it is visible.
+
+    The server cannot measure this itself: a reader who opens a document and
+    reads for twenty minutes issues one request. What is recorded is time with
+    the page open and visible, which is not the same as time spent reading, and
+    `docs/metrics.md` requires it be reported as the former.
+    """
+    try:
+        credited = await TimeOnTaskService(session).beat(req.activity, req.member_id)
+    except ValueError as exc:
+        raise InvalidInput(f"activity must be one of {', '.join(ACTIVITIES)}") from exc
+    return HeartbeatResponse(
+        seconds_credited=credited,
+        heartbeat_seconds=HEARTBEAT_SECONDS,
+    )
 
 
 @router.post("/focus/start")

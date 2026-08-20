@@ -290,7 +290,9 @@ async def test_long_chapter_reads_back_verbatim(test_db):
         resp = await client.get(f"/sections/{doc_id}/content")
 
     assert resp.status_code == 200
-    item = resp.json()[0]
+    item = resp.json()["items"][0]
     assert item["content_source"] == "body"
+    # Comfortably under the inline limit, so the reader must serve it whole.
+    assert item["truncated"] is False
     assert item["content"] == long_chapter
     assert item["content"].count("\n\n") == len(paragraphs) - 1

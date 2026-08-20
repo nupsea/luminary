@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildGlobalMatches, findMatchIndices, formatMatchCounts } from "./pdfSearchUtils"
+import { activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel, stepZoom } from "./pdfSearchUtils"
 
 describe("findMatchIndices", () => {
   it("returns empty for empty query", () => {
@@ -98,5 +98,84 @@ describe("formatMatchCounts", () => {
     const result = formatMatchCounts(matches, 0, 5)
     expect(result.pageCount).toBe(0)
     expect(result.label).toBe("0 on page, 6 total")
+  })
+})
+
+describe("activeMatchIndexForPage", () => {
+  const matches = [
+    { page: 1, index: 10 },
+    { page: 2, index: 5 },
+    { page: 2, index: 40 },
+    { page: 3, index: 7 },
+  ]
+
+  it("finds the active match's position among that page's matches", () => {
+    expect(activeMatchIndexForPage(matches, 2, 2)).toBe(1)
+  })
+
+  it("reports -1 when the active match is on another page", () => {
+    expect(activeMatchIndexForPage(matches, 0, 2)).toBe(-1)
+  })
+
+  it("reports -1 when nothing is active", () => {
+    expect(activeMatchIndexForPage(matches, -1, 1)).toBe(-1)
+  })
+
+  it("is stable while later pages are still being extracted", () => {
+    // The flicker case: extraction appends matches from further into the book
+    // once per batch. The current page's answer must not change, or the effect
+    // re-runs and clears every overlay before redrawing the same thing.
+    const grown = [...matches, { page: 9, index: 1 }, { page: 12, index: 3 }]
+    expect(activeMatchIndexForPage(grown, 2, 2)).toBe(activeMatchIndexForPage(matches, 2, 2))
+  })
+})
+
+describe("printedPageLabel", () => {
+  // Sheet positions and their printed labels, measured on a real 613-page book.
+  const labels = ["Cover", "BackCover", "i", "ii", "iii", "iv"]
+
+  it("reports the printed label when it differs from the sheet number", () => {
+    expect(printedPageLabel(labels, 6)).toBe("iv")
+    expect(printedPageLabel(labels, 1)).toBe("Cover")
+  })
+
+  it("reports nothing when the PDF defines no labels", () => {
+    // Three of four books in one library define none; their footers are right
+    // as they are and must not grow a redundant second number.
+    expect(printedPageLabel(null, 5)).toBeNull()
+    expect(printedPageLabel([], 5)).toBeNull()
+  })
+
+  it("reports nothing when the label is just the sheet number", () => {
+    expect(printedPageLabel(["1", "2", "3"], 2)).toBeNull()
+  })
+
+  it("reports nothing outside the document", () => {
+    expect(printedPageLabel(labels, 0)).toBeNull()
+    expect(printedPageLabel(labels, 99)).toBeNull()
+  })
+})
+
+describe("zoom stepping", () => {
+  it("walks up and down the ladder of stops", () => {
+    expect(stepZoom(1, 1)).toBe(1.25)
+    expect(stepZoom(1, -1)).toBe(0.75)
+  })
+
+  it("snaps to the neighbouring stop from a value between them", () => {
+    // Auto-fit produces arbitrary values -- 2.87 was measured on a real book --
+    // so stepping must find the next stop rather than add a fixed delta.
+    expect(stepZoom(2.87, 1)).toBe(3)
+    expect(stepZoom(2.87, -1)).toBe(2.5)
+  })
+
+  it("clamps at both ends rather than running off the ladder", () => {
+    expect(stepZoom(4, 1)).toBe(4)
+    expect(stepZoom(0.25, -1)).toBe(0.25)
+  })
+
+  it("steps down from a value above every stop", () => {
+    // The old control capped at 200% and could not represent 287% at all.
+    expect(stepZoom(9, -1)).toBe(4)
   })
 })

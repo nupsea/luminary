@@ -68,3 +68,31 @@ def test_unrelated_runtime_errors_are_not_swallowed(tmp_path, monkeypatch):
     monkeypatch.setattr(gc.kuzu, "Database", _boom)
     with pytest.raises(RuntimeError, match="disk on fire"):
         _open_database(str(tmp_path / "x.kuzu"))
+
+
+def test_a_corrupt_graph_reports_itself_as_rebuildable(tmp_path, monkeypatch):
+    """An unreadable graph is a 503 with guidance, not a 500 with a stack trace.
+
+    Kuzu reports a graph it cannot read as a bare RuntimeError, which escaped to
+    the client on every document in the library -- the whole concept layer
+    failing identically with an error naming a catalog table. Unlike a lock this
+    never clears on its own.
+    """
+    import app.services.graph_connection as gc
+    from app.services.graph_connection import GraphDatabaseUnreadableError
+
+    def _corrupt(_path):
+        raise RuntimeError(
+            "Runtime exception: Load table failed: table 0 doesn't exist in catalog."
+        )
+
+    monkeypatch.setattr(gc.kuzu, "Database", _corrupt)
+    with pytest.raises(GraphDatabaseUnreadableError) as exc:
+        _open_database(str(tmp_path / "graph.kuzu"))
+
+    # 503, so the client can tell "rebuild this" from "the server broke".
+    assert exc.value.status_code == 503
+    # The graph is never recreated here: doing so would discard the user's
+    # extracted entities without telling them.
+    assert not (tmp_path / "graph.kuzu").exists()
+    assert "re-ingest" in str(exc.value)

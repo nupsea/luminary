@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod logging;
+mod render;
 mod report;
 mod stage;
 mod supervisor;
@@ -248,9 +249,41 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
         let url = format!("http://127.0.0.1:{port}");
         // Navigating to the backend's own origin keeps the SPA and the API
         // same-origin, so neither CORS nor TrustedHostMiddleware needs relaxing.
+        grant_spa_render(&app, port);
         if let Ok(parsed) = url.parse() {
             let _ = window.navigate(parsed);
         }
+    }
+}
+
+/// Let the SPA -- and only the SPA -- ask for a page to be rendered.
+///
+/// Navigating the main window to the backend makes it a *remote* origin as far
+/// as the ACL is concerned, so an app command it invokes is rejected unless a
+/// capability names both the command and the origin. The port is chosen at
+/// startup, so the grant cannot be a static capability file; wildcarding the
+/// port there would hand `render_page` to anything listening on loopback.
+///
+/// Failure is logged rather than fatal: every article still imports over the
+/// backend's static fetch, which measured full prose and headings on eight of
+/// nine test pages. It is logged loudly because a silent rejection here is
+/// indistinguishable from a page that simply did not need rendering.
+fn grant_spa_render(app: &AppHandle, port: u16) {
+    let capability = tauri::ipc::CapabilityBuilder::new(format!("spa-render-{port}"))
+        .local(false)
+        .remote(render::spa_origin_pattern(port))
+        .window("main")
+        .permission("allow-render-page");
+
+    match app.add_capability(capability) {
+        Ok(()) => logging::write(
+            "shell",
+            &format!("page rendering enabled for the app origin on port {port}"),
+        ),
+        Err(e) => logging::write(
+            "shell",
+            &format!("page rendering unavailable, imports will use the static fetch: {e}"),
+        ),
     }
 }
 
@@ -361,7 +394,8 @@ fn main() {
             diagnostics,
             report_issue,
             reveal_log,
-            retry_boot
+            retry_boot,
+            render::render_page
         ])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

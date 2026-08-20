@@ -208,6 +208,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
             # Use \f (form feed) markers inserted by book_parser to compute per-chunk
             # page numbers instead of assigning the section start page to every chunk.
             section_page_start = s.get("page_start", 0) or (1 if is_pdf else 0)
+            book_page_labels: dict = (pd.get("page_labels") if pd else None) or {}
 
             # Strip \f from the text used for splitting (it's a control char, not content),
             # but first compute page-break positions in clean-text coordinates.
@@ -220,7 +221,14 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                         ff_clean_positions.append(i - len(ff_clean_positions))
                 clean_section_text = section_text.replace("\f", "")
             else:
-                ff_clean_positions = []
+                # No form feeds: this section came from DocumentParser, which
+                # records page starts as offsets instead of inserting markers.
+                # They are already in this text's coordinates, so they slot
+                # straight into the same counting below. Without this the book
+                # path degrades exactly like the technical one used to -- every
+                # chunk claiming the page its section opened on, measured as 26
+                # sections over 26 distinct pages across 3,425 chunks.
+                ff_clean_positions = list(s.get("page_breaks") or [])
                 clean_section_text = section_text
 
             # Track search position to handle overlapping chunks correctly
@@ -252,6 +260,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
                         speaker=None,
                         chunk_index=chunk_idx,
                         pdf_page_number=chunk_pdf_page,
+                        pdf_page_label=_printed_label_for(book_page_labels, chunk_pdf_page),
                         context_header=context_header,
                     )
                 )
@@ -283,6 +292,49 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
         },
     )
     return {**state, "chunks": chunks, "status": "embedding"}
+
+
+class _SectionPageCursor:
+    """Per-chunk PDF page within one section, advanced as chunks are emitted.
+
+    Four chunking paths need this and three of them assigned the section's start
+    page to every chunk in it, which is why a citation into a long chapter named
+    the page the chapter opened on -- measured at 2,329 chunks all claiming one
+    page. Chunks are emitted in order, so the search cursor only moves forward
+    and repeated text later in the section cannot drag the page backwards.
+    """
+
+    def __init__(self, section_text: str, page_start: int | None, page_breaks: list[int]):
+        self._text = section_text
+        self._start = page_start
+        self._breaks = page_breaks
+        self._cursor = 0
+
+    def page_for(self, chunk_text: str) -> int | None:
+        if self._start is None:
+            return None
+        if not self._breaks:
+            return self._start
+        probe = chunk_text[:80]
+        position = self._text.find(probe, self._cursor) if probe else -1
+        if position < 0:
+            # Some paths rewrite chunk text, so it cannot always be located.
+            # The section's page is imprecise; a wrong page is worse.
+            return self._start
+        self._cursor = position
+        return self._start + sum(1 for offset in self._breaks if offset <= position)
+
+
+def _printed_label_for(page_labels: dict, page: int | None) -> str | None:
+    """The number printed on a sheet, when the PDF says it differs.
+
+    Keys survive the pipeline state as strings on one path and integers on
+    another, so both are tried rather than depending on which serialiser ran.
+    """
+    if page is None or not page_labels:
+        return None
+    label = page_labels.get(page) or page_labels.get(str(page))
+    return str(label) if label else None
 
 
 async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) -> IngestionState:
@@ -369,6 +421,17 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             section_pdf_page: int | None = None
             if tech_fmt == "pdf":
                 section_pdf_page = s.get("page_start", 0) or 1  # ensure at least page 1
+            # Offsets recorded by the parser where each later page begins. The
+            # book path already computes a per-chunk page; this path assigned the
+            # section's start page to every chunk in it, which on one library
+            # meant every section of every PDF reported one page -- 2,329 chunks
+            # all claiming p167 -- so a citation landed wherever the chapter
+            # began rather than where its sentence is.
+            page_breaks: list[int] = s.get("page_breaks") or []
+            page_search_start = 0
+            # Sheet -> printed page. Keyed by string after a round trip through
+            # the pipeline state, which JSON-encodes integer keys.
+            page_labels: dict = (pd.get("page_labels") if pd else None) or {}
 
             for chunk_dict in chunk_mixed_content(
                 section_text,
@@ -381,6 +444,19 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                 # text stays clean; header rides in context_header (FTS/display),
                 # kept out of the embedding -- see ChunkModel.context_header.
                 clean_text = chunk_dict["text"]
+                chunk_pdf_page = section_pdf_page
+                if section_pdf_page is not None and page_breaks:
+                    probe = clean_text[:80]
+                    pos = section_text.find(probe, page_search_start) if probe else -1
+                    if pos >= 0:
+                        # Falls back to the section's page when the chunk cannot be
+                        # located -- mixed-content chunking rewrites some text, and
+                        # a wrong page is worse than an imprecise one.
+                        chunk_pdf_page = section_pdf_page + sum(
+                            1 for offset in page_breaks if offset <= pos
+                        )
+                        page_search_start = pos
+                chunk_page_label = _printed_label_for(page_labels, chunk_pdf_page)
                 chunk_model = ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
@@ -393,7 +469,8 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                     has_code=chunk_dict["has_code"],
                     code_language=chunk_dict["code_language"],
                     code_signature=chunk_dict["code_signature"],
-                    pdf_page_number=section_pdf_page,
+                    pdf_page_number=chunk_pdf_page,
+                    pdf_page_label=chunk_page_label,
                     context_header=context_header,
                 )
                 chunk_models.append(chunk_model)
@@ -751,11 +828,17 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
                     continue
 
                 context_header = _context_header(paper_title, section_model.heading)
-                chunk_pdf_page = (s.get("page_start", 0) or 1) if is_pdf else None
+                pages = _SectionPageCursor(
+                    section_text,
+                    (s.get("page_start", 0) or 1) if is_pdf else None,
+                    s.get("page_breaks") or [],
+                )
+                paper_page_labels: dict = (pd.get("page_labels") if pd else None) or {}
 
                 for text in chunk_paper_section(
                     section_text, cfg["chunk_size"], cfg["chunk_overlap"]
                 ):
+                    chunk_pdf_page = pages.page_for(text)
                     chunk_id = str(uuid.uuid4())
                     chunk_models.append(
                         ChunkModel(
@@ -768,6 +851,9 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
                             speaker=None,
                             chunk_index=chunk_idx,
                             pdf_page_number=chunk_pdf_page,
+                            pdf_page_label=_printed_label_for(
+                                paper_page_labels, chunk_pdf_page
+                            ),
                             context_header=context_header,
                         )
                     )
@@ -856,11 +942,15 @@ async def _chunk_generic(
             if not section_text.strip():
                 continue
 
-            chunk_pdf_page: int | None = None
-            if fmt == "pdf":
-                chunk_pdf_page = s.get("page_start", 0) or 1
+            pages = _SectionPageCursor(
+                section_text,
+                (s.get("page_start", 0) or 1) if fmt == "pdf" else None,
+                s.get("page_breaks") or [],
+            )
+            generic_page_labels: dict = (pd.get("page_labels") if pd else None) or {}
 
             for text in splitter.split_text(section_text):
+                chunk_pdf_page = pages.page_for(text)
                 chunk_id = str(uuid.uuid4())
                 chunk_models.append(
                     ChunkModel(
@@ -873,6 +963,9 @@ async def _chunk_generic(
                         speaker=None,
                         chunk_index=chunk_idx,
                         pdf_page_number=chunk_pdf_page,
+                        pdf_page_label=_printed_label_for(
+                            generic_page_labels, chunk_pdf_page
+                        ),
                     )
                 )
                 chunks.append(

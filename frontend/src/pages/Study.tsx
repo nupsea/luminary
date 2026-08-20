@@ -56,6 +56,8 @@ import {
 
 // Document list for the in-tab picker
 
+import { useTimeOnTask } from "@/lib/useTimeOnTask"
+import { studyScopeDocumentId } from "./studyScope"
 import { apiGet, apiPost } from "@/lib/apiClient"
 
 import type { DocListItem } from "./Study/types"
@@ -146,7 +148,20 @@ export default function Study() {
   // When a collection is active, suppress the lastReadyDocumentId fallback so
   // the DocPicker shows no selection and startStudy doesn't mix a stale document
   // scope into a collection-scoped session.
-  const studyDocumentId = activeCollectionId ? null : effectiveDocumentId
+  //
+  // `rawActiveId` rather than `effectiveDocumentId` decides whether a document
+  // is open at all. The hook falls back to the last-read document so a surface
+  // always has something to render, which on Study meant the landing page --
+  // the due-review CTA, the session manager and the collection grid -- could
+  // not be reached: clicking the "Study" heading clears the selection, the
+  // fallback immediately supplied the most recent document, and the page
+  // reopened it. `effectiveDocumentId` still supplies the id, so a selection
+  // that is mid-ingestion keeps falling back to a readable one with its banner.
+  const studyDocumentId = studyScopeDocumentId(
+    activeCollectionId,
+    rawActiveId,
+    effectiveDocumentId,
+  )
 
   // Study-session lifecycle lives entirely in this one state variable.
   // It is ONLY mutated by explicit user handlers (handleStartFlashcard,
@@ -164,6 +179,16 @@ export default function Study() {
   // Per-surface model override; "" follows Settings, exactly as Ask does.
   const [studyModel, setStudyModel] = useState("")
   const [studyPhase, setStudyPhase] = useState<StudyPhase>({ phase: "idle" })
+
+  // The hub draws review and study as separate slices, so a running flashcard
+  // session is attributed to review and everything else on this page to study.
+  // Both are sampled the same way as reading, rather than derived from
+  // study_sessions wall clock: one pie needs one basis, or the slices are not
+  // parts of the same whole.
+  useTimeOnTask(
+    studyPhase.phase === "ready" && studyPhase.mode === "flashcard" ? "review" : "study",
+    null,
+  )
 
   const { data: collections = [], isLoading: loadingCollections } = useQuery({
     queryKey: ["collections-list"],
@@ -533,136 +558,137 @@ export default function Study() {
             />
           </>
         ) : (
-          /* Landing page: due-review CTA + session manager + collection grid.
-             Goals now live solely on Progress to remove the Study/Progress overlap. */
-          <div className="flex flex-col gap-10">
-            <StartReviewDueCard onStart={() => handleStartFlashcard()} />
+          /* Landing page: two-column split.
+             Left (40%): Continue sessions (due-review CTA + session history).
+             Right (60%): Collections in an n×2 grid. */
+          <div className="grid grid-cols-1 gap-10 xl:grid-cols-[2fr_3fr] xl:items-start">
+            {/* ── Left column: Continue sessions ── */}
+            <div className="flex flex-col gap-6 order-1 xl:sticky xl:top-8">
+              <StartReviewDueCard onStart={() => handleStartFlashcard()} />
 
-            <SessionManager
-              onContinue={(sessionId, documentId, collectionId, mode) => {
-                if (documentId) setActiveDocument(documentId)
-                if (collectionId) setActiveCollectionId(collectionId)
-                void startStudy(mode === "flashcard" ? "flashcard" : "teachback", null, sessionId)
-              }}
-            />
-
-            {/* Collections heading */}
-            <div className="flex flex-col gap-2 max-w-2xl">
-              <motion.h1
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="text-3xl font-bold tracking-tight text-foreground"
-              >
-                Collections
-              </motion.h1>
-              <p className="text-muted-foreground text-lg">
-                Group documents and notes by topic to study them together.
-              </p>
+              <SessionManager
+                onContinue={(sessionId, documentId, collectionId, mode) => {
+                  if (documentId) setActiveDocument(documentId)
+                  if (collectionId) setActiveCollectionId(collectionId)
+                  void startStudy(mode === "flashcard" ? "flashcard" : "teachback", null, sessionId)
+                }}
+              />
             </div>
 
-            {loadingCollections ? (
-              <div className="flex py-20 justify-center">
-                <Loader2 className="h-10 w-10 animate-spin text-primary" />
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {(() => {
-                  type FlatCollection = CollectionNode & {
-                    description?: string | null
-                    _parentName: string | null
-                    _isNested: boolean
-                  }
-                  const flatten = (
-                    items: CollectionNode[],
-                    parentName: string | null = null,
-                  ): FlatCollection[] => {
-                    let result: FlatCollection[] = []
-                    items.forEach((item) => {
-                      result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
-                      if (item.children && item.children.length > 0) {
-                        result = result.concat(flatten(item.children, item.name))
-                      }
-                    })
-                    return result
-                  }
-                  const flatCollections = flatten(collections as CollectionNode[])
-                  return flatCollections.map((coll, idx) => (
-                    <motion.div
-                      key={coll.id}
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      whileHover={{ y: -5 }}
-                      onClick={() => {
-                        setActiveCollectionId(coll.id)
-                        setActiveDocument(null)
-                      }}
-                      className={`group relative cursor-pointer overflow-hidden rounded-3xl border p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-xl ${
-                        coll._isNested ? "border-primary/20 bg-card/30" : "border-border bg-card/40"
-                      }`}
-                    >
-                      {coll._isNested && (
-                        <div className="absolute top-3 right-3 flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                          <CornerDownRight size={10} />
-                          <span className="font-medium">{coll._parentName}</span>
-                        </div>
-                      )}
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:scale-110">
-                        <Layers size={24} />
-                      </div>
-                      <div className="mt-6 flex flex-col gap-2">
-                        <h3 className="text-lg font-semibold text-foreground">{coll.name}</h3>
-                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
-                          {coll.description || "Group documents and notes to study them together."}
-                        </p>
-                      </div>
-                      <div className="mt-4 flex items-center gap-3">
-                        {(coll.document_count ?? 0) > 0 || (coll.note_count ?? 0) > 0 ? (
-                          <>
-                            {(coll.document_count ?? 0) > 0 && (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <BookOpen size={12} className="text-blue-500/70" />
-                                {coll.document_count} {coll.document_count === 1 ? "doc" : "docs"}
-                              </span>
-                            )}
-                            {(coll.note_count ?? 0) > 0 && (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <StickyNote size={12} className="text-amber-500/70" />
-                                {coll.note_count} {coll.note_count === 1 ? "note" : "notes"}
-                              </span>
-                            )}
-                            {coll.children && coll.children.length > 0 && (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <Layers size={12} className="text-primary/50" />
-                                {coll.children.length} sub
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground/50 italic">No sources yet</span>
-                        )}
-                      </div>
-                      <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-4">
-                        <div className="text-xs font-semibold uppercase text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                          Open
-                        </div>
-                        <ChevronRight size={16} className="text-primary translate-x-4 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
-                      </div>
-                    </motion.div>
-                  ))
-                })()}
-
-                <motion.button
-                  onClick={() => navigate("/notes", { state: { from: "/study" } })}
-                  className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
+            {/* ── Right column: Collections ── */}
+            <div className="flex flex-col gap-6 order-2">
+              <div className="flex flex-col gap-1.5">
+                <motion.h2
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="text-xl font-bold tracking-tight text-foreground"
                 >
-                  <Plus size={24} className="group-hover:scale-110 transition-transform" />
-                  <div className="text-center">
-                    <p className="text-sm font-semibold uppercase">New collection</p>
-                  </div>
-                </motion.button>
+                  Collections
+                </motion.h2>
+                <p className="text-[13px] text-muted-foreground">
+                  Group documents and notes by topic to study them together.
+                </p>
               </div>
-            )}
+
+              {loadingCollections ? (
+                <div className="flex py-16 justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {(() => {
+                    type FlatCollection = CollectionNode & {
+                      description?: string | null
+                      _parentName: string | null
+                      _isNested: boolean
+                    }
+                    const flatten = (
+                      items: CollectionNode[],
+                      parentName: string | null = null,
+                    ): FlatCollection[] => {
+                      let result: FlatCollection[] = []
+                      items.forEach((item) => {
+                        result.push({ ...item, _parentName: parentName, _isNested: parentName !== null })
+                        if (item.children && item.children.length > 0) {
+                          result = result.concat(flatten(item.children, item.name))
+                        }
+                      })
+                      return result
+                    }
+                    const flatCollections = flatten(collections as CollectionNode[])
+                    return flatCollections.map((coll, idx) => (
+                      <motion.div
+                        key={coll.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.04 }}
+                        whileHover={{ y: -3 }}
+                        onClick={() => {
+                          setActiveCollectionId(coll.id)
+                          setActiveDocument(null)
+                        }}
+                        className={`group relative cursor-pointer overflow-hidden rounded-2xl border p-6 shadow-sm transition-all hover:border-primary/40 hover:bg-card hover:shadow-lg ${
+                          coll._isNested ? "border-primary/20 bg-card/30" : "border-border bg-card/40"
+                        }`}
+                      >
+                        {coll._isNested && (
+                          <div className="absolute top-3 right-3 flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                            <CornerDownRight size={10} />
+                            <span className="font-medium">{coll._parentName}</span>
+                          </div>
+                        )}
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:scale-105">
+                          <Layers size={22} />
+                        </div>
+                        <div className="mt-4 flex flex-col gap-1.5">
+                          <h3 className="truncate text-base font-semibold text-foreground">{coll.name}</h3>
+                          <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed opacity-70">
+                            {coll.description || "Documents & notes grouped for study."}
+                          </p>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between border-t border-border/40 pt-3">
+                          <div className="flex items-center gap-3">
+                            {(coll.document_count ?? 0) > 0 || (coll.note_count ?? 0) > 0 ? (
+                              <>
+                                {(coll.document_count ?? 0) > 0 && (
+                                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                    <BookOpen size={11} className="text-blue-500/70" />
+                                    {coll.document_count} {coll.document_count === 1 ? "doc" : "docs"}
+                                  </span>
+                                )}
+                                {(coll.note_count ?? 0) > 0 && (
+                                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                    <StickyNote size={11} className="text-amber-500/70" />
+                                    {coll.note_count} {coll.note_count === 1 ? "note" : "notes"}
+                                  </span>
+                                )}
+                                {coll.children && coll.children.length > 0 && (
+                                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                    <Layers size={10} className="text-primary/50" />
+                                    {coll.children.length} sub
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground/50 italic">No sources yet</span>
+                            )}
+                          </div>
+                          <ChevronRight size={14} className="text-primary/50 transition-all group-hover:text-primary group-hover:translate-x-0.5" />
+                        </div>
+                      </motion.div>
+                    ))
+                  })()}
+
+                  <motion.button
+                    onClick={() => navigate("/notes", { state: { from: "/study" } })}
+                    className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border/60 bg-transparent p-6 transition-all hover:bg-accent/30 hover:border-primary/40 group text-muted-foreground"
+                  >
+                    <Plus size={22} className="group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-semibold uppercase">New collection</span>
+                  </motion.button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -12,16 +12,19 @@ import type { ContentType } from "@/components/library/types"
 import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from "@/components/library/utils"
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
+import { useTimeOnTask } from "@/lib/useTimeOnTask"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
-import { LUMINARY_MODE } from "@/lib/surfaceManifest"
+import { LUMINARY_MODE, isSurfaceVisible } from "@/lib/surfaceManifest"
+
 import { EPUBViewer } from "./EPUBViewer"
 import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
+import { readerLandingTab } from "./hooks/readerLandingTab"
 import { useReaderHistory, type ReaderPlace } from "./hooks/useReaderHistory"
 import { useReaderKeyboardShortcuts } from "./hooks/useReaderKeyboardShortcuts"
 import { useReaderTabs } from "./hooks/useReaderTabs"
@@ -42,6 +45,10 @@ import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
+
+// The Feynman dialog talks to the `feynman` router, which only full mode mounts.
+// Gated on content type alone, the button shipped in public builds and answered 404.
+const FEYNMAN_VISIBLE = isSurfaceVisible("feynman")
 
 // Error Boundary
 
@@ -116,6 +123,10 @@ export function DocumentReader(props: DocumentReaderProps) {
 function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
+  // Reading time exists nowhere else: opening a document and reading it for
+  // twenty minutes is one request, so the server would record it as an instant.
+  useTimeOnTask("document", documentId)
+
   const { data: doc, isLoading, isError, refetch } = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => fetchDocument(documentId),
@@ -132,6 +143,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   })
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
 
+  // A deep link names a passage, which only the Read view can scroll to.
+  const hasDeepLink = Boolean(initialSectionId || initialChunkId || initialPage)
+
   const {
     leftTab,
     setLeftTab,
@@ -139,7 +153,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setPdfViewVisited,
     bookViewVisited,
     setBookViewVisited,
-  } = useReaderTabs({ format: doc?.format })
+  } = useReaderTabs({ format: doc?.format, hasDeepLink })
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
@@ -422,20 +436,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [leftTab, scrollActiveSectionIntoView])
 
 
-  // Auto-switch to PDF view for PDF documents; Book view for EPUB; Read view for deep links
+  // The tab a document opens on: its own viewer for PDF and EPUB, the Read
+  // view for a deep link and for every other format.
   useEffect(() => {
     if (!doc) return
-    if (doc.format === "pdf") {
-      setPdfViewVisited(true)
-      setLeftTab("pdfview")
-      if (initialSectionId) setReadSectionId(initialSectionId)
-    } else if (initialSectionId || initialChunkId || initialPage) {
-      if (initialSectionId) setReadSectionId(initialSectionId)
-      setLeftTab("read")
-    } else if (doc.format === "epub") {
-      setBookViewVisited(true)
-      setLeftTab("bookview")
-    }
+    const tab = readerLandingTab(doc.format, hasDeepLink)
+    if (initialSectionId) setReadSectionId(initialSectionId)
+    if (tab === "pdfview") setPdfViewVisited(true)
+    if (tab === "bookview") setBookViewVisited(true)
+    setLeftTab(tab)
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads
@@ -526,7 +535,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSearchHitIndex(0)
   }, [])
 
-  const openReaderSearch = useCallback(() => setSearchOpen(true), [])
+  // The PDF viewer owns Cmd+F on its own tab. Every other tab has no search of
+  // its own and InDocSearchBar renders inside the section list, so opening the
+  // search goes there -- the move the ?search= deep link and a tag click make.
+  const openReaderSearch = useCallback(() => {
+    if (leftTab !== "pdfview") setLeftTab("sections")
+    setSearchOpen(true)
+  }, [leftTab, setLeftTab])
 
   useReaderKeyboardShortcuts({
     onBack: goBack,
@@ -824,7 +839,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           searchSnippet={searchSnippetMap.get(section.id)}
           progressPct={progressBySectionId.get(section.id)}
           annotations={annotationsBySection.get(section.id) ?? []}
-          feynmanEnabled={doc.content_type === "tech_book" || doc.content_type === "tech_article"}
+          feynmanEnabled={FEYNMAN_VISIBLE && (doc.content_type === "tech_book" || doc.content_type === "tech_article")}
           isActive={activeSectionId === section.id}
           lastPracticedAt={lastPracticedBySection?.get(section.id)}
           childCount={sectionTree.descendantCount.get(section.id) ?? 0}
@@ -1108,8 +1123,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Document header — hidden in PDF/Book view to maximise canvas area */}
-          {leftTab !== "pdfview" && leftTab !== "bookview" && leftTab !== "read" && (
+          {/* Document header — hidden in PDF/Book view to maximise canvas area.
+              It carries the resume banner and the ingestion health panel, so it
+              stays on Read, which is where most documents open. */}
+          {leftTab !== "pdfview" && leftTab !== "bookview" && (
             <>
               <div className="px-6 py-4">
                 <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
@@ -1225,7 +1242,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
@@ -1249,6 +1266,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 highlightsVisible={highlightsVisible}
                 contentType={doc.content_type}
                 structureType={doc.structure_type}
+                extractionReport={doc.extraction_report}
+                sourceUrl={doc.source_url}
               />
             )}
           </div>

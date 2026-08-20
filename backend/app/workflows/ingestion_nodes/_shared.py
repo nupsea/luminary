@@ -227,6 +227,28 @@ async def _persist_is_technical(document_id: str, is_technical: bool) -> None:
         await session.commit()
 
 
+async def _persist_extraction_report(document_id: str, report: dict | None) -> None:
+    """Store what the importer captured and what it could not.
+
+    Null on the column means "fidelity was never measured", which is not the
+    same as a clean import -- so the ingest path only writes when a parser
+    actually measured. A re-import writes whatever it measured including None,
+    because the stored report has to describe the import that is in the
+    database, not the one it replaced.
+    """
+    from sqlalchemy import update  # noqa: PLC0415
+
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(DocumentModel)
+            .where(DocumentModel.id == document_id)
+            .values(extraction_report=report)
+        )
+        await session.commit()
+
+
 async def _persist_structure_type(document_id: str, structure_type: str) -> None:
     """Write the layout the parser discovered ('book'|'paper'|'script'|'chat')."""
     from sqlalchemy import update  # noqa: PLC0415

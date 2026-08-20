@@ -18,14 +18,21 @@ Notes
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 
 
 def main() -> int:
-    from app.main import app  # noqa: PLC0415  -- import lazy so module-load errors print to stderr
+    # Importing the app is not quiet: PyMuPDF's deprecated `fitz` alias prints a
+    # notice on stdout, and a single stray line ahead of the JSON silently
+    # corrupts the 20k-line file this feeds. Anything a dependency writes while
+    # the app loads goes to stderr, where it is still visible.
+    with contextlib.redirect_stdout(sys.stderr):
+        from app.main import app  # noqa: PLC0415
 
-    schema = app.openapi()
+        schema = app.openapi()
+
     json.dump(schema, sys.stdout, ensure_ascii=False, indent=2)
     return 0
 

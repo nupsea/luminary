@@ -35,6 +35,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Hub recommender + misconception lifecycle | `recommender_service.py`, `misconceptions.py` |
 | Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
 | Flashcard factuality gate + recorded passage (`source_chunk_ids`) | `invariants.md` I-35 |
+| Learner-facing metrics carrying sample size, definition and basis | `metrics.md` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -138,6 +139,104 @@ Two constraints decide the design:
   the user's first question rather than at the point of choosing.
 
 Removing the superseded model is a separate step, default off, and confirmed.
+
+### 6. The Hub sketch, and what is still approximate in it
+
+Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
+quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
+active collections and a week summary, all from one fetch of `GET /home/overview`
+(`routers/home.py:58`).
+
+Both gaps against the sketch are closed: the continue lane carries notes and an open study
+session, and `time_on_task` records per-activity duration for the week (`metrics.md` carries its
+contract). Stored titles render through `humanizeTitle`, because two thirds of one library's
+titles are the filename the document arrived as.
+
+The page is now one 780px reading column rather than a two-column dashboard, following the
+`Luminary Home v2` design handoff: a single card for the decision the hub exists for — carry on
+reading, or start the review — then rows, then the week's shape two-up at the foot. The week
+split is labelled bars rather than a pie, because four magnitudes compared against each other is
+what a bar chart is for and a 72px pie made the small slices unreadable.
+
+What remains is smaller and worth stating rather than assuming.
+
+- **The ring's slices are foreground samples; `minutes_studied` beside them is session wall
+  clock.** Two bases on one card. They measure different things and are labelled so, but a
+  future edit that averages or sums them would produce a number meaning nothing.
+- **A study interval spanning local midnight lands on the day it began**, matching
+  EngagementService's approximation rather than splitting the interval.
+- **`Study` cannot be deep-linked to resume a session.** The hub's study row routes to the page
+  because `Study.tsx` reads neither search params nor route state, so a session id in the URL
+  would silently start a fresh session.
+- **"~N min left" stacks two approximations.** Reading speed is a convention (200 wpm, named in
+  `readingTime.ts`), and reading progress counts sections rather than words, so the words
+  remaining assume sections of roughly equal length. It is labelled with a tilde and carries its
+  basis on hover; it is not a measurement and must not be promoted to one.
+- **A quote carries no field of its own.** Tagging each with a subject would need a taxonomy
+  applied by hand across the whole set, so the card shows author and source instead.
+- **Nothing prefills a note from elsewhere in the app.** `Notes.tsx` reads neither search params
+  nor route state, so "reflect on this" affordances elsewhere can only link to the page, which
+  the sidebar already does.
+
+### 7. What the reported reader and study defects left behind
+
+All three are fixed (per-chunk citation pages, the unreachable Study landing, the search-highlight
+flicker and the sheet-vs-printed page footer), as is the reader opening on its section list.
+Three smaller things surfaced while fixing them and are worth stating rather than rediscovering.
+
+- **The page box counts sheets, and it is the only surface that still does.** The footer chip,
+  the contents list and every citation read the document's sheet-to-printed map, but the page
+  field jumps by sheet: typing `19` on a book with twenty pages of front matter lands nowhere
+  near the page printed `19`. Entering a printed number, or searching for one, has no path.
+- **Opening the in-document search leaves the reader.** `InDocSearchBar` renders inside the
+  section list, so Cmd+F from the Read view switches tabs to reach it — the same move the
+  `?search=` deep link makes. The search belongs to the document, not to one tab.
+- **The no-TOC PDF path invents headings from font size**, and on one book produced sections
+  titled `27` and `265` — page numbers picked up as headings. It does not lose text, so it is a
+  reading-quality defect rather than a data one.
+
+### 8. Formats other than HTML and PDF are unmeasured
+
+`universal-reader.md` is the contract for the reader. Region selection, the Markdown serialiser,
+webview rendering and `documents.extraction_report` shipped after it was written, so it does not
+yet describe them.
+
+- `md`, `epub`, `docx` and `txt` have **no post-`body`-column documents**, so those paths are
+  unmeasured rather than known good. Ingest one of each and compare stored `body` against source
+  before changing anything.
+- **A parent section can store its descendants' text as well as its own.** Measured: on one
+  1,017-section manual the top section holds 5,063,040 characters, and 60 of 60 sampled
+  sections have their opening text inside it; `SysDesign_2024_Blue` puts 55% of its document in
+  one section with 26 of 40 contained. `DDIA` shows 0 of 40, so this is not every document and
+  not every parser path. The reader now bounds what it fetches, so the symptom is gone, but the
+  duplicated text is still stored and still costs the section it was copied from. Find the path
+  that assigns a parent its children's span before changing the reader further.
+- **Audio documents are retrievable and unreadable.** Measured on the four `wav` documents in
+  one library: each is `stage=complete` with its whole transcript in chunks (2,948 to 15,301
+  words, 28,991 in total), and each has **zero sections**, so `GET /sections/{id}/content`
+  returns `[]` and the reader shows "No content available". The orphan-chunk fallback in
+  `sections.py` cannot cover this: it fires only when sections exist but are empty
+  (`all(not r.content for r in result) and result`), and here `result` is itself empty. The
+  transcript is chunked without ever being sectioned, so retrieval finds it and the reader
+  cannot show it.
+- `pymupdf4llm>=1.28.2` is a **core dependency with no importer** (`pyproject.toml:41`, no
+  reference anywhere under `backend/`). It was added for the PDF-to-Markdown path, which is not
+  built. Either build that path or drop the dependency; a shipped dependency nothing imports is
+  weight in every install.
+- Two known losses remain on an interactive article measured at 13 headings: the site name
+  leaks as a one-word line, and a 205-character standfirst is `<h2>` in the source and therefore
+  renders as a heading. Demoting it means the serialiser overruling the author's markup, which
+  is a decision, not a bug fix.
+
+### 9. Rendering reaches only the platform with a shell
+
+`render_page` (`src-tauri/src/render.rs`) uses the webview the desktop shell embeds, so it
+exists only where that shell runs — macOS today. The browser dev server, Docker and the script
+installs take the static fetch, which measured full prose and headings on eight of nine test
+articles; the ninth returned 0 images statically against 78 rendered.
+
+Windows (#24) and Linux need their own shell before rendering follows. Canvas-drawn figures are
+not covered on any platform: they need an element screenshot, not a DOM capture.
 
 ## Deferred — decided, not scheduled
 

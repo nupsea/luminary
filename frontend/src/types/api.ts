@@ -1041,6 +1041,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Document Facets
+         * @description Counts per content type and per format, for deciding which filters to show.
+         *
+         *     Declared above `/{document_id}` so the router does not read `facets` as an id.
+         */
+        get: operations["document_facets_documents_facets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -1381,6 +1403,37 @@ export interface paths {
          * @description Replace the tag list for a document.
          */
         patch: operations["patch_document_tags_documents__document_id__tags_patch"];
+        trace?: never;
+    };
+    "/documents/{document_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reparse Document
+         * @description Re-run parsing and chunking for a document that is already in the library.
+         *
+         *     Stored text cannot be repaired in place -- a parser fix only reaches a
+         *     document by parsing it again -- and `/documents/ingest` deduplicates on
+         *     `file_hash`, so re-uploading the same file silently returns the old row.
+         *
+         *     For a web article the stored raw file is the *extracted markdown*, not the
+         *     original page, so re-parsing it would only re-read the old extraction. Those
+         *     are re-fetched from `source_url` instead.
+         *
+         *     Call once with `confirm=false` to see what it costs, then again with
+         *     `confirm=true`.
+         */
+        post: operations["reparse_document_documents__document_id__reparse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/documents/{document_id}/status": {
@@ -1725,6 +1778,31 @@ export interface paths {
         get: operations["get_recent_achievements_engagement_achievements_recent_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/engagement/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heartbeat
+         * @description Sample of foreground attention, sent by a surface while it is visible.
+         *
+         *     The server cannot measure this itself: a reader who opens a document and
+         *     reads for twenty minutes issues one request. What is recorded is time with
+         *     the page open and visible, which is not the same as time spent reading, and
+         *     `docs/metrics.md` requires it be reported as the former.
+         */
+        post: operations["heartbeat_engagement_heartbeat_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4129,6 +4207,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/progress/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Progress Summary
+         * @description Every headline number on the Progress page, each with its definition.
+         *
+         *     A metric that could not be computed returns `value=null` and says why; the
+         *     client renders an em dash. Nothing defaults to zero.
+         */
+        get: operations["get_progress_summary_progress_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/progress/notes-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notes Timeline
+         * @description Notes created per month, grouped in SQL.
+         */
+        get: operations["get_notes_timeline_progress_notes_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/qa": {
         parameters: {
             query?: never;
@@ -4414,6 +4535,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sections/{document_id}/content/{section_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get One Section Content
+         * @description One section with its text entire, however long it is.
+         *
+         *     Declared above the windowed route so `content/{section_id}` is not matched by
+         *     it, and it is what keeps the bound on that route honest: text over the inline
+         *     limit is a second call away, never lost.
+         */
+        get: operations["get_one_section_content_sections__document_id__content__section_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sections/{document_id}/content": {
         parameters: {
             query?: never;
@@ -4423,7 +4568,13 @@ export interface paths {
         };
         /**
          * Get Section Content
-         * @description Return all sections with full text assembled from their chunks.
+         * @description A window of sections, each with its text.
+         *
+         *     Bounded on two axes because a reader renders neither all of a long
+         *     document's sections nor all of one huge section at once: `limit` bounds how
+         *     many sections come back, and `_INLINE_CONTENT_LIMIT` bounds each one. Text
+         *     over that limit is not dropped -- the item says so and names its full
+         *     length, and the whole section is one call away.
          */
         get: operations["get_section_content_sections__document_id__content_get"];
         put?: never;
@@ -6770,6 +6921,21 @@ export interface components {
             mastery: number;
         };
         /**
+         * ContinueNoteItem
+         * @description A note the user was writing and has not come back to.
+         */
+        ContinueNoteItem: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Last Meaningful At
+             * Format: date-time
+             */
+            last_meaningful_at: string;
+        };
+        /**
          * ContinueReadingItem
          * @description A doc the user has momentum on -- started, not finished, recently touched.
          */
@@ -6785,6 +6951,29 @@ export interface components {
              * Format: date-time
              */
             last_meaningful_at: string;
+            /** Word Count */
+            word_count?: number | null;
+        };
+        /**
+         * ContinueStudyItem
+         * @description A study session left open, which `planned_card_ids` can resume.
+         *
+         *     `cards_remaining` counts the planned queue the session has not reached, not
+         *     the cards due now: re-querying due cards would pull in cards that became due
+         *     after the session began, which is the reason the queue is stored at all.
+         */
+        ContinueStudyItem: {
+            /** Session Id */
+            session_id: string;
+            /** Mode */
+            mode: string;
+            /** Cards Remaining */
+            cards_remaining: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
         };
         /** ConversationMessage */
         ConversationMessage: {
@@ -6934,6 +7123,10 @@ export interface components {
             content_type: string;
             /** Structure Type */
             structure_type?: string | null;
+            /** Extraction Report */
+            extraction_report?: {
+                [key: string]: unknown;
+            } | null;
             /** Word Count */
             word_count: number;
             /** Page Count */
@@ -6952,6 +7145,13 @@ export interface components {
              * Format: date-time
              */
             last_accessed_at: string;
+            /**
+             * Page Labels
+             * @default {}
+             */
+            page_labels: {
+                [key: string]: string;
+            };
             /** Sections */
             sections: components["schemas"]["SectionItem"][];
             /** Reading Progress Pct */
@@ -6979,6 +7179,26 @@ export interface components {
             edge_count: number;
             /** Vector Count */
             vector_count: number;
+        };
+        /**
+         * DocumentFacetsResponse
+         * @description How many documents each filter would match, over the whole library.
+         *
+         *     A filter offering zero results is not a filter, it is a dead end -- and the
+         *     library has carried several: `code` is not even a storable content type,
+         *     and `epub` is a format that no document carries as its type.
+         */
+        DocumentFacetsResponse: {
+            /** Content Types */
+            content_types: {
+                [key: string]: number;
+            };
+            /** Formats */
+            formats: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
         };
         /** DocumentGroup */
         DocumentGroup: {
@@ -8217,6 +8437,27 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HeartbeatRequest */
+        HeartbeatRequest: {
+            /** Activity */
+            activity: string;
+            /** Member Id */
+            member_id?: string | null;
+        };
+        /**
+         * HeartbeatResponse
+         * @description What this beat was worth, and how often to send the next one.
+         *
+         *     `seconds_credited` is 0 for the first beat of a stretch and for one arriving
+         *     after a gap too long to be continuous. The client does not need to act on
+         *     it; it is returned so the accrual is observable rather than opaque.
+         */
+        HeartbeatResponse: {
+            /** Seconds Credited */
+            seconds_credited: number;
+            /** Heartbeat Seconds */
+            heartbeat_seconds: number;
+        };
         /** HeatmapCellOut */
         HeatmapCellOut: {
             /** Chapter */
@@ -8242,6 +8483,12 @@ export interface components {
              * @default []
              */
             continue_reading: components["schemas"]["ContinueReadingItem"][];
+            /**
+             * Continue Notes
+             * @default []
+             */
+            continue_notes: components["schemas"]["ContinueNoteItem"][];
+            continue_study?: components["schemas"]["ContinueStudyItem"] | null;
             /**
              * Fading Items
              * @default []
@@ -8522,6 +8769,26 @@ export interface components {
             created_at: string;
         };
         /**
+         * Metric
+         * @description One number, with everything needed to defend it.
+         *
+         *     `value` is None when the metric could not be computed -- no data, or a sample
+         *     too small to mean anything. `basis` then says which, in the same words the UI
+         *     shows the user.
+         */
+        Metric: {
+            /** Value */
+            value: number | null;
+            /** Unit */
+            unit: string;
+            /** Sample Size */
+            sample_size: number;
+            /** Definition */
+            definition: string;
+            /** Basis */
+            basis: string;
+        };
+        /**
          * MetricRow
          * @description One metric across every arm, with the tier that decides whether it counts.
          */
@@ -8592,6 +8859,13 @@ export interface components {
                     [key: string]: string;
                 };
             };
+            /** Resident Budget Gb */
+            resident_budget_gb?: number | null;
+            /**
+             * Resident Set Fits
+             * @default true
+             */
+            resident_set_fits: boolean;
         };
         /** ModelUsageItem */
         ModelUsageItem: {
@@ -8937,6 +9211,26 @@ export interface components {
             /** Title */
             title?: string | null;
         };
+        /** NotesTimelinePoint */
+        NotesTimelinePoint: {
+            /** Month */
+            month: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * NotesTimelineResponse
+         * @description Notes created per month, grouped in SQL.
+         *
+         *     The page used to build this by downloading every note -- bodies included --
+         *     and bucketing them in the browser.
+         */
+        NotesTimelineResponse: {
+            /** Points */
+            points: components["schemas"]["NotesTimelinePoint"][];
+            /** Total Notes */
+            total_notes: number;
+        };
         /** OllamaPullRequest */
         OllamaPullRequest: {
             /** Model */
@@ -8999,6 +9293,27 @@ export interface components {
             metrics: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * ProgressSummaryResponse
+         * @description Every headline number on the Progress page, computed server-side.
+         *
+         *     Named fields rather than a list so the contract is checkable and the frontend
+         *     cannot silently render a metric that was removed.
+         */
+        ProgressSummaryResponse: {
+            retention_30d: components["schemas"]["Metric"];
+            mastery: components["schemas"]["Metric"];
+            mature_cards: components["schemas"]["Metric"];
+            due_today: components["schemas"]["Metric"];
+            current_streak: components["schemas"]["Metric"];
+            longest_streak: components["schemas"]["Metric"];
+            reviews_30d: components["schemas"]["Metric"];
+            gaps_closed: components["schemas"]["Metric"];
+            time_on_luminary: components["schemas"]["Metric"];
+            active_days: components["schemas"]["Metric"];
+            documents: components["schemas"]["Metric"];
+            notes: components["schemas"]["Metric"];
         };
         /** PurgeJunkResponse */
         PurgeJunkResponse: {
@@ -9209,6 +9524,41 @@ export interface components {
             /** Orphan Rows Removed */
             orphan_rows_removed: number;
         };
+        /**
+         * ReparseRequest
+         * @description `confirm=False` reports what a re-import would cost and changes nothing.
+         */
+        ReparseRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Rendered Html */
+            rendered_html?: string | null;
+        };
+        /** ReparseResponse */
+        ReparseResponse: {
+            /** Document Id */
+            document_id: string;
+            /** Status */
+            status: string;
+            /** Source */
+            source: string;
+            /** Anchored */
+            anchored: {
+                [key: string]: number;
+            };
+            /**
+             * Cleared
+             * @default {}
+             */
+            cleared: {
+                [key: string]: number;
+            };
+            /** Detail */
+            detail: string;
+        };
         /** RetrievalSettingsPatch */
         RetrievalSettingsPatch: {
             /** Rerank Enabled */
@@ -9402,6 +9752,35 @@ export interface components {
              * @enum {string}
              */
             content_source: "body" | "preview" | "chunks" | "empty";
+            /**
+             * Content Chars
+             * @default 0
+             */
+            content_chars: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * SectionContentPage
+         * @description One window of a document's sections.
+         *
+         *     An envelope rather than a bare list because the reader has to know whether
+         *     more exists. The unbounded version returned every section's full body in one
+         *     response: measured at 20.2 MB over 1,017 sections on a 2.9M-word manual,
+         *     which is enough to make a browser report the page as unresponsive.
+         */
+        SectionContentPage: {
+            /** Items */
+            items: components["schemas"]["SectionContentItem"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
         };
         /** SectionHeatmapItem */
         SectionHeatmapItem: {
@@ -9433,6 +9812,8 @@ export interface components {
             page_start: number;
             /** Page End */
             page_end: number;
+            /** Page Label Start */
+            page_label_start?: string | null;
             /** Section Order */
             section_order: number;
             /** Preview */
@@ -10211,6 +10592,12 @@ export interface components {
         UrlIngestRequest: {
             /** Url */
             url: string;
+            /** Rendered Html */
+            rendered_html?: string | null;
+            /** Render State */
+            render_state?: string | null;
+            /** Render Detail */
+            render_detail?: string | null;
         };
         /** ValidateResponse */
         ValidateResponse: {
@@ -10284,6 +10671,13 @@ export interface components {
             notes_written: number;
             /** Docs Touched */
             docs_touched: number;
+            /**
+             * Seconds By Activity
+             * @default {}
+             */
+            seconds_by_activity: {
+                [key: string]: number;
+            };
         };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
@@ -12288,6 +12682,8 @@ export interface operations {
             query?: {
                 /** @description Comma-separated content types */
                 content_type?: string | null;
+                /** @description Comma-separated file formats. Distinct from content_type: an EPUB is format `epub` and content_type `book`, which is why filtering for e-books by type never matched one. */
+                format?: string | null;
                 /** @description Filter by tag value */
                 tag?: string | null;
                 /** @description Restrict to documents in this collection */
@@ -12450,6 +12846,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_facets_documents_facets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentFacetsResponse"];
                 };
             };
         };
@@ -12959,6 +13375,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reparse_document_documents__document_id__reparse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReparseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReparseResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13500,6 +13951,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    heartbeat_engagement_heartbeat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HeartbeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeartbeatResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16383,6 +16867,9 @@ export interface operations {
                 group?: string | null;
                 tag?: string | null;
                 collection_id?: string | null;
+                page?: number;
+                /** @description Omit for the full list (the historical behaviour every caller relies on). Declared because FastAPI drops unknown query params silently, so a caller that passed page_size used to believe it had paginated when it had not. */
+                page_size?: number | null;
             };
             header?: never;
             path?: never;
@@ -17427,6 +17914,71 @@ export interface operations {
             };
         };
     };
+    get_progress_summary_progress_summary_get: {
+        parameters: {
+            query?: {
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). Buckets use the user's local date so a session at 11pm does not roll into tomorrow. */
+                tz_offset_minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notes_timeline_progress_notes_timeline_get: {
+        parameters: {
+            query?: {
+                months?: number;
+                /** @description Client's timezone offset from UTC in minutes, matching JS `Date.getTimezoneOffset()` (positive west of UTC; PDT=420). Buckets use the user's local date so a session at 11pm does not roll into tomorrow. */
+                tz_offset_minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ask_question_qa_post: {
         parameters: {
             query?: never;
@@ -17837,9 +18389,44 @@ export interface operations {
             };
         };
     };
-    get_section_content_sections__document_id__content_get: {
+    get_one_section_content_sections__document_id__content__section_id__get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionContentItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_section_content_sections__document_id__content_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
             header?: never;
             path: {
                 document_id: string;
@@ -17854,7 +18441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SectionContentItem"][];
+                    "application/json": components["schemas"]["SectionContentPage"];
                 };
             };
             /** @description Validation Error */

@@ -151,12 +151,16 @@ export function StudyHabitsSection() {
 
   return (
     <>
-      {/* Study Habits header */}
+      {/* Kept deliberately apart from the measured numbers above. A streak, a
+          level and a badge are devices for showing up; none of them measures
+          how much you know, and presenting them beside retention invites the
+          reader to treat them as if they did. */}
       <section className="flex flex-col gap-3">
         <div className="rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent px-6 py-4 border border-amber-500/10">
-          <h2 className="text-lg font-bold text-foreground">Study Habits</h2>
+          <h2 className="text-lg font-bold text-foreground">Motivation</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Streaks, XP, focus sessions, and achievements
+            Streaks, XP, focus sessions and achievements. These track showing up,
+            not what you have learned.
           </p>
         </div>
 

@@ -341,6 +341,17 @@ async def list_notes(
     group: str | None = Query(default=None),
     tag: str | None = Query(default=None),
     collection_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int | None = Query(
+        default=None,
+        ge=1,
+        le=500,
+        description=(
+            "Omit for the full list (the historical behaviour every caller relies on). "
+            "Declared because FastAPI drops unknown query params silently, so a caller "
+            "that passed page_size used to believe it had paginated when it had not."
+        ),
+    ),
     session: AsyncSession = Depends(get_db),
 ) -> list[NoteResponse]:
     """List notes with optional filters."""
@@ -384,6 +395,9 @@ async def list_notes(
                 )
             )
         )
+
+    if page_size is not None:
+        stmt = stmt.limit(page_size).offset((page - 1) * page_size)
 
     # Dynamic filter composition built incrementally from query params; the stmt
     # is too conditional to encapsulate in a NoteRepo.list() without complex args.
