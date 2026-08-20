@@ -130,10 +130,14 @@ and be perfectly calibrated about which 40% they will miss.
 
 ## Streaks
 
-One source: `study_streaks`, via `GET /engagement/streak`. Recomputing a streak
-client-side from a 30-day history window reads `0` for anyone who has not studied
-yet today and truncates any run longer than the window — the Progress page did
-both, while `StudyHabitsSection` on the same page showed the stored value.
+One source: `study_streaks`, reaching the page as `current_streak` on
+`GET /progress/summary` and as `GET /engagement/streak` in `StudyHabitsSection`.
+
+Never recompute it client-side. A streak derived from the 30-day history window
+reads `0` for anyone who has not studied *yet today* and truncates any run longer
+than the window. Progress did exactly that in its headline card while
+`StudyHabitsSection` lower down the same page showed the stored value, so one
+screen displayed two different streaks and the visible one was usually zero.
 
 ## Adding a metric
 

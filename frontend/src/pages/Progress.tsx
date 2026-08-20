@@ -521,7 +521,12 @@ export default function Progress() {
 
   // Derived stats from history
   const totalReviewed = history.reduce((s, d) => s + d.cards_reviewed, 0)
-  const streak = computeStreak(history)
+  // The stored streak, not one recomputed here. Recomputing from the 30-day
+  // history window reads 0 for anyone who has not studied *yet today* and
+  // truncates any run longer than the window -- and StudyHabitsSection lower
+  // down this same page has always shown the stored value, so the page
+  // displayed two different streaks at once.
+  const streak = summary?.current_streak.value ?? 0
   const hasAnyStudy = totalReviewed > 0
 
   // Chart data: last 30 days, fill in missing dates with 0
@@ -593,7 +598,7 @@ export default function Progress() {
             label="Study Streak"
             value={streak}
             icon={TrendingUp}
-            loading={historyLoading}
+            loading={summaryLoading}
             accent="amber"
           />
         </div>
@@ -725,20 +730,6 @@ function localDateKey(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-function computeStreak(history: DailyHistoryItem[]): number {
-  if (history.length === 0) return 0
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  let streak = 0
-  const cursor = new Date(today)
-  const histSet = new Set(history.filter((h) => h.cards_reviewed > 0).map((h) => h.date))
-  while (true) {
-    if (!histSet.has(localDateKey(cursor))) break
-    streak++
-    cursor.setDate(cursor.getDate() - 1)
-  }
-  return streak
-}
 
 function buildActivityData(
   history: DailyHistoryItem[],
