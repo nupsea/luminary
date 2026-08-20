@@ -504,6 +504,7 @@ endif
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
+	cd frontend && npm test
 	@echo "CI passed."
 
 regen-api-types:

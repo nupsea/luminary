@@ -143,6 +143,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   })
   const pdfViewerRef = useRef<PDFViewerHandle>(null)
 
+  // A deep link names a passage, which only the Read view can scroll to.
+  const hasDeepLink = Boolean(initialSectionId || initialChunkId || initialPage)
+
   const {
     leftTab,
     setLeftTab,
@@ -150,7 +153,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setPdfViewVisited,
     bookViewVisited,
     setBookViewVisited,
-  } = useReaderTabs({ format: doc?.format })
+  } = useReaderTabs({ format: doc?.format, hasDeepLink })
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
@@ -437,10 +440,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // view for a deep link and for every other format.
   useEffect(() => {
     if (!doc) return
-    const tab = readerLandingTab(
-      doc.format,
-      Boolean(initialSectionId || initialChunkId || initialPage),
-    )
+    const tab = readerLandingTab(doc.format, hasDeepLink)
     if (initialSectionId) setReadSectionId(initialSectionId)
     if (tab === "pdfview") setPdfViewVisited(true)
     if (tab === "bookview") setBookViewVisited(true)
@@ -535,7 +535,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSearchHitIndex(0)
   }, [])
 
-  const openReaderSearch = useCallback(() => setSearchOpen(true), [])
+  // The PDF viewer owns Cmd+F on its own tab. Every other tab has no search of
+  // its own and InDocSearchBar renders inside the section list, so opening the
+  // search goes there -- the move the ?search= deep link and a tag click make.
+  const openReaderSearch = useCallback(() => {
+    if (leftTab !== "pdfview") setLeftTab("sections")
+    setSearchOpen(true)
+  }, [leftTab, setLeftTab])
 
   useReaderKeyboardShortcuts({
     onBack: goBack,
@@ -1117,8 +1123,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Document header — hidden in PDF/Book view to maximise canvas area */}
-          {leftTab !== "pdfview" && leftTab !== "bookview" && leftTab !== "read" && (
+          {/* Document header — hidden in PDF/Book view to maximise canvas area.
+              It carries the resume banner and the ingestion health panel, so it
+              stays on Read, which is where most documents open. */}
+          {leftTab !== "pdfview" && leftTab !== "bookview" && (
             <>
               <div className="px-6 py-4">
                 <h1 className="text-lg font-bold text-foreground">{doc.title}</h1>
