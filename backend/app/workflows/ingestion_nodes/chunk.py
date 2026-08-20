@@ -369,6 +369,14 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
             section_pdf_page: int | None = None
             if tech_fmt == "pdf":
                 section_pdf_page = s.get("page_start", 0) or 1  # ensure at least page 1
+            # Offsets recorded by the parser where each later page begins. The
+            # book path already computes a per-chunk page; this path assigned the
+            # section's start page to every chunk in it, which on one library
+            # meant every section of every PDF reported one page -- 2,329 chunks
+            # all claiming p167 -- so a citation landed wherever the chapter
+            # began rather than where its sentence is.
+            page_breaks: list[int] = s.get("page_breaks") or []
+            page_search_start = 0
 
             for chunk_dict in chunk_mixed_content(
                 section_text,
@@ -381,6 +389,18 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                 # text stays clean; header rides in context_header (FTS/display),
                 # kept out of the embedding -- see ChunkModel.context_header.
                 clean_text = chunk_dict["text"]
+                chunk_pdf_page = section_pdf_page
+                if section_pdf_page is not None and page_breaks:
+                    probe = clean_text[:80]
+                    pos = section_text.find(probe, page_search_start) if probe else -1
+                    if pos >= 0:
+                        # Falls back to the section's page when the chunk cannot be
+                        # located -- mixed-content chunking rewrites some text, and
+                        # a wrong page is worse than an imprecise one.
+                        chunk_pdf_page = section_pdf_page + sum(
+                            1 for offset in page_breaks if offset <= pos
+                        )
+                        page_search_start = pos
                 chunk_model = ChunkModel(
                     id=chunk_id,
                     document_id=doc_id,
@@ -393,7 +413,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                     has_code=chunk_dict["has_code"],
                     code_language=chunk_dict["code_language"],
                     code_signature=chunk_dict["code_signature"],
-                    pdf_page_number=section_pdf_page,
+                    pdf_page_number=chunk_pdf_page,
                     context_header=context_header,
                 )
                 chunk_models.append(chunk_model)

@@ -164,20 +164,22 @@ What remains is smaller and worth stating rather than assuming.
   because `Study.tsx` reads neither search params nor route state, so a session id in the URL
   would silently start a fresh session.
 
-### 7. Three reader and study defects, reported and not yet filed
+### 7. Two reader and study defects, reported and not yet filed
 
 Reported by the user, evidence gathered, **no GitHub issue exists for any of them**.
 They belong in the tracker under the rule at the foot of this file; they are recorded here only
 so they are not lost between report and filing.
 
-- **A citation's page number does not locate the passage.** An Ask answer cited p324 of a PDF
-  whose quoted text is on p336. The reader jumps to the cited page, so the citation is precise
-  and wrong, which is worse than absent (I-33 governs the quote, not the page).
 - **`Study` lands on the last document rather than a chooser.** `Study.tsx:146` falls back to
   `lastReadyDocumentId` via `useEffectiveActiveDocument()`, so opening Study resumes the most
   recent collection instead of offering the higher-level list the user expects.
 - **The PDF find UI flickers, and the page numbers along the bottom are unverified.** Same
-  surface as the citation defect and likely the same page-index provenance.
+  surface as the citation defect, though not the same cause: that one was per-chunk page
+  provenance and is fixed.
+
+The third — a citation naming a page its text was not on — is fixed. Every chunk now carries the
+page its own text falls on rather than the page its section opened at. Re-ingestion is what
+applies it: existing documents keep the page recorded when they were chunked.
 
 ### 8. Formats other than HTML and PDF are unmeasured
 

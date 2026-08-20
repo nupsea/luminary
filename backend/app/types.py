@@ -27,6 +27,12 @@ class Section:
     page_end: int
     admonition_type: str | None = None  # 'note'|'warning'|'tip'|'caution'|'important' or None
     parent_heading: str | None = None  # heading string of the logical parent section
+    # Character offsets in `text` where a new page begins, excluding the first
+    # page (whose number is `page_start`). Without this a chunk can only report
+    # the page its *section* began on: measured on one library, every section of
+    # every PDF reported a single page, one of them across 2,329 chunks, so a
+    # citation into a long chapter pointed a hundred pages from its own text.
+    page_breaks: list[int] = field(default_factory=list)
 
 
 @dataclass

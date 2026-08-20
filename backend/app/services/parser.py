@@ -153,6 +153,26 @@ _MARGIN_FRACTION = 0.1
 _FURNITURE_MAX_CHARS = 80
 
 
+def _line_start_offsets(lines: list[str]) -> list[int]:
+    """Character offset at which each line starts once joined by a newline."""
+    offsets: list[int] = []
+    running = 0
+    for line in lines:
+        offsets.append(running)
+        running += len(line) + 1  # the "\n" the lines are joined with
+    return offsets
+
+
+def _block_start_offsets(blocks: list[str]) -> list[int]:
+    """Character offset at which each block starts once joined by a blank line."""
+    offsets: list[int] = []
+    running = 0
+    for block in blocks:
+        offsets.append(running)
+        running += len(block) + 2  # the "\n\n" the blocks are joined with
+    return offsets
+
+
 def _is_page_furniture(block: dict, page_height: float) -> bool:
     bbox = block.get("bbox")
     if not bbox or len(bbox) < 4:
@@ -303,8 +323,14 @@ class DocumentParser:
                 page_end = min(next_page - 1, total_pages)
 
                 texts: list[str] = []
+                # Index into `texts` at which each page after the first starts,
+                # so a per-chunk page can be recovered later. Without it every
+                # chunk in the section can only claim the section's start page.
+                page_start_blocks: list[int] = []
 
-                for pn in range(max(0, pg - 1), page_end):  # 0-based page index
+                for page_offset, pn in enumerate(range(max(0, pg - 1), page_end)):
+                    if page_offset > 0:
+                        page_start_blocks.append(len(texts))
                     page_obj = doc[pn]
                     page_height = float(page_obj.rect.height) or 1.0
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
@@ -327,7 +353,18 @@ class DocumentParser:
                 # Blocks are the layout's own paragraphs; a PDF text layer is
                 # hard-wrapped, so joining lines alone leaves no boundary and
                 # the reader renders a whole chapter as one block.
-                text = "\n\n".join(texts).strip()
+                joined = "\n\n".join(texts)
+                text = joined.strip()
+                # Offsets are measured on the joined string, then shifted by
+                # whatever the strip removed from the front, so they stay true to
+                # the text that is actually stored.
+                lead = len(joined) - len(joined.lstrip())
+                block_offsets = _block_start_offsets(texts)
+                page_breaks = [
+                    max(0, block_offsets[i] - lead)
+                    for i in page_start_blocks
+                    if i < len(block_offsets)
+                ]
                 raw_parts.append(text)
                 sections.append(
                     Section(
@@ -338,6 +375,7 @@ class DocumentParser:
                         text=text,
                         page_start=pg,
                         page_end=page_end,
+                        page_breaks=page_breaks,
                     )
                 )
 
@@ -382,11 +420,20 @@ class DocumentParser:
         current_level = 1
         current_page_start = 1
         current_texts: list[str] = []
+        # Index into `current_texts` at which each later page of the current
+        # section begins. One entry per page even when a page contributes no
+        # lines, so counting entries below a position always yields the right
+        # page across a blank leaf between chapters.
+        current_page_marks: list[int] = []
 
         def flush_section(next_heading: str, next_level: int, next_page: int) -> None:
             nonlocal current_heading, current_level, current_page_start, current_texts
-            text = "\n".join(current_texts).strip()
+            nonlocal current_page_marks
+            joined = "\n".join(current_texts)
+            text = joined.strip()
             if text:
+                lead = len(joined) - len(joined.lstrip())
+                line_offsets = _line_start_offsets(current_texts)
                 sections.append(
                     Section(
                         heading=_norm_ws(current_heading),
@@ -394,14 +441,22 @@ class DocumentParser:
                         text=text,
                         page_start=current_page_start,
                         page_end=next_page - 1,
+                        page_breaks=[
+                            max(0, line_offsets[i] - lead)
+                            for i in current_page_marks
+                            if i < len(line_offsets)
+                        ],
                     )
                 )
             current_heading = next_heading
             current_level = next_level
             current_page_start = next_page
             current_texts = []
+            current_page_marks = []
 
         for page_num, page in enumerate(doc):
+            if page_num + 1 > current_page_start:
+                current_page_marks.append(len(current_texts))
             for block in page.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                 if block.get("type") != 0:
                     continue
