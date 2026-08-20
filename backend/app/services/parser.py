@@ -1,6 +1,7 @@
 import html
 import logging
 import re
+from collections import Counter
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -177,6 +178,67 @@ def _printed_page_labels(doc) -> dict[int, str]:
     return labels
 
 
+# How many lines at the top and bottom of a page count as its running header or
+# footer. A page number lives there; a number three lines in is content.
+_PAGE_NUMBER_BAND = 2
+
+# The share of a document's pages that must agree on one sheet-minus-printed
+# offset before the reading is trusted. Bracketing cases: a scanned book prints
+# its number on nearly every body page, so agreement is high; a slide deck with
+# a figure labelled "12" in the corner of one page agrees with nothing and must
+# yield no labels rather than a plausible-looking wrong one.
+_MIN_OFFSET_AGREEMENT = 0.4
+
+
+def _printed_numbers_from_text(doc) -> dict[int, str]:
+    """Recover printed page numbers from each page's own header or footer.
+
+    Used only when the PDF declares no page labels of its own. A book scanned
+    or typeset without them still prints the number on the page -- measured on
+    one 386-sheet volume, sheet 340 opens with the line "336" -- and that is the
+    number the reader sees, so it is the number a citation must name.
+
+    A bare integer in a header is not proof on its own: it could be a figure
+    number or a year. What makes this trustworthy is agreement. The offset
+    between sheet and printed number is constant through a book's body, so the
+    reading is accepted only where a dominant offset holds, and each page is
+    labelled from its own detected number rather than extrapolated.
+    """
+    detected: dict[int, int] = {}
+    offsets: Counter = Counter()
+    try:
+        for index in range(doc.page_count):
+            lines = [ln.strip() for ln in doc[index].get_text().splitlines() if ln.strip()]
+            if not lines:
+                continue
+            band = lines[:_PAGE_NUMBER_BAND] + lines[-_PAGE_NUMBER_BAND:]
+            for line in band:
+                # Four digits is a year in a header far more often than a page.
+                if line.isdigit() and 1 <= len(line) <= 3:
+                    sheet = index + 1
+                    detected[sheet] = int(line)
+                    offsets[sheet - int(line)] += 1
+                    break
+    except Exception:  # noqa: BLE001 - a nicety; parsing must not fail for it
+        return {}
+
+    if not offsets:
+        return {}
+    offset, agreeing = offsets.most_common(1)[0]
+    if agreeing < _MIN_OFFSET_AGREEMENT * doc.page_count:
+        logger.info(
+            "PDF printed-page scan: no dominant offset (%d/%d agree); citations name sheets",
+            agreeing,
+            doc.page_count,
+        )
+        return {}
+    return {
+        sheet: str(number)
+        for sheet, number in detected.items()
+        if sheet - number == offset and sheet != number
+    }
+
+
 def _line_start_offsets(lines: list[str]) -> list[int]:
     """Character offset at which each line starts once joined by a newline."""
     offsets: list[int] = []
@@ -308,7 +370,7 @@ class DocumentParser:
         total_pages = len(doc)
         # Read once here so every return below carries them, including the
         # fallback paths -- two of four books in one library take those.
-        page_labels = _printed_page_labels(doc)
+        page_labels = _printed_page_labels(doc) or _printed_numbers_from_text(doc)
 
         all_font_sizes: list[float] = []
         for page in doc:

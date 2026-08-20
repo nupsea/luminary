@@ -71,6 +71,11 @@ class SectionItem(BaseModel):
     level: int
     page_start: int
     page_end: int
+    # What the section's first page is printed as, when the book numbers its
+    # front matter separately. Display only -- `page_start` is the sheet, and
+    # the sheet is what the viewer scrolls to. Without this the contents list
+    # said "p.328" beside a page printed 324 and a citation that also said 324.
+    page_label_start: str | None = None
     section_order: int
     preview: str
     admonition_type: str | None = None
@@ -101,6 +106,12 @@ class DocumentDetail(BaseModel):
     tags: list[str]
     created_at: datetime
     last_accessed_at: datetime
+    # Sheet number -> the number printed on that sheet, for PDFs whose front
+    # matter is numbered separately. Derived at ingestion, so it covers books
+    # that print their page numbers without declaring PDF page labels -- which
+    # pdf.js cannot see, and which would otherwise leave the viewer's footer
+    # disagreeing with the citation that sent the reader there.
+    page_labels: dict[str, str] = {}
     sections: list[SectionItem]
     reading_progress_pct: float
     audio_duration_seconds: float | None = None

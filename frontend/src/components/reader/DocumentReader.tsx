@@ -1235,7 +1235,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}

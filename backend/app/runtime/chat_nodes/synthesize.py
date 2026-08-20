@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, ImageModel
+from app.models import ChunkModel, DocumentModel, ImageModel, SectionModel
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.context_packer import pack_context_indexed
@@ -97,7 +97,7 @@ async def _fetch_doc_titles_for_chunks(chunks_dicts: list[dict]) -> dict[str, st
 async def _fetch_section_ids_and_pages_for_chunks(
     chunk_ids: list[str],
 ) -> dict[str, tuple[str | None, int | None]]:
-    """Return {chunk_id: (section_id, pdf_page_number, pdf_page_label)}.
+    """Return {chunk_id: (section_id, pdf_page_number, pdf_page_label, heading)}.
 
     Used by synthesize_node to build SourceCitation entries from retrieved chunks.
     Returns {} on any DB error (non-fatal).
@@ -112,10 +112,18 @@ async def _fetch_section_ids_and_pages_for_chunks(
                     ChunkModel.section_id,
                     ChunkModel.pdf_page_number,
                     ChunkModel.pdf_page_label,
-                ).where(ChunkModel.id.in_(chunk_ids))
+                    SectionModel.heading,
+                )
+                .outerjoin(SectionModel, SectionModel.id == ChunkModel.section_id)
+                .where(ChunkModel.id.in_(chunk_ids))
             )
             return {
-                row.id: (row.section_id, row.pdf_page_number, row.pdf_page_label)
+                row.id: (
+                    row.section_id,
+                    row.pdf_page_number,
+                    row.pdf_page_label,
+                    row.heading,
+                )
                 for row in rows
             }
     except Exception:
@@ -341,7 +349,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # collect SourceCitations from context chunks for post-stream emission.
     # Deduplicate by section_id (first occurrence wins); when section_id is None,
     # fall back to chunk_id so each unlinked chunk gets its own citation entry.
-    chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page, pdf_page_label)
+    chunk_meta: dict = {}  # chunk_id -> (section_id, pdf_page, pdf_page_label, heading)
     source_citations_out: list[dict] = []
     if chunks_dicts:
         # Rank by retrieval score so the best sources lead and the cap keeps the
@@ -363,11 +371,17 @@ async def synthesize_node(state: ChatState) -> dict:
             if source_citations_out and c.get("score", 0.0) < floor:
                 continue
             cid = c.get("chunk_id", "")
-            meta = chunk_meta.get(cid, (None, None, None))
-            section_id, pdf_page, pdf_page_label = meta
+            meta = chunk_meta.get(cid, (None, None, None, None))
+            section_id, pdf_page, pdf_page_label, db_heading = meta
             doc_id = c.get("document_id", "")
             doc_title = doc_titles_map.get(doc_id, "")
-            section_heading = c.get("section_heading", "")
+            # The retrieved chunk's heading is always empty: embed_node writes
+            # `"section_heading": ""` into every vector row, so the field exists
+            # in the index and never carries anything. Measured on a real
+            # answer, that left four citations on one page indistinguishable --
+            # same title, same number, nothing to tell them apart. The section
+            # row is the only place the heading actually lives.
+            section_heading = (db_heading or c.get("section_heading", "") or "").strip()
 
             # Dedup key: (section_id, page) for PDFs so different pages in the same
             # section produce separate citations; section_id alone for non-PDFs.

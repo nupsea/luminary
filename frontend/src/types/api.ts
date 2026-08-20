@@ -7091,6 +7091,13 @@ export interface components {
              * Format: date-time
              */
             last_accessed_at: string;
+            /**
+             * Page Labels
+             * @default {}
+             */
+            page_labels: {
+                [key: string]: string;
+            };
             /** Sections */
             sections: components["schemas"]["SectionItem"][];
             /** Reading Progress Pct */
@@ -9700,6 +9707,8 @@ export interface components {
             page_start: number;
             /** Page End */
             page_end: number;
+            /** Page Label Start */
+            page_label_start?: string | null;
             /** Section Order */
             section_order: number;
             /** Preview */

@@ -921,6 +921,33 @@ async def get_document(document_id: str):
         doc = await repo.get_or_404(document_id)
         sections = list(await repo.sections_for_document(document_id))
         read_count = await repo.read_section_count(document_id)
+        # The printed page each section opens on, taken from its own first
+        # chunk rather than a second column: the chunk already records it, and
+        # a section's label is by definition its first chunk's. Empty for a
+        # document whose sheets and printed pages agree, which is most of them.
+        label_rows = await session.execute(
+            select(
+                ChunkModel.section_id,
+                ChunkModel.pdf_page_label,
+                ChunkModel.pdf_page_number,
+            )
+            .where(
+                ChunkModel.document_id == document_id,
+                ChunkModel.pdf_page_label.is_not(None),
+            )
+            .order_by(ChunkModel.chunk_index)
+        )
+        section_page_labels: dict[str, str] = {}
+        # Sheet -> printed page for the whole document, so the viewer's footer
+        # names the same page the citation that opened it did. pdf.js only sees
+        # labels a PDF *declares*; a book that merely prints its numbers has
+        # none, and that is the case this map exists for.
+        page_labels: dict[str, str] = {}
+        for section_id, label, sheet in label_rows:
+            if section_id and section_id not in section_page_labels:
+                section_page_labels[section_id] = label
+            if sheet is not None:
+                page_labels.setdefault(str(sheet), label)
 
     section_count = len(sections)
     reading_progress_pct = (read_count / section_count) if section_count > 0 else 0.0
@@ -945,6 +972,7 @@ async def get_document(document_id: str):
                 level=s.level,
                 page_start=s.page_start,
                 page_end=s.page_end,
+                page_label_start=section_page_labels.get(s.id),
                 section_order=s.section_order,
                 preview=_wire_preview(s.preview),
                 admonition_type=s.admonition_type,
@@ -952,6 +980,7 @@ async def get_document(document_id: str):
             )
             for s in sections
         ],
+        page_labels=page_labels,
         reading_progress_pct=reading_progress_pct,
         audio_duration_seconds=doc.audio_duration_seconds,
         source_url=doc.source_url,

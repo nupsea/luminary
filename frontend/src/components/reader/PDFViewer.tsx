@@ -213,6 +213,16 @@ const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
 interface PDFViewerProps {
   documentId: string
   sections: SectionItem[]
+  /**
+   * Sheet -> the number printed on it, derived at ingestion.
+   *
+   * pdf.js only reports labels a PDF *declares*. A book that merely prints its
+   * page numbers declares none, so without this the footer counts sheets while
+   * the citation that opened the document names the printed page -- the two
+   * disagreeing by a constant, which is the confusion this whole thread began
+   * with.
+   */
+  pageLabels?: Record<string, string>
   initialPage?: number  // navigate to this page after PDF loads (from citation deep-link)
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
@@ -226,7 +236,7 @@ export interface PDFViewerHandle {
 type LoadStatus = "loading" | "error" | "ready"
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, initialPage, annotations = [], highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, annotations = [], highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
     const [totalPages, setTotalPages] = useState(0)
@@ -277,6 +287,13 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const [searchOpen, setSearchOpen] = useState(false)
     const [zoomOpen, setZoomOpen] = useState(false)
     const zoomPopoverRef = useRef<HTMLDivElement | null>(null)
+    // What the box shows, and what the search actually runs on. They are
+    // separate because every change of the second one re-extracts the whole
+    // document: typing a seven-letter word launched seven full passes over 613
+    // pages, each clearing and redrawing the highlights 62 times as its batches
+    // landed. The box stays instant; the search waits for a pause in typing,
+    // the same way the page field already does.
+    const [searchInput, setSearchInput] = useState("")
     const [searchQuery, setSearchQuery] = useState("")
     const [globalMatches, setGlobalMatches] = useState<PageMatch[]>([])
     const [globalMatchIndex, setGlobalMatchIndex] = useState(-1)
@@ -285,7 +302,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const [extractedPageCount, setExtractedPageCount] = useState(0)
     // The numbers printed on the sheets, when the PDF says they differ from
     // the sheets' positions. Null on a document that defines none.
-    const [pageLabels, setPageLabels] = useState<string[] | null>(null)
+    const [declaredLabels, setDeclaredLabels] = useState<string[] | null>(null)
 
     // Expose goToPage for parent (section list page-jump badges)
     useImperativeHandle(
@@ -310,7 +327,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setCurrentPage(1)
       setPageInput("1")
       setTotalPages(0)
-      setPageLabels(null)
+      setDeclaredLabels(null)
       // Clear search state and text cache for new document
       pageTextCacheRef.current = new Map()
       setExtractedPageCount(0)
@@ -344,7 +361,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             // rest: the footer is correct without it, just less specific.
             try {
               const labels = await doc.getPageLabels()
-              if (!cancelled) setPageLabels(labels)
+              if (!cancelled) setDeclaredLabels(labels)
             } catch {
               // non-fatal; the footer falls back to counting sheets
             }
@@ -708,6 +725,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       }
     }, [extractPageText])
 
+    // Settle the typed text before searching on it. 250ms matches the page
+    // field: long enough that a word is typed as one query, short enough that
+    // the results feel immediate on pausing.
+    useEffect(() => {
+      const timer = window.setTimeout(() => setSearchQuery(searchInput), 250)
+      return () => window.clearTimeout(timer)
+    }, [searchInput])
+
     // Trigger text extraction when search opens or query changes
     useEffect(() => {
       if (!searchOpen || !searchQuery || !pdfDoc) {
@@ -741,10 +766,14 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // below depends on a number rather than on the identity of `globalMatches`,
     // which progressive extraction replaces once per ten-page batch.
     // What the sheet in view is printed as, when that differs from its position.
-    const printedLabel = useMemo(
-      () => printedPageLabel(pageLabels, currentPage),
-      [pageLabels, currentPage],
-    )
+    const printedLabel = useMemo(() => {
+      // The derived map wins: it covers books that print a number without
+      // declaring one, which is precisely where the footer used to disagree
+      // with the citation. Falls back to what the PDF declares.
+      const derived = (pageLabels ?? {})[String(currentPage)]
+      if (derived && derived !== String(currentPage)) return derived
+      return printedPageLabel(declaredLabels, currentPage)
+    }, [pageLabels, declaredLabels, currentPage])
 
     const activePageMatchIndex = useMemo(
       () => activeMatchIndexForPage(globalMatches, globalMatchIndex, currentPage),
@@ -789,6 +818,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
 
     function closeSearch() {
       setSearchOpen(false)
+      setSearchInput("")
       setSearchQuery("")
       setGlobalMatches([])
       setGlobalMatchIndex(-1)
@@ -966,8 +996,8 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           {/* Search overlay */}
           {searchOpen && (
             <PdfSearchBar
-              query={searchQuery}
-              onQueryChange={setSearchQuery}
+              query={searchInput}
+              onQueryChange={setSearchInput}
               matchLabel={
                 searchQuery && extractedPageCount < totalPages
                   ? `${formatMatchCounts(globalMatches, globalMatchIndex, currentPage).label} (scanning...)`

@@ -90,3 +90,118 @@ class TestPrintedLabel:
 
     def test_a_chunk_with_no_page_has_no_label(self):
         assert self._label({41: "19"}, None) is None
+
+
+class TestSectionPageCursor:
+    """The shared rule, after three paths each got it wrong separately."""
+
+    @staticmethod
+    def _cursor(text, start, breaks):
+        from app.workflows.ingestion_nodes.chunk import _SectionPageCursor
+
+        return _SectionPageCursor(text, start, breaks)
+
+    def test_each_chunk_reports_the_page_its_own_text_falls_on(self):
+        text = "aaaa" + "bbbb" + "cccc"
+        cursor = self._cursor(text, 324, [4, 8])
+        assert cursor.page_for("aaaa") == 324
+        assert cursor.page_for("bbbb") == 325
+        assert cursor.page_for("cccc") == 326
+
+    def test_a_section_on_one_page_reports_that_page(self):
+        cursor = self._cursor("some text", 12, [])
+        assert cursor.page_for("some") == 12
+        assert cursor.page_for("text") == 12
+
+    def test_a_non_pdf_section_has_no_page_at_all(self):
+        """None, never 1: a text file has no page for a citation to name."""
+        cursor = self._cursor("some text", None, [])
+        assert cursor.page_for("some") is None
+
+    def test_text_that_cannot_be_located_falls_back_to_the_section_page(self):
+        """Some paths rewrite chunk text; a wrong page is worse than a coarse one."""
+        cursor = self._cursor("aaaabbbb", 100, [4])
+        assert cursor.page_for("this text is not in the section") == 100
+
+    def test_pages_never_go_backwards_across_a_section(self):
+        """Chunks are emitted in order, so their pages must not decrease.
+
+        The cursor advances to each match rather than past it, because chunks
+        overlap -- the next one starts inside the last. Identical text therefore
+        resolves to the same position, which is why this asserts monotonicity
+        rather than a strict increase.
+        """
+        text = "aaaa" + "bbbb" + "aaaa" + "cccc"
+        cursor = self._cursor(text, 50, [4, 8, 12])
+        pages = [cursor.page_for(part) for part in ("aaaa", "bbbb", "aaaa", "cccc")]
+        assert pages == sorted(pages), pages
+        assert pages[0] == 50 and pages[-1] == 53
+
+
+class _StubPage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def get_text(self) -> str:
+        return self._text
+
+
+class _StubDoc:
+    """Enough of a PyMuPDF document for the header scan."""
+
+    def __init__(self, pages: list[str]) -> None:
+        self._pages = [_StubPage(p) for p in pages]
+        self.page_count = len(pages)
+
+    def __getitem__(self, index):
+        return self._pages[index]
+
+
+class TestPrintedNumbersFromText:
+    """Books without PDF labels still print the number on the page."""
+
+    @staticmethod
+    def _scan(pages):
+        from app.services.parser import _printed_numbers_from_text
+
+        return _printed_numbers_from_text(_StubDoc(pages))
+
+    def test_a_document_printing_its_own_sheet_numbers_yields_no_labels(self):
+        """The label is only worth storing where it differs from the sheet.
+
+        Same rule the declared-label reader and the reader footer both apply:
+        a second number identical to the first is noise.
+        """
+        pages = [f"{n}\nA Title\nbody text here" for n in range(1, 21)]
+        assert self._scan(pages) == {}
+
+    def test_a_running_header_number_is_recovered(self):
+        # Measured shape: sheet 340 of one volume opens with the line "336",
+        # a constant four sheets of front matter ahead of the printed number.
+        pages = ["cover", "title", "contents", "preface"] + [
+            f"{n}\nHegel's Philosophy of Mind\nbody text here" for n in range(1, 17)
+        ]
+        found = self._scan(pages)
+        assert found[10] == "6"
+        assert found[20] == "16"
+
+    def test_an_offset_between_sheet_and_printed_number_is_honoured(self):
+        # Four sheets of front matter, then the body prints 1, 2, 3...
+        pages = ["cover", "title", "contents", "preface"] + [
+            f"{n}\nChapter text" for n in range(1, 17)
+        ]
+        found = self._scan(pages)
+        assert found[5] == "1"
+        assert found[20] == "16"
+
+    def test_numbers_that_agree_on_nothing_yield_no_labels(self):
+        """A bare number is not proof: it could be a figure label or a year.
+
+        Agreement on one offset is what makes the reading trustworthy, so a
+        document without it must name sheets rather than invent pages.
+        """
+        pages = ["12\nfigure", "99\nfigure", "3\nfigure", "451\nfigure"] * 5
+        assert self._scan(pages) == {}
+
+    def test_a_document_with_no_numbers_yields_no_labels(self):
+        assert self._scan(["just prose"] * 10) == {}
