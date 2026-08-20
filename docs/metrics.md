@@ -19,8 +19,9 @@ the definition it was computed from. `GET /progress/summary` returns each as a
 **A metric that could not be computed is `null`, never `0`.** "You have reviewed
 nothing" and "your retention is 0%" are opposite statements, and a zero standing
 in for the first is the defect this contract exists to prevent. `MetricCard`
-(`frontend/src/components/ui/metric.tsx`) renders `null` as an em dash with the
-`basis` beneath it. This is I-32 applied to the surfaces a learner reads.
+(`frontend/src/pages/Progress/MetricCard.tsx`) renders `null` as an em dash with
+the `basis` behind its info control, via `formatMetric`. This is I-32 applied to
+the surfaces a learner reads.
 
 ## The metrics
 
@@ -65,6 +66,30 @@ Two properties are load-bearing:
 single 10-card session at 90% rendered as "90% mastery" on a fresh install. That
 scenario reproduced against this formula reads 7.1% — ten cards at 1.5 days'
 stability against a 21-day bar — which is what one sitting has actually bought.
+
+## Measured and Motivation are separate sections
+
+The Progress page has two headings and the split is load-bearing. **Measured**
+holds only metrics that arrive from `/progress/summary` with a definition, a
+basis and a sample size; each card exposes all three. **Motivation** holds the
+streak, level, XP, focus sessions and achievements, under a subheading saying
+they track showing up rather than what was learned.
+
+A streak beside a retention percentage reads as a second measurement of the same
+thing. Separating them is what stops a badge from borrowing the credibility of a
+number the learner can recount.
+
+**`mastery` is computed but not shown on Progress.** It is a Bloom-weighted mean
+of a capped stability ratio: correct, and impossible for a learner to check
+against their own week. The page had already shipped one unaccountable headline
+(90% after a single session, from `/monitoring/overview`), and a second composite
+in its place would have repeated the failure with better arithmetic. Cards
+mastered — `mature_cards`, a plain count of cards past 21 days' stability — is
+what the section shows instead, because a learner can ask which cards those are.
+
+The card it replaced reported the sum of `cards_correct` across sessions under
+the label "Cards Mastered": correct *answers*, which on one library read 60
+against a true 2.
 
 ## Time on task
 

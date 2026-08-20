@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from "react"
-import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, Clock, StickyNote, Target, TrendingUp, Sparkles, Loader2, Brain } from "lucide-react"
+import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, Clock, StickyNote, Target, Sparkles, Loader2, Brain } from "lucide-react"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import {
   Bar,
@@ -25,6 +25,7 @@ import {
   YAxis,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MetricCard } from "./Progress/MetricCard"
 import { StudyHabitsSection } from "@/components/StudyHabitsSection"
 import { logger } from "@/lib/logger"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -34,9 +35,6 @@ import type { components } from "@/types/api"
 import { ChartTooltip } from "@/components/ui/chart-tooltip"
 
 type DailyHistoryItem = components["schemas"]["DailyHistoryItem"]
-type DueCountResponse = components["schemas"]["DueCountResponse"]
-type SessionListResponse = components["schemas"]["SessionListResponse"]
-type MisconceptionStats = components["schemas"]["MisconceptionStatsResponse"]
 type ProgressSummary = components["schemas"]["ProgressSummaryResponse"]
 
 
@@ -47,12 +45,6 @@ const fetchStudyHistory = (days: number): Promise<DailyHistoryItem[]> =>
     days,
     tz_offset_minutes: new Date().getTimezoneOffset(),
   })
-
-const fetchDueCount = (): Promise<DueCountResponse> =>
-  apiGet<DueCountResponse>("/study/due-count")
-
-const fetchMisconceptionStats = (): Promise<MisconceptionStats> =>
-  apiGet<MisconceptionStats>("/study/misconception-stats")
 
 // /monitoring/overview used to serve the Documents count. `monitoring` is a
 // full-mode surface, so in every shipped build (all of which run
@@ -83,9 +75,6 @@ const fetchNotesTimeline = (): Promise<NotesTimeline> =>
     tz_offset_minutes: new Date().getTimezoneOffset(),
   })
 
-const fetchSessions = (): Promise<SessionListResponse> =>
-  apiGet<SessionListResponse>("/study/sessions", { page: 1, page_size: 50 })
-
 function SectionSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="flex flex-col gap-3">
@@ -101,66 +90,6 @@ function SectionError({ name }: { name: string }) {
     <div className="flex h-16 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
       <AlertCircle size={14} />
       Could not load {name}
-    </div>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  loading,
-  accent = "primary",
-}: {
-  label: string
-  value: string | number
-  icon: React.ComponentType<{ size?: number; className?: string }>
-  loading: boolean
-  accent?: "primary" | "emerald" | "amber" | "rose"
-}) {
-  const accentClasses: Record<string, { ring: string; iconBg: string; iconText: string }> = {
-    primary: { ring: "ring-primary/10", iconBg: "bg-primary/10", iconText: "text-primary" },
-    emerald: { ring: "ring-emerald-500/10", iconBg: "bg-emerald-500/10", iconText: "text-emerald-600" },
-    amber: { ring: "ring-amber-500/10", iconBg: "bg-amber-500/10", iconText: "text-amber-600" },
-    rose: { ring: "ring-rose-500/10", iconBg: "bg-rose-500/10", iconText: "text-rose-600" },
-  }
-  const a = accentClasses[accent] ?? accentClasses.primary
-
-  // Animated counter for numeric values
-  const [displayValue, setDisplayValue] = useState<string | number>(0)
-  useEffect(() => {
-    if (loading) return
-    if (typeof value === "number") {
-      const duration = 600
-      const start = performance.now()
-      const end = value
-      function tick(now: number) {
-        const elapsed = now - start
-        const progress = Math.min(elapsed / duration, 1)
-        // Ease-out cubic
-        const eased = 1 - Math.pow(1 - progress, 3)
-        setDisplayValue(Math.round(eased * end))
-        if (progress < 1) requestAnimationFrame(tick)
-      }
-      requestAnimationFrame(tick)
-    } else {
-      setDisplayValue(value)
-    }
-  }, [value, loading])
-
-  return (
-    <div className={`flex flex-col gap-3 rounded-2xl border border-border/50 bg-card/60 backdrop-blur-xl px-5 py-4 shadow-lg ring-1 ${a.ring} transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5`}>
-      <div className="flex items-center gap-3">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${a.iconBg}`}>
-          <Icon size={18} className={a.iconText} />
-        </div>
-        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{label}</span>
-      </div>
-      {loading ? (
-        <Skeleton className="h-8 w-20" />
-      ) : (
-        <span className="text-3xl font-extrabold tracking-tight text-foreground">{displayValue}</span>
-      )}
     </div>
   )
 }
@@ -379,12 +308,6 @@ export default function Progress() {
   const [historyError, setHistoryError] = useState(false)
   const [history, setHistory] = useState<DailyHistoryItem[]>([])
 
-  const [dueLoading, setDueLoading] = useState(true)
-  const [dueCount, setDueCount] = useState<number>(0)
-
-  const [gapsLoading, setGapsLoading] = useState(true)
-  const [gapsClosed, setGapsClosed] = useState<number>(0)
-
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [summary, setSummary] = useState<ProgressSummary | null>(null)
 
@@ -394,11 +317,6 @@ export default function Progress() {
 
   const [docsLoading, setDocsLoading] = useState(true)
   const [docList, setDocList] = useState<DocListItem[]>([])
-
-  // Mastery score: average accuracy_pct across recent sessions
-  const [masteryLoading, setMasteryLoading] = useState(true)
-  const [masteryScore, setMasteryScore] = useState<number | null>(null)
-  const [cardsMastered, setCardsMastered] = useState<number>(0)
 
   useEffect(() => {
     let cancelled = false
@@ -416,30 +334,6 @@ export default function Progress() {
           setHistoryLoading(false)
           setHistoryError(true)
         }
-      })
-
-    fetchDueCount()
-      .then((d) => {
-        if (!cancelled) {
-          setDueCount(d.due_today)
-          setDueLoading(false)
-        }
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Progress] study/due-count failed", e)
-        if (!cancelled) setDueLoading(false)
-      })
-
-    fetchMisconceptionStats()
-      .then((d) => {
-        if (!cancelled) {
-          setGapsClosed(d.resolved_count)
-          setGapsLoading(false)
-        }
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Progress] study/misconception-stats failed", e)
-        if (!cancelled) setGapsLoading(false)
       })
 
     fetchProgressSummary()
@@ -481,29 +375,6 @@ export default function Progress() {
         if (!cancelled) setDocsLoading(false)
       })
 
-    // Mastery score: average accuracy across recent sessions + total correct as mastered proxy
-    fetchSessions()
-      .then((d) => {
-        if (!cancelled) {
-          const sessionsWithAccuracy = d.items.filter((s) => s.accuracy_pct !== null)
-          const avgAccuracy =
-            sessionsWithAccuracy.length > 0
-              ? Math.round(
-                  sessionsWithAccuracy.reduce((sum, s) => sum + (s.accuracy_pct ?? 0), 0) /
-                    sessionsWithAccuracy.length,
-                )
-              : null
-          const totalCorrect = d.items.reduce((s, i) => s + i.cards_correct, 0)
-          setMasteryScore(avgAccuracy)
-          setCardsMastered(totalCorrect)
-          setMasteryLoading(false)
-        }
-      })
-      .catch((e: unknown) => {
-        logger.warn("[Progress] study/sessions failed", e)
-        if (!cancelled) setMasteryLoading(false)
-      })
-
     return () => {
       cancelled = true
     }
@@ -516,7 +387,6 @@ export default function Progress() {
   // truncates any run longer than the window -- and StudyHabitsSection lower
   // down this same page has always shown the stored value, so the page
   // displayed two different streaks at once.
-  const streak = summary?.current_streak.value ?? 0
   const hasAnyStudy = totalReviewed > 0
 
   // Chart data: last 30 days, fill in missing dates with 0
@@ -546,7 +416,7 @@ export default function Progress() {
       {/* Empty state -- no study history yet */}
       {!historyLoading && !hasAnyStudy && (
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-16 text-center">
-          <TrendingUp size={32} className="text-muted-foreground" />
+          <Target size={32} className="text-muted-foreground" />
           <p className="text-base font-medium text-muted-foreground">
             Start studying to see your progress here
           </p>
@@ -556,88 +426,80 @@ export default function Progress() {
         </div>
       )}
 
-      {/* Stats row */}
+      {/* Measured: every card here carries its own definition, basis and sample
+          size, straight from /progress/summary. "Mastery Score" is deliberately
+          absent -- it was a weighted composite no reader could check against
+          their own week, and it read 90% after a single session. */}
       <section className="flex flex-col gap-3">
-        <div className="rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-6 py-4 border border-primary/10">
-          <h2 className="text-lg font-bold text-foreground">Overview</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">Your learning journey at a glance</p>
+        <div className="rounded-2xl border border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-6 py-4">
+          <h2 className="text-lg font-bold text-foreground">Measured</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Counted from what you did. Each one shows how it was computed — the
+            info icon gives the definition and the numbers behind it.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard
-            label="Mastery Score"
-            value={masteryScore !== null ? `${masteryScore}%` : "—"}
-            icon={TrendingUp}
-            loading={masteryLoading}
+          <MetricCard
+            label="Retention (30d)"
+            metric={summary?.retention_30d}
+            icon={Target}
+            loading={summaryLoading}
             accent="primary"
           />
-          <StatCard
+          <MetricCard
             label="Cards Mastered"
-            value={cardsMastered}
+            metric={summary?.mature_cards}
             icon={BookOpen}
-            loading={masteryLoading}
+            loading={summaryLoading}
             accent="emerald"
           />
-          <StatCard
+          <MetricCard
             label="Due Today"
-            value={dueCount}
+            metric={summary?.due_today}
             icon={Target}
-            loading={dueLoading}
+            loading={summaryLoading}
             accent="rose"
           />
-          <StatCard
-            label="Study Streak"
-            value={streak}
-            icon={TrendingUp}
+          <MetricCard
+            label="Reviews (30d)"
+            metric={summary?.reviews_30d}
+            icon={BookOpen}
             loading={summaryLoading}
-            accent="amber"
+            accent="primary"
           />
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {/* Named for what is measured. This is a surface being open and
-              visible, sampled every 15s -- not time studied, and not attention.
-              An em dash rather than 0 when nothing has been recorded. */}
-          <StatCard
+          <MetricCard
             label="Time in Luminary (7d)"
-            value={
-              summary?.time_on_luminary.value != null
-                ? `${summary.time_on_luminary.value}m`
-                : "—"
-            }
+            metric={summary?.time_on_luminary}
             icon={Clock}
             loading={summaryLoading}
             accent="primary"
           />
-          <StatCard
+          <MetricCard
             label="Active Days (7d)"
-            value={summary?.active_days.value ?? "—"}
+            metric={summary?.active_days}
             icon={CheckCircle2}
             loading={summaryLoading}
             accent="amber"
           />
-          <StatCard
-            label="Reviews (30d)"
-            value={totalReviewed}
-            icon={BookOpen}
-            loading={historyLoading}
-            accent="primary"
-          />
-          <StatCard
+          <MetricCard
             label="Gaps Closed"
-            value={gapsClosed}
+            metric={summary?.gaps_closed}
             icon={CheckCircle2}
-            loading={gapsLoading}
+            loading={summaryLoading}
             accent="emerald"
           />
-          <StatCard
+          <MetricCard
             label="Documents"
-            value={summary?.documents.value ?? "—"}
+            metric={summary?.documents}
             icon={BookOpen}
             loading={summaryLoading}
             accent="emerald"
           />
-          <StatCard
+          <MetricCard
             label="Notes"
-            value={summary?.notes.value ?? "—"}
+            metric={summary?.notes}
             icon={StickyNote}
             loading={summaryLoading}
             accent="amber"
