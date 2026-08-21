@@ -30,7 +30,7 @@ from collections import Counter
 from pathlib import Path
 
 from app.config import get_settings
-from app.services.model_loading import MODEL_LOAD_LOCK
+from app.services.model_loading import MODEL_LOAD_LOCK, offline_model_load
 from app.types import is_technical_content
 
 logger = logging.getLogger(__name__)
@@ -425,13 +425,18 @@ class EntityExtractor:
             from gliner import GLiNER  # noqa: PLC0415
 
             logger.info("Loading GLiNER model", extra={"model_id": self._model_id})
-            # Try loading locally first to prevent blocking name resolution attempts offline
+            # Try loading locally first to prevent blocking name resolution attempts offline.
+            # `local_files_only=True` alone does not achieve that: GLiNER forwards it to
+            # its own checkpoint but loads the tokenizer through a bare
+            # `AutoTokenizer.from_pretrained`, which still reaches for huggingface.co and
+            # raises when the network is down rather than absent.
             try:
-                self._model = GLiNER.from_pretrained(
-                    self._model_id,
-                    cache_dir=str(self._model_dir),
-                    local_files_only=True,
-                )
+                with offline_model_load():
+                    self._model = GLiNER.from_pretrained(
+                        self._model_id,
+                        cache_dir=str(self._model_dir),
+                        local_files_only=True,
+                    )
                 logger.info("Loaded GLiNER model (local cache)")
             except Exception as local_exc:
                 logger.debug(
