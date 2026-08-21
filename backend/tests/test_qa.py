@@ -956,6 +956,83 @@ def test_enrich_citation_titles_all_scope_populates_from_chunks():
     assert result[0]["document_title"] == "The Odyssey"
 
 
+def test_enrich_citation_titles_keeps_each_citation_on_its_own_document():
+    """Every retrieved chunk carries ("", 0) for (section_heading, page), so a
+    lookup keyed on that pair collapses to one entry and "first match wins"
+    relabels every citation with the first chunk's document. Measured on two
+    chunks from two documents: the second was attributed to the first.
+    """
+    a = _make_chunk("docA", section="")
+    a.chunk_id, a.page = "c1", 0
+    b = _make_chunk("docB", section="")
+    b.chunk_id, b.page = "c2", 0
+    citations = [
+        {"chunk_id": "c1", "document_id": "docA", "section_heading": "", "page": 0},
+        {"chunk_id": "c2", "document_id": "docB", "section_heading": "", "page": 0},
+    ]
+    titles = {"docA": "Attention Is All You Need", "docB": "Sutton & Barto RL"}
+    result = _enrich_citation_titles(citations, [a, b], titles, "all")
+    assert [c["document_title"] for c in result] == [
+        "Attention Is All You Need",
+        "Sutton & Barto RL",
+    ]
+
+
+def test_enrich_citation_titles_resolves_by_chunk_id_without_document_id():
+    """A citation carrying only chunk_id still names the right document."""
+    a = _make_chunk("docA", section="")
+    a.chunk_id, a.page = "c1", 0
+    citations = [{"chunk_id": "c1", "section_heading": "", "page": 0}]
+    result = _enrich_citation_titles(citations, [a], {"docA": "Some Book"}, "all")
+    assert result[0]["document_title"] == "Some Book"
+
+
+@pytest.mark.asyncio
+async def test_fill_citation_locations_reads_section_and_page_from_the_chunk_row(monkeypatch):
+    """A resolved citation cannot learn where it sits from the chunk it came
+    from: embed_node writes section_heading "" and page 0 into every vector row
+    and the keyword path hardcodes the same, so the chip rendered with no
+    section and "page 0" while the section row held the real heading.
+    """
+    from app.services import qa as qa_module
+
+    async def fake_locations(chunk_ids):
+        assert chunk_ids == ["c1", "c2"]
+        return {
+            "c1": ("sec-1", 4, "iv", "Multi-Head Attention"),
+            "c2": (None, None, None, None),
+        }
+
+    monkeypatch.setattr(
+        "app.repos.document_repo.fetch_chunk_locations", fake_locations
+    )
+    citations = [
+        {"chunk_id": "c1", "section_heading": "", "page": 0},
+        {"chunk_id": "c2", "section_heading": "", "page": 0},
+    ]
+    await qa_module._fill_citation_locations(citations)
+
+    assert citations[0]["section_heading"] == "Multi-Head Attention"
+    assert citations[0]["page"] == 4
+    # A chunk with no section row stays blank rather than inventing a heading.
+    assert citations[1]["section_heading"] == ""
+    assert citations[1]["page"] == 0
+
+
+@pytest.mark.asyncio
+async def test_fill_citation_locations_never_overwrites_a_real_value(monkeypatch):
+    from app.services import qa as qa_module
+
+    async def fake_locations(chunk_ids):
+        return {"c1": ("sec-1", 9, "ix", "Wrong Heading")}
+
+    monkeypatch.setattr("app.repos.document_repo.fetch_chunk_locations", fake_locations)
+    citations = [{"chunk_id": "c1", "section_heading": "Already Known", "page": 3}]
+    await qa_module._fill_citation_locations(citations)
+    assert citations[0]["section_heading"] == "Already Known"
+    assert citations[0]["page"] == 3
+
+
 @pytest.mark.asyncio
 async def test_citations_passed_through_from_graph(test_db):
     """Citations returned by graph are passed through in the done event."""

@@ -18,7 +18,8 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import ChunkModel, DocumentModel, ImageModel, SectionModel
+from app.models import DocumentModel, ImageModel
+from app.repos.document_repo import fetch_chunk_locations
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.context_packer import pack_context_indexed
@@ -99,36 +100,12 @@ async def _fetch_section_ids_and_pages_for_chunks(
 ) -> dict[str, tuple[str | None, int | None]]:
     """Return {chunk_id: (section_id, pdf_page_number, pdf_page_label, heading)}.
 
-    Used by synthesize_node to build SourceCitation entries from retrieved chunks.
-    Returns {} on any DB error (non-fatal).
+    Kept as a name because `chat_graph` re-exports it. The query itself lives in
+    the repo layer so the `/qa` citation path resolves location identically --
+    the two lists render side by side under one answer and must not disagree
+    about which section a chunk is in.
     """
-    if not chunk_ids:
-        return {}
-    try:
-        async with get_session_factory()() as session:
-            rows = await session.execute(
-                select(
-                    ChunkModel.id,
-                    ChunkModel.section_id,
-                    ChunkModel.pdf_page_number,
-                    ChunkModel.pdf_page_label,
-                    SectionModel.heading,
-                )
-                .outerjoin(SectionModel, SectionModel.id == ChunkModel.section_id)
-                .where(ChunkModel.id.in_(chunk_ids))
-            )
-            return {
-                row.id: (
-                    row.section_id,
-                    row.pdf_page_number,
-                    row.pdf_page_label,
-                    row.heading,
-                )
-                for row in rows
-            }
-    except Exception:
-        logger.warning("_fetch_section_ids_and_pages_for_chunks: DB lookup failed", exc_info=True)
-        return {}
+    return await fetch_chunk_locations(chunk_ids)
 
 
 async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
