@@ -3,9 +3,11 @@ import {
   buildModelOptions,
   buildTransparencyIconLabel,
   buildScopeComboboxLabel,
+  cloudOverrideAllowed,
   DRAWER_SECTIONS,
   effectiveDefaultModel,
   shortModelLabel,
+  shouldClearPrivateModeOverride,
   TRANSPARENCY_DEFAULT_OPEN,
 } from "./chatSettingsUtils"
 
@@ -160,6 +162,39 @@ describe("buildScopeComboboxLabel", () => {
     const preloadDocId = "doc-1"
     const selectedDoc = docList.find((d) => d.id === preloadDocId)
     expect(buildScopeComboboxLabel(selectedDoc?.title ?? null)).toBe("Doc One")
+  })
+})
+
+describe("cloudOverrideAllowed", () => {
+  it("is false in private mode", () => {
+    expect(cloudOverrideAllowed("private")).toBe(false)
+  })
+
+  it("is true in hybrid and cloud mode", () => {
+    expect(cloudOverrideAllowed("hybrid")).toBe(true)
+    expect(cloudOverrideAllowed("cloud")).toBe(true)
+  })
+
+  it("is true when mode is undefined (still loading)", () => {
+    expect(cloudOverrideAllowed(undefined)).toBe(true)
+  })
+})
+
+describe("shouldClearPrivateModeOverride", () => {
+  it("clears a cloud override once mode becomes private", () => {
+    expect(shouldClearPrivateModeOverride("private", "openai/gpt-5.4")).toBe(true)
+  })
+
+  it("leaves a local override alone in private mode", () => {
+    expect(shouldClearPrivateModeOverride("private", "llama3.2:latest")).toBe(false)
+  })
+
+  it("leaves Auto (empty override) alone in private mode", () => {
+    expect(shouldClearPrivateModeOverride("private", "")).toBe(false)
+  })
+
+  it("leaves a cloud override alone outside private mode", () => {
+    expect(shouldClearPrivateModeOverride("hybrid", "openai/gpt-5.4")).toBe(false)
   })
 })
 

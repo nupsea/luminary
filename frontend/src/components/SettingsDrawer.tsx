@@ -239,8 +239,19 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const [isSaving, setIsSaving] = useState(false)
 
   const isCloudMode = localMode === "cloud" || localMode === "hybrid"
+  // Whether a key is stored is part of the cache key, not just a fetch input:
+  // the endpoint returns the curated fallback with no key and the live
+  // per-key list with one, so keying on provider alone served the keyless
+  // list for another five minutes after the user pasted their key -- which
+  // reads exactly as "it doesn't show my models".
+  const hasKeyForFetch =
+    localProvider === "openai"
+      ? Boolean(llm?.has_openai_key)
+      : localProvider === "anthropic"
+        ? Boolean(llm?.has_anthropic_key)
+        : Boolean(llm?.has_google_key)
   const { data: availableModels = [], isLoading: modelsLoading } = useQuery({
-    queryKey: ["llm-models", localProvider],
+    queryKey: ["llm-models", localProvider, hasKeyForFetch],
     queryFn: () => fetchModels(localProvider),
     enabled: isCloudMode && open,
     staleTime: 5 * 60 * 1000,
@@ -288,6 +299,11 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       setApiKey("")
       toast.success("Settings saved")
       void queryClient.invalidateQueries({ queryKey: ["llm-settings"] })
+      // A newly saved key changes what the provider will list, and the chat and
+      // study selectors read their own copies of it.
+      void queryClient.invalidateQueries({ queryKey: ["llm-models"] })
+      void queryClient.invalidateQueries({ queryKey: ["chat-cloud-models"] })
+      void queryClient.invalidateQueries({ queryKey: ["study-cloud-models"] })
     } catch {
       toast.error("Failed to save settings")
     } finally {

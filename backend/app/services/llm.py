@@ -231,12 +231,17 @@ class LLMService:
             # Luminary's prompts are all direct-answer shaped, so thinking is
             # disabled globally for local models.
             kwargs["think"] = False
-        elif model.startswith("openai/"):
-            kwargs["api_key"] = settings.OPENAI_API_KEY
-        elif model.startswith("anthropic/"):
-            kwargs["api_key"] = settings.ANTHROPIC_API_KEY
-        elif model.startswith("gemini/"):
-            kwargs["api_key"] = settings.GOOGLE_API_KEY
+        elif model.startswith(("openai/", "anthropic/", "gemini/")):
+            # A pinned model (an explicit per-request override, e.g. from the
+            # chat header's model selector) reaches here with override_key=None,
+            # so it must resolve its key the same way routed calls do -- DB/
+            # keychain first, env fallback -- or a key added only through
+            # Settings (the only path a packaged desktop app's user has) works
+            # for "Auto" chat and silently fails for every explicit choice.
+            from app.services.settings_service import resolve_provider_api_key  # noqa: PLC0415
+
+            provider = model.split("/", 1)[0]
+            kwargs["api_key"] = resolve_provider_api_key(provider)
         return kwargs
 
     def _offline_fallback_kwargs(

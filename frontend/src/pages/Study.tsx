@@ -28,7 +28,7 @@ import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { motion } from "framer-motion"
 import { toast } from "sonner"
 import { ModelSelector } from "@/components/ModelSelector"
-import { buildModelOptions, effectiveDefaultModel } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride } from "@/lib/chatSettingsUtils"
 import { fetchLLMSettings } from "@/lib/llmSettings"
 import { useAppStore } from "@/store"
 import { useEffectiveActiveDocument } from "@/hooks/useEffectiveActiveDocument"
@@ -209,13 +209,26 @@ export default function Study() {
     refetchOnWindowFocus: false,
   })
   const studyProvider = llmSettings?.provider
+  // Private mode's promise is on-device only, so a cloud model must never be
+  // offered as a per-generation override there -- see the matching guard in
+  // Chat.tsx.
+  const studyCloudAllowed = cloudOverrideAllowed(llmSettings?.mode)
   const { data: studyCloudModels } = useQuery({
     queryKey: ["study-cloud-models", studyProvider],
     queryFn: () =>
       apiGet<{ id: string }[]>("/settings/llm/models", { provider: studyProvider as string }),
-    enabled: Boolean(studyProvider),
+    enabled: Boolean(studyProvider) && studyCloudAllowed,
     staleTime: 300_000,
   })
+  const studyCloudModelChoices = studyCloudAllowed
+    ? (studyCloudModels ?? []).map((m) => `${studyProvider}/${m.id}`)
+    : []
+
+  // Derived, not cleared -- see the matching note in Chat.tsx. Every send
+  // reads `activeStudyModel`, never `studyModel`.
+  const activeStudyModel = shouldClearPrivateModeOverride(llmSettings?.mode, studyModel)
+    ? ""
+    : studyModel
 
   const { data: docList = [] } = useQuery<DocListItem[]>({
     queryKey: ["study-doc-list"],
@@ -291,7 +304,7 @@ export default function Study() {
           scope: "section",
           section_heading: sectionHeading,
           count: 8,
-          ...(studyModel ? { model: studyModel } : {}),
+          ...(activeStudyModel ? { model: activeStudyModel } : {}),
         })
       }
       if (!cards || cards.length === 0) {
@@ -502,14 +515,14 @@ export default function Study() {
         </div>
 
         <ModelSelector
-          value={studyModel}
+          value={activeStudyModel}
           onChange={setStudyModel}
           localModels={
             buildModelOptions(llmSettings).length > 0
               ? buildModelOptions(llmSettings)
               : (llmSettings?.available_local_models ?? [])
           }
-          cloudModels={(studyCloudModels ?? []).map((m) => `${studyProvider}/${m.id}`)}
+          cloudModels={studyCloudModelChoices}
           effectiveDefault={effectiveDefaultModel(llmSettings)}
           title="Model that writes the cards here. 'Auto' follows your Settings."
         />

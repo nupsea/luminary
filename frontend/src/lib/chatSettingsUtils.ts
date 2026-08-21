@@ -40,6 +40,29 @@ export function buildModelOptions(settings: LLMSettingsForUtils | undefined): st
 }
 
 /**
+ * Whether a cloud model may be offered as a per-request override. Private
+ * mode's promise is "all processing on-device via Ollama", so a cloud model
+ * must never even appear as a choice there -- not just fail to be used.
+ */
+export function cloudOverrideAllowed(mode: string | undefined): boolean {
+  return mode !== "private"
+}
+
+/**
+ * Whether a currently-selected per-request override must be cleared: it names
+ * a cloud model (has a provider prefix) but the mode has since become
+ * Private. Without this, a choice made back in Cloud/Hybrid mode keeps
+ * pinning a cloud model after switching -- invisible in the dropdown (which
+ * no longer offers it) but still sent on the next request.
+ */
+export function shouldClearPrivateModeOverride(
+  mode: string | undefined,
+  currentOverride: string,
+): boolean {
+  return mode === "private" && currentOverride.includes("/")
+}
+
+/**
  * Returns a human-readable label for a transparency confidence level.
  */
 export function buildTransparencyIconLabel(confidenceLevel: string): string {

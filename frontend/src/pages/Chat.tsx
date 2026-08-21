@@ -30,7 +30,7 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
-import { buildModelOptions, buildScopeComboboxLabel, effectiveDefaultModel, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
+import { buildModelOptions, buildScopeComboboxLabel, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride, TRANSPARENCY_DEFAULT_OPEN } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -561,18 +561,34 @@ export default function Chat() {
 
   // Cloud models for the configured provider, so the header selector can offer
   // a frontier model per-conversation (the /qa model override routes to it
-  // directly). Curated list — returned regardless of key presence.
+  // directly). Not fetched in Private mode: "All processing on-device via
+  // Ollama" is the promise of that mode, so a cloud model must never even be
+  // offered as a per-conversation override there.
   const chatProvider = llmSettings?.provider
+  const cloudAllowed = cloudOverrideAllowed(llmSettings?.mode)
   const { data: cloudModelList } = useQuery({
     queryKey: ["chat-cloud-models", chatProvider],
     queryFn: () =>
       apiGet<{ id: string }[]>("/settings/llm/models", { provider: chatProvider as string }),
-    enabled: Boolean(chatProvider),
+    enabled: Boolean(chatProvider) && cloudAllowed,
     staleTime: 300_000,
   })
   const localModelChoices = llmSettings?.available_local_models ?? []
-  const cloudModelChoices = (cloudModelList ?? []).map((m) => `${chatProvider}/${m.id}`)
+  // Guard against a stale cache too: react-query keeps the last-fetched list
+  // around when a query goes from enabled to disabled, so a provider fetched
+  // before switching to Private must not leak through here.
+  const cloudModelChoices = cloudAllowed
+    ? (cloudModelList ?? []).map((m) => `${chatProvider}/${m.id}`)
+    : []
   const effectiveModel = effectiveDefaultModel(llmSettings)
+
+  // A per-conversation override chosen back in Cloud/Hybrid mode must not keep
+  // pinning a cloud model once the user switches to Private -- that mode's
+  // promise is on-device only, and the stale override would still be sent to
+  // /qa even though the dropdown no longer offers it. Derived rather than
+  // cleared: the stored choice is left intact so switching back to Cloud
+  // restores it, and every send below reads `activeModel`, never `model`.
+  const activeModel = shouldClearPrivateModeOverride(llmSettings?.mode, model) ? "" : model
 
   // Check if any documents have been ingested (use prefetched cache if available)
   const cachedDocs = qc.getQueryData<{ items?: unknown[] } | unknown[]>(
@@ -675,7 +691,7 @@ export default function Chat() {
       const created = await createChatSession({
         scope: nextScope,
         document_ids: nextScope === "single" && nextDocId ? [nextDocId] : [],
-        model: model || null,
+        model: activeModel || null,
       })
       setActiveSessionId(created.id)
       setMessagesRaw([])
@@ -748,7 +764,7 @@ export default function Chat() {
         const created = await createChatSession({
           scope: effScope,
           document_ids: sessionDocIds,
-          model: model || null,
+          model: activeModel || null,
         })
         sessionId = created.id
         setActiveSessionId(created.id)
@@ -795,7 +811,7 @@ export default function Chat() {
           question,
           document_ids: documentIds,
           scope: effScope,
-          model: model || null,
+          model: activeModel || null,
           messages: historySlice.length > 0 ? historySlice : undefined,
           web_enabled: webEnabled,
           creative: creativeEnabled,
@@ -1080,7 +1096,7 @@ export default function Chat() {
         {/* Inline model indicator + per-conversation override */}
         {!llmLoading && llmSettings && (
           <ModelSelector
-            value={model}
+            value={activeModel}
             onChange={(m) => {
               setModel(m)
               const sid = useAppStore.getState().activeChatSessionId

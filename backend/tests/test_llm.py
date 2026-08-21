@@ -252,6 +252,55 @@ async def test_gemini_prefix_sets_api_key(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.mark.asyncio
+async def test_pinned_model_uses_db_cached_key_not_only_env(settings_db, monkeypatch):
+    """A key added only through Settings (the only path a packaged desktop
+    app's user has -- there is no .env entry) must still work for an explicit
+    per-request model override, not just for routed "Auto" chat. Regression
+    test: _build_kwargs used to read settings.OPENAI_API_KEY (env-only) for a
+    pinned model, so a Settings-only key silently failed every override.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    import app.services.settings_service as svc_module
+
+    svc_module._cache["openai_api_key"] = "sk-from-keychain"
+
+    svc = LLMService()
+    mock_response = _make_completion_response("ok")
+    with patch(
+        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
+    ) as mock_ac:
+        await svc.generate("hi", model="openai/gpt-4o")
+    assert mock_ac.call_args.kwargs["api_key"] == "sk-from-keychain"
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_pinned_model_db_cached_key_wins_over_env(settings_db, monkeypatch):
+    """DB/keychain takes precedence over env when both are set, matching
+    get_effective_routing's precedence -- the two must never disagree.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    import app.services.settings_service as svc_module
+
+    svc_module._cache["openai_api_key"] = "sk-from-keychain"
+
+    svc = LLMService()
+    mock_response = _make_completion_response("ok")
+    with patch(
+        "litellm.acompletion", new_callable=AsyncMock, return_value=mock_response
+    ) as mock_ac:
+        await svc.generate("hi", model="openai/gpt-4o")
+    assert mock_ac.call_args.kwargs["api_key"] == "sk-from-keychain"
+    get_settings.cache_clear()
+
+
 # GET /settings/llm endpoint
 
 
