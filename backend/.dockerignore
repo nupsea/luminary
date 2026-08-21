@@ -1,0 +1,16 @@
+# backend/Dockerfile.ci builds with context=backend/ (Makefile: `docker build
+# -f backend/Dockerfile.ci backend/`), so the root .dockerignore never applies
+# here -- Docker only reads the .dockerignore beside the build context root.
+# Dockerfile.ci does `COPY . .`; without this, the same class of bug fixed at
+# the repo root (a developer's real backend/.env baked into an image layer)
+# is still open for anyone running `make ci` on an Intel Mac.
+.env
+.env.*
+
+.venv/
+__pycache__/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+htmlcov/
+.coverage
