@@ -14,6 +14,7 @@ already use `Depends(get_db)`.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -22,7 +23,7 @@ from fastapi import Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -30,6 +31,8 @@ from app.models import (
     SectionModel,
 )
 from app.repos._helpers import get_or_404
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentRepo:
@@ -163,3 +166,46 @@ class DocumentRepo:
 
 def get_document_repo(session: AsyncSession = Depends(get_db)) -> DocumentRepo:
     return DocumentRepo(session)
+
+
+# chunk_id -> (section_id, pdf_page_number, pdf_page_label, section_heading)
+ChunkLocation = tuple[str | None, int | None, str | None, str | None]
+
+
+async def fetch_chunk_locations(chunk_ids: list[str]) -> dict[str, ChunkLocation]:
+    """Where each chunk sits in its document: section, page, and heading.
+
+    A retrieved chunk cannot answer this itself. `embed_node` writes
+    `section_heading: ""` and `page: 0` into every vector row, so the fields
+    exist in the index and never carry anything, and the keyword path hardcodes
+    the same blanks -- the section row is the only place the heading lives and
+    `chunks.pdf_page_number` the only place the page does. Both citation paths
+    therefore resolve location here rather than trusting the chunk they were
+    built from.
+
+    Opens its own session so callers outside a request scope can use it.
+    Returns {} on any DB error: a citation without a page is degraded, a failed
+    answer is not.
+    """
+    if not chunk_ids:
+        return {}
+    try:
+        async with get_session_factory()() as session:
+            rows = await session.execute(
+                select(
+                    ChunkModel.id,
+                    ChunkModel.section_id,
+                    ChunkModel.pdf_page_number,
+                    ChunkModel.pdf_page_label,
+                    SectionModel.heading,
+                )
+                .outerjoin(SectionModel, SectionModel.id == ChunkModel.section_id)
+                .where(ChunkModel.id.in_(chunk_ids))
+            )
+            return {
+                row.id: (row.section_id, row.pdf_page_number, row.pdf_page_label, row.heading)
+                for row in rows
+            }
+    except Exception:
+        logger.warning("fetch_chunk_locations: DB lookup failed", exc_info=True)
+        return {}

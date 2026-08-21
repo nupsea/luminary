@@ -86,6 +86,30 @@ async def _maybe_rewrite_query(
     return question
 
 
+async def _fill_citation_locations(citations: list[dict]) -> None:
+    """Fill `section_heading` and `page` on each citation, in place.
+
+    Resolved from the chunk's row rather than from the retrieved chunk, which
+    never carries either. `page` stays the navigable sheet number the viewer
+    scrolls to; `pdf_page_label` (what the sheet is printed as) is carried by
+    `source_citations` and is not part of this shape.
+    """
+    from app.repos.document_repo import fetch_chunk_locations  # noqa: PLC0415
+
+    chunk_ids = [c["chunk_id"] for c in citations if c.get("chunk_id")]
+    if not chunk_ids:
+        return
+    locations = await fetch_chunk_locations(chunk_ids)
+    for c in citations:
+        _section_id, pdf_page, _label, heading = locations.get(
+            c.get("chunk_id") or "", (None, None, None, None)
+        )
+        if heading and not (c.get("section_heading") or "").strip():
+            c["section_heading"] = heading
+        if pdf_page and not c.get("page"):
+            c["page"] = pdf_page
+
+
 def _enrich_citation_titles(
     citations: list[dict],
     chunks: list[ScoredChunk],
@@ -97,26 +121,41 @@ def _enrich_citation_titles(
     scope='single' — set document_title=None on all citations (redundant when
     the user is already reading a specific document).
 
-    scope='all' — match each citation to a retrieved chunk by
-    (section_heading, page) and fill in the authoritative title from doc_titles.
-    If no chunk matches, keep whatever the LLM put in (graceful degradation).
+    scope='all' — name the document each citation actually came from.
+
+    A marker citation already carries the `document_id` of the chunk it was
+    resolved from, so that is what names it. The previous lookup matched on
+    (section_heading, page) instead, and every retrieved chunk carries
+    ("", 0) -- see `fetch_chunk_locations` -- so the index collapsed to a
+    single entry and "first match wins" relabelled every citation with the
+    first chunk's document. Measured on two chunks from two documents, the
+    second was attributed to the first. Fall back to the chunk match only for
+    citations with no document_id (a retyped excerpt that never resolved).
     """
     if scope == "single":
         for c in citations:
             c["document_title"] = None
         return citations
 
-    # Build lookup: (section_heading, page) -> document_id  (first match wins)
-    chunk_index: dict[tuple[str, int], str] = {}
+    chunk_docs = {chunk.chunk_id: chunk.document_id for chunk in chunks}
+
+    # Retained for citations carrying neither id -- a retyped excerpt that never
+    # resolved to a marker. Keyed only on a *non-empty* heading: every retrieved
+    # chunk carries ("", 0), so an unguarded key made one entry that relabelled
+    # every citation with the first chunk's document.
+    heading_index: dict[tuple[str, int], str] = {}
     for chunk in chunks:
-        key = (chunk.section_heading, chunk.page)
-        if key not in chunk_index:
-            chunk_index[key] = chunk.document_id
+        heading = (chunk.section_heading or "").strip()
+        if not heading:
+            continue
+        heading_index.setdefault((heading, chunk.page), chunk.document_id)
 
     for c in citations:
-        heading = (c.get("section_heading") or "").strip()
-        page = int(c.get("page") or 0)
-        doc_id = chunk_index.get((heading, page))
+        doc_id = c.get("document_id") or chunk_docs.get(c.get("chunk_id") or "")
+        if not doc_id:
+            heading = (c.get("section_heading") or "").strip()
+            if heading:
+                doc_id = heading_index.get((heading, int(c.get("page") or 0)))
         if doc_id and doc_id in doc_titles:
             c["document_title"] = doc_titles[doc_id]
 
@@ -1075,6 +1114,12 @@ class QAService:
                 citations, citations_unresolved = _resolve_marker_citations(
                     citations, result.get("cited_chunks") or [], doc_titles, answer_text
                 )
+                # The chunk a citation was resolved from cannot say where it sits:
+                # every vector row carries section_heading "" and page 0. Without
+                # this the chip renders with no section and "page 0" while the
+                # section row holds the real heading, and several chips on one
+                # answer become indistinguishable from each other.
+                await _fill_citation_locations(citations)
                 # Summary/graph routes ground on section_context with zero chunks,
                 # so both are the grounding an excerpt must be found in.
                 grounding_texts = [
