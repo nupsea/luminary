@@ -6,6 +6,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-22
+
+### Fixed
+- **Reading was often not recorded at all**, so a document you had opened and
+  read never appeared under "continue" and its progress stayed at zero.
+- **Scrolling a document's contents list counted as reading it.** Only the
+  reading pane counts now, and a section must hold the screen for five seconds.
+- **Very long sections could never be marked read** — one measured document
+  holds five million characters in a single section.
+- **Citations name their section and page again**, and in library-wide answers
+  each citation names the document it actually came from rather than borrowing
+  the first one's title.
+- **A cloud model chosen in Settings failed offline-style errors** no longer
+  applies: with the network down, cached models now load from disk instead of
+  reaching for huggingface.co and losing entity extraction.
+- **"Documents touched this week" counted documents you added, not read.**
+
+### Changed
+- **The home page leads with a review session you can finish**, rather than a
+  library-wide count of everything overdue.
+- **Study time is shown as two labelled measures** — time on screen, and time in
+  closed study sessions — instead of two numbers that disagreed.
+- **"Fading" is now "Not opened lately"**, since notes do not decay.
+- **Section summaries are no longer attached to answer context by default**
+  (`QA_ATTACH_SECTION_SUMMARIES`); attaching them cost roughly a third of the
+  passages the model sees at the current token budget.
+- **README rewritten** to lead with what Luminary does rather than six install
+  paths.
+
 ## [0.7.1] - 2026-08-21
 
 ### Fixed
