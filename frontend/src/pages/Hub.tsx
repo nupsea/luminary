@@ -85,10 +85,11 @@ export default function Hub() {
   const remainingReads = (data.continue_reading ?? []).filter(
     (d) => d.document_id !== resume?.document_id,
   )
+  // continue_study is not offered: Study reads neither search params nor route
+  // state, so a session id in a link silently starts a fresh session. The lane
+  // cannot do what its label promises until resume exists.
   const hasContinue =
-    remainingReads.length > 0 ||
-    (data.continue_notes?.length ?? 0) > 0 ||
-    data.continue_study != null
+    remainingReads.length > 0 || (data.continue_notes?.length ?? 0) > 0
 
   return (
     <PageSurface>
@@ -104,7 +105,7 @@ export default function Hub() {
         <ContinueSection
           docs={remainingReads}
           notes={data.continue_notes ?? []}
-          study={data.continue_study ?? null}
+          study={null}
         />
       )}
 
@@ -219,7 +220,6 @@ function WhereYouLeftOff({
   const focusCount = scoped > 0 ? scoped : total
   const sessionSize = Math.min(_SESSION_SIZE, focusCount)
   const estimatedMin = Math.max(1, Math.round(sessionSize * 0.9))
-  const overflow = total - focusCount
 
   const startSession = () => {
     markRecommendationActed(action?.recommendation_id)
@@ -237,8 +237,37 @@ function WhereYouLeftOff({
   }
 
   return (
-    <HubSection label="Where you left off" accent gap="gap-5">
+    <HubSection label="Start here" accent gap="gap-5">
       <div className="flex flex-col gap-6 rounded-3xl border border-border bg-card px-7 py-6 transition-colors hover:border-primary/35">
+        {action && total > 0 && (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3.5">
+              <div className="flex min-w-0 items-center gap-2.5">
+                {action.collection_color && (
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: action.collection_color }}
+                    aria-hidden
+                  />
+                )}
+                <span className="truncate text-sm font-medium text-foreground">
+                  {action.collection_name ?? "Your daily review"}
+                </span>
+                <span className="shrink-0 text-[13px] text-muted-foreground">
+                  · {focusCount} card{focusCount === 1 ? "" : "s"} due
+                </span>
+              </div>
+              <button
+                onClick={startSession}
+                className="flex shrink-0 items-center gap-2 rounded-xl border border-border bg-transparent px-4 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:border-muted-foreground/40 hover:bg-accent active:translate-y-px"
+              >
+                Start {sessionSize}-card session
+                <span className="font-normal text-muted-foreground">~{estimatedMin} min</span>
+              </button>
+            </div>
+            <div className="h-px bg-border" />
+          </>
+        )}
         {resume ? (
           <>
             <div className="flex items-start gap-4">
@@ -280,44 +309,10 @@ function WhereYouLeftOff({
           </>
         ) : (
           <p className="text-[15px] text-muted-foreground">
-            Nothing open. Add something to the library, or start a review below.
+            Nothing open yet — add something to your library to pick up here.
           </p>
         )}
 
-        {action && total > 0 && (
-          <>
-            <div className="h-px bg-border" />
-            <div className="flex flex-wrap items-center justify-between gap-3.5">
-              <div className="flex min-w-0 items-center gap-2.5">
-                {action.collection_color && (
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: action.collection_color }}
-                    aria-hidden
-                  />
-                )}
-                <span className="truncate text-sm font-medium text-foreground">
-                  {action.collection_name ?? "Your daily review"}
-                </span>
-                <span className="shrink-0 text-[13px] text-muted-foreground">
-                  · {focusCount} card{focusCount === 1 ? "" : "s"} due
-                </span>
-              </div>
-              <button
-                onClick={startSession}
-                className="flex shrink-0 items-center gap-2 rounded-xl border border-border bg-transparent px-4 py-2.5 text-[13px] font-semibold text-foreground transition-colors hover:border-muted-foreground/40 hover:bg-accent active:translate-y-px"
-              >
-                Start {sessionSize}-card session
-                <span className="font-normal text-muted-foreground">~{estimatedMin} min</span>
-              </button>
-            </div>
-            {overflow > 0 && (
-              <span className="text-xs text-muted-foreground/80">
-                {total} cards due across your library
-              </span>
-            )}
-          </>
-        )}
       </div>
     </HubSection>
   )
@@ -453,10 +448,21 @@ function ThisWeek({ stats }: { stats: WeeklyStats }) {
           </div>
         ))}
       </div>
+      {/* Two measures of time, and they are not the same measure. The bars are
+          sampled foreground time; `minutes_studied` is study-session wall clock,
+          which counts only sessions that were closed. They disagreed on one
+          library -- 0 minutes beside 22 minutes of bars -- so each now says what
+          it is rather than sitting side by side unlabelled. Never sum or average
+          them. */}
       <span className="text-xs text-muted-foreground/80">
-        {total > 0 ? `${durationLabel(total)} total` : "No time recorded yet"} ·{" "}
-        {stats.notes_written} note{stats.notes_written === 1 ? "" : "s"} · {stats.docs_touched} docs
-        touched
+        {total > 0 ? `${durationLabel(total)} on screen` : "No time recorded yet"} ·{" "}
+        {stats.minutes_studied > 0
+          ? `${stats.minutes_studied} min in closed study sessions`
+          : "no study session closed"}
+      </span>
+      <span className="text-xs text-muted-foreground/80">
+        {stats.notes_written} note{stats.notes_written === 1 ? "" : "s"} written ·{" "}
+        {stats.docs_touched} doc{stats.docs_touched === 1 ? "" : "s"} read
       </span>
     </div>
   )
@@ -499,7 +505,7 @@ function FadingBlock({ items }: { items: FadingItem[] }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <SectionLabel>Fading</SectionLabel>
+      <SectionLabel>Not opened lately</SectionLabel>
       <div className="flex flex-col gap-0.5">
         {items.map((item) => (
           <MiniRow

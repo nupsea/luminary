@@ -569,12 +569,18 @@ async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
             )
         )
     ).first()
+    # Documents actually read, not documents the library acquired.
+    # `content_activity` is deliberately bumped by `record_document_added` so the
+    # hub's recency feeds are not empty on a fresh library, which makes it the
+    # wrong source for a weekly engagement figure: on one library it reported 45
+    # of 48 documents "touched", 28 of them on the day of a bulk ingest.
+    # `reading_progress` is only written when a section has actually held the
+    # screen, so it is the one source here that cannot be inflated by ingesting.
     docs_row = (
         await session.execute(
             text(
-                "SELECT COUNT(DISTINCT member_id) FROM content_activity "
-                "WHERE member_type = 'document' "
-                "  AND last_meaningful_at >= datetime('now', '-7 days')"
+                "SELECT COUNT(DISTINCT document_id) FROM reading_progress "
+                "WHERE last_seen_at >= datetime('now', '-7 days')"
             )
         )
     ).first()
