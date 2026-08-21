@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint . --max-warnings 91",
+    "lint": "eslint . --max-warnings 90",
     "preview": "vite preview",
     "test": "vitest run",
     "regen:api-types": "bash scripts/regen-api-types.sh"

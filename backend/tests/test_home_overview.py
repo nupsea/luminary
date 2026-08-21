@@ -370,17 +370,37 @@ async def test_weekly_stats_count_recent_activity(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         await c.post("/notes", json={"content": "n1", "tags": [], "document_id": None})
         await c.post("/notes", json={"content": "n2", "tags": [], "document_id": None})
+        # Acquiring a document is not reading it. `record_document_added` bumps
+        # content_activity so the hub's recency feeds are not empty on a fresh
+        # library, which is why that table cannot source an engagement figure:
+        # on one real library it reported 45 of 48 documents "touched", 28 of
+        # them on the day of a bulk ingest.
         async with factory() as s:
-            await ActivityService(s).record_doc_read(doc_id)
+            await ActivityService(s).record_document_added(doc_id)
 
         body = (await c.get("/home/overview")).json()
         stats = body["weekly_stats"]
         assert stats is not None
         assert stats["notes_written"] >= 2
-        assert stats["docs_touched"] >= 1
+        assert stats["docs_touched"] == 0, "an ingested document must not count as read"
         # Cards and minutes should be zero in a fresh DB.
         assert stats["cards_reviewed"] == 0
         assert stats["minutes_studied"] == 0
+
+        # A section that actually held the screen is what counts.
+        async with factory() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO reading_progress "
+                    "(id, document_id, section_id, first_seen_at, last_seen_at, view_count) "
+                    "VALUES (:i, :d, :s, datetime('now'), datetime('now'), 1)"
+                ),
+                {"i": str(uuid.uuid4()), "d": doc_id, "s": str(uuid.uuid4())},
+            )
+            await s.commit()
+
+        stats = (await c.get("/home/overview")).json()["weekly_stats"]
+        assert stats["docs_touched"] == 1
 
 
 @pytest.mark.anyio

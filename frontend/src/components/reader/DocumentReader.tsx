@@ -676,7 +676,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   )
 
   // Track reading progress via IntersectionObserver (3-second dwell per section)
-  useReadingProgress(documentId, doc?.sections.length ?? 0)
+  useReadingProgress(documentId, doc?.sections.length ?? 0, readerContainerRef)
 
   // fetch saved reading position on mount; show ResumeBanner unless already dismissed this session
   useEffect(() => {
@@ -1343,8 +1343,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             </div>
           )}
 
-          {/* Read View — full document content as markdown, or transcript for YouTube */}
-          <div className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}>
+          {/* Read View — full document content as markdown, or transcript for YouTube.
+              `data-reading-surface` marks this as the only pane whose sections count
+              as reading: the contents list carries data-section-id too, and scrolling
+              a table of contents is not reading the document. */}
+          <div
+            data-reading-surface=""
+            className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}
+          >
             {isYouTube ? (
               <YouTubeTranscriptView doc={doc} initialSectionId={readTargetSectionId} initialChunkId={initialChunkId} />
             ) : (
