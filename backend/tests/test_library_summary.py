@@ -198,6 +198,7 @@ async def test_library_summary_error_when_fewer_than_2_docs(test_db):
     mock_llm.generate.assert_not_called()
 
 
+@pytest.mark.real_library_summary
 @pytest.mark.asyncio
 async def test_library_summary_stays_readable_while_it_refreshes(test_db):
     """A new ingest refreshes the library summary without ever leaving it missing.
