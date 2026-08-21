@@ -1,72 +1,135 @@
 # Luminary
 
-**Study smarter, locally.** Upload a book or paper, ask questions with source citations, and review with FSRS-scheduled flashcards — your data never leaves your machine.
+**Read it. Ask it. Actually remember it.** A local-first study workspace for the
+documents you already have.
 
-> Local-first document learning with cited Q&A and science-backed spaced repetition.
+[![Release](https://img.shields.io/github/v/release/nupsea/luminary?label=release)](https://github.com/nupsea/luminary/releases/latest)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](#install)
+[![Runs offline](https://img.shields.io/badge/runs-offline-success)](#it-keeps-working-with-the-wifi-off)
 
-No subscription. No cloud sync. Works offline with a local LLM (Ollama) or any API key you supply.
+Point it at a book, paper, video or article. It answers questions about them,
+turns them into flashcards, and schedules the review. Nothing leaves your
+machine unless you hand it an API key.
 
-**[Watch the intro video](https://youtu.be/semZlbJde_Q)** — a tour of Luminary.
+<!-- HERO: replace with assets/images/offline.gif — see docs/demo-assets.md -->
+<p align="center">
+  <img src="assets/images/reader.png" alt="Luminary reader: source on the left, generated summary on the right" width="900">
+</p>
+
+<p align="center"><a href="https://youtu.be/semZlbJde_Q"><b>Watch the two-minute tour</b></a></p>
 
 ---
 
-## Install and run
+## Why this and not a chatbot
 
-### macOS (Apple Silicon) — download the app (recommended)
+Three things, and they are the whole point.
 
-The simplest way in. Download `Luminary_<version>_aarch64.dmg` from the
-[latest release](https://github.com/nupsea/luminary/releases/latest), open it, and
-drag Luminary to your Applications folder.
+**Every answer shows its receipts.** A citation names the section and page it
+came from, and the quote is lifted from that passage rather than written by the
+model. It is not a nicety — a model asked to retype a quote will happily invent
+one, so Luminary never lets it: the model points at a passage, and the passage
+speaks for itself.
 
-There is nothing else to install. The Python runtime, every dependency and the
-local inference server all live inside the app — no terminal, Homebrew, Node or
-separate Ollama. Requires macOS 14 (Sonoma) or newer on Apple Silicon.
+**A flashcard is checked against your document.** Cards that quote a source get
+that quote verified against the text. A card that could not be checked says so
+instead of quietly passing. You always know which of your deck is grounded and
+which is the model's word for it.
 
-The download is about 700 MB. First launch fetches roughly 1.4 GB of models; your
-library opens after about 20 seconds and the rest finishes in the background,
-typically inside two minutes. A chat model is a separate ~2 GB download that the
-app offers when you first need one — everything else works without it.
+**It measures what you actually remember.** Before you flip a card, you say
+whether you know it. Luminary tracks how often you were right, so you find out
+where you are confidently wrong — the thing that ordinary review hides. FSRS
+schedules the next visit.
 
-Your library is kept in `~/Library/Application Support/sh.luminary.app/`.
+---
 
-**If it will not start,** the startup screen says what went wrong and can open a
-pre-filled bug report. Nothing is sent anywhere until you have read it and
-submitted it yourself. There is also a log at
-`~/Library/Logs/Luminary/luminary.log`.
+## Install
 
-**To remove it,** drag Luminary from Applications to the Trash. That leaves your
-library untouched; if you want that gone too, delete
-`~/Library/Application Support/sh.luminary.app/` as well.
+**macOS (Apple Silicon)** — download the `.dmg` from the
+**[latest release](https://github.com/nupsea/luminary/releases/latest)**, open
+it, drag Luminary to Applications. Done.
 
-### macOS (Apple Silicon) — one command
+Nothing else to install: Python, every dependency and the local inference server
+ship inside the app. No terminal, Homebrew, Node or separate Ollama. Needs
+macOS 14 (Sonoma) or newer.
 
-Choose this instead if you want Luminary running as a background service with a
-command-line tool, or if you already have a `~/.luminary` library from a source
-install and want to keep using it.
+> The download is ~700 MB. First launch fetches ~1.4 GB of models; your library
+> opens in about 20 seconds and the rest finishes in the background. A chat model
+> is a separate ~2 GB download the app offers when you first need one.
 
-The two installs are independent. They keep separate libraries — the app's under
-Application Support, this one at `~/.luminary` — and neither reads the other's, so
-pick one rather than running both.
+On Linux, Windows, Intel Mac, or want it as a background service?
+**[Every other install path is below.](#other-ways-to-install)**
 
-> **Beta.** This installer is new and has not yet been tested across a wide range
-> of Macs. If it fails, use the source install below and please
-> [open an issue](https://github.com/nupsea/luminary/issues) — it registers a
-> background service, so `luminary uninstall` cleanly reverses it.
+---
+
+## Your first five minutes
+
+1. **Add something.** Library → Add Content. A PDF, EPUB, docx or audio file — or
+   paste a web article or YouTube URL.
+2. **Wait for the summary card.** Usually under a minute. That means it is
+   indexed and ready.
+3. **Ask it something.** The Ask tab, or `⌘K` from anywhere. Click a citation to
+   land on the exact passage it came from.
+4. **Make some cards.** Study → generate from the document, then Start Review.
+   Predict before you flip.
+
+That is the loop. Everything else is built on it.
+
+---
+
+## It keeps working with the wifi off
+
+Luminary's default is a local model through Ollama, so the whole loop — reading,
+asking, generating cards, reviewing — runs with no connection and no account.
+Turn the wifi off mid-session and it keeps answering.
+
+Prefer a frontier model? Add an OpenAI, Anthropic or Google key in Settings and
+switch to Cloud or Hybrid mode. **Private mode never sends anything off the
+machine**, and it will not even offer you a cloud model.
+
+---
+
+## What else is in it
+
+| | |
+|---|---|
+| **Read** | Side-by-side PDF viewer, section navigation, dark-page mode, saved reading position, highlights and clippings |
+| **Ingest** | PDF, EPUB, docx, Markdown, txt, audio, video, web articles, YouTube, Kindle highlights |
+| **Ask** | Hybrid retrieval (vector + keyword + graph), Socratic mode, teach-back, optional web augmentation |
+| **Study** | Regular, cloze and code-trace cards; FSRS scheduling; three-phase sessions; prediction calibration |
+| **Notes** | Markdown editor with live preview, wiki-links, backlinks, Mermaid and Excalidraw |
+| **Track** | Mastery rings per document, "what's about to slip", study activity, time on task |
+| **Export** | Markdown vault (Obsidian-compatible), Anki `.apkg`, flashcard CSV |
+
+The Hub is the daily entry point: it picks the one thing most worth doing now —
+review what is due, carry on reading, or write something down.
+
+---
+
+## Other ways to install
+
+<details>
+<summary><b>macOS — one command (background service + CLI)</b></summary>
+
+Choose this if you want Luminary running at login with a command-line tool, or
+you already have a `~/.luminary` library from a source install.
+
+The two macOS installs are independent — separate libraries, neither reads the
+other's — so pick one rather than running both.
+
+> **Beta.** Not yet tested across a wide range of Macs. If it fails, use the
+> source install and please [open an issue](https://github.com/nupsea/luminary/issues).
+> It registers a background service, and `luminary uninstall` cleanly reverses it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nupsea/luminary/master/scripts/bootstrap.sh | bash
 ```
 
 Starts Luminary at login and opens it in your browser. No Homebrew, Node, git or
-Xcode tools required.
-
-The application installs to `~/Library/Application Support/Luminary` while your
-library stays at `~/.luminary`, so upgrades never touch your data.
-
-Requires macOS 14 (Sonoma) or newer. The first install downloads roughly 5GB of
-models and takes 15-25 minutes.
-
-Manage it with the `luminary` command (installed to `~/.local/bin`):
+Xcode tools required. The app installs to
+`~/Library/Application Support/Luminary`; your library stays at `~/.luminary`, so
+upgrades never touch your data. Needs macOS 14+. First install pulls ~5 GB of
+models and takes 15–25 minutes.
 
 ```bash
 luminary status      # version, paths, service and Ollama state
@@ -74,118 +137,78 @@ luminary stop        # stop the background service
 luminary update      # upgrade in place; your library is preserved
 luminary uninstall   # remove the app; asks before touching your library
 ```
+</details>
 
-### Linux & WSL — from source
+<details>
+<summary><b>Linux & WSL — from source</b></summary>
+
 A stock Ubuntu image ships none of `git`, `make` or `curl`, so install those first:
+
 ```bash
 sudo apt-get update && sudo apt-get install -y git make curl
 git clone https://github.com/nupsea/luminary.git
 cd luminary
 make install   # Installs uv, Node, Ollama; pulls models; builds the app
-make start     # Starts the production server on http://localhost:7820
+make start     # Production server on http://localhost:7820
 ```
-`make install` needs `sudo` once, for Ollama and for the `zstd` its installer
+
+`make install` needs `sudo` once, for Ollama and the `zstd` its installer
 requires. Node is fetched into `~/.local` — apt only carries Node 18 and the
-build needs 20+, so the installer does not use apt for it.
+build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64).
+</details>
 
-Verified end to end on a clean `ubuntu:24.04` container (arm64).
+<details>
+<summary><b>Windows — Docker, or native</b></summary>
 
-### macOS (Intel / x86_64) — via Docker
-Intel Macs have no native `lancedb` wheel, so the native `make install` can't run there.
-Use Docker instead:
+Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running):
+
+```powershell
+docker compose --profile ai up
+```
+
+Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time; creates start.ps1
+.\start.ps1                                                              # each time after
+```
+
+Open http://localhost:7820 when the log settles. First start downloads models —
+the launcher prints `Luminary is ready` only when it truly is.
+</details>
+
+<details>
+<summary><b>macOS (Intel / x86_64) — via Docker</b></summary>
+
+Intel Macs have no native `lancedb` wheel, so `make install` cannot run there.
+
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary
 docker compose --profile ai up   # or: make docker-run
 ```
-Then open http://localhost:7820. (Apple Silicon Macs use the native path above.)
 
-### Windows — Docker
-```powershell
-docker compose --profile ai up
-```
-Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running. Open http://localhost:7820 when the log settles.
+Then open http://localhost:7820. Apple Silicon Macs use the native path above.
+</details>
 
-### Windows — native (behind a proxy/VPN that blocks Docker)
-Install once, then start whenever you want it. In a normal PowerShell window (no admin):
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time setup; creates start.ps1
-.\start.ps1                                                                # run this each time
-```
-Wait for `Luminary is ready`, then open http://localhost:7820. The first start downloads models, so give it a few minutes — the launcher tells you when it's done.
-
-> First launch is slow because it downloads ML models. All launchers poll the server and print `Luminary is ready` only when it truly is; until then they say models are still downloading. Background `Warmup:` log lines after that are normal.
+> First launch is slow because it downloads ML models. Every launcher polls the
+> server and prints `Luminary is ready` only when it is. Background `Warmup:` log
+> lines after that are normal.
 
 ---
 
-## Your first 5 minutes
+## Choosing a model
 
-1. **Add a source** — Library → Upload a PDF, EPUB, doc or media file, or paste a web-article or YouTube URL
-2. **Wait for processing** — a summary card appears when indexing finishes (usually under a minute)
-3. **Ask a question** — Ask tab → citations link straight back to the source section
-4. **Review flashcards** — Study → Start Review → grade cards; FSRS schedules the next one
+<details>
+<summary><b>Which model runs, and how to change it</b></summary>
 
-That's the core loop. Luminary adds more as you return: mastery rings on the library card, a "What's about to slip" widget, reading continuity ("Continue reading" picks up exactly where you left off), a references panel per section, and a prediction-calibration graph on Progress.
+If Ollama is not running or no model is pulled, only the LLM features (chat,
+teach-back, flashcards) pause — reading, search and review keep working. Fix it
+with `ollama serve` and `ollama pull qwen3.5:4b`. Docker users: the `--profile ai`
+sidecar does this on first start.
 
----
-
-## Features
-
-### Cited Q&A — Ask across your library
-
-Chat with every document you've uploaded. Every answer includes citations with section heading, excerpt, and page number.
-
-Press **⌘K** from any tab to open the Quick Ask panel. Toggle **Socratic mode** (default) to get a probing question before the answer — useful for active recall. If a question fails (model busy, briefly offline), retry it inline without retyping.
-
-### Spaced repetition — Remember what you read
-
-AI-generated flashcards (regular, cloze-deletion, code-trace) scheduled by the FSRS algorithm. Review sessions are shaped into three phases:
-
-- **Warm-up** — well-retained cards to build momentum
-- **Engage** — cards that need work
-- **Reflect** — phase label on the last 15%
-
-Before flipping a card, predict your confidence (Know it / Unsure / Blank). Luminary tracks your prediction accuracy on the Progress tab.
-
-### Local-first reader — Read and annotate
-
-Side-by-side PDF viewer with section navigation and an optional dark-page mode for low-glare reading. Jump to a page by typing its number or with arrow-key navigation. Luminary saves your reading position; "Continue reading" brings you back to the right section. Generate flashcards from a text selection, or delete a document straight from the reader header. Web articles and papers keep their figures inline, with extracted text cleaned up on the way in.
-
-### Media & web — Learn from more than PDFs
-
-Paste a **web article** or **YouTube** URL and Luminary mirrors the content, transcribes or extracts it, and indexes it like any other source. Drop in **audio or video** files and it transcribes them; import **Kindle clippings** to turn highlights into a studyable document. Research papers get structure-aware chunking so sections and figures survive ingestion.
-
-### Works offline — No internet required
-
-With a local model (Ollama), the whole loop runs with no connection. If you go offline mid-session, Luminary keeps working and routes Ask to the local model with a clear notice instead of failing.
-
-### References — Canonical sources per section
-
-Every document section gets a **References** panel with LLM-suggested canonical sources: official docs for software, Stanford Encyclopedia of Philosophy for philosophy, PubMed for science, and so on. Click any reference to open it; outdated references can be refreshed per-section.
-
-### Notes — Write alongside reading
-
-Markdown editor with live preview. Notes are indexed and appear in search. Supports Mermaid diagrams and Excalidraw sketches.
-
-### Progress — See what's sticking
-
-- Mastery rings on every document card (weighted FSRS stability)
-- "What's about to slip" widget (cards approaching the forgetting threshold)
-- Study activity chart (last 30 days)
-- Prediction calibration graph (are your confidence ratings accurate?)
-- Sort library by "Weakest first" to target the documents that need the most work
-
-### Hub — Your daily learning cockpit
-
-The home screen surfaces the day's highest-leverage action (review due cards, continue reading, or take a note) and shows your most active projects with due-card counts. Collections keep related documents grouped; clicking one opens a focused study environment scoped to that project.
-
----
-
-## Models
-
-If the app warns that Ollama isn't running or no model is pulled, only the LLM features (chat, teach-back, flashcards) pause — everything else keeps working. Fix it with `ollama serve` and `ollama pull qwen3.5:4b` (Docker users: the `--profile ai` sidecar does this automatically on first start).
-
-Luminary sizes its models from your machine's RAM, and `make install` pulls what that band needs.
+Luminary sizes its models from your machine's RAM, and `make install` pulls what
+that band needs.
 
 | RAM | Profile | Text (chat, generation, background) | Figures | Resident |
 |-----|---------|-------------------------------------|---------|----------|
@@ -193,14 +216,13 @@ Luminary sizes its models from your machine's RAM, and `make install` pulls what
 | 16–24 GB | `standard` | `qwen3.5:4b` | the same model | 3.2 GB |
 | over 24 GB | `performance` | `qwen2.5:14b-instruct` | `qwen3.5:4b` | 12.9 GB |
 
-`qwen3.5:4b` reads images as well as text, which is what lets one model fill every
-role on a small machine. A second model is loaded only where both fit at once —
-a 16 GB laptop can keep one model loaded, so what the larger profile buys it is
+`qwen3.5:4b` reads images as well as text, which is what lets one model fill
+every role on a small machine. A second model is loaded only where both fit at
+once — a 16 GB laptop can keep one model loaded, so the larger profile buys
 concurrency rather than a second model.
 
 Any Ollama-served model works; these are the ones with measured footprints and
-eval numbers behind them. `ollama show <model>` lists whether a model can read
-images.
+eval numbers behind them. `ollama show <model>` lists whether a model reads images.
 
 | Model | Command | Best for | Resident |
 |-------|---------|----------|----------|
@@ -211,19 +233,15 @@ images.
 | Qwen 2.5 14B | `ollama pull qwen2.5:14b-instruct` | Highest quality text, needs 24 GB+ | 9.7 GB |
 | Qwen 2.5 VL 7B | `ollama pull qwen2.5vl:7b` | A dedicated figure reader | 6.8 GB |
 
-### Changing which models run
-
 **`backend/.env` is the one file to edit** — copy `backend/.env.example`, which
-documents every model knob. Nothing else in the codebase reads a model name out
-of configuration, so a change there reaches every call site.
+documents every model knob. Nothing else reads a model name out of
+configuration, so a change there reaches every call site.
 
 Three layers decide which model runs, strongest first:
 
-1. **Settings in the app** — what you pick in the UI. Stored in the database,
-   per-machine, and it wins over the file.
+1. **Settings in the app** — stored per-machine, wins over the file.
 2. **`backend/.env`** — the deployment default for this install.
-3. **The registry default** — sized from your RAM, as in the table above. Applies
-   only where the first two say nothing.
+3. **The registry default** — sized from your RAM, as above.
 
 ```bash
 LITELLM_DEFAULT_MODEL=ollama/gemma3:4b   # chat, and the fallback for everything
@@ -231,39 +249,35 @@ LITELLM_GENERATION_MODEL=                # empty = follow the above
 VISION_MODEL=ollama/qwen2.5vl:7b         # must be a model with vision
 ```
 
-Run `make models` to print what your current configuration costs, which roles
-resolve to which model, and any warnings.
+Run `make models` to print what your configuration costs, which roles resolve to
+which model, and any warnings.
 
-### Switch to a cloud model (optional)
-
-An id is `provider/name`. A local model needs no key; a hosted one does.
+**Cloud models.** An id is `provider/name`. A local model needs no key; a hosted
+one does. You can also add the key in Settings, which stores it in your OS
+keychain rather than a file.
 
 ```bash
-# OpenAI
 LITELLM_DEFAULT_MODEL=openai/gpt-4o
 OPENAI_API_KEY=sk-...
 
-# Anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 LITELLM_DEFAULT_MODEL=anthropic/claude-3-7-sonnet-latest
 
-# Google
 LITELLM_DEFAULT_MODEL=gemini/gemini-2.5-pro
 GOOGLE_API_KEY=...
 ```
 
-### If you choose a model too big for the machine
+**If you pick a model too big for the machine,** Luminary warns and carries on —
+at startup, at `GET /settings/models`, and in `make models`. It never overrides
+your choice. The warning is real: a model that does not fit swaps under load, and
+the first symptom is usually a stall during ingestion rather than an error.
+</details>
 
-Luminary warns and carries on — at startup in the log, at `GET /settings/models`,
-and in `make models`. It never overrides your choice. What it is warning about is
-real: a model that does not fit swaps under load, and the first symptom is usually
-a stall during ingestion rather than an error.
+<details>
+<summary><b>Configuration reference</b></summary>
 
----
-
-## Configuration
-
-All settings are environment variables in `backend/.env` (gitignored). `backend/.env.example` is the annotated template.
+All settings are environment variables in `backend/.env` (gitignored).
+`backend/.env.example` is the annotated template.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -274,76 +288,49 @@ All settings are environment variables in `backend/.env` (gitignored). `backend/
 | `FLASHCARD_FACTUALITY_MODEL` | *(empty)* | Checks a generated card's answer against its passage; off by default |
 | `LUMINARY_MEMORY_PROFILE` | *(from RAM)* | `low` / `standard` / `performance`; forces a smaller footprint |
 | `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures (LaTeX papers embed no images) |
-| `LUMINARY_MODE` | `full` | `full` = every feature (what `make luminary` runs); `public` = curated learner surfaces, SPA + API on one port |
+| `LUMINARY_MODE` | `full` | `full` = every feature; `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |
 | `DATA_DIR` | `.luminary` | Where databases and embeddings live |
+</details>
 
 ---
 
 ## Your data
 
-Everything — library database, vector embeddings, knowledge graph, notes — is in `.luminary/` at the project root. To move to a new machine: copy `.luminary/`, `DATA/` (source files), and `backend/.env`.
+Everything — library database, vector embeddings, knowledge graph, notes — lives
+in one folder. The bundled app keeps it in
+`~/Library/Application Support/sh.luminary.app/`; a source install uses
+`.luminary/` at the project root.
 
-The library database schema is versioned with Alembic, and the server applies any pending migrations on startup. Upgrading Luminary keeps your existing library, flashcards and review history — you never need to delete the database to take a new version.
+Upgrading keeps your library, flashcards and review history. The schema is
+versioned with Alembic and the server migrates on startup — you never delete the
+database to take a new version.
 
-Export options: Markdown vault (Obsidian-compatible), Anki deck (`.apkg`), flashcard CSV.
+To move machines, copy `.luminary/`, `DATA/` (source files) and `backend/.env`.
 
-### Re-extracting figures from an existing document
+To remove the app, drag it to the Trash. That leaves your library alone; delete
+the folder above if you want that gone too.
+
+<details>
+<summary><b>Re-extracting figures from a document already in your library</b></summary>
 
 Extraction improvements only apply to documents ingested after them. To re-run
-figure extraction on a document already in your library, without re-uploading it:
+figure extraction without re-uploading:
 
 ```bash
 curl -X POST http://localhost:7820/documents/<document_id>/images/reextract
 ```
 
 Extraction deduplicates on content hash, so this only adds figures the previous
-run missed. `GET /documents/<document_id>/enrichment` shows the job's progress.
+run missed. `GET /documents/<document_id>/enrichment` shows progress.
+</details>
 
 ---
 
-## Make commands
+## For contributors
 
-| Command | What it does |
-|---------|-------------|
-| `make install` | One-time setup (uv, Node, Ollama, models, build) |
-| `make start` | Start the public-mode server on :7820 (curated learner surfaces) |
-| `make luminary` | Start backend + frontend in full mode (:7820 + :5173) — every feature enabled |
-| `make stop` | Stop all Luminary processes |
-| `make test` | Unit + integration tests |
-| `make lint` | Ruff + tsc |
-| `make ci` | Full CI: deps, lint, layer check, tests, build |
-| `make db-migrate` | Apply pending database migrations (the server also does this on boot) |
-| `make db-revision m="..."` | Generate a migration after changing `models.py` |
-| `make docker-build` | Build the Docker image |
-| `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
-
----
-
-## Evaluation harness
-
-Luminary ships a retrieval and generation eval harness with golden Q&A datasets. Retrieval is scored with HR@5 / MRR / nDCG@10; faithfulness uses a dedicated NLI model (Vectara HHEM-2.1-Open) rather than an LLM judge, so it is deterministic and needs no API key. An optional `--judge-model` adds answer relevance. See [`evals/README.md`](evals/README.md) for the full picture.
-
-```bash
-cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
-```
-
-Enforced thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45. Faithfulness is currently **report-only** — the metric moved from an LLM judge to NLI, so its old floor no longer applies and a new one has yet to be derived from a labelled run.
-
----
-
-## Platform notes
-
-| Platform | Status |
-|---------|--------|
-| macOS Apple Silicon | Native, fully supported |
-| macOS Intel | Docker required for backend (auto-detected by `make luminary`) |
-| Linux / WSL | Native, same steps |
-| Windows | Supported via Docker (Docker Desktop) or natively via `scripts/install.ps1` |
-
----
-
-## Architecture (for contributors)
+<details>
+<summary><b>Architecture, commands and the eval harness</b></summary>
 
 ```
 Types -> Config -> Repo -> Service -> Runtime -> API
@@ -365,6 +352,7 @@ Types -> Config -> Repo -> Service -> Runtime -> API
 backend/app/
   config.py       Settings
   models.py       SQLAlchemy ORM
+  repos/          Database reads and writes
   services/       Business logic (one file per domain)
   routers/        FastAPI endpoints
   runtime/        LangGraph workflows, background workers
@@ -378,22 +366,67 @@ frontend/src/
   hooks/          Custom React hooks
 ```
 
-### Documentation
+| Command | What it does |
+|---------|-------------|
+| `make install` | One-time setup (uv, Node, Ollama, models, build) |
+| `make start` | Public-mode server on :7820 |
+| `make luminary` | Backend + frontend in full mode (:7820 + :5173) |
+| `make stop` | Stop all Luminary processes |
+| `make test` | Backend unit + integration tests |
+| `make lint` | Ruff + tsc + eslint + manifest checks |
+| `make ci` | **The gate.** Lint, layer check, tests, build, tsc, eslint, vitest |
+| `make smoke` | ~230 HTTP contract scripts against a running backend |
+| `make db-migrate` | Apply pending migrations (the server also does this on boot) |
+| `make db-revision m="..."` | Generate a migration after changing `models.py` |
+| `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
 
-- **[DEEP_DIVE.md](DEEP_DIVE.md)** — the long-form tour: architecture, design decisions, and the engineering philosophy behind Luminary.
-- **[docs/roadmap.md](docs/roadmap.md)** — what is built, what is open, and what was deliberately abandoned. Check it before proposing work.
-- **[docs/architecture.md](docs/architecture.md)** and **[docs/invariants.md](docs/invariants.md)** — the rules a change has to satisfy.
+**Evaluation harness.** Retrieval is scored with HR@5 / MRR / nDCG@10;
+faithfulness uses a dedicated NLI model (Vectara HHEM-2.1-Open) rather than an
+LLM judge, so it is deterministic and needs no API key. See
+[`evals/README.md`](evals/README.md).
 
-Every other file in `docs/` describes something that already exists; `roadmap.md` is the only one that carries status.
+```bash
+cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
+```
 
-### Contributing
+Enforced thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45. These are **collapse detectors,
+not quality bars** — clearing them says a leg of the funnel is alive, not that a
+change was an improvement. Faithfulness is report-only pending a re-baseline.
 
-Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full setup, architecture rules, and PR workflow. In short:
+**Platform support.**
 
-- Fork, branch from `master`, and run `make ci` before opening a PR
-- Follow the 6-layer import rule; route all LLM calls through LiteLLM; new endpoints need a pytest test
+| Platform | Status |
+|---------|--------|
+| macOS Apple Silicon | Native, fully supported |
+| macOS Intel | Docker required for backend |
+| Linux / WSL | Native, same steps |
+| Windows | Docker, or natively via `scripts/install.ps1` |
 
-Found a bug or have an idea? **[Open an issue](https://github.com/nupsea/luminary/issues/new/choose)** — or browse [open issues](https://github.com/nupsea/luminary/issues) to pick something up.
+**Documentation.**
+
+- **[DEEP_DIVE.md](DEEP_DIVE.md)** — architecture, design decisions, and the
+  engineering philosophy.
+- **[docs/roadmap.md](docs/roadmap.md)** — what is built, what is open, what was
+  deliberately abandoned. Check it before proposing work.
+- **[docs/architecture.md](docs/architecture.md)** and
+  **[docs/invariants.md](docs/invariants.md)** — the rules a change has to satisfy.
+
+Every other file in `docs/` describes something that already exists;
+`roadmap.md` is the only one carrying status.
+</details>
+
+**Contributions are welcome.** See **[CONTRIBUTING.md](CONTRIBUTING.md)**. In
+short: fork, branch from `master`, run `make ci` before opening a PR, follow the
+6-layer import rule, route all LLM calls through LiteLLM, and give new endpoints
+a pytest test.
+
+Found a bug or have an idea?
+**[Open an issue](https://github.com/nupsea/luminary/issues/new/choose)** — or
+browse [open issues](https://github.com/nupsea/luminary/issues) to pick something up.
+
+**If the app will not start,** the startup screen says what went wrong and can
+open a pre-filled bug report — nothing is sent until you have read and submitted
+it yourself. There is also a log at `~/Library/Logs/Luminary/luminary.log`.
 
 ---
 
