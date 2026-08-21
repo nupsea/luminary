@@ -12,6 +12,13 @@ RUN npm ci --no-audit --no-fund
 # Copy the surface manifest (server.fs.allow opens repo root; vite resolves ../../../surface-manifest.json from frontend/)
 COPY surface-manifest.json /surface-manifest.json
 
+# studyPrinciples.ts imports ../../../src-tauri/boot/principles.json -- one
+# source shared with the Tauri boot screen, which can only read a file beside
+# it. Missing here, the frontend build fails outright, which makes this the
+# one thing that breaks docker-run/docker-compose entirely (the Intel Mac and
+# any-unsupported-host fallback) rather than a feature silently not working.
+COPY src-tauri/boot/principles.json /src-tauri/boot/principles.json
+
 COPY frontend/ .
 RUN VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
 
@@ -34,6 +41,22 @@ RUN uv sync --frozen --no-default-groups --no-install-project
 # in this image __file__=/app/app/surface_manifest.py so parents[2]=/
 COPY backend/ .
 COPY surface-manifest.json /surface-manifest.json
+
+# db_init.py's alembic_ini() resolves app_root()/"backend"/"alembic.ini" -- same
+# parents[2]=/ as above, so it wants /backend/alembic.ini, not the /alembic.ini
+# `COPY backend/ .` already placed above. Without this the app crashed on every
+# boot: "No 'script_location' key found in configuration." alembic/ itself
+# (env.py, versions/) has to come along too -- script_location is relative to
+# alembic.ini's own directory, not app_root().
+COPY backend/alembic.ini /backend/alembic.ini
+COPY backend/alembic/ /backend/alembic/
+
+# app_version() reads pyproject_path() = /backend/pyproject.toml (same
+# app_root()=/ resolution as above) to report the shipped version; without
+# this it caught the FileNotFoundError and silently reported "0.0.0" on
+# every /health call instead of crashing, which is why this one shipped
+# unnoticed for however long docker-run has existed.
+COPY backend/pyproject.toml /backend/pyproject.toml
 
 # Copy frontend build artefacts into the path the server resolves.
 # serve_spa uses Path(__file__).parents[2]/"frontend"/"dist"; here
