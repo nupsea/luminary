@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-21
+
+### Added
+- **Progress metrics carry sample size, definition and basis.** A metric that
+  can't be computed is reported absent, never defaulted.
+- **Time on task**, measured by heartbeat sampling while a document is in view.
+- **Library filter chips only show types with documents behind them.**
+- **A Settings card flags when the running model differs from configured**,
+  and switches only after the replacement finishes downloading.
+
+### Fixed
+- **Citations name the page printed on the sheet**, not a chapter's first page.
+- **Study and the reader reach their own landing** instead of the last-viewed
+  document.
+- **The study streak shown is the stored one**, not a recompute that read zero
+  for same-day study.
+- **Mastery Score removed** (was an unweighted average); **Cards Mastered now
+  counts mastered cards**, not correct answers.
+- **PDF search no longer flickers**; zoom matches auto-fit's actual value.
+- **Windows install now records the model it pulled**, matching install.sh —
+  could silently disagree with what's on disk before.
+- **install.sh fails fast when curl or make is missing**, not a raw shell error.
+- **`docker compose --profile ai` / `make docker-run` actually works now** —
+  the frontend build, backend boot, and model handoff to the app were all
+  broken.
+- **A developer's `.env` was baked into Docker image layers** in two build
+  paths with no guard against it. Fixed in both; local images rebuilt.
+- **An unreadable knowledge graph reports 503 with guidance**, not a crash.
+
+### Changed
+- **Add Content leads with a web URL**; the type picker collapsed to one line.
+- **Article import owns the DOM** rather than a boilerplate remover.
+- **Interactive articles render through the desktop webview on macOS** —
+  Windows and Linux still use static fetch.
+
 ## [0.6.1] - 2026-08-11
 
 ### Fixed
@@ -682,7 +717,8 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/nupsea/luminary/releases/tag/v0.7.0
 [0.6.1]: https://github.com/nupsea/luminary/releases/tag/v0.6.1
 [0.6.0]: https://github.com/nupsea/luminary/releases/tag/v0.6.0
 [0.5.0]: https://github.com/nupsea/luminary/releases/tag/v0.5.0
