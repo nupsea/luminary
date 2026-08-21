@@ -125,8 +125,8 @@ def test_the_bands_agree_across_platforms(sh, ps1):
     assert '[ "$_gb" -lt 16 ]; then echo "public"' in sh
     assert '[ "$_gb" -le 24 ]; then echo "standard"' in sh
     assert 'echo "performance"' in sh
-    assert '$MemGB -gt 24' in ps1
-    assert '$MemGB -ge 16' in ps1
+    assert "$MemGB -gt 24" in ps1
+    assert "$MemGB -ge 16" in ps1
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
@@ -198,7 +198,7 @@ def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
     boot = _BOOTSTRAP.read_text()
     sh_text = _SH.read_text()
     for band in ("16", "24"):
-        assert re.search(rf'MEM_GB.*-lt {band}|MEM_GB.*-le {band}', boot), (
+        assert re.search(rf"MEM_GB.*-lt {band}|MEM_GB.*-le {band}", boot), (
             f"bootstrap.sh has no {band}GB band"
         )
     for source, name in ((boot, "bootstrap.sh"), (sh_text, "install.sh")):
@@ -333,7 +333,7 @@ def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
     """
     text = _SH.read_text()
     chat_block_start = text.index('if [ -z "$CHAT_MODEL" ]; then')
-    chat_block_end = text.index('\nfi\n', chat_block_start)
+    chat_block_end = text.index("\nfi\n", chat_block_start)
     vision_default = text.index('VISION_MODEL="$PUBLIC_GENERALIST"')
     assert not (chat_block_start < vision_default < chat_block_end), (
         "the vision default is nested inside the chat-model block again"
@@ -392,9 +392,7 @@ def test_ps1_refuses_an_unknown_profile():
     `Performance` installed a performance profile on Windows and exited 1 on
     macOS -- the same input, two different products."""
     text = _PS1.read_text()
-    assert "-cin @(" in text, (
-        "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
-    )
+    assert "-cin @(" in text, "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
     assert 'public", "standard", "performance"' in text
 
 
@@ -406,9 +404,39 @@ def test_ps1_guards_the_vision_pull_on_ollama_being_present():
     pull = text.index("ollama pull $visionModel")
     guard = text.rindex('Test-CommandExists "ollama"', 0, pull)
     condition = text.rindex("if (", 0, pull)
-    assert guard > condition - 200, (
-        "the vision pull is not guarded by a Test-CommandExists check"
+    assert guard > condition - 200, "the vision pull is not guarded by a Test-CommandExists check"
+
+
+def _run_platform_guard(sh: str, os_name: str, arch: str):
+    """Run install.sh's real OS/ARCH-detection-through-guard block verbatim,
+    with `uname` shadowed rather than the block reimplemented, so this proves
+    the actual file's logic and not a paraphrase of it."""
+    import subprocess
+
+    start = sh.index("_info()  { printf")
+    end = sh.index("fi\n", sh.index("Native install isn't supported")) + len("fi\n")
+    block = sh[start:end]
+    harness = f'uname() {{ case "$1" in -s) echo {os_name};; -m) echo {arch};; esac; }}\n' + block
+    return subprocess.run(["bash", "-c", harness], capture_output=True, text=True, timeout=10)
+
+
+def test_intel_mac_is_refused_with_docker_guidance(sh):
+    """The only guard against a native install on Intel Macs (no macOS x86_64
+    lancedb wheel) had no test until now -- covered by regex elsewhere in this
+    file, never actually run."""
+    proc = _run_platform_guard(sh, "Darwin", "x86_64")
+    assert proc.returncode == 1, (
+        f"expected exit 1 on Darwin/x86_64, got {proc.returncode}: {proc.stderr}"
     )
+    assert "Intel Mac" in proc.stderr
+    assert "docker compose --profile ai up" in proc.stderr
+
+
+def test_apple_silicon_mac_is_not_caught_by_the_intel_guard(sh):
+    """The guard above must be precise to x86_64 -- proves it does not also
+    block the architecture the fallback message never mentions."""
+    proc = _run_platform_guard(sh, "Darwin", "arm64")
+    assert proc.returncode == 0, f"Darwin/arm64 should not be blocked, got: {proc.stderr}"
 
 
 def test_install_sh_checks_for_curl_and_make(sh):
@@ -451,9 +479,9 @@ def test_install_ps1_records_the_models_it_pulled(ps1):
     backend fell back to its own hardcoded default and could disagree with
     what this script had just downloaded.
     """
-    assert re.search(
-        r'Set-EnvLine \$EnvLines "LITELLM_DEFAULT_MODEL" "ollama/\$chatModel"', ps1
-    ), "install.ps1 does not record the chat model it pulled"
+    assert re.search(r'Set-EnvLine \$EnvLines "LITELLM_DEFAULT_MODEL" "ollama/\$chatModel"', ps1), (
+        "install.ps1 does not record the chat model it pulled"
+    )
     assert re.search(r'Set-EnvLine \$EnvLines "VISION_MODEL"', ps1), (
         "install.ps1 does not record the vision model it pulled"
     )

@@ -14,7 +14,6 @@ build/
 
 # Node / frontend
 node_modules/
-scripts/ralph/flowchart/node_modules/
 dist/
 .parcel-cache/
 .vite/
@@ -80,6 +79,7 @@ uv.lock
 # Internal project metadata (project root only)
 prd.json
 evals/scores_history.jsonl
+evals/.realign_*.txt
 
 # Design system reference inputs (local-only)
 REF/
