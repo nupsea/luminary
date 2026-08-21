@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -32,6 +32,7 @@ import { useReadingProgress } from "./hooks/useReadingProgress"
 import { useSectionListCollapse } from "./hooks/useSectionListCollapse"
 import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
+import { orderHitsByDocument } from "./searchHighlight"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
 import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
@@ -191,6 +192,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Initial query pushed into the in-doc search bar when the Tags tab fires
   // a tag click. Cleared on consumption so subsequent ⌘F opens fresh.
   const [pendingSearchQuery, setPendingSearchQuery] = useState<string>("")
+  // The settled term, lifted out of the search bar so the Read view can mark
+  // it in the prose. Jumping to a hit that is not visibly marked is why search
+  // read as broken there: the section list at least shows a snippet.
+  const [searchTerm, setSearchTerm] = useState<string>("")
 
   // reading position — resume banner
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null)
@@ -254,6 +259,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (docSections) {
       for (const s of docSections) m.set(s.id, s)
     }
+    return m
+  }, [docSections])
+
+  // Reading position of each section, so search hits can be stepped through in
+  // document order rather than the relevance order the endpoint returns.
+  const sectionOrder = useMemo(() => {
+    const m = new Map<string, number>()
+    ;(docSections ?? []).forEach((s, i) => m.set(s.id, i))
     return m
   }, [docSections])
 
@@ -533,13 +546,19 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSearchOpen(false)
     setSearchResults([])
     setSearchHitIndex(0)
+    setSearchTerm("")
   }, [])
 
-  // The PDF viewer owns Cmd+F on its own tab. Every other tab has no search of
-  // its own and InDocSearchBar renders inside the section list, so opening the
-  // search goes there -- the move the ?search= deep link and a tag click make.
-  const openReaderSearch = useCallback(() => {
-    if (leftTab !== "pdfview") setLeftTab("sections")
+  // The search belongs to the document, not to one tab. The bar is rendered
+  // once above both panes, so Sections and Read each keep it where the reader
+  // already is -- opening it used to switch tabs to reach it. The PDF viewer
+  // owns Cmd+F on its own tab, so a bare keypress there is left alone; a
+  // query-carrying open (deep link, tag click) still needs somewhere to land,
+  // so it moves off pdfview/bookview.
+  const openReaderSearch = useCallback((query?: string) => {
+    if (leftTab === "pdfview" && query === undefined) return
+    if (leftTab !== "sections" && leftTab !== "read") setLeftTab("read")
+    if (query !== undefined) setPendingSearchQuery(query)
     setSearchOpen(true)
   }, [leftTab, setLeftTab])
 
@@ -551,7 +570,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   })
 
   useEffect(() => {
-    if (leftTab !== "sections" && searchOpen) closeReaderSearch()
+    if (leftTab !== "sections" && leftTab !== "read" && searchOpen) closeReaderSearch()
   }, [leftTab, searchOpen, closeReaderSearch])
 
   // Map entity deep-link (?search=) -> open the in-doc search bar prefilled
@@ -560,35 +579,49 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useEffect(() => {
     const query = initialSearch?.trim()
     if (!query || !doc) return
-    setLeftTab("sections")
-    setPendingSearchQuery(query)
-    setSearchOpen(true)
+    openReaderSearch(query)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSearch, doc])
 
   // Tags-tab click -> open in-doc search with the tag's surface form prefilled.
   // Listens on window so the panel doesn't need a prop drilled through SummaryPanel.
+  // Depends on openReaderSearch (re-registers on tab change) so the tab-landing
+  // check inside it never reads a leftTab captured at mount.
   useEffect(() => {
     function onDocSearch(e: Event) {
       const detail = (e as CustomEvent<{ query?: string }>).detail
       const query = detail?.query?.trim()
       if (!query) return
-      setLeftTab("sections")
-      setPendingSearchQuery(query)
-      setSearchOpen(true)
+      openReaderSearch(query)
     }
     window.addEventListener("luminary:doc-search", onDocSearch)
     return () => window.removeEventListener("luminary:doc-search", onDocSearch)
-  }, [])
+  }, [openReaderSearch])
 
-  // scroll current hit into view when hitIndex or results change
+  // Scroll the current hit into view when hitIndex or results change.
+  //
+  // The pane matters. ReadView stays mounted and CSS-hidden on every tab, and
+  // it renders `data-section-id` *earlier in the DOM* than the section list, so
+  // a bare `document.querySelector` always resolved to the hidden Read pane --
+  // which is why stepping through hits on the Sections tab appeared to do
+  // nothing at all. Each tab is therefore addressed by its own handle:
+  // `read-sec-<id>` belongs only to ReadView, and the section list is queried
+  // through its own container ref.
+  // On Read the hit is handed to ReadView as its target (below), which widens
+  // its own window and scrolls -- a hit past the rendered window has no element
+  // to scroll to yet. Only the section list is scrolled from here.
   useEffect(() => {
-    if (searchResults.length === 0) return
+    if (leftTab !== "sections" || searchResults.length === 0) return
     const targetId = searchResults[searchHitIndex]?.section_id
-    if (!targetId) return
-    const el = document.querySelector(`[data-section-id="${CSS.escape(targetId)}"]`)
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" })
-  }, [searchHitIndex, searchResults])
+    if (targetId) scrollActiveSectionIntoView(targetId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchHitIndex, searchResults, leftTab])
+
+  // The section ReadView should show: a search hit while searching, otherwise
+  // whatever a citation or resume link pointed at.
+  const searchHitSectionId = searchResults[searchHitIndex]?.section_id ?? null
+  const readTargetSectionId =
+    searchOpen && searchHitSectionId ? searchHitSectionId : readSectionId
 
   function handleStudyClick(sid: string) {
     setActiveDocument(documentId)
@@ -1124,8 +1157,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Document header — hidden in PDF/Book view to maximise canvas area.
-              It carries the resume banner and the ingestion health panel, so it
-              stays on Read, which is where most documents open. */}
+              The ingestion diagnostics grid (chunk/vector/entity counts) is a
+              processing-health readout, not reading chrome: it stays on Sections,
+              where it sits next to the structure it describes, and is hidden on
+              Read so opening a document to read it doesn't put a stats dashboard
+              above the text. */}
           {leftTab !== "pdfview" && leftTab !== "bookview" && (
             <>
               <div className="px-6 py-4">
@@ -1138,9 +1174,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   <span>·</span>
                   <span>{relativeDate(doc.created_at)}</span>
                 </div>
-                <div className="mt-3">
-                  <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
-                </div>
+                {leftTab === "sections" && (
+                  <div className="mt-3">
+                    <IngestionHealthPanel documentId={documentId} stage={doc.stage} />
+                  </div>
+                )}
               </div>
 
               {/* Resume banner — shown once per session when a saved position exists */}
@@ -1186,6 +1224,25 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                       : "Sections"}
               </button>
             ))}
+            {/* Search — the only affordance for it was Cmd+F, which is
+                undiscoverable and unreachable on a touch device. PDF View has
+                its own search, so the button follows the tabs that use this one. */}
+            {(leftTab === "sections" || leftTab === "read") && (
+              <button
+                onClick={() => (searchOpen ? closeReaderSearch() : openReaderSearch())}
+                title="Search in document (⌘F)"
+                aria-label="Search in document"
+                aria-pressed={searchOpen}
+                className={cn(
+                  "flex items-center justify-center px-2 py-2 text-xs transition-colors",
+                  searchOpen
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Search size={14} />
+              </button>
+            )}
             {/* Highlight visibility toggle + dropdown */}
             <div className="relative flex items-center">
               <button
@@ -1232,6 +1289,38 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             </div>
           </div>
 
+          {/* In-document search — shared by Sections and Read, which both key
+              off data-section-id, so it stays put across a tab switch instead
+              of living inside one tab's content. */}
+          {searchOpen && (leftTab === "sections" || leftTab === "read") && (
+            <div className="px-6 pt-3">
+              <InDocSearchBar
+                documentId={documentId}
+                initialQuery={pendingSearchQuery}
+                onConsumeInitialQuery={() => setPendingSearchQuery("")}
+                onQueryChange={setSearchTerm}
+                onResults={(results) => {
+                  setSearchResults(orderHitsByDocument(results, sectionOrder))
+                  setSearchHitIndex(0)
+                }}
+                onClose={() => {
+                  closeReaderSearch()
+                  setPendingSearchQuery("")
+                }}
+                hitIndex={searchHitIndex}
+                totalHits={searchResults.length}
+                onPrev={() =>
+                  setSearchHitIndex((i) =>
+                    (i - 1 + searchResults.length) % searchResults.length,
+                  )
+                }
+                onNext={() =>
+                  setSearchHitIndex((i) => (i + 1) % searchResults.length)
+                }
+              />
+            </div>
+          )}
+
           {/* PDF View — lazy-mounted, hidden when not active to preserve page state */}
           {doc.format === "pdf" && pdfViewVisited && (() => {
             let targetPdfPage = initialPage
@@ -1257,17 +1346,18 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           {/* Read View — full document content as markdown, or transcript for YouTube */}
           <div className={cn("flex-1 overflow-hidden", leftTab !== "read" && "hidden")}>
             {isYouTube ? (
-              <YouTubeTranscriptView doc={doc} initialSectionId={readSectionId} initialChunkId={initialChunkId} />
+              <YouTubeTranscriptView doc={doc} initialSectionId={readTargetSectionId} initialChunkId={initialChunkId} />
             ) : (
               <ReadView
                 documentId={documentId}
-                initialSectionId={readSectionId}
+                initialSectionId={readTargetSectionId}
                 annotations={docAnnotations ?? []}
                 highlightsVisible={highlightsVisible}
                 contentType={doc.content_type}
                 structureType={doc.structure_type}
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
+                searchTerm={searchOpen ? searchTerm : ""}
               />
             )}
           </div>
@@ -1328,34 +1418,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   </p>
                 )}
                 <div className="px-6 pt-3">
-                  {/* Inline search bar — shown when Cmd+F is pressed */}
-                  {searchOpen && (
-                    <InDocSearchBar
-                      documentId={documentId}
-                      initialQuery={pendingSearchQuery}
-                      onConsumeInitialQuery={() => setPendingSearchQuery("")}
-                      onResults={(results) => {
-                        setSearchResults(results)
-                        setSearchHitIndex(0)
-                      }}
-                      onClose={() => {
-                        setSearchOpen(false)
-                        setSearchResults([])
-                        setSearchHitIndex(0)
-                        setPendingSearchQuery("")
-                      }}
-                      hitIndex={searchHitIndex}
-                      totalHits={searchResults.length}
-                      onPrev={() =>
-                        setSearchHitIndex((i) =>
-                          (i - 1 + searchResults.length) % searchResults.length,
-                        )
-                      }
-                      onNext={() =>
-                        setSearchHitIndex((i) => (i + 1) % searchResults.length)
-                      }
-                    />
-                  )}
                   {doc.sections.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No sections detected.</p>
                   ) : (

@@ -337,6 +337,38 @@ def get_llm_error_message() -> str:
 
 # Routing helper — used by LLMService
 
+# provider -> (DB/keychain cache field, environment variable name)
+_PROVIDER_KEY_FIELDS: dict[str, tuple[str, str]] = {
+    "openai": ("openai_api_key", "OPENAI_API_KEY"),
+    "anthropic": ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    "gemini": ("google_api_key", "GOOGLE_API_KEY"),
+}
+
+
+def resolve_provider_api_key(provider: str) -> str:
+    """The key that will actually be sent for *provider*: DB/keychain first,
+    then the same-named environment variable. Empty when neither is set.
+
+    A packaged desktop app's user has only one way to add a key -- the
+    Settings dialog, which writes to the OS keychain -- so this precedence
+    must be the single source of truth for every call site that resolves a
+    provider key, whether the model came from mode-based routing
+    (get_effective_routing) or a pinned per-request override
+    (LLMService._build_kwargs). Two independent resolutions is how they drift:
+    routing already fell back to the env key while an override read the env
+    key only, so a key added through Settings worked for "Auto" chat and
+    silently failed for every explicit model choice.
+    """
+    key_field, env_field = _PROVIDER_KEY_FIELDS.get(provider, (None, None))
+    if key_field is None:
+        return ""
+    api_key = _cache.get(key_field, "")
+    if api_key:
+        return api_key
+    from app.config import get_settings  # noqa: PLC0415
+
+    return getattr(get_settings(), env_field, "") or ""
+
 
 def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
     """Return (litellm_model_string, api_key_or_none).
@@ -361,25 +393,8 @@ def get_effective_routing(background: bool = False) -> tuple[str, str | None]:
 
     provider = _cache["cloud_provider"]
     cloud_model = _cache["cloud_model"]
-
-    _provider_map: dict[str, tuple[str, str, str]] = {
-        "openai": ("openai", "openai_api_key", "OPENAI_API_KEY"),
-        "anthropic": ("anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY"),
-        "gemini": ("gemini", "google_api_key", "GOOGLE_API_KEY"),
-    }
-    prefix, key_field, env_field = _provider_map.get(
-        provider, ("openai", "openai_api_key", "OPENAI_API_KEY")
-    )
-    api_key = _cache[key_field]
-
-    if not api_key:
-        # Fall back to a key supplied via environment (.env), mirroring how an
-        # explicit model override resolves its key in llm._build_kwargs. Without
-        # this, mode-based routing and per-request overrides disagree: a .env key
-        # works for evals/explicit models but not for plain "Auto" chat.
-        from app.config import get_settings  # noqa: PLC0415
-
-        api_key = getattr(get_settings(), env_field, "") or ""
+    prefix = provider if provider in _PROVIDER_KEY_FIELDS else "openai"
+    api_key = resolve_provider_api_key(prefix)
 
     if not api_key:
         raise ValueError(

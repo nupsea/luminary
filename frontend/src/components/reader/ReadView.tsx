@@ -17,6 +17,7 @@ import {
   resolveReadingLayout,
   type ResolvedLayout,
 } from "./readingProfile"
+import { applySearchTerm, widenedListLimit } from "./searchHighlight"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
@@ -75,7 +76,10 @@ interface LazySectionProps {
   images?: DocumentImage[]
   spec: ResolvedLayout
   isLast: boolean
+  /** In-document search term to mark in the body. Empty when search is closed. */
+  searchTerm?: string
 }
+
 
 // Figures live in the images table with a vision-generated description; the
 // reader previously rendered only text, so diagrams never appeared at all.
@@ -138,7 +142,7 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "" }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -168,8 +172,9 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const showHeading = hasAuthoredHeading(section)
   const highlighted = useMemo(() => {
     if (!isVisible) return "" // defer processing
-    return applyHighlights(body, highlightsVisible ? annotations : [])
-  }, [isVisible, body, annotations, highlightsVisible])
+    const marked = applyHighlights(body, highlightsVisible ? annotations : [])
+    return searchTerm ? applySearchTerm(marked, searchTerm) : marked
+  }, [isVisible, body, annotations, highlightsVisible, searchTerm])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
@@ -409,6 +414,8 @@ interface ReadViewProps {
   extractionReport?: ExtractionReport | null
   /** Needed to re-render the page on a re-import; absent for non-URL sources. */
   sourceUrl?: string | null
+  /** In-document search term, marked in the body. Empty when search is closed. */
+  searchTerm?: string
 }
 
 export function ReadView({
@@ -420,6 +427,7 @@ export function ReadView({
   structureType,
   extractionReport,
   sourceUrl,
+  searchTerm = "",
 }: ReadViewProps) {
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
@@ -434,7 +442,9 @@ export function ReadView({
   const contentRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [activeSection, setActiveSection] = useState<string | null>(null)
-  const [listLimit, setListLimit] = useState(SECTION_PAGE)
+  // How far scrolling alone has extended the window. The window actually
+  // rendered is `listLimit` below, which also accounts for a jump target.
+  const [scrolledLimit, setScrolledLimit] = useState(SECTION_PAGE)
   const toc = useResizablePanel({
     storageKey: "luminary-read-toc",
     defaultWidth: 224,
@@ -443,6 +453,26 @@ export function ReadView({
     side: "right",
   })
 
+  const { data: sectionMeta } = useQuery({
+    queryKey: ["section-meta", documentId],
+    queryFn: () => fetchSectionMeta(documentId),
+    staleTime: 60_000,
+  })
+
+  // A search hit or a deep link can name a section past the rendered window,
+  // which starts at SECTION_PAGE and otherwise only grows as the reader
+  // scrolls. There is no element to scroll to until the window covers it, so
+  // the target widens it -- without this, jumping to a hit in a long document
+  // silently did nothing and the search looked broken.
+  //
+  // Derived rather than pushed into state by an effect, so the fetch below
+  // asks for the right window on its first attempt instead of fetching twice.
+  const targetIndex = useMemo(() => {
+    if (!initialSectionId || !sectionMeta) return -1
+    return sectionMeta.findIndex((m) => m.id === initialSectionId)
+  }, [initialSectionId, sectionMeta])
+  const listLimit = widenedListLimit(scrolledLimit, targetIndex, SECTION_PAGE, MAX_SECTION_WINDOW)
+
   const { data: page, isLoading, error } = useQuery({
     queryKey: ["section-content", documentId, listLimit],
     queryFn: () => fetchSectionContent(documentId, listLimit),
@@ -450,12 +480,6 @@ export function ReadView({
   })
   const sections = useMemo(() => page?.items ?? [], [page])
   const totalSections = page?.total ?? 0
-
-  const { data: sectionMeta } = useQuery({
-    queryKey: ["section-meta", documentId],
-    queryFn: () => fetchSectionMeta(documentId),
-    staleTime: 60_000,
-  })
 
   const tocEntries = useMemo(
     () => usableSections((sectionMeta ?? []).map((m) => ({ ...m, section_id: m.id }))),
@@ -561,7 +585,11 @@ export function ReadView({
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setListLimit((prev) => Math.min(prev + SECTION_PAGE, MAX_SECTION_WINDOW))
+          // Steps up from the window actually rendered, not from `scrolledLimit`
+          // alone: after a jump target has widened it, incrementing the smaller
+          // number leaves the rendered window unchanged and the reader cannot
+          // load any further.
+          setScrolledLimit(Math.min(listLimit + SECTION_PAGE, MAX_SECTION_WINDOW))
         }
       },
       { rootMargin: "800px" },
@@ -710,6 +738,7 @@ export function ReadView({
               images={imagesBySection.get(section.section_id)}
               spec={spec}
               isLast={i === sections.length - 1}
+              searchTerm={searchTerm}
             />
           ))}
           

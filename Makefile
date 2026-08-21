@@ -503,6 +503,10 @@ endif
 	cd frontend && npm run build
 	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
+	# The frontend suite was never wired into a gate: 59 files of pure-logic
+	# tests ran only when someone typed `npm test`, so a broken helper reached
+	# master green. It costs ~1s.
+	cd frontend && npm test
 	cd frontend && npm test
 	@echo "CI passed."
 

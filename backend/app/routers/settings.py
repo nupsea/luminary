@@ -1,9 +1,11 @@
 """Settings router — GET and PATCH /settings/llm (DB-backed, mode + encrypted keys)."""
 
+import asyncio
 import logging
 from typing import Any
 
 import httpx
+import litellm
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -368,6 +370,97 @@ async def _list_gemini_models(api_key: str) -> list[dict]:
     return models
 
 
+# Non-chat families a provider's /models endpoint also returns. litellm's cost
+# map already marks most of them, but only for ids it has seen -- a brand-new
+# image or audio model is absent from the map exactly like a brand-new chat
+# model, and `_is_chat_model` keeps what it does not recognise. These prefixes
+# are what remains: families that are never chat, whatever the version number.
+_NON_CHAT_PREFIXES = (
+    "babbage",
+    "dall-e",
+    "davinci",
+    "gpt-image",
+    "omni-moderation",
+    "sora",
+    "text-embedding",
+    "text-moderation",
+    "tts-",
+    "whisper",
+)
+
+
+def _is_chat_model(model_id: str) -> bool:
+    """True unless this id is known, or shaped, as something other than chat.
+
+    An id absent from litellm's cost map is kept rather than dropped: it is
+    more likely a model newer than litellm's snapshot -- the exact problem
+    this replaces, a hardcoded roster going stale -- than an obscure non-chat
+    one. `_NON_CHAT_PREFIXES` covers the families where that guess is wrong.
+    """
+    bare = model_id.split("/", 1)[-1]
+    if bare.startswith(_NON_CHAT_PREFIXES):
+        return False
+    mode = litellm.model_cost.get(model_id, {}).get("mode")
+    if mode is None:
+        mode = litellm.model_cost.get(bare, {}).get("mode")
+    return mode is None or mode == "chat"
+
+
+def _strip_provider_prefix(model_id: str, provider: str) -> str:
+    """Return the bare model id.
+
+    Providers disagree about this and the difference is invisible until it
+    breaks: litellm's OpenAI `get_models` returns `model["id"]` verbatim
+    (`gpt-4o`), while its Anthropic one returns `"anthropic/" + id`. Every
+    consumer here re-attaches the prefix itself -- the frontend builds
+    `${provider}/${id}` and `get_effective_routing` builds `f"{prefix}/{model}"`
+    -- so passing a prefixed id through yields `anthropic/anthropic/claude-...`,
+    which resolves to nothing.
+    """
+    return model_id[len(provider) + 1 :] if model_id.startswith(f"{provider}/") else model_id
+
+
+async def _list_provider_models_live(
+    provider: str, api_key: str, curated: list[dict]
+) -> list[dict]:
+    """Models this key can actually reach, fetched live via litellm.
+
+    Falls back to the curated list when no key is configured or the live call
+    fails or returns nothing, so the dropdown never regresses to empty.
+    """
+    if not api_key:
+        return curated
+    try:
+        # litellm's provider `get_models` is a synchronous HTTP call.
+        raw_ids = await asyncio.to_thread(
+            litellm.get_valid_models,
+            check_provider_endpoint=True,
+            custom_llm_provider=provider,
+            api_key=api_key,
+        )
+    except Exception as exc:
+        logger.warning("%s model list failed: %s", provider, exc)
+        return curated
+
+    seen: set[str] = set()
+    ids: list[str] = []
+    for raw in raw_ids:
+        mid = _strip_provider_prefix(raw, provider)
+        if mid and mid not in seen and _is_chat_model(mid):
+            seen.add(mid)
+            ids.append(mid)
+    if not ids:
+        return curated
+
+    known_names = {m["id"]: m["name"] for m in curated}
+    models = [{"id": mid, "name": known_names.get(mid, mid)} for mid in ids]
+    known_order = list(_MODEL_COSTS.keys())
+    models.sort(
+        key=lambda m: (known_order.index(m["id"]) if m["id"] in known_order else 999, m["id"])
+    )
+    return models
+
+
 @router.get("/llm/models")
 async def list_llm_models(
     provider: str,
@@ -375,12 +468,14 @@ async def list_llm_models(
 ) -> list[dict]:
     """Return available models for the given provider with cost info.
 
-    For Gemini: fetches live from Google's ListModels API using the stored key.
-    For OpenAI/Anthropic: returns a curated list (no live fetch needed).
+    Fetches live from each provider's own endpoint using the stored key, so
+    the list reflects what that key can actually reach instead of a fixed
+    roster that goes stale the moment a provider ships a new model. Falls
+    back to a curated list when no key is configured or the live call fails.
     """
-    if provider == "gemini":
-        from app.services.settings_service import _cache  # noqa: PLC0415
+    from app.services.settings_service import _cache  # noqa: PLC0415
 
+    if provider == "gemini":
         api_key = _cache.get("google_api_key", "")
         if not api_key:
             return []
@@ -388,10 +483,14 @@ async def list_llm_models(
         return _attach_costs(models)
 
     if provider == "openai":
-        return _attach_costs(_OPENAI_MODELS)
+        api_key = _cache.get("openai_api_key", "")
+        models = await _list_provider_models_live("openai", api_key, _OPENAI_MODELS)
+        return _attach_costs(models)
 
     if provider == "anthropic":
-        return _attach_costs(_ANTHROPIC_MODELS)
+        api_key = _cache.get("anthropic_api_key", "")
+        models = await _list_provider_models_live("anthropic", api_key, _ANTHROPIC_MODELS)
+        return _attach_costs(models)
 
     return []
 

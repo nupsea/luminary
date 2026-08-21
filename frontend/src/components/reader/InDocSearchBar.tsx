@@ -24,6 +24,9 @@ interface InDocSearchBarProps {
   /** Fires once after initialQuery has been pushed into the input, so the
    * caller can clear its pending state and not re-prefill on next open. */
   onConsumeInitialQuery?: () => void
+  /** The settled query, so the reader can mark the term in the body it shows.
+   * Fires with the debounced value, matching what was actually searched for. */
+  onQueryChange?: (query: string) => void
 }
 
 export function InDocSearchBar({
@@ -36,6 +39,7 @@ export function InDocSearchBar({
   onNext,
   initialQuery,
   onConsumeInitialQuery,
+  onQueryChange,
 }: InDocSearchBarProps) {
   const [inputValue, setInputValue] = useState(initialQuery ?? "")
   const [loading, setLoading] = useState(false)
@@ -54,12 +58,30 @@ export function InDocSearchBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // The callbacks arrive as inline arrows, so their identity changes on every
+  // render of the reader. Held in refs and kept out of the dep arrays below,
+  // because naming them as dependencies made the search feed itself: a result
+  // set -> a reader re-render -> fresh callback identity -> the same query
+  // refetched, forever. The visible symptom was Next/Prev doing nothing, since
+  // the reader resets the hit index to 0 every time results arrive.
+  const onResultsRef = useRef(onResults)
+  const onQueryChangeRef = useRef(onQueryChange)
+  useEffect(() => {
+    onResultsRef.current = onResults
+    onQueryChangeRef.current = onQueryChange
+  })
+
+  useEffect(() => {
+    onQueryChangeRef.current?.(debouncedQuery.trim())
+  }, [debouncedQuery])
+
   useEffect(() => {
     if (!debouncedQuery.trim()) {
-      onResults([])
+      onResultsRef.current([])
       setError(null)
       return
     }
+    let cancelled = false
     setLoading(true)
     setError(null)
     void (async () => {
@@ -68,15 +90,21 @@ export function InDocSearchBar({
           `/documents/${encodeURIComponent(documentId)}/search`,
           { q: debouncedQuery },
         )
-        onResults(data)
+        // A slower earlier query must not overwrite a newer one's results.
+        if (cancelled) return
+        onResultsRef.current(data)
       } catch {
+        if (cancelled) return
         setError("Search failed")
-        onResults([])
+        onResultsRef.current([])
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
-  }, [debouncedQuery, documentId, onResults])
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedQuery, documentId])
 
   return (
     <div className="mb-3 flex flex-col gap-1">

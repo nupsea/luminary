@@ -221,6 +221,104 @@ async def test_openai_model_list_includes_gpt5_family(test_db):
     assert g5["cost_input"] is None
 
 
+async def test_openai_model_list_fetches_live_when_key_configured(test_db):
+    """A configured key means whatever that key can actually reach, not a
+    fixed curated roster -- regression test for a hardcoded OpenAI list that
+    never checked what the user's own key could see.
+    """
+    import unittest.mock
+
+    svc_module._cache["openai_api_key"] = "sk-test-key"
+    with unittest.mock.patch(
+        "litellm.get_valid_models", return_value=["gpt-4o", "gpt-6-preview"]
+    ) as mock_list:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+    assert resp.status_code == 200
+    ids = {m["id"] for m in resp.json()}
+    assert ids == {"gpt-4o", "gpt-6-preview"}
+    assert mock_list.call_args.kwargs["api_key"] == "sk-test-key"
+    assert mock_list.call_args.kwargs["custom_llm_provider"] == "openai"
+
+
+async def test_anthropic_model_list_strips_the_provider_prefix(test_db):
+    """litellm's Anthropic `get_models` returns `anthropic/<id>` while its
+    OpenAI one returns a bare id. Every consumer re-attaches the prefix, so a
+    prefixed id passed through becomes `anthropic/anthropic/claude-...` and
+    resolves to nothing.
+    """
+    import unittest.mock
+
+    svc_module._cache["anthropic_api_key"] = "ant-test-key"
+    with unittest.mock.patch(
+        "litellm.get_valid_models",
+        return_value=["anthropic/claude-sonnet-4-6", "anthropic/claude-99-future"],
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/settings/llm/models", params={"provider": "anthropic"})
+    assert resp.status_code == 200
+    ids = [m["id"] for m in resp.json()]
+    assert ids == ["claude-sonnet-4-6", "claude-99-future"]
+    assert not any(i.startswith("anthropic/") for i in ids)
+    # A known id keeps its display name; an unknown one falls back to the id.
+    by_id = {m["id"]: m["name"] for m in resp.json()}
+    assert by_id["claude-sonnet-4-6"] == "Claude Sonnet 4.6"
+    assert by_id["claude-99-future"] == "claude-99-future"
+
+
+async def test_model_list_drops_non_chat_models(test_db):
+    """`/v1/models` returns embeddings, audio and image models too. A model
+    newer than litellm's cost map is kept (that staleness is the bug being
+    fixed); a non-chat *family* is dropped whatever its version.
+    """
+    import unittest.mock
+
+    svc_module._cache["openai_api_key"] = "sk-test-key"
+    with unittest.mock.patch(
+        "litellm.get_valid_models",
+        return_value=[
+            "gpt-4o",
+            "gpt-7-unreleased",  # newer than the cost map -> kept
+            "text-embedding-3-small",
+            "whisper-1",
+            "dall-e-3",
+            "tts-1-hd",
+            "sora-2",
+            "omni-moderation-latest",
+        ],
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+    assert resp.status_code == 200
+    assert {m["id"] for m in resp.json()} == {"gpt-4o", "gpt-7-unreleased"}
+
+
+async def test_openai_model_list_falls_back_on_live_failure(test_db):
+    """A failed live call must not empty the dropdown -- falls back to curated."""
+    import unittest.mock
+
+    svc_module._cache["openai_api_key"] = "sk-test-key"
+    with unittest.mock.patch("litellm.get_valid_models", side_effect=RuntimeError("boom")):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+    assert resp.status_code == 200
+    ids = [m["id"] for m in resp.json()]
+    assert "gpt-5.4" in ids
+
+
+async def test_openai_model_list_curated_without_key(test_db):
+    """No key configured -- the live endpoint is never called, curated list stands."""
+    import unittest.mock
+
+    with unittest.mock.patch("litellm.get_valid_models") as mock_list:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/settings/llm/models", params={"provider": "openai"})
+    assert resp.status_code == 200
+    mock_list.assert_not_called()
+    ids = [m["id"] for m in resp.json()]
+    assert "gpt-5.4" in ids
+
+
 async def test_switch_to_gpt5_persists(test_db):
     """Selecting a GPT-5 model saves and is what the pipeline will resolve."""
     import unittest.mock
