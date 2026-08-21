@@ -240,5 +240,43 @@ def _no_real_library_summary_generation():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_real_library_summary_refresh(request):
+    """The same leak, reached from ingestion rather than from chat.
+
+    `enrichment_enqueue_node` fires `_run_pregenerate` as a background task, and
+    `pregenerate` ends by calling `refresh_library_summary`, which streams a
+    library summary and touches the database. A test that runs real ingestion --
+    `test_e2e_upload` does, and needs to -- therefore spawns a DB-touching task
+    that outlives its event loop.
+
+    Observed as a 120s session timeout attributed to `test_e2e_upload`, whose
+    captured stderr carries the real story: `stream_library_summary failed ...
+    no such table: summaries`, the in-memory database of an earlier test already
+    disposed, with aiosqlite's `_connection_worker_thread` still blocked. That
+    thread is why `_drain_leaked_tasks` cannot save it -- a task parked in a
+    thread executor cannot be cancelled, only detached.
+
+    Neutralised rather than suppressed: ingestion still runs for real and still
+    schedules the task, so anything asserting that it was scheduled still holds.
+    Only the part that reaches the database after the loop is gone is removed.
+
+    A test whose subject *is* this method opts out with
+    `@pytest.mark.real_library_summary`, which is what keeps the neutralisation
+    from hiding the behaviour it is meant to keep out of other tests' loops.
+    """
+    if "real_library_summary" in {m.name for m in request.node.iter_markers()}:
+        yield
+        return
+
+    async def _noop(self) -> None:
+        return
+
+    with patch(
+        "app.services.summarizer.SummarizationService.refresh_library_summary", _noop
+    ):
+        yield
+
+
 # Deterministic service stubs live in tests/stubs.py (Belief #25)
 # Test files import directly: from stubs import MockLLMService

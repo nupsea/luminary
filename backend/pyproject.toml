@@ -103,6 +103,7 @@ markers = [
     "unstable: known-broken or environment-flaky; excluded from CI, runnable locally via `uv run pytest -m unstable`",
     "flaky: mark test as flaky for rerunning or skipping",
     "anyio: inert; the anyio plugin is disabled and pytest-asyncio drives async tests",
+    "real_library_summary: opt out of the autouse neutralisation of SummarizationService.refresh_library_summary; for tests whose subject IS that method",
 ]
 
 [dependency-groups]
