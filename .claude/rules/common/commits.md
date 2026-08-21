@@ -1,6 +1,9 @@
-# Commit messages
+# Commit messages and changelog entries
 
-Short. A subject line, a few lines of body, stop.
+Short. A subject line, a few lines of body, stop. This applies equally to
+`CHANGELOG.md` entries — a bold lead sentence and, at most, one short sentence
+of why. Not the PR-description depth this repo's PR bodies use; that detail
+stays in the PR, not the changelog.
 
 Include only:
 

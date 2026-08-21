@@ -470,6 +470,14 @@ $EnvLines = Set-EnvLine $EnvLines "ENRICHMENT_VISION_CONCURRENCY" $VisionConcurr
 # canonical; "public" survives only as a legacy alias.
 $BackendProfile = if ($LumProfile -eq "public") { "low" } else { $LumProfile }
 $EnvLines = Set-EnvLine $EnvLines "LUMINARY_MEMORY_PROFILE" $BackendProfile
+# The models this installer actually pulled. Leaving them unset lets the
+# backend resolve its own host-aware default, which is not the model on disk
+# -- it fails at the user's first question instead of here. install.sh and
+# bootstrap.sh already close this gap; test_installer_models.py checks this
+# script pins the same two keys.
+$EnvLines = Set-EnvLine $EnvLines "LITELLM_DEFAULT_MODEL" "ollama/$chatModel"
+$visionModelForEnv = if ($visionModel) { $visionModel } else { $chatModel }
+$EnvLines = Set-EnvLine $EnvLines "VISION_MODEL" "ollama/$visionModelForEnv"
 Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
 
 # Ollama on Windows reads its own knobs from the user environment, and the

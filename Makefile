@@ -458,9 +458,8 @@ concepts:
 concepts-dryrun:
 	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.regenerate_concepts --dry-run
 
-# Deprecated: naive 1:1 entity->concept promotion. Use `make concepts` instead.
-backfill-concepts:
-	cd backend && DATA_DIR="$(CURDIR)/.luminary" uv run python -m app.scripts.backfill_concepts
+
+
 
 # Apply pending migrations to the dev database. The server does this itself on boot;
 # this is for applying a revision without a restart.

@@ -128,11 +128,10 @@ async def lifespan(app: FastAPI):
         # warning, not debug: this swallowed a TypeError in the check itself for
         # as long as the check existed, so the advisory never ran and nothing said so.
         logger.warning("model residency check failed", exc_info=True)
-    # NOTE: the one-time concept backfill is a manual offline step (with the server
-    # stopped so it can hold the Kuzu lock and not starve the event loop):
-    #   make backfill-concepts
-    # Running it inside the live server blocks the loop (sync Kuzu scans), so it is NOT
-    # auto-run here. See docs/concepts.md.
+    # NOTE: concept regeneration is a manual offline step (with the server stopped
+    # so it can hold the Kuzu lock and not starve the event loop):
+    #   make concepts
+    # See docs/concepts.md.
 
     # Telemetry setup
     if settings.PHOENIX_ENABLED:

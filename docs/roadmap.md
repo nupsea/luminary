@@ -36,6 +36,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
 | Flashcard factuality gate + recorded passage (`source_chunk_ids`) | `invariants.md` I-35 |
 | Learner-facing metrics carrying sample size, definition and basis | `metrics.md` |
+| An existing install carried to the model its host should run: Windows records what it pulled, a Settings card surfaces drift and switches only after the download completes | `model_router.narrowed_defaults()`, `ModelDriftNotice.tsx` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -108,39 +109,7 @@ arm pins `document_id` so cross-document routing is unmeasured.
 
 Plan, six stages: `model-and-eval-plan.md`. Delete it when the last stage ships.
 
-### 5. An existing install is never moved to the model its host should run
-
-Changing the default model moves new installs only. There is no path that carries an existing
-one across, and for two of the three install routes the result is that chat stops answering.
-
-`scripts/install.sh` before 2026-08-19 pulled `llama3.2` and never wrote
-`LITELLM_DEFAULT_MODEL`, and the desktop app writes no `.env` at all —
-`supervisor.rs:298` only reads `OLLAMA_NUM_PARALLEL` and `OLLAMA_MAX_LOADED_MODELS` back out.
-Both therefore resolve the host-aware default, which is not the model on disk:
-`warmup.py:125` reports `chat_model: missing`, and `components.py:285` lists catalogue entries
-only, so the setup screen offers a 3.21GB download and never mentions the working 2.88GB model
-the user already has. `bootstrap.sh` wrote the pin, so those installs keep working and are the
-only ones that do.
-
-The primitives exist. `POST /setup/components/model:<ref>/install` installs any registry entry
-with streamed progress, `PATCH /settings/llm {local_chat_model}` switches, and `settings` is a
-key/value table (`models.py:439`), so remembering a dismissal needs no migration. What is
-missing is the comparison — what is in play against what this host would pick, and whether that
-is installed — and one surface for it.
-
-Two constraints decide the design:
-
-- **Frame it as fit, never quality.** `TEXT_PREFERENCE` is ranked on single runs and says so;
-  it ranks a default and does not gate a swap. "This machine can hold a larger model" is
-  measured. "This model is better" is not, and claiming it is the failure
-  `.claude/rules/common/product-integrity.md` exists to prevent.
-- **The download completes before the pin flips.** Switching to a model that is not on disk is
-  what the silent host-aware upgrade did before `_named_by_a_human` gated it, and it fails at
-  the user's first question rather than at the point of choosing.
-
-Removing the superseded model is a separate step, default off, and confirmed.
-
-### 6. The Hub sketch, and what is still approximate in it
+### 5. The Hub sketch, and what is still approximate in it
 
 Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
 quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
@@ -178,7 +147,7 @@ What remains is smaller and worth stating rather than assuming.
   nor route state, so "reflect on this" affordances elsewhere can only link to the page, which
   the sidebar already does.
 
-### 7. What the reported reader and study defects left behind
+### 6. What the reported reader and study defects left behind
 
 All three are fixed (per-chunk citation pages, the unreachable Study landing, the search-highlight
 flicker and the sheet-vs-printed page footer), as is the reader opening on its section list.
@@ -195,7 +164,7 @@ Three smaller things surfaced while fixing them and are worth stating rather tha
   titled `27` and `265` — page numbers picked up as headings. It does not lose text, so it is a
   reading-quality defect rather than a data one.
 
-### 8. Formats other than HTML and PDF are unmeasured
+### 7. Formats other than HTML and PDF are unmeasured
 
 `universal-reader.md` is the contract for the reader. Region selection, the Markdown serialiser,
 webview rendering and `documents.extraction_report` shipped after it was written, so it does not
@@ -228,7 +197,7 @@ yet describe them.
   renders as a heading. Demoting it means the serialiser overruling the author's markup, which
   is a decision, not a bug fix.
 
-### 9. Rendering reaches only the platform with a shell
+### 8. Rendering reaches only the platform with a shell
 
 `render_page` (`src-tauri/src/render.rs`) uses the webview the desktop shell embeds, so it
 exists only where that shell runs — macOS today. The browser dev server, Docker and the script

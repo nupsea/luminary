@@ -4,6 +4,14 @@
 *.db-shm
 *.db-wal
 
+# secrets -- COPY backend/ . had no guard against this and baked a real
+# OPENAI_API_KEY from a developer's backend/.env straight into an image layer.
+# Compose passes what the container needs through `environment:`; nothing
+# reads a .env file from inside the image.
+.env
+**/.env
+**/.env.*
+
 # deps and build artefacts
 frontend/node_modules/
 frontend/dist/
