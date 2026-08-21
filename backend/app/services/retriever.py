@@ -154,6 +154,39 @@ def _rerank_candidates(
     ]
 
 
+async def _fill_chunk_locations(results: list[ScoredChunk]) -> list[ScoredChunk]:
+    """Give every retrieved chunk the section and page it actually sits at.
+
+    Neither retrieval path can supply this. `embed_node` writes
+    `section_heading: ""` and `page: 0` into every vector row, and `_fts_match`
+    hardcodes the same pair, so both arrive blank however the chunk was found.
+    Filled here, at the single exit point, rather than in each path -- a chunk
+    that reaches a caller with a blank heading and a real one is the same chunk
+    described two ways.
+
+    Downstream this is load-bearing beyond display: `search_node` keys its
+    section-summary lookup on (document_id, section_heading) and
+    `pack_context_indexed` groups by section and emits a `### heading` header,
+    all of which were inert while the heading was empty.
+    """
+    if not results:
+        return results
+    from app.repos.document_repo import fetch_chunk_locations  # noqa: PLC0415
+
+    locations = await fetch_chunk_locations([r.chunk_id for r in results if r.chunk_id])
+    if not locations:
+        return results
+    for r in results:
+        _section_id, pdf_page, _label, heading = locations.get(
+            r.chunk_id, (None, None, None, None)
+        )
+        if heading and not r.section_heading:
+            r.section_heading = heading
+        if pdf_page and not r.page:
+            r.page = pdf_page
+    return results
+
+
 class HybridRetriever:
     def vector_search(
         self,
@@ -576,6 +609,7 @@ class HybridRetriever:
                 # re-cut after expansion.
                 if date_filtering:
                     results = await self._filter_by_entry_date(results, date_from, date_to)
+            results = await _fill_chunk_locations(results)
             span.set_attribute("retrieval.chunk_count", len(results))
             if results:
                 span.set_attribute("retrieval.top_score", round(results[0].score, 4))

@@ -1,20 +1,22 @@
 # Luminary
 
-**Read it. Ask it. Actually remember it.** A local-first study workspace for the
-documents you already have.
+**Read content. Seek answers. Write your thoughts. Master what matters.** A local-first study workspace for the documents you already have.
 
 [![Release](https://img.shields.io/github/v/release/nupsea/luminary?label=release)](https://github.com/nupsea/luminary/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](#install)
 [![Runs offline](https://img.shields.io/badge/runs-offline-success)](#it-keeps-working-with-the-wifi-off)
 
-Point it at a book, paper, video or article. It answers questions about them,
-turns them into flashcards, and schedules the review. Nothing leaves your
+Point it at a book, paper, video or article. It helps you answer questions about them,
+turn them into flashcards, and schedule the review. Nothing ever leaves your
 machine unless you hand it an API key.
 
-<!-- HERO: replace with assets/images/offline.gif — see docs/demo-assets.md -->
+<!-- HERO — placeholder. Record the wifi-off demo, then:
+       scripts/make_gif.sh ~/Desktop/raw.mov offline
+     and swap the img below for assets/images/offline.gif.
+     Shot list and checklist: docs/demo-assets.md -->
 <p align="center">
-  <img src="assets/images/reader.png" alt="Luminary reader: source on the left, generated summary on the right" width="900">
+  <img src="assets/images/hub.png" alt="Luminary showing your learning journey" width="900">
 </p>
 
 <p align="center"><a href="https://youtu.be/semZlbJde_Q"><b>Watch the two-minute tour</b></a></p>

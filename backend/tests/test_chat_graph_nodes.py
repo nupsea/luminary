@@ -25,6 +25,7 @@
 
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -221,8 +222,17 @@ def _make_scored_chunk(
 
 
 @pytest.mark.asyncio
-async def test_search_node_augments_chunks_with_section_summaries(test_db):
-    """search_node prepends section summary to chunk text when SectionSummaryModel exists."""
+async def test_search_node_augments_chunks_with_section_summaries(test_db, monkeypatch):
+    """search_node prepends section summary to chunk text when SectionSummaryModel exists.
+
+    Requires QA_ATTACH_SECTION_SUMMARIES: attaching is opt-in because it
+    inflates candidate text 42.2% and, at the default token budget, drops the
+    passages reaching the model from 39 to 28 over an 8-query sample.
+    """
+    monkeypatch.setattr(
+        "app.runtime.chat_nodes.search.get_settings",
+        lambda: SimpleNamespace(QA_ATTACH_SECTION_SUMMARIES=True),
+    )
     _engine, factory, _tmp = test_db
     doc_id = str(uuid.uuid4())
     await _insert_doc(factory, doc_id)
@@ -262,6 +272,49 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db):
     assert heading in augmented_text
     assert section_summary in augmented_text
     assert mock_chunk.text in augmented_text
+
+
+@pytest.mark.asyncio
+async def test_search_node_omits_section_summaries_by_default(test_db):
+    """The default is not to attach, and the default is what ships.
+
+    The lookup is keyed on (document_id, section_heading) and every retrieved
+    chunk carried an empty heading until that was fixed, so this has never
+    fired in a shipped build. Turning it on is a behaviour change that costs
+    passages against a fixed token budget, so it stays opt-in.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    heading = "Chapter 1: The Beginning"
+    section_summary = "This chapter introduces the main characters."
+    async with factory() as session:
+        session.add(
+            SectionSummaryModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                section_id=None,
+                heading=heading,
+                content=section_summary,
+                unit_index=0,
+            )
+        )
+        await session.commit()
+
+    mock_chunk = _make_scored_chunk(doc_id, heading)
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+    mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
+
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
+        result = await search_node(
+            _make_state(question="What happens?", doc_ids=[doc_id], scope="single")
+        )
+
+    text = result.get("chunks", [])[0]["text"]
+    assert section_summary not in text
+    assert text == mock_chunk.text
 
 
 # (d2) search_node honours the DB-backed L3 rerank toggle

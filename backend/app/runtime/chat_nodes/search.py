@@ -11,6 +11,7 @@ import time
 
 from sqlalchemy import and_, or_, select
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel
 from app.services.context_packer import _cap_per_document
@@ -230,9 +231,18 @@ async def search_node(state: ChatState) -> dict:
             len(chunks),
         )
 
-        # Batch-fetch section summaries for all unique (document_id, section_heading) pairs
-        pairs = list({(c.document_id, c.section_heading) for c in chunks if c.section_heading})
-        section_summary_map = await _fetch_section_summaries(pairs)
+        # Batch-fetch section summaries for all unique (document_id, section_heading) pairs.
+        # Gated: this lookup could never hit while retrieved chunks carried an
+        # empty heading, so attaching summaries is a behaviour change and not a
+        # restoration. Measured cost at the current budget in
+        # QA_ATTACH_SECTION_SUMMARIES.
+        attach_summaries = get_settings().QA_ATTACH_SECTION_SUMMARIES
+        pairs = (
+            list({(c.document_id, c.section_heading) for c in chunks if c.section_heading})
+            if attach_summaries
+            else []
+        )
+        section_summary_map = await _fetch_section_summaries(pairs) if pairs else {}
 
         # Context Expansion: batch fetch neighbors for all chunks to avoid looping db sessions
         chunk_keys = [
