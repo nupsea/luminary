@@ -4664,8 +4664,10 @@ export interface paths {
          * List Llm Models
          * @description Return available models for the given provider with cost info.
          *
-         *     For Gemini: fetches live from Google's ListModels API using the stored key.
-         *     For OpenAI/Anthropic: returns a curated list (no live fetch needed).
+         *     Fetches live from each provider's own endpoint using the stored key, so
+         *     the list reflects what that key can actually reach instead of a fixed
+         *     roster that goes stale the moment a provider ships a new model. Falls
+         *     back to a curated list when no key is configured or the live call fails.
          */
         get: operations["list_llm_models_settings_llm_models_get"];
         put?: never;
@@ -6951,6 +6953,10 @@ export interface components {
              * Format: date-time
              */
             last_meaningful_at: string;
+            /** Sections Read */
+            sections_read: number;
+            /** Sections Total */
+            sections_total: number;
             /** Word Count */
             word_count?: number | null;
         };
