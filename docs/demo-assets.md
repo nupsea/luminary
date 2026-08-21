@@ -81,28 +81,38 @@ than at the top.
 
 ## Producing the file
 
-Record with QuickTime (File → New Screen Recording) or `screencapture -v`, then:
+Record with QuickTime (File → New Screen Recording), stop, save. Then one
+command:
 
 ```bash
-# 12 fps is enough for UI motion and roughly halves the file against 24.
-ffmpeg -i raw.mov -vf "fps=12,scale=900:-1:flags=lanczos,palettegen=stats_mode=diff" -y /tmp/pal.png
-ffmpeg -i raw.mov -i /tmp/pal.png \
-  -lavfi "fps=12,scale=900:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3" \
-  -y assets/images/offline.gif
-
-ls -lh assets/images/offline.gif
+scripts/make_gif.sh ~/Desktop/raw.mov offline
 ```
 
-Targets: **900 px wide**, **under 5 MB**, ideally 2–3 MB. GitHub will not inline
-an image much beyond that on a slow connection, and the README should paint
-before the reader scrolls.
+It writes `assets/images/offline.gif` and prints the Markdown to paste. Needs
+`ffmpeg` (`brew install ffmpeg`).
 
-If it comes out too large, in this order: cut a beat, drop to 10 fps, then narrow
-to 800 px. Do not drop the streaming beat — a GIF that jumps straight to a
-finished answer looks staged.
+Trim and tune with environment variables rather than re-recording:
 
-`gifski --fps 12 --width 900 --quality 90 -o assets/images/offline.gif frames/*.png`
-produces a better palette if you have it, at a larger file size.
+```bash
+START=2.5 DURATION=12 scripts/make_gif.sh ~/Desktop/raw.mov offline   # cut the lead-in
+FPS=10 WIDTH=800      scripts/make_gif.sh ~/Desktop/raw.mov offline   # smaller file
+```
+
+| Variable | Default | Why |
+|---|---|---|
+| `FPS` | 12 | Enough for UI motion; roughly half the size of 24 |
+| `WIDTH` | 900 | The README column. Wider is unreadable once GitHub scales it |
+| `START` / `DURATION` | whole clip | Trim without re-recording |
+| `MAX_MB` | 5 | Warn above this |
+
+The script builds the palette from the clip's own frames rather than using
+ffmpeg's default. A global palette banks colours the UI never uses and renders
+small text mushy, which is the usual reason a UI GIF looks worse than the
+recording.
+
+Target 2–3 MB. Over 5 MB the script tells you and lists what to try, in order:
+cut a beat, drop to 10 fps, then narrow to 800 px. **Do not cut the beat where
+the answer streams in** — a GIF that jumps to a finished answer reads as staged.
 
 ## Keeping them honest
 
