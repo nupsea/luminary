@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-21
+
+### Fixed
+- **Stepping through in-document search matches did nothing.** Results refetched
+  in a loop that reset the match counter, and the jump resolved to a hidden pane.
+- **Matches now step in reading order** and are highlighted in the text; search
+  reaches sections beyond the first page of a long document.
+- **Search has a visible icon and stays on the tab you are reading**, rather than
+  ⌘F switching you to the section list.
+- **The reader opens on the document**, with ingestion counts moved to Sections.
+- **A cloud model picked in Settings answered "Ollama is not running".** An
+  explicitly chosen model read its API key from the environment only, so a key
+  added through Settings was ignored.
+- **Private mode no longer offers cloud models**, and a cloud model chosen in
+  another mode is not used while Private is active.
+- **The model list comes from your own provider key** instead of a fixed roster,
+  so newly released models appear.
+
 ## [0.7.0] - 2026-08-21
 
 ### Added
