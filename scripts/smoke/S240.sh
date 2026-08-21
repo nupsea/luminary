@@ -73,6 +73,19 @@ for name, seconds in by.items():
 # foreground sampling. Drawing them as one number is what this keeps apart.
 assert 'minutes_studied' in stats, 'weekly_stats lost minutes_studied'
 print('  weekly: %s' % ', '.join('%s=%ds' % kv for kv in sorted(by.items())))
-" || fail "/home/overview seconds_by_activity contract check failed"
+
+# A percentage the reader cannot check is not a figure worth printing, so the
+# continue lane carries the counts its ratio is taken from. Without these the
+# hub is back to a bare '9%'.
+for item in body.get('continue_reading') or []:
+    for field in ('sections_read', 'sections_total'):
+        assert field in item, f'continue_reading item has no {field}'
+        assert isinstance(item[field], int), f'{field} is {item[field]!r}'
+    assert item['sections_total'] > 0, 'a continue item with no sections cannot show progress'
+    assert 0 <= item['sections_read'] <= item['sections_total'], (
+        'sections_read %s is outside 0..%s' % (item['sections_read'], item['sections_total'])
+    )
+print('  continue_reading: %d item(s) carry section counts' % len(body.get('continue_reading') or []))
+" || fail "/home/overview contract check failed"
 
 echo "S240 OK"

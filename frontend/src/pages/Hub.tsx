@@ -28,7 +28,6 @@ import { quoteOfTheDay } from "@/lib/quotes"
 import { useAppStore } from "@/store"
 import { cn } from "@/lib/utils"
 import { humanizeTitle } from "@/lib/humanizeTitle"
-import { readingTimeLabel } from "@/lib/readingTime"
 import { buildBars } from "./Hub/activityBars"
 import { HubRow, HubSection, MiniRow, SectionLabel } from "./Hub/HubPrimitives"
 import type { components } from "@/types/api"
@@ -213,7 +212,12 @@ function WhereYouLeftOff({
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
 
   const pct = resume ? Math.round(resume.reading_progress_pct * 100) : 0
-  const timeLeft = resume ? readingTimeLabel(resume.word_count, resume.reading_progress_pct) : null
+  // Progress is counted in sections, so it is shown in sections. The percentage
+  // stays on the ring as a shape; the countable basis sits beside it, because a
+  // bare "9%" is not something a reader can check against the page in front of
+  // them. No "~N min left": that stacked a 200 wpm convention on top of
+  // section-count progress used as a word-count proxy, and nothing on screen
+  // said so.
 
   const total = action?.count ?? 0
   const scoped = action?.scoped_count ?? 0
@@ -281,11 +285,11 @@ function WhereYouLeftOff({
                 </h2>
                 <span className="text-[13px] text-muted-foreground">
                   {sinceLabel(resume.last_meaningful_at)}
-                  {timeLeft && (
-                    <span title="Estimated at 200 words a minute, from the share of sections still unread.">
+                  {resume.sections_total > 0 && (
+                    <>
                       {" · "}
-                      {timeLeft}
-                    </span>
+                      {resume.sections_read} of {resume.sections_total} sections
+                    </>
                   )}
                 </span>
               </div>
@@ -486,7 +490,7 @@ function ActiveProjects({ collections }: { collections: ActiveCollection[] }) {
               key={c.id}
               label={c.name}
               dot={c.color}
-              value={`${c.document_count}d · ${c.note_count}n · ${c.flashcard_count}c`}
+              value={`${c.document_count} docs · ${c.flashcard_count} cards`}
               onClick={() => {
                 setActiveCollectionId(c.id)
                 navigate("/library", { state: { from: "/" } })

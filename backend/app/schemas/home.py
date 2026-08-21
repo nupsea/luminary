@@ -105,6 +105,12 @@ class ContinueReadingItem(BaseModel):
     title: str
     reading_progress_pct: float  # 0..1
     last_meaningful_at: datetime
+    # The counts the percentage is a ratio of. A bare "9%" is not something a
+    # reader can check or act on; "2 of 22 sections" is the same fact in units
+    # they can see on the page, and it makes clear that progress is counted in
+    # sections rather than words.
+    sections_read: int
+    sections_total: int
     # For the client's "~N min left". None when the document never recorded one,
     # which is the difference between "no estimate" and "a short document".
     word_count: int | None = None

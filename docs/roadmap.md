@@ -134,13 +134,14 @@ What remains is smaller and worth stating rather than assuming.
   future edit that averages or sums them would produce a number meaning nothing.
 - **A study interval spanning local midnight lands on the day it began**, matching
   EngagementService's approximation rather than splitting the interval.
-- **`Study` cannot be deep-linked to resume a session.** The hub's study row routes to the page
-  because `Study.tsx` reads neither search params nor route state, so a session id in the URL
-  would silently start a fresh session.
-- **"~N min left" stacks two approximations.** Reading speed is a convention (200 wpm, named in
-  `readingTime.ts`), and reading progress counts sections rather than words, so the words
-  remaining assume sections of roughly equal length. It is labelled with a tilde and carries its
-  basis on hover; it is not a measurement and must not be promoted to one.
+- **`Study` cannot be deep-linked to resume a session**, so the hub no longer offers a
+  continue-study lane at all: `Study.tsx` reads neither search params nor route state, and a
+  session id in the URL silently starts a fresh session. Restore the lane only alongside resume.
+- **"~N min left" is gone, and `readingTime.ts` with it.** It stacked a 200 wpm convention on
+  section-count progress standing in for word-count progress, and a tilde plus a hover title did
+  not make that legible to a reader. The hub shows the countable basis instead -- "2 of 22
+  sections" -- which is the same fact in units visible on the page. Restoring an estimate means
+  measuring reading speed rather than assuming one.
 - **A quote carries no field of its own.** Tagging each with a subject would need a taxonomy
   applied by hand across the whole set, so the card shows author and source instead.
 - **Nothing prefills a note from elsewhere in the app.** `Notes.tsx` reads neither search params

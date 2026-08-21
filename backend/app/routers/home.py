@@ -390,6 +390,8 @@ async def _fetch_continue_reading(session: AsyncSession) -> list[ContinueReading
                 document_id=row[0],
                 title=row[1] or "(untitled)",
                 reading_progress_pct=round(read / total, 3),
+                sections_read=read,
+                sections_total=total,
                 last_meaningful_at=row[2],
                 word_count=int(row[3] or 0) or None,
             )
