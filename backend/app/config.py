@@ -91,6 +91,16 @@ class Settings(BaseSettings):
     # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
+    # Prepend each section's generated summary to its chunks in the prompt.
+    # Off, and the default is the measurement rather than a preference: the
+    # lookup is keyed on (document_id, section_heading), and every retrieved
+    # chunk carried an empty heading until that was fixed, so this has never
+    # actually fired in a shipped build. Switching it on inflates candidate text
+    # by 42.2% and, against QA_CONTEXT_TOKEN_BUDGET, drops the passages that
+    # reach the model from 39 to 28 across an 8-query sample -- one query fell
+    # from 4 passages to 1. Turning it on means raising the budget with it, and
+    # that costs prefill latency and KV cache (I-27).
+    QA_ATTACH_SECTION_SUMMARIES: bool = False
     # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
     # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
     # recall lever L2 owns; cross-encoder latency scales linearly with it
