@@ -52,8 +52,8 @@ const CONTENT_TYPE_OPTIONS = [
   // description said "non-fiction", the one word Technical also claims. Name
   // the writing rather than the length, and say what it is not.
   { value: "book" as const, label: "Book (prose)", description: "For novels, essays, history, biography, plays -- prose read start to finish. Not code or maths (including EPUB)" },
-  { value: "technical" as const, label: "Technical", description: "For programming/CS books, papers and articles with code, formulae or numbered sections (sizing auto-tuned to length and structure)" },
-  { value: "paper" as const, label: "Paper", description: "For research papers and academic writing" },
+  { value: "technical" as const, label: "Tech Book", description: "For programming/CS books, manuals and long-form technical writing with code, formulae or numbered sections (sizing auto-tuned to length and structure)" },
+  { value: "paper" as const, label: "Research Paper", description: "For academic papers with an abstract, method and references" },
   { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
   { value: "notes" as const, label: "Notes", description: "For personal notes, web clips, short mixed content" },
   { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
@@ -80,6 +80,25 @@ interface UploadDialogProps {
 
 
 type ContentTypeOption = { value: ContentTypeValue; label: string; description: string }
+
+/** Three dots breathing in sequence, to say work is happening without a spinner.
+ *
+ *  Staggered `animate-pulse` rather than a JS interval: no timer to leak, and it
+ *  stops with the element instead of outliving it.
+ */
+function WorkingDots() {
+  return (
+    <span aria-hidden className="inline-flex gap-0.5 pl-0.5 align-baseline">
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="inline-block h-1 w-1 rounded-full bg-current animate-pulse"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </span>
+  )
+}
 
 /** The document type, collapsed to the one line it usually is.
  *
@@ -122,13 +141,28 @@ function ContentTypePicker({
           className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-primary/50"
         >
           <p className="text-sm font-medium text-foreground">
-            {detecting ? "Reading the document..." : (selected?.label ?? "Detect automatically")}
+            {/* A choice the user has made outranks a detection still running:
+                showing "Reading the document..." over their own selection reads
+                as if the app were about to overrule them. It never does --
+                detection is discarded once they pick. */}
+            {selected ? (
+              selected.label
+            ) : detecting ? (
+              <span className="inline-flex items-center">
+                Reading the document
+                <WorkingDots />
+              </span>
+            ) : (
+              "Detect automatically"
+            )}
           </p>
           <p className="text-xs text-muted-foreground">
-            {detecting
-              ? "Working out what this is, so you can correct it before adding."
-              : selected
-                ? `Detected. ${selected.description}`
+            {selected
+              ? detecting
+                ? "Your choice. Add when you are ready."
+                : `Detected. ${selected.description}`
+              : detecting
+                ? "Working out what this is. Pick one yourself to skip the wait."
                 : "Luminary reads the document and decides. Change it if it gets it wrong."}
           </p>
         </button>
@@ -678,6 +712,12 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                     onChange={(v) => {
                       typeTouchedRef.current = true
                       setUploadType(v)
+                      // The user has decided, so the request in flight is moot.
+                      // Bumping the sequence discards its result and clears the
+                      // indicator, rather than leaving "Reading the document"
+                      // running underneath a choice that has already been made.
+                      detectSeqRef.current += 1
+                      setDetecting(false)
                     }}
                   />
                 )}
