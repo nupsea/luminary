@@ -128,6 +128,12 @@ async def test_youtube_error_names_every_missing_component(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(documents_module, "capabilities", _no_media_capabilities)
+    # Pinned, not inherited from the machine: the direct check now decides for
+    # the tools it can run, so a developer with ffmpeg installed and a CI runner
+    # without it would otherwise take different branches -- which is exactly the
+    # divergence that let a broken YouTube through a green local suite.
+    monkeypatch.setattr(documents_module._yt_module, "check_ffmpeg_available", lambda: False)
+    monkeypatch.setattr(documents_module._yt_module, "check_ytdlp_available", lambda: True)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(

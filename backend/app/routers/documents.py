@@ -980,14 +980,20 @@ async def ingest_url(
     required: list[str] = []
     if not yt_capability.get("available"):
         required = list(yt_capability.get("requires") or [])
-    # The tool checks stay as a backstop rather than being replaced by the
-    # capability. The two can disagree -- they resolve through different code --
-    # and proceeding on an optimistic capability means failing later, deeper,
-    # with a worse message than this one.
-    if not _yt_module.check_ytdlp_available() and "yt-dlp" not in required:
-        required.append("yt-dlp")
-    if not _yt_module.check_ffmpeg_available() and "ffmpeg" not in required:
-        required.append("ffmpeg")
+    # For the two tools it can run directly, the direct check decides -- in both
+    # directions. The capability reaches them through component_status and the
+    # two can disagree; what matters here is whether the binary can actually be
+    # invoked, so an optimistic capability cannot wave a missing tool through
+    # and a pessimistic one cannot block a tool that is plainly there.
+    # Everything else (the transcriber) is the capability's to report.
+    for name, present in (
+        ("yt-dlp", _yt_module.check_ytdlp_available()),
+        ("ffmpeg", _yt_module.check_ffmpeg_available()),
+    ):
+        if present and name in required:
+            required.remove(name)
+        elif not present and name not in required:
+            required.append(name)
     if required:
         raise HTTPException(
             status_code=503,

@@ -86,7 +86,14 @@ async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
     async def _ffmpeg_missing():
         return {"youtube_ingest": {"available": False, "requires": ["ffmpeg"]}}
 
-    with patch("app.routers.documents.capabilities", _ffmpeg_missing):
+    # ffmpeg pinned absent rather than inherited from the machine: the direct
+    # check decides for tools it can run, so this must not depend on whether the
+    # developer happens to have ffmpeg installed.
+    with (
+        patch("app.routers.documents.capabilities", _ffmpeg_missing),
+        patch("app.services.youtube_downloader.check_ffmpeg_available", return_value=False),
+        patch("app.services.youtube_downloader.check_ytdlp_available", return_value=True),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
@@ -380,3 +387,58 @@ async def test_ingest_url_stores_channel_name(test_db, monkeypatch):
     assert doc is not None
     assert doc.channel_name == "Prof. Smith"
     assert doc.youtube_url == "https://www.youtube.com/watch?v=lec001"
+
+
+async def test_download_passes_the_resolved_ffmpeg_location(monkeypatch, tmp_path):
+    """yt-dlp inherits the bundle's PATH, not wherever we found ffmpeg.
+
+    Luminary's own capability check passed while the download still died on
+    "ffprobe and ffmpeg not found", because resolving the binary for ourselves
+    does nothing for the subprocess. The directory is passed, not the binary:
+    postprocessing needs ffprobe too and it sits beside ffmpeg.
+    """
+    import app.services.youtube_downloader as yt
+
+    captured: list[str] = []
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        captured.extend(args)
+        return _Proc()
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: f"/opt/homebrew/bin/{name}")
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    await yt.download_audio("https://youtu.be/x", tmp_path / "out")
+
+    assert "--ffmpeg-location" in captured
+    assert captured[captured.index("--ffmpeg-location") + 1] == "/opt/homebrew/bin"
+
+
+async def test_download_omits_the_flag_when_ffmpeg_is_not_found(monkeypatch, tmp_path):
+    """An empty --ffmpeg-location is worse than none: yt-dlp would take it."""
+    import app.services.youtube_downloader as yt
+
+    captured: list[str] = []
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _fake_exec(*args, **kwargs):
+        captured.extend(args)
+        return _Proc()
+
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
+
+    await yt.download_audio("https://youtu.be/x", tmp_path / "out")
+
+    assert "--ffmpeg-location" not in captured

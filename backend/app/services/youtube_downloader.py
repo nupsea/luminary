@@ -83,6 +83,14 @@ async def download_audio(url: str, dest_stem: Path) -> None:
 
     Raises RuntimeError on non-zero exit.
     """
+    # yt-dlp finds ffmpeg on its own PATH, which is the bundle's minimal one --
+    # not wherever `resolve_tool` located the binary. Luminary's own check would
+    # pass while the download still died on "ffprobe and ffmpeg not found", so
+    # the resolved location has to be handed over explicitly. The *directory* is
+    # passed rather than the binary because postprocessing needs ffprobe too,
+    # and it sits beside ffmpeg.
+    ffmpeg = resolve_tool("ffmpeg")
+    location = ["--ffmpeg-location", str(Path(ffmpeg).parent)] if ffmpeg else []
     proc = await asyncio.create_subprocess_exec(
         _ytdlp(),
         "-x",
@@ -90,6 +98,7 @@ async def download_audio(url: str, dest_stem: Path) -> None:
         "wav",
         "--audio-quality",
         "0",
+        *location,
         "-o",
         f"{dest_stem}.%(ext)s",
         url,
