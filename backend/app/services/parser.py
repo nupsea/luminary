@@ -693,18 +693,26 @@ class DocumentParser:
         if result is not None:
             return result
 
-        # Fallback: paragraph-split (for unstructured text files)
+        # Fallback: paragraph-split (for unstructured text files).
+        # The heading stays empty (I-30): a paragraph split out of unstructured
+        # text has no label the source authored, and "Section 3" is a fabricated
+        # one. An empty heading is the signal that the source gave none, so
+        # `sectionTitle()` can derive a navigable label for the contents panel
+        # while nothing else presents it as the author's words. This went
+        # unnoticed while retrieval carried no headings at all; now that a
+        # citation names its section, an invented one would be printed under
+        # "Source" beside a real quote.
         text = read_source_text(file_path)
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
         sections = [
             Section(
-                heading=f"Section {i + 1}",
+                heading="",
                 level=1,
                 text=para,
                 page_start=0,
                 page_end=0,
             )
-            for i, para in enumerate(paragraphs)
+            for para in paragraphs
         ]
         word_count = len(text.split())
         title = file_path.stem

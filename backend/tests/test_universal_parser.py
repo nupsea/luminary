@@ -388,3 +388,24 @@ def test_markdown_heading_depth_survives_segmentation(tmp_path):
     assert by_heading["Outer section"] == 2
     assert by_heading["Inner label"] == 3
     assert by_heading["Second outer"] == 2
+
+
+def test_plain_text_fallback_invents_no_heading(tmp_path):
+    """I-30: a heading is a label the source authored.
+
+    The paragraph-split fallback used to name every paragraph "Section N".
+    Nothing surfaced it while retrieval carried no headings, but a citation
+    now names its section, so an invented label would be printed under
+    "Source" beside a real quote. An empty heading is the signal that the
+    source gave none; `sectionTitle()` derives a navigable label for the
+    contents panel from it without claiming the author wrote it.
+    """
+    from app.services.parser import DocumentParser
+
+    f = tmp_path / "unstructured.txt"
+    f.write_text("First paragraph of prose.\n\nSecond paragraph of prose.\n")
+    parsed = DocumentParser().parse(f, "txt")
+
+    assert parsed.sections, "the fallback produced no sections"
+    for s in parsed.sections:
+        assert s.heading == "", f"invented heading {s.heading!r}"
