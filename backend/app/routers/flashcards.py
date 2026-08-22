@@ -58,6 +58,7 @@ from app.schemas.flashcards import (
     FillUncoveredRequest,
     FillUncoveredResponse,
     FlashcardGenerateRequest,
+    FlashcardRegenerateRequest,
     FlashcardResponse,
     FlashcardSearchResponse,
     FlashcardUpdateRequest,
@@ -67,6 +68,7 @@ from app.schemas.flashcards import (
     GenerateTechnicalRequest,
     GroundingAuditRequest,
     GroundingReport,
+    RegenerateResponse,
     RepairReport,
     ReviewRequest,
     SourceContextResponse,
@@ -120,6 +122,7 @@ __all__ = [
     "FillUncoveredRequest",
     "FillUncoveredResponse",
     "FlashcardGenerateRequest",
+    "FlashcardRegenerateRequest",
     "FlashcardResponse",
     "FlashcardSearchResponse",
     "FlashcardUpdateRequest",
@@ -276,7 +279,6 @@ async def generate_flashcards(
             session=session,
             context=req.context,
             model=req.model,
-            avoid=req.avoid,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(
@@ -293,6 +295,55 @@ async def generate_flashcards(
             document_id=req.document_id, note_id=None
         )
     return [_to_response(c) for c in cards]
+
+
+@router.post("/regenerate", response_model=RegenerateResponse, status_code=201)
+async def regenerate_flashcards(
+    req: FlashcardRegenerateRequest,
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> RegenerateResponse:
+    """Replace one source's deck with cards written from unused material.
+
+    One request rather than the client's delete-then-generate pair: the old deck
+    has to still be in the table while the replacement is generated, or the
+    near-duplicate filter has nothing to compare against and a failed run leaves
+    the user with no cards at all.
+    """
+    logger.info(
+        "Flashcard regeneration requested",
+        extra={
+            "document_id": req.document_id,
+            "note_id": req.note_id,
+            # 0 means "whatever the deck holds"; the service resolves it.
+            "count": req.count,
+            "difficulty": req.difficulty,
+            "model": req.model or "auto",
+        },
+    )
+    try:
+        result = await service.regenerate(
+            session=session,
+            document_id=req.document_id,
+            note_id=req.note_id,
+            count=req.count or None,
+            difficulty=req.difficulty,
+            model=req.model,
+        )
+    except LLMUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=get_llm_error_message()) from exc
+
+    if result.cards:
+        await ActivityService(session).record_flashcard_event(
+            document_id=req.document_id, note_id=req.note_id
+        )
+    return RegenerateResponse(
+        cards=[_to_response(c) for c in result.cards],
+        requested=result.requested,
+        delivered=len(result.cards),
+        replaced=result.replaced,
+        kept_previous=result.kept_previous,
+    )
 
 
 @router.post("/from-gaps", response_model=FromGapsResponse, status_code=200)

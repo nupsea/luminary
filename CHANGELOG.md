@@ -6,7 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-08-23
+
 ### Fixed
+- **A Hub card opens the document it names.** "Dive back in" could land on
+  whichever document you had open last, because the reader wrote that one back
+  over the incoming link before reading it.
+- **"Regenerate (replace)" writes a different deck**, for a document, a note or
+  a whole collection. It now draws on material the current cards were not
+  written from -- measured on the reported document, nothing in common with the
+  deck it replaced -- and reports when it delivers fewer cards than asked
+  instead of quietly shrinking the deck. Your existing cards survive a run that
+  produces nothing.
+- **A collection's note cards are replaced rather than piled up.** Cards
+  generated from a note did not record which note they came from, so a
+  collection could not see them: every replace added a fresh batch on top of the
+  old ones. Cards made before this still cannot be attributed and are best
+  deleted by hand.
 - **Imported web articles lost characters.** Box-drawing, dashes and anything
   else multi-byte could arrive as `��`. One measured article stored 34 damaged
   characters from a page that served none.

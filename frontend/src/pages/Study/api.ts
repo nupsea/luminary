@@ -92,14 +92,39 @@ export async function generateFlashcards(req: {
   section_heading: string | null
   count: number
   difficulty: "easy" | "medium" | "hard"
-  /** Questions the previous deck asked, so a replacement is actually different.
-   *  Steers the prompt; the backend does not filter on it. */
-  avoid?: string[]
 }): Promise<Flashcard[]> {
   try {
     return await apiPost<Flashcard[]>("/flashcards/generate", req)
   } catch (err) {
     asGenerateError(err, "Failed to generate flashcards")
+  }
+}
+
+export interface RegenerateResult {
+  cards: Flashcard[]
+  requested: number
+  delivered: number
+  replaced: number
+  kept_previous: boolean
+}
+
+/** Replace a document's deck in one request.
+ *
+ *  Deliberately not delete-then-generate from here: the old cards have to be in
+ *  the table while the new ones are written, or the backend's near-duplicate
+ *  filter has nothing to compare against and a failed run leaves the user with
+ *  an empty deck. `requested` vs `delivered` is what lets the toast stop
+ *  announcing a shrunken deck as a clean replacement.
+ */
+export async function regenerateFlashcards(req: {
+  document_id: string
+  count: number
+  difficulty: "easy" | "medium" | "hard"
+}): Promise<RegenerateResult> {
+  try {
+    return await apiPost<RegenerateResult>("/flashcards/regenerate", req)
+  } catch (err) {
+    asGenerateError(err, "Failed to regenerate flashcards")
   }
 }
 

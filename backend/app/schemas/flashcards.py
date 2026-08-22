@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # provider/name, the shape LiteLLM routes on. Validated rather than passed
 # through so a typo fails loudly here instead of silently falling back to the
@@ -37,16 +37,39 @@ class FlashcardGenerateRequest(BaseModel):
     # None follows the model chosen in Settings, exactly as /qa does when its
     # selector reads "Auto". A concrete id overrides it for this request only.
     model: str | None = None
-    # Questions a fresh run should steer away from. "Regenerate (replace)" wipes
-    # the deck first, so without this the next run starts from an empty avoid
-    # list against identical sampled passages -- and returns the same questions
-    # it just deleted, which is what "replace" was asked not to do.
-    avoid: list[str] = Field(default_factory=list, max_length=40)
 
     @field_validator("model")
     @classmethod
     def _check_model(cls, value: str | None) -> str | None:
         return _validate_model_id(value)
+
+
+class FlashcardRegenerateRequest(BaseModel):
+    """Replace a document's deck. Not `generate` with a flag: the replacement is
+    generated *before* the old cards are deleted, which is what lets the
+    near-duplicate filter see the deck it is replacing and what leaves the user
+    their existing cards when a run produces nothing usable."""
+
+    # Exactly one source. A collection replaces its sources one at a time, so a
+    # source whose run fails costs that source's cards and no others.
+    document_id: str | None = None
+    note_id: str | None = None
+    # 0 means "as many as the deck has now" -- the deck keeps its size unless
+    # the user changes it.
+    count: int = Field(default=0, ge=0, le=50)
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    model: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str | None) -> str | None:
+        return _validate_model_id(value)
+
+    @model_validator(mode="after")
+    def _one_source(self) -> "FlashcardRegenerateRequest":
+        if bool(self.document_id) == bool(self.note_id):
+            raise ValueError("provide exactly one of document_id, note_id")
+        return self
 
 
 class FromGapsRequest(BaseModel):
@@ -91,11 +114,6 @@ class GenerateTechnicalRequest(BaseModel):
     section_heading: str | None = None
     count: int = 10
     model: str | None = None
-    # Questions a fresh run should steer away from. "Regenerate (replace)" wipes
-    # the deck first, so without this the next run starts from an empty avoid
-    # list against identical sampled passages -- and returns the same questions
-    # it just deleted, which is what "replace" was asked not to do.
-    avoid: list[str] = Field(default_factory=list, max_length=40)
 
     @field_validator("model")
     @classmethod
@@ -148,6 +166,24 @@ class FlashcardResponse(BaseModel):
         """A card read before its row was flushed has no verdict yet, not a passing
         one. Coerced here so every reader sees the same four states."""
         return value or "unchecked"
+
+
+class RegenerateResponse(BaseModel):
+    """What a deck replacement actually did.
+
+    `requested` and `delivered` are both reported because they differ: the
+    quality gate drops a card whose quote is not in its passage, and a backfill
+    pass cannot always replace it. Returning only the cards let the UI announce
+    "Replaced with 3 fresh cards" for a deck of 5 that had just lost 2 with no
+    explanation. `kept_previous` says the run produced nothing usable and the
+    old deck is still there -- `cards` is then empty and nothing was deleted.
+    """
+
+    cards: list[FlashcardResponse]
+    requested: int
+    delivered: int
+    replaced: int
+    kept_previous: bool = False
 
 
 class GroundingAuditRequest(BaseModel):

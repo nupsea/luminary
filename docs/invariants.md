@@ -152,6 +152,63 @@ they collide, and `tests/test_flashcard_factuality.py` and `tests/test_flashcard
 CI if an unparseable verdict defaults to a pass, if a rebuilt passage falls back to `chunk_id`, or
 if the guard reads the override again.
 
+**I-36. A regeneration reads material the current deck was not written from, that deck is still
+in the table while it runs, and one call replaces exactly one source.**
+"Regenerate (replace)" returned the questions it had just deleted, and the deck came back two
+cards short of the five it replaced. Nothing was cached and nothing was wrong with the decoding.
+Measured on the reported document: 265 chunks, of which `_filter_chunks_by_classification` leaves
+10, and all 10 fit `_CHUNK_CHAR_LIMIT` — so every run read the same 3,024 characters and returned
+the same handful of topics reworded, whatever happened to the deck in between.
+
+**What a generation can ask about is a property of the passage in its prompt.** The lever is which
+chunks reach it — not the temperature, and not an instruction. The first fix listed the previous
+questions under "do not repeat these", which is the I-28 anti-pattern in a new place: verbatim
+questions are exemplars a small model copies, not a signal it steers away from. `source_chunk_ids`
+(I-35) already records which chunks each card was written from, so `_passage_not_yet_used` drops
+them and takes the next unread run of the document in reading order; successive regenerations
+sweep forward rather than re-reading the opening. The replacement passage is held to the size of
+the one it replaces instead of filling the budget — more text is not free. Three runs each on the
+reported document: capped, 14 of 15 cards past the grounding gate and 4–5 delivered per run;
+filling the budget with the same material, 12 of 15 and 3–5. Both shared no question with the deck
+they replaced, so the cap costs no novelty.
+
+**A note has no unread material, so its replacement is made different by rejection rather than
+selection.** Filtering the extracted concepts on the previous questions was tried first and
+measured useless: extraction returns whole sentences ("TF-IDF measures the importance of a word in
+a document within a corpus"), which never occur inside a question, so on two real notes it dropped
+0 of 12 and 0 of 11 — a check that cannot fire. What fires is the 0.85 cosine test already used on
+document cards, scoped to the note being replaced: measured against a real 8-card note deck, three
+rewordings of its own questions scored 0.9284, 0.9593 and 0.9828, while three genuinely new
+questions about the same note scored 0.7627, 0.7730 and 0.8248. Extraction is widened during a
+replacement so the run has spare concepts when candidates are rejected, which costs no extra call.
+
+**A note card records which note wrote it, and only when one note did.** Cards from the
+`note_ids` path carried no `note_id` at all — 75 such rows in the dev library — and
+`collection_card_filter` matches on it, so a collection could not see, scope or delete them. Its
+"Regenerate (replace)" wiped what the filter could find and then generated more, stacking a new
+batch of note cards on top of the old ones every time. Several notes are concatenated into one
+prompt, so a run over more than one records `NULL` rather than naming one of them: that is the
+same false provenance `chunk_id` carried before I-35, and a card that cannot be attributed must
+not be swept up by a replacement of some other note. Rows written before this stay `NULL` — the
+note that produced them was never recorded, so nothing can recover it.
+
+**The order is the other half, and it is what a client cannot get right.** The near-duplicate
+filter compares a candidate against the cards the document already has, so deleting the deck first
+left it comparing against nothing — the one mechanism that could catch a repeat was disabled by
+the step before it, and a run that produced nothing left the user with an empty deck.
+`POST /flashcards/regenerate` is therefore one request, and it takes exactly one source: a
+collection replaces its sources one at a time, so a source whose run fails costs that source's
+cards and no others. `requested` and `delivered` are both on the wire because they differ — the
+quality gate drops a card whose quote is not in its passage and a backfill pass cannot always
+replace it, which is how a deck of 5 came back as 3 announced as a clean replacement.
+`tests/test_flashcard_regenerate_differs.py` fails CI if a replacement re-reads the chunks its
+deck was written from, if it reads more than the passage it replaces, if a note run stops rejecting repeats of its own
+deck or starts rejecting another note's cards as its own, if a single-note run stops recording
+`note_id` or a multi-note run starts inventing one, if the old cards are deleted before new ones exist, if an empty run
+deletes anything, or if a short delivery is not reported; `scripts/smoke/S243.sh` fails if the
+endpoint stops taking either source, stops refusing two, stops reporting the three counts
+separately, or if `avoid` returns to the generate request.
+
 ## Vector Dimensions
 
 **I-9. Note and chunk vectors share one embedding space, whose dimension is a stored property of the corpus rather than a setting.**
@@ -176,7 +233,7 @@ Block-level elements (h1, ul) inside a `<td>` break layout. Use `stripMarkdown()
 The order is load-bearing, not cosmetic: a lint error masks the test error underneath it, and a layer violation is a design fault that makes the test result meaningless. Run the cheap check first and fix what it says before moving on; running `pytest` against code `ruff` has already rejected wastes the slow step. Claiming a change is done means `make ci` exited 0 on your machine -- naming the individual commands you ran instead is not the same claim, because `make ci` also runs `check_manifest_schema.py`, `check_manifest_coverage.py` and `check_public_import.sh`, which are the ones people forget. Local green is necessary, not sufficient: GLiNER memory pressure has produced GitHub-only failures that no local run reproduces.
 
 **I-14. `make ci` passing does not mean the app works. `make smoke` is the HTTP contract check.**
-`make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~230 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
+`make ci` runs `pytest` against the app in-process; it never starts a server, so it cannot catch a route registered in the wrong order, a router the manifest does not cover, or a response shape the UI reads differently than the test does. `scripts/smoke/all.sh` drives ~180 numbered `S###.sh` scripts against a live backend on :7820 and is the only thing that verifies the wire contract the frontend depends on. A change that adds or alters an endpoint is not finished until it has a smoke script and `make smoke` exits 0. There is no reviewer gate and no `passes=true` flag -- an earlier version of this invariant named both, and neither ever existed in the repo, so any claim of having satisfied them was unfalsifiable. If you want a review, `/code-review` is the mechanism.
 
 **I-32. An eval metric that could not be computed is a failure, never a pass.**
 `run_eval.py` scored every generation metric behind `if value is not None`, so an NLI model that failed to load, a judge that errored, or a `/qa` that timed out produced `None`, was skipped, and recorded `passed: true` for a run that measured nothing of what it was asked to measure. 166 rows in `scores_history.jsonl` were written under that rule, one of them a generation run whose faithfulness is null -- and history is what later comparisons are read against, so a pass that was never earned poisons every delta computed from it. The distinction the gate must keep is between **requested-but-uncomputed**, which fails, and **not-requested**, which is a skip: a retrieval-only run legitimately has no faithfulness, while a run that generated answers and could not score them has a hole in it. `_check()` in `run_eval.py` takes `requested=` for exactly this, and asking for generation while `/qa` returns no answers at all is itself a violation. Never paper over the gap with a default -- no `or 0.0`, no `or 1.0`, no neutral score for a missing verdict. `tests/test_eval_gate.py` fails CI if an uncomputed metric passes, or if a violation stops short of a non-zero exit. See the `eval-integrity` skill.

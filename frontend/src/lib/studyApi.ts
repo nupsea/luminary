@@ -412,6 +412,94 @@ export async function generateCollectionFlashcards(
   return result
 }
 
+export interface CollectionRegenerationResult {
+  requested: number
+  delivered: number
+  replaced: number
+  /** Sources whose run produced nothing usable; their old cards are still there. */
+  keptPrevious: string[]
+  errors: string[]
+}
+
+/** Replace a collection's deck, one source at a time.
+ *
+ *  Deliberately not "delete the collection's cards, then generate": the old
+ *  cards of a source are what the backend's duplicate filters compare against,
+ *  and what the user keeps when a run yields nothing. Wiping first made a
+ *  collection replace return the questions it had just removed. Per source, so
+ *  one failure costs that source's deck and no others -- and the failures are
+ *  reported rather than folded into a success count.
+ *
+ *  A source allotted 0 cards keeps what it has. Nothing was generated to replace
+ *  them with, and silently emptying a source is the behaviour this whole change
+ *  exists to remove.
+ */
+export async function regenerateCollectionFlashcards(
+  sources: { id: string; type: "document" | "note"; weight?: number; title?: string }[],
+  totalCount: number = 20,
+  difficulty: Difficulty = "medium",
+): Promise<CollectionRegenerationResult> {
+  const result: CollectionRegenerationResult = {
+    requested: 0,
+    delivered: 0,
+    replaced: 0,
+    keptPrevious: [],
+    errors: [],
+  }
+  if (sources.length === 0) return result
+
+  const targets = distributeByWeight(
+    totalCount,
+    sources.map((s) => s.weight ?? 0),
+  )
+
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i]
+    const count = targets[i]
+    if (count <= 0) continue
+    try {
+      const res = await fetch(`${API_BASE}/flashcards/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(source.type === "document"
+            ? { document_id: source.id }
+            : { note_id: source.id }),
+          count,
+          difficulty,
+        }),
+      })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try {
+          const body = (await res.json()) as { detail?: string }
+          if (body.detail) msg = body.detail
+        } catch {
+          // body wasn't JSON
+        }
+        result.errors.push(`${source.title ?? source.type}: ${msg}`)
+        continue
+      }
+      const report = (await res.json()) as {
+        requested: number
+        delivered: number
+        replaced: number
+        kept_previous: boolean
+      }
+      result.requested += report.requested
+      result.delivered += report.delivered
+      result.replaced += report.replaced
+      if (report.kept_previous) result.keptPrevious.push(source.title ?? source.id)
+    } catch (e) {
+      result.errors.push(
+        `${source.title ?? source.type}: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+  }
+
+  return result
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

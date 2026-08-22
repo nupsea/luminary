@@ -37,6 +37,7 @@ import {
   fetchLibraryFacets,
   fetchRecentlyAccessed,
 } from "./Learning/api"
+import { docToMirror } from "./Learning/docUrlSync"
 import { LibraryStatsBar } from "./Learning/LibraryStatsBar"
 import { LibraryTable } from "./Learning/LibraryTable"
 import { SearchPanel } from "./Learning/SearchPanel"
@@ -341,11 +342,19 @@ export default function Learning() {
   // Writes only. Clearing belongs to `returnToLibrary`: on mount this runs
   // before `doc` is read into the store, where an unpopulated store is
   // indistinguishable from a closed reader.
+  //
+  // The open document is read from the store, never from this render. The
+  // effect above consumes an incoming `?doc=` in the same commit, so the
+  // `activeDocumentId` captured here is still the document that was open
+  // before the link was followed -- writing it back replaced the link, and the
+  // next pass opened it. That is what sent a Hub "Dive back in" to the last
+  // document read instead of the one on the card.
   useEffect(() => {
-    if (!activeDocumentId || docParam === activeDocumentId) return
+    const open = docToMirror(docParam, useAppStore.getState().activeDocumentId)
+    if (!open) return
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.set("doc", activeDocumentId)
+      next.set("doc", open)
       return next
     }, { replace: true, state: routeLocation.state })
   // eslint-disable-next-line react-hooks/exhaustive-deps
