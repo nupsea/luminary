@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Imported web articles lost characters.** Box-drawing, dashes and anything
+  else multi-byte could arrive as `��`. One measured article stored 34 damaged
+  characters from a page that served none.
+- **YouTube refused to import even with ffmpeg installed**, and told you to
+  install the ffmpeg you already had. A tool installed by Homebrew or apt is now
+  found; the app could only see its own directory before.
+- **Media errors name everything that is missing**, and offer to install what
+  Luminary can fetch, rather than stopping at the first item and printing a
+  command to run elsewhere.
+
+### Changed
+- **The document type is detected when you pick the file**, so you can correct
+  it before adding rather than discovering it in the library afterwards.
+
 ## [0.7.4] - 2026-08-22
 
 ### Fixed
