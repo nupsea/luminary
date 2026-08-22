@@ -675,13 +675,44 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                 audio_chunks = state.get("_audio_chunks") or []
                 chunks = []
                 async with get_session_factory()() as session:
+                    # A transcript needs sections like any other document. This
+                    # branch alone wrote chunks with section_id=None and created
+                    # none, so `GET /sections/{id}/content` returned [] and the
+                    # reader showed "No content available" for a document whose
+                    # whole transcript was sitting in chunks -- retrievable and
+                    # unreadable. The orphan-chunk fallback in sections.py could
+                    # not cover it either: that fires when sections exist but are
+                    # empty, and here there were none at all.
+                    #
+                    # One section per transcript chunk, and the heading stays
+                    # empty: nobody wrote one. I-30 -- a heading is a label the
+                    # source authored, and a timestamp dressed up as one would
+                    # be this pipeline inventing structure it was not given.
+                    section_models: list[SectionModel] = []
+                    for order, c in enumerate(audio_chunks):
+                        section_models.append(
+                            SectionModel(
+                                id=str(uuid.uuid4()),
+                                document_id=doc_id,
+                                heading="",
+                                level=1,
+                                page_start=0,
+                                page_end=0,
+                                section_order=order,
+                                body=c["text"],
+                                preview=c["text"][:PREVIEW_CHARS],
+                            )
+                        )
+                    session.add_all(section_models)
+                    await session.flush()
+
                     chunk_models: list[ChunkModel] = []
-                    for c in audio_chunks:
+                    for c, section in zip(audio_chunks, section_models, strict=True):
                         chunk_models.append(
                             ChunkModel(
                                 id=c["id"],
                                 document_id=doc_id,
-                                section_id=None,
+                                section_id=section.id,
                                 text=c["text"],
                                 token_count=len(c["text"].split()),
                                 page_number=0,
