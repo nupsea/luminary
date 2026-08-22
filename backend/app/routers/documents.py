@@ -499,9 +499,17 @@ async def parse_document(
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
-    content_type: ContentType = Form(...),
+    content_type: ContentType | None = Form(None),
     settings: Settings = Depends(get_settings),
 ):
+    """Ingest a file. Omit content_type to have the pipeline classify it.
+
+    Optional rather than required because a supplied content_type is final:
+    classify_node skips every heuristic when the caller names a type. A client
+    that guesses -- the upload dialog defaulted every non-media file to "book"
+    -- silently disables classification, which is not a behaviour a caller
+    should be able to trigger by accident.
+    """
     ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
     if ext and ext not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -562,7 +570,8 @@ async def ingest_document(
                 # Previous attempt failed — reset stage and retry ingestion on
                 # the same document record so no duplicate row is created.
                 existing.stage = "parsing"
-                existing.content_type = content_type
+                if content_type:
+                    existing.content_type = content_type
                 # commit stage reset before the background job polls document.stage
                 await session.commit()
                 get_ingestion_jobs().launch(
@@ -606,7 +615,10 @@ async def ingest_document(
             id=doc_id,
             title=Path(file.filename or "upload").stem,
             format=fmt,
-            content_type=content_type,
+            # Provisional when the caller left it to us: classify_node persists
+            # the real type before chunk_node reads it, so nothing branches on
+            # this value. It exists only to satisfy the NOT NULL column.
+            content_type=content_type or "notes",
             word_count=0,
             page_count=0,
             file_path=str(dest),

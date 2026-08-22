@@ -5,7 +5,7 @@ parse_node turns the raw file at `state['file_path']` into a structured
 parsing here; transcribe_node handles them downstream.
 
 classify_node assigns a `content_type` (book/conversation/notes/code/
-tech_book/tech_article/...). It uses the heuristic in `_classify` plus
+tech_book/tech_article/...). It uses `classify_content` plus
 optional LLM reclassification for ambiguous large documents. If the
 caller pre-supplied content_type, both heuristics and LLM are skipped.
 """
@@ -14,11 +14,11 @@ import asyncio
 import logging
 from pathlib import Path
 
+from app.services.content_classifier import classify_content
 from app.telemetry import trace_ingestion_node
 from app.types import TECHNICAL_CONTENT_TYPES
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
-    _classify,
     _parser,
     _persist_content_type,
     _persist_extraction_report,
@@ -131,16 +131,17 @@ async def classify_node(state: IngestionState) -> IngestionState:
             fp_obj = Path(state["file_path"])
             file_ext = fp_obj.suffix.lstrip(".")
             filename = fp_obj.name
-            content_type = _classify(
+            content_type = classify_content(
                 pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
             )
 
-            # LLM reclassification: heuristic result is uncertain for large documents.
-            # 'notes' on a long doc may be book/paper; 'conversation' on a very long doc
-            # (>20k words) is likely misclassified — epics/plays have speaker patterns too.
-            needs_llm = (content_type == "notes" and pd["word_count"] > 5000) or (
-                content_type == "conversation" and pd["word_count"] > 20000
-            )
+            # LLM reclassification, for the one case the rules stay uncertain on:
+            # a long document that scored as a conversation. Epics and plays carry
+            # speaker turns, so length is the tell.
+            #
+            # The old 'notes on a >5000-word doc' arm is gone because it became
+            # unreachable: classify_content only returns notes below 2000 words.
+            needs_llm = content_type == "conversation" and pd["word_count"] > 20000
             if needs_llm:
                 try:
                     from app.services.llm import get_llm_service  # noqa: PLC0415
@@ -183,6 +184,14 @@ async def classify_node(state: IngestionState) -> IngestionState:
             # Media documents are decided in transcribe_node instead — their text
             # does not exist yet at this point.
             is_technical = content_type in TECHNICAL_CONTENT_TYPES
+            # The classified type has to reach the row, not just the state. Chunking
+            # and NER read it from the state and were correct, so a document could
+            # be chunked and entity-extracted as a tech_book while the library, the
+            # filters and every later read still called it whatever the row was
+            # seeded with. Harmless while this branch only ran for documents whose
+            # row already held the caller's own value; a silent mislabel now that
+            # classification is the normal path.
+            await _persist_content_type(state["document_id"], content_type)
             await _persist_is_technical(state["document_id"], is_technical)
 
             logger.info(

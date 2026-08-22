@@ -1,0 +1,97 @@
+{
+  "_comment": [
+    "Ground truth for content-type classification, labelled by the maintainer.",
+    "",
+    "`expected` is a list because some documents are legitimately two things and",
+    "the product does not need to pick between them -- the Federalist Papers read",
+    "as both a book and a collection of position papers, and the user can override",
+    "either way. A classifier is correct when it returns any listed value.",
+    "",
+    "`family` is the coarse call and is what actually matters: a technical",
+    "document chunked and prompted as a novel is a real failure, while tech_book",
+    "vs tech_article only changes chunk sizing. Rules are judged on family first.",
+    "",
+    "Paths are relative to the repo root. A file that is absent is skipped rather",
+    "than failed, so the suite still runs on a checkout without DATA/."
+  ],
+  "cases": [
+    {
+      "path": "DATA/books/d2l_dive_into_deep_learning.md",
+      "expected": ["tech_book"],
+      "family": "technical",
+      "why": "Deep-learning textbook: fenced code, numbered sections, a References line that must not make it a paper"
+    },
+    {
+      "path": "DATA/papers/art_of_unix.txt",
+      "expected": ["tech_book"],
+      "family": "technical",
+      "why": "Technical book despite living under papers/; colon-led lines must not make it a conversation"
+    },
+    {
+      "path": "DATA/books/time_machine.txt",
+      "expected": ["book"],
+      "family": "prose",
+      "why": "Novel"
+    },
+    {
+      "path": "DATA/books/alice_in_wonderland.txt",
+      "expected": ["book"],
+      "family": "prose",
+      "why": "Novel"
+    },
+    {
+      "path": "DATA/books/frankenstein.txt",
+      "expected": ["book"],
+      "family": "prose",
+      "why": "Epistolary novel: letter salutations must not make it a conversation"
+    },
+    {
+      "path": "DATA/books/the_odyssey.txt",
+      "expected": ["book"],
+      "family": "prose",
+      "why": "Epic poem in translation; named speakers must not make it a conversation"
+    },
+    {
+      "path": "DATA/plays/hamlet.txt",
+      "expected": ["book"],
+      "family": "prose",
+      "why": "A play is prose to the pipeline; speaker lines are the hard case against conversation"
+    },
+    {
+      "path": "DATA/legal/federalist_papers.txt",
+      "expected": ["paper", "book"],
+      "family": "prose",
+      "why": "Genuinely both; either is acceptable, conversation is not"
+    },
+    {
+      "path": "DATA/notes/ml_notes.txt",
+      "expected": ["notes"],
+      "family": "notes",
+      "why": "Short personal notes"
+    },
+    {
+      "path": "DATA/daily_thoughts_2026.txt",
+      "expected": ["notes"],
+      "family": "notes",
+      "why": "Short personal journal"
+    },
+    {
+      "path": "DATA/conversations/engineering_sync.txt",
+      "expected": ["conversation"],
+      "family": "conversation",
+      "why": "Meeting transcript with speaker turns"
+    },
+    {
+      "path": "DATA/conversations/project_atlas_design_review.txt",
+      "expected": ["conversation"],
+      "family": "conversation",
+      "why": "Design review transcript"
+    },
+    {
+      "path": "DATA/conversations/modern_retrieval_talk_transcript.txt",
+      "expected": ["conversation"],
+      "family": "conversation",
+      "why": "Talk transcript; technical subject matter must not outweigh its transcript shape"
+    }
+  ]
+}

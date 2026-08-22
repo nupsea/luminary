@@ -59,6 +59,22 @@ async def fetch_metadata(url: str) -> dict:
     return json.loads(stdout.decode())
 
 
+def _last_error_line(stderr: bytes | None) -> str:
+    """The most useful line of yt-dlp's stderr, trimmed for a UI toast.
+
+    yt-dlp prints warnings before the failure, so the last ERROR line is the
+    one that explains the exit code; fall back to the last non-empty line when
+    it failed without one.
+    """
+    text = (stderr or b"").decode("utf-8", "replace").strip()
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    errors = [ln for ln in lines if ln.startswith("ERROR:")]
+    chosen = errors[-1] if errors else lines[-1]
+    return chosen[:300]
+
+
 async def download_audio(url: str, dest_stem: Path) -> None:
     """Download audio-only WAV to dest_stem.wav using yt-dlp.
 
@@ -78,9 +94,19 @@ async def download_audio(url: str, dest_stem: Path) -> None:
         f"{dest_stem}.%(ext)s",
         url,
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
+    _, stderr = await proc.communicate()
     if proc.returncode != 0:
-        raise RuntimeError(f"yt-dlp download failed (exit {proc.returncode})")
+        # yt-dlp says why on stderr and the reason is actionable: a stale binary
+        # gets "HTTP Error 403: Forbidden" on every video, a private or removed
+        # video says so, a region block says that. Discarding it left the user
+        # with "exit 1" and nothing to act on -- which is how a five-month-old
+        # pin went unnoticed.
+        detail = _last_error_line(stderr)
+        raise RuntimeError(
+            f"yt-dlp download failed (exit {proc.returncode}): {detail}"
+            if detail
+            else f"yt-dlp download failed (exit {proc.returncode})"
+        )
     logger.info("yt-dlp downloaded audio to %s.wav", dest_stem)

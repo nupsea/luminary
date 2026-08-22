@@ -15,8 +15,28 @@ from datetime import UTC, datetime
 
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services import ner as _ner_module  # indirect: get_entity_extractor is patched
+from app.services.graph_connection import GraphDatabaseLockedError
 
 logger = logging.getLogger(__name__)
+
+
+def _log_graph_failure(operation: str, exc: Exception) -> None:
+    """Report a graph write that did not happen, at the volume it deserves.
+
+    A locked graph is expected, documented and self-resolving -- another
+    Luminary process or an offline script holds an OS-level lock the kernel
+    frees when it exits (I-24). Printing a stack trace for it reads as a crash:
+    it was reported as "seeing errors after deleting notes" when the note had
+    deleted fine and a background reindex simply held the lock. Anything else
+    is unexpected and keeps its traceback.
+
+    Either way the graph write is lost, so the id is logged: SQLite and Kuzu
+    have diverged and nothing reconciles them.
+    """
+    if isinstance(exc, GraphDatabaseLockedError):
+        logger.warning("%s skipped -- %s", operation, exc)
+        return
+    logger.warning("%s failed (non-fatal): %s", operation, exc, exc_info=True)
 
 _note_graph_service: "NoteGraphService | None" = None
 
@@ -65,7 +85,7 @@ class NoteGraphService:
                 source_document_ids or [],
             )
         except Exception as exc:
-            logger.warning("upsert_note_node failed (non-fatal): %s", exc, exc_info=True)
+            _log_graph_failure("upsert_note_node", exc)
 
     def _upsert_note_node_sync(
         self,
@@ -269,7 +289,7 @@ class NoteGraphService:
         try:
             await asyncio.to_thread(self._upsert_links_to_sync, source_id, target_id, link_type)
         except Exception as exc:
-            logger.warning("upsert_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
+            _log_graph_failure("upsert_links_to_edge", exc)
 
     def _upsert_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
 
@@ -299,7 +319,7 @@ class NoteGraphService:
         try:
             await asyncio.to_thread(self._delete_links_to_sync, source_id, target_id, link_type)
         except Exception as exc:
-            logger.warning("delete_links_to_edge failed (non-fatal): %s", exc, exc_info=True)
+            _log_graph_failure("delete_links_to_edge", exc)
 
     def _delete_links_to_sync(self, source_id: str, target_id: str, link_type: str) -> None:
 
@@ -320,7 +340,7 @@ class NoteGraphService:
         try:
             await asyncio.to_thread(self._delete_note_node_sync, note_id)
         except Exception as exc:
-            logger.warning("delete_note_node failed (non-fatal): %s", exc, exc_info=True)
+            _log_graph_failure("delete_note_node", exc)
 
     def _delete_note_node_sync(self, note_id: str) -> None:
 

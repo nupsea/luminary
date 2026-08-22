@@ -44,8 +44,11 @@ const STAGE_LABELS: Record<string, string> = {
 const SLOW_STAGES = new Set(["embedding", "entity_extract"])
 
 const CONTENT_TYPE_OPTIONS = [
-  { value: "book" as const, label: "Book", description: "For novels, non-fiction, full-length documents (including EPUB)" },
-  { value: "technical" as const, label: "Technical", description: "For programming/CS books and articles with code or numbered sections (sizing auto-tuned to length and structure)" },
+  // "Book" reads as any long document, which put technical books here: the old
+  // description said "non-fiction", the one word Technical also claims. Name
+  // the writing rather than the length, and say what it is not.
+  { value: "book" as const, label: "Book (prose)", description: "For novels, essays, history, biography, plays -- prose read start to finish. Not code or maths (including EPUB)" },
+  { value: "technical" as const, label: "Technical", description: "For programming/CS books, papers and articles with code, formulae or numbered sections (sizing auto-tuned to length and structure)" },
   { value: "paper" as const, label: "Paper", description: "For research papers and academic writing" },
   { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
   { value: "notes" as const, label: "Notes", description: "For personal notes, web clips, short mixed content" },
@@ -113,10 +116,10 @@ function ContentTypePicker({
           className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-primary/50"
         >
           <p className="text-sm font-medium text-foreground">
-            {selected?.label ?? "Choose a type"}
+            {selected?.label ?? "Detect automatically"}
           </p>
           <p className="text-xs text-muted-foreground">
-            {selected?.description ?? "Auto-detected from what you add."}
+            {selected?.description ?? "Luminary reads the document and decides. Change it if it gets it wrong."}
           </p>
         </button>
       ) : (
@@ -340,7 +343,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     return `About ${remaining}s remaining`
   }
 
-  async function doSubmit(file: File, title: string, contentType: ContentTypeValue) {
+  async function doSubmit(file: File, title: string, contentType: ContentTypeValue | null) {
     uploadStartRef.current = Date.now()
     const sizeMB = file.size / (1024 * 1024)
     setFileSizeMB(sizeMB)
@@ -447,7 +450,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   async function handleRetry() {
     setErrorMessage("")
-    if (tab === "upload" && selectedFile && uploadType) {
+    if (tab === "upload" && selectedFile) {
       await handleUploadSubmit()
     } else if (tab === "paste" && pasteLabel.trim() && pasteText.trim() && pasteType) {
       await handlePasteSubmit()

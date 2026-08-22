@@ -40,6 +40,16 @@ module.exports = {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        // `--destructive` has always been defined in index.css for both themes,
+        // but it was never mapped here -- so `bg-destructive` and friends
+        // generated no CSS at all and every destructive style silently did
+        // nothing. The visible symptom was a delete confirmation whose
+        // "Confirm" button rendered `text-white` on no background: invisible,
+        // leaving only "Cancel" and no way to complete the action.
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",

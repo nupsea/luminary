@@ -31,11 +31,14 @@ export interface KindleIngestResult {
 
 export async function submitFile(
   file: File,
-  contentType: ContentTypeValue,
+  contentType: ContentTypeValue | null,
 ): Promise<string> {
   const form = new FormData()
   form.append("file", file)
-  form.append("content_type", contentType)
+  // Omitted, not blank, when the user did not choose: the backend skips
+  // classification for any supplied content_type, so sending a guess here
+  // silently overrides detection.
+  if (contentType) form.append("content_type", contentType)
   try {
     const data = await apiPost<{ document_id: string }>(
       "/documents/ingest",

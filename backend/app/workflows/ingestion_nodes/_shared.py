@@ -137,37 +137,17 @@ def resolve_technical_variant(raw_text: str) -> str:
 def _classify(
     raw_text: str, sections: list[dict], word_count: int, file_ext: str, filename: str = ""
 ) -> str:
-    if file_ext in ("mp3", "m4a", "wav"):
-        return "audio"
-    if file_ext == "mp4":
-        return "video"
-    if file_ext == "epub":
-        return "book"
+    """Deprecated alias for `classify_content`, kept for existing importers.
 
-    if file_ext in ("py", "js", "ts", "go", "java", "rs", "cpp", "c", "rb"):
-        return "code"
-    # Kindle My Clippings.txt detection: filename pattern or content signature
-    if re.search(r"clippings", filename, re.IGNORECASE) or re.search(
-        r"^==========", raw_text[:2000], re.MULTILINE
-    ):
-        return "kindle_clippings"
-    headings_lower = " ".join(s.get("heading", "").lower() for s in sections)
-    text_lower = raw_text[:5000].lower()
-    speaker_pattern = re.compile(r"\b[A-Z][a-zA-Z]+:\s")
-    if speaker_pattern.search(raw_text[:3000]):
-        return "conversation"
-    if re.search(r"\b(speaker|interviewer|host|guest):", text_lower):
-        return "conversation"
-    if re.search(r"\b(abstract|methodology|references|hypothesis)\b", text_lower):
-        return "paper"
-    if re.search(r"\b(abstract|methodology)\b", headings_lower):
-        return "paper"
-    if resolve_technical_variant(raw_text) == "tech_book":
-        return "tech_book"
-    chapter_count = len(re.findall(r"\bchapter\b", headings_lower))
-    if chapter_count >= 2 and word_count > 40000:
-        return "book"
-    return "notes"
+    The rules that used to live here scored 4 of 13 on the repo's own corpus:
+    they read the first 5,000 characters (a Gutenberg licence, not the book),
+    matched single words anywhere, and returned on the first hit so ordering
+    decided the answer. `app.services.content_classifier` replaces them and
+    scores 13 of 13 against `tests/fixtures/content_type_labels.json`.
+    """
+    from app.services.content_classifier import classify_content  # noqa: PLC0415
+
+    return classify_content(raw_text, sections, word_count, file_ext, filename)
 
 
 async def _update_stage(document_id: str, stage: str) -> None:
