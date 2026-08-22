@@ -1,7 +1,12 @@
-"""Tests for mandatory content type selection (S63).
+"""Tests for the content_type form field on /documents/ingest.
+
+content_type is optional: omitting it is the request to classify. It was
+mandatory (S63) until the upload dialog was found to be defaulting every
+non-media file to "book", which -- because a supplied type skips classification
+outright -- meant auto-detection never ran for any document the user uploaded.
 
 Covers:
-  (a) test_ingest_without_content_type_returns_422
+  (a) test_ingest_without_content_type_classifies
   (b) test_ingest_with_valid_type_skips_classify_llm
   (c) test_patch_content_type_updates_document
   (d) test_invalid_content_type_returns_422
@@ -67,17 +72,38 @@ def _make_doc(doc_id: str | None = None, **kwargs) -> DocumentModel:
 
 
 @pytest.mark.anyio
-async def test_ingest_without_content_type_returns_422(test_db):
-    """POST /documents/ingest without content_type form field returns HTTP 422."""
+async def test_ingest_without_content_type_classifies(test_db, monkeypatch):
+    """Omitting content_type is accepted, and passes None so classify_node runs.
+
+    None specifically, not a placeholder: classify_node treats any non-None
+    content_type as the caller's decision and skips every heuristic.
+    """
+    called: list[str | None] = []
+
+    async def _noop() -> None:
+        return None
+
+    # Recorded at call time, not inside the coroutine body: the job never runs
+    # here, so a mock that appends when awaited would record nothing and the
+    # assertion below would pass on an empty list.
+    def _mock_run_ingestion(document_id, file_path, format, content_type=None):
+        called.append(content_type)
+        return _noop()
+
+    import app.routers.documents as documents_module
+
+    monkeypatch.setattr(documents_module, "run_ingestion", _mock_run_ingestion)
+    monkeypatch.setattr(
+        documents_module.get_ingestion_jobs(), "launch", lambda doc_id, coro: coro.close()
+    )
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/documents/ingest",
             files={"file": ("test.txt", io.BytesIO(b"hello world"), "text/plain")},
         )
-    assert resp.status_code == 422
-    detail = resp.json().get("detail", "")
-    # FastAPI 422 includes field errors — content_type must be mentioned
-    assert "content_type" in str(detail)
+    assert resp.status_code == 200, resp.text
+    assert called == [None]
 
 
 @pytest.mark.anyio

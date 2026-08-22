@@ -22,14 +22,25 @@ export function isKindleClippings(filename: string): boolean {
   return /clippings/i.test(filename)
 }
 
-// Best-effort default so the type choice is never a hard gate -- the radio
-// stays visible for the user to correct.
-export function detectContentType(filename: string): ContentTypeValue {
+/**
+ * The type a *filename* proves, or null when only the content can say.
+ *
+ * Returning null matters: the backend skips classification entirely for a
+ * user-supplied content_type, so anything sent here is final. This used to
+ * return "book" for every non-media file, which meant a PDF paper and a
+ * markdown textbook both arrived pre-labelled as a novel and the classifier
+ * never ran -- auto-detection was unreachable from the upload path no matter
+ * how good the rules were.
+ *
+ * An extension is evidence for media and EPUB and for nothing else. `.pdf`,
+ * `.txt`, `.md` and `.docx` each carry every content type there is.
+ */
+export function detectContentType(filename: string): ContentTypeValue | null {
   const f = filename.toLowerCase()
   if (f.endsWith(".epub")) return "book"
   if (/\.(mp3|m4a|wav)$/.test(f)) return "audio"
   if (f.endsWith(".mp4")) return "video"
-  return "book"
+  return null
 }
 
 export interface Rejection {

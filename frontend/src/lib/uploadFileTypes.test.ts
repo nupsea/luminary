@@ -47,11 +47,20 @@ describe("describeRejection", () => {
 })
 
 describe("detectContentType", () => {
-  it("reads the format off the name", () => {
+  it("reads the format off the name where the format proves it", () => {
     expect(detectContentType("novel.epub")).toBe("book")
     expect(detectContentType("lecture.M4A")).toBe("audio")
     expect(detectContentType("screencast.mp4")).toBe("video")
-    expect(detectContentType("paper.pdf")).toBe("book")
+  })
+
+  it("defers to the backend for formats that carry any content type", () => {
+    // Returning a guess here is not harmless: the backend skips classification
+    // entirely for a supplied content_type, so "book" for every .pdf/.txt/.md
+    // silently disabled auto-detection for every document that was not media.
+    expect(detectContentType("paper.pdf")).toBeNull()
+    expect(detectContentType("textbook.md")).toBeNull()
+    expect(detectContentType("transcript.txt")).toBeNull()
+    expect(detectContentType("report.docx")).toBeNull()
   })
 })
 

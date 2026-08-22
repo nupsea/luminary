@@ -295,9 +295,12 @@ async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, mo
             "title": "Large Generic Document",
             "format": "txt",
             "pages": 1,
-            "word_count": 6000,  # > 5000 → LLM reclassification attempted but fails
+            # Long enough to look misclassified: the rules score speaker turns
+            # as a conversation, and past 20k words that is more likely an epic
+            # or a play, so classify_node asks the LLM -- which is down here.
+            "word_count": 30000,
             "sections": [],
-            "raw_text": "word " * 6000,
+            "raw_text": "Alice: what did you see\nBob: the whole valley\n" * 3000,
         },
         "content_type": None,
         "chunks": None,
@@ -309,7 +312,9 @@ async def test_classify_node_llm_unavailable_falls_back_to_heuristic(test_db, mo
 
     # Heuristic fallback: generic text with no special markers → "notes"
     assert result["status"] == "chunking"
-    assert result["content_type"] == "notes"
+    # The heuristic answer stands when the LLM cannot be reached. The value is
+    # not the point -- not raising, and still advancing the pipeline, is.
+    assert result["content_type"] == "conversation"
     assert result["error"] is None
 
 
