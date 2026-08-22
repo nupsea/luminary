@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-22
+
+### Fixed
+- **Plain text files no longer get invented section headings.** Paragraphs were
+  named "Section 1", "Section 2" — labels nobody wrote, which since 0.7.2 could
+  appear under "Source" beside a real quote.
+
+### Changed
+- **Reading progress is shown in sections you can count** — "2 of 22 sections"
+  rather than a bare percentage, because that is how progress is measured.
+- **"~N min left" removed.** It assumed a reading speed and treated sections as
+  equal lengths, and nothing on screen said so.
+- **Collection rows spell out what they count** instead of "18d · 24n · 39c".
+
 ## [0.7.2] - 2026-08-22
 
 ### Fixed
