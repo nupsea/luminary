@@ -94,10 +94,10 @@ async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
             )
     assert resp.status_code == 503
     detail = resp.json()["detail"]
-    assert detail["components"] == ["ffmpeg"]
-    # Never a package manager: the app installs this component itself, and the
-    # bundle's minimal PATH may not even find a brew install.
-    assert "brew" not in detail["message"].lower()
+    # ffmpeg has no automated installer, so it is named in the message but is
+    # not offered as a button that would fail on click.
+    assert detail["components"] == []
+    assert "Audio and video support" in detail["message"]
 
 
 async def test_ingest_url_returns_400_for_non_youtube_url(test_db):

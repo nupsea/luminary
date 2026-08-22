@@ -455,7 +455,10 @@ mod tests {
         assert!(!a.accept(parse_chunk("LUMX:1:2:3:%80").unwrap()));
         let html = rx.recv().unwrap().unwrap();
         assert_eq!(html, "\u{2500}", "got {:?}", html);
-        assert!(!html.contains('\u{FFFD}'), "replacement character in {html:?}");
+        assert!(
+            !html.contains('\u{FFFD}'),
+            "replacement character in {html:?}"
+        );
     }
 
     #[test]
@@ -464,7 +467,9 @@ mod tests {
         for cut in 3..12 {
             let enc = "%F0%9F%9A%80"; // U+1F680
             let (head, tail) = enc.split_at(cut);
-            if head.ends_with('%') || (head.len() >= 2 && &head[head.len() - 2..head.len() - 1] == "%") {
+            if head.ends_with('%')
+                || (head.len() >= 2 && &head[head.len() - 2..head.len() - 1] == "%")
+            {
                 continue; // the splitter never cuts inside a triplet
             }
             let (tx, rx) = sync_channel(1);

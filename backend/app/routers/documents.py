@@ -510,6 +510,43 @@ def _component_labels(component_ids: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def _media_missing_message(required: list[str]) -> str:
+    """One sentence naming everything missing, and what to do about each kind."""
+    fetchable, manual = _installable(required)
+    parts = [
+        f"YouTube needs {_component_labels(required)}, "
+        f"{'which are' if len(required) > 1 else 'which is'} not bundled for licensing reasons."
+    ]
+    if fetchable:
+        parts.append(f"Install {_component_labels(fetchable)} below.")
+    if manual:
+        # Named precisely, because the old advice ("brew install ffmpeg") was
+        # advice the user had often already followed: the binary existed and the
+        # bundle's PATH could not see it. It is found automatically now, so the
+        # remaining case is genuinely not having it.
+        names = _component_labels(manual)
+        parts.append(
+            f"{names} is found automatically once installed on this machine "
+            f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
+        )
+    return " ".join(parts)
+
+
+def _installable(component_ids: list[str]) -> tuple[list[str], list[str]]:
+    """Split into what the app can fetch and what the user must supply.
+
+    `kind == "tool"` has no automated source on purpose: the licence travels
+    with the build, so it is not Luminary's to choose. Offering an install
+    button for one is worse than offering nothing -- it fails on click with a
+    message the error should have carried in the first place.
+    """
+    fetchable, manual = [], []
+    for cid in component_ids:
+        comp = get_component(cid)
+        (manual if comp is not None and comp.kind == "tool" else fetchable).append(cid)
+    return fetchable, manual
+
+
 @router.post("/detect-type")
 async def detect_document_type(file: UploadFile = File(...)):
     """The content type this file would be given, without ingesting it.
@@ -955,15 +992,10 @@ async def ingest_url(
         raise HTTPException(
             status_code=503,
             detail={
-                "message": (
-                    f"YouTube needs {_component_labels(required)}, which "
-                    f"{'are' if len(required) > 1 else 'is'} not bundled for "
-                    f"licensing reasons. Install "
-                    f"{'them' if len(required) > 1 else 'it'} here."
-                ),
-                # Named so the client can offer the in-app install instead of
-                # printing shell instructions the user has to act on elsewhere.
-                "components": required,
+                "message": _media_missing_message(required),
+                # Only what the app can actually fetch: a button that fails on
+                # click is worse than no button.
+                "components": _installable(required)[0],
             },
         )
 

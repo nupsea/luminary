@@ -138,10 +138,50 @@ async def test_youtube_error_names_every_missing_component(monkeypatch) -> None:
     assert resp.status_code == 503
     detail = resp.json()["detail"]
     assert isinstance(detail, dict), "the client needs component ids, not a sentence"
-    assert set(detail["components"]) == {"transcription", "ffmpeg"}
-    # The message names the components in words the user sees on the install screen.
+
+    # The message names everything missing, in the words the install screen uses.
     assert "Speech to text" in detail["message"]
     assert "Audio and video support" in detail["message"]
-    # And it must not send the user to a package manager.
-    assert "brew" not in detail["message"].lower()
-    assert "apt" not in detail["message"].lower()
+
+    # But only the fetchable one is offered as a button. ffmpeg is `kind="tool"`
+    # and has no automated source -- its licence travels with the build, so it
+    # is not Luminary's to pick. A button for it fails on click, which is worse
+    # than no button.
+    assert detail["components"] == ["transcription"]
+
+
+def test_a_tool_outside_the_bundles_path_is_still_found(tmp_path, monkeypatch):
+    """The actual cause of the shipped YouTube failure.
+
+    The bundled app runs with `PATH=<its own runtime>:/usr/bin:/bin`. A login
+    shell's PATH never reaches it, so `shutil.which("ffmpeg")` returned None for
+    a user whose Homebrew ffmpeg sat at /opt/homebrew/bin/ffmpeg -- and Luminary
+    told them to run the `brew install ffmpeg` they had already run.
+    """
+    import app.services.components as components_module
+
+    fake_prefix = tmp_path / "opt" / "homebrew" / "bin"
+    fake_prefix.mkdir(parents=True)
+    tool = fake_prefix / "ffmpeg"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+
+    monkeypatch.setattr(components_module, "_WELL_KNOWN_TOOL_DIRS", (str(fake_prefix),))
+    monkeypatch.setattr(components_module.shutil, "which", lambda _n: None)
+
+    assert components_module.resolve_tool("ffmpeg") == str(tool)
+
+
+def test_a_present_but_unexecutable_file_is_not_a_find(tmp_path, monkeypatch):
+    """Reporting one turns "not installed" into a failure at the point of use."""
+    import app.services.components as components_module
+
+    prefix = tmp_path / "bin"
+    prefix.mkdir()
+    (prefix / "ffmpeg").write_text("not executable")
+    (prefix / "ffmpeg").chmod(0o644)
+
+    monkeypatch.setattr(components_module, "_WELL_KNOWN_TOOL_DIRS", (str(prefix),))
+    monkeypatch.setattr(components_module.shutil, "which", lambda _n: None)
+
+    assert components_module.resolve_tool("ffmpeg") is None

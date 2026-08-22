@@ -24,6 +24,7 @@ import importlib
 import importlib.util
 import json
 import logging
+import os
 import shutil
 import site
 import sys
@@ -258,16 +259,45 @@ def activate_extras() -> bool:
     return True
 
 
+# Where the package managers put things, searched after PATH.
+#
+# The bundled app's PATH is its own runtime plus `/usr/bin:/bin` -- a login
+# shell's PATH never reaches it. So a user who had already run
+# `brew install ffmpeg` was told by Luminary to run `brew install ffmpeg`: the
+# binary sat at /opt/homebrew/bin/ffmpeg and `shutil.which` could not see it.
+# Homebrew on Apple silicon, Homebrew on Intel, MacPorts, and the usual Linux
+# prefixes.
+_WELL_KNOWN_TOOL_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/snap/bin",
+)
+
+
 def resolve_tool(name: str) -> str | None:
     """Find a tool the user installed, falling back to whatever is on PATH.
 
     The bundled app runs with a minimal PATH and cannot rely on a user's shell
-    environment, so the app-managed directory is searched first.
+    environment, so the app-managed directory is searched first and the standard
+    install prefixes are searched last.
     """
     candidate = tool_bin_dir() / name
     if candidate.is_file():
         return str(candidate)
-    return shutil.which(name)
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in _WELL_KNOWN_TOOL_DIRS:
+        candidate = Path(directory) / name
+        # Executable, not merely present: a name that cannot be run is not a
+        # find, and reporting one turns a clear "not installed" into a failure
+        # at the point of use.
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 async def _installed_ollama_models() -> set[str]:
