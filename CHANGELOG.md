@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Media errors name everything that is missing**, and offer to install what
   Luminary can fetch, rather than stopping at the first item and printing a
   command to run elsewhere.
+- **An imported video or recording can be read**, not only searched. Its
+  transcript was stored without sections, so the reader said "No content
+  available" for a document it had every word of. Documents added before this
+  need re-importing.
 
 ### Changed
 - **The document type is detected when you pick the file**, so you can correct

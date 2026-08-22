@@ -182,14 +182,12 @@ yet describe them.
   not every parser path. The reader now bounds what it fetches, so the symptom is gone, but the
   duplicated text is still stored and still costs the section it was copied from. Find the path
   that assigns a parent its children's span before changing the reader further.
-- **Audio documents are retrievable and unreadable.** Measured on the four `wav` documents in
-  one library: each is `stage=complete` with its whole transcript in chunks (2,948 to 15,301
-  words, 28,991 in total), and each has **zero sections**, so `GET /sections/{id}/content`
-  returns `[]` and the reader shows "No content available". The orphan-chunk fallback in
-  `sections.py` cannot cover this: it fires only when sections exist but are empty
-  (`all(not r.content for r in result) and result`), and here `result` is itself empty. The
-  transcript is chunked without ever being sectioned, so retrieval finds it and the reader
-  cannot show it.
+- **Audio documents ingested before 0.7.5 are still unreadable.** The cause is fixed — the
+  audio branch of `chunk_node` now writes one section per transcript chunk — but the fix runs at
+  ingestion, so documents already in a library keep their zero sections and still return `[]`
+  from `GET /sections/{id}/content`. Re-ingesting is the only way to gain them. A backfill would
+  have to reconstruct sections from stored chunks, which is what I-29 forbids; if one is built
+  it must read the transcript again, not reassemble it.
 - `pymupdf4llm>=1.28.2` is a **core dependency with no importer** (`pyproject.toml:41`, no
   reference anywhere under `backend/`). It was added for the PDF-to-Markdown path, which is not
   built. Either build that path or drop the dependency; a shipped dependency nothing imports is
