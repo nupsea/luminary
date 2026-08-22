@@ -510,6 +510,13 @@ def _component_labels(component_ids: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+# How long the dialog will wait before showing nothing. Bracketing cases from
+# the measured set: a 4MB PDF answers in 6.0s, a 44MB one had not answered at
+# 300s. Twenty seconds clears every document that returns at all and gives up on
+# the ones that would otherwise spin forever.
+_DETECT_TIMEOUT_SECONDS = 20
+
+
 def _media_missing_message(required: list[str]) -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = _installable(required)
@@ -578,8 +585,14 @@ async def detect_document_type(file: UploadFile = File(...)):
     tmp = Path(tempfile.gettempdir()) / f"detect-{uuid.uuid4()}{suffix}"
     try:
         tmp.write_bytes(content)
-        # Parsing is CPU-bound and one worker serves every request (I-2).
-        parsed = await asyncio.to_thread(_parser.parse, tmp, fmt)
+        # Parsing is CPU-bound and one worker serves every request (I-2), and it
+        # is unbounded in the document's size: a 44MB PDF measured over 300s with
+        # no answer, which leaves the dialog saying "Reading the document..."
+        # indefinitely. Detection is a convenience -- ingestion classifies again
+        # regardless -- so it is bounded here and gives up rather than hanging.
+        parsed = await asyncio.wait_for(
+            asyncio.to_thread(_parser.parse, tmp, fmt), timeout=_DETECT_TIMEOUT_SECONDS
+        )
         content_type = classify_content(
             parsed.raw_text,
             [s.__dict__ for s in parsed.sections],
@@ -588,6 +601,11 @@ async def detect_document_type(file: UploadFile = File(...)):
             file.filename or "",
         )
         return {"content_type": content_type, "detected": True}
+    except TimeoutError:
+        logger.info(
+            "detect-type gave up on %s after %ss", file.filename, _DETECT_TIMEOUT_SECONDS
+        )
+        return {"content_type": None, "detected": False}
     except Exception as exc:
         # A detection failure must not block the upload: the pipeline classifies
         # again during ingestion anyway, so the dialog just shows nothing.

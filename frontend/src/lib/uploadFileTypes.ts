@@ -43,6 +43,38 @@ export function detectContentType(filename: string): ContentTypeValue | null {
   return null
 }
 
+/** Map a classified type onto the value the picker actually offers.
+ *
+ *  The classifier answers in the stored vocabulary (`tech_book`,
+ *  `tech_article`, `epub`...) while the picker offers one `technical` option
+ *  covering the tech_* variants, because the difference is only chunk sizing.
+ *  Without this the detected value matched no option, `selected` was undefined,
+ *  and a correctly detected technical book rendered as "Detect automatically" --
+ *  detection looked broken precisely when it had worked.
+ */
+export function toPickerValue(detected: string | null): ContentTypeValue | null {
+  if (!detected) return null
+  const mapped: Record<string, ContentTypeValue> = {
+    tech_book: "technical",
+    tech_article: "technical",
+    code: "technical",
+    epub: "book",
+    kindle_clippings: "notes",
+  }
+  const value = mapped[detected] ?? (detected as ContentTypeValue)
+  // Anything the picker cannot show is better left undetected than shown wrong.
+  const offered: ContentTypeValue[] = [
+    "book",
+    "technical",
+    "paper",
+    "conversation",
+    "notes",
+    "audio",
+    "video",
+  ]
+  return offered.includes(value) ? value : null
+}
+
 export interface Rejection {
   message: string
   // Set when the format is supported but its component is not installed, so the

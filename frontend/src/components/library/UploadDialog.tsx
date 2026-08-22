@@ -25,6 +25,7 @@ import {
   acceptedExtensions,
   describeRejection,
   detectContentType,
+  toPickerValue,
 
   isKindleClippings,
 } from "@/lib/uploadFileTypes"
@@ -345,7 +346,16 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     try {
       const detected = await detectFileType(file)
       if (seq !== detectSeqRef.current) return
-      if (detected && !typeTouchedRef.current) setUploadType(detected)
+      // The classifier answers in the stored vocabulary; the picker offers a
+      // narrower set. Mapping is what stops a correct answer rendering as no
+      // answer at all.
+      const value = toPickerValue(detected)
+      logger.info("[Upload] type detected", {
+        filename: file.name,
+        detected,
+        shown: value,
+      })
+      if (value && !typeTouchedRef.current) setUploadType(value)
     } finally {
       if (seq === detectSeqRef.current) setDetecting(false)
     }
