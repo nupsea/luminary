@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
-# Smoke test for S63 — Mandatory content type selection in upload
+# Smoke test for S63 — content type selection in upload
+#
+# content_type is optional: omitting it is the request to classify. It was
+# mandatory until the upload dialog was found to be pre-labelling every
+# non-media file, which switched detection off for everything a user uploaded.
 set -euo pipefail
 
 BASE="http://localhost:7820"
 
-echo "[S63] Test 1: POST /documents/ingest without content_type returns 422"
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE}/documents/ingest" \
-  -F "file=@/etc/hostname")
-if [ "$STATUS" != "422" ]; then
-  echo "FAIL: expected 422, got $STATUS"
-  exit 1
-fi
-echo "PASS: 422 returned when content_type missing"
+# A real file this script creates. /etc/hostname was used here and does not
+# exist on macOS, so curl exited 26 ("couldn't read file") and every check
+# after the first failed for a reason that had nothing to do with the endpoint.
+FIXTURE=$(mktemp /tmp/s63fixture.XXXXXX.txt)
+echo "S63 smoke fixture." > "$FIXTURE"
+trap 'rm -f "$FIXTURE"' EXIT
+
+echo "[S63] Test 1: POST /documents/ingest without content_type is accepted"
+TMP1=$(mktemp /tmp/s63auto.XXXXXX.txt)
+echo "A short note written for the S63 smoke test." > "$TMP1"
+RESP1=$(curl -s -X POST "${BASE}/documents/ingest" -F "file=@${TMP1};filename=s63_auto.txt")
+rm -f "$TMP1"
+echo "$RESP1" | grep -q "document_id" || { echo "FAIL: expected document_id, got: $RESP1"; exit 1; }
+AUTO_ID=$(echo "$RESP1" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
+curl -s -o /dev/null -X DELETE "${BASE}/documents/${AUTO_ID}"
+echo "PASS: omitted content_type accepted (classification runs)"
 
 echo "[S63] Test 2: POST /documents/ingest with invalid content_type returns 422"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE}/documents/ingest" \
-  -F "file=@/etc/hostname" \
+  -F "file=@${FIXTURE}" \
   -F "content_type=invalid_type")
 if [ "$STATUS" != "422" ]; then
   echo "FAIL: expected 422, got $STATUS"
@@ -41,5 +53,9 @@ PATCH_RESP=$(curl -s -X PATCH "${BASE}/documents/${DOC_ID}" \
 echo "$PATCH_RESP" | grep -q '"updated":true' || { echo "FAIL: patch response missing updated=true: $PATCH_RESP"; exit 1; }
 echo "$PATCH_RESP" | grep -q "Re-ingest" || { echo "FAIL: patch response missing re-ingest note: $PATCH_RESP"; exit 1; }
 echo "PASS: PATCH content_type returned updated=true with re-ingest note"
+
+# The script creates a document in Test 3; leaving one behind per run
+# accumulates in whatever library the smoke suite is pointed at.
+curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}"
 
 echo "[S63] All smoke tests passed."

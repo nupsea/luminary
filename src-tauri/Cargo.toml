@@ -1,6 +1,6 @@
 [package]
 name = "luminary-desktop"
-version = "0.7.3"
+version = "0.7.4"
 description = "Luminary"
 edition = "2021"
 rust-version = "1.77"

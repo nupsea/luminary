@@ -6,7 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.3] - 2026-08-22
+## [0.7.4] - 2026-08-22
+
+### Fixed
+- **Delete confirmations had no visible Confirm button.** The `destructive`
+  colour was missing from the Tailwind map, so every destructive style across
+  41 files generated no CSS and the button rendered white on nothing.
+- **Document type is detected again, and is now recorded.** Uploads were
+  labelled "book" before they were read, which also switched detection off, and
+  the type the pipeline did work out never reached the document's record — so a
+  technical book was chunked correctly but filed as a novel.
+- **YouTube links failed with only an exit code.** yt-dlp was five months
+  stale, and the reason it gave was being discarded rather than shown.
+- **Deleting a note logged a page of traceback** when the graph was busy.
 
 ### Fixed
 - **Plain text files no longer get invented section headings.** Paragraphs were
