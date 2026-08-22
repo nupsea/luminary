@@ -3,7 +3,7 @@
 # Tests GET /collections/{id}/health and POST /collections/{id}/health/archive-stale
 
 set -euo pipefail
-BASE="${API_BASE:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S173 Smoke Test ==="
 

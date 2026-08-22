@@ -2,7 +2,7 @@
 # Smoke test for S174 -- Export collections as Obsidian Markdown vault and Anki deck
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S174 smoke: Export collection endpoints ==="
 

@@ -4,7 +4,7 @@
 #        migration endpoints
 set -euo pipefail
 
-BASE="${LUMINARY_URL:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {

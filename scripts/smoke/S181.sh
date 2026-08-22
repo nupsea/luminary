@@ -3,7 +3,7 @@
 # Verifies the backend endpoints used by the Viz tab still respond correctly.
 set -euo pipefail
 
-BASE="${LUMINARY_API:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 

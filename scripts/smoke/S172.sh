@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S172 Smoke Test: Note nodes in Viz graph ==="
 

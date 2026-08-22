@@ -2,7 +2,7 @@
 # Smoke test for S182 -- YouTube transcript viewer: GET /documents/{id}/chunks
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 

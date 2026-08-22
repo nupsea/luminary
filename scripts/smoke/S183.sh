@@ -2,7 +2,7 @@
 # Smoke test for S183 -- Learning tab stats bar: verify endpoints used by LibraryStatsBar
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
 
