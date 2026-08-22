@@ -25,7 +25,7 @@ CLIPPINGS
 
 # POST to ingest-kindle
 HTTP_STATUS=$(curl -s -o /tmp/s123_response.json -w "%{http_code}" \
-  -X POST "${BASE_URL}/api/documents/ingest-kindle" \
+  -X POST "${BASE_URL}/documents/ingest-kindle" \
   -F "file=@${TMPFILE};filename=My Clippings.txt;type=text/plain")
 
 rm -f "$TMPFILE"
