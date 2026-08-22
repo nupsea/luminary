@@ -38,11 +38,14 @@ check "GET /chat/suggestions (all scope) returns 200 with suggestions array" \
   200 \
   "assert isinstance(d.get('suggestions'), list) and len(d['suggestions']) == 4"
 
-# AC2: GET /chat/suggestions with a document_id returns 200 (may be fake doc -> onboarding)
-check "GET /chat/suggestions with document_id returns 200" \
+# AC2: an unknown document id yields no pills, deliberately. `_handle_single_doc`
+# returns [] for a document that does not exist rather than onboarding chips,
+# because those submit their own text to /qa and arrive as dead questions. This
+# script used to demand 4 suggestions here, which asked for the defect back.
+check "GET /chat/suggestions with an unknown document_id returns no pills" \
   "$BASE/chat/suggestions?document_id=smoke-doc-s187" \
   200 \
-  "assert isinstance(d.get('suggestions'), list) and len(d['suggestions']) == 4"
+  "assert d.get('suggestions') == []"
 
 # AC7: GET /chat/confusion-signals should return 404 (endpoint removed)
 TMPFILE=$(mktemp /tmp/s187_XXXXXX)
