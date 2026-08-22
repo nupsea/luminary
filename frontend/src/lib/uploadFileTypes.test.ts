@@ -5,6 +5,7 @@ import {
   carriesFiles,
   describeRejection,
   detectContentType,
+  toPickerValue,
   makeDragDepth,
 } from "./uploadFileTypes"
 
@@ -90,5 +91,33 @@ describe("carriesFiles", () => {
     expect(carriesFiles(["text/plain"])).toBe(false)
     expect(carriesFiles([])).toBe(false)
     expect(carriesFiles(undefined)).toBe(false)
+  })
+})
+
+describe("toPickerValue", () => {
+  it("maps the tech_* variants onto the one option the picker offers", () => {
+    // The bug this guards: the classifier answered `tech_book`, the picker has
+    // no such option, so `options.find(...)` was undefined and a correctly
+    // detected technical book rendered as "Detect automatically". Detection
+    // looked broken exactly when it had worked.
+    expect(toPickerValue("tech_book")).toBe("technical")
+    expect(toPickerValue("tech_article")).toBe("technical")
+    expect(toPickerValue("code")).toBe("technical")
+  })
+
+  it("passes through the values the picker already offers", () => {
+    for (const v of ["book", "paper", "conversation", "notes", "audio", "video"]) {
+      expect(toPickerValue(v)).toBe(v)
+    }
+  })
+
+  it("maps stored-only values onto their nearest option", () => {
+    expect(toPickerValue("epub")).toBe("book")
+    expect(toPickerValue("kindle_clippings")).toBe("notes")
+  })
+
+  it("returns null rather than a value the picker cannot show", () => {
+    expect(toPickerValue(null)).toBeNull()
+    expect(toPickerValue("something_new_from_the_backend")).toBeNull()
   })
 })

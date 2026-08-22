@@ -981,6 +981,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/detect-type": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect Document Type
+         * @description The content type this file would be given, without ingesting it.
+         *
+         *     Classification needs the document's text, so it cannot happen in the client
+         *     and it cannot happen before the bytes arrive. Exposing it separately lets
+         *     the upload dialog show what was detected while the user can still correct
+         *     it -- the alternative is telling them after the document is already in the
+         *     library, which is the wrong moment to find out it was wrong.
+         *
+         *     Creates nothing: no row, no file on disk, no ingestion job.
+         */
+        post: operations["detect_document_type_documents_detect_type_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/ingest": {
         parameters: {
             query?: never;
@@ -990,7 +1018,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ingest Document */
+        /**
+         * Ingest Document
+         * @description Ingest a file. Omit content_type to have the pipeline classify it.
+         *
+         *     Optional rather than required because a supplied content_type is final:
+         *     classify_node skips every heuristic when the caller names a type. A client
+         *     that guesses -- the upload dialog defaulted every non-media file to "book"
+         *     -- silently disables classification, which is not a behaviour a caller
+         *     should be able to trigger by accident.
+         */
         post: operations["ingest_document_documents_ingest_post"];
         delete?: never;
         options?: never;
@@ -2645,6 +2682,31 @@ export interface paths {
          * @description Generate flashcards for a document using LLM.
          */
         post: operations["generate_flashcards_flashcards_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flashcards/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Flashcards
+         * @description Replace one source's deck with cards written from unused material.
+         *
+         *     One request rather than the client's delete-then-generate pair: the old deck
+         *     has to still be in the table while the replacement is generated, or the
+         *     near-duplicate filter has nothing to compare against and a failed run leaves
+         *     the user with no cards at all.
+         */
+        post: operations["regenerate_flashcards_flashcards_regenerate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6517,15 +6579,17 @@ export interface components {
             /** Output */
             output: string;
         };
+        /** Body_detect_document_type_documents_detect_type_post */
+        Body_detect_document_type_documents_detect_type_post: {
+            /** File */
+            file: string;
+        };
         /** Body_ingest_document_documents_ingest_post */
         Body_ingest_document_documents_ingest_post: {
             /** File */
             file: string;
-            /**
-             * Content Type
-             * @enum {string}
-             */
-            content_type: "book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical";
+            /** Content Type */
+            content_type?: ("book" | "conversation" | "notes" | "paper" | "audio" | "video" | "epub" | "kindle_clippings" | "tech_book" | "tech_article" | "technical") | null;
         };
         /** Body_ingest_kindle_documents_ingest_kindle_post */
         Body_ingest_kindle_documents_ingest_kindle_post: {
@@ -7935,6 +7999,32 @@ export interface components {
             difficulty: "easy" | "medium" | "hard";
             /** Context */
             context?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * FlashcardRegenerateRequest
+         * @description Replace a document's deck. Not `generate` with a flag: the replacement is
+         *     generated *before* the old cards are deleted, which is what lets the
+         *     near-duplicate filter see the deck it is replacing and what leaves the user
+         *     their existing cards when a run produces nothing usable.
+         */
+        FlashcardRegenerateRequest: {
+            /** Document Id */
+            document_id?: string | null;
+            /** Note Id */
+            note_id?: string | null;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Difficulty
+             * @default medium
+             * @enum {string}
+             */
+            difficulty: "easy" | "medium" | "hard";
             /** Model */
             model?: string | null;
         };
@@ -9512,6 +9602,32 @@ export interface components {
             concepts?: number | null;
             /** Error */
             error?: string | null;
+        };
+        /**
+         * RegenerateResponse
+         * @description What a deck replacement actually did.
+         *
+         *     `requested` and `delivered` are both reported because they differ: the
+         *     quality gate drops a card whose quote is not in its passage, and a backfill
+         *     pass cannot always replace it. Returning only the cards let the UI announce
+         *     "Replaced with 3 fresh cards" for a deck of 5 that had just lost 2 with no
+         *     explanation. `kept_previous` says the run produced nothing usable and the
+         *     old deck is still there -- `cards` is then empty and nothing was deleted.
+         */
+        RegenerateResponse: {
+            /** Cards */
+            cards: components["schemas"]["FlashcardResponse"][];
+            /** Requested */
+            requested: number;
+            /** Delivered */
+            delivered: number;
+            /** Replaced */
+            replaced: number;
+            /**
+             * Kept Previous
+             * @default false
+             */
+            kept_previous: boolean;
         };
         /** RenameRequest */
         RenameRequest: {
@@ -12757,6 +12873,39 @@ export interface operations {
             };
         };
     };
+    detect_document_type_documents_detect_type_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_detect_document_type_documents_detect_type_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ingest_document_documents_ingest_post: {
         parameters: {
             query?: never;
@@ -15505,6 +15654,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlashcardResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_flashcards_flashcards_regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlashcardRegenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegenerateResponse"];
                 };
             };
             /** @description Validation Error */

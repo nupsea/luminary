@@ -1,22 +1,17 @@
 # Luminary
 
-**Read content. Seek answers. Write your thoughts. Master what matters.** A local-first study workspace for the documents you already have.
+ **Read. Ask. Write. Master what matters.**
+> A local-first study workspace built on your own documents, that measures what you actually know.
 
 [![Release](https://img.shields.io/github/v/release/nupsea/luminary?label=release)](https://github.com/nupsea/luminary/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](#install)
 [![Runs offline](https://img.shields.io/badge/runs-offline-success)](#it-keeps-working-with-the-wifi-off)
 
-Point it at a book, paper, video or article. It helps you answer questions about them,
-turn them into flashcards, and schedule the review. Nothing ever leaves your
-machine unless you hand it an API key.
+ Point it at a book, paper, video or article. Ask it questions and get answers that cite the passage, write down what you understand, turn what matters into flashcards, and let it schedule the review. Nothing ever leaves your machine unless you hand it an API key.
 
-<!-- HERO — placeholder. Record the wifi-off demo, then:
-       scripts/make_gif.sh ~/Desktop/raw.mov offline
-     and swap the img below for assets/images/offline.gif.
-     Shot list and checklist: docs/demo-assets.md -->
 <p align="center">
-  <img src="assets/images/hub.png" alt="Luminary showing your learning journey" width="900">
+  <img src="assets/images/luminary.gif" alt="A quick journey in luminary" width="900">
 </p>
 
 <p align="center"><a href="https://youtu.be/semZlbJde_Q"><b>Watch the two-minute tour</b></a></p>
@@ -377,7 +372,7 @@ frontend/src/
 | `make test` | Backend unit + integration tests |
 | `make lint` | Ruff + tsc + eslint + manifest checks |
 | `make ci` | **The gate.** Lint, layer check, tests, build, tsc, eslint, vitest |
-| `make smoke` | ~230 HTTP contract scripts against a running backend |
+| `make smoke` | ~180 HTTP contract scripts against a running backend |
 | `make db-migrate` | Apply pending migrations (the server also does this on boot) |
 | `make db-revision m="..."` | Generate a migration after changing `models.py` |
 | `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
@@ -391,9 +386,12 @@ LLM judge, so it is deterministic and needs no API key. See
 cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
 ```
 
-Enforced thresholds: HR@5 ≥ 0.60, MRR ≥ 0.45. These are **collapse detectors,
-not quality bars** — clearing them says a leg of the funnel is alive, not that a
-change was an improvement. Faithfulness is report-only pending a re-baseline.
+Enforced thresholds: HR@5 ≥ 0.50, MRR ≥ 0.35, nDCG@10 ≥ 0.40, and — whenever a
+run generated answers — faithfulness ≥ 0.30. The `notes` dataset holds a higher
+bar (HR@5 ≥ 0.60, MRR ≥ 0.45). These are **collapse detectors, not quality
+bars** — clearing them says a leg of the funnel is alive, not that a change was
+an improvement. A metric that was requested and could not be computed fails the
+run rather than being skipped.
 
 **Platform support.**
 

@@ -440,6 +440,114 @@ async def _screen_factuality(cards: list[dict], source_text: str | None) -> list
     return kept
 
 
+def _passage_not_yet_used(
+    all_chunks: list[ChunkModel],
+    preferred: list[ChunkModel],
+    already_used: set[str],
+) -> list[ChunkModel]:
+    """The chunks a regeneration reads: the ones the current deck was not written from.
+
+    What a run can ask about is decided by the passage in its prompt, not by the
+    decoding. The classifier leaves a technical tutorial with 10 eligible chunks
+    out of 265, all of which fit the prompt budget, so every run read the same
+    1,679 characters and returned the same five topics -- deleting the deck first
+    changed nothing, because the input was identical.
+
+    Preference order is the classifier's choice first, then the rest of the
+    document, in reading order -- so successive regenerations sweep forward
+    through the document instead of re-reading its opening. When every chunk has
+    been used the preferred set is returned unchanged: a document whose material
+    is exhausted must still produce a deck, and the near-duplicate filter is what
+    stops the repeats reaching the user.
+
+    The replacement passage is held to the size of the one it replaces rather
+    than filled to `_CHUNK_CHAR_LIMIT`. More text is not free: measured on the
+    reported document over three runs each, the same unused material cut to the
+    previous passage's size passed the grounding gate 14 times in 15 and
+    delivered 4-5 cards a run, against 12 in 15 and 3-5 when it filled the
+    budget -- and both asked questions with nothing in common with the deck they
+    replaced, so the cap costs no novelty. The size is defensible on its own
+    terms too: that many characters already produced the deck being replaced.
+    """
+    fresh = [c for c in preferred if c.id not in already_used]
+    if fresh:
+        return fresh
+    rest = [c for c in all_chunks if c.id not in already_used]
+    if not rest:
+        return preferred
+
+    budget = sum(len(c.text) for c in preferred)
+    capped: list[ChunkModel] = []
+    size = 0
+    for chunk in rest:
+        if capped and size + len(chunk.text) > budget:
+            break
+        capped.append(chunk)
+        size += len(chunk.text)
+    return capped
+
+
+async def _drop_near_duplicates(
+    cards: list[dict], session: AsyncSession, *, note_id: str | None
+) -> tuple[list[dict], int]:
+    """Reject candidates that repeat a card the same note already has.
+
+    A note is one short text, so a replacement cannot be steered onto unread
+    material the way a document's can (`_passage_not_yet_used`). Rejection is
+    what makes it different instead, and it is the same 0.85 cosine test
+    `generate` applies to document cards -- reused rather than invented, and
+    measured on real note questions before being relied on here. The two cases
+    that bracket it: "In what ways is BM25 an improvement over TF-IDF?" against
+    a deck holding "How does BM25 improve upon TF-IDF?" scores 0.9828 and must
+    go, while "When is a cross-encoder too slow to use as a first-stage
+    retriever?" is new to that same deck at 0.8248 and must stay. Scoped to the
+    one note: a card about a different note is not a duplicate of this one.
+
+    Returns (kept, dropped). Embedding failure keeps everything: a duplicate that
+    reaches the user is a worse outcome than none, but an empty deck is worse
+    than both.
+    """
+    if not note_id or not cards:
+        return cards, 0
+
+    import numpy as np  # noqa: PLC0415
+
+    from app.services.embedder import get_embedding_service  # noqa: PLC0415
+    from app.services.flashcard import (  # noqa: PLC0415
+        _fetch_existing_embeddings,
+        _is_near_duplicate,
+    )
+
+    _existing, existing_vecs = await _fetch_existing_embeddings(
+        "default", session, note_id=note_id
+    )
+    if existing_vecs is None:
+        return cards, 0
+    try:
+        embedder = get_embedding_service()
+        vecs = np.array(
+            await asyncio.to_thread(
+                embedder.encode, [str(c.get("question", "")).strip() for c in cards]
+            )
+        )
+    except Exception:
+        logger.warning("Embedding dedup: candidate encode failed; keeping all", exc_info=True)
+        return cards, 0
+
+    kept: list[dict] = []
+    pool = existing_vecs
+    for i, card in enumerate(cards):
+        if _is_near_duplicate(vecs[i], pool):
+            logger.info(
+                "flashcard.generate_from_notes: skipping near-duplicate question: %r",
+                str(card.get("question", ""))[:80],
+            )
+            continue
+        pool = np.vstack([pool, vecs[i : i + 1]])
+        kept.append(card)
+    return kept, len(cards) - len(kept)
+
+
 async def _collect_with_backfill(
     count: int,
     generate_batch: Callable[[int, list[str]], Awaitable[list[dict]]],
@@ -452,7 +560,9 @@ async def _collect_with_backfill(
     seen: set[str] = set()
     attempts = 0
     while len(candidates) < count and attempts <= _MAX_GENERATION_RETRIES:
-        batch = await generate_batch(count - len(candidates), [c["question"] for c in candidates])
+        batch = await generate_batch(
+            count - len(candidates), [c["question"] for c in candidates]
+        )
         attempts += 1
         added = 0
         for c in batch:
@@ -529,8 +639,15 @@ async def generate(
     difficulty: Literal["easy", "medium", "hard"] = "medium",
     context: str | None = None,
     model: str | None = None,
+    exclude_chunk_ids: set[str] | None = None,
 ) -> list[FlashcardModel]:
     """Generate flashcards from document chunks using LLM.
+
+    *exclude_chunk_ids* names chunks an existing deck was already written from.
+    A regeneration passes them so it reads material this document has not been
+    questioned on yet -- see `_passage_not_yet_used`. Listing the previous
+    questions in the prompt instead is what I-28 forbids: verbatim questions are
+    exemplars the model copies, not a signal it steers away from.
 
     When *context* (selected text) is provided, uses it directly instead of
     fetching chunks -- this produces questions grounded in the exact selection.
@@ -606,6 +723,14 @@ async def generate(
                 "flashcard.generate: no concept/definition chunks found, using all %d chunks",
                 len(chunks),
             )
+
+        if exclude_chunk_ids:
+            swapped = _passage_not_yet_used(chunks, eligible_chunks, exclude_chunk_ids)
+            if swapped and swapped[0].id != eligible_chunks[0].id:
+                # The passage is no longer the classifier's pick, so the label it
+                # produced does not describe what these cards were written from.
+                chunk_classification = None
+            eligible_chunks = swapped
 
         if section_ctx:
             combined_text, first_chunk_id, passage_chunk_ids = _build_enriched_text(
@@ -781,8 +906,24 @@ async def generate_from_notes(
     count: int,
     session: AsyncSession,
     difficulty: Literal["easy", "medium", "hard"] = "medium",
+    replacing_note_id: str | None = None,
 ) -> list[FlashcardModel]:
-    """Generate flashcards from user notes scoped by tag or explicit note IDs."""
+    """Generate flashcards from user notes scoped by tag or explicit note IDs.
+
+    *replacing_note_id* names the note whose deck is being replaced. A note is a
+    single short text, so unlike a document there is no unread material to move
+    to -- the mechanism that makes a replacement different is therefore
+    rejection, not selection: every candidate is compared against that note's
+    existing cards and a near-duplicate is dropped. Extraction is widened at the
+    same time so the run has spare concepts to fall back on, which costs no
+    extra call.
+
+    Filtering the *concepts* on the previous questions was tried first and
+    measured useless: extraction returns whole sentences ("TF-IDF measures the
+    importance of a word in a document within a corpus"), which never occur
+    inside a question, so on two real notes it dropped 0 of 12 and 0 of 11. A
+    check that cannot fire is not a check.
+    """
     from app.services.flashcard import _CHUNK_CHAR_LIMIT  # noqa: PLC0415
 
     if not tag and not note_ids:
@@ -811,7 +952,7 @@ async def generate_from_notes(
         return []
 
     extract_prompt = NOTES_CONCEPT_EXTRACT_TMPL.format(
-        max_concepts=max(count, 8),
+        max_concepts=max(count * 2, 12) if replacing_note_id else max(count, 8),
         text=combined_text,
     )
 
@@ -842,6 +983,21 @@ async def generate_from_notes(
         span.set_attribute("flashcard.generated_count", len(cards_data))
 
     now = datetime.now(UTC)
+    # Attributable only when one note produced the passage. Several notes are
+    # concatenated into one prompt, so naming any single one of them would be the
+    # same false provenance `chunk_id` carried before I-35. NULL is the honest
+    # answer there -- and it is why a card from a tag-wide run cannot be scoped to
+    # a collection or replaced per note.
+    owning_note_id = notes[0].id if len(notes) == 1 else None
+    cards_data, deduped = await _drop_near_duplicates(
+        cards_data, session, note_id=replacing_note_id
+    )
+    if deduped:
+        logger.info(
+            "flashcard.generate_from_notes: %d candidate(s) dropped as near-duplicates "
+            "of cards this note already has",
+            deduped,
+        )
     flashcards: list[FlashcardModel] = []
     for item in cards_data:
         question = str(item.get("question", "")).strip()
@@ -851,6 +1007,7 @@ async def generate_from_notes(
             id=str(uuid.uuid4()),
             document_id=None,
             chunk_id=None,
+            note_id=owning_note_id,
             source="note",
             question=question,
             answer=answer,

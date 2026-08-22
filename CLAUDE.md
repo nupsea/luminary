@@ -11,7 +11,7 @@ This file is a table of contents. The system of record is `docs/`.
 | Before you… | Read |
 |---|---|
 | proposing or scoping work | `docs/roadmap.md` — the only doc carrying status |
-| any backend change | `docs/invariants.md` (35 hard rules, each from a real incident) |
+| any backend change | `docs/invariants.md` (36 hard rules, each from a real incident) |
 | a structural change | `docs/architecture.md` (6-layer rule, stores, directories) |
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |
@@ -31,7 +31,7 @@ Prose versions in this repo have drifted before.
 | `make ci` | **the gate.** ruff, layer_linter, boundary_checker, pytest, manifest checks, frontend build, tsc, eslint, vitest |
 | `make lint` | ruff + tsc + eslint + manifest checks |
 | `make test` | `pytest` (backend) |
-| `make smoke` | `scripts/smoke/all.sh` — ~230 numbered HTTP contract scripts; needs a running backend |
+| `make smoke` | `scripts/smoke/all.sh` — ~180 numbered HTTP contract scripts; needs a running backend |
 | `make eval` | retrieval quality vs. committed thresholds; needs a running backend |
 | `make db-revision m="…"` | generate an Alembic revision (never raw `alembic revision` — see I-23) |
 | `make db-migrate` | apply migrations to the dev database |

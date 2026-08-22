@@ -23,11 +23,35 @@ export class ApiError extends Error {
  * unwrapping — it was written twice before this, once against `Response` and
  * once against `ApiError`.
  */
+/** An error whose fix is installing components the app can fetch itself.
+ *
+ *  Carries the ids so the caller can offer the install rather than restating a
+ *  sentence the user has to act on somewhere else.
+ */
+export class ComponentsRequiredError extends Error {
+  readonly components: string[]
+  constructor(message: string, components: string[]) {
+    super(message)
+    this.name = "ComponentsRequiredError"
+    this.components = components
+  }
+}
+
 export function detailFromError(err: unknown, fallback: string): Error {
   if (err instanceof ApiError) {
     try {
       const parsed = JSON.parse(err.body) as { detail?: unknown }
       if (typeof parsed.detail === "string" && parsed.detail) return new Error(parsed.detail)
+      // A structured detail must not fall through to the generic fallback: it
+      // carries a better message than `fallback` plus the components to offer.
+      if (parsed.detail && typeof parsed.detail === "object") {
+        const d = parsed.detail as { message?: unknown; components?: unknown }
+        const message = typeof d.message === "string" && d.message ? d.message : fallback
+        if (Array.isArray(d.components) && d.components.length > 0) {
+          return new ComponentsRequiredError(message, d.components.map(String))
+        }
+        if (message !== fallback) return new Error(message)
+      }
     } catch {
       // body wasn't JSON
     }

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -537,7 +538,10 @@ async def _study_scope_member_ids(document_id: str, session: AsyncSession) -> li
 
 
 async def _fetch_existing_embeddings(
-    deck: str, session: AsyncSession, document_id: str | None = None
+    deck: str,
+    session: AsyncSession,
+    document_id: str | None = None,
+    note_id: str | None = None,
 ) -> "tuple[list[str], list] | tuple[list, None]":
     """Embed the questions a new card could be a duplicate of, in one batch.
 
@@ -545,7 +549,9 @@ async def _fetch_existing_embeddings(
     document-derived ones land in "default", so the two never compared even
     though a collection session interleaves them. When *document_id* is given,
     the scope widens to that document and everything sharing a collection with
-    it.
+    it. *note_id* narrows instead: replacing one note's deck compares against
+    that note's own cards and nothing else, so a repeat is rejected without a
+    card about a different note counting as one.
 
     Returns (questions, vectors) or ([], None) when nothing to compare against
     or embedding fails.
@@ -555,7 +561,9 @@ async def _fetch_existing_embeddings(
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
     scope = FlashcardModel.deck == deck
-    if document_id is not None:
+    if note_id is not None:
+        scope = FlashcardModel.note_id == note_id
+    elif document_id is not None:
         member_ids = await _study_scope_member_ids(document_id, session)
         scope = or_(
             scope,
@@ -594,6 +602,28 @@ def _is_near_duplicate(
     return bool(np.any(sims >= threshold))
 
 
+# What "Regenerate" asks for on a document with no deck yet. Same as the
+# Generate button's default, so the two produce comparably sized decks.
+_DEFAULT_REGENERATE_COUNT = 10
+
+
+@dataclass
+class RegenerateResult:
+    """Outcome of a deck replacement, reported rather than inferred.
+
+    `requested` and the length of `cards` differ whenever the quality gate drops
+    a card the backfill could not replace, and the user saw that as a deck that
+    silently shrank (5 cards asked for, 3 delivered, no explanation). The caller
+    states both. `kept_previous` is the honest name for the case where nothing
+    survived and the old deck is still there.
+    """
+
+    cards: list[FlashcardModel]
+    requested: int
+    replaced: int
+    kept_previous: bool
+
+
 class FlashcardService(FlashcardSearchService):
     async def generate(
         self,
@@ -605,11 +635,114 @@ class FlashcardService(FlashcardSearchService):
         difficulty: Literal["easy", "medium", "hard"] = "medium",
         context: str | None = None,
         model: str | None = None,
+        exclude_chunk_ids: set[str] | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
         return await _gen(
-            document_id, scope, section_heading, count, session, difficulty, context, model
+            document_id, scope, section_heading, count, session, difficulty, context, model,
+            exclude_chunk_ids=exclude_chunk_ids,
+        )
+
+    async def regenerate(
+        self,
+        session: AsyncSession,
+        document_id: str | None = None,
+        note_id: str | None = None,
+        count: int | None = None,
+        difficulty: Literal["easy", "medium", "hard"] = "medium",
+        model: str | None = None,
+    ) -> "RegenerateResult":
+        """Replace one source's deck with cards written from material it has not used.
+
+        Three things happen in this order and the order is the fix. The previous
+        deck is read first, so what it was written from can be excluded from the
+        new run -- chunks for a document, extracted concepts for a note. What a
+        run can ask about is decided by the material in its prompt, and re-reading
+        the same material returned the same questions however the deck was deleted
+        in between. Generation then runs while the old cards are still in the
+        table, so the near-duplicate filter has something to compare against;
+        deleting first left it comparing new cards to an empty deck, which is why
+        "replace" could return what it had just removed. The old cards are deleted
+        last, and only if new ones exist: a run that produces nothing must leave
+        the user their deck rather than an empty one.
+
+        One source per call. A collection replaces its sources one at a time, so a
+        source whose run fails costs that source's cards and no others.
+        """
+        from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
+
+        if bool(document_id) == bool(note_id):
+            raise ValueError("regenerate takes exactly one of document_id, note_id")
+
+        owner = (
+            FlashcardModel.document_id == document_id
+            if document_id
+            else FlashcardModel.note_id == note_id
+        )
+        previous = (
+            await session.execute(
+                select(FlashcardModel.id, FlashcardModel.source_chunk_ids).where(owner)
+            )
+        ).all()
+        previous_ids = [row[0] for row in previous]
+        requested = count if count is not None else len(previous_ids)
+        requested = max(1, min(requested or _DEFAULT_REGENERATE_COUNT, 50))
+
+        if document_id:
+            used_chunk_ids = {
+                chunk_id
+                for row in previous
+                for chunk_id in (row[1] or [])
+                if isinstance(chunk_id, str)
+            }
+            cards = await self.generate(
+                document_id=document_id,
+                scope="full",
+                section_heading=None,
+                count=requested,
+                session=session,
+                difficulty=difficulty,
+                model=model,
+                exclude_chunk_ids=used_chunk_ids or None,
+            )
+        else:
+            cards = await self.generate_from_notes(
+                tag=None,
+                note_ids=[note_id or ""],
+                count=requested,
+                session=session,
+                difficulty=difficulty,
+                replacing_note_id=note_id,
+            )
+
+        source = {"document_id": document_id} if document_id else {"note_id": note_id}
+        if not cards:
+            logger.warning(
+                "flashcard.regenerate: no usable cards; keeping the existing deck",
+                extra={**source, "kept": len(previous_ids)},
+            )
+            return RegenerateResult(
+                cards=[], requested=requested, replaced=0, kept_previous=True
+            )
+
+        for card_id in previous_ids:
+            await _delete_flashcard_fts(card_id, session)
+        await FlashcardRepo(session).delete_by_ids(previous_ids)
+        logger.info(
+            "flashcard.regenerate: replaced deck",
+            extra={
+                **source,
+                "replaced": len(previous_ids),
+                "requested": requested,
+                "delivered": len(cards),
+            },
+        )
+        return RegenerateResult(
+            cards=cards,
+            requested=requested,
+            replaced=len(previous_ids),
+            kept_previous=False,
         )
 
     async def generate_from_notes(
@@ -619,12 +752,15 @@ class FlashcardService(FlashcardSearchService):
         count: int,
         session: AsyncSession,
         difficulty: Literal["easy", "medium", "hard"] = "medium",
+        replacing_note_id: str | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import (  # noqa: PLC0415
             generate_from_notes as _gen,
         )
 
-        return await _gen(tag, note_ids, count, session, difficulty)
+        return await _gen(
+            tag, note_ids, count, session, difficulty, replacing_note_id=replacing_note_id
+        )
 
     async def generate_from_collection(
         self,

@@ -24,8 +24,8 @@ import {
   type Difficulty,
   generateCollectionFlashcards,
   generateDocumentFlashcards,
+  regenerateCollectionFlashcards,
 } from "@/lib/studyApi"
-import { deleteAllFlashcardsForCollection } from "@/pages/Study/api"
 import { type StudyFilters, endOpenSessionsForScope } from "@/lib/studySessionService"
 import { SessionHistory } from "@/components/study/SessionHistory"
 import { CollectionCardManager } from "@/components/study/CollectionCardManager"
@@ -123,24 +123,50 @@ export function CollectionStudyDashboard({
     },
   })
 
-  // Regenerate (replace): wipe this collection's cards, then generate a fresh
-  // set across all its sources. Fresh slate -- old cards + review history go.
+  // Regenerate (replace): each source replaces its own cards, in one backend
+  // call per source. Wiping the collection first is what made "replace" return
+  // the questions it had just removed -- the duplicate filters compare against
+  // the cards a source already has -- and it emptied the deck outright when a
+  // run produced nothing.
   const collectionReplaceMutation = useMutation({
     mutationFn: async () => {
-      await deleteAllFlashcardsForCollection(collectionId)
-      // Fresh cards -> fresh review: drop the stale in-progress session.
-      await endOpenSessionsForScope(null, collectionId)
-      return generateCollectionFlashcards(data?.sources ?? [], genCount, genDifficulty)
+      const result = await regenerateCollectionFlashcards(
+        data?.sources ?? [],
+        genCount,
+        genDifficulty,
+      )
+      // Fresh cards -> fresh review, but only if something actually changed.
+      if (result.replaced > 0) await endOpenSessionsForScope(null, collectionId)
+      return result
     },
     onSuccess: (result) => {
       setConfirmReplace(false)
-      toast.success(
-        result.totalCreated > 0
-          ? `Replaced with ${result.totalCreated} fresh card${result.totalCreated === 1 ? "" : "s"}`
-          : "Cleared -- no new cards were generated",
-      )
+      if (result.delivered === 0) {
+        toast.error("No new cards could be written -- your existing cards are unchanged")
+      } else {
+        const short = result.delivered < result.requested
+        toast.success(
+          `Replaced with ${result.delivered} fresh card${result.delivered === 1 ? "" : "s"}`,
+          short
+            ? {
+                description:
+                  `Asked for ${result.requested}. The rest did not quote their source and were dropped.`,
+              }
+            : undefined,
+        )
+      }
+      if (result.keptPrevious.length > 0) {
+        toast.warning(
+          `${result.keptPrevious.length} source${result.keptPrevious.length === 1 ? "" : "s"} ` +
+            "produced nothing new and kept their cards",
+          { description: result.keptPrevious.join(", ") },
+        )
+      }
       if (result.errors.length > 0) {
-        toast.error(`${result.errors.length} source${result.errors.length === 1 ? "" : "s"} failed`)
+        toast.error(
+          `${result.errors.length} source${result.errors.length === 1 ? "" : "s"} failed`,
+          { description: result.errors[0] },
+        )
       }
       invalidateAll()
     },
@@ -610,8 +636,9 @@ export function CollectionStudyDashboard({
             ) : (
               <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
                 <p className="text-xs text-foreground">
-                  Delete all existing cards in this collection and generate a fresh set?
-                  Their review history is lost.
+                  Write a fresh set of cards for each source and replace its current
+                  ones? Their review history is lost. A source that produces nothing
+                  keeps the cards it has.
                 </p>
                 <div className="flex items-center gap-2">
                   <button

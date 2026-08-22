@@ -9,14 +9,23 @@ import {
 } from "react"
 import { toast } from "sonner"
 import { logger } from "@/lib/logger"
+import { ApiError } from "@/lib/apiClient"
 import { fetchIngestionStatus } from "@/lib/ingestionApi"
 import {
+  classifyPollFailure,
   IngestionTrackerContext,
   type IngestionJob,
   type IngestionTrackerContextValue,
 } from "./ingestionTrackerCore"
 
 const POLL_INTERVAL_MS = 2000
+
+// Consecutive unreadable polls before a job is called failed. Deletion is not
+// counted here -- that is recognised outright -- so this only covers a status
+// endpoint that is erroring or unreachable. Six is twelve seconds at the poll
+// interval: long enough to ride out a restart, short enough that the pill does
+// not sit there indefinitely.
+const MAX_MISSED_POLLS = 6
 
 export function IngestionTrackerProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
@@ -43,17 +52,48 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
       stopPolling()
       return
     }
-    const results = await Promise.allSettled(
-      active.map(async (job) => ({ job, status: await fetchIngestionStatus(job.docId) })),
+    // Each entry resolves either way. `Promise.allSettled` alone loses which
+    // job a rejection belonged to, and the loop below skipped every rejected
+    // entry -- so a document deleted mid-ingestion 404ed on every poll and its
+    // job stayed "processing" forever, leaving the progress pill stuck at
+    // whatever stage it had reached.
+    const results = await Promise.all(
+      active.map(async (job) => {
+        try {
+          return { job, status: await fetchIngestionStatus(job.docId), error: null }
+        } catch (error) {
+          return { job, status: null, error }
+        }
+      }),
     )
     setJobs((prev) => {
       const next = { ...prev }
       let mutated = false
-      for (const r of results) {
-        if (r.status !== "fulfilled") continue
-        const { job, status } = r.value
+      for (const { job, status, error } of results) {
         const current = next[job.docId]
         if (!current || current.status !== "processing") continue
+
+        if (error) {
+          const httpStatus = error instanceof ApiError ? error.status : null
+          const outcome = classifyPollFailure(httpStatus, current.missedPolls, MAX_MISSED_POLLS)
+          if (outcome.action === "drop") {
+            logger.info("[Ingestion] document removed while ingesting", { doc_id: job.docId })
+            delete next[job.docId]
+            toast.dismiss(job.docId)
+          } else if (outcome.action === "give-up") {
+            logger.error("[Ingestion] status unreadable, giving up", { doc_id: job.docId })
+            next[job.docId] = {
+              ...current,
+              status: "error",
+              errorMessage: "Lost track of this import.",
+            }
+          } else {
+            next[job.docId] = { ...current, missedPolls: outcome.missedPolls }
+          }
+          mutated = true
+          continue
+        }
+        if (!status) continue
 
         if (status.stage === "error" || status.error_message) {
           const errMsg = status.error_message ?? "Ingestion failed"
@@ -72,6 +112,7 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
           ...current,
           stage: status.stage,
           progressPct: status.progress_pct,
+          missedPolls: 0,
         }
 
         if (status.done) {
@@ -110,6 +151,7 @@ export function IngestionTrackerProvider({ children }: { children: ReactNode }) 
         progressPct: 5,
         status: "processing",
         errorMessage: null,
+        missedPolls: 0,
         startedAt: Date.now(),
       }
       setJobs((prev) => {

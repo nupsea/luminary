@@ -175,3 +175,63 @@ async def test_transcribe_node_populates_parsed_document(test_db, tmp_path):
     audio_chunks = result["_audio_chunks"]
     assert audio_chunks is not None
     assert all("start_time" in c and "end_time" in c for c in audio_chunks)
+
+
+@pytest.mark.anyio
+async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, monkeypatch):
+    """Audio was retrievable and unreadable: chunks but no sections.
+
+    `GET /sections/{id}/content` returned [] for a document whose whole
+    transcript sat in chunks, so the reader said "No content available". The
+    orphan-chunk fallback in sections.py could not cover it -- that fires when
+    sections exist but are empty, and here there were none at all.
+
+    Headings stay empty on purpose (I-30): nobody authored one for a transcript.
+    """
+    from sqlalchemy import select
+
+    from app.models import ChunkModel, SectionModel
+    from app.workflows.ingestion_nodes.chunk import chunk_node
+
+    _engine, factory, _tmp = test_db
+    doc_id = "audio-sections-doc"
+
+    state = {
+        "document_id": doc_id,
+        "file_path": "/tmp/talk.wav",
+        "format": "wav",
+        "content_type": "audio",
+        "parsed_document": None,
+        "chunks": None,
+        "status": "chunking",
+        "error": None,
+        "_audio_chunks": [
+            {
+                "id": f"c{i}",
+                "index": i,
+                "text": f"spoken words number {i}",
+                "start_time": i * 30.0,
+                "end_time": (i + 1) * 30.0,
+            }
+            for i in range(3)
+        ],
+    }
+
+    result = await chunk_node(state)
+    assert result["status"] == "embedding"
+
+    async with factory() as session:
+        sections = (
+            await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id))
+        ).scalars().all()
+        chunks = (
+            await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
+        ).scalars().all()
+
+    assert len(sections) == 3, "a transcript with no sections cannot be read"
+    assert all(s.heading == "" for s in sections), "nothing may invent a heading (I-30)"
+    assert all(s.body for s in sections), "an empty section body is the same failure"
+    # Every chunk must point at a section, or retrieval and the reader disagree
+    # about what the document contains.
+    assert all(c.section_id is not None for c in chunks)
+    assert {c.section_id for c in chunks} == {s.id for s in sections}

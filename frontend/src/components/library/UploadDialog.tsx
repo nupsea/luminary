@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress"
 import {
   type ContentTypeValue,
   submitFile,
+  detectFileType,
   submitKindleFile,
   submitUrl,
 } from "@/lib/ingestionApi"
@@ -24,8 +25,11 @@ import {
   acceptedExtensions,
   describeRejection,
   detectContentType,
+  toPickerValue,
+
   isKindleClippings,
 } from "@/lib/uploadFileTypes"
+import { ComponentsRequiredError } from "@/lib/apiClient"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { useAppStore } from "@/store"
 
@@ -48,8 +52,8 @@ const CONTENT_TYPE_OPTIONS = [
   // description said "non-fiction", the one word Technical also claims. Name
   // the writing rather than the length, and say what it is not.
   { value: "book" as const, label: "Book (prose)", description: "For novels, essays, history, biography, plays -- prose read start to finish. Not code or maths (including EPUB)" },
-  { value: "technical" as const, label: "Technical", description: "For programming/CS books, papers and articles with code, formulae or numbered sections (sizing auto-tuned to length and structure)" },
-  { value: "paper" as const, label: "Paper", description: "For research papers and academic writing" },
+  { value: "technical" as const, label: "Tech Book", description: "For programming/CS books, manuals and long-form technical writing with code, formulae or numbered sections (sizing auto-tuned to length and structure)" },
+  { value: "paper" as const, label: "Research Paper", description: "For academic papers with an abstract, method and references" },
   { value: "conversation" as const, label: "Conversation", description: "For chat exports, interviews, meeting transcripts" },
   { value: "notes" as const, label: "Notes", description: "For personal notes, web clips, short mixed content" },
   { value: "audio" as const, label: "Audio", description: "For lectures, podcasts, recorded talks (MP3, M4A, WAV)" },
@@ -77,6 +81,25 @@ interface UploadDialogProps {
 
 type ContentTypeOption = { value: ContentTypeValue; label: string; description: string }
 
+/** Three dots breathing in sequence, to say work is happening without a spinner.
+ *
+ *  Staggered `animate-pulse` rather than a JS interval: no timer to leak, and it
+ *  stops with the element instead of outliving it.
+ */
+function WorkingDots() {
+  return (
+    <span aria-hidden className="inline-flex gap-0.5 pl-0.5 align-baseline">
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="inline-block h-1 w-1 rounded-full bg-current animate-pulse"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </span>
+  )
+}
+
 /** The document type, collapsed to the one line it usually is.
  *
  *  Seven options with a sentence each ran ~470px, so on the paste tab the
@@ -88,10 +111,12 @@ function ContentTypePicker({
   value,
   onChange,
   options,
+  detecting = false,
 }: {
   value: ContentTypeValue | null
   onChange: (v: ContentTypeValue) => void
   options: ContentTypeOption[]
+  detecting?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const selected = options.find((o) => o.value === value) ?? null
@@ -116,10 +141,29 @@ function ContentTypePicker({
           className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-primary/50"
         >
           <p className="text-sm font-medium text-foreground">
-            {selected?.label ?? "Detect automatically"}
+            {/* A choice the user has made outranks a detection still running:
+                showing "Reading the document..." over their own selection reads
+                as if the app were about to overrule them. It never does --
+                detection is discarded once they pick. */}
+            {selected ? (
+              selected.label
+            ) : detecting ? (
+              <span className="inline-flex items-center">
+                Reading the document
+                <WorkingDots />
+              </span>
+            ) : (
+              "Detect automatically"
+            )}
           </p>
           <p className="text-xs text-muted-foreground">
-            {selected?.description ?? "Luminary reads the document and decides. Change it if it gets it wrong."}
+            {selected
+              ? detecting
+                ? "Your choice. Add when you are ready."
+                : `Detected. ${selected.description}`
+              : detecting
+                ? "Working out what this is. Pick one yourself to skip the wait."
+                : "Luminary reads the document and decides. Change it if it gets it wrong."}
           </p>
         </button>
       ) : (
@@ -184,6 +228,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   // True once the user has explicitly picked a type; auto-detection from the
   // filename must never override an explicit choice.
   const typeTouchedRef = useRef(false)
+  // Detection runs against the file the user just chose, so a slow one must not
+  // overwrite the answer for a file they have since replaced.
+  const detectSeqRef = useRef(0)
+  const [detecting, setDetecting] = useState(false)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
   const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
@@ -193,6 +241,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   const [mode, setMode] = useState<Mode>("idle")
   const [errorMessage, setErrorMessage] = useState("")
+  // Components the failure can be fixed by installing, so the error offers the
+  // install instead of telling the user to go and run a package manager.
+  const [errorComponents, setErrorComponents] = useState<string[]>([])
   const [docTitle, setDocTitle] = useState("")
   const [fileSizeMB, setFileSizeMB] = useState(0)
   const [trackedDocId, setTrackedDocId] = useState<string | null>(null)
@@ -258,7 +309,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setTab("upload")
     setSelectedFile(pendingUpload)
     setRejection(null)
-    if (!typeTouchedRef.current) setUploadType(detectContentType(pendingUpload.name))
+    if (!typeTouchedRef.current) {
+      setUploadType(detectContentType(pendingUpload.name))
+      void runDetection(pendingUpload)
+    }
     clearPendingUpload()
   }, [open, pendingUpload, clearPendingUpload])
 
@@ -272,6 +326,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setRejection(null)
     setUploadType(null)
     typeTouchedRef.current = false
+    detectSeqRef.current += 1
+    setDetecting(false)
     setPasteLabel("")
     setPasteText("")
     setPasteType("notes")
@@ -280,6 +336,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setTab(canUrl ? "url" : "upload")
     setMode("idle")
     setErrorMessage("")
+    setErrorComponents([])
     setDocTitle("")
     setFileSizeMB(0)
     setTrackedDocId(null)
@@ -306,7 +363,36 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }
     setRejection(null)
     setSelectedFile(file)
-    if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
+    if (!typeTouchedRef.current) {
+      setUploadType(detectContentType(file.name))
+      void runDetection(file)
+    }
+  }
+
+  /** Ask the backend what this file is, so the user can correct it before adding. */
+  async function runDetection(file: File) {
+    const fromName = detectContentType(file.name)
+    // The extension already settles media and EPUB; reading those costs time
+    // and cannot change the answer.
+    if (fromName) return
+    const seq = ++detectSeqRef.current
+    setDetecting(true)
+    try {
+      const detected = await detectFileType(file)
+      if (seq !== detectSeqRef.current) return
+      // The classifier answers in the stored vocabulary; the picker offers a
+      // narrower set. Mapping is what stops a correct answer rendering as no
+      // answer at all.
+      const value = toPickerValue(detected)
+      logger.info("[Upload] type detected", {
+        filename: file.name,
+        detected,
+        shown: value,
+      })
+      if (value && !typeTouchedRef.current) setUploadType(value)
+    } finally {
+      if (seq === detectSeqRef.current) setDetecting(false)
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -444,6 +530,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
       setMode("error")
       setErrorMessage(errMsg)
+      setErrorComponents(err instanceof ComponentsRequiredError ? err.components : [])
       toast.error(errMsg)
     }
   }
@@ -525,9 +612,16 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
         {mode === "error" && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/40">
-              <p className="text-sm font-medium text-red-700">Upload failed</p>
-              <p className="mt-0.5 text-xs text-red-600">{errorMessage}</p>
+            <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/40">
+              <div>
+                <p className="text-sm font-medium text-red-700">
+                  {errorComponents.length > 0 ? "One more step" : "Upload failed"}
+                </p>
+                <p className="mt-0.5 text-xs text-red-600">{errorMessage}</p>
+              </div>
+              {errorComponents.map((id) => (
+                <InstallComponentButton key={id} componentId={id} />
+              ))}
             </div>
             <div className="flex gap-2">
               <button
@@ -613,10 +707,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                 ) : (
                   <ContentTypePicker
                     value={uploadType}
+                    detecting={detecting}
                     options={contentTypeOptions}
                     onChange={(v) => {
                       typeTouchedRef.current = true
                       setUploadType(v)
+                      // The user has decided, so the request in flight is moot.
+                      // Bumping the sequence discards its result and clears the
+                      // indicator, rather than leaving "Reading the document"
+                      // running underneath a choice that has already been made.
+                      detectSeqRef.current += 1
+                      setDetecting(false)
                     }}
                   />
                 )}

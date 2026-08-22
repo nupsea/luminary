@@ -37,6 +37,7 @@ import {
   generateFlashcards,
   generateFlashcardsFromGraph,
   generateTechnicalFlashcards,
+  regenerateFlashcards,
   updateFlashcard,
 } from "./api"
 import { FlashcardCard } from "./FlashcardCard"
@@ -197,31 +198,44 @@ export function FlashcardManager({
     onError: () => toast.error("Failed to delete flashcards"),
   })
 
-  // Regenerate (replace): delete the current cards, then generate a fresh set of
-  // the same size. A clean slate -- the old cards and their review history go.
+  // Regenerate (replace): one backend call, not delete-then-generate from here.
+  // The old cards must still exist while the replacement is written -- they are
+  // what the near-duplicate filter compares against, and they are what the user
+  // keeps if the run produces nothing. Deleting first is what made "replace"
+  // return the questions it had just removed, two cards short.
   const replaceMutation = useMutation({
     mutationFn: async () => {
-      await deleteAllFlashcardsForDocument(documentId)
-      // Fresh cards -> fresh review: drop the stale in-progress session.
-      await endOpenSessionsForScope(documentId, null)
       const count = Math.min(Math.max(totalCards || 10, 1), 50)
-      return generateFlashcards({
+      const result = await regenerateFlashcards({
         document_id: documentId,
-        scope: "full",
-        section_heading: null,
         count,
         difficulty: "medium",
       })
+      // Fresh cards -> fresh review: drop the stale in-progress session. After
+      // the swap, so a run that kept the old deck keeps its session too.
+      if (!result.kept_previous) await endOpenSessionsForScope(documentId, null)
+      return result
     },
-    onSuccess: (created) => {
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
       clearSelection()
       setSelectionMode(false)
       setConfirmBulkDelete(null)
       setPage(1)
+      if (result.kept_previous) {
+        toast.error("No new cards could be written from this document — your deck is unchanged")
+        return
+      }
+      const short = result.delivered < result.requested
       toast.success(
-        `Replaced with ${created.length} fresh card${created.length === 1 ? "" : "s"}`,
+        `Replaced with ${result.delivered} fresh card${result.delivered === 1 ? "" : "s"}`,
+        short
+          ? {
+              description:
+                `Asked for ${result.requested}. The rest did not quote the source and were dropped.`,
+            }
+          : undefined,
       )
     },
     onError: (err: Error) => {

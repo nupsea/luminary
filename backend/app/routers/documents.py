@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +74,8 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
+from app.services.components import capabilities, get_component
+from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
@@ -496,6 +499,122 @@ async def parse_document(
     return {"document_id": doc_id, "parsed": _parsed_to_dict(parsed)}
 
 
+def _component_labels(component_ids: list[str]) -> str:
+    """Human names for components, so an error names the thing the user installs."""
+    names = []
+    for cid in component_ids:
+        comp = get_component(cid)
+        names.append(comp.label if comp else cid)
+    if len(names) <= 1:
+        return names[0] if names else "an extra component"
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+# How long the dialog will wait before showing nothing. Bracketing cases from
+# the measured set: a 4MB PDF answers in 6.0s, a 44MB one had not answered at
+# 300s. Twenty seconds clears every document that returns at all and gives up on
+# the ones that would otherwise spin forever.
+_DETECT_TIMEOUT_SECONDS = 20
+
+
+def _media_missing_message(required: list[str]) -> str:
+    """One sentence naming everything missing, and what to do about each kind."""
+    fetchable, manual = _installable(required)
+    parts = [
+        f"YouTube needs {_component_labels(required)}, "
+        f"{'which are' if len(required) > 1 else 'which is'} not bundled for licensing reasons."
+    ]
+    if fetchable:
+        parts.append(f"Install {_component_labels(fetchable)} below.")
+    if manual:
+        # Named precisely, because the old advice ("brew install ffmpeg") was
+        # advice the user had often already followed: the binary existed and the
+        # bundle's PATH could not see it. It is found automatically now, so the
+        # remaining case is genuinely not having it.
+        names = _component_labels(manual)
+        parts.append(
+            f"{names} is found automatically once installed on this machine "
+            f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
+        )
+    return " ".join(parts)
+
+
+def _installable(component_ids: list[str]) -> tuple[list[str], list[str]]:
+    """Split into what the app can fetch and what the user must supply.
+
+    `kind == "tool"` has no automated source on purpose: the licence travels
+    with the build, so it is not Luminary's to choose. Offering an install
+    button for one is worse than offering nothing -- it fails on click with a
+    message the error should have carried in the first place.
+    """
+    fetchable, manual = [], []
+    for cid in component_ids:
+        comp = get_component(cid)
+        (manual if comp is not None and comp.kind == "tool" else fetchable).append(cid)
+    return fetchable, manual
+
+
+@router.post("/detect-type")
+async def detect_document_type(file: UploadFile = File(...)):
+    """The content type this file would be given, without ingesting it.
+
+    Classification needs the document's text, so it cannot happen in the client
+    and it cannot happen before the bytes arrive. Exposing it separately lets
+    the upload dialog show what was detected while the user can still correct
+    it -- the alternative is telling them after the document is already in the
+    library, which is the wrong moment to find out it was wrong.
+
+    Creates nothing: no row, no file on disk, no ingestion job.
+    """
+    ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
+    if ext and ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '.{ext}'.")
+
+    # Media is decided from its transcript, which does not exist yet, so the
+    # extension is the whole answer and parsing would only cost time.
+    if ext in ("mp3", "m4a", "wav"):
+        return {"content_type": "audio", "detected": True}
+    if ext == "mp4":
+        return {"content_type": "video", "detected": True}
+    if ext == "epub":
+        return {"content_type": "book", "detected": True}
+
+    content = await file.read()
+    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
+    suffix = f".{fmt}"
+    tmp = Path(tempfile.gettempdir()) / f"detect-{uuid.uuid4()}{suffix}"
+    try:
+        tmp.write_bytes(content)
+        # Parsing is CPU-bound and one worker serves every request (I-2), and it
+        # is unbounded in the document's size: a 44MB PDF measured over 300s with
+        # no answer, which leaves the dialog saying "Reading the document..."
+        # indefinitely. Detection is a convenience -- ingestion classifies again
+        # regardless -- so it is bounded here and gives up rather than hanging.
+        parsed = await asyncio.wait_for(
+            asyncio.to_thread(_parser.parse, tmp, fmt), timeout=_DETECT_TIMEOUT_SECONDS
+        )
+        content_type = classify_content(
+            parsed.raw_text,
+            [s.__dict__ for s in parsed.sections],
+            parsed.word_count,
+            fmt,
+            file.filename or "",
+        )
+        return {"content_type": content_type, "detected": True}
+    except TimeoutError:
+        logger.info(
+            "detect-type gave up on %s after %ss", file.filename, _DETECT_TIMEOUT_SECONDS
+        )
+        return {"content_type": None, "detected": False}
+    except Exception as exc:
+        # A detection failure must not block the upload: the pipeline classifies
+        # again during ingestion anyway, so the dialog just shows nothing.
+        logger.warning("detect-type failed for %s: %s", file.filename, exc)
+        return {"content_type": None, "detected": False}
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
@@ -864,23 +983,44 @@ async def ingest_url(
         )
         return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
-    # 2. YouTube: Existing logic
-    if not _yt_module.check_ytdlp_available():
+    # 2. YouTube. Ask the capability what is missing rather than testing tools
+    # one at a time here.
+    #
+    # Two bugs came from doing it by hand. The checks stopped at the first
+    # failure and never covered transcription at all, so a user was told to
+    # install ffmpeg, did, and hit a second wall with a worse message. And the
+    # advice was "brew install ffmpeg" while the app ships an installer for that
+    # exact component -- ffmpeg and the transcriber are withheld from the bundle
+    # for licensing reasons (GPL), not because the app cannot fetch them. The
+    # bundled app also runs with a minimal PATH, so a brew install may not even
+    # be found.
+    yt_capability = (await capabilities()).get("youtube_ingest", {})
+    required: list[str] = []
+    if not yt_capability.get("available"):
+        required = list(yt_capability.get("requires") or [])
+    # For the two tools it can run directly, the direct check decides -- in both
+    # directions. The capability reaches them through component_status and the
+    # two can disagree; what matters here is whether the binary can actually be
+    # invoked, so an optimistic capability cannot wave a missing tool through
+    # and a pessimistic one cannot block a tool that is plainly there.
+    # Everything else (the transcriber) is the capability's to report.
+    for name, present in (
+        ("yt-dlp", _yt_module.check_ytdlp_available()),
+        ("ffmpeg", _yt_module.check_ffmpeg_available()),
+    ):
+        if present and name in required:
+            required.remove(name)
+        elif not present and name not in required:
+            required.append(name)
+    if required:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "yt-dlp is not installed. Install it with: "
-                "uv tool install yt-dlp  or  brew install yt-dlp"
-            ),
-        )
-
-    if not _yt_module.check_ffmpeg_available():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "ffmpeg is not installed. Install it with: "
-                "brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
-            ),
+            detail={
+                "message": _media_missing_message(required),
+                # Only what the app can actually fetch: a button that fails on
+                # click is worse than no button.
+                "components": _installable(required)[0],
+            },
         )
 
     try:

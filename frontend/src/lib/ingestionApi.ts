@@ -29,6 +29,28 @@ export interface KindleIngestResult {
   book_count: number
 }
 
+/** The type the backend detects for this file, without ingesting it.
+ *
+ *  Detection needs the document's text, so it cannot happen in the browser.
+ *  Returns null when detection fails or is not applicable -- never a guess:
+ *  the value is shown to the user as what Luminary decided, and a fabricated
+ *  one would be indistinguishable from a real detection.
+ */
+export async function detectFileType(file: File): Promise<ContentTypeValue | null> {
+  const form = new FormData()
+  form.append("file", file)
+  try {
+    const data = await apiPost<{ content_type: ContentTypeValue | null }>(
+      "/documents/detect-type",
+      form,
+    )
+    return data.content_type ?? null
+  } catch {
+    // Detection is an convenience, not a gate: ingestion classifies anyway.
+    return null
+  }
+}
+
 export async function submitFile(
   file: File,
   contentType: ContentTypeValue | null,
