@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale, and the reason it gave was being discarded rather than shown.
 - **Deleting a note logged a page of traceback** when the graph was busy.
 
+## [0.7.3] - 2026-08-22
+
 ### Fixed
 - **Plain text files no longer get invented section headings.** Paragraphs were
   named "Section 1", "Section 2" — labels nobody wrote, which since 0.7.2 could
