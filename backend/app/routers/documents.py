@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +74,8 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
+from app.services.components import capabilities, get_component
+from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
 from app.services.document_tagger import enrich_document_tags, prune_auto_entity_tags
@@ -496,6 +499,67 @@ async def parse_document(
     return {"document_id": doc_id, "parsed": _parsed_to_dict(parsed)}
 
 
+def _component_labels(component_ids: list[str]) -> str:
+    """Human names for components, so an error names the thing the user installs."""
+    names = []
+    for cid in component_ids:
+        comp = get_component(cid)
+        names.append(comp.label if comp else cid)
+    if len(names) <= 1:
+        return names[0] if names else "an extra component"
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+@router.post("/detect-type")
+async def detect_document_type(file: UploadFile = File(...)):
+    """The content type this file would be given, without ingesting it.
+
+    Classification needs the document's text, so it cannot happen in the client
+    and it cannot happen before the bytes arrive. Exposing it separately lets
+    the upload dialog show what was detected while the user can still correct
+    it -- the alternative is telling them after the document is already in the
+    library, which is the wrong moment to find out it was wrong.
+
+    Creates nothing: no row, no file on disk, no ingestion job.
+    """
+    ext = Path(file.filename or "upload.txt").suffix.lstrip(".").lower()
+    if ext and ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '.{ext}'.")
+
+    # Media is decided from its transcript, which does not exist yet, so the
+    # extension is the whole answer and parsing would only cost time.
+    if ext in ("mp3", "m4a", "wav"):
+        return {"content_type": "audio", "detected": True}
+    if ext == "mp4":
+        return {"content_type": "video", "detected": True}
+    if ext == "epub":
+        return {"content_type": "book", "detected": True}
+
+    content = await file.read()
+    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
+    suffix = f".{fmt}"
+    tmp = Path(tempfile.gettempdir()) / f"detect-{uuid.uuid4()}{suffix}"
+    try:
+        tmp.write_bytes(content)
+        # Parsing is CPU-bound and one worker serves every request (I-2).
+        parsed = await asyncio.to_thread(_parser.parse, tmp, fmt)
+        content_type = classify_content(
+            parsed.raw_text,
+            [s.__dict__ for s in parsed.sections],
+            parsed.word_count,
+            fmt,
+            file.filename or "",
+        )
+        return {"content_type": content_type, "detected": True}
+    except Exception as exc:
+        # A detection failure must not block the upload: the pipeline classifies
+        # again during ingestion anyway, so the dialog just shows nothing.
+        logger.warning("detect-type failed for %s: %s", file.filename, exc)
+        return {"content_type": None, "detected": False}
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
@@ -864,23 +928,43 @@ async def ingest_url(
         )
         return {"document_id": doc_id, "status": "processing", "warnings": parsed.warnings}
 
-    # 2. YouTube: Existing logic
-    if not _yt_module.check_ytdlp_available():
+    # 2. YouTube. Ask the capability what is missing rather than testing tools
+    # one at a time here.
+    #
+    # Two bugs came from doing it by hand. The checks stopped at the first
+    # failure and never covered transcription at all, so a user was told to
+    # install ffmpeg, did, and hit a second wall with a worse message. And the
+    # advice was "brew install ffmpeg" while the app ships an installer for that
+    # exact component -- ffmpeg and the transcriber are withheld from the bundle
+    # for licensing reasons (GPL), not because the app cannot fetch them. The
+    # bundled app also runs with a minimal PATH, so a brew install may not even
+    # be found.
+    yt_capability = (await capabilities()).get("youtube_ingest", {})
+    required: list[str] = []
+    if not yt_capability.get("available"):
+        required = list(yt_capability.get("requires") or [])
+    # The tool checks stay as a backstop rather than being replaced by the
+    # capability. The two can disagree -- they resolve through different code --
+    # and proceeding on an optimistic capability means failing later, deeper,
+    # with a worse message than this one.
+    if not _yt_module.check_ytdlp_available() and "yt-dlp" not in required:
+        required.append("yt-dlp")
+    if not _yt_module.check_ffmpeg_available() and "ffmpeg" not in required:
+        required.append("ffmpeg")
+    if required:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "yt-dlp is not installed. Install it with: "
-                "uv tool install yt-dlp  or  brew install yt-dlp"
-            ),
-        )
-
-    if not _yt_module.check_ffmpeg_available():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "ffmpeg is not installed. Install it with: "
-                "brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
-            ),
+            detail={
+                "message": (
+                    f"YouTube needs {_component_labels(required)}, which "
+                    f"{'are' if len(required) > 1 else 'is'} not bundled for "
+                    f"licensing reasons. Install "
+                    f"{'them' if len(required) > 1 else 'it'} here."
+                ),
+                # Named so the client can offer the in-app install instead of
+                # printing shell instructions the user has to act on elsewhere.
+                "components": required,
+            },
         )
 
     try:

@@ -258,12 +258,22 @@ impl Assembly {
         }
         self.parts[chunk.index] = Some(chunk.payload);
         if self.parts.iter().all(Option::is_some) {
-            let html: String = self
+            // Join the encoded payloads, then decode once. Decoding per chunk
+            // corrupted every multi-byte character that spanned a cut: the
+            // splitter only keeps a single `%XX` triplet intact, but one
+            // character is several consecutive escapes -- `─` is `%E2%94%80` --
+            // so a cut between them left one chunk ending in an incomplete
+            // sequence and the next opening with orphaned continuation bytes.
+            // `percent_decode` finishes with `from_utf8_lossy`, so each side
+            // became U+FFFD and one box-drawing character arrived as two
+            // replacement characters. Percent-encoding is byte-oriented, so
+            // concatenating first reproduces the original byte stream exactly.
+            let encoded: String = self
                 .parts
                 .iter()
-                .map(|p| percent_decode(p.as_deref().unwrap_or("")))
+                .map(|p| p.as_deref().unwrap_or(""))
                 .collect();
-            self.finish(Ok(html));
+            self.finish(Ok(percent_decode(&encoded)));
             return false;
         }
         true
@@ -430,6 +440,40 @@ mod tests {
         assert_eq!(percent_decode("%3Cp%3Ehi%3C%2Fp%3E"), "<p>hi</p>");
         assert_eq!(percent_decode("a%20b%0Ac"), "a b\nc");
         assert_eq!(percent_decode("caf%C3%A9"), "café");
+    }
+
+    #[test]
+    fn a_character_split_across_two_chunks_survives() {
+        // `─` is U+2500, encoded as three escapes: %E2%94%80. The splitter only
+        // keeps a single `%XX` triplet whole, so a cut can land between them.
+        // Decoding each chunk on its own turned this one character into two
+        // U+FFFD, which is how a rendered article arrived with replacement
+        // characters scattered through its box-drawing.
+        let (tx, rx) = sync_channel(1);
+        let mut a = Assembly::new(tx);
+        assert!(a.accept(parse_chunk("LUMX:0:2:6:%E2%94").unwrap()));
+        assert!(!a.accept(parse_chunk("LUMX:1:2:3:%80").unwrap()));
+        let html = rx.recv().unwrap().unwrap();
+        assert_eq!(html, "\u{2500}", "got {:?}", html);
+        assert!(!html.contains('\u{FFFD}'), "replacement character in {html:?}");
+    }
+
+    #[test]
+    fn a_four_byte_character_split_across_chunks_survives() {
+        // An emoji is four escapes; the cut can fall at any of three points.
+        for cut in 3..12 {
+            let enc = "%F0%9F%9A%80"; // U+1F680
+            let (head, tail) = enc.split_at(cut);
+            if head.ends_with('%') || (head.len() >= 2 && &head[head.len() - 2..head.len() - 1] == "%") {
+                continue; // the splitter never cuts inside a triplet
+            }
+            let (tx, rx) = sync_channel(1);
+            let mut a = Assembly::new(tx);
+            a.accept(parse_chunk(&format!("LUMX:0:2:{}:{head}", head.len())).unwrap());
+            a.accept(parse_chunk(&format!("LUMX:1:2:{}:{tail}", tail.len())).unwrap());
+            let html = rx.recv().unwrap().unwrap();
+            assert_eq!(html, "\u{1F680}", "cut at {cut} gave {html:?}");
+        }
     }
 
     #[test]

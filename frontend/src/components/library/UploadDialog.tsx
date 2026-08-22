@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress"
 import {
   type ContentTypeValue,
   submitFile,
+  detectFileType,
   submitKindleFile,
   submitUrl,
 } from "@/lib/ingestionApi"
@@ -24,8 +25,10 @@ import {
   acceptedExtensions,
   describeRejection,
   detectContentType,
+
   isKindleClippings,
 } from "@/lib/uploadFileTypes"
+import { ComponentsRequiredError } from "@/lib/apiClient"
 import { InstallComponentButton } from "@/components/setup/InstallComponentButton"
 import { useAppStore } from "@/store"
 
@@ -88,10 +91,12 @@ function ContentTypePicker({
   value,
   onChange,
   options,
+  detecting = false,
 }: {
   value: ContentTypeValue | null
   onChange: (v: ContentTypeValue) => void
   options: ContentTypeOption[]
+  detecting?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const selected = options.find((o) => o.value === value) ?? null
@@ -116,10 +121,14 @@ function ContentTypePicker({
           className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-primary/50"
         >
           <p className="text-sm font-medium text-foreground">
-            {selected?.label ?? "Detect automatically"}
+            {detecting ? "Reading the document..." : (selected?.label ?? "Detect automatically")}
           </p>
           <p className="text-xs text-muted-foreground">
-            {selected?.description ?? "Luminary reads the document and decides. Change it if it gets it wrong."}
+            {detecting
+              ? "Working out what this is, so you can correct it before adding."
+              : selected
+                ? `Detected. ${selected.description}`
+                : "Luminary reads the document and decides. Change it if it gets it wrong."}
           </p>
         </button>
       ) : (
@@ -184,6 +193,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   // True once the user has explicitly picked a type; auto-detection from the
   // filename must never override an explicit choice.
   const typeTouchedRef = useRef(false)
+  // Detection runs against the file the user just chose, so a slow one must not
+  // overwrite the answer for a file they have since replaced.
+  const detectSeqRef = useRef(0)
+  const [detecting, setDetecting] = useState(false)
   const [pasteLabel, setPasteLabel] = useState("")
   const [pasteText, setPasteText] = useState("")
   const [pasteType, setPasteType] = useState<ContentTypeValue>("notes")
@@ -193,6 +206,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
   const [mode, setMode] = useState<Mode>("idle")
   const [errorMessage, setErrorMessage] = useState("")
+  // Components the failure can be fixed by installing, so the error offers the
+  // install instead of telling the user to go and run a package manager.
+  const [errorComponents, setErrorComponents] = useState<string[]>([])
   const [docTitle, setDocTitle] = useState("")
   const [fileSizeMB, setFileSizeMB] = useState(0)
   const [trackedDocId, setTrackedDocId] = useState<string | null>(null)
@@ -258,7 +274,10 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setTab("upload")
     setSelectedFile(pendingUpload)
     setRejection(null)
-    if (!typeTouchedRef.current) setUploadType(detectContentType(pendingUpload.name))
+    if (!typeTouchedRef.current) {
+      setUploadType(detectContentType(pendingUpload.name))
+      void runDetection(pendingUpload)
+    }
     clearPendingUpload()
   }, [open, pendingUpload, clearPendingUpload])
 
@@ -272,6 +291,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setRejection(null)
     setUploadType(null)
     typeTouchedRef.current = false
+    detectSeqRef.current += 1
+    setDetecting(false)
     setPasteLabel("")
     setPasteText("")
     setPasteType("notes")
@@ -280,6 +301,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setTab(canUrl ? "url" : "upload")
     setMode("idle")
     setErrorMessage("")
+    setErrorComponents([])
     setDocTitle("")
     setFileSizeMB(0)
     setTrackedDocId(null)
@@ -306,7 +328,27 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     }
     setRejection(null)
     setSelectedFile(file)
-    if (!typeTouchedRef.current) setUploadType(detectContentType(file.name))
+    if (!typeTouchedRef.current) {
+      setUploadType(detectContentType(file.name))
+      void runDetection(file)
+    }
+  }
+
+  /** Ask the backend what this file is, so the user can correct it before adding. */
+  async function runDetection(file: File) {
+    const fromName = detectContentType(file.name)
+    // The extension already settles media and EPUB; reading those costs time
+    // and cannot change the answer.
+    if (fromName) return
+    const seq = ++detectSeqRef.current
+    setDetecting(true)
+    try {
+      const detected = await detectFileType(file)
+      if (seq !== detectSeqRef.current) return
+      if (detected && !typeTouchedRef.current) setUploadType(detected)
+    } finally {
+      if (seq === detectSeqRef.current) setDetecting(false)
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -444,6 +486,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
       setMode("error")
       setErrorMessage(errMsg)
+      setErrorComponents(err instanceof ComponentsRequiredError ? err.components : [])
       toast.error(errMsg)
     }
   }
@@ -525,9 +568,16 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
 
         {mode === "error" && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/40">
-              <p className="text-sm font-medium text-red-700">Upload failed</p>
-              <p className="mt-0.5 text-xs text-red-600">{errorMessage}</p>
+            <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950/40">
+              <div>
+                <p className="text-sm font-medium text-red-700">
+                  {errorComponents.length > 0 ? "One more step" : "Upload failed"}
+                </p>
+                <p className="mt-0.5 text-xs text-red-600">{errorMessage}</p>
+              </div>
+              {errorComponents.map((id) => (
+                <InstallComponentButton key={id} componentId={id} />
+              ))}
             </div>
             <div className="flex gap-2">
               <button
@@ -613,6 +663,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                 ) : (
                   <ContentTypePicker
                     value={uploadType}
+                    detecting={detecting}
                     options={contentTypeOptions}
                     onChange={(v) => {
                       typeTouchedRef.current = true

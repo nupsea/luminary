@@ -73,23 +73,31 @@ async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
                 json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
             )
     assert resp.status_code == 503
-    assert "yt-dlp" in resp.json()["detail"].lower()
+    # `detail` is a dict now, not a sentence: the client needs component ids so
+    # it can offer the in-app install rather than printing shell instructions.
+    detail = resp.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["components"], "the error must name what is missing"
 
 
 async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):
     """POST /documents/ingest-url returns 503 when ffmpeg is not installed."""
 
-    def _mock_which(cmd):
-        return "/usr/bin/yt-dlp" if cmd == "yt-dlp" else None
+    async def _ffmpeg_missing():
+        return {"youtube_ingest": {"available": False, "requires": ["ffmpeg"]}}
 
-    with patch("app.services.youtube_downloader.resolve_tool", side_effect=_mock_which):
+    with patch("app.routers.documents.capabilities", _ffmpeg_missing):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 "/documents/ingest-url",
                 json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
             )
     assert resp.status_code == 503
-    assert "ffmpeg" in resp.json()["detail"].lower()
+    detail = resp.json()["detail"]
+    assert detail["components"] == ["ffmpeg"]
+    # Never a package manager: the app installs this component itself, and the
+    # bundle's minimal PATH may not even find a brew install.
+    assert "brew" not in detail["message"].lower()
 
 
 async def test_ingest_url_returns_400_for_non_youtube_url(test_db):
