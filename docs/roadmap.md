@@ -37,6 +37,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Flashcard factuality gate + recorded passage (`source_chunk_ids`) | `invariants.md` I-35 |
 | Learner-facing metrics carrying sample size, definition and basis | `metrics.md` |
 | An existing install carried to the model its host should run: Windows records what it pulled, a Settings card surfaces drift and switches only after the download completes | `model_router.narrowed_defaults()`, `ModelDriftNotice.tsx` |
+| Content-type classification, scored against a labelled corpus rather than asserted | `services/content_classifier.py`, `tests/fixtures/content_type_labels.json` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
