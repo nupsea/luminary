@@ -50,16 +50,24 @@ export function cloudOverrideAllowed(mode: string | undefined): boolean {
 
 /**
  * Whether a currently-selected per-request override must be cleared: it names
- * a cloud model (has a provider prefix) but the mode has since become
- * Private. Without this, a choice made back in Cloud/Hybrid mode keeps
- * pinning a cloud model after switching -- invisible in the dropdown (which
- * no longer offers it) but still sent on the next request.
+ * a cloud model but the mode has since become Private. Without this, a choice
+ * made back in Cloud/Hybrid mode keeps pinning a cloud model after switching --
+ * invisible in the dropdown (which no longer offers it) but still sent on the
+ * next request.
+ *
+ * "Cloud" is the provider, not the presence of a slash. Every id the backend
+ * reports is prefixed -- `available_local_models` is `["ollama/qwen3.5:4b", …]`
+ * -- so testing for a slash cleared local overrides too, and picking any local
+ * model in Private mode (the default mode) silently reverted to Auto in both
+ * Study and Chat.
  */
 export function shouldClearPrivateModeOverride(
   mode: string | undefined,
   currentOverride: string,
 ): boolean {
-  return mode === "private" && currentOverride.includes("/")
+  if (mode !== "private") return false
+  const [provider, ...rest] = currentOverride.split("/")
+  return rest.length > 0 && provider !== "ollama"
 }
 
 /**

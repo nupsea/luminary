@@ -186,7 +186,12 @@ describe("shouldClearPrivateModeOverride", () => {
   })
 
   it("leaves a local override alone in private mode", () => {
-    expect(shouldClearPrivateModeOverride("private", "llama3.2:latest")).toBe(false)
+    // The shape the backend actually sends. This case used to pass a bare
+    // "llama3.2:latest", which `available_local_models` never contains, so the
+    // test stayed green while every local model picked in Private mode was
+    // discarded on the way to the request.
+    expect(shouldClearPrivateModeOverride("private", "ollama/llama3.2:latest")).toBe(false)
+    expect(shouldClearPrivateModeOverride("private", "ollama/qwen3.5:4b")).toBe(false)
   })
 
   it("leaves Auto (empty override) alone in private mode", () => {
