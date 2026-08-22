@@ -443,6 +443,7 @@ async def _screen_factuality(cards: list[dict], source_text: str | None) -> list
 async def _collect_with_backfill(
     count: int,
     generate_batch: Callable[[int, list[str]], Awaitable[list[dict]]],
+    exclude: list[str] | None = None,
 ) -> list[dict]:
     """Run `generate_batch(want, avoid)` until `count` gate-passing cards are
     collected or a pass stops making progress. Each retry is told which
@@ -452,7 +453,10 @@ async def _collect_with_backfill(
     seen: set[str] = set()
     attempts = 0
     while len(candidates) < count and attempts <= _MAX_GENERATION_RETRIES:
-        batch = await generate_batch(count - len(candidates), [c["question"] for c in candidates])
+        batch = await generate_batch(
+            count - len(candidates),
+            [*(exclude or []), *(c["question"] for c in candidates)],
+        )
         attempts += 1
         added = 0
         for c in batch:
@@ -529,8 +533,15 @@ async def generate(
     difficulty: Literal["easy", "medium", "hard"] = "medium",
     context: str | None = None,
     model: str | None = None,
+    avoid: list[str] | None = None,
 ) -> list[FlashcardModel]:
     """Generate flashcards from document chunks using LLM.
+
+    *avoid* names questions a previous deck already asked. It steers the prompt
+    only -- it is deliberately not a filter. Filtering on it would return an
+    empty deck for a short document whose every reasonable question was already
+    asked, and delivering nothing is a worse answer than delivering something
+    familiar.
 
     When *context* (selected text) is provided, uses it directly instead of
     fetching chunks -- this produces questions grounded in the exact selection.
@@ -678,7 +689,7 @@ async def generate(
         if section_heading:
             span.set_attribute("flashcard.section_heading", section_heading)
 
-        candidates = await _collect_with_backfill(count, _batch)
+        candidates = await _collect_with_backfill(count, _batch, exclude=avoid)
         span.set_attribute("flashcard.generated_count", len(candidates))
 
     now = datetime.now(UTC)

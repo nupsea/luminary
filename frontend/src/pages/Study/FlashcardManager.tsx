@@ -201,6 +201,15 @@ export function FlashcardManager({
   // the same size. A clean slate -- the old cards and their review history go.
   const replaceMutation = useMutation({
     mutationFn: async () => {
+      // Read the questions before wiping them. The passages a run samples are
+      // chosen deterministically, so a replacement generated against an empty
+      // avoid list saw the same text and returned the same questions it had
+      // just deleted -- "replace" that replaced nothing the user could see.
+      //
+      // This is the visible page rather than the whole deck. The backend caps
+      // the list at 40 and treats it as a steer, so a partial list is worth
+      // sending; a second fetch to complete it would buy little.
+      const previous = cards.map((c) => c.question).filter(Boolean)
       await deleteAllFlashcardsForDocument(documentId)
       // Fresh cards -> fresh review: drop the stale in-progress session.
       await endOpenSessionsForScope(documentId, null)
@@ -211,6 +220,7 @@ export function FlashcardManager({
         section_heading: null,
         count,
         difficulty: "medium",
+        avoid: previous.slice(0, 40),
       })
     },
     onSuccess: (created) => {

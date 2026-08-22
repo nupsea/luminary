@@ -276,6 +276,7 @@ async def generate_flashcards(
             session=session,
             context=req.context,
             model=req.model,
+            avoid=req.avoid,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(

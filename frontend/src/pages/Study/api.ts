@@ -92,6 +92,9 @@ export async function generateFlashcards(req: {
   section_heading: string | null
   count: number
   difficulty: "easy" | "medium" | "hard"
+  /** Questions the previous deck asked, so a replacement is actually different.
+   *  Steers the prompt; the backend does not filter on it. */
+  avoid?: string[]
 }): Promise<Flashcard[]> {
   try {
     return await apiPost<Flashcard[]>("/flashcards/generate", req)

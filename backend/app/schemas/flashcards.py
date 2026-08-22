@@ -37,6 +37,11 @@ class FlashcardGenerateRequest(BaseModel):
     # None follows the model chosen in Settings, exactly as /qa does when its
     # selector reads "Auto". A concrete id overrides it for this request only.
     model: str | None = None
+    # Questions a fresh run should steer away from. "Regenerate (replace)" wipes
+    # the deck first, so without this the next run starts from an empty avoid
+    # list against identical sampled passages -- and returns the same questions
+    # it just deleted, which is what "replace" was asked not to do.
+    avoid: list[str] = Field(default_factory=list, max_length=40)
 
     @field_validator("model")
     @classmethod
@@ -86,6 +91,11 @@ class GenerateTechnicalRequest(BaseModel):
     section_heading: str | None = None
     count: int = 10
     model: str | None = None
+    # Questions a fresh run should steer away from. "Regenerate (replace)" wipes
+    # the deck first, so without this the next run starts from an empty avoid
+    # list against identical sampled passages -- and returns the same questions
+    # it just deleted, which is what "replace" was asked not to do.
+    avoid: list[str] = Field(default_factory=list, max_length=40)
 
     @field_validator("model")
     @classmethod

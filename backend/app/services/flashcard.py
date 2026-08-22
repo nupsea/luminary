@@ -605,11 +605,13 @@ class FlashcardService(FlashcardSearchService):
         difficulty: Literal["easy", "medium", "hard"] = "medium",
         context: str | None = None,
         model: str | None = None,
+        avoid: list[str] | None = None,
     ) -> list[FlashcardModel]:
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
         return await _gen(
-            document_id, scope, section_heading, count, session, difficulty, context, model
+            document_id, scope, section_heading, count, session, difficulty, context, model,
+            avoid=avoid
         )
 
     async def generate_from_notes(
