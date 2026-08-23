@@ -42,7 +42,9 @@ async def test_retriever_strategy_vector_skips_keyword_and_graph(monkeypatch):
     monkeypatch.setattr(retriever, "vector_search", fake_vector)
     monkeypatch.setattr(retriever, "keyword_search", fail_keyword)
 
-    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="vector")
+    rows = await retriever.retrieve(
+        "query", ["doc-1"], 5, strategy="vector", expand_context=False
+    )
 
     assert calls == ["vector:query"]
     assert rows[0].chunk_id == "vector-1"
@@ -61,7 +63,9 @@ async def test_retriever_strategy_fts_skips_vector(monkeypatch):
     monkeypatch.setattr(retriever, "vector_search", fail_vector)
     monkeypatch.setattr(retriever, "keyword_search", fake_keyword)
 
-    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="fts")
+    rows = await retriever.retrieve(
+        "query", ["doc-1"], 5, strategy="fts", expand_context=False
+    )
 
     assert rows[0].chunk_id == "keyword-1"
 
@@ -84,7 +88,9 @@ async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
     monkeypatch.setattr(retriever_module, "_graph_expand", fake_graph_expand)
     monkeypatch.setattr(retriever, "vector_search", fake_vector)
 
-    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="graph")
+    rows = await retriever.retrieve(
+        "query", ["doc-1"], 5, strategy="graph", expand_context=False
+    )
 
     assert calls == ["graph:query", "vector:expanded query"]
     assert rows[0].chunk_id == "graph-1"

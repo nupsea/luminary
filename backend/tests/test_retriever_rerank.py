@@ -369,3 +369,58 @@ async def test_retrieve_with_rerank_falls_back_when_reranker_fails():
 
     # Fallback to RRF top-5 -- no exception propagated.
     assert len(results) == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["vector", "fts", "graph"])
+async def test_a_single_leg_strategy_honours_rerank(strategy):
+    """`strategy=fts&rerank=true` used to return unreranked keyword results.
+
+    The three single-leg branches returned before the rerank block, so /search
+    accepted both parameters and silently applied one. It also skipped context
+    expansion and location filling, which made the eval ablation's leg arms
+    incomparable with its rrf arms -- the comparison the ablation exists for.
+    """
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.01) for i in range(50)]
+    mock_reranker = MagicMock()
+    # Reverse the leg's own order, so a result that honours the reranker cannot
+    # be confused with one that merely truncated the leg.
+    mock_reranker.score.return_value = [float(i) for i in range(len(pool))]
+
+    retriever = HybridRetriever()
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._graph_expand", new=AsyncMock(side_effect=lambda q: q)),
+        patch("app.services.retriever._get_reranker", return_value=mock_reranker),
+        patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
+    ):
+        results = await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.0,
+            graph_expand=False, strategy=strategy,
+        )
+
+    mock_reranker.score.assert_called_once()
+    scored = mock_reranker.score.call_args[0][1]
+    assert len(scored) == 50, f"{strategy} handed the reranker {len(scored)} candidates, not a pool"
+    assert [c.chunk_id for c in results] == ["c49", "c48", "c47", "c46", "c45"]
+
+
+@pytest.mark.asyncio
+async def test_a_single_leg_strategy_expands_context_like_the_fused_one():
+    """Leg arms skipped expansion while rrf arms got it, so any leg-vs-fusion
+    number was partly measuring the extra stage rather than the ranking."""
+    pool = [_make_chunk(f"c{i}", f"text {i}", score=1.0 - i * 0.01) for i in range(10)]
+    expand = AsyncMock(side_effect=lambda r, k: r)
+
+    retriever = HybridRetriever()
+    with (
+        patch.object(retriever, "vector_search", return_value=pool),
+        patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)),
+        patch("app.services.retriever._expand_context", new=expand),
+    ):
+        await retriever.retrieve(
+            "q", document_ids=["doc-1"], k=5, graph_expand=False, strategy="fts"
+        )
+
+    expand.assert_awaited_once()

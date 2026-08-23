@@ -148,7 +148,7 @@ docker-build:
 	docker build -t luminary:latest .
 
 docker-run:
-	docker compose --profile ai up
+	docker compose --profile ai up --build
 
 stop:
 	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \

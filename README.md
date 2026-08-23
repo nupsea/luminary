@@ -160,7 +160,7 @@ build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64)
 Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running):
 
 ```powershell
-docker compose --profile ai up
+docker compose --profile ai up --build
 ```
 
 Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
@@ -182,8 +182,10 @@ Intel Macs have no native `lancedb` wheel, so `make install` cannot run there.
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary
-docker compose --profile ai up   # or: make docker-run
+make docker-run
 ```
+
+*(or directly via compose: `docker compose --profile ai up --build`)*
 
 Then open http://localhost:7820. Apple Silicon Macs use the native path above.
 </details>
