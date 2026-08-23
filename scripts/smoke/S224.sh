@@ -38,7 +38,31 @@ uv run python -m app.scripts.reindex_entities --document-id S224-smoke-bogus-doc
 
 # 4. End-to-end --all run. With an empty document table this is a no-op
 #    that still exits 0; with documents present it exercises the full path.
-uv run python -m app.scripts.reindex_entities --all \
-  || { echo "FAIL: reindex_entities --all should exit 0"; exit 1; }
+#
+# NOT `--all`. That reindexes every chunk in the catalog through GLiNER: measured
+# at ~70 minutes on a 60-document, 75,617-chunk library, which is most of the
+# whole smoke suite's runtime and makes `make smoke` impractical to run at all.
+# One real document exercises the same code path -- read chunks, extract
+# entities, canonicalize, write `chunks.entities_text`, upsert to LanceDB -- and
+# costs seconds. The whole-corpus sweep is a maintenance job, not a contract
+# check; run it by hand when the extraction changes:
+#
+#     cd backend && uv run python -m app.scripts.reindex_entities --all
+#
+DOC_ID=$(curl -s "${BASE}/documents" | python3 -c "
+import json, sys
+docs = json.load(sys.stdin)
+items = docs.get('items', docs) if isinstance(docs, dict) else docs
+ready = [d for d in items if isinstance(d, dict) and d.get('stage') == 'complete']
+print(ready[0]['id'] if ready else '')
+" 2>/dev/null || echo "")
 
-echo "PASS: S224 -- reindex_entities CLI verified (health + help + missing-id + --all)"
+if [ -z "$DOC_ID" ]; then
+  echo "SKIP: no complete document to reindex"
+else
+  uv run python -m app.scripts.reindex_entities --document-id "$DOC_ID" \
+    || { echo "FAIL: reindex_entities --document-id should exit 0"; exit 1; }
+  echo "  reindexed one document ($DOC_ID) end to end"
+fi
+
+echo "PASS: S224 -- reindex_entities CLI verified (health + help + missing-id + one document)"
