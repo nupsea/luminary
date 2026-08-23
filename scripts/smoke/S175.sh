@@ -3,7 +3,7 @@
 # Tests that notes can be linked to multiple source documents via NoteSourceModel pivot.
 
 set -euo pipefail
-BASE="${API_BASE:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S175 Smoke Test ==="
 

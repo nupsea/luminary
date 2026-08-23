@@ -20,7 +20,8 @@ check_qa() {
         -H "Content-Type: application/json" \
         -d "$payload" 2>&1) || { echo "FAIL [$desc]: curl error"; return 1; }
 
-    if echo "$resp" | grep -q '"done":true'; then
+    # See S142: the field, not one rendering of it.
+    if echo "$resp" | grep -qE '"done"[[:space:]]*:[[:space:]]*true'; then
         echo "PASS [$desc]"
     else
         echo "FAIL [$desc]: no done event in response"

@@ -48,11 +48,9 @@ else
 fi
 rm -f "$TMPFILE"
 
-# GET /chat/confusion-signals -- confusion signal endpoint
-TMPFILE=$(mktemp)
-STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/chat/confusion-signals")
-check "GET /chat/confusion-signals" "200" "$STATUS"
-rm -f "$TMPFILE"
+# GET /chat/confusion-signals is gone: the endpoint was dropped when the chat
+# router split into chat_meta and chat_sessions, and services/confusion_detector.py
+# is now imported by nothing. Nothing replaced it, so there is nothing to check.
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

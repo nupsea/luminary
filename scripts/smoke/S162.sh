@@ -71,8 +71,8 @@ science_node = next((n for n in tree if n['id'] == 'science'), None)
 assert science_node is not None, 'science not found in tree'
 child_ids = [c['id'] for c in science_node.get('children', [])]
 assert 'science/biology' in child_ids, 'science/biology not child of science: ' + str(child_ids)
-assert science_node['note_count'] >= 1, 'inclusive note_count should be >= 1'
-print('GET /tags/tree nesting OK, inclusive count=%d' % science_node['note_count'])
+assert science_node['usage_count'] >= 1, 'inclusive usage_count should be >= 1'
+print('GET /tags/tree nesting OK, inclusive count=%d' % science_node['usage_count'])
 "
 
 # ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ echo "$TAG_CREATE" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert d.get('id') == 'smoke-test-tag', 'id mismatch'
-assert d.get('note_count') == 0, 'new tag should have 0 notes'
+assert d.get('usage_count') == 0, 'new tag should have 0 uses'
 print('POST /tags OK')
 "
 

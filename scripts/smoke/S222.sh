@@ -10,7 +10,9 @@ HELP="$(cd "$ROOT/evals" && uv run --no-sync python run_eval.py --help)"
 grep -q -- "--ablation" <<<"$HELP"
 grep -q 'strategy: RetrievalStrategy = "rrf"' "$ROOT/backend/app/services/retriever.py"
 grep -q 'strategy: str = Query' "$ROOT/backend/app/routers/search.py"
-grep -q 'ablation_metrics' "$ROOT/backend/app/routers/monitoring.py"
+# `ablation_metrics` moved to the evals router when the Evals surface split out
+# of monitoring; it is the run's response field there.
+grep -q 'ablation_metrics' "$ROOT/backend/app/routers/evals.py"
 
 uv run --project "$ROOT/backend" --no-sync pytest \
   "$ROOT/backend/tests/test_ablation_eval.py" \

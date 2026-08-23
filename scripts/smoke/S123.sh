@@ -8,7 +8,13 @@ BASE_URL="${BASE_URL:-http://localhost:7820}"
 echo "S123 smoke: Kindle My Clippings.txt ingest"
 
 # Create a minimal Kindle clippings file
-TMPFILE=$(mktemp /tmp/My_Clippings_XXXXXX.txt)
+# `mktemp /tmp/..._XXXXXX.txt` is the GNU form: BSD mktemp wants the Xs last and
+# fails "mkstemp failed ... File exists" once a run has left one behind, so this
+# script worked once per machine. A temp directory keeps the filename meaningful
+# and unique per run; the upload names the file itself on line below.
+TMPDIR_S123=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_S123"' EXIT
+TMPFILE="$TMPDIR_S123/My_Clippings.txt"
 cat >"$TMPFILE" <<'CLIPPINGS'
 ==========
 A Brief History of Time (Stephen Hawking)
@@ -25,10 +31,9 @@ CLIPPINGS
 
 # POST to ingest-kindle
 HTTP_STATUS=$(curl -s -o /tmp/s123_response.json -w "%{http_code}" \
-  -X POST "${BASE_URL}/api/documents/ingest-kindle" \
+  -X POST "${BASE_URL}/documents/ingest-kindle" \
   -F "file=@${TMPFILE};filename=My Clippings.txt;type=text/plain")
 
-rm -f "$TMPFILE"
 
 if [ "$HTTP_STATUS" != "200" ]; then
   echo "FAIL: ingest-kindle returned HTTP $HTTP_STATUS"

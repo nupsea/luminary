@@ -10,9 +10,13 @@ FAIL=0
 echo "=== S191 Smoke: Frontend-only story ==="
 
 # Gate 1: TypeScript compilation
-echo "[1/2] npx tsc --noEmit"
+# tsconfig.json is solution-style ("files": []), so a bare `tsc --noEmit`
+# resolves zero files and exits 0 with real type errors present -- measured.
+# `-b` walks the project references; the project binary, not npx, is the
+# compiler this repo pins.
+echo "[1/2] ./node_modules/.bin/tsc -b --noEmit --force"
 cd "$REPO/frontend"
-if npx tsc --noEmit 2>&1; then
+if ./node_modules/.bin/tsc -b --noEmit --force 2>&1; then
   echo "  PASS: tsc"
 else
   echo "  FAIL: tsc"

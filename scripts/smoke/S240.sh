@@ -40,9 +40,20 @@ body = json.load(sys.stdin)
 for field in ('seconds_credited', 'heartbeat_seconds'):
     assert field in body, f'heartbeat response has no {field}'
 assert body['heartbeat_seconds'] > 0, 'the client is told to beat every 0 seconds'
-assert body['seconds_credited'] == 0, (
-    'the first beat of a stretch credited %r; nothing precedes it to measure from'
-    % body['seconds_credited']
+# Time is credited BETWEEN beats, and a gap over MAX_CREDITED_GAP_SECONDS (45)
+# credits nothing -- the surface was hidden or the user left, and crediting it
+# would invent attention the product then reports as measured. That cap is the
+# property the metric depends on, and it is what this asserts.
+#
+# It used to require exactly 0, true only when nothing precedes this beat. Two
+# runs of the suite inside 45 seconds made the second one credit the gap between
+# them, so the script failed on when it was last run rather than on anything
+# about the endpoint. Measured: two beats 6s apart credit 0 then 6.
+credited = body['seconds_credited']
+assert isinstance(credited, int) and credited >= 0, f'seconds_credited is {credited!r}'
+assert credited <= 45, (
+    'a beat credited %ds, above the 45s cap -- a gap that long is not attention'
+    % credited
 )
 print('  heartbeat: credited %ds, cadence %ds'
       % (body['seconds_credited'], body['heartbeat_seconds']))

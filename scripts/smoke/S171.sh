@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S171 Smoke Test: Note-to-note bidirectional links ==="
 

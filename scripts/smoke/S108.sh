@@ -8,7 +8,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "S108 [1/2]: TypeScript type check (SpeechRecognition types)..."
 cd "${REPO_ROOT}/frontend"
-npx tsc --noEmit
+# tsconfig.json is solution-style ("files": []), so a bare `tsc --noEmit`
+# resolves zero files and exits 0 with real type errors present -- measured.
+# `-b` walks the project references; the project binary, not npx, is the
+# compiler this repo pins.
+./node_modules/.bin/tsc -b --noEmit --force
 echo "PASS: tsc --noEmit"
 
 echo "S108 [2/2]: Vite build (no chunk warnings)..."

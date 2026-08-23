@@ -99,10 +99,18 @@ class SmartTagNormalizerService:
                     logger.debug("Skipping already-aliased pair (%s, %s)", tag_a.id, tag_b.id)
                     continue
 
-                # Skip if a suggestion already exists for this pair (any status)
+                # Skip if a suggestion already exists for this pair (any status).
+                # `.first()`, not `.scalar_one_or_none()`: this asks whether a row
+                # exists, and the query deliberately matches the pair in both
+                # orientations, so two rows are reachable -- (a-mouse, mouse) and
+                # (mouse, a-mouse) were both present in a real library. Asserting
+                # at most one raised MultipleResultsFound out of the whole scan,
+                # which the caller logged as "Background tag normalization scan
+                # failed" and swallowed, so the scan produced nothing from then on.
                 existing = (
                     await session.execute(
-                        select(TagMergeSuggestionModel).where(
+                        select(TagMergeSuggestionModel.id)
+                        .where(
                             (
                                 (TagMergeSuggestionModel.tag_a_id == tag_a.id)
                                 & (TagMergeSuggestionModel.tag_b_id == tag_b.id)
@@ -112,8 +120,9 @@ class SmartTagNormalizerService:
                                 & (TagMergeSuggestionModel.tag_b_id == tag_a.id)
                             )
                         )
+                        .limit(1)
                     )
-                ).scalar_one_or_none()
+                ).first()
                 if existing is not None:
                     continue
 

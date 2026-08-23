@@ -163,6 +163,12 @@ class ModelResidencyResponse(BaseModel):
     # which is a different question from whether the machine can hold them.
     resident_budget_gb: float | None = None
     resident_set_fits: bool = True
+    # Text-producing roles answering with a local model that is not in the
+    # measured text order, keyed by role, each carrying `model` and `multimodal`.
+    # This report only ever checked size, so a shipped install ran a figure
+    # reader as its chat model with every field clean and worse answers as the
+    # only symptom.
+    unranked_text_roles: dict[str, dict[str, object]] = {}
 
 
 class InstallableModel(BaseModel):

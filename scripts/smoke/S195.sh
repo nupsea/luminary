@@ -2,6 +2,13 @@
 # Smoke test for S195 -- Chat: Bloom-progressive recommendations
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="http://localhost:7820"
 FAIL=0
 
@@ -9,7 +16,7 @@ echo "=== S195 Smoke: Bloom-progressive chat suggestions ==="
 
 # 1. GET /chat/suggestions with no document_id
 echo "[1/4] GET /chat/suggestions (all-scope)..."
-TMPFILE=$(mktemp /tmp/s195_1_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s195_1.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/chat/suggestions")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -34,7 +41,7 @@ fi
 
 # 2. GET /chat/suggestions?document_id=nonexistent (fallback path)
 echo "[2/4] GET /chat/suggestions?document_id=nonexistent..."
-TMPFILE=$(mktemp /tmp/s195_2_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s195_2.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/chat/suggestions?document_id=nonexistent-doc-s195")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -48,7 +55,7 @@ fi
 # 3. Extract first suggestion id and POST /asked
 echo "[3/4] POST /chat/suggestions/{id}/asked..."
 # Use all-scope suggestions to get an id
-TMPFILE=$(mktemp /tmp/s195_3_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s195_3.json"
 curl -s -o "$TMPFILE" "$BASE/chat/suggestions"
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"

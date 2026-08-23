@@ -18,6 +18,7 @@ from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
 from app.models import NoteModel, NoteTagIndexModel  # noqa: F401
+from app.services.vector_store import EMBEDDING_DIM
 
 # Fixtures
 
@@ -76,18 +77,24 @@ def _make_note(note_id: str | None = None, content: str = "test", **kwargs) -> N
 
 
 def test_dim_mismatch_triggers_drop_and_recreate(tmp_path):
-    """_get_or_create_note_table with a 384-dim existing table drops and recreates."""
+    """A table whose vector dimension is not the shared one is dropped and recreated.
+
+    This case used to assert the opposite -- that a 384-dim table gets dropped --
+    because `NOTE_VECTOR_DIM` was a hand-written 1024. The test passed while
+    every note embedding was rejected (I-9). 1024 is the shape that actually
+    shipped, so it is the shape this now feeds in.
+    """
     from app.services.vector_store import NOTE_TABLE_NAME, NOTE_VECTOR_DIM, LanceDBService
 
     svc = LanceDBService()
 
-    # Build a fake table with a 384-dim schema
+    # The shape found in a real library: a note table left at 1024.
     bad_schema = pa.schema(
         [
             pa.field("note_id", pa.string()),
             pa.field("document_id", pa.string()),
             pa.field("content", pa.string()),
-            pa.field("vector", pa.list_(pa.float32(), 384)),
+            pa.field("vector", pa.list_(pa.float32(), 1024)),
         ]
     )
     mock_table = MagicMock()
@@ -112,12 +119,12 @@ def test_dim_mismatch_triggers_drop_and_recreate(tmp_path):
     # Warning should have been logged mentioning the dim mismatch
     assert mock_warn.called
     warn_args = mock_warn.call_args[0]
-    assert 384 in warn_args
+    assert 1024 in warn_args
     assert NOTE_VECTOR_DIM in warn_args
 
 
 def test_correct_dim_does_not_trigger_drop(tmp_path):
-    """_get_or_create_note_table with correct 1024-dim schema does not drop the table."""
+    """A table already at the shared dimension is left alone."""
     from app.services.vector_store import NOTE_TABLE_NAME, NOTE_VECTOR_DIM, LanceDBService
 
     svc = LanceDBService()
@@ -177,7 +184,7 @@ async def test_reindex_notes_reindexes_absent_notes(test_db):
     mock_vs.upsert_note_vector = MagicMock()
 
     mock_embedder = MagicMock()
-    mock_embedder.encode.return_value = [[0.0] * 1024]
+    mock_embedder.encode.return_value = [[0.0] * EMBEDDING_DIM]
 
     with (
         patch("app.services.reindex_service.get_reindex_service"),

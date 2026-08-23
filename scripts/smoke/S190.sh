@@ -3,10 +3,17 @@
 # Frontend-only story, but verifies GET /tags/tree still returns 200 + array
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="http://localhost:7820"
 
 echo "--- S190 smoke: GET /tags/tree ---"
-TMPFILE=$(mktemp /tmp/s190_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s190.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/tags/tree")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"

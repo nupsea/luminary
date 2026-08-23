@@ -28,7 +28,10 @@ fi
 
 # 4. Verify test collection (dry-run, no execution)
 cd "$BACKEND_DIR"
-COLLECTED=$(uv run pytest tests/test_e2e_book.py --collect-only -q -m slow 2>&1 | grep "test session starts" -A 50 | grep -c "test_" || true)
+# `-q` suppresses the "test session starts" header this used to grep for, so the
+# count came back 0 and reported an empty suite that had nine tests in it. Read
+# the collected node ids instead -- one per line, each containing "::".
+COLLECTED=$(uv run pytest tests/test_e2e_book.py --collect-only -q -m slow 2>&1 | grep -c "::" || true)
 if [ "$COLLECTED" -lt 5 ]; then
   echo "FAIL: expected >= 5 test items collected, got $COLLECTED"
   exit 1

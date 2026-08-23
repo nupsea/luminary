@@ -150,6 +150,34 @@ def test_split_response_extracts_answer_and_citations():
     assert confidence == "high"
 
 
+def test_split_response_refuses_the_format_spec_as_a_confidence():
+    """The prompt shows the model `"confidence":"high|medium|low"`, and a small
+    model returns that string verbatim. It passed a bare "non-empty string" test
+    and reached the UI as a confidence level -- the product's own placeholder
+    being read back as its measurement. Anything that is not one of the three
+    levels means the model did not state one."""
+    # Over the 80-character mark the fallback uses, so "medium" is the expected
+    # landing spot rather than the blanket "low".
+    long_answer = (
+        "A substantive answer, comfortably past the eighty character mark that the "
+        "length fallback uses to choose between medium and low."
+    )
+    for bogus in ("high|medium|low", "", "  ", "unknown", "HIGH-ISH", "confidence"):
+        full_text = long_answer + json.dumps({"citations": [], "confidence": bogus})
+        _, _, confidence = _split_response(full_text)
+        assert confidence in {"high", "medium", "low"}, (
+            f"{bogus!r} was accepted as a confidence level and would render as one"
+        )
+        assert confidence == "medium", "long answers fall back to medium, as with no JSON at all"
+
+
+def test_split_response_accepts_the_three_levels_case_insensitively():
+    for level in ("high", "HIGH", " Medium ", "low"):
+        full_text = "x" + json.dumps({"citations": [], "confidence": level})
+        _, _, confidence = _split_response(full_text)
+        assert confidence == level.strip().lower()
+
+
 def test_split_response_no_json_returns_full_text():
     full_text = "The answer is here."
     answer, citations, confidence = _split_response(full_text)

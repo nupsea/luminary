@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Smoke test for S83: confidence fixes and multi-doc scope improvements.
 # 1. POST /qa with scope='all' factual query — asserts HTTP 200, confidence != 'low'
+#    The question names something only the ingested documents say. "Who is the
+#    main character?" was the old one, and against a 60-document library it
+#    retrieved Hamlet, Hegel and the Federalist Papers -- low confidence is the
+#    honest answer to a vague question over unrelated sources, so the script was
+#    asking the product to overstate what it knew.
 # 2. POST /qa with scope='all' summary query — asserts HTTP 200, non-empty answer
 set -euo pipefail
 
@@ -19,13 +24,20 @@ DOC2=$(curl -sf -X POST "$BASE/documents/ingest" \
   "Watson recorded the events in his journal. The adventure concluded successfully." \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
 
+# Both documents go however this exits; the script had been leaving two per run.
+cleanup_docs() {
+  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC1" || true
+  curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC2" || true
+}
+trap cleanup_docs EXIT
+
 echo "Ingested doc1=$DOC1 doc2=$DOC2"
 sleep 2
 
 # ---- (1) Factual query across all docs — confidence should not be 'low' ----
 QA_RESP=$(curl -sf -X POST "$BASE/qa" \
   -H "Content-Type: application/json" \
-  -d '{"question": "Who is the main character?", "scope": "all"}' \
+  -d '{"question": "Who examined the room carefully?", "scope": "all"}' \
   --header "Accept: text/event-stream" \
   | grep '^data:' \
   | python3 -c "
@@ -45,10 +57,13 @@ else:
     print(json.dumps({'confidence': 'unknown'}))
 ")
 
-echo "QA response (factual): $QA_RESP"
-python3 -c "
+echo "QA response (factual): ${QA_RESP:0:160}..."
+# The JSON goes in on stdin, never interpolated into the program text. An answer
+# containing a quote or a newline -- which most do -- made this a SyntaxError in
+# the middle of a generated python source line, reported as a failing QA call.
+printf '%s' "$QA_RESP" | python3 -c "
 import sys, json
-resp = json.loads('$QA_RESP')
+resp = json.load(sys.stdin)
 conf = resp.get('confidence', 'unknown')
 assert conf != 'low', f'FAIL: factual query returned low confidence: {conf}'
 print(f'PASS: factual query confidence={conf} (not low)')
@@ -77,12 +92,12 @@ full = ''.join(tokens)
 print(json.dumps({'answer': full, 'confidence': done.get('confidence') if done else 'unknown'}))
 ")
 
-echo "Summary response: $SUM_RESP"
-python3 -c "
+echo "Summary response: ${SUM_RESP:0:160}..."
+printf '%s' "$SUM_RESP" | python3 -c "
 import sys, json
-resp = json.loads('$SUM_RESP')
+resp = json.load(sys.stdin)
 answer = resp.get('answer', '')
-assert len(answer) > 0, f'FAIL: summary answer is empty'
+assert len(answer) > 0, 'FAIL: summary answer is empty'
 print(f'PASS: summary answer is non-empty ({len(answer)} chars)')
 "
 

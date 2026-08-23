@@ -748,7 +748,13 @@ async def migrate_tag_naming(
     return {"renamed": renamed_count, "merged": merged_count}
 
 
-@router.get("/{tag_id}/notes", response_model=list[NoteItem])
+# `{tag_id:path}`, not `{tag_id}`: a tag id is hierarchical. `POST /tags`
+# normalises "Science/Cell_Division" to "science/cell-division", and a plain
+# path parameter matches one segment, so every route below 404d on the ids
+# this API mints -- a tag you could create and then neither rename, inspect
+# nor delete. Percent-encoding does not help: Starlette decodes before it
+# routes. These stay last in the file so the literal routes above win.
+@router.get("/{tag_id:path}/notes", response_model=list[NoteItem])
 async def get_notes_for_tag(
     tag_id: str,
     repo: TagRepo = Depends(get_tag_repo),
@@ -761,7 +767,7 @@ async def get_notes_for_tag(
     return [NoteItem(id=n.id, content=n.content, tags=n.tags or []) for n in notes]
 
 
-@router.get("/{tag_id}/cross-content-counts", response_model=TagCrossContentCounts)
+@router.get("/{tag_id:path}/cross-content-counts", response_model=TagCrossContentCounts)
 async def get_tag_cross_content_counts(
     tag_id: str,
     session: AsyncSession = Depends(get_db),
@@ -790,7 +796,7 @@ async def get_tag_cross_content_counts(
     )
 
 
-@router.put("/{tag_id}", response_model=TagResponse)
+@router.put("/{tag_id:path}", response_model=TagResponse)
 async def update_tag(
     tag_id: str,
     req: TagUpdateRequest,
@@ -810,7 +816,7 @@ async def update_tag(
     return _to_response(tag)
 
 
-@router.delete("/{tag_id}", status_code=204)
+@router.delete("/{tag_id:path}", status_code=204)
 async def delete_tag(
     tag_id: str,
     repo: TagRepo = Depends(get_tag_repo),

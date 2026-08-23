@@ -1,58 +1,69 @@
 #!/usr/bin/env bash
 # Smoke test for S113 - Learning Goals endpoints
-# Requires: live backend at http://localhost:7820 and at least one ingested document.
+#
+# The document-centric goals API this script was written against was replaced by
+# typed learning goals: `routers/goals.py` says so in its own module docstring,
+# and `GET /goals/{id}/readiness` -- with its `on_track` /
+# `projected_retention_pct` / `at_risk_cards` contract -- went with it. The
+# router survives as a data source for the Hub, which is the live surface, so
+# this covers that rather than the FSRS readiness projection.
+#
+# Verifies: list, create with the typed shape, read back, progress, delete.
+# Requires: live backend at http://localhost:7820.
 set -euo pipefail
 
-BASE="http://localhost:7820"
+BASE="${BASE:-http://localhost:7820}"
 
-echo "=== S113 smoke: Learning Goals ==="
+fail() { echo "    FAIL: $1"; exit 1; }
 
-# 1. GET /goals -- should return list (possibly empty)
+echo "=== S113 Smoke: Learning Goals ==="
+
+# 1. GET /goals
 echo "[1] GET /goals"
-GOALS=$(curl -sf "${BASE}/goals")
-echo "    Response: ${GOALS}"
-echo "${GOALS}" | python3 -c "import sys, json; d=json.load(sys.stdin); assert isinstance(d, list), 'expected list'"
+curl -sf "${BASE}/goals" | python3 -c "
+import sys, json
+rows = json.load(sys.stdin)
+assert isinstance(rows, list), 'expected a list of goals'
+" || fail "GET /goals did not return a list"
 echo "    PASS"
 
-# 2. Get first document id
-echo "[2] GET /documents to pick a doc_id"
-FIRST_DOC=$(curl -sf "${BASE}/documents?sort=newest&page=1&page_size=1" | python3 -c "import sys, json; items=json.load(sys.stdin)['items']; print(items[0]['id']) if items else print('')")
-if [ -z "${FIRST_DOC}" ]; then
-    echo "    SKIP: no documents ingested -- skipping create/readiness checks"
-    exit 0
-fi
-echo "    doc_id=${FIRST_DOC}"
-
-# 3. POST /goals
-echo "[3] POST /goals"
-TARGET=$(python3 -c "from datetime import date, timedelta; print((date.today()+timedelta(days=30)).isoformat())")
+# 2. POST /goals with the typed shape (title + goal_type, not document + date)
+echo "[2] POST /goals"
 CREATE_RESP=$(curl -sf -X POST "${BASE}/goals" \
-    -H "Content-Type: application/json" \
-    -d "{\"document_id\": \"${FIRST_DOC}\", \"title\": \"Smoke Test Goal\", \"target_date\": \"${TARGET}\"}")
-echo "    Response: ${CREATE_RESP}"
+  -H "Content-Type: application/json" \
+  -d '{"title": "S113 Smoke Goal", "goal_type": "studying", "target_value": 30, "target_unit": "minutes"}')
 GOAL_ID=$(echo "${CREATE_RESP}" | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
+[ -n "${GOAL_ID}" ] || fail "POST /goals returned no id"
 echo "    goal_id=${GOAL_ID}"
 echo "    PASS"
 
-# 4. GET /goals/{id}/readiness
-echo "[4] GET /goals/${GOAL_ID}/readiness"
-READINESS=$(curl -sf "${BASE}/goals/${GOAL_ID}/readiness")
-echo "    Response: ${READINESS}"
-echo "${READINESS}" | python3 -c "
+# 3. GET /goals/{id}
+echo "[3] GET /goals/${GOAL_ID}"
+curl -sf "${BASE}/goals/${GOAL_ID}" | python3 -c "
 import sys, json
-d=json.load(sys.stdin)
-assert 'on_track' in d, 'missing on_track'
-assert 'projected_retention_pct' in d, 'missing projected_retention_pct'
-assert 'at_risk_card_count' in d, 'missing at_risk_card_count'
-assert 'at_risk_cards' in d, 'missing at_risk_cards'
-assert 0.0 <= d['projected_retention_pct'] <= 100.0, 'pct out of range'
-"
+d = json.load(sys.stdin)
+assert d['title'] == 'S113 Smoke Goal', f\"title round-trip: {d['title']!r}\"
+assert d['goal_type'] == 'studying', f\"goal_type: {d['goal_type']!r}\"
+assert d['status'] == 'active', f\"a new goal starts active, got {d['status']!r}\"
+" || fail "GET /goals/{id} did not round-trip the goal"
 echo "    PASS"
 
-# 5. DELETE /goals/{id}
+# 4. GET /goals/{id}/progress -- what replaced the readiness projection.
+#    `metrics` is typed per goal_type, so this asserts the envelope, not its keys.
+echo "[4] GET /goals/${GOAL_ID}/progress"
+curl -sf "${BASE}/goals/${GOAL_ID}/progress" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d['goal_id'] == '${GOAL_ID}', 'progress reported for the wrong goal'
+assert d['goal_type'] == 'studying', f\"goal_type: {d['goal_type']!r}\"
+assert isinstance(d['metrics'], dict), 'metrics must be an object'
+" || fail "GET /goals/{id}/progress did not report on this goal"
+echo "    PASS"
+
+# 5. DELETE /goals/{id} -- also keeps the library clean between runs.
 echo "[5] DELETE /goals/${GOAL_ID}"
 DEL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "${BASE}/goals/${GOAL_ID}")
-[ "${DEL_STATUS}" = "204" ] || { echo "    FAIL: expected 204 got ${DEL_STATUS}"; exit 1; }
+[ "${DEL_STATUS}" = "204" ] || fail "expected 204 got ${DEL_STATUS}"
 echo "    PASS"
 
 echo "=== S113 smoke: ALL PASS ==="

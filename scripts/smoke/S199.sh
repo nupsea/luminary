@@ -4,7 +4,7 @@
 #        migration endpoints
 set -euo pipefail
 
-BASE="${LUMINARY_URL:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 FAIL=0
 
 check() {
@@ -29,6 +29,14 @@ check "Collection name normalized" "MY-READING-NOTES" "$COL_NAME"
 COL_ID=$(python3 -c "import json; print(json.load(open('$TMPFILE'))['id'])")
 
 # 2. POST /tags normalizes id
+# The tag this creates outlived every previous run, so the second run onwards got
+# 409 and reported a failure that was its own residue. Remove it first, and again
+# on the way out; DELETE is a no-op when the tag is not there and refuses (409)
+# while anything still uses it, which is the behaviour we want either way.
+curl -s -o /dev/null -X DELETE "$BASE/tags/science/cell-division" || true
+cleanup_tag() { curl -s -o /dev/null -X DELETE "$BASE/tags/science/cell-division" || true; }
+trap cleanup_tag EXIT
+
 HTTP=$(curl -s -o "$TMPFILE" -w "%{http_code}" \
     -X POST "$BASE/tags" \
     -H "Content-Type: application/json" \

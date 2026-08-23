@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for S164 - Collections UI backend integration
 # Tests: GET /collections/tree, POST /collections, PUT /collections/{id},
-#        GET /notes (collection_ids field), GET /notes/{id},
+#        GET /notes (collections field), GET /notes/{id},
 #        POST /collections/{id}/notes, DELETE /collections/{id}/notes/{note_id},
 #        DELETE /collections/{id}
 set -euo pipefail
@@ -44,7 +44,10 @@ COL_RESP=$(curl -sf -X POST "$BASE/collections" \
 COL_ID=$(echo "$COL_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['id'])")
 COL_NAME=$(echo "$COL_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['name'])")
 check "POST /collections returns id" "$([ -n "$COL_ID" ] && echo true || echo false)"
-check "POST /collections name matches" "$([ "$COL_NAME" = "Smoke Test Collection" ] && echo true || echo false)"
+# `normalize_collection_name` upper-cases and hyphenates on the way in, by
+# design (services/naming.py). The name that comes back is the normalised one,
+# not the string sent.
+check "POST /collections normalises the name" "$([ "$COL_NAME" = "SMOKE-TEST-COLLECTION" ] && echo true || echo false)"
 
 # 3. GET /collections/tree includes new collection
 echo ""
@@ -60,11 +63,11 @@ RENAME_RESP=$(curl -sf -X PUT "$BASE/collections/$COL_ID" \
   -H "Content-Type: application/json" \
   -d '{"name":"Renamed Collection"}')
 RENAMED=$(echo "$RENAME_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['name'])")
-check "PUT /collections/{id} updates name" "$([ "$RENAMED" = "Renamed Collection" ] && echo true || echo false)"
+check "PUT /collections/{id} normalises the new name" "$([ "$RENAMED" = "RENAMED-COLLECTION" ] && echo true || echo false)"
 
-# 5. Create a note and verify GET /notes returns collection_ids field
+# 5. Create a note and verify GET /notes returns the collections field
 echo ""
-echo "-- GET /notes returns collection_ids field --"
+echo "-- GET /notes returns collections field --"
 NOTE_RESP=$(curl -sf -X POST "$BASE/notes" \
   -H "Content-Type: application/json" \
   -d '{"content":"Smoke test note for S164"}')
@@ -76,18 +79,18 @@ HAS_COL_IDS=$(echo "$NOTES_LIST" | python3 -c "
 import sys, json
 notes = json.load(sys.stdin)
 note = next((n for n in notes if n['id'] == '$NOTE_ID'), None)
-print(str(note is not None and 'collection_ids' in note and isinstance(note['collection_ids'], list)).lower())
+print(str(note is not None and isinstance(note.get('collections'), list)).lower())
 ")
-check "GET /notes includes collection_ids field" "$HAS_COL_IDS"
+check "GET /notes includes collections field" "$HAS_COL_IDS"
 
-# 6. GET /notes/{id} returns collection_ids field
+# 6. GET /notes/{id} returns the collections field
 echo ""
 echo "-- GET /notes/{id} --"
 NOTE_GET=$(curl -sf "$BASE/notes/$NOTE_ID")
-HAS_COL_IDS2=$(echo "$NOTE_GET" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str('collection_ids' in d and isinstance(d['collection_ids'], list)).lower())")
-check "GET /notes/{id} includes collection_ids" "$HAS_COL_IDS2"
-EMPTY_IDS=$(echo "$NOTE_GET" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d['collection_ids'] == []).lower())")
-check "GET /notes/{id} collection_ids is empty initially" "$EMPTY_IDS"
+HAS_COL_IDS2=$(echo "$NOTE_GET" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(isinstance(d.get('collections'), list)).lower())")
+check "GET /notes/{id} includes collections" "$HAS_COL_IDS2"
+EMPTY_IDS=$(echo "$NOTE_GET" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d['collections'] == []).lower())")
+check "GET /notes/{id} collections is empty initially" "$EMPTY_IDS"
 
 # 7. POST /collections/{id}/notes adds note to collection
 echo ""
@@ -98,10 +101,10 @@ ADD_RESP=$(curl -sf -X POST "$BASE/collections/$COL_ID/notes" \
 ADDED=$(echo "$ADD_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d['added'] == 1).lower())")
 check "POST /collections/{id}/notes added=1" "$ADDED"
 
-# 8. GET /notes/{id} now returns collection_ids with the collection
+# 8. GET /notes/{id} now lists the collection it belongs to
 NOTE_GET2=$(curl -sf "$BASE/notes/$NOTE_ID")
-HAS_COL=$(echo "$NOTE_GET2" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str('$COL_ID' in d['collection_ids']).lower())")
-check "GET /notes/{id} collection_ids includes collection after add" "$HAS_COL"
+HAS_COL=$(echo "$NOTE_GET2" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str('$COL_ID' in [c['id'] for c in d['collections']]).lower())")
+check "GET /notes/{id} collections includes the collection after add" "$HAS_COL"
 
 # 9. GET /notes?collection_id= filters to the collection
 echo ""
@@ -110,16 +113,17 @@ COL_NOTES=$(curl -sf "$BASE/notes?collection_id=$COL_ID")
 IN_LIST=$(echo "$COL_NOTES" | python3 -c "import sys,json; notes=json.load(sys.stdin); print(str(any(n['id']=='$NOTE_ID' for n in notes)).lower())")
 check "GET /notes?collection_id= returns note" "$IN_LIST"
 
-# 10. DELETE /collections/{id}/notes/{note_id} removes note from collection
+# 10. Removing a member. The per-type route (.../notes/{id}) became one
+#     members route covering documents and notes alike.
 echo ""
-echo "-- DELETE /collections/{id}/notes/{note_id} --"
+echo "-- DELETE /collections/{id}/members/{member_id} --"
 DEL_MEMBER_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-  "$BASE/collections/$COL_ID/notes/$NOTE_ID")
-check "DELETE /collections/{id}/notes/{note_id} returns 204" "$([ "$DEL_MEMBER_STATUS" = "204" ] && echo true || echo false)"
+  "$BASE/collections/$COL_ID/members/$NOTE_ID")
+check "DELETE /collections/{id}/members/{member_id} returns 204" "$([ "$DEL_MEMBER_STATUS" = "204" ] && echo true || echo false)"
 
 NOTE_GET3=$(curl -sf "$BASE/notes/$NOTE_ID")
-REMOVED=$(echo "$NOTE_GET3" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str('$COL_ID' not in d['collection_ids']).lower())")
-check "GET /notes/{id} collection_ids empty after remove" "$REMOVED"
+REMOVED=$(echo "$NOTE_GET3" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str('$COL_ID' not in [c['id'] for c in d['collections']]).lower())")
+check "GET /notes/{id} collections empty after remove" "$REMOVED"
 
 # 11. Cleanup: DELETE /collections/{id}
 echo ""

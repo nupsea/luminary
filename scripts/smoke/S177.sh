@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-BASE="${LUMINARY_API:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S177 Smoke: Progress tab / Admin route ==="
 

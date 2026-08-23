@@ -2,7 +2,7 @@
 # Smoke test for S168: Smart tag normalization endpoints
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:7820}"
 
 # Helpers
 check_status() {

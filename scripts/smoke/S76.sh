@@ -19,7 +19,7 @@ fi
 
 # POST /ingest
 echo "Ingesting fixture..."
-INGEST_RESP=$(curl -s -X POST "${BASE}/ingest" \
+INGEST_RESP=$(curl -s -X POST "${BASE}/documents/ingest" \
   -F "file=@${FIXTURE};type=text/plain" \
   -F "content_type=notes")
 
@@ -93,10 +93,14 @@ if [ "$HTTP_CODE" != "200" ]; then
   exit 1
 fi
 
+# The cached response nests each mode under `summaries`; it was flat when this
+# script was written, so a top-level lookup reported the summary missing while
+# the endpoint was returning it.
 HAS_EXECUTIVE=$(python3 -c "
 import json
 data = json.load(open('/tmp/s76_cached.json'))
-print('yes' if 'executive' in data else 'no')
+summaries = data.get('summaries', {})
+print('yes' if summaries.get('executive', {}).get('content') else 'no')
 " 2>/dev/null || echo "no")
 
 if [ "$HAS_EXECUTIVE" != "yes" ]; then

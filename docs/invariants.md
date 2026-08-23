@@ -216,6 +216,8 @@ The deployed embedder is `bge-small-en-v1.5` and the LanceDB schema must declare
 
 The embedder is therefore not pluggable the way a generation model is. Every stored vector was written by the deployed model, so replacing it is a full re-embed of the corpus behind a migration, not a config change — the dimension in the schema moves with it or nothing matches anything. Work that makes generation models substitutable must state explicitly that it stops here.
 
+**The number is declared once, and the check is against the embedder rather than against the declaration.** `note_vectors_v2` carried a hand-written `NOTE_VECTOR_DIM = 1024`, and a 61-note library held **zero** note vectors: a 384-float list cannot be cast into a 1024 fixed-size list, so every `upsert_note_vector` raised and `embed_and_store_note` logged it "non-fatal" and returned. Semantic note search then returned nothing, which is indistinguishable from a library with no matching notes — so the chat notes path answered "Nothing in your library matches that question" about notes it held, and had done since the table was created. The existing guard in `_get_or_create_note_table` could not catch it: it compares the table against the constant, and both said 1024. A constant is not a check when the constant is what is wrong. One `EMBEDDING_DIM` now feeds every schema in the space, and `tests/test_vector_space_dimension.py` fails CI if any table declares something else **or if the deployed embedder stops producing that many dimensions**. Fixing the declaration does not backfill: the guard drops and recreates the table, and the vectors come back only via `ReindexService.reindex_notes`.
+
 ## Frontend
 
 **I-10. Every frontend feature must have loading, error, and empty states.**

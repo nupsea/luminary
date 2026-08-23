@@ -8,6 +8,15 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# The one embedding space. Notes, chunks, concepts and images are all written by
+# the deployed embedder (bge-small-en-v1.5, 384-dim) and compared against each
+# other, so every table in that space declares this and nothing declares its own
+# number -- I-9. `note_vectors_v2` carried a hand-written 1024 for long enough
+# that not one of a 61-note library was ever embedded: a 384-float list cannot be
+# cast into a 1024 fixed-size list, every write raised, and
+# `embed_and_store_note` logged it as non-fatal and moved on.
+EMBEDDING_DIM = 384
+
 TABLE_NAME = "chunk_vectors_v3"
 
 SCHEMA = pa.schema(
@@ -20,12 +29,12 @@ SCHEMA = pa.schema(
         pa.field("chunk_index", pa.int32()),
         pa.field("speaker", pa.string()),
         pa.field("text", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 384)),
+        pa.field("vector", pa.list_(pa.float32(), EMBEDDING_DIM)),
     ]
 )
 
 NOTE_TABLE_NAME = "note_vectors_v2"
-NOTE_VECTOR_DIM = 1024
+NOTE_VECTOR_DIM = EMBEDDING_DIM
 
 NOTE_SCHEMA = pa.schema(
     [
@@ -43,7 +52,7 @@ IMAGE_SCHEMA = pa.schema(
         pa.field("image_id", pa.string()),
         pa.field("document_id", pa.string()),
         pa.field("description", pa.string()),
-        pa.field("vector", pa.list_(pa.float32(), 384)),
+        pa.field("vector", pa.list_(pa.float32(), EMBEDDING_DIM)),
     ]
 )
 
@@ -53,7 +62,7 @@ IMAGE_SCHEMA = pa.schema(
 # query embeddings (scope resolution, concept dedup). It is a DERIVED projection, never a
 # retrieval primary (see docs/concepts.md, invariant I-20).
 CONCEPT_TABLE_NAME = "concept_vectors_v1"
-CONCEPT_VECTOR_DIM = 384  # chunk/bge-small space -- matches chunk_vectors_v3
+CONCEPT_VECTOR_DIM = EMBEDDING_DIM
 
 CONCEPT_SCHEMA = pa.schema(
     [

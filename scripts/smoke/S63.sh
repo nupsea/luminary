@@ -6,17 +6,23 @@
 # non-media file, which switched detection off for everything a user uploaded.
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+
 BASE="http://localhost:7820"
 
 # A real file this script creates. /etc/hostname was used here and does not
 # exist on macOS, so curl exited 26 ("couldn't read file") and every check
 # after the first failed for a reason that had nothing to do with the endpoint.
-FIXTURE=$(mktemp /tmp/s63fixture.XXXXXX.txt)
+FIXTURE="$SMOKE_TMPDIR/s63fixture.txt"
 echo "S63 smoke fixture." > "$FIXTURE"
-trap 'rm -f "$FIXTURE"' EXIT
+trap 'rm -f "$FIXTURE"; rm -rf "$SMOKE_TMPDIR"' EXIT
 
 echo "[S63] Test 1: POST /documents/ingest without content_type is accepted"
-TMP1=$(mktemp /tmp/s63auto.XXXXXX.txt)
+TMP1="$SMOKE_TMPDIR/s63auto.txt"
 echo "A short note written for the S63 smoke test." > "$TMP1"
 RESP1=$(curl -s -X POST "${BASE}/documents/ingest" -F "file=@${TMP1};filename=s63_auto.txt")
 rm -f "$TMP1"
@@ -36,7 +42,7 @@ fi
 echo "PASS: 422 returned for invalid content_type"
 
 echo "[S63] Test 3: POST /documents/ingest with valid content_type returns 200"
-TMP=$(mktemp /tmp/s63test.XXXXXX.txt)
+TMP="$SMOKE_TMPDIR/s63test.txt"
 echo "This is a test document for S63 smoke test." > "$TMP"
 RESP=$(curl -s -X POST "${BASE}/documents/ingest" \
   -F "file=@${TMP};filename=s63_smoke.txt" \

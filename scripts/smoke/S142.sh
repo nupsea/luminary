@@ -42,7 +42,10 @@ if [ "$HTTP" != "200" ]; then
   exit 1
 fi
 
-HAS_DONE=$(grep -c '"done":true' "${TMPFILE}" || true)
+# The payload is JSON: `{"done": true, …}` with a space after the colon.
+# Matching the exact byte string '"done":true' asserted a formatting choice
+# rather than the event, and broke when nothing about the event changed.
+HAS_DONE=$(grep -cE '"done"[[:space:]]*:[[:space:]]*true' "${TMPFILE}" || true)
 rm -f "${TMPFILE}"
 
 if [ "${HAS_DONE}" -lt 1 ]; then

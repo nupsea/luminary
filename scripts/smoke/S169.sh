@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-BASE="http://localhost:8000"
+BASE="${BASE:-http://localhost:7820}"
 
 echo "=== S169 Smoke Test: Collection-based flashcard generation ==="
 

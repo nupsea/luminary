@@ -16,7 +16,7 @@ fi
 
 # POST /ingest
 echo "Ingesting fixture..."
-INGEST_RESP=$(curl -s -X POST "${BASE}/ingest" \
+INGEST_RESP=$(curl -s -X POST "${BASE}/documents/ingest" \
   -F "file=@${FIXTURE};type=text/plain" \
   -F "content_type=notes")
 

@@ -2,6 +2,13 @@
 # Smoke test for S207: naming normalization check + apply endpoints
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="${LUMINARY_URL:-http://localhost:7820}"
 PASS=0
 FAIL=0
@@ -20,7 +27,7 @@ check() {
 echo "=== S207 Smoke Test ==="
 
 # 1. POST /notes/cluster/normalize-check returns 200
-TMPFILE=$(mktemp /tmp/s207_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s207.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/notes/cluster/normalize-check")
 check "POST /notes/cluster/normalize-check" "200" "$STATUS"
 
@@ -30,7 +37,7 @@ echo "  normalize-check response: ${BODY:0:200}"
 rm -f "$TMPFILE"
 
 # 2. POST /notes/cluster/normalize-apply with empty list returns 200
-TMPFILE2=$(mktemp /tmp/s207_apply_XXXXXX.json)
+TMPFILE2="$SMOKE_TMPDIR/s207_apply.json"
 STATUS2=$(curl -s -o "$TMPFILE2" -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -d '{"fixes":[]}' \

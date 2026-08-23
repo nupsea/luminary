@@ -117,17 +117,6 @@ async def lifespan(app: FastAPI):
         raise
     status.set_state("db", "ready")
 
-    # Say it out loud at boot, not only at GET /settings/models. An oversized
-    # configuration's first symptom was a crash during ingestion, which is the
-    # least useful moment to learn that the models do not fit.
-    try:
-        from app.services.model_router import warn_if_configuration_exceeds_host
-
-        warn_if_configuration_exceeds_host()
-    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
-        # warning, not debug: this swallowed a TypeError in the check itself for
-        # as long as the check existed, so the advisory never ran and nothing said so.
-        logger.warning("model residency check failed", exc_info=True)
     # NOTE: concept regeneration is a manual offline step (with the server stopped
     # so it can hold the Kuzu lock and not starve the event loop):
     #   make concepts
@@ -209,6 +198,24 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
 
+    # Say it out loud at boot, not only at GET /settings/models. An oversized
+    # configuration's first symptom was a crash during ingestion, which is the
+    # least useful moment to learn that the models do not fit.
+    #
+    # This has to run AFTER the settings load above. It ran 80 lines earlier,
+    # with the cache still empty, so every role resolved to the registry default
+    # and a model chosen in Settings was invisible to it -- which is precisely
+    # the configuration worth warning about. A shipped install running a figure
+    # reader as its chat model booted silent.
+    try:
+        from app.services.model_router import warn_if_configuration_exceeds_host
+
+        warn_if_configuration_exceeds_host()
+    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
+        # warning, not debug: this swallowed a TypeError in the check itself for
+        # as long as the check existed, so the advisory never ran and nothing said so.
+        logger.warning("model residency check failed", exc_info=True)
+
     # An ingestion that was running when the process died cannot resume: its task
     # is gone and nothing owns the document any more. It used to keep its last
     # stage for ever, so the UI showed a progress card that would never finish --
@@ -269,6 +276,39 @@ async def lifespan(app: FastAPI):
                 logger.warning("Description backfill failed (non-fatal): %s", exc)
 
         _background_tasks.add(asyncio.create_task(backfill_descriptions()))
+
+        # Note vectors, for libraries that predate the dimension fix. The note
+        # table declared 1024 while the embedder produces 384 (I-9), so every
+        # `upsert_note_vector` raised and was logged non-fatal: a 61-note library
+        # held zero vectors and semantic note search returned nothing, which is
+        # indistinguishable from having no matching notes.
+        #
+        # Correcting the constant does not repair an existing library. The guard
+        # drops and recreates the table on first write, so only notes saved after
+        # the upgrade get vectors -- and the one manual trigger,
+        # POST /admin/notes/reindex, is 403 unless ADMIN_KEY is set, which the
+        # desktop app does not set. Without this, the fix reached new notes only.
+        #
+        # `reindex_notes` embeds only what LanceDB is missing, so this is a cheap
+        # presence check per note once a library is caught up.
+        async def backfill_note_vectors():
+            try:
+                await asyncio.sleep(30)
+                from app.services.reindex_service import get_reindex_service
+
+                async with get_session_factory()() as _reindex_db:
+                    report = await get_reindex_service().reindex_notes(_reindex_db)
+                if report["reindexed"] or report["failed"]:
+                    logger.info(
+                        "Note vector backfill: %d embedded, %d failed, %d total",
+                        report["reindexed"],
+                        report["failed"],
+                        report["total"],
+                    )
+            except Exception as exc:
+                logger.warning("Note vector backfill failed (non-fatal): %s", exc)
+
+        _background_tasks.add(asyncio.create_task(backfill_note_vectors()))
 
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield

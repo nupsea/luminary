@@ -2,6 +2,13 @@
 # Smoke test for S192 -- DocumentReader notes panel: auto-collection endpoints
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="http://localhost:7820"
 FAIL=0
 
@@ -9,7 +16,7 @@ echo "=== S192 Smoke: Auto-collection endpoints ==="
 
 # Step 1: GET /collections/by-document with nonexistent doc -> 404
 echo "[1/5] GET /collections/by-document/{fake_id} -> 404"
-TMPFILE=$(mktemp /tmp/s192_1_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s192_1.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/collections/by-document/smoke-nonexistent-doc")
 rm -f "$TMPFILE"
 if [ "$STATUS" = "404" ]; then
@@ -21,7 +28,7 @@ fi
 
 # Step 2: POST /collections/auto with nonexistent doc -> 404
 echo "[2/5] POST /collections/auto/{fake_id} -> 404"
-TMPFILE=$(mktemp /tmp/s192_2_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s192_2.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/collections/auto/smoke-nonexistent-doc")
 rm -f "$TMPFILE"
 if [ "$STATUS" = "404" ]; then
@@ -33,7 +40,7 @@ fi
 
 # Step 3: Find an existing document to test with
 echo "[3/5] Finding an existing document..."
-TMPFILE=$(mktemp /tmp/s192_3_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s192_3.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/documents?limit=1")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -47,7 +54,7 @@ else
 
     # Step 4: POST /collections/auto/{doc_id} -> 201
     echo "[4/5] POST /collections/auto/{doc_id} -> 201"
-    TMPFILE=$(mktemp /tmp/s192_4_XXXXXX.json)
+    TMPFILE="$SMOKE_TMPDIR/s192_4.json"
     STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/collections/auto/$DOC_ID")
     BODY=$(cat "$TMPFILE")
     rm -f "$TMPFILE"
@@ -68,7 +75,7 @@ else
 
     # Step 5: GET /collections/by-document/{doc_id} -> 200
     echo "[5/5] GET /collections/by-document/{doc_id} -> 200"
-    TMPFILE=$(mktemp /tmp/s192_5_XXXXXX.json)
+    TMPFILE="$SMOKE_TMPDIR/s192_5.json"
     STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/collections/by-document/$DOC_ID")
     rm -f "$TMPFILE"
     if [ "$STATUS" = "200" ]; then

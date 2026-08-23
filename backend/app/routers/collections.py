@@ -376,8 +376,17 @@ async def migrate_collection_naming(
 
     renamed_count = 0
     merged_count = 0
+    # Collections read once up front, then deleted as the loop merges groups. A
+    # child of one group's loser can be a member of a later group, and touching
+    # it there raised `InvalidRequestError: Instance has been deleted` -- a 500
+    # from a migration whose whole job is to be safe to run. Ids go in here as
+    # they are deleted and every group is filtered through it.
+    deleted_ids: set[str] = set()
 
-    for normalized_name, col_group in groups.items():
+    for normalized_name, group in groups.items():
+        col_group = [c for c in group if c.id not in deleted_ids]
+        if not col_group:
+            continue
         if len(col_group) == 1:
             col = col_group[0]
             if col.name != normalized_name:
@@ -439,11 +448,26 @@ async def migrate_collection_naming(
                         CollectionMemberModel.collection_id == loser.id
                     )
                 )
-                # Also delete child collections of loser
+                # Also delete child collections of loser. Read their ids first:
+                # a bulk delete leaves the session's loaded instances behind, and
+                # those are what a later group would try to rename.
+                child_ids = list(
+                    (
+                        await session.execute(
+                            select(CollectionModel.id).where(
+                                CollectionModel.parent_collection_id == loser.id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 await session.execute(
                     delete(CollectionModel).where(CollectionModel.parent_collection_id == loser.id)
                 )
                 await session.execute(delete(CollectionModel).where(CollectionModel.id == loser.id))
+                deleted_ids.update(child_ids)
+                deleted_ids.add(loser.id)
 
             merged_count += 1
 
