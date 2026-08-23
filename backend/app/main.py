@@ -277,6 +277,39 @@ async def lifespan(app: FastAPI):
 
         _background_tasks.add(asyncio.create_task(backfill_descriptions()))
 
+        # Note vectors, for libraries that predate the dimension fix. The note
+        # table declared 1024 while the embedder produces 384 (I-9), so every
+        # `upsert_note_vector` raised and was logged non-fatal: a 61-note library
+        # held zero vectors and semantic note search returned nothing, which is
+        # indistinguishable from having no matching notes.
+        #
+        # Correcting the constant does not repair an existing library. The guard
+        # drops and recreates the table on first write, so only notes saved after
+        # the upgrade get vectors -- and the one manual trigger,
+        # POST /admin/notes/reindex, is 403 unless ADMIN_KEY is set, which the
+        # desktop app does not set. Without this, the fix reached new notes only.
+        #
+        # `reindex_notes` embeds only what LanceDB is missing, so this is a cheap
+        # presence check per note once a library is caught up.
+        async def backfill_note_vectors():
+            try:
+                await asyncio.sleep(30)
+                from app.services.reindex_service import get_reindex_service
+
+                async with get_session_factory()() as _reindex_db:
+                    report = await get_reindex_service().reindex_notes(_reindex_db)
+                if report["reindexed"] or report["failed"]:
+                    logger.info(
+                        "Note vector backfill: %d embedded, %d failed, %d total",
+                        report["reindexed"],
+                        report["failed"],
+                        report["total"],
+                    )
+            except Exception as exc:
+                logger.warning("Note vector backfill failed (non-fatal): %s", exc)
+
+        _background_tasks.add(asyncio.create_task(backfill_note_vectors()))
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
