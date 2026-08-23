@@ -17,7 +17,9 @@ qa_check() {
   local tmp_file="/tmp/s78_qa_${RANDOM}.txt"
 
   echo "Testing $label ..."
-  HTTP_CODE=$(curl -s --max-time 30 -o "$tmp_file" -w "%{http_code}" \
+  # 30s truncated the stream before its done event on a cold model load; a
+  # measured all-scope /qa on this library takes ~18s once the model is resident.
+  HTTP_CODE=$(curl -s --max-time 180 -o "$tmp_file" -w "%{http_code}" \
     -X POST "${BASE}/qa" \
     -H "Content-Type: application/json" \
     -d "{\"question\": \"${question}\", \"document_ids\": [], \"scope\": \"all\"}")
@@ -43,7 +45,7 @@ for line in lines:
 print('no')
 " 2>/dev/null || echo "no")
 
-  if [ "\$HAS_DONE" == "yes" ]; then
+  if [ "$HAS_DONE" = "yes" ]; then
     echo "PASS: $label returned HTTP 200 with done event"
   else
     echo "FAIL: $label response did not contain a done event"

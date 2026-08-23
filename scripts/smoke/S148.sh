@@ -25,7 +25,10 @@ if [ "$HTTP_QA" != "200" ]; then
 fi
 
 # The done event must include source_citations field (even if empty array)
-if ! grep -q '"done":true' "${TMPFILE}"; then
+# The payload is JSON: `{"done": true, …}` with a space after the colon.
+# Matching the exact byte string '"done":true' asserted a formatting choice
+# rather than the event, and broke when nothing about the event changed.
+if ! grep -qE '"done"[[:space:]]*:[[:space:]]*true' "${TMPFILE}"; then
   echo "FAIL: expected done event in SSE body"
   cat "${TMPFILE}"
   rm -f "${TMPFILE}"
