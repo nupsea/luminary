@@ -95,4 +95,12 @@ EXPOSE 7820
 # DATA_DIR is a volume mount — create it so it exists even without a volume
 RUN mkdir -p /data
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7820"]
+# The venv interpreter directly, never `uv run`. `uv run` resolves the project
+# before executing, and it resolves DEFAULT groups -- so every container start
+# downloaded and installed 46 packages (av, ctranslate2, faster-whisper,
+# yt-dlp, arize-phoenix, ruff, pytest) over the network, into the image that
+# had just been built without them. Three things broke at once: the image's
+# dependency curation was undone at runtime, a local-first app needed the
+# network to boot, and the GPL components the licence carve-out exists to keep
+# out of distribution were installed automatically anyway.
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7820"]

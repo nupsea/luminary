@@ -60,3 +60,16 @@ def test_the_build_arg_the_message_names_is_wired_end_to_end():
     # full-mode surface, so pulling it here would ship libraries this image
     # has no surface for.
     assert "--group full" not in media_step
+
+
+def test_the_container_runs_what_the_image_was_built_with():
+    """`uv run` resolves the project before executing, and resolves DEFAULT
+    groups. As the CMD it installed 46 packages over the network on every
+    container start -- undoing the image's curation, requiring the network to
+    boot a local-first app, and pulling in the GPL components the licence
+    carve-out keeps out of distribution."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    cmd = [ln for ln in dockerfile.splitlines() if ln.startswith("CMD ")]
+    assert len(cmd) == 1, "one CMD, or this guard is reading the wrong line"
+    assert "uv" not in cmd[0].split(), "the runtime entrypoint must not resolve dependencies"
+    assert "/app/.venv/bin/python" in cmd[0]
