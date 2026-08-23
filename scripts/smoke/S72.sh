@@ -23,10 +23,15 @@ routes = [r.path for r in app.routes]
 assert "/monitoring/phoenix-url" in routes, \
     f"/monitoring/phoenix-url not in routes: {routes}"
 
-# Verify _check_phoenix_reachable_cached exists and is callable
-from app.routers.monitoring import _check_phoenix_reachable_cached
+# Verify the cached reachability probe exists and is a coroutine. It was renamed
+# `_check_phoenix_reachable_cached` -> `_check_phoenix_running` when /overview,
+# /traces and /phoenix-url were made to share one 30s-cached probe instead of
+# three per page render.
 import inspect
-assert inspect.iscoroutinefunction(_check_phoenix_reachable_cached)
+
+from app.routers.monitoring import _check_phoenix_running
+
+assert inspect.iscoroutinefunction(_check_phoenix_running)
 
 print("PASS: /monitoring/phoenix-url endpoint and PhoenixUrlResponse verified")
 EOF

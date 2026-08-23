@@ -32,9 +32,18 @@ assert r.force_refresh is True
 lr = LibrarySummarizeRequest(mode="executive", force_refresh=True)
 assert lr.force_refresh is True
 
-# Verify glossary is a valid mode
-r2 = SummarizeRequest(mode="glossary")
-assert r2.mode == "glossary"
+# `glossary` was a summarize mode; the glossary feature was removed along with
+# /explain/glossary/*, and SummarizeRequest now accepts one_sentence, executive,
+# detailed and conversation. Asserting the removed mode asked for it back.
+for mode in ("one_sentence", "executive", "detailed", "conversation"):
+    assert SummarizeRequest(mode=mode).mode == mode
 
-print("PASS: force_refresh, _should_use_summary, and glossary mode all verified")
+try:
+    SummarizeRequest(mode="glossary")
+except Exception:
+    pass
+else:
+    raise AssertionError("glossary is accepted again -- the mode was removed with the feature")
+
+print("PASS: force_refresh, _should_use_summary, and the summarize modes all verified")
 EOF

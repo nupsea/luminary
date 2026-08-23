@@ -48,9 +48,13 @@ class FakeResult:
 def install_fake_modules(evaluate_func):
     ragas_mod = types.ModuleType("ragas")
     ragas_mod.evaluate = evaluate_func
+    # A namespace package: without __path__, `from ragas.run_config import ...`
+    # fails with "'ragas' is not a package" even though the submodule is in
+    # sys.modules.
+    ragas_mod.__path__ = []
 
     ragas_llms_mod = types.ModuleType("ragas.llms")
-    ragas_llms_mod.LangchainLLMWrapper = lambda llm: llm
+    ragas_llms_mod.LangchainLLMWrapper = lambda llm, *args, **kwargs: llm
 
     ragas_metrics_mod = types.ModuleType("ragas.metrics")
     for name in ("answer_relevancy", "context_precision", "context_recall", "faithfulness"):
@@ -59,9 +63,33 @@ def install_fake_modules(evaluate_func):
     datasets_mod = types.ModuleType("datasets")
     datasets_mod.Dataset = type("Dataset", (), {"from_list": classmethod(lambda cls, rows: rows)})
 
+    # Fakes take whatever the caller passes. `ChatOllama(model=...)` grew
+    # `temperature` and the runner's other ollama kwargs, and a stub pinned to one
+    # positional argument turned that into "RAGAS scoring failed: TypeError" --
+    # a stub signature drifting from its caller, reported as a scoring failure.
     langchain_mod = types.ModuleType("langchain_community")
     chat_models_mod = types.ModuleType("langchain_community.chat_models")
-    chat_models_mod.ChatOllama = lambda model: object()
+    chat_models_mod.ChatOllama = lambda *args, **kwargs: object()
+
+    # The runner prefers langchain_ollama and falls back to langchain_community;
+    # stub both so the test does not depend on which one is installed.
+    langchain_ollama_mod = types.ModuleType("langchain_ollama")
+    langchain_ollama_mod.ChatOllama = lambda *args, **kwargs: object()
+
+    langchain_openai_mod = types.ModuleType("langchain_openai")
+    langchain_openai_mod.ChatOpenAI = lambda *args, **kwargs: object()
+
+    # The runner also builds an embeddings wrapper, which would otherwise pull
+    # langchain_huggingface and load bge-small just to reach the scoring call
+    # this script is about.
+    langchain_hf_mod = types.ModuleType("langchain_huggingface")
+    langchain_hf_mod.HuggingFaceEmbeddings = lambda *args, **kwargs: object()
+
+    ragas_embeddings_mod = types.ModuleType("ragas.embeddings")
+    ragas_embeddings_mod.LangchainEmbeddingsWrapper = lambda emb, *a, **k: emb
+
+    ragas_run_config_mod = types.ModuleType("ragas.run_config")
+    ragas_run_config_mod.RunConfig = lambda *args, **kwargs: object()
 
     sys.modules["ragas"] = ragas_mod
     sys.modules["ragas.llms"] = ragas_llms_mod
@@ -69,6 +97,11 @@ def install_fake_modules(evaluate_func):
     sys.modules["datasets"] = datasets_mod
     sys.modules["langchain_community"] = langchain_mod
     sys.modules["langchain_community.chat_models"] = chat_models_mod
+    sys.modules["langchain_ollama"] = langchain_ollama_mod
+    sys.modules["langchain_openai"] = langchain_openai_mod
+    sys.modules["langchain_huggingface"] = langchain_hf_mod
+    sys.modules["ragas.embeddings"] = ragas_embeddings_mod
+    sys.modules["ragas.run_config"] = ragas_run_config_mod
 
 
 samples = [{
@@ -94,8 +127,13 @@ assert metrics["faithfulness"] == 0.91
 assert metrics["answer_relevance"] == 0.82
 assert metrics["context_precision"] == 0.73
 assert metrics["context_recall"] == 0.64
-assert THRESHOLDS["faithfulness"] == 0.65
-assert THRESHOLDS["answer_relevance"] == 0.50
+# 0.65 was the RAGAS LLM-judge bar and is meaningless for HHEM NLI, which scores
+# grounding in the retrieved context rather than truth: measured on d2l, nothing
+# scored above 0.66 and 0.65 would have passed 1 answer of 12. The gate is 0.30 --
+# a collapse detector, not a quality bar -- and run_eval.py carries the reasoning.
+# Pinning the old number here asserted a threshold the harness had deliberately left.
+assert THRESHOLDS["faithfulness"] == 0.30, THRESHOLDS["faithfulness"]
+assert THRESHOLDS["answer_relevance"] == 0.50, THRESHOLDS["answer_relevance"]
 
 
 def failing_evaluate(**kwargs):
