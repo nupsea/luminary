@@ -63,6 +63,7 @@ from evals.lib.manifest import (  # noqa: E402
 from evals.lib.retrieval_metrics import (  # noqa: E402
     _extract_hint_norms,
     _norm,
+    arm_metrics,
     compute_hit_rate_5,
     compute_mrr,
     compute_ndcg_10,
@@ -395,15 +396,21 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
     print(f"\n{'=' * 56}")
     print(f"  Retrieval ablation -- dataset={dataset}  model={model}")
     print(f"{'=' * 56}")
-    print(f"  {'strategy':<12} {'HR@5':>10} {'MRR':>10} {'NDCG@10':>10}")
+    print(
+        f"  {'strategy':<18} {'HR@5':>9} {'MRR':>9} {'NDCG@10':>9} {'bound':>6}"
+    )
     for strategy, metrics in ablation_metrics.items():
         if strategy == "rrf-pool":
             continue
+        # Indexed, not .get(_, 0.0): a metric that could not be computed must
+        # raise here rather than print a plausible 0.0000 that reads as a
+        # measured collapse.
         print(
-            f"  {strategy:<12} "
-            f"{metrics.get('hit_rate_5', 0.0):>10.4f} "
-            f"{metrics.get('mrr', 0.0):>10.4f} "
-            f"{metrics.get('ndcg_10', 0.0):>10.4f}"
+            f"  {strategy:<18} "
+            f"{metrics['hit_rate_5']:>9.4f} "
+            f"{metrics['mrr']:>9.4f} "
+            f"{metrics['ndcg_10']:>9.4f} "
+            f"{metrics['boundary_misses']:>6d}"
         )
     pool = ablation_metrics.get("rrf-pool")
     if pool:
@@ -411,7 +418,7 @@ def print_ablation_table(dataset: str, model: str, ablation_metrics: dict) -> No
         print("  L1 pool recall (raw RRF, no rerank):")
         for key in sorted(pool, key=lambda s: int(s.rsplit("_", 1)[1])):
             depth = key.rsplit("_", 1)[1]
-            print(f"  {'recall@' + depth:<12} {pool[key]:>10.4f}")
+            print(f"  {'recall@' + depth:<18} {pool[key]:>9.4f}")
     print(f"{'=' * 56}\n")
 
 
@@ -769,11 +776,7 @@ def main() -> None:
                         "relevance": row.get("relevance") or [],
                     }
                 )
-            ablation_metrics[label] = {
-                "hit_rate_5": compute_hit_rate_5(samples),
-                "mrr": compute_mrr(samples),
-                "ndcg_10": compute_ndcg_10(samples),
-            }
+            ablation_metrics[label] = arm_metrics(samples)
 
         # L1 pool recall: Recall@K over the raw RRF pool (no rerank, no fixed-k
         # cut). This is the funnel's recall ceiling stated directly -- a flat
