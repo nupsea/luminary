@@ -19,7 +19,9 @@ else
   PASS=false
 fi
 
-# 2. Verify POST /notes returns full NoteResponse with id, tags, collection_ids
+# 2. Verify POST /notes returns full NoteResponse with id, tags, collections
+#    (`collection_ids` became `collections`, a list of {id,name,color} objects;
+#    plan 2E.5 replaced the bare id list.)
 echo "--- Check 2: POST /notes returns full model ---"
 TMPFILE=$(mktemp /tmp/s204_XXXXXX.json)
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/notes" \
@@ -27,7 +29,7 @@ STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/notes" \
   -d '{"document_id":"smoke-s204-doc","section_id":null,"content":"Smoke test note for S204","tags":["smoke"],"group_name":null}')
 if [ "$STATUS" = "200" ] || [ "$STATUS" = "201" ]; then
   # Check required fields exist in response
-  for field in id tags collection_ids created_at updated_at; do
+  for field in id tags collections created_at updated_at; do
     if grep -q "\"$field\"" "$TMPFILE"; then
       echo "  OK: response contains $field"
     else
@@ -50,7 +52,11 @@ rm -f "$TMPFILE"
 # 3. Verify invalidation code exists in DocumentReader.tsx
 echo "--- Check 3: Query invalidation in DocumentReader ---"
 DR="$REPO_ROOT/frontend/src/components/reader/DocumentReader.tsx"
-for key in "reader-notes" '"notes"' '"notes-groups"' '"collections"'; do
+# `"collections"` is deliberately absent: creating a note joins no collection
+# (measured -- a note posted with a document_id comes back `collections: []`),
+# so nothing about collections goes stale and the invalidation was dropped when
+# capture moved into QuickNoteComposer (f5d2344).
+for key in "reader-notes" '"notes"' '"notes-groups"'; do
   COUNT=$(grep -c "$key" "$DR" 2>/dev/null || echo 0)
   if [ "$COUNT" -ge 1 ]; then
     echo "  OK: $key invalidation found ($COUNT occurrences)"

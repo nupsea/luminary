@@ -13,7 +13,9 @@ COL_JSON=$(curl -sf -X POST -H 'Content-Type: application/json' \
 echo "$COL_JSON" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-assert d.get('name') == 'SmokeColl', 'name mismatch'
+# normalize_collection_name upper-cases and hyphenates on the way in
+# (services/naming.py), so the name returned is the normalised one.
+assert d.get('name') == 'SMOKECOLL', 'name mismatch'
 assert d.get('color') == '#FF5733', 'color mismatch'
 assert d.get('parent_collection_id') is None, 'should be top-level'
 print('POST /collections OK id=' + d['id'])
@@ -30,7 +32,7 @@ echo "$CHILD_JSON" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 assert d.get('parent_collection_id') is not None, 'parent_collection_id should be set'
-assert d.get('name') == 'SmokeChild', 'child name mismatch'
+assert d.get('name') == 'SMOKECHILD', 'child name mismatch'
 print('POST /collections (child) OK')
 "
 CHILD_ID=$(echo "$CHILD_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
@@ -123,7 +125,7 @@ curl -sf -X PUT -H 'Content-Type: application/json' \
   "$BASE/collections/$COL_ID" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-assert d['name'] == 'SmokeCollRenamed', 'rename failed: ' + d['name']
+assert d['name'] == 'SMOKECOLLRENAMED', 'rename failed: ' + d['name']
 print('PUT /collections/{id} rename OK')
 "
 

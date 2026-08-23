@@ -33,7 +33,11 @@ fi
 
 # 3. TypeScript compilation
 echo "--- Check 3: tsc --noEmit ---"
-if (cd "$REPO_ROOT/frontend" && npx tsc --noEmit 2>&1); then
+# tsconfig.json is solution-style ("files": []), so a bare `tsc --noEmit`
+# resolves zero files and exits 0 with real type errors present -- measured.
+# `-b` walks the project references; the project binary, not npx, is the
+# compiler this repo pins.
+if (cd "$REPO_ROOT/frontend" && ./node_modules/.bin/tsc -b --noEmit --force 2>&1); then
   echo "PASS: tsc --noEmit exits 0"
 else
   echo "FAIL: tsc --noEmit had errors"

@@ -21,7 +21,11 @@ echo "PASS: list notes returns section_id"
 
 echo "S106 [3/3]: TypeScript type check..."
 cd "$(dirname "$0")/../../frontend"
-npx tsc --noEmit
+# tsconfig.json is solution-style ("files": []), so a bare `tsc --noEmit`
+# resolves zero files and exits 0 with real type errors present -- measured.
+# `-b` walks the project references; the project binary, not npx, is the
+# compiler this repo pins.
+./node_modules/.bin/tsc -b --noEmit --force
 echo "PASS: tsc --noEmit"
 
 echo "S106: ALL CHECKS PASSED"
