@@ -26,22 +26,32 @@ model, key = svc.get_effective_routing()
 assert model.startswith("ollama/"), f"private mode should return ollama/ prefix, got: {model}"
 assert key is None, "private mode should return None api_key"
 
-# Verify get_effective_routing raises ValueError for cloud + no key
-import pytest
+# Verify get_effective_routing raises ValueError for cloud + no key.
+# Emptying _cache is no longer enough to mean "no key": routing resolves through
+# resolve_provider_api_key, which falls back to the environment, so a developer
+# with OPENAI_API_KEY exported got a key and no raise. Stub the resolver, which
+# is the thing that decides.
 svc._cache["llm_mode"] = "cloud"
 svc._cache["cloud_provider"] = "openai"
 svc._cache["openai_api_key"] = ""
+_real_resolve = svc.resolve_provider_api_key
+svc.resolve_provider_api_key = lambda provider: ""
 try:
     svc.get_effective_routing()
     assert False, "Expected ValueError not raised"
 except ValueError as e:
     assert "key not configured" in str(e), f"Unexpected error: {e}"
+finally:
+    svc.resolve_provider_api_key = _real_resolve
 
-# Verify route returns key when encrypted key present
-svc._cache["openai_api_key"] = encrypt_setting("sk-real-key")
+# Verify routing returns the key once one is configured. The cache holds
+# plaintext: decryption happens once in _load_settings, and legacy XOR values are
+# migrated there, so the resolver returns what it finds rather than decrypting
+# on every call. Putting ciphertext in the cache asserted the older design.
+svc._cache["openai_api_key"] = "sk-real-key"
 model2, key2 = svc.get_effective_routing()
 assert model2.startswith("openai/"), f"cloud openai should have openai/ prefix, got: {model2}"
-assert key2 == "sk-real-key", "decrypted key mismatch"
+assert key2 == "sk-real-key", f"routing returned {key2!r}"
 
 # Restore defaults
 svc._cache.update(svc._DEFAULTS)

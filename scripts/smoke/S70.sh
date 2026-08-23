@@ -11,27 +11,30 @@ uv run python - <<'EOF'
 import ast, sys
 from pathlib import Path
 
-src = Path("app/workflows/ingestion.py").read_text()
-tree = ast.parse(src)
+# The pipeline was split into nodes: the chunk writes moved out of
+# workflows/ingestion.py into workflows/ingestion_nodes/, so counting one file
+# found zero and reported a regression in batching that had not happened. What
+# matters is that chunks are inserted in batches somewhere in the pipeline, so
+# the whole package is what gets counted.
+node_files = sorted(Path("app/workflows/ingestion_nodes").glob("*.py"))
+assert node_files, "no ingestion nodes found -- has the package moved again?"
 
 add_all_calls = 0
-add_chunk_calls = 0
-for node in ast.walk(tree):
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Attribute):
-            if func.attr == "add_all":
+for path in [Path("app/workflows/ingestion.py"), *node_files]:
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "add_all":
                 add_all_calls += 1
-            elif func.attr == "add":
-                # Check if the argument is a ChunkModel (by variable name heuristic)
-                add_chunk_calls += 1
 
-assert add_all_calls >= 4, f"Expected >= 4 add_all calls in ingestion.py, got {add_all_calls}"
+assert add_all_calls >= 4, (
+    f"Expected >= 4 add_all calls across the ingestion pipeline, got {add_all_calls}: "
+    "a per-row session.add() per chunk is what this guards against"
+)
 
 # Verify generate_all_summaries is defined on SummarizationService
 from app.services.summarizer import SummarizationService
 assert hasattr(SummarizationService, "generate_all_summaries"), \
     "SummarizationService missing generate_all_summaries method"
 
-print(f"PASS: {add_all_calls} add_all calls in ingestion.py, generate_all_summaries defined")
+print(f"PASS: {add_all_calls} add_all calls across the ingestion pipeline, generate_all_summaries defined")
 EOF
