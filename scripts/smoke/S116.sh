@@ -9,7 +9,8 @@ DOC_ID="smoke-test-nonexistent"
 
 echo "S116 smoke: GET /study/section-heatmap?document_id=${DOC_ID}"
 RESPONSE=$(curl -sf -w "\n%{http_code}" "${BASE}/study/section-heatmap?document_id=${DOC_ID}")
-BODY=$(echo "$RESPONSE" | head -n -1)
+# `head -n -1` is GNU-only and errors on macOS; sed drops the last line portably.
+BODY=$(echo "$RESPONSE" | sed '$d')
 STATUS=$(echo "$RESPONSE" | tail -n 1)
 
 if [ "$STATUS" != "200" ]; then

@@ -13,7 +13,8 @@ echo "S130 smoke: GET /evals/results"
 
 response=$(curl -s -w "\n%{http_code}" "${BASE_URL}/evals/results")
 http_code=$(echo "$response" | tail -1)
-body=$(echo "$response" | head -n -1)
+# `head -n -1` is GNU-only and errors on macOS; sed drops the last line portably.
+body=$(echo "$response" | sed '$d')
 
 if [ "$http_code" != "200" ]; then
   echo "FAIL: expected HTTP 200, got $http_code"

@@ -7,7 +7,8 @@ BASE="http://localhost:7820"
 
 echo "S115 smoke: GET /study/sessions"
 RESPONSE=$(curl -sf -w "\n%{http_code}" "${BASE}/study/sessions?page=1&page_size=5")
-BODY=$(echo "$RESPONSE" | head -n -1)
+# `head -n -1` is GNU-only and errors on macOS; sed drops the last line portably.
+BODY=$(echo "$RESPONSE" | sed '$d')
 STATUS=$(echo "$RESPONSE" | tail -n 1)
 
 if [ "$STATUS" != "200" ]; then
