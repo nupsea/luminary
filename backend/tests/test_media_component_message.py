@@ -55,5 +55,8 @@ def test_the_build_arg_the_message_names_is_wired_end_to_end():
     # and the transcriber missing and the user hits a second wall.
     media_step = dockerfile.split("ARG WITH_MEDIA", 1)[1]
     assert "ffmpeg" in media_step
-    assert "--group full" in media_step, "yt-dlp lives in the full group"
-    assert "--group media" in media_step, "faster-whisper lives in the media group"
+    assert "--group media" in media_step, "yt-dlp and faster-whisper live there"
+    # `full` also carries the tree-sitter grammars and code_parsing is a
+    # full-mode surface, so pulling it here would ship libraries this image
+    # has no surface for.
+    assert "--group full" not in media_step

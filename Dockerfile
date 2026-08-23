@@ -45,16 +45,17 @@ RUN uv sync --frozen --no-default-groups --no-install-project
 # publishes an image), so opting in installs GPL code from upstream by the
 # user's own action, exactly as `apt install ffmpeg` would.
 #
-# One flag does the whole path deliberately. ffmpeg alone leaves the download
+# One flag does the whole path deliberately. ffmpeg alone leaves the downloader
 # and the transcriber missing, and the user hits a second wall with a worse
 # message -- the failure mode `_media_missing_message` exists to prevent.
+# `media` and not `full`: `full` also carries the tree-sitter grammars, and
+# `code_parsing` is a full-mode surface this image does not serve.
 ARG WITH_MEDIA=0
 RUN if [ "$WITH_MEDIA" = "1" ]; then \
       apt-get update && \
       apt-get install -y --no-install-recommends ffmpeg && \
       rm -rf /var/lib/apt/lists/* && \
-      uv sync --frozen --no-default-groups --group full --group media \
-        --no-install-project; \
+      uv sync --frozen --no-default-groups --group media --no-install-project; \
     fi
 
 # Copy app code and the surface manifest.
