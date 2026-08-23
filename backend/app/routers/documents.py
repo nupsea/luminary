@@ -74,7 +74,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
-from app.services.components import capabilities, get_component
+from app.services.components import capabilities, get_component, running_in_container
 from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
@@ -532,10 +532,20 @@ def _media_missing_message(required: list[str]) -> str:
         # bundle's PATH could not see it. It is found automatically now, so the
         # remaining case is genuinely not having it.
         names = _component_labels(manual)
-        parts.append(
-            f"{names} is found automatically once installed on this machine "
-            f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
-        )
+        if running_in_container():
+            # Host advice cannot reach a container: the user installs ffmpeg on
+            # their Mac, the Linux container still cannot see it, and the wall
+            # is identical. The image is the thing that has to change.
+            parts.append(
+                f"{names} is not in this Docker image. Rebuild it with "
+                f"`WITH_MEDIA=1 docker compose --profile ai up --build`; "
+                f"installing on the host does not reach the container."
+            )
+        else:
+            parts.append(
+                f"{names} is found automatically once installed on this machine "
+                f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
+            )
     return " ".join(parts)
 
 

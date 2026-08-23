@@ -36,6 +36,27 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-default-groups --no-install-project
 
+# Audio/video ingestion (MP4, YouTube), off by default.
+#
+# ffmpeg and faster-whisper's PyAV carry x264/x265, which are GPL-2.0-or-later,
+# and Luminary is Apache-2.0 -- so neither may travel inside anything the
+# project distributes. Nothing here breaks that: this image is built on the
+# user's own machine (`docker-compose.yml` uses `build:`, and no workflow
+# publishes an image), so opting in installs GPL code from upstream by the
+# user's own action, exactly as `apt install ffmpeg` would.
+#
+# One flag does the whole path deliberately. ffmpeg alone leaves the download
+# and the transcriber missing, and the user hits a second wall with a worse
+# message -- the failure mode `_media_missing_message` exists to prevent.
+ARG WITH_MEDIA=0
+RUN if [ "$WITH_MEDIA" = "1" ]; then \
+      apt-get update && \
+      apt-get install -y --no-install-recommends ffmpeg && \
+      rm -rf /var/lib/apt/lists/* && \
+      uv sync --frozen --no-default-groups --group full --group media \
+        --no-install-project; \
+    fi
+
 # Copy app code and the surface manifest.
 # surface_manifest.py resolves Path(__file__).parents[2]/surface-manifest.json;
 # in this image __file__=/app/app/surface_manifest.py so parents[2]=/

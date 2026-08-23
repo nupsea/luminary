@@ -14,7 +14,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from evals.lib.retrieval_metrics import _norm, arm_metrics, compute_hit_rate_5, count_boundary_misses
+from evals.lib.retrieval_metrics import (
+    _norm,
+    arm_metrics,
+    compute_hit_rate_5,
+    count_boundary_misses,
+)
 
 
 def _sample(hint: str, *chunks: str) -> dict:
