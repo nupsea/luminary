@@ -11,14 +11,8 @@ The GPL carve-out is real and stays, but it has to be declared here rather than
 discovered by a user whose ingest fails.
 """
 
-import re
-import tomllib
-from pathlib import Path
-
 import pytest
-
-REPO = Path(__file__).resolve().parents[2]
-PYPROJECT = tomllib.loads((REPO / "backend" / "pyproject.toml").read_text())
+from dependency_groups import BASE, GROUPS
 
 # The distributions each public ingest surface cannot run without.
 PUBLIC_SURFACE_DISTRIBUTIONS = {
@@ -31,32 +25,6 @@ PUBLIC_SURFACE_DISTRIBUTIONS = {
 # may not travel inside anything Luminary distributes. These are opt-in at
 # build time (WITH_MEDIA=1) instead of shipping by default.
 GPL_GATED = {"youtube_ingest", "audio_transcribe"}
-
-
-_RAW_GROUPS = PYPROJECT["dependency-groups"]
-
-
-def _names(requirements, *, seen: frozenset[str] = frozenset()) -> set[str]:
-    """Distribution names in a requirement list, resolving PEP 735 includes.
-
-    Without the include-group arm this reports `media` as holding only
-    faster-whisper, which is what uv installs plus everything the include
-    pulls in -- a test that reads groups differently from the resolver would
-    pass while the built image lacked the package.
-    """
-    out: set[str] = set()
-    for req in requirements:
-        if isinstance(req, str):
-            out.add(re.split(r"[<>=!~\[ ]", req, maxsplit=1)[0].strip().lower())
-        elif isinstance(req, dict) and "include-group" in req:
-            included = req["include-group"]
-            assert included not in seen, f"dependency-group cycle at {included!r}"
-            out |= _names(_RAW_GROUPS[included], seen=seen | {included})
-    return out
-
-
-BASE = _names(PYPROJECT["project"]["dependencies"])
-GROUPS = {name: _names(reqs) for name, reqs in _RAW_GROUPS.items()}
 
 
 @pytest.mark.parametrize(

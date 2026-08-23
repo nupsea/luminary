@@ -198,7 +198,7 @@ WITH_MEDIA=1 docker compose --profile ai up --build
 ```
 
 That installs ffmpeg from Debian plus the download and transcription packages,
-by your own action, and adds roughly 300 MB to the image. Installing ffmpeg on
+by your own action, and adds about 850 MB to the image. Installing ffmpeg on
 the Mac itself does nothing here -- the backend is a Linux container and cannot
 see the host's PATH.
 </details>

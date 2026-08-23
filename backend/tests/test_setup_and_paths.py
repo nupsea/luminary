@@ -366,17 +366,16 @@ def test_transcription_is_kept_out_of_the_bundle_dependency_set():
     installs. The bundle builds `--no-default-groups --group full`; this is the
     guard that keeps `media` separate.
     """
-    import tomllib
+    from dependency_groups import BASE, GROUPS
 
-    from app.paths import pyproject_path
-
-    with pyproject_path().open("rb") as fh:
-        groups = tomllib.load(fh)["dependency-groups"]
-
-    full = " ".join(groups["full"])
-    media = " ".join(groups["media"])
-    assert "faster-whisper" in media
-    assert "faster-whisper" not in full, "GPL-carrying deps must not ship in the installer"
+    assert "faster-whisper" in GROUPS["media"]
+    # Transitive: `full` and `media` both include the `youtube` group, so a
+    # string search over `full`'s own entries would no longer see everything
+    # the installer actually gets.
+    assert "faster-whisper" not in GROUPS["full"], (
+        "GPL-carrying deps must not ship in the installer"
+    )
+    assert "faster-whisper" not in BASE, "nor in the base set every install takes"
 
 
 @pytest.mark.parametrize(
