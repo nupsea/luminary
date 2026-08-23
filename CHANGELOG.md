@@ -6,6 +6,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-08-23
+
+### Fixed
+- **Choosing a local model in Private mode had no effect.** The Study and Chat
+  headers discarded it before the request went out, so the model you picked was
+  never the model that answered. Private is the default mode, so this affected
+  most installs.
+- **Notes were never searchable by meaning.** Every note embedding failed and was
+  logged as harmless, so a library could hold hundreds of notes and no vectors,
+  and asking chat about your notes answered "nothing in your library matches".
+  Existing libraries are repaired automatically on the next start.
+- **A tag with a slash in it could be created and then never renamed or
+  deleted** -- and the app creates those itself, turning "Science/Cell Division"
+  into `science/cell-division`.
+- **Cleaning up duplicate collection names failed with an error** instead of
+  merging them.
+- **Tag merge suggestions stopped appearing.** The scan that produces them died
+  on a pair it had already suggested, and said so only in the log.
+- **An answer could show a confidence chip reading "high|medium|low"** -- the
+  model repeating the format it was asked for, shown as if it were a measurement.
+- **Luminary now says so when a text model has never been measured for text** --
+  at startup and in Settings. A shipped install was running the figure reader as
+  its chat model, which nothing reported and only showed up as worse answers.
+  The startup check also ran before your saved settings loaded, so a model chosen
+  in Settings was invisible to every warning it makes.
+
+### Changed
+- **The HTTP contract suite is honest again.** Of 179 checks, 63 were failing
+  against endpoints, response shapes and thresholds the product had deliberately
+  moved on from; several asserted behaviour that had been removed on purpose,
+  including one requiring admin routes to be reachable without credentials. Six
+  more reported success while verifying nothing.
+
 ## [0.7.5] - 2026-08-23
 
 ### Fixed
