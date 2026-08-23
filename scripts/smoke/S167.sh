@@ -110,12 +110,14 @@ import sys, json
 d = json.load(sys.stdin)
 node = next((n for n in d['nodes'] if n['id'] == '$SHARED_TAG_A'), None)
 if node:
-  ok = all(k in node for k in ['id', 'display_name', 'note_count'])
+  # `note_count` became `usage_count`: a tag is used by documents as well as
+  # notes, so the count is not notes-only.
+  ok = all(k in node for k in ['id', 'display_name', 'usage_count'])
   print(str(ok).lower())
 else:
   print('false')
 ")
-check "Node has id, display_name, note_count fields" "$NODE_SHAPE"
+check "Node has id, display_name, usage_count fields" "$NODE_SHAPE"
 
 # Cleanup
 echo ""
