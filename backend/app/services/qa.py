@@ -552,6 +552,12 @@ def _drop_ungrounded_citations(
     return kept
 
 
+# The only values a confidence may take. The prompt spells them out as
+# `"confidence":"high|medium|low"`, so the spec string itself is a value the
+# model can emit and must never be accepted as one.
+CONFIDENCE_LEVELS = frozenset({"high", "medium", "low"})
+
+
 def _split_response(full_text: str) -> tuple[str, list[dict], str]:
     """Extract (answer_text, citations, confidence) from the LLM response.
 
@@ -629,9 +635,16 @@ def _split_response(full_text: str) -> tuple[str, list[dict], str]:
                 answer = salvaged
 
     confidence = parsed.get("confidence")
-    if not isinstance(confidence, str) or not confidence:
-        # No parseable confidence (usually a truncated block): fall back to the
-        # same length heuristic as the no-JSON path instead of a blanket "low".
+    if isinstance(confidence, str):
+        confidence = confidence.strip().lower()
+    if confidence not in CONFIDENCE_LEVELS:
+        # No usable confidence: a truncated block, or the model echoing the
+        # format spec back at us. The prompt shows it
+        # `"confidence":"high|medium|low"` and a 4B model returns that string
+        # verbatim often enough to matter -- it passed a bare "is a non-empty
+        # string" test and reached the UI as a confidence level, which is the
+        # product's own placeholder being read as its measurement. Fall back to
+        # the same length heuristic as the no-JSON path.
         confidence = "medium" if len(answer) > 80 else "low"
     return answer, citations, confidence
 
