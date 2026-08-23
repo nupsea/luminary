@@ -33,14 +33,28 @@ EOF
 )
 
 DOC_ID=$(echo "$INGEST_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['document_id'])")
+
+# Delete it however this exits: the script ingested a document per run and left
+# every one of them in the library.
+trap 'curl -s -o /dev/null -X DELETE "$BASE/documents/$DOC_ID" || true' EXIT
 echo "Created document: $DOC_ID"
 
-# Wait briefly for ingestion background tasks
-sleep 2
+# Ingestion is asynchronous; poll rather than guess at a sleep.
+for _ in $(seq 1 60); do
+  STAGE=$(curl -s "$BASE/documents/$DOC_ID" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))" 2>/dev/null || echo "")
+  [ "$STAGE" = "complete" ] && break
+  sleep 2
+done
+[ "$STAGE" = "complete" ] || { echo "FAIL: document stalled at stage=${STAGE:-unknown}"; exit 1; }
 
-# Request executive summary with force_refresh=true and collect streaming output
-SUMMARY_TEXT=$(curl -sf \
-  "$BASE/summarize/$DOC_ID?mode=executive&force_refresh=true" \
+# Request executive summary with force_refresh=true and collect streaming output.
+# `GET /summarize/{id}?mode=...` is a 405: summarize takes POST with a JSON body.
+# With `curl -sf` under `set -e` that killed the script with no message at all.
+SUMMARY_TEXT=$(curl -sf -X POST \
+  "$BASE/summarize/$DOC_ID" \
+  --header "Content-Type: application/json" \
+  --data '{"mode": "executive", "force_refresh": true}' \
   --header "Accept: text/event-stream" \
   | grep '^data:' \
   | python3 -c "
