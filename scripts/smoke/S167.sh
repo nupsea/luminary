@@ -49,15 +49,29 @@ SHARED_TAG_B="smoke-cooccur-b-$$"
 
 echo ""
 echo "-- Creating notes with shared tags to test graph content --"
-NOTE1_RESP=$(curl -sf -X POST "$BASE/notes" \
-  -H "Content-Type: application/json" \
-  -d "{\"content\":\"Smoke note 1\",\"tags\":[\"$SHARED_TAG_A\",\"$SHARED_TAG_B\"]}")
+# Not `curl -sf`: under `set -e` a non-2xx kills the script with no output at
+# all, which is how this failed inside the suite while passing in isolation --
+# four identical creations in a row succeed on an idle backend. Capture the
+# status so a load-dependent failure says what it was instead of vanishing.
+post_note() {
+  local body="$1" out code
+  out=$(mktemp)
+  code=$(curl -s -o "$out" -w "%{http_code}" -X POST "$BASE/notes" \
+    -H "Content-Type: application/json" -d "$body")
+  if [ "$code" != "201" ] && [ "$code" != "200" ]; then
+    echo "  FAIL: POST /notes returned $code: $(head -c 200 "$out")" >&2
+    rm -f "$out"
+    return 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+
+NOTE1_RESP=$(post_note "{\"content\":\"Smoke note 1\",\"tags\":[\"$SHARED_TAG_A\",\"$SHARED_TAG_B\"]}")
 NOTE1_ID=$(echo "$NOTE1_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['id'])")
 check "POST /notes note1 created" "$([ -n "$NOTE1_ID" ] && echo true || echo false)"
 
-NOTE2_RESP=$(curl -sf -X POST "$BASE/notes" \
-  -H "Content-Type: application/json" \
-  -d "{\"content\":\"Smoke note 2\",\"tags\":[\"$SHARED_TAG_A\",\"$SHARED_TAG_B\"]}")
+NOTE2_RESP=$(post_note "{\"content\":\"Smoke note 2\",\"tags\":[\"$SHARED_TAG_A\",\"$SHARED_TAG_B\"]}")
 NOTE2_ID=$(echo "$NOTE2_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['id'])")
 check "POST /notes note2 created" "$([ -n "$NOTE2_ID" ] && echo true || echo false)"
 
