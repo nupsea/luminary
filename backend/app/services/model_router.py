@@ -33,11 +33,14 @@ from app.model_registry import (
     _GB,
     _RESIDENT_SET_FRACTION,
     ROLES,
+    TEXT_PREFERENCE,
+    TEXT_ROLES,
     ModelProfile,
     Role,
     configured_generation_override,
     fits_host,
     fits_together,
+    is_measured_text_model,
     profile_for,
     vision_candidates,
 )
@@ -241,7 +244,10 @@ def resident_models() -> set[str]:
 
 
 def warn_if_configuration_exceeds_host() -> list[str]:
-    """Log every way the configured models are too big for this machine.
+    """Log every way the configured models are a poor fit for this machine.
+
+    Size was the whole of it once, which is how a figure reader configured as the
+    chat model produced a clean report.
 
     Returns the warnings so a caller can surface them too. Advisory by design:
     a model chosen by hand is honoured, because a backend that refuses to start
@@ -299,6 +305,17 @@ def warn_if_configuration_exceeds_host() -> list[str]:
         warnings.append(
             f"no measured footprint for {', '.join(report['unmeasured_models'])} -- "
             f"this machine's headroom is unknown, not fine"
+        )
+    ranked = ", ".join(TEXT_PREFERENCE)
+    for role, detail in (report.get("unranked_text_roles") or {}).items():
+        kind = (
+            "a figure reader"
+            if detail["multimodal"]
+            else "a model never measured for text"
+        )
+        warnings.append(
+            f"{role} answers with {detail['model']}, {kind}: it is not in the measured "
+            f"text order ({ranked}), so the quality of what it writes is unknown"
         )
 
     for line in warnings:
@@ -389,4 +406,19 @@ def residency_report() -> dict[str, Any]:
         # Without this, configuring a model too large for the profile produced a
         # clean report describing a model the user never chose.
         "narrowed_defaults": narrowed_defaults(),
+        # Text roles answering with a local model that is not in the measured
+        # text order. Size was the only thing this report checked, so a shipped
+        # install had `qwen2.5vl:7b` -- a figure reader -- configured as its chat
+        # model, every field read clean, and the only visible symptom was worse
+        # answers. Cloud models are exempt: the order ranks local models.
+        "unranked_text_roles": {
+            role: {
+                "model": choice.model,
+                "multimodal": bool(p.multimodal) if (p := profile_for(choice.model)) else False,
+            }
+            for role, choice in per_role.items()
+            if role in TEXT_ROLES
+            and choice.is_local
+            and not is_measured_text_model(choice.model)
+        },
     }

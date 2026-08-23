@@ -8962,6 +8962,15 @@ export interface components {
              * @default true
              */
             resident_set_fits: boolean;
+            /**
+             * Unranked Text Roles
+             * @default {}
+             */
+            unranked_text_roles: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
         };
         /** ModelUsageItem */
         ModelUsageItem: {

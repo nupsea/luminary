@@ -117,17 +117,6 @@ async def lifespan(app: FastAPI):
         raise
     status.set_state("db", "ready")
 
-    # Say it out loud at boot, not only at GET /settings/models. An oversized
-    # configuration's first symptom was a crash during ingestion, which is the
-    # least useful moment to learn that the models do not fit.
-    try:
-        from app.services.model_router import warn_if_configuration_exceeds_host
-
-        warn_if_configuration_exceeds_host()
-    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
-        # warning, not debug: this swallowed a TypeError in the check itself for
-        # as long as the check existed, so the advisory never ran and nothing said so.
-        logger.warning("model residency check failed", exc_info=True)
     # NOTE: concept regeneration is a manual offline step (with the server stopped
     # so it can hold the Kuzu lock and not starve the event loop):
     #   make concepts
@@ -208,6 +197,24 @@ async def lifespan(app: FastAPI):
         logger.info("LLM settings loaded from DB")
     except Exception:
         logger.warning("Failed to load LLM settings at startup; using defaults", exc_info=True)
+
+    # Say it out loud at boot, not only at GET /settings/models. An oversized
+    # configuration's first symptom was a crash during ingestion, which is the
+    # least useful moment to learn that the models do not fit.
+    #
+    # This has to run AFTER the settings load above. It ran 80 lines earlier,
+    # with the cache still empty, so every role resolved to the registry default
+    # and a model chosen in Settings was invisible to it -- which is precisely
+    # the configuration worth warning about. A shipped install running a figure
+    # reader as its chat model booted silent.
+    try:
+        from app.services.model_router import warn_if_configuration_exceeds_host
+
+        warn_if_configuration_exceeds_host()
+    except Exception:  # noqa: BLE001 -- an advisory check may never block startup
+        # warning, not debug: this swallowed a TypeError in the check itself for
+        # as long as the check existed, so the advisory never ran and nothing said so.
+        logger.warning("model residency check failed", exc_info=True)
 
     # An ingestion that was running when the process died cannot resume: its task
     # is gone and nothing owns the document any more. It used to keep its last

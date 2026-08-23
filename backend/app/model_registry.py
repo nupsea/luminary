@@ -274,6 +274,23 @@ TEXT_PREFERENCE: tuple[str, ...] = (
     "ollama/llama3.2",
 )
 
+# The roles that produce prose. `vision` is excluded because a figure reader is
+# the right answer there; everywhere else it is the wrong one.
+TEXT_ROLES: tuple[Role, ...] = ("chat", "generation", "background")
+
+
+def is_measured_text_model(model_id: str) -> bool:
+    """Whether this id appears in the measured text ordering.
+
+    False does not mean bad -- it means nobody has measured it for text, and the
+    registry has no basis for the claim either way. `qwen2.5vl:7b` is the case
+    that matters: it is in the registry as a reader, not in this order, and
+    selecting it as the chat model is silently answering every question with a
+    model measured only on figures.
+    """
+    return model_id in TEXT_PREFERENCE
+
+
 # A resident set takes at most half the machine. That is the repo's own per-model
 # rule (`min_ram_gb` is twice the resident size) applied to the set instead of the
 # member, because two models break the assumption the per-model rule rests on --
