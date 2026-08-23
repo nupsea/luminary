@@ -23,7 +23,7 @@ DOCEOF
 
 UPLOAD_TMPFILE=$(mktemp)
 HTTP_UPLOAD=$(curl -s -o "${UPLOAD_TMPFILE}" -w "%{http_code}" \
-  -X POST "${BASE}/documents/upload" \
+  -X POST "${BASE}/documents/ingest" \
   -F "file=@${DOC_TMPFILE};type=text/plain" \
   -F "content_type=tech_book")
 rm -f "${DOC_TMPFILE}"
@@ -35,11 +35,30 @@ if [ "$HTTP_UPLOAD" != "200" ] && [ "$HTTP_UPLOAD" != "201" ]; then
   exit 1
 fi
 
-DOC_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" < "${UPLOAD_TMPFILE}")
+DOC_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['document_id'])" < "${UPLOAD_TMPFILE}")
 rm -f "${UPLOAD_TMPFILE}"
 
-echo "Uploaded doc=${DOC_ID}, waiting 3s for processing..."
-sleep 3
+if [ -z "${DOC_ID}" ]; then
+  echo "FAIL: could not extract document id from the ingest response"
+  exit 1
+fi
+
+# Delete the document however this script exits -- see S137.
+cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; }
+trap cleanup_doc EXIT
+
+# Ingestion is asynchronous; poll the stage rather than guessing at a sleep.
+echo "Ingested doc=${DOC_ID}, waiting for stage=complete..."
+for _ in $(seq 1 60); do
+  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))" 2>/dev/null || echo "")
+  [ "$STAGE" = "complete" ] && break
+  sleep 2
+done
+if [ "$STAGE" != "complete" ]; then
+  echo "FAIL: document did not reach stage=complete (last stage: ${STAGE:-unknown})"
+  exit 1
+fi
 
 # GET /references/documents/{id} -- must return 200 with references key
 RESULT_TMPFILE=$(mktemp)

@@ -32,7 +32,7 @@ DOCEOF
 
 UPLOAD_TMPFILE=$(mktemp)
 HTTP_UPLOAD=$(curl -s -o "${UPLOAD_TMPFILE}" -w "%{http_code}" \
-  -X POST "${BASE}/documents/upload" \
+  -X POST "${BASE}/documents/ingest" \
   -F "file=@${DOC_TMPFILE};type=text/plain" \
   -F "content_type=tech_book")
 
@@ -45,16 +45,33 @@ if [ "$HTTP_UPLOAD" != "200" ] && [ "$HTTP_UPLOAD" != "201" ]; then
   exit 1
 fi
 
-DOC_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" < "${UPLOAD_TMPFILE}")
+DOC_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['document_id'])" < "${UPLOAD_TMPFILE}")
 rm -f "${UPLOAD_TMPFILE}"
 
 if [ -z "${DOC_ID}" ]; then
-  echo "FAIL: could not extract document id from upload response"
+  echo "FAIL: could not extract document id from the ingest response"
   exit 1
 fi
 
-echo "Uploaded document id=${DOC_ID}, waiting 3s for ingestion..."
-sleep 3
+# Delete the document however this script exits, so a run does not leave one
+# behind in the library -- these scripts have been depositing one per run.
+cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; }
+trap cleanup_doc EXIT
+
+# Ingestion is asynchronous: /documents/ingest answers `{"document_id", "status":
+# "processing"}` and the pipeline runs behind it. A fixed `sleep 3` was a guess
+# that passed or failed with the machine; poll the stage instead.
+echo "Ingested document id=${DOC_ID}, waiting for stage=complete..."
+for _ in $(seq 1 60); do
+  STAGE=$(curl -s "${BASE}/documents/${DOC_ID}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('stage',''))" 2>/dev/null || echo "")
+  [ "$STAGE" = "complete" ] && break
+  sleep 2
+done
+if [ "$STAGE" != "complete" ]; then
+  echo "FAIL: document did not reach stage=complete (last stage: ${STAGE:-unknown})"
+  exit 1
+fi
 
 # 3. POST /flashcards/generate-technical
 RESULT_TMPFILE=$(mktemp)
