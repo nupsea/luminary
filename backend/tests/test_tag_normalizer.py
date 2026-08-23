@@ -48,12 +48,16 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-def _make_tag(tag_id: str, display_name: str, note_count: int = 5) -> CanonicalTagModel:
+def _make_tag(tag_id: str, display_name: str, usage_count: int = 5) -> CanonicalTagModel:
+    # `note_count` became `usage_count` when tags started counting documents too.
+    # Every test here builds tags through this helper, so the rename broke all of
+    # them at once -- and they are marked `unstable`, excluded from CI by default,
+    # so nothing said so.
     return CanonicalTagModel(
         id=tag_id,
         display_name=display_name,
         parent_tag=None,
-        note_count=note_count,
+        usage_count=usage_count,
         created_at=datetime.now(UTC),
     )
 
@@ -61,15 +65,14 @@ def _make_tag(tag_id: str, display_name: str, note_count: int = 5) -> CanonicalT
 # Tests: scan
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_creates_suggestion_for_similar_pair(test_db):
     """Scan with similar embeddings creates a TagMergeSuggestionModel row."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("ml", "machine learning", note_count=10))
-        session.add(_make_tag("machine-learning", "machine learning", note_count=8))
+        session.add(_make_tag("ml", "machine learning", usage_count=10))
+        session.add(_make_tag("machine-learning", "machine learning", usage_count=8))
         await session.commit()
 
     # ml and machine-learning have identical display_names -> cosine sim = 1.0
@@ -99,19 +102,18 @@ async def test_scan_creates_suggestion_for_similar_pair(test_db):
         row = rows[0]
         assert row.status == "pending"
         assert frozenset([row.tag_a_id, row.tag_b_id]) == frozenset(["ml", "machine-learning"])
-        # suggested canonical = tag with higher note_count = "ml" (10)
+        # suggested canonical = tag with higher usage_count = "ml" (10)
         assert row.suggested_canonical_id == "ml"
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_skips_existing_alias(test_db):
     """Scan skips pairs already linked in TagAliasModel (in either direction)."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("ml", "ml", note_count=10))
-        session.add(_make_tag("machine-learning", "machine learning", note_count=8))
+        session.add(_make_tag("ml", "ml", usage_count=10))
+        session.add(_make_tag("machine-learning", "machine learning", usage_count=8))
         # Pre-existing alias: ml -> machine-learning
         session.add(TagAliasModel(alias="ml", canonical_tag_id="machine-learning"))
         await session.commit()
@@ -134,15 +136,14 @@ async def test_scan_skips_existing_alias(test_db):
     assert count == 0
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_skips_pairs_below_threshold(test_db):
     """Scan skips pairs with cosine similarity <= 0.85."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("python", "python", note_count=5))
-        session.add(_make_tag("cooking", "cooking", note_count=3))
+        session.add(_make_tag("python", "python", usage_count=5))
+        session.add(_make_tag("cooking", "cooking", usage_count=3))
         await session.commit()
 
     # Very different vectors -> low similarity
@@ -161,14 +162,13 @@ async def test_scan_skips_pairs_below_threshold(test_db):
     assert count == 0
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_scan_with_fewer_than_two_tags_returns_zero(test_db):
     """Scan with 0 or 1 tags returns 0 without crashing."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("solo", "solo", note_count=1))
+        session.add(_make_tag("solo", "solo", usage_count=1))
         await session.commit()
 
     service = SmartTagNormalizerService()
@@ -181,21 +181,20 @@ async def test_scan_with_fewer_than_two_tags_returns_zero(test_db):
 # Tests: accept
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_accept_merges_tags_and_creates_alias(test_db):
     """Accept endpoint creates TagAliasModel and deletes source CanonicalTagModel."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("ml", "ml", note_count=10))
-        session.add(_make_tag("machine-learning", "machine learning", note_count=8))
+        session.add(_make_tag("ml", "ml", usage_count=10))
+        session.add(_make_tag("machine-learning", "machine learning", usage_count=8))
         suggestion = TagMergeSuggestionModel(
             id=str(uuid.uuid4()),
             tag_a_id="machine-learning",
             tag_b_id="ml",
             similarity=0.92,
-            suggested_canonical_id="ml",  # ml has higher note_count
+            suggested_canonical_id="ml",  # ml has higher usage_count
             status="pending",
             created_at=datetime.now(UTC),
         )
@@ -238,15 +237,14 @@ async def test_accept_merges_tags_and_creates_alias(test_db):
         assert sug.status == "accepted"
 
 
-@pytest.mark.unstable
 @pytest.mark.anyio
 async def test_reject_sets_status_rejected(test_db):
     """reject_suggestion sets status=rejected without touching tags."""
     _engine, factory, _ = test_db
 
     async with factory() as session:
-        session.add(_make_tag("ai", "ai", note_count=4))
-        session.add(_make_tag("artificial-intelligence", "artificial intelligence", note_count=2))
+        session.add(_make_tag("ai", "ai", usage_count=4))
+        session.add(_make_tag("artificial-intelligence", "artificial intelligence", usage_count=2))
         suggestion = TagMergeSuggestionModel(
             id=str(uuid.uuid4()),
             tag_a_id="ai",
@@ -281,3 +279,55 @@ async def test_reject_sets_status_rejected(test_db):
                 select(CanonicalTagModel).where(CanonicalTagModel.id == "artificial-intelligence")
             )
         ).scalar_one_or_none() is not None
+
+
+@pytest.mark.anyio
+async def test_scan_survives_a_pair_already_suggested_in_both_orientations(test_db):
+    """The existence check must tolerate duplicates it can legitimately find.
+
+    The query matches (a,b) or (b,a), so a pair suggested in both orientations
+    yields two rows -- (a-mouse, mouse) and (mouse, a-mouse) were both present in
+    a real library. `scalar_one_or_none()` raised MultipleResultsFound out of the
+    whole scan; the router caught it, logged "Background tag normalization scan
+    failed", and the scan produced nothing from then on.
+    """
+    _engine, factory, _ = test_db
+
+    async with factory() as session:
+        session.add(_make_tag("mouse", "mouse", usage_count=10))
+        session.add(_make_tag("a-mouse", "a mouse", usage_count=8))
+        for tag_a, tag_b in (("mouse", "a-mouse"), ("a-mouse", "mouse")):
+            session.add(
+                TagMergeSuggestionModel(
+                    id=str(uuid.uuid4()),
+                    tag_a_id=tag_a,
+                    tag_b_id=tag_b,
+                    suggested_canonical_id=tag_a,
+                    similarity=0.99,
+                    status="pending",
+                    created_at=datetime.now(UTC),
+                )
+            )
+        await session.commit()
+
+    vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    near = np.array([0.99, 0.14, 0.0], dtype=np.float32)
+    mock_embeddings = [
+        (vec / np.linalg.norm(vec)).tolist(),
+        (near / np.linalg.norm(near)).tolist(),
+    ]
+
+    service = SmartTagNormalizerService()
+    with patch(
+        "app.services.tag_normalizer.asyncio.to_thread",
+        AsyncMock(return_value=mock_embeddings),
+    ):
+        async with factory() as session:
+            count = await service.scan(session)
+
+    # The pair is already suggested, so nothing new -- and, crucially, no raise.
+    assert count == 0
+
+    async with factory() as session:
+        rows = (await session.execute(select(TagMergeSuggestionModel))).scalars().all()
+        assert len(rows) == 2, "the scan must not add a third row for the same pair"
