@@ -2,6 +2,13 @@
 # Smoke test for S182 -- YouTube transcript viewer: GET /documents/{id}/chunks
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="${BASE:-http://localhost:7820}"
 PASS=0
 FAIL=0
@@ -53,7 +60,7 @@ BODY=$(cat "$TMPFILE")
 check "GET /documents returns 200" "$STATUS" "200" "$BODY" ""
 
 # Test 3: Create a plain text document and verify chunks endpoint works
-UPLOAD_TMPFILE=$(mktemp /tmp/s182_smoke_XXXXXX.txt)
+UPLOAD_TMPFILE="$SMOKE_TMPDIR/s182_smoke.txt"
 echo "This is a test document for S182 smoke test. It has some content." > "$UPLOAD_TMPFILE"
 
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" \

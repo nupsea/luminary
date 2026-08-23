@@ -3,6 +3,12 @@
 # Requires a running backend at http://localhost:7820.
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+
 BASE="http://localhost:7820"
 
 # Health check
@@ -13,7 +19,7 @@ if [ "$HTTP_HEALTH" != "200" ]; then
 fi
 
 # Upload a minimal tech document
-DOC_TMPFILE=$(mktemp /tmp/s138doc.XXXXXX.txt)
+DOC_TMPFILE="$SMOKE_TMPDIR/s138doc.txt"
 cat > "${DOC_TMPFILE}" << 'DOCEOF'
 ## Python Generators
 
@@ -44,7 +50,7 @@ if [ -z "${DOC_ID}" ]; then
 fi
 
 # Delete the document however this script exits -- see S137.
-cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; }
+cleanup_doc() { curl -s -o /dev/null -X DELETE "${BASE}/documents/${DOC_ID}" || true; rm -rf "$SMOKE_TMPDIR"; }
 trap cleanup_doc EXIT
 
 # Ingestion is asynchronous; poll the stage rather than guessing at a sleep.

@@ -7,10 +7,17 @@
 #   4. TypeScript compilation passes
 
 set -euo pipefail
+
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
 FAIL=0
-TMPFILE=$(mktemp /tmp/smoke_s198_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/smoke_s198.json"
 
 echo "=== S198 Smoke: highlight reliability ==="
 

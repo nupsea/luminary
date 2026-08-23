@@ -3,6 +3,13 @@
 # Frontend-only fix (query invalidation) -- verify backend contract + tsc.
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${LUMINARY_PORT:-7820}"
 BASE="http://localhost:$PORT"
@@ -23,7 +30,7 @@ fi
 #    (`collection_ids` became `collections`, a list of {id,name,color} objects;
 #    plan 2E.5 replaced the bare id list.)
 echo "--- Check 2: POST /notes returns full model ---"
-TMPFILE=$(mktemp /tmp/s204_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s204.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/notes" \
   -H "Content-Type: application/json" \
   -d '{"document_id":"smoke-s204-doc","section_id":null,"content":"Smoke test note for S204","tags":["smoke"],"group_name":null}')

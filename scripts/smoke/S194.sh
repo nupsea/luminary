@@ -2,6 +2,13 @@
 # Smoke test for S194 -- References: URL validation and pruning of dead links
 set -euo pipefail
 
+# BSD mktemp only substitutes Xs at the END of a template, so
+# `mktemp /tmp/foo.XXXXXX.json` created that name literally: the script worked
+# once per machine and then failed "File exists" forever. One per-run directory
+# keeps the extensions -- uploads are validated on them -- and cleans up itself.
+SMOKE_TMPDIR=$(mktemp -d)
+trap 'rm -rf "$SMOKE_TMPDIR"' EXIT
+
 BASE="http://localhost:7820"
 FAIL=0
 
@@ -9,7 +16,7 @@ echo "=== S194 Smoke: Reference URL validation ==="
 
 # Find an existing document
 echo "[1/5] Finding an existing document..."
-TMPFILE=$(mktemp /tmp/s194_1_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s194_1.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/documents?limit=1")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -32,7 +39,7 @@ echo "  OK: doc_id=$DOC_ID"
 
 # GET /references/documents/{id} -- default (exclude invalid)
 echo "[2/5] GET /references/documents/{id} (default)..."
-TMPFILE=$(mktemp /tmp/s194_2_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s194_2.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/references/documents/$DOC_ID")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -51,7 +58,7 @@ fi
 
 # GET /references/documents/{id}?include_invalid=true
 echo "[3/5] GET /references/documents/{id}?include_invalid=true..."
-TMPFILE=$(mktemp /tmp/s194_3_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s194_3.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/references/documents/$DOC_ID?include_invalid=true")
 rm -f "$TMPFILE"
 if [ "$STATUS" != "200" ]; then
@@ -63,7 +70,7 @@ fi
 
 # POST /references/documents/{id}/validate
 echo "[4/5] POST /references/documents/{id}/validate..."
-TMPFILE=$(mktemp /tmp/s194_4_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s194_4.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/references/documents/$DOC_ID/validate")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
@@ -82,7 +89,7 @@ fi
 
 # POST /references/documents/{id}/refresh
 echo "[5/5] POST /references/documents/{id}/refresh..."
-TMPFILE=$(mktemp /tmp/s194_5_XXXXXX.json)
+TMPFILE="$SMOKE_TMPDIR/s194_5.json"
 STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$BASE/references/documents/$DOC_ID/refresh")
 BODY=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
