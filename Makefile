@@ -144,8 +144,14 @@ release:
 	echo "release-macos-app.yml (signed, notarized DMG). Both attach to the same release."; \
 	git tag -a "v$$v" -m "Luminary $$v" && git push origin "v$$v"
 
+# WITH_MEDIA=1 adds ffmpeg and the transcriber (GPL, opt-in; see the Dockerfile).
+# docker-run gets it through compose's own ${WITH_MEDIA} interpolation; this
+# target builds directly, so it has to pass the arg itself or the flag is
+# silently ignored on exactly one of the two documented ways to build.
+WITH_MEDIA ?= 0
+
 docker-build:
-	docker build -t luminary:latest .
+	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
 
 docker-run:
 	docker compose --profile ai up --build
