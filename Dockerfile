@@ -86,7 +86,13 @@ COPY backend/pyproject.toml /backend/pyproject.toml
 # (same reason surface-manifest.json is placed at / above).
 COPY --from=frontend-build /frontend/dist /frontend/dist
 
-ENV LUMINARY_MODE=public \
+# The venv's bin on PATH, because `resolve_tool` finds tools with
+# `shutil.which`. `uv run` used to put it there; running the interpreter
+# directly does not, so console scripts installed into the venv (yt-dlp) were
+# present on disk and invisible to the app -- a YouTube ingest failed saying
+# yt-dlp was missing while `/app/.venv/bin/yt-dlp --version` answered fine.
+ENV PATH="/app/.venv/bin:${PATH}" \
+    LUMINARY_MODE=public \
     DATA_DIR=/data \
     PORT=7820
 

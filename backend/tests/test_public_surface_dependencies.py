@@ -44,8 +44,18 @@ def test_an_ungated_public_surface_ships_in_the_public_image(surface):
 def test_a_gpl_gated_surface_is_reachable_through_the_media_opt_in(surface):
     """The carve-out may withhold these from the image; it may not strand them
     where no documented install reaches them at all."""
-    missing = [d for d in PUBLIC_SURFACE_DISTRIBUTIONS[surface] if d not in GROUPS["media"]]
+    reachable = BASE | GROUPS["media"]
+    missing = [d for d in PUBLIC_SURFACE_DISTRIBUTIONS[surface] if d not in reachable]
     assert not missing, f"{surface} needs {missing}, which WITH_MEDIA=1 does not install"
+
+
+def test_only_a_real_licence_constraint_keeps_a_library_out_of_the_image():
+    """yt-dlp is Unlicense. Holding it back put a permissive 3MB package behind
+    a "not bundled for licensing reasons" dialog naming a constraint that does
+    not exist, and moved the user from the ffmpeg wall to a second one."""
+    assert "yt-dlp" in BASE, "nothing licences yt-dlp out of the public image"
+    # faster-whisper carries PyAV's GPL binaries, so it stays gated.
+    assert "faster-whisper" not in BASE
 
 
 def test_the_memory_guard_can_actually_read_memory_where_the_app_ships():

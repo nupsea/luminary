@@ -45,6 +45,13 @@ dependencies = [
     "python-multipart>=0.0.22",
     "sentence-transformers>=5.2.3",
     "trafilatura>=2.0.0",
+    # Unlicense, so no distribution constraint -- and youtube_ingest is a
+    # `public` surface. Withholding it only moved the user to a second wall
+    # behind a licence message that does not apply to this package.
+    # YouTube breaks yt-dlp regularly; a pin that drifts months behind stops
+    # downloading entirely. 2026.3.13 returned "HTTP Error 403: Forbidden" on
+    # every video while 2026.8.19 succeeded on the same URL and machine.
+    "yt-dlp>=2026.8.19",
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn[standard]>=0.41.0",
     "pymupdf4llm>=1.28.2",
@@ -116,16 +123,6 @@ markers = [
 ]
 
 [dependency-groups]
-# Its own group because two install paths need it and neither needs the other's
-# extras: the desktop bundle takes it through `full`, the Docker media build
-# through `media`. yt-dlp is Unlicense, so it carries none of the constraint
-# below.
-youtube = [
-    # YouTube breaks yt-dlp regularly; a pin that drifts months behind stops
-    # downloading entirely. 2026.3.13 returned "HTTP Error 403: Forbidden" on
-    # every video while 2026.8.19 succeeded on the same URL and machine.
-    "yt-dlp>=2026.8.19",
-]
 # Speech-to-text, kept OUT of `full` on purpose. faster-whisper pulls PyAV,
 # whose wheels bundle libx264 and libx265 (GPL-2.0-or-later). Luminary is
 # Apache-2.0, so those cannot travel inside a distributed installer. The
@@ -135,7 +132,6 @@ youtube = [
 # See docs/desktop-bundle.md.
 media = [
     "faster-whisper>=1.2.1",
-    { include-group = "youtube" },
 ]
 # `code_parsing` is a `full`-mode surface, so the grammars stay out of the
 # public image rather than riding along with it.
@@ -146,7 +142,6 @@ full = [
     "tree-sitter-python>=0.25.0",
     "tree-sitter-rust>=0.24.0",
     "tree-sitter-typescript>=0.23.2",
-    { include-group = "youtube" },
 ]
 dev = [
     "arize-phoenix>=13.3.0",

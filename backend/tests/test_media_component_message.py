@@ -84,3 +84,32 @@ def test_the_container_runs_what_the_image_was_built_with():
     assert len(cmd) == 1, "one CMD, or this guard is reading the wrong line"
     assert "uv" not in cmd[0].split(), "the runtime entrypoint must not resolve dependencies"
     assert "/app/.venv/bin/python" in cmd[0]
+
+
+def test_a_component_with_no_licence_constraint_is_not_blamed_on_licensing(on_a_host):
+    """The dialog said yt-dlp was "not bundled for licensing reasons". yt-dlp is
+    Unlicense; nothing about its licence keeps it out of anything."""
+    from app.routers import documents as docs
+
+    message = docs._media_missing_message(["yt-dlp"])
+    assert "licensing" not in message, message
+
+
+def test_an_unknown_component_is_never_offered_an_install_button():
+    """`_installable` defaulted an unrecognised id to fetchable, so the dialog
+    rendered "Install yt-dlp below" for a component with no catalogue entry and
+    therefore no source to install from."""
+    from app.routers.documents import _installable
+
+    fetchable, manual = _installable(["definitely-not-a-component"])
+    assert fetchable == []
+    assert manual == ["definitely-not-a-component"]
+
+
+def test_the_image_puts_the_venv_on_path_so_tools_resolve():
+    """`resolve_tool` finds tools with `shutil.which`. Running the venv
+    interpreter directly (instead of `uv run`) does not put the venv's bin on
+    PATH, so yt-dlp was installed and invisible: the YouTube dialog reported it
+    missing while `/app/.venv/bin/yt-dlp --version` answered fine."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    assert 'ENV PATH="/app/.venv/bin:${PATH}"' in dockerfile
