@@ -503,3 +503,51 @@ async def test_status_endpoint_reports_the_pause_the_ui_shows(tmp_path, monkeypa
         db_module._engine, db_module._session_factory = orig_engine, orig_factory
         get_settings.cache_clear()
         await engine.dispose()
+
+
+def test_the_defer_bound_stretches_to_the_length_of_a_slow_answer(admission_settings):
+    """60s means "wait out the answer" only where an answer takes under 60s.
+
+    Measured on a CPU-only host: a chat answer took 375s wall-clock, of which
+    Ollama's own timing accounted for 140s -- the rest was the question queued
+    behind background calls that the expiring bound had force-admitted into a
+    one-slot runtime ahead of it.
+    """
+    admission_settings(LLM_ADMISSION_MAX_DEFER_SECONDS=60.0)
+    state = llm_admission.AdmissionState()
+    state.last_interactive_seconds = 375.0
+    assert llm_admission._max_defer_seconds(state) == 375.0
+
+
+def test_a_fast_host_keeps_the_configured_bound(admission_settings):
+    """The stretch must be a no-op wherever answers are quick, or it would trade
+    ingestion throughput for nothing."""
+    admission_settings(LLM_ADMISSION_MAX_DEFER_SECONDS=60.0)
+    state = llm_admission.AdmissionState()
+    state.last_interactive_seconds = 2.0
+    assert llm_admission._max_defer_seconds(state) == 60.0
+
+
+def test_the_bound_never_outlives_the_staleness_window(admission_settings):
+    """An answer still going after ten minutes is pathological rather than slow,
+    and ingestion should get the runtime back. The ceiling is deliberately NOT
+    the staleness window: that is a three-minute liveness test, and a healthy
+    six-minute answer never trips it, so using it there force-admitted
+    background work into the middle of a live answer."""
+    admission_settings(LLM_ADMISSION_MAX_DEFER_SECONDS=60.0)
+    state = llm_admission.AdmissionState()
+    state.last_interactive_seconds = 10_000.0
+    assert llm_admission._max_defer_seconds(state) == llm_admission._MAX_DEFER_CEILING_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_an_interactive_call_records_how_long_it_ran(admission_settings):
+    """The bound can only adapt if something measures the answer."""
+    admission_settings()
+    state = llm_admission._state()
+    state.last_interactive_seconds = 0.0
+
+    async with llm_admission.interactive_call():
+        await asyncio.sleep(0.05)
+
+    assert state.last_interactive_seconds >= 0.05

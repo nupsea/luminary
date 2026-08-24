@@ -52,6 +52,25 @@ services:
       # A floor, not a guess: compose cannot measure the host and each slot
       # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      # Residency has to be set here. The backend cannot: LiteLLM's `ollama/`
+      # completion path folds keep_alive into `options`, where Ollama rejects
+      # it, so a per-call value never applied and the model unloaded on
+      # Ollama's own 5-minute default -- paying a full reload on a machine
+      # where a reload is measured in tens of seconds.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      # Ollama leaves llama.cpp's prompt cache at 8192 MiB on every host --
+      # measured, not inferred: unset reports "size limit: 8192 MiB", which on a
+      # 7.8GB Docker VM is a larger allowance than the whole machine. It is a
+      # cap, not a reservation, but a reported run reached 1039 MiB of it.
+      #
+      # 512 MiB is bracketed by two measured cases: a real prompt's saved state
+      # is 105-206 MiB, so this holds the two or three recent prompts that reuse
+      # actually draws on, while the default exceeds the entire VM. Not zero,
+      # because on a non-hybrid model the cache genuinely works -- qwen3.5 is
+      # hybrid/recurrent, so llama.cpp re-processes every prompt regardless
+      # ("forcing full prompt re-processing due to lack of cache data") and the
+      # allowance buys nothing there.
+      - LLAMA_ARG_CACHE_RAM=${LLAMA_ARG_CACHE_RAM:-512}
     restart: unless-stopped
     profiles:
       - ai

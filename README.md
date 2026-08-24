@@ -224,6 +224,44 @@ see the host's PATH.
 > server and prints `Luminary is ready` only when it is. Background `Warmup:` log
 > lines after that are normal.
 
+## How much memory it actually needs
+
+Measured, not estimated — every figure below was read off a running instance.
+
+| what is resident | GB |
+|---|---|
+| Ollama serving `qwen3.5:4b` | 4.2 |
+| PyTorch + the embedder | 0.8 |
+| Cross-encoder reranker | 0.2 |
+| Entity model (GLiNER) | 1.3 |
+| Peak while a document is ingesting | +1.1 |
+| **total while ingesting** | **~7.6** |
+
+**Give Luminary 12 GB to work with, and treat 8 GB as the floor where it runs
+but will swap under load.** Ingestion is the peak; answering questions afterwards
+sits around 6.5 GB.
+
+**Docker users: this is the VM's memory, not your machine's.** Docker Desktop
+gives its Linux VM a fraction of the host — often half — so a 16 GB Mac presents
+as roughly 7.7 GB and lands under the floor. Raise it in **Settings → Resources →
+Memory**. Luminary reads the VM, not the Mac, and says so at startup:
+
+```
+model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it will swap under load
+```
+
+Docker on any Mac is CPU-only — no GPU passes through — so generation runs at a
+few tokens per second whatever the memory. On an Intel Mac especially, prefer
+more RAM and expect ingestion to take minutes.
+
+Two runtime bounds ship set, because Ollama's own defaults are not sized for a
+laptop: the model stays resident for 30 minutes rather than Ollama's 5, and
+llama.cpp's prompt cache is capped at 512 MB rather than its default 8192 MB —
+which is more than a default Docker VM has in total. Override either with
+`OLLAMA_KEEP_ALIVE` and `LLAMA_ARG_CACHE_RAM`. On a native macOS or Linux
+install the Ollama server is yours, not ours, so set them there (`launchctl
+setenv`, or your systemd unit) if you want them changed.
+
 ---
 
 ## Choosing a model
