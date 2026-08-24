@@ -112,6 +112,75 @@ async def test_embedding_called_in_batch(test_db):
     assert encode_calls[0] == [c["text"] for c in chunks]
 
 
+@pytest.mark.asyncio
+async def test_embedding_never_holds_more_than_a_batch(test_db):
+    """Peak memory must be a batch, not a document.
+
+    embed_node used to encode every chunk in one call and then materialise every
+    row before writing any, so the document's text was live three times over --
+    the chunk list, the encoder input and the rows -- plus one vector per chunk.
+    Only the LanceDB write was bounded, which is why the code carries a note
+    about a 9400-chunk Bible: this limit was met here once and only the last
+    step was fixed.
+
+    Asserted structurally rather than by watching RSS. Measured at node
+    granularity, the change is swamped: entity_extract_node spikes 2.3GB
+    transiently in the same pass, and three runs of similar code gave embed
+    deltas of +0.43, +0.97 and +1.87GB. The bound is the thing that is true
+    regardless of what the allocator does with it.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id, tmp_path)
+
+    n_chunks = 2500  # more than one batch, so the loop is exercised
+    chunks = [
+        {"id": str(uuid.uuid4()), "document_id": doc_id, "text": f"chunk text {i}", "index": i}
+        for i in range(n_chunks)
+    ]
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": str(tmp_path / "doc.txt"),
+        "format": "txt",
+        "parsed_document": None,
+        "content_type": "notes",
+        "chunks": chunks,
+        "status": "embedding",
+        "error": None,
+    }
+
+    encode_sizes: list[int] = []
+    upsert_sizes: list[int] = []
+
+    class TrackingEmbedder:
+        def encode(self, texts: list[str]) -> list[list[float]]:
+            encode_sizes.append(len(texts))
+            return [[0.1] * 384 for _ in texts]
+
+    class TrackingLanceDB:
+        def upsert_chunks(self, rows):
+            upsert_sizes.append(len(rows))
+
+        def count_for_document(self, _doc_id):
+            return sum(upsert_sizes)
+
+    with (
+        patch("app.services.embedder.get_embedding_service", return_value=TrackingEmbedder()),
+        patch("app.services.vector_store.get_lancedb_service", return_value=TrackingLanceDB()),
+    ):
+        result = await embed_node(state)
+
+    assert result["status"] == "indexing", result.get("error")
+    assert max(encode_sizes) <= 1000, (
+        f"the encoder was handed {max(encode_sizes)} texts at once; peak memory "
+        f"scales with the document again"
+    )
+    assert max(upsert_sizes) <= 1000
+    # Still batched, not per-chunk: the defect the original test guarded.
+    assert len(encode_sizes) == 3
+    assert sum(encode_sizes) == n_chunks
+
+
 # 2. Summarization is fire-and-forget
 
 
