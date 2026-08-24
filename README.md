@@ -163,6 +163,19 @@ Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) 
 docker compose --profile ai up --build
 ```
 
+Audio, video and YouTube ingestion are **off** in that image — they need ffmpeg
+and a transcriber, which are GPL and never travel inside anything Luminary
+distributes. The image is built on your machine, so you can opt in. PowerShell
+has no inline `VAR=value` form, so set it first:
+
+```powershell
+$env:WITH_MEDIA=1
+docker compose --profile ai up --build
+```
+
+That adds about 850 MB. Installing ffmpeg on Windows itself does nothing for the
+Docker path — the backend is a Linux container and cannot see your `PATH`.
+
 Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
 
 ```powershell
@@ -172,6 +185,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-
 
 Open http://localhost:7820 when the log settles. First start downloads models —
 the launcher prints `Luminary is ready` only when it truly is.
+
+The native install covers everything except audio and video. For those, install
+ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
+to text** from Settings — Luminary fetches that one itself.
 </details>
 
 <details>

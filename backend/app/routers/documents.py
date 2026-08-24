@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -517,6 +518,15 @@ def _component_labels(component_ids: list[str]) -> str:
 _DETECT_TIMEOUT_SECONDS = 20
 
 
+def _ffmpeg_install_hint() -> str:
+    """The install command for the platform actually running this."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "apt install ffmpeg"
+
+
 def _media_missing_message(required: list[str]) -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = _installable(required)
@@ -542,9 +552,12 @@ def _media_missing_message(required: list[str]) -> str:
                 f"installing on the host does not reach the container."
             )
         else:
+            # One command for the platform running this, not a list to pick
+            # from. Windows was in neither of the two the message used to name,
+            # so a Windows user was shown brew and apt and left to guess.
             parts.append(
                 f"{names} is found automatically once installed on this machine "
-                f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
+                f"(for example `{_ffmpeg_install_hint()}`)."
             )
     return " ".join(parts)
 

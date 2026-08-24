@@ -36,9 +36,20 @@ def test_a_container_says_why_installing_on_the_host_will_not_work(in_container)
     assert "does not reach the container" in _media_missing_message(["ffmpeg"])
 
 
-def test_a_host_install_still_gets_host_advice(on_a_host):
+@pytest.mark.parametrize(
+    "platform,command",
+    [
+        ("win32", "winget install Gyan.FFmpeg"),
+        ("darwin", "brew install ffmpeg"),
+        ("linux", "apt install ffmpeg"),
+    ],
+)
+def test_a_host_install_gets_its_own_platform_command(on_a_host, monkeypatch, platform, command):
+    """Windows was in neither platform the message named, so a Windows user was
+    shown brew and apt and left to work it out."""
+    monkeypatch.setattr("app.routers.documents.sys.platform", platform)
     message = _media_missing_message(["ffmpeg"])
-    assert "brew install ffmpeg" in message
+    assert command in message
     assert "WITH_MEDIA" not in message
 
 

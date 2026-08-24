@@ -358,8 +358,10 @@ done
 # Backend deps — public profile (no labs/dev groups)
 # ---------------------------------------------------------------------------
 _info "Syncing backend deps (public profile)..."
-# `full` carries trafilatura, cloudscraper, yt-dlp and tree-sitter. Without it
-# the install comes up but refuses every URL the UI offers to ingest.
+# `full` adds yt-dlp and the tree-sitter grammars. The article path
+# (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
+# a `public` surface and the Docker image installs base only -- it was shipping
+# without the libraries its own manifest advertised.
 (cd backend && uv sync --no-default-groups --group full)
 
 # ---------------------------------------------------------------------------
