@@ -64,6 +64,19 @@ _POLL_SECONDS = 0.2
 # the old 600s, which stalled ingestion for ten minutes per abandoned stream.
 _STALE_INTERACTIVE_SECONDS = 180.0
 
+# Absolute ceiling on how long background work may be deferred.
+#
+# Not `_STALE_INTERACTIVE_SECONDS`: that is "no token for three minutes", a
+# liveness test, and a healthy answer streaming for six minutes never trips it.
+# Reusing it as the deferral ceiling force-admitted background work into the
+# middle of a live answer, which is the case this bound exists to prevent.
+#
+# Ten minutes is where an answer is pathological rather than slow and ingestion
+# should get the runtime back regardless. Nothing depends on this for safety --
+# pressure decay already stops the gate wedging; this only decides how long
+# ingestion yields to a user who is actually being served.
+_MAX_DEFER_CEILING_SECONDS = 600.0
+
 
 @dataclass
 class AdmissionState:
@@ -76,6 +89,13 @@ class AdmissionState:
     background_inflight: int = 0
     background_waiting: int = 0
     last_interactive_end: float = 0.0
+    # How long the most recent interactive call ran. The deferral bound is
+    # wall-clock, and 60s was calibrated where a call takes seconds; on a CPU-only
+    # host one runs into minutes, so the bound expired mid-answer and admitted
+    # background work into a one-slot runtime AHEAD of the user's own call.
+    # Measured on such a host: 45s of prompt eval inside a 280s wait for first
+    # token.
+    last_interactive_seconds: float = 0.0
     deferred_calls: int = 0
     deferred_seconds: float = 0.0
     forced_admissions: int = 0
@@ -126,8 +146,22 @@ def background_reserve() -> int:
     return max(0, enrichment_concurrency() - 1)
 
 
-def _max_defer_seconds() -> float:
-    return float(_settings().LLM_ADMISSION_MAX_DEFER_SECONDS)
+def _max_defer_seconds(state: AdmissionState | None = None) -> float:
+    """The configured bound, or the last interactive call's duration if longer.
+
+    Deferring background work for 60s means "wait out the answer" only where an
+    answer takes less than 60s. Where one takes six minutes the bound expires
+    while the user is still waiting, and the forced admission queues background
+    work ahead of them -- the opposite of what the guard is for.
+
+    Still bounded, and never past the staleness window, so the starvation guard
+    this exists for keeps working: a user chatting continuously cannot hold
+    ingestion off for ever, and nothing here can wedge.
+    """
+    configured = float(_settings().LLM_ADMISSION_MAX_DEFER_SECONDS)
+    if state is None:
+        return configured
+    return min(max(configured, state.last_interactive_seconds), _MAX_DEFER_CEILING_SECONDS)
 
 
 def under_interactive_pressure() -> bool:
@@ -186,7 +220,7 @@ async def _wait_for_slot(state: AdmissionState) -> None:
     if not _blocked(state, reserve):
         return
 
-    max_defer = _max_defer_seconds()
+    max_defer = _max_defer_seconds(state)
     started = time.monotonic()
     state.background_waiting += 1
     state.deferred_calls += 1
@@ -211,14 +245,17 @@ async def _wait_for_slot(state: AdmissionState) -> None:
 async def interactive_call():
     """Mark interactive pressure for the life of a call, plus the grace window."""
     state = _state()
-    entry = [time.monotonic()]
+    started = time.monotonic()
+    entry = [started]
     state.interactive_activity.append(entry)
     try:
         yield entry
     finally:
         with contextlib.suppress(ValueError):
             state.interactive_activity.remove(entry)
-        state.last_interactive_end = time.monotonic()
+        now = time.monotonic()
+        state.last_interactive_end = now
+        state.last_interactive_seconds = now - started
 
 
 @asynccontextmanager
