@@ -38,7 +38,33 @@ MIN_UNIT_CHARS = 1500
 
 # Above this many qualifying sections, summarisation moves off the ingestion
 # path entirely and runs after the document is readable.
+#
+# A count is the wrong unit for the decision and this number had no measured
+# basis. On a CPU-only host one summary is an LLM call at 5-7 tok/s: measured
+# end to end in Docker, alice_in_wonderland.txt produced 12 qualifying sections
+# and spent 330 of its 390-second ingest on them -- comfortably under 40, so
+# they ran inline and held `stage=complete` for five and a half minutes on a
+# document that was already readable. At 40 the same host would block for
+# roughly twenty.
+#
+# So the gate is the model, not the count: see `defer_section_summaries`.
 DEFER_ABOVE_SECTIONS = 40
+
+
+def defer_section_summaries(qualifying_sections: int, model: str) -> bool:
+    """Whether summarisation should run behind `stage=complete`.
+
+    Local generation is the cost. A hosted model answers in a second or two and
+    a small document is genuinely nicer with its summaries already there, so the
+    count threshold still applies to cloud. A local model on CPU makes every
+    section minutes of blocked ingest, and the deferred path exists precisely
+    because the document does not need them to be readable.
+    """
+    from app.services.connectivity import is_cloud_model  # noqa: PLC0415
+
+    if not is_cloud_model(model):
+        return True
+    return qualifying_sections > DEFER_ABOVE_SECTIONS
 
 
 def unit_text_cap(unit_count: int) -> int:

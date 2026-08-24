@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-08-24
+
+### Fixed
+- **The Docker stack would not start if you already had Ollama installed.** The
+  daemon reported `bind: address already in use` and nothing explained it. The
+  port was never needed -- the app reaches Ollama over the compose network.
+- **A first run reported the chat model missing.** The app warmed up in parallel
+  with the model pull, so it asked an empty Ollama for a model that was still
+  downloading. It waits for the pull now.
+- **The startup warm-up cancelled the model load it exists to avoid.** Its 60s
+  timeout was shorter than a cold load on a CPU-only host, and giving up closed
+  the connection, which makes Ollama abandon the load. Every later request then
+  started from nothing.
+- **A book took minutes longer to open than it needed to.** Section summaries
+  ran inline for documents under 40 sections, and each one is an LLM call:
+  `alice_in_wonderland` spent 330 of its 390-second ingest on 12 of them. They
+  now run behind the document becoming readable whenever generation is local --
+  `frankenstein`, a longer book, reaches complete in 85s.
+- **Ollama was allowed an 8192 MB prompt cache on every machine**, more than a
+  default Docker VM has in total, and models unloaded after 5 minutes because
+  the backend could not set `keep_alive` where Ollama reads it.
+- **Peak ingest memory scaled with document size** rather than with a batch.
+- **A YouTube URL is no longer parsable as a yt-dlp option**, and previewing a
+  parse no longer leaves the uploaded file behind.
+
+### Changed
+- The README states measured memory: 12 GB working, 8 GB floor, and that a
+  Docker VM rather than the host is what counts.
+- Saving an API key in Settings on a Docker install stores it in the database in
+  plain text -- there is no OS keyring in a container. Now documented where the
+  claim is made.
+
 ## [0.7.6] - 2026-08-23
 
 ### Fixed

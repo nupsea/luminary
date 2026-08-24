@@ -43,8 +43,22 @@ services:
       - LITELLM_DEFAULT_MODEL=${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}
       - VISION_MODEL=${VISION_MODEL:-${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}}
     depends_on:
+      # required:false so the default profile is a valid project. `ollama` only
+      # exists under the `ai` profile, so without this a plain
+      # `docker compose up` -- the obvious thing to try when you already run
+      # Ollama yourself and just want the app pointed at it -- failed with
+      # "service app depends on undefined service ollama".
       ollama:
         condition: service_started
+        required: false
+      # Wait for the model, not just for Ollama. These started in parallel, so
+      # on a first run the app warmed up against an empty Ollama and logged
+      # `model 'qwen3.5:4b' not found` -- the chat model reported missing on a
+      # fresh install until something retried. ollama-pull is idempotent and
+      # always exits 0, so this cannot wedge startup.
+      ollama-pull:
+        condition: service_completed_successfully
+        required: false
     restart: unless-stopped
     profiles:
       - ""
@@ -52,8 +66,12 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    ports:
-      - "127.0.0.1:11434:11434"
+    # Deliberately NOT published to the host. Nothing needs it there: the app
+    # reaches Ollama at http://ollama:11434 over the compose network, and so
+    # does ollama-pull. Publishing it only created a failure mode -- anyone who
+    # already runs Ollama natively, which is most people who have heard of it,
+    # got `bind: address already in use` from the Docker daemon and no guidance.
+    # For the CLI against this container: `docker compose exec ollama ollama ls`.
     volumes:
       - ollama-models:/root/.ollama
     environment:
@@ -109,7 +127,11 @@ services:
       # failed the whole file with "invalid interpolation format". Only
       # LITELLM_DEFAULT_MODEL is meant for compose to substitute, from the host
       # env or .env; M is the shell's and stays escaped.
-      - 'M="${LITELLM_DEFAULT_MODEL:-qwen3.5:4b}"; M="$${M#ollama/}"; until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; echo "pulling $$M"; ollama pull "$$M"'
+      # Idempotent and always exit 0. Both matter now that `app` waits for this
+      # to finish: a re-pull of a cached model fails with no network, and
+      # exiting non-zero there would stop the app from starting at all -- on a
+      # machine that has the model and would have worked offline.
+      - 'M="${LITELLM_DEFAULT_MODEL:-qwen3.5:4b}"; M="$${M#ollama/}"; until ollama list >/dev/null 2>&1; do echo "waiting for ollama..."; sleep 2; done; if ollama list | grep -q "^$$M[[:space:]]"; then echo "$$M already present"; else echo "pulling $$M"; ollama pull "$$M" || echo "pull failed -- the app will start and report the model as missing"; fi; exit 0'
     restart: "no"
     profiles:
       - ai

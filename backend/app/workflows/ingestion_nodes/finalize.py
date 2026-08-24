@@ -24,8 +24,9 @@ from app.models import DocumentModel, EnrichmentJobModel
 from app.services.activity_service import ActivityService
 from app.services.document_tagger import enrich_document_tags
 from app.services.enrichment_worker import get_enrichment_worker
+from app.services.model_router import resolve
 from app.services.section_summarizer import (
-    DEFER_ABOVE_SECTIONS,
+    defer_section_summaries,
     get_section_summarizer_service,
 )
 from app.services.summarizer import get_summarization_service
@@ -79,8 +80,9 @@ async def _run_deferred_section_summaries(doc_id: str) -> None:
 async def section_summarize_node(state: IngestionState) -> IngestionState:
     """Generate section-level summaries before document summarization.
 
-    Past DEFER_ABOVE_SECTIONS the work moves behind `stage='complete'` so the
-    document is readable while its summaries fill in.
+    Summaries move behind `stage='complete'` whenever generation is local --
+    see `defer_section_summaries` -- so the document is readable while they
+    fill in rather than after.
 
     Non-fatal: if Ollama is offline or summarization fails, ingestion continues.
     """
@@ -88,9 +90,11 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "section_summarize", "doc_id": doc_id})
     try:
         svc = get_section_summarizer_service()
-        if await svc.qualifying_section_count(doc_id) > DEFER_ABOVE_SECTIONS:
+        sections = await svc.qualifying_section_count(doc_id)
+        if defer_section_summaries(sections, resolve("generation").model):
             logger.info(
-                "section_summarize_node: deferring summaries until after completion",
+                "section_summarize_node: deferring %d section summaries until after completion",
+                sections,
                 extra={"doc_id": doc_id},
             )
             return {**state, "section_summary_count": 0, "defer_section_summaries": True}
