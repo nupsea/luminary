@@ -18,6 +18,18 @@ services:
     environment:
       - LUMINARY_MODE=public
       - DATA_DIR=/data
+      # Without this, Python buffers stdout when it is a pipe, so `docker logs`
+      # lags the work it is describing -- which is how a bug report arrives with
+      # the interesting lines missing.
+      - PYTHONUNBUFFERED=1
+      # No OMP_NUM_THREADS / MKL_NUM_THREADS cap here, deliberately. Bounding
+      # PyTorch to 4 threads was proposed as the highest-impact laptop fix and
+      # measured the other way: on a 12-vCPU container, the same PDF ingested in
+      # 137s/139s unbounded against 179s/181s at 4 threads -- about 30% slower,
+      # two runs each. Embedding and NER are batched tensor work over thousands
+      # of chunks, which uses the threads; the spin-wait contention story fits
+      # small ops, not this. Set them yourself if you want Luminary to leave
+      # cores for something else.
       # Point the backend at the ollama service. The backend reads OLLAMA_URL
       # (NOT OLLAMA_HOST); its default 127.0.0.1 would resolve to this container.
       - OLLAMA_URL=http://ollama:11434
@@ -45,10 +57,14 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # Keep the text and vision models resident together so enrichment does
-      # not thrash reloading them. Which models those are is the app's
-      # decision, not compose's -- see LITELLM_DEFAULT_MODEL below.
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      # A floor, not a guess -- the same reasoning as OLLAMA_NUM_PARALLEL below.
+      # Two resident models let enrichment keep a reader loaded beside the chat
+      # model instead of thrashing between them, and that is right on a host
+      # with the memory for it. Compose cannot measure the host, and the backend
+      # on a small one resolves to `low`, which keeps ONE model resident -- so
+      # the default here disagreed with the profile the app had already chosen.
+      # Raise it to 2 on a host with 16GB+ available to the container.
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
       # A floor, not a guess: compose cannot measure the host and each slot
       # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}

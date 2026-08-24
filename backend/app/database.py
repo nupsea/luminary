@@ -27,6 +27,25 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=5000")
+    # synchronous stays at WAL's default of FULL, and cache_size/temp_store stay
+    # at their defaults. All three were proposed as "zero risk, high impact" and
+    # measured instead, inside the container on the real data volume:
+    #
+    #   commit cost   FULL 0.960 ms   NORMAL 0.005 ms   (400 commits)
+    #   full ingest   FULL 137s/139s  NORMAL 157s/146s  (same PDF, same image)
+    #
+    # NORMAL is ~190x cheaper per commit and bought nothing end to end, because
+    # commits are not a meaningful share of ingest -- that is GLiNER and the
+    # embedder. Trading durability for an unmeasurable gain is not a trade.
+    #
+    # cache_size=-64000 was rejected outright: the pragma is PER CONNECTION and
+    # make_engine below pools up to 30 (pool_size 10 + max_overflow 20), so it
+    # allows ~1.9GB of page cache on hosts already measured at ~7.7GB of demand
+    # against a 7.8GB Docker VM.
+    #
+    # The premise offered for all three -- that fsync crosses a VirtioFS
+    # boundary -- describes a bind mount. `luminary-data` is a named volume and
+    # lives inside the VM's own filesystem.
     cursor.close()
 
 
