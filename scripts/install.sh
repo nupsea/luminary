@@ -73,6 +73,12 @@ fi
 # curl for it -- died on a raw "command not found" instead of this script's own
 # error convention. Measured on stock ubuntu:24.04 and debian:bookworm images.
 _have curl || { _err "curl is required and not on PATH. Install it and re-run."; exit 1; }
+# `make` is checked HERE rather than where the SPA build uses it. The guard at
+# the build step already existed and still let a Debian/Fedora/Arch adopter sit
+# through node, uv, ~1.6GB of Python wheels, npm and the model pull before being
+# told to install a prerequisite and start again. Measured on debian:bookworm-slim:
+# the run reached "Building production SPA" and failed there after ten minutes.
+_have make || { _err "make is required and not on PATH. Install it (e.g. build-essential/base-devel) and re-run."; exit 1; }
 
 # ---------------------------------------------------------------------------
 # uv — Python package + project manager
@@ -248,7 +254,14 @@ case "$PROFILE" in
     performance) OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
     *)           OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=2; VISION_CONCURRENCY=2 ;;
 esac
-export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL
+# Ollama's own defaults are not sized for a laptop: the prompt cache is allowed
+# 8192MB (more than a small machine has in total) and models unload after 5
+# minutes, paying a full reload on the next question. The backend cannot set
+# either -- LiteLLM's `ollama/` completion path folds keep_alive into `options`,
+# where Ollama rejects it -- so they belong wherever the server is started.
+OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+LLAMA_ARG_CACHE_RAM="${LLAMA_ARG_CACHE_RAM:-512}"
+export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM
 _info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
 
 # The chat model follows the profile, because on `public` the runtime keeps one
@@ -330,11 +343,11 @@ if ! curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; t
     # brew services / launchd do not inherit our exported env; warn if that path ran.
     if [ "$OS" = "Darwin" ] && _have brew && pgrep -f "Ollama" >/dev/null 2>&1; then
         _warn "If Ollama is managed by brew services, apply the profile with:"
-        _warn "  launchctl setenv OLLAMA_MAX_LOADED_MODELS $OLLAMA_MAX_LOADED_MODELS && launchctl setenv OLLAMA_NUM_PARALLEL $OLLAMA_NUM_PARALLEL && brew services restart ollama"
+        _warn "  launchctl setenv OLLAMA_MAX_LOADED_MODELS $OLLAMA_MAX_LOADED_MODELS && launchctl setenv OLLAMA_NUM_PARALLEL $OLLAMA_NUM_PARALLEL && launchctl setenv OLLAMA_KEEP_ALIVE $OLLAMA_KEEP_ALIVE && launchctl setenv LLAMA_ARG_CACHE_RAM $LLAMA_ARG_CACHE_RAM && brew services restart ollama"
     fi
 else
     _warn "Ollama already running — restart it to apply the profile:"
-    _warn "  OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ollama serve   (after stopping the current server)"
+    _warn "  OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE=$OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM=$LLAMA_ARG_CACHE_RAM ollama serve   (after stopping the current server)"
 fi
 
 # Pull models only if not already cached.
@@ -374,10 +387,6 @@ if [ ! -d frontend/node_modules ] \
 fi
 
 _info "Building production SPA..."
-# Fedora and Arch base images carry curl but not make, so a bare container got
-# all the way through uv/node/ollama and the model pull before dying here on
-# the same raw "command not found" curl now has a guard against above.
-_have make || { _err "make is required and not on PATH. Install it (e.g. build-essential/base-devel) and re-run."; exit 1; }
 make build
 
 if [ "$OLLAMA_MAX_LOADED_MODELS" -le 1 ]; then
