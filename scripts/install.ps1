@@ -486,6 +486,10 @@ Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
 # already-running server does not pick them up until it restarts.
 [Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "$MaxLoaded", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "$NumParallel", "User")
+# llama.cpp's prompt cache is left at 8192MB by default on every host, which is
+# more than most machines can spare. A saved prompt state measures 105-206MB, so
+# 512MB holds the two or three recent prompts reuse actually draws on.
+[Environment]::SetEnvironmentVariable("LLAMA_ARG_CACHE_RAM", "512", "User")
 Write-Host "[install] Restart Ollama for the server-side profile to take effect." -ForegroundColor Gray
 
 # ---------------------------------------------------------------------------
