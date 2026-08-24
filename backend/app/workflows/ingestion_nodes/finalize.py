@@ -91,7 +91,14 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
     try:
         svc = get_section_summarizer_service()
         sections = await svc.qualifying_section_count(doc_id)
-        if defer_section_summaries(sections, resolve("generation").model):
+        # `sections` first: with nothing to summarise there is nothing to defer,
+        # and scheduling the deferred task anyway left a background coroutine
+        # running after every ingest of a document with no qualifying sections.
+        # CI could not see it -- there is no Ollama there, so the task failed
+        # instantly -- but against a live one test_e2e_upload went from 8s to
+        # past the 120s pytest timeout, hanging in teardown on the loop that
+        # task was still using.
+        if sections and defer_section_summaries(sections, resolve("generation").model):
             logger.info(
                 "section_summarize_node: deferring %d section summaries until after completion",
                 sections,
