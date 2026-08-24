@@ -49,6 +49,12 @@ async def fetch_metadata(url: str) -> dict:
         _ytdlp(),
         "--dump-json",
         "--no-download",
+        # `--` ends option parsing. Without it a URL beginning with "-" reaches
+        # yt-dlp as a flag, which is a file read/write primitive even though
+        # nothing here uses a shell. Today `is_youtube_url` happens to block
+        # that by requiring an https://youtube.com/... prefix -- this makes it
+        # true structurally, so loosening that validator cannot reintroduce it.
+        "--",
         url,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
@@ -101,6 +107,9 @@ async def download_audio(url: str, dest_stem: Path) -> None:
         *location,
         "-o",
         f"{dest_stem}.%(ext)s",
+        # See fetch_metadata: `--` ends option parsing so the URL can never be
+        # read as a flag.
+        "--",
         url,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,

@@ -489,15 +489,27 @@ async def parse_document(
     data_dir = Path(settings.DATA_DIR).expanduser()
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
+    if ext and ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '.{ext}'. Allowed: {sorted(_ALLOWED_EXTENSIONS)}",
+        )
     dest = raw_dir / f"{doc_id}.{ext}"
 
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
-    parsed = _parser.parse(dest, fmt)
-    logger.info("Parsed document", extra={"doc_id": doc_id, "format": fmt})
-    return {"document_id": doc_id, "parsed": _parsed_to_dict(parsed)}
+    # This route previews a parse; it does not ingest. The file it writes has no
+    # document row behind it, so without the cleanup every call left an orphan
+    # in DATA_DIR/raw that nothing would ever reference or delete -- user
+    # content accumulating out of sight of the library that is supposed to own
+    # it. Two sibling upload routes validate the extension; this one did not.
+    try:
+        with dest.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        fmt = ext if ext in ("pdf", "docx", "txt", "md", "markdown") else "txt"
+        parsed = _parser.parse(dest, fmt)
+        logger.info("Parsed document", extra={"doc_id": doc_id, "format": fmt})
+        return {"document_id": doc_id, "parsed": _parsed_to_dict(parsed)}
+    finally:
+        dest.unlink(missing_ok=True)
 
 
 def _component_labels(component_ids: list[str]) -> str:
