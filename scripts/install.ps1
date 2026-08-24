@@ -505,8 +505,12 @@ $env:LUMINARY_MODE = "public"
 $port = 7820
 
 Write-Host "Starting Luminary... (first run downloads models and can take a few minutes)" -ForegroundColor Cyan
+# --no-sync is load-bearing: `uv run` resolves DEFAULT groups (dev, full,
+# media) before executing, so every launch reinstalled what install.ps1
+# deliberately left out -- faster-whisper among them, whose PyAV wheels carry
+# GPL binaries -- and made startup need the network.
 $proc = Start-Process -FilePath "uv" `
-    -ArgumentList "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
+    -ArgumentList "run", "--no-sync", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
     -NoNewWindow -PassThru
 
 # Poll /health so the "ready" banner reflects reality. First run downloads models,

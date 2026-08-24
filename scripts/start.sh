@@ -18,9 +18,15 @@ if [ ! -f "$DIST" ]; then
 fi
 
 cd "$REPO_ROOT/backend"
+# --no-sync is load-bearing. `uv run` resolves the project before executing and
+# resolves DEFAULT groups (dev, full, media), so every launch re-installed what
+# the installer deliberately left out -- including faster-whisper, whose PyAV
+# wheels carry GPL binaries the carve-out exists to keep out of a distributed
+# install. It also made a local-first app need the network to start. Run what
+# the installer chose; never re-resolve it here.
 DATA_DIR="$REPO_ROOT/.luminary" \
 LUMINARY_MODE=public \
-    uv run uvicorn app.main:app --port "$PORT" 2>&1 &
+    uv run --no-sync uvicorn app.main:app --port "$PORT" 2>&1 &
 SERVER_PID=$!
 
 cleanup() {
