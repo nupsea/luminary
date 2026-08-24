@@ -50,6 +50,26 @@ class Settings(BaseSettings):
     # query after an idle period does not re-pay the (large-model) load cost.
     # "-1" = never unload; accepts any Ollama keep_alive value (e.g. "30m").
     OLLAMA_KEEP_ALIVE: str = "30m"
+    # How long the startup warm-up waits for its one generation.
+    #
+    # This is NOT an ordinary timeout. A cold model load runs inside that first
+    # request, and when the client gives up, httpx closes the connection and
+    # Ollama abandons the load outright:
+    #
+    #   client connection closed before llama-server finished loading, aborting load
+    #   Load failed ... error="timed out waiting for llama-server to start: context canceled"
+    #
+    # So a warm-up that times out does not merely fail to warm anything -- it
+    # cancels the load, and the next request starts from nothing. Measured on an
+    # Intel i7-8850H in Docker: qwen3.5:4b took just over 60s to load (it is
+    # multimodal, so the 3.3GB vision tower and 58 compat tensor transforms load
+    # too), against the 60.0s this used to hardcode. The warm-up whose whole
+    # purpose is "so the first real question does not pay the load" was the
+    # reason the model never finished loading at all.
+    #
+    # 300s matches Ollama's own OLLAMA_LOAD_TIMEOUT default: the client must
+    # never be stricter about a load than the server that performs it.
+    LLM_WARMUP_TIMEOUT_SECONDS: float = 300.0
     # Ollama context window, and the ONLY one: this is a per-model property, not
     # a per-call one. Ollama keys a loaded runner on num_ctx, so a call asking
     # for a different window unloads llama-server and reloads it -- tens of

@@ -111,7 +111,11 @@ async def _warm_llm() -> None:
             t0 = time.perf_counter()
             if interactive:
                 status.set_state("chat_model", "loading", model or "")
-            await get_llm_service().generate("ping", model=model, timeout=60.0)
+            # Never shorter than a cold load: giving up here closes the
+            # connection and Ollama aborts the load it was still doing.
+            await get_llm_service().generate(
+                "ping", model=model, timeout=get_settings().LLM_WARMUP_TIMEOUT_SECONDS
+            )
             if interactive:
                 status.set_state("chat_model", "ready", model or "")
             logger.info("Warmup: %s LLM warm in %.2fs", label, time.perf_counter() - t0)
