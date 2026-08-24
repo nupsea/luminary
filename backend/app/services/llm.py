@@ -222,7 +222,14 @@ class LLMService:
             # unless a call genuinely needs a different model instance. The value
             # comes from the model's registry profile (I-27), which is what makes
             # it impossible for two call sites to disagree about it.
-            kwargs["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
+            # keep_alive is deliberately NOT sent here. LiteLLM's ollama_chat
+            # transformation lifts it to the top level, but the `ollama/`
+            # completion path -- the one every local call takes -- drops every
+            # unrecognised kwarg into `options`, where keep_alive is not an
+            # option. Ollama answers `invalid option provided option=keep_alive`
+            # and ignores it, so this never controlled residency; it only
+            # emitted a warning on every request. Residency is a property of the
+            # server, set with OLLAMA_KEEP_ALIVE on the Ollama process itself.
             kwargs["num_ctx"] = num_ctx or context_window_for(model)
             # Thinking-capable models (qwen3+) auto-enable reasoning, which
             # streams as reasoning_content (never surfaced) and burns the

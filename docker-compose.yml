@@ -52,6 +52,12 @@ services:
       # A floor, not a guess: compose cannot measure the host and each slot
       # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      # Residency has to be set here. The backend cannot: LiteLLM's `ollama/`
+      # completion path folds keep_alive into `options`, where Ollama rejects
+      # it, so a per-call value never applied and the model unloaded on
+      # Ollama's own 5-minute default -- paying a full reload on a machine
+      # where a reload is measured in tens of seconds.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
     restart: unless-stopped
     profiles:
       - ai
