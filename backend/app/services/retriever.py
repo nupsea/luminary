@@ -549,43 +549,51 @@ class HybridRetriever:
                 span.set_attribute("retrieval.rerank_depth", candidate_pool)
                 if threshold is not None:
                     span.set_attribute("retrieval.rerank_threshold", threshold)
+            # Single-leg strategies once returned three steps early, before
+            # rerank, context expansion and location filling. Both halves of
+            # that mattered: the API accepted `strategy=fts&rerank=true` and
+            # silently dropped the rerank, and the ablation's leg arms were
+            # compared against rrf arms that had been through two extra stages,
+            # so "fusion beats its legs" was partly measuring expansion.
+            # Depth mirrors the rrf path: hold the whole candidate pool when
+            # something downstream still has to re-score or filter it.
+            leg_k = candidate_pool if (rerank or date_filtering) else k
             if strategy == "vector":
-                results = await asyncio.to_thread(
-                    self.vector_search, query, document_ids, candidate_pool
+                results = (
+                    await asyncio.to_thread(
+                        self.vector_search, vector_query, document_ids, candidate_pool
+                    )
+                )[:leg_k]
+            elif strategy == "fts":
+                results = (
+                    await self.keyword_search(keyword_query, document_ids, k=candidate_pool)
+                )[:leg_k]
+            elif strategy == "graph":
+                expanded_query = await _graph_expand(vector_query)
+                results = (
+                    await asyncio.to_thread(
+                        self.vector_search, expanded_query, document_ids, candidate_pool
+                    )
+                )[:leg_k]
+            else:
+                vector_results, keyword_results = await asyncio.gather(
+                    asyncio.to_thread(
+                        self.vector_search, vector_query, document_ids, candidate_pool
+                    ),
+                    self.keyword_search(keyword_query, document_ids, k=candidate_pool),
                 )
-                results = results[:k]
-                span.set_attribute("retrieval.chunk_count", len(results))
-                return results
-            if strategy == "fts":
-                results = await self.keyword_search(query, document_ids, k=candidate_pool)
-                results = results[:k]
-                span.set_attribute("retrieval.chunk_count", len(results))
-                return results
-            if strategy == "graph":
-                expanded_query = await _graph_expand(query)
-                results = await asyncio.to_thread(
-                    self.vector_search, expanded_query, document_ids, candidate_pool
+                # When reranking, ask rrf_merge for the full candidate pool so
+                # the cross-encoder can re-score them. Skip diversification
+                # regardless of single-doc scope -- relevance reranking and
+                # section breadth are orthogonal goals; mixing them dilutes the
+                # rerank signal.
+                diversify = (not rerank) and (not scoped_single_doc)
+                results = self.rrf_merge(
+                    vector_results,
+                    keyword_results,
+                    k=leg_k,
+                    diversify=diversify,
                 )
-                results = results[:k]
-                span.set_attribute("retrieval.chunk_count", len(results))
-                return results
-
-            vector_results, keyword_results = await asyncio.gather(
-                asyncio.to_thread(self.vector_search, vector_query, document_ids, candidate_pool),
-                self.keyword_search(keyword_query, document_ids, k=candidate_pool),
-            )
-            # When reranking, ask rrf_merge for the full candidate pool so the
-            # cross-encoder can re-score them. Skip diversification regardless
-            # of single-doc scope -- relevance reranking and section breadth
-            # are orthogonal goals; mixing them dilutes the rerank signal.
-            merge_k = candidate_pool if (rerank or date_filtering) else k
-            diversify = (not rerank) and (not scoped_single_doc)
-            results = self.rrf_merge(
-                vector_results,
-                keyword_results,
-                k=merge_k,
-                diversify=diversify,
-            )
             if date_filtering:
                 results = await self._filter_by_entry_date(results, date_from, date_to)
                 if not rerank:

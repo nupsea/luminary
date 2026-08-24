@@ -14,7 +14,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from evals.lib.retrieval_metrics import _norm, compute_hit_rate_5, count_boundary_misses
+from evals.lib.retrieval_metrics import (
+    _norm,
+    arm_metrics,
+    compute_hit_rate_5,
+    count_boundary_misses,
+)
 
 
 def _sample(hint: str, *chunks: str) -> dict:
@@ -55,3 +60,26 @@ def test_a_genuinely_absent_hint_is_not_a_boundary_miss():
 def test_a_hit_is_never_counted_as_a_boundary_miss():
     hint = "the machine was a thing of brass and ivory and quartz that shimmered oddly"
     assert count_boundary_misses([_sample(hint, hint)]) == 0
+
+
+def test_an_ablation_arm_reports_boundary_misses_alongside_its_hit_rate():
+    """The ablation is the arm a retrieval change is chosen on, and it reported
+    HR@5, MRR and nDCG only. A hint the chunker split scores a miss on every
+    strategy and every depth, so without this it reads as a ranking failure the
+    funnel could fix -- and the whole point of an arm is attribution."""
+    hint = "the machine was a thing of brass and ivory and quartz that shimmered oddly"
+    left, right = hint[:40], hint[40:]
+    split = [_sample(hint, f"prelude {left}", f"{right} coda")]
+
+    metrics = arm_metrics(split)
+
+    assert set(metrics) == {"hit_rate_5", "mrr", "ndcg_10", "boundary_misses"}
+    assert metrics["hit_rate_5"] == 0.0
+    assert metrics["boundary_misses"] == 1, "a split hint is a chunking miss, not a ranking one"
+
+
+def test_an_arm_that_genuinely_missed_reports_no_boundary_miss():
+    """Otherwise the column would excuse every miss and could never fail."""
+    metrics = arm_metrics([_sample("a passage that was never retrieved at all", "unrelated")])
+    assert metrics["hit_rate_5"] == 0.0
+    assert metrics["boundary_misses"] == 0

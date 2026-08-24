@@ -396,8 +396,10 @@ $RepoRoot = (Get-Item -Path $PSScriptRoot).Parent.FullName
 # Backend sync
 Write-Host "[install] Installing backend dependencies..." -ForegroundColor Yellow
 Set-Location -Path "$RepoRoot\backend"
-# `full` carries trafilatura, cloudscraper, yt-dlp and tree-sitter. Without it
-# the install comes up but refuses every URL the UI offers to ingest.
+# `full` adds yt-dlp and the tree-sitter grammars. The article path
+# (trafilatura, cloudscraper) moved to base dependencies, because web_ingest is
+# a `public` surface and the Docker image installs base only -- it was shipping
+# without the libraries its own manifest advertised.
 uv sync --no-default-groups --group full
 
 # Frontend build
@@ -503,8 +505,12 @@ $env:LUMINARY_MODE = "public"
 $port = 7820
 
 Write-Host "Starting Luminary... (first run downloads models and can take a few minutes)" -ForegroundColor Cyan
+# --no-sync is load-bearing: `uv run` resolves DEFAULT groups (dev, full,
+# media) before executing, so every launch reinstalled what install.ps1
+# deliberately left out -- faster-whisper among them, whose PyAV wheels carry
+# GPL binaries -- and made startup need the network.
 $proc = Start-Process -FilePath "uv" `
-    -ArgumentList "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
+    -ArgumentList "run", "--no-sync", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$port" `
     -NoNewWindow -PassThru
 
 # Poll /health so the "ready" banner reflects reality. First run downloads models,

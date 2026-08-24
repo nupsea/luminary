@@ -160,8 +160,21 @@ build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64)
 Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running):
 
 ```powershell
-docker compose --profile ai up
+docker compose --profile ai up --build
 ```
+
+Audio, video and YouTube ingestion are **off** in that image — they need ffmpeg
+and a transcriber, which are GPL and never travel inside anything Luminary
+distributes. The image is built on your machine, so you can opt in. PowerShell
+has no inline `VAR=value` form, so set it first:
+
+```powershell
+$env:WITH_MEDIA=1
+docker compose --profile ai up --build
+```
+
+That adds about 850 MB. Installing ffmpeg on Windows itself does nothing for the
+Docker path — the backend is a Linux container and cannot see your `PATH`.
 
 Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
 
@@ -172,6 +185,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-
 
 Open http://localhost:7820 when the log settles. First start downloads models —
 the launcher prints `Luminary is ready` only when it truly is.
+
+The native install covers everything except audio and video. For those, install
+ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
+to text** from Settings — Luminary fetches that one itself.
 </details>
 
 <details>
@@ -182,10 +199,25 @@ Intel Macs have no native `lancedb` wheel, so `make install` cannot run there.
 ```bash
 git clone https://github.com/nupsea/luminary.git
 cd luminary
-docker compose --profile ai up   # or: make docker-run
+make docker-run
 ```
 
+*(or directly via compose: `docker compose --profile ai up --build`)*
+
 Then open http://localhost:7820. Apple Silicon Macs use the native path above.
+
+Audio, video and YouTube ingestion are **off** in this image. They need ffmpeg
+and a transcriber, which are GPL and so are never part of anything Luminary
+distributes. The image is built on your machine, so you can opt in:
+
+```bash
+WITH_MEDIA=1 docker compose --profile ai up --build
+```
+
+That installs ffmpeg from Debian plus the download and transcription packages,
+by your own action, and adds about 850 MB to the image. Installing ffmpeg on
+the Mac itself does nothing here -- the backend is a Linux container and cannot
+see the host's PATH.
 </details>
 
 > First launch is slow because it downloads ML models. Every launcher polls the

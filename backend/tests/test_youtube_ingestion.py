@@ -77,7 +77,11 @@ async def test_ingest_url_returns_503_when_ytdlp_missing(test_db):
     # it can offer the in-app install rather than printing shell instructions.
     detail = resp.json()["detail"]
     assert isinstance(detail, dict)
-    assert detail["components"], "the error must name what is missing"
+    assert detail["missing"], "the error must name what is missing"
+    # yt-dlp has no catalogue entry, so there is nothing to install in-app and
+    # no button may be offered for it. `components` used to carry it anyway,
+    # because an unknown id defaulted to installable.
+    assert detail["components"] == []
 
 
 async def test_ingest_url_returns_503_when_ffmpeg_missing(test_db):

@@ -36,6 +36,28 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-default-groups --no-install-project
 
+# Audio/video ingestion (MP4, YouTube), off by default.
+#
+# ffmpeg and faster-whisper's PyAV carry x264/x265, which are GPL-2.0-or-later,
+# and Luminary is Apache-2.0 -- so neither may travel inside anything the
+# project distributes. Nothing here breaks that: this image is built on the
+# user's own machine (`docker-compose.yml` uses `build:`, and no workflow
+# publishes an image), so opting in installs GPL code from upstream by the
+# user's own action, exactly as `apt install ffmpeg` would.
+#
+# One flag does the whole path deliberately. ffmpeg alone leaves the downloader
+# and the transcriber missing, and the user hits a second wall with a worse
+# message -- the failure mode `_media_missing_message` exists to prevent.
+# `media` and not `full`: `full` also carries the tree-sitter grammars, and
+# `code_parsing` is a full-mode surface this image does not serve.
+ARG WITH_MEDIA=0
+RUN if [ "$WITH_MEDIA" = "1" ]; then \
+      apt-get update && \
+      apt-get install -y --no-install-recommends ffmpeg && \
+      rm -rf /var/lib/apt/lists/* && \
+      uv sync --frozen --no-default-groups --group media --no-install-project; \
+    fi
+
 # Copy app code and the surface manifest.
 # surface_manifest.py resolves Path(__file__).parents[2]/surface-manifest.json;
 # in this image __file__=/app/app/surface_manifest.py so parents[2]=/
@@ -64,7 +86,13 @@ COPY backend/pyproject.toml /backend/pyproject.toml
 # (same reason surface-manifest.json is placed at / above).
 COPY --from=frontend-build /frontend/dist /frontend/dist
 
-ENV LUMINARY_MODE=public \
+# The venv's bin on PATH, because `resolve_tool` finds tools with
+# `shutil.which`. `uv run` used to put it there; running the interpreter
+# directly does not, so console scripts installed into the venv (yt-dlp) were
+# present on disk and invisible to the app -- a YouTube ingest failed saying
+# yt-dlp was missing while `/app/.venv/bin/yt-dlp --version` answered fine.
+ENV PATH="/app/.venv/bin:${PATH}" \
+    LUMINARY_MODE=public \
     DATA_DIR=/data \
     PORT=7820
 
@@ -73,4 +101,12 @@ EXPOSE 7820
 # DATA_DIR is a volume mount — create it so it exists even without a volume
 RUN mkdir -p /data
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7820"]
+# The venv interpreter directly, never `uv run`. `uv run` resolves the project
+# before executing, and it resolves DEFAULT groups -- so every container start
+# downloaded and installed 46 packages (av, ctranslate2, faster-whisper,
+# yt-dlp, arize-phoenix, ruff, pytest) over the network, into the image that
+# had just been built without them. Three things broke at once: the image's
+# dependency curation was undone at runtime, a local-first app needed the
+# network to boot, and the GPL components the licence carve-out exists to keep
+# out of distribution were installed automatically anyway.
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7820"]

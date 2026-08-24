@@ -1,0 +1,115 @@
+"""What a user is told when audio/video support is missing.
+
+The remediation has been wrong twice for the same underlying reason: it named
+an action the user could not usefully take. First it said `brew install ffmpeg`
+to bundled-app users who had already done exactly that (the bundle's minimal
+PATH could not see it). Now it said the same thing to a Docker user, whose
+backend is a Linux container that cannot see the host's PATH at all -- they run
+it, it succeeds, and nothing changes.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from app.routers.documents import _media_missing_message
+
+
+@pytest.fixture()
+def in_container(monkeypatch):
+    monkeypatch.setattr("app.routers.documents.running_in_container", lambda: True)
+
+
+@pytest.fixture()
+def on_a_host(monkeypatch):
+    monkeypatch.setattr("app.routers.documents.running_in_container", lambda: False)
+
+
+def test_a_container_is_told_to_rebuild_the_image(in_container):
+    message = _media_missing_message(["ffmpeg"])
+    assert "WITH_MEDIA=1" in message, "the fix is a rebuild, and it must name the flag"
+    assert "brew install" not in message, "host advice cannot reach a container"
+
+
+def test_a_container_says_why_installing_on_the_host_will_not_work(in_container):
+    """Otherwise the user tries the obvious thing first and loses another hour."""
+    assert "does not reach the container" in _media_missing_message(["ffmpeg"])
+
+
+@pytest.mark.parametrize(
+    "platform,command",
+    [
+        ("win32", "winget install Gyan.FFmpeg"),
+        ("darwin", "brew install ffmpeg"),
+        ("linux", "apt install ffmpeg"),
+    ],
+)
+def test_a_host_install_gets_its_own_platform_command(on_a_host, monkeypatch, platform, command):
+    """Windows was in neither platform the message named, so a Windows user was
+    shown brew and apt and left to work it out."""
+    monkeypatch.setattr("app.routers.documents.sys.platform", platform)
+    message = _media_missing_message(["ffmpeg"])
+    assert command in message
+    assert "WITH_MEDIA" not in message
+
+
+def test_the_build_arg_the_message_names_is_wired_end_to_end():
+    """A rebuild flag that reaches nothing is worse than no advice: the user
+    runs it, the build succeeds, and the feature is still missing."""
+    repo = Path(__file__).resolve().parents[2]
+    dockerfile = (repo / "Dockerfile").read_text()
+    compose = (repo / "docker-compose.yml").read_text()
+
+    assert "ARG WITH_MEDIA" in dockerfile
+    assert "WITH_MEDIA: ${WITH_MEDIA:-0}" in compose, "compose must pass the arg through"
+    # One flag has to cover the whole path. ffmpeg alone leaves the downloader
+    # and the transcriber missing and the user hits a second wall.
+    media_step = dockerfile.split("ARG WITH_MEDIA", 1)[1]
+    assert "ffmpeg" in media_step
+    assert "--group media" in media_step, "yt-dlp and faster-whisper live there"
+    # `full` also carries the tree-sitter grammars and code_parsing is a
+    # full-mode surface, so pulling it here would ship libraries this image
+    # has no surface for.
+    assert "--group full" not in media_step
+
+
+def test_the_container_runs_what_the_image_was_built_with():
+    """`uv run` resolves the project before executing, and resolves DEFAULT
+    groups. As the CMD it installed 46 packages over the network on every
+    container start -- undoing the image's curation, requiring the network to
+    boot a local-first app, and pulling in the GPL components the licence
+    carve-out keeps out of distribution."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    cmd = [ln for ln in dockerfile.splitlines() if ln.startswith("CMD ")]
+    assert len(cmd) == 1, "one CMD, or this guard is reading the wrong line"
+    assert "uv" not in cmd[0].split(), "the runtime entrypoint must not resolve dependencies"
+    assert "/app/.venv/bin/python" in cmd[0]
+
+
+def test_a_component_with_no_licence_constraint_is_not_blamed_on_licensing(on_a_host):
+    """The dialog said yt-dlp was "not bundled for licensing reasons". yt-dlp is
+    Unlicense; nothing about its licence keeps it out of anything."""
+    from app.routers import documents as docs
+
+    message = docs._media_missing_message(["yt-dlp"])
+    assert "licensing" not in message, message
+
+
+def test_an_unknown_component_is_never_offered_an_install_button():
+    """`_installable` defaulted an unrecognised id to fetchable, so the dialog
+    rendered "Install yt-dlp below" for a component with no catalogue entry and
+    therefore no source to install from."""
+    from app.routers.documents import _installable
+
+    fetchable, manual = _installable(["definitely-not-a-component"])
+    assert fetchable == []
+    assert manual == ["definitely-not-a-component"]
+
+
+def test_the_image_puts_the_venv_on_path_so_tools_resolve():
+    """`resolve_tool` finds tools with `shutil.which`. Running the venv
+    interpreter directly (instead of `uv run`) does not put the venv's bin on
+    PATH, so yt-dlp was installed and invisible: the YouTube dialog reported it
+    missing while `/app/.venv/bin/yt-dlp --version` answered fine."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    assert 'ENV PATH="/app/.venv/bin:${PATH}"' in dockerfile

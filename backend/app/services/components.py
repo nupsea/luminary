@@ -277,6 +277,18 @@ _WELL_KNOWN_TOOL_DIRS = (
 )
 
 
+def running_in_container() -> bool:
+    """Whether this process is inside a container.
+
+    This changes what a user can be told to do, not what the app does. A
+    containerised backend cannot see the host's PATH, so `brew install ffmpeg`
+    is advice that succeeds on the host and changes nothing here -- the user
+    follows it and hits the same wall, which is the exact trap the media
+    error message was rewritten once already to avoid.
+    """
+    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
+
+
 def resolve_tool(name: str) -> str | None:
     """Find a tool the user installed, falling back to whatever is on PATH.
 

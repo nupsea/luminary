@@ -3,6 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Audio/video ingestion (MP4, YouTube). Off by default because it
+        # installs GPL components; see the Dockerfile. Turn on with
+        # `WITH_MEDIA=1 docker compose --profile ai up --build`.
+        WITH_MEDIA: ${WITH_MEDIA:-0}
     ports:
       # Loopback-only. The API has no authentication, so publishing on all host
       # interfaces exposed the full library to whatever network the machine was

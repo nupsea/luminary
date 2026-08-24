@@ -292,7 +292,7 @@
       "labels": {
         "en": "Web search & URL ingestion"
       },
-      "description": "Augment answers with live web search and ingest articles from URLs (requires the full dependency group)."
+      "description": "Augment answers with live web search and ingest articles from URLs."
     },
     {
       "id": "youtube_ingest",

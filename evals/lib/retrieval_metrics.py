@@ -79,6 +79,22 @@ def compute_hit_rate_5(samples: list[dict]) -> float:
     return hits / len(samples)
 
 
+def arm_metrics(samples: list[dict]) -> dict[str, float | int]:
+    """Every metric one ablation arm reports.
+
+    boundary_misses belongs in this set rather than at the call site. An arm is
+    what a retrieval change is chosen on, and HR@5 alone cannot say whether an
+    arm missed because ranking failed or because the chunker split the hint --
+    the second moves with chunk size and is not a funnel property at all.
+    """
+    return {
+        "hit_rate_5": compute_hit_rate_5(samples),
+        "mrr": compute_mrr(samples),
+        "ndcg_10": compute_ndcg_10(samples),
+        "boundary_misses": count_boundary_misses(samples),
+    }
+
+
 def count_boundary_misses(samples: list[dict], k: int = 5) -> int:
     """Misses whose hint spans two retrieved chunks instead of being absent.
 

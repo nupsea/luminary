@@ -56,7 +56,12 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
-from app.services.components import activate_extras, install_ollama_model, resolve_tool
+from app.services.components import (
+    activate_extras,
+    install_ollama_model,
+    resolve_tool,
+    running_in_container,
+)
 from app.services.concept_linker import concept_link_handler
 from app.services.diagram_extractor import diagram_extract_handler
 from app.services.enrichment_worker import get_enrichment_worker
@@ -170,8 +175,10 @@ async def lifespan(app: FastAPI):
     _ffmpeg_path = resolve_tool("ffmpeg")
     if _ffmpeg_path is None:
         logger.warning(
-            "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. "
-            "Add audio and video support from Settings."
+            "ffmpeg not found at startup — video (MP4) ingestion will be unavailable. %s",
+            "Rebuild the image with WITH_MEDIA=1."
+            if running_in_container()
+            else "Add audio and video support from Settings.",
         )
     else:
         logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})

@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -74,7 +75,7 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services import youtube_downloader as _yt_module
 from app.services.activity_service import ActivityService
 from app.services.article_extractor import get_article_extractor
-from app.services.components import capabilities, get_component
+from app.services.components import capabilities, get_component, running_in_container
 from app.services.content_classifier import classify_content
 from app.services.document_deletion_service import get_document_deletion_service
 from app.services.document_search import get_document_search_service
@@ -517,13 +518,43 @@ def _component_labels(component_ids: list[str]) -> str:
 _DETECT_TIMEOUT_SECONDS = 20
 
 
+def _all_withheld_for_licence(component_ids: list[str]) -> bool:
+    """Whether every named component is genuinely held back by its licence.
+
+    The catalogue marks those "(not distributed with Luminary)". A component
+    with no entry, or a permissive one, is missing for some other reason and
+    must not be described as a licensing decision.
+    """
+    comps = [get_component(cid) for cid in component_ids]
+    return bool(comps) and all(
+        c is not None and "not distributed with Luminary" in (c.licence or "") for c in comps
+    )
+
+
+def _ffmpeg_install_hint() -> str:
+    """The install command for the platform actually running this."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "apt install ffmpeg"
+
+
 def _media_missing_message(required: list[str]) -> str:
     """One sentence naming everything missing, and what to do about each kind."""
     fetchable, manual = _installable(required)
-    parts = [
-        f"YouTube needs {_component_labels(required)}, "
-        f"{'which are' if len(required) > 1 else 'which is'} not bundled for licensing reasons."
-    ]
+    # Only claim a licence reason where one exists. yt-dlp is Unlicense, and
+    # saying it was "not bundled for licensing reasons" stated a constraint
+    # that is not real and pointed the user at nothing they could act on.
+    if _all_withheld_for_licence(required):
+        lead = (
+            f"YouTube needs {_component_labels(required)}, "
+            f"{'which are' if len(required) > 1 else 'which is'} not bundled for "
+            f"licensing reasons."
+        )
+    else:
+        lead = f"YouTube needs {_component_labels(required)}."
+    parts = [lead]
     if fetchable:
         parts.append(f"Install {_component_labels(fetchable)} below.")
     if manual:
@@ -532,10 +563,23 @@ def _media_missing_message(required: list[str]) -> str:
         # bundle's PATH could not see it. It is found automatically now, so the
         # remaining case is genuinely not having it.
         names = _component_labels(manual)
-        parts.append(
-            f"{names} is found automatically once installed on this machine "
-            f"(for example `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)."
-        )
+        if running_in_container():
+            # Host advice cannot reach a container: the user installs ffmpeg on
+            # their Mac, the Linux container still cannot see it, and the wall
+            # is identical. The image is the thing that has to change.
+            parts.append(
+                f"{names} is not in this Docker image. Rebuild it with "
+                f"`WITH_MEDIA=1 docker compose --profile ai up --build`; "
+                f"installing on the host does not reach the container."
+            )
+        else:
+            # One command for the platform running this, not a list to pick
+            # from. Windows was in neither of the two the message used to name,
+            # so a Windows user was shown brew and apt and left to guess.
+            parts.append(
+                f"{names} is found automatically once installed on this machine "
+                f"(for example `{_ffmpeg_install_hint()}`)."
+            )
     return " ".join(parts)
 
 
@@ -550,7 +594,12 @@ def _installable(component_ids: list[str]) -> tuple[list[str], list[str]]:
     fetchable, manual = [], []
     for cid in component_ids:
         comp = get_component(cid)
-        (manual if comp is not None and comp.kind == "tool" else fetchable).append(cid)
+        # An id with no catalogue entry is not fetchable -- there is nothing to
+        # fetch it from. It used to default the other way, so a missing
+        # component the app has no installer for still rendered an "Install"
+        # button, which is the failure this docstring warns about.
+        fetchable_here = comp is not None and comp.kind != "tool"
+        (fetchable if fetchable_here else manual).append(cid)
     return fetchable, manual
 
 
@@ -1017,6 +1066,11 @@ async def ingest_url(
             status_code=503,
             detail={
                 "message": _media_missing_message(required),
+                # Everything missing, whether or not the app can install it.
+                # `components` alone could be empty -- a component with no
+                # catalogue entry is not installable -- and then the payload
+                # named nothing at all while the ingest still refused.
+                "missing": list(required),
                 # Only what the app can actually fetch: a button that fails on
                 # click is worse than no button.
                 "components": _installable(required)[0],
