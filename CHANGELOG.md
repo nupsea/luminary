@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-08-25
+
+### Fixed
+- **0.7.7's compose file would not parse on Docker Compose older than ~2.20**,
+  which rejected the whole file with
+  `services.app.depends_on.ollama Additional property required is not allowed`.
+  Reproduced against v2.17.3 and verified fixed there.
+
 ## [0.7.7] - 2026-08-24
 
 ### Fixed
