@@ -320,8 +320,14 @@ Run `make models` to print what your configuration costs, which roles resolve to
 which model, and any warnings.
 
 **Cloud models.** An id is `provider/name`. A local model needs no key; a hosted
-one does. You can also add the key in Settings, which stores it in your OS
-keychain rather than a file.
+one does. You can also add the key in Settings.
+
+Where that key is stored depends on the install. A native install puts it in
+your OS keychain. **A container has no OS keyring, so Docker installs fall back
+to storing the key in the SQLite database in plain text** — readable by anyone
+who can read the `luminary-data` volume. If that matters to you, pass the key
+as an environment variable instead of saving it in Settings, and remember that
+`docker compose` reads a `.env` file beside the compose file.
 
 ```bash
 LITELLM_DEFAULT_MODEL=openai/gpt-4o
