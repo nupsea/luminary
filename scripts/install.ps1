@@ -490,6 +490,11 @@ Set-Content -Path $EnvFile -Value $EnvLines -Encoding UTF8
 # more than most machines can spare. A saved prompt state measures 105-206MB, so
 # 512MB holds the two or three recent prompts reuse actually draws on.
 [Environment]::SetEnvironmentVariable("LLAMA_ARG_CACHE_RAM", "512", "User")
+# Residency must be set on the server: LiteLLM's `ollama/` completion path folds
+# a per-call keep_alive into `options`, where Ollama rejects it, so the backend
+# cannot ask for this. Without it the model unloads on Ollama's 5-minute default
+# and the next question pays a full reload.
+[Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "30m", "User")
 Write-Host "[install] Restart Ollama for the server-side profile to take effect." -ForegroundColor Gray
 
 # ---------------------------------------------------------------------------
