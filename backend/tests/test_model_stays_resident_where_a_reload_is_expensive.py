@@ -48,24 +48,24 @@ class TestTheGateIsAMeasurement:
         """Unmeasured is not 'fast'. Defaulting it either way would be a guess
         about a machine nobody has timed."""
         assert model_keepwarm.measured_probe_seconds() is None
-        assert not model_keepwarm.reload_is_expensive()
+        assert not model_keepwarm.local_inference_is_slow()
 
     def test_a_fast_host_never_starts_the_loop(self):
         """The whole constraint: this must change nothing where nothing is wrong."""
         model_keepwarm.record_startup_probe(3.0)
-        assert not model_keepwarm.reload_is_expensive()
+        assert not model_keepwarm.local_inference_is_slow()
 
     def test_the_fastest_load_seen_on_the_slow_host_stays_below_the_line(self):
         """9.59s was the quickest load measured there. A host that loads that
         fast is not one where anybody waits, so it is deliberately not covered
         -- the gate reads the start-up probe, which on that host was 84-107s."""
         model_keepwarm.record_startup_probe(9.59)
-        assert not model_keepwarm.reload_is_expensive()
+        assert not model_keepwarm.local_inference_is_slow()
 
     def test_the_load_that_cost_a_user_86s_is_above_the_line(self):
         """The case the fix exists for: 86.25s of one 261s question."""
         model_keepwarm.record_startup_probe(86.25)
-        assert model_keepwarm.reload_is_expensive()
+        assert model_keepwarm.local_inference_is_slow()
 
     def test_the_threshold_still_admits_that_load(self):
         """Raising it past a real measured load turns the fix off silently."""

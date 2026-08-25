@@ -104,11 +104,14 @@ def reset_measurement() -> None:
     _measured_probe_seconds = None
 
 
-def reload_is_expensive() -> bool:
-    """Whether an evicted model on this host is the user's problem.
+def local_inference_is_slow() -> bool:
+    """Whether local inference on this host is slow enough to change behaviour for.
 
-    Unmeasured is not fast: with no measurement this returns False and the loop
-    never starts, so a host we know nothing about keeps today's behaviour.
+    The host fact other features read, not only this one: an evicted model is
+    the user's problem here, and so is a prompt that takes a minute to prefill.
+
+    Unmeasured is not slow: with no measurement this returns False and nothing
+    changes, so a host we know nothing about keeps the shipped defaults.
     """
     settings = get_settings()
     if not settings.LLM_KEEP_WARM_ENABLED:
@@ -160,7 +163,7 @@ async def _ping_if_idle() -> bool:
 async def keep_warm_loop() -> None:
     """Hold the interactive model resident. Returns immediately on a fast host."""
     settings = get_settings()
-    if not reload_is_expensive():
+    if not local_inference_is_slow():
         logger.info(
             "Keep-warm off: the first local generation took %s at start-up "
             "(threshold %.0fs)",

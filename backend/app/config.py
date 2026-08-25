@@ -152,6 +152,30 @@ class Settings(BaseSettings):
     # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
+    # The budget on a host the start-up probe found slow at local inference.
+    # Everywhere else `QA_CONTEXT_TOKEN_BUDGET` above applies unchanged -- this
+    # never narrows an Apple Silicon, Windows or Linux install, because prefill
+    # there is a rounding error against decode (I-31: 0.4s against 16s) and the
+    # grounding would be spent for nothing.
+    #
+    # This one BUYS LATENCY WITH CONTENT, which nothing else in this file does,
+    # so both halves are measured. One question, one document, Intel i7-8850H in
+    # a 12GB Docker VM, 1500 against 750:
+    #
+    #   total 182.91s -> 91.22s, first token 79.68s -> 37.46s
+    #   passages reaching the model 5 -> 2, answer 355 -> 241 tokens
+    #
+    # Half the wait, and less than half the grounding. The answer shortens
+    # because there is less to say, and each token also decodes faster against
+    # the shorter context (4.00 -> 5.22 tok/s) -- so part of the speed-up IS the
+    # content reduction, not a free win beside it.
+    #
+    # Whole passages, not tokens, are what a budget buys: chunks run ~250 tokens,
+    # so the curve steps rather than slides. Measured over two queries --
+    # 1500: 5-6 passages, 1250: 4, 1000: 3-4, 750: 2-3, 500: 1-2. 1250 is the
+    # gentler knee (about half the latency win for about half the loss) if this
+    # trade reads as too steep. Set it to QA_CONTEXT_TOKEN_BUDGET to decline it.
+    QA_CONTEXT_TOKEN_BUDGET_CONSTRAINED: int = 750
     # Prepend each section's generated summary to its chunks in the prompt.
     # Off, and the default is the measurement rather than a preference: the
     # lookup is keyed on (document_id, section_heading), and every retrieved
