@@ -326,3 +326,41 @@ def get_section_summarizer_service() -> SectionSummarizerService:
     if _service is None:
         _service = SectionSummarizerService()
     return _service
+
+
+async def resummarize_documents_missing_summaries(limit: int = 20) -> int:
+    """Regenerate summaries for completed documents that have none.
+
+    Deferred summarisation runs as a background task, so a shutdown between
+    `stage='complete'` and the task finishing loses the work with nothing
+    recording that it was owed. This is the repair: a completed document that
+    has qualifying sections and no summary rows gets another pass.
+
+    Bounded per boot, because each document is one LLM call per section and a
+    library that has never been summarised must not turn startup into an hours
+    long job that competes with the user's first question.
+    """
+    from app.models import DocumentModel  # noqa: PLC0415
+
+    async with get_session_factory()() as session:
+        summarised = select(SectionSummaryModel.document_id).distinct().scalar_subquery()
+        result = await session.execute(
+            select(DocumentModel.id)
+            .join(SectionModel, SectionModel.document_id == DocumentModel.id)
+            .where(DocumentModel.stage == "complete")
+            .where(DocumentModel.id.notin_(summarised))
+            .group_by(DocumentModel.id)
+            .limit(limit)
+        )
+        doc_ids = [row[0] for row in result.all()]
+
+    repaired = 0
+    for doc_id in doc_ids:
+        try:
+            if await get_section_summarizer_service().generate(doc_id, per_section=True):
+                repaired += 1
+        except Exception as exc:
+            logger.warning(
+                "section summary repair failed (non-fatal): %s", exc, extra={"doc_id": doc_id}
+            )
+    return repaired
