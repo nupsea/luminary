@@ -250,6 +250,15 @@ Memory**. Luminary reads the VM, not the Mac, and says so at startup:
 model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it will swap under load
 ```
 
+**Docker also needs disk, and more than people expect.** The image is 3.4 GB, or
+4.2 GB with `WITH_MEDIA=1`, and the model blob is another 3.4 GB — so budget
+**10 GB free** in Docker Desktop's disk image before the first build, or `apt`
+fails partway through with `You don't have enough free space in
+/var/cache/apt/archives/`. Reclaim it with `docker builder prune -af` (build
+cache only) and `docker image prune -af` (unused images), or raise the slider in
+**Settings → Resources → Disk image size**. Do not pass `--volumes` to a prune:
+that deletes `luminary-data`, which is your library.
+
 Docker on any Mac is CPU-only — no GPU passes through — so generation runs at a
 few tokens per second whatever the memory. On an Intel Mac especially, prefer
 more RAM and expect ingestion to take minutes.
