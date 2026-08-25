@@ -49,3 +49,22 @@ def test_the_documented_profile_still_orders_the_model_pull():
     app = COMPOSE["services"]["app"]["depends_on"]
     assert app["ollama-pull"]["condition"] == "service_completed_successfully"
     assert app["ollama"]["condition"] == "service_started"
+
+
+def test_no_nested_interpolation_in_environment_defaults():
+    """`${A:-${B:-c}}` is not supported by older Compose: it substitutes the
+    outer and passes the inner through verbatim. A reported 0.7.6 log shows the
+    app receiving the literal string `${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}`
+    as VISION_MODEL. It degraded gracefully, but the value was never a model id.
+    """
+    import re
+
+    # Config lines only: the comment above VISION_MODEL quotes the broken form
+    # deliberately, and a guard that trips on its own documentation is noise.
+    config = "\n".join(
+        line
+        for line in (REPO / "docker-compose.yml").read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    nested = re.findall(r"\$\{[^{}]*\$\{", config)
+    assert not nested, f"nested interpolation is not portable: {nested}"

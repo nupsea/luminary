@@ -41,7 +41,17 @@ services:
       # Set with the ollama/ prefix (config.py's own convention); ollama-pull
       # strips it defensively either way.
       - LITELLM_DEFAULT_MODEL=${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}
-      - VISION_MODEL=${VISION_MODEL:-${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}}
+      # A plain default, not ${VISION_MODEL:-${LITELLM_DEFAULT_MODEL:-...}}.
+      # Nested interpolation is not supported by older Compose, which passes the
+      # inner expression through verbatim -- a reported 0.7.6 log shows the app
+      # receiving the literal string:
+      #
+      #   vision was configured as ${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}
+      #
+      # It degraded gracefully because the router falls back, but the value was
+      # never a model id. Overriding LITELLM_DEFAULT_MODEL no longer moves this
+      # with it: set VISION_MODEL too if you want them to match.
+      - VISION_MODEL=${VISION_MODEL:-ollama/qwen3.5:4b}
     # No `required: false` here. It is valid Compose Spec, and it is what would
     # make the default profile a valid project -- but Compose only understands
     # it from v2.20-ish, and v2.29.7 accepts it while older daemons reject the
