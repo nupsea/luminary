@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-08-25
+
+### Fixed
+- **Section summaries could be lost when the app stopped.** They run behind the
+  document becoming readable, but nothing cancelled that work at shutdown and
+  nothing recorded it was owed — so closing a laptop mid-ingest left a document
+  permanently without summaries. Shutdown now waits for them, and a bounded pass
+  on the next start finishes any that were interrupted.
+- **`VISION_MODEL` was never a real model id on older Docker Compose.** The
+  default used nested interpolation, which older Compose passes through
+  verbatim. It fell back safely, but the setting did nothing.
+- **`frontend/package-lock.json` was not updated by a version bump**, so it sat
+  on 0.7.5 until an unrelated build corrected it.
+
+### Changed
+- The README states the disk the Docker path needs (~10 GB) and how to reclaim
+  it without deleting your library.
+
 ## [0.7.8] - 2026-08-25
 
 ### Fixed
