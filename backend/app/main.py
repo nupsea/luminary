@@ -269,7 +269,16 @@ async def lifespan(app: FastAPI):
 
     if "pytest" not in sys.modules:
 
-        _background_tasks.add(asyncio.create_task(run_warmup()))
+        # Chained, not two tasks: keep-warm gates on what warm-up measured, so
+        # it cannot start until warm-up has produced that number. On a host
+        # where a reload is cheap the loop returns immediately.
+        async def _warmup_then_keep_warm():
+            from app.services.model_keepwarm import keep_warm_loop  # noqa: PLC0415
+
+            await run_warmup()
+            await keep_warm_loop()
+
+        _background_tasks.add(asyncio.create_task(_warmup_then_keep_warm()))
 
         # One-time-ish backfill: summarise notes created before card descriptions
         # existed. Runs after a short delay so it doesn't compete with model

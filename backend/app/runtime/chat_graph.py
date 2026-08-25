@@ -230,8 +230,17 @@ async def classify_node(state: ChatState) -> dict:
         t_clf = time.perf_counter()
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"
+        # Wall clock, and on a cold runtime most of it is not this call: an
+        # evicted model is reloaded inside whichever request arrives first, and
+        # this is usually that request. A measured 94.10s here was 6.6s of
+        # classification (189 prompt tokens, 4 generated) behind an 87.5s model
+        # load, which sent two investigations into the classifier. LiteLLM drops
+        # Ollama's `load_duration`, so nothing here can separate them -- say so
+        # rather than letting the number read as the classifier's cost.
         logger.info(
-            "[perf] classify_node LLM fallback took %.2fs", time.perf_counter() - t_clf
+            "[perf] classify_node LLM fallback took %.2fs (wall clock; includes a "
+            "model load when the model was not resident)",
+            time.perf_counter() - t_clf,
         )
 
     logger.info(

@@ -296,3 +296,70 @@ async def admit(model: str, *, background: bool):
 
 def _noop() -> None:
     """Keepalive for a call the gate does not track."""
+
+
+class YieldedToInteractive(Exception):
+    """A background call was abandoned so an interactive one could have the slot."""
+
+
+async def run_yielding_to_interactive(coro, *, after_seconds: float):
+    """Run a background coroutine, abandoning it if the user ends up waiting on it.
+
+    Admission (`background_call`) decides whether to *start* a background call,
+    and that is the whole story wherever a call is short. It is not the story on
+    a host where one runs for a minute: a call admitted a second before the user
+    asks anything is already in flight, and Ollama does not preempt (I-31), so
+    the question queues behind it. Measured on an Intel i7-8850H: chat
+    suggestions were generated at 11:51:20, a question arrived at 11:51:21, and
+    48.5s of that question's 102s time-to-first-token was spent waiting for
+    garnish to finish.
+
+    Cancelling the client request is what frees the slot, and it genuinely does
+    -- Ollama logs `srv stop: cancel task` and releases the slot immediately. A
+    call cancelled at 12.0s here was followed by one served in 0.44s.
+
+    Two states look alike from outside and must not be confused. A background
+    call *waiting* in admission while a question runs is blocking nobody, and
+    abandoning it would spend suggestion quality to buy latency nobody was
+    losing -- on any host where a question outlasts the window, which is most of
+    them. A call *in flight* when the question arrives is the one holding the
+    slot. The discriminator is whether pressure was absent at some point while
+    we ran: admission only admits when it is, so the timer arms only after that
+    has been observed, and a call queued behind a question never arms at all.
+
+    `after_seconds` is then continuous pressure *after arming*. A call that
+    finishes inside the window can never be abandoned, which is what keeps this
+    inert on hosts where background work is quick.
+
+    Only for work that is cheap to lose and has a real fallback. Abandoning an
+    enrichment call throws away minutes and leaves no equivalent second answer;
+    abandoning suggestions costs one set of pills that templates then render.
+
+    Raises:
+        YieldedToInteractive: the call was abandoned; the caller must fall back.
+    """
+    task = asyncio.ensure_future(coro)
+    armed = False
+    pressure_since: float | None = None
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=_POLL_SECONDS)
+        if done:
+            return task.result()
+        if not under_interactive_pressure():
+            # Admission admits only when this is true, so reaching here means the
+            # call is running rather than queued behind someone's question.
+            armed = True
+            pressure_since = None
+            continue
+        if not armed:
+            continue
+        now = time.monotonic()
+        if pressure_since is None:
+            pressure_since = now
+        elif now - pressure_since >= after_seconds:
+            task.cancel()
+            # The result is being discarded either way, and a provider error
+            # raised by a call we just cancelled says nothing about the caller.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            raise YieldedToInteractive

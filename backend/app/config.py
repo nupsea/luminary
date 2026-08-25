@@ -70,6 +70,32 @@ class Settings(BaseSettings):
     # 300s matches Ollama's own OLLAMA_LOAD_TIMEOUT default: the client must
     # never be stricter about a load than the server that performs it.
     LLM_WARMUP_TIMEOUT_SECONDS: float = 300.0
+    # Keep the interactive model resident on hosts where a reload is what the
+    # user waits for. Warm-up times the first local generation; above the
+    # threshold below, `model_keepwarm` pings inside the keep-alive window
+    # instead of letting the model be evicted and reloaded on the next question.
+    LLM_KEEP_WARM_ENABLED: bool = True
+    # Bracketed by two measured start-up probes. Under the line: an Apple
+    # Silicon or GPU host, single-digit seconds, which never starts the loop --
+    # the point of the threshold, since this must change nothing where nothing
+    # is wrong. Over it: an Intel i7-8850H in a 12GB Docker VM, whose start-up
+    # probes measured 84.03s, 91.07s and 107.47s, and which later spent 86.25s
+    # of one question's 261 loading the model again.
+    #
+    # The probe is the START-UP generation, not a mid-session sample and not
+    # specifically a load. Loads on that host ranged 9.59s-155.45s and did not
+    # track page-cache state (35.5s/21.7s with caches dropped against
+    # 48.9s/12.7s retained), so a mid-session sample would be a coin toss; and
+    # the 91.07s probe paid no load at all -- Ollama never reloaded, the model
+    # was resident throughout, and those seconds were start-up contention for 8
+    # vCPUs. Both kinds of slowness are the user's wait, so both count.
+    # Raising this past a host's start-up probe silently turns the fix off.
+    LLM_KEEP_WARM_ABOVE_SECONDS: float = 20.0
+    # Comfortably inside OLLAMA_KEEP_ALIVE (30m on every install path this
+    # repo controls), so three pings cover a window rather than one racing its
+    # edge. A warm ping is one token, ~0.2s on the host above; the cost of
+    # getting this wrong in the other direction is a full reload.
+    LLM_KEEP_WARM_INTERVAL_SECONDS: float = 600.0
     # Ollama context window, and the ONLY one: this is a per-model property, not
     # a per-call one. Ollama keys a loaded runner on num_ctx, so a call asking
     # for a different window unloads llama-server and reloads it -- tens of
@@ -105,6 +131,21 @@ class Settings(BaseSettings):
     # Starvation bound. Someone who keeps chatting must not stop ingestion
     # for ever: a background call held this long is admitted anyway and logged.
     LLM_ADMISSION_MAX_DEFER_SECONDS: float = 60.0
+    # How long the user may be left waiting on a background call that is already
+    # in flight before it is abandoned. Admission decides whether to *start* one;
+    # this covers the case it cannot, where the call was admitted a moment before
+    # the question arrived and Ollama will not preempt it (I-31).
+    #
+    # Bracketed by the two cases that decide it. Under the line: a host where a
+    # suggestions call finishes in a couple of seconds -- it completes before the
+    # window elapses, so nothing is ever abandoned there and the behaviour is
+    # today's exactly. Over it: an Intel i7-8850H in a 12GB Docker VM, where that
+    # same call ran 67s (877 prompt tokens, 155 generated) and cost a question
+    # 48.5s of its 102s time-to-first-token.
+    #
+    # Lowering it toward zero would abandon calls on quick hosts too, which
+    # spends suggestion quality to buy latency nobody was losing.
+    LLM_BACKGROUND_YIELD_AFTER_SECONDS: float = 5.0
     # Token budget for retrieved context fed to the synthesis LLM. Prefill time
     # on local models scales ~linearly with prompt size, so this is the primary
     # latency lever. Lower = faster first token, less grounding context. Kept
