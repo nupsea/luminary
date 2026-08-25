@@ -317,6 +317,33 @@ async def lifespan(app: FastAPI):
 
         _background_tasks.add(asyncio.create_task(backfill_note_vectors()))
 
+        async def backfill_section_summaries():
+            """Finish section summaries an earlier run did not get to.
+
+            Deferred summarisation is fire-and-forget: the task is cancelled at
+            shutdown and nothing records that it was owed. That was survivable
+            while deferral only happened above 40 sections; it is now the path
+            every local-model ingest takes, so a laptop closed mid-ingest would
+            leave a document permanently without summaries and nothing would
+            ever notice. Runs after the note backfill so the two do not compete
+            for the one model slot.
+            """
+            try:
+                await asyncio.sleep(90)
+                from app.services.section_summarizer import (
+                    resummarize_documents_missing_summaries,
+                )
+
+                repaired = await resummarize_documents_missing_summaries()
+                if repaired:
+                    logger.info(
+                        "Section summary backfill: repaired %d document(s)", repaired
+                    )
+            except Exception as exc:
+                logger.warning("Section summary backfill failed (non-fatal): %s", exc)
+
+        _background_tasks.add(asyncio.create_task(backfill_section_summaries()))
+
     logger.info("Luminary backend started", extra={"data_dir": str(data_dir)})
     yield
     logger.info("Luminary backend shutting down")
@@ -327,11 +354,27 @@ async def lifespan(app: FastAPI):
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 
-    for task in list(_background_tasks):
+    # Both sets, not just this module's. The ingestion nodes keep their own
+    # (`ingestion_nodes._shared._background_tasks`) and shutdown never touched
+    # it, so post-ingest work -- deferred section summaries, pregeneration --
+    # kept running against a database that was closing underneath it:
+    #
+    #   deferred section summaries failed (non-fatal):
+    #   (sqlite3.ProgrammingError) Cannot operate on a closed database.
+    #
+    # It was survivable while deferral only happened above 40 sections. It is
+    # now the path every local-model ingest takes, so the leak is on every one.
+    from app.workflows.ingestion_nodes._shared import (  # noqa: PLC0415
+        _background_tasks as _ingestion_background_tasks,
+    )
+
+    pending = set(_background_tasks) | set(_ingestion_background_tasks)
+    for task in pending:
         task.cancel()
-    if _background_tasks:
-        await asyncio.wait(_background_tasks, timeout=_SHUTDOWN_GRACE_S)
-        _background_tasks.clear()
+    if pending:
+        await asyncio.wait(pending, timeout=_SHUTDOWN_GRACE_S)
+    _background_tasks.clear()
+    _ingestion_background_tasks.clear()
 
     shutdown_model_executor()
 
