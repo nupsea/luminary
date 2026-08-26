@@ -30,6 +30,20 @@ L3  final re-ordering      (not built) MMR diversity, dedup, listwise polish
   are the current stand-ins; a real L3 would do MMR/dedup over the reranked
   list. Out of scope for the L2 branch.
 
+  The one piece of dedup that does exist is in `search_node`: a neighbour
+  window never expands into a chunk that was retrieved in its own right. Built
+  per chunk and blind to the rest of the result set, the windows duplicated
+  whatever retrieval returned as a run -- measured on three real questions
+  against one document, each returned chunk indices 0..7, whose windows emitted
+  24 chunk slots covering 10 distinct chunks. That charged the context budget
+  twice for the same prose: a passage cost ~750 tokens rather than the ~250 its
+  chunk measures, so `QA_CONTEXT_TOKEN_BUDGET=1500` carried 2 passages covering
+  4 distinct chunks. Filtering retrieved neighbours out takes the same budget to
+  6 passages for a 2% larger prompt (1699 -> 1739 tokens, two questions).
+  `tests/test_neighbour_expansion_does_not_duplicate.py` guards it. Retrieval
+  order and membership are untouched, so HR@5 and MRR cannot move -- the recall
+  arm already measures `expand_context=false`.
+
 ## Query understanding & corpus routing (pre-L1)
 
 Before the funnel ranks, a corpus-wide ("All documents") query is routed. These
