@@ -144,6 +144,15 @@ generation-side over repeated runs and compare distributions.
 weaker dataset. Passing means no leg of the pipeline died. It does not mean the product is good,
 and the number to beat is always the measured mean.
 
+**The retrieval arm measures the funnel the app ships.** `/search` defaults `rerank=false`
+while the answering path resolves `get_rerank_enabled()` (default true), so an arm that did not
+ask measured a funnel no user gets — and still recorded a `rerank_model`, which read as proof it
+had been used. The harness now defaults `--rerank` to the backend's `rerank_enabled` and refuses
+to guess when it cannot read it; `--no-rerank` measures the ablation and says so. Isolated on
+`study` in one library state: HR@5 0.5667 unreranked against 0.7000 shipped. Retrieval baselines
+and floors recorded before 2026-08-26 are the unreranked funnel and are not comparable to later
+ones.
+
 **Check the stage before attributing a change.** A retrieval regression can come from ingestion;
 a generation regression can come from retrieval. `eval-ingest` first, then `eval`, then
 `eval-gen` — in that order, because each is the ceiling on the next.

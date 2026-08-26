@@ -79,6 +79,12 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         "rerank_model": settings.RERANK_MODEL,
         "rerank_depth": settings.RERANK_DEPTH,
         "rerank_blend_alpha": settings.RERANK_BLEND_ALPHA,
+        # Whether the reranker actually runs, not merely which one is configured.
+        # `/search` defaults `rerank=false` while the chat path resolves this
+        # setting, so an eval arm querying `/search` measured a funnel the app
+        # does not ship -- and the block still named a reranker, which read as
+        # proof it had been used. Recorded so the two can be compared.
+        "rerank_enabled": await settings_service.get_rerank_enabled(db),
         "query_spell_correct": settings.QUERY_SPELL_CORRECT,
         "llm_mode": llm["mode"],
         "chat_model": interactive_model,

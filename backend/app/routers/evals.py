@@ -587,6 +587,8 @@ class EvalEnvironmentResponse(BaseModel):
     rerank_model: str
     rerank_depth: int
     rerank_blend_alpha: float | None
+    # The app's resolved setting, not the eval arm's choice. See eval_environment.py.
+    rerank_enabled: bool = True
     query_spell_correct: bool
     llm_mode: str
     chat_model: str

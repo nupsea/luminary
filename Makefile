@@ -369,9 +369,11 @@ eval-all:
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
+# --no-rerank is explicit: this is the unreranked arm of the A/B below, and the
+# harness now defaults to the funnel the app ships (which reranks).
 eval-d2l:
-	@echo "Retrieval eval on the d2l technical corpus (HR@5/MRR, no judge)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model "" --assert-thresholds
+	@echo "Retrieval eval on the d2l technical corpus (HR@5/MRR, no judge, no rerank)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model "" --no-rerank --assert-thresholds
 
 # Same dataset WITH the cross-encoder reranker — compare HR@5/MRR against `eval-d2l`.
 eval-d2l-rerank:
