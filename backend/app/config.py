@@ -152,30 +152,22 @@ class Settings(BaseSettings):
     # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
-    # The budget on a host the start-up probe found slow at local inference.
-    # Everywhere else `QA_CONTEXT_TOKEN_BUDGET` above applies unchanged -- this
-    # never narrows an Apple Silicon, Windows or Linux install, because prefill
-    # there is a rounding error against decode (I-31: 0.4s against 16s) and the
-    # grounding would be spent for nothing.
+    # 1500 is a cliff edge, not a dial, and lowering it for slow hosts was tried
+    # and reverted. `search_node` sets each chunk's `text` to the chunk PLUS its
+    # neighbours, so a packed passage here is ~750 tokens, not the ~250 a raw
+    # chunk measures. Every budget from 500 to 1250 therefore delivers exactly
+    # ONE passage; 1500 is the first value that delivers two. Measured on one
+    # live request (same chunks, packed at each budget):
     #
-    # This one BUYS LATENCY WITH CONTENT, which nothing else in this file does,
-    # so both halves are measured. One question, one document, Intel i7-8850H in
-    # a 12GB Docker VM, 1500 against 750:
+    #   500/750/1000/1250 -> 1 passage, 752 ctx tokens
+    #   1500              -> 2 passages, 1489
+    #   3000              -> 4 passages, 2918
     #
-    #   total 182.91s -> 91.22s, first token 79.68s -> 37.46s
-    #   passages reaching the model 5 -> 2, answer 355 -> 241 tokens
-    #
-    # Half the wait, and less than half the grounding. The answer shortens
-    # because there is less to say, and each token also decodes faster against
-    # the shorter context (4.00 -> 5.22 tok/s) -- so part of the speed-up IS the
-    # content reduction, not a free win beside it.
-    #
-    # Whole passages, not tokens, are what a budget buys: chunks run ~250 tokens,
-    # so the curve steps rather than slides. Measured over two queries --
-    # 1500: 5-6 passages, 1250: 4, 1000: 3-4, 750: 2-3, 500: 1-2. 1250 is the
-    # gentler knee (about half the latency win for about half the loss) if this
-    # trade reads as too steep. Set it to QA_CONTEXT_TOKEN_BUDGET to decline it.
-    QA_CONTEXT_TOKEN_BUDGET_CONSTRAINED: int = 750
+    # So on an Intel i7-8850H the ~24s of prefill a narrower budget saves costs
+    # half the evidence -- the answer rests on a single retrieved region. Read
+    # the passage count in the `synthesize_node: packed N/M` log before changing
+    # this; a sweep over raw chunk sizes says 1250 keeps 4 passages and is wrong.
+    # The lever worth having is the neighbour expansion, not the budget.
     # Prepend each section's generated summary to its chunks in the prompt.
     # Off, and the default is the measurement rather than a preference: the
     # lookup is keyed on (document_id, section_heading), and every retrieved

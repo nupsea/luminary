@@ -35,25 +35,6 @@ from app.types import ChatState, TransparencyInfo
 logger = logging.getLogger(__name__)
 
 
-def _qa_context_budget() -> int:
-    """Grounding tokens the synthesis prompt may carry.
-
-    The shipped budget everywhere, except on a host the start-up probe measured
-    as slow at local inference, where prefill is the dominant term rather than a
-    rounding error: 1751 tokens cost 66.1s of one 183s question on an Intel
-    i7-8850H, against I-31's 0.4s on an M3 Pro.
-
-    A narrower budget is not a free win -- it is fewer of the user's own passages
-    reaching the model, which is why it is conditioned on a measurement and why
-    the two values are separate settings rather than one that "adapts".
-    """
-    settings = get_settings()
-    from app.services.model_keepwarm import local_inference_is_slow  # noqa: PLC0415
-
-    if local_inference_is_slow():
-        return settings.QA_CONTEXT_TOKEN_BUDGET_CONSTRAINED
-    return settings.QA_CONTEXT_TOKEN_BUDGET
-
 # Citation gating. A cited source should actually contain the text the user is
 # sent to — a weakly-related chunk only pollutes the reference list. Cap the list
 # and drop low-relevance sources, but always keep the single best source so a
@@ -212,21 +193,29 @@ async def synthesize_node(state: ChatState) -> dict:
         return {"not_found": True}
 
     logger.info(
-        "synthesize_node: intent=%s chunks=%d section_context=%s",
+        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d",
         intent,
         len(chunks_dicts),
         "yes" if section_context else "no",
+        get_settings().QA_CONTEXT_TOKEN_BUDGET,
     )
 
 
     # Assemble chunk context using the pure context packer (dedup + section grouping).
     # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
     # it came from and have its excerpt filled in from that chunk (I-33).
-    token_budget = _qa_context_budget()
+    token_budget = get_settings().QA_CONTEXT_TOKEN_BUDGET
     chunks_context, cited_chunks = (
         pack_context_indexed(chunks_dicts, token_budget=token_budget)
         if chunks_dicts
         else ("", [])
+    )
+    logger.info(
+        "synthesize_node: packed %d/%d passages into %d chars at budget %d",
+        len(cited_chunks),
+        len(chunks_dicts),
+        len(chunks_context),
+        token_budget,
     )
 
     # section_context (graph results, executive summary) capped at 1000 tokens
