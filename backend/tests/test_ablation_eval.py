@@ -116,6 +116,9 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
         ],
     )
     monkeypatch.setattr(run_eval, "load_manifest", lambda: {})
+    # An ablation sweep states its own arms, but the base run still resolves the
+    # retrieval arm against the backend's shipped funnel and refuses to guess.
+    monkeypatch.setattr(run_eval, "shipped_rerank", lambda *a, **k: False)
     monkeypatch.setattr(
         run_eval,
         "search_chunks",

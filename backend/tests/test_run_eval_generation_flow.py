@@ -57,6 +57,9 @@ def _wire_common(monkeypatch, history):
     monkeypatch.setattr(run_eval, "is_document_alive", lambda *a, **k: True)
     monkeypatch.setattr(run_eval, "resolve_backend_base", lambda url: url)
     monkeypatch.setattr(run_eval, "require_backend", lambda *a, **k: None)
+    # The retrieval arm defaults to the funnel the backend reports shipping and
+    # refuses to guess when it cannot read it. No backend here, so state it.
+    monkeypatch.setattr(run_eval, "shipped_rerank", lambda *a, **k: False)
     monkeypatch.setattr(
         run_eval, "search_chunks", lambda *args, **kwargs: ["chunk with hint one inside"]
     )

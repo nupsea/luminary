@@ -195,7 +195,9 @@ DATASET_THRESHOLDS: dict[str, dict[str, float]] = {
     "paper": {"hit_rate_5": 0.80, "mrr": 0.60, "ndcg_10": 0.65},
     "legal": {"hit_rate_5": 0.55, "mrr": 0.40, "ndcg_10": 0.45},
     "play": {"hit_rate_5": 0.70, "mrr": 0.50, "ndcg_10": 0.55},
-    "study": {"hit_rate_5": 0.60, "mrr": 0.35, "ndcg_10": 0.40},
+    # study takes the default mrr/ndcg_10: measured 0.4692/0.5370, its floors land
+    # exactly on the global ones, and restating a default reads as a decision.
+    "study": {"hit_rate_5": 0.60},
 }
 
 

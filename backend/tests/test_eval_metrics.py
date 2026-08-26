@@ -72,13 +72,19 @@ def test_an_override_exists_only_where_it_differs_from_the_default():
 
     `paper` carried 0.45/0.30 because 17 of its 40 questions asked about scrape
     furniture; the floor had been lowered instead of the data fixed. Regenerated
-    clean it measures 0.850/0.703, so it takes the default like everything else.
+    clean it measures 0.850/0.703.
+
+    It carries an override again since 2026-08-26, in the opposite direction and
+    for the opposite reason: measured on the shipped (reranked) funnel it scores
+    HR@5 0.9000, against which the global 0.50 floor would let it halve before
+    firing. A floor RAISED to match a measurement is a collapse detector doing its
+    job; a floor lowered to make a run pass is what this test exists to catch.
     """
     for dataset, overrides in DATASET_THRESHOLDS.items():
         differing = {k: v for k, v in overrides.items() if THRESHOLDS.get(k) != v}
         assert differing == overrides, f"{dataset} restates the default for {overrides}"
 
-    assert thresholds_for_dataset("paper")["hit_rate_5"] == THRESHOLDS["hit_rate_5"]
+    assert thresholds_for_dataset("paper")["hit_rate_5"] > THRESHOLDS["hit_rate_5"]
 
 
 # HR@5 tests

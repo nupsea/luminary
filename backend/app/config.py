@@ -152,22 +152,23 @@ class Settings(BaseSettings):
     # under OLLAMA_NUM_CTX (with headroom for question/system/history) so the
     # prompt is never silently truncated.
     QA_CONTEXT_TOKEN_BUDGET: int = 1500
-    # 1500 is a cliff edge, not a dial, and lowering it for slow hosts was tried
-    # and reverted. `search_node` sets each chunk's `text` to the chunk PLUS its
-    # neighbours, so a packed passage here is ~750 tokens, not the ~250 a raw
-    # chunk measures. Every budget from 500 to 1250 therefore delivers exactly
-    # ONE passage; 1500 is the first value that delivers two. Measured on one
-    # live request (same chunks, packed at each budget):
+    # This WAS a cliff and is now a dial, because the neighbour expansion landed.
+    # Until 914e8b54, `search_node` set each chunk's `text` to the chunk PLUS its
+    # neighbours -- including neighbours that had themselves been retrieved -- so
+    # a packed passage cost ~750 tokens instead of ~250 and every budget from 500
+    # to 1250 delivered exactly ONE passage. Re-measured 2026-08-26 on the merged
+    # build, feeding real /qa passages to `pack_context_indexed`:
     #
-    #   500/750/1000/1250 -> 1 passage, 752 ctx tokens
-    #   1500              -> 2 passages, 1489
-    #   3000              -> 4 passages, 2918
+    #   budget   500  750 1000 1250 1500 2000 3000
+    #   Q1      1/10 2/10 3/10 4/10 5/10 7/10 10/10
+    #   Q2      4/13 6/13 8/13 11/13 13/13 13/13 13/13
     #
-    # So on an Intel i7-8850H the ~24s of prefill a narrower budget saves costs
-    # half the evidence -- the answer rests on a single retrieved region. Read
-    # the passage count in the `synthesize_node: packed N/M` log before changing
-    # this; a sweep over raw chunk sizes says 1250 keeps 4 passages and is wrong.
-    # The lever worth having is the neighbour expansion, not the budget.
+    # It now loses roughly one passage at a time, so narrowing it on a slow host
+    # is a graded trade rather than a collapse to a single region. What it buys is
+    # prefill: local prefill scales ~linearly with prompt size, and on an Intel
+    # i7-8850H (~31 tok/s prefill) 1500 -> 750 is ~56s -> ~29s.
+    # Read the `synthesize_node: packed N/M` log before changing it. Do NOT
+    # restore the old table: it measured the pre-de-duplication funnel.
     # Prepend each section's generated summary to its chunks in the prompt.
     # Off, and the default is the measurement rather than a preference: the
     # lookup is keyed on (document_id, section_heading), and every retrieved
@@ -177,6 +178,37 @@ class Settings(BaseSettings):
     # reach the model from 39 to 28 across an 8-query sample -- one query fell
     # from 4 passages to 1. Turning it on means raising the budget with it, and
     # that costs prefill latency and KV cache (I-27).
+    # Slow-host context budget, used in place of QA_CONTEXT_TOKEN_BUDGET where the
+    # start-up probe says local inference is expensive. Same gate as the keep-warm
+    # loop and for the same reason: a MEASUREMENT of this host, never a platform
+    # check. `platform.machine()` would guess at the cause; the probe measures the
+    # effect, and is right for a CPU-only Intel laptop, a Docker VM and a GPU box
+    # alike without naming any of them.
+    #
+    # 750 halves prefill (~56s -> ~29s at the i7-8850H's measured ~31 tok/s) and
+    # costs roughly half the passages -- see the dial table on
+    # QA_CONTEXT_TOKEN_BUDGET. Bracketing it: 500 drops one sampled query to a
+    # single passage, which is the collapse the 8244526 revert exists to prevent;
+    # 1250 saves only ~6s of prefill and is not worth a profile.
+    #
+    # NOT YET MEASURED: the generation-quality cost of answering at 750. Measure it
+    # with `QA_CONTEXT_TOKEN_BUDGET=750` and a study --generate run before treating
+    # this as a shipped default rather than an opt-in for hosts that are unusable
+    # without it.
+    QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST: int = 750
+    # Hard ceiling on everything the synthesis prompt carries, not just the chunk
+    # context. QA_CONTEXT_TOKEN_BUDGET bounds `chunks_context` only; section
+    # context, image context and a prepended executive summary are appended AFTER
+    # it, and the summary had no cap at all. A budget that bounds one component
+    # while another is unbounded gives a good average and an unbounded worst case,
+    # which is the shape of the original 173s report. 0 disables the ceiling.
+    QA_PROMPT_TOKEN_CEILING: int = 4000
+    # Cap on the prepended executive summary specifically, matching the 1000 the
+    # section context has always carried. `_should_use_summary` is a keyword match
+    # ("summarise", "main takeaway"), so this fires on the questions most likely to
+    # be asked of a long document -- 0/60 on the `study` golden, which is why it
+    # was never seen.
+    QA_SUMMARY_INJECTION_TOKEN_CAP: int = 1000
     QA_ATTACH_SECTION_SUMMARIES: bool = False
     # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
     # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
