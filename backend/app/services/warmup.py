@@ -15,7 +15,7 @@ import logging
 import time
 
 from app.config import get_settings
-from app.services import model_prefetch
+from app.services import model_keepwarm, model_prefetch
 from app.services.executors import get_model_executor
 from app.services.startup_status import get_startup_status
 
@@ -116,9 +116,15 @@ async def _warm_llm() -> None:
             await get_llm_service().generate(
                 "ping", model=model, timeout=get_settings().LLM_WARMUP_TIMEOUT_SECONDS
             )
+            elapsed = time.perf_counter() - t0
             if interactive:
                 status.set_state("chat_model", "ready", model or "")
-            logger.info("Warmup: %s LLM warm in %.2fs", label, time.perf_counter() - t0)
+                # The one local generation at start-up that something already
+                # times. Whether its cost was a load, start-up contention, or
+                # both, it is what getting an answer out of this machine costs,
+                # which is what `model_keepwarm` gates on.
+                model_keepwarm.record_startup_probe(elapsed)
+            logger.info("Warmup: %s LLM warm in %.2fs", label, elapsed)
         except Exception as exc:
             if interactive:
                 # A model that was never pulled is not a fault -- it is the

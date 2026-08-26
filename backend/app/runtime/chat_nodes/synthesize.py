@@ -34,6 +34,7 @@ from app.types import ChatState, TransparencyInfo
 
 logger = logging.getLogger(__name__)
 
+
 # Citation gating. A cited source should actually contain the text the user is
 # sent to — a weakly-related chunk only pollutes the reference list. Cap the list
 # and drop low-relevance sources, but always keep the single best source so a
@@ -192,10 +193,11 @@ async def synthesize_node(state: ChatState) -> dict:
         return {"not_found": True}
 
     logger.info(
-        "synthesize_node: intent=%s chunks=%d section_context=%s",
+        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d",
         intent,
         len(chunks_dicts),
         "yes" if section_context else "no",
+        get_settings().QA_CONTEXT_TOKEN_BUDGET,
     )
 
 
@@ -207,6 +209,13 @@ async def synthesize_node(state: ChatState) -> dict:
         pack_context_indexed(chunks_dicts, token_budget=token_budget)
         if chunks_dicts
         else ("", [])
+    )
+    logger.info(
+        "synthesize_node: packed %d/%d passages into %d chars at budget %d",
+        len(cited_chunks),
+        len(chunks_dicts),
+        len(chunks_context),
+        token_budget,
     )
 
     # section_context (graph results, executive summary) capped at 1000 tokens

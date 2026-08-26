@@ -251,9 +251,29 @@ async def search_node(state: ChatState) -> dict:
             if hasattr(c, "chunk_index")
         ]
         neighbors_map = await _fetch_neighbor_chunks_batch(chunk_keys)
+        retrieved_keys = set(chunk_keys)
 
         for c in chunks:
             neighbors = neighbors_map.get((c.document_id, c.chunk_index), [])
+            # Never expand into a chunk that was retrieved in its own right: it
+            # is already arriving as its own passage, so including it here sends
+            # the same prose twice and charges the context budget for it twice.
+            #
+            # Retrieval routinely returns a consecutive run -- measured on three
+            # real questions against one document, every one returned chunk
+            # indices 0..7, whose [prev, self, next] windows emitted 24 chunk
+            # slots covering 10 distinct chunks. 58% of the prompt was duplicate
+            # text, and a passage cost ~750 tokens instead of ~250, so a 1500
+            # token budget carried 2 passages / 4 distinct chunks rather than 6.
+            #
+            # Expansion still fires where it is for: an isolated hit that cuts
+            # mid-idea still gets the prose either side of it. What stops is
+            # expanding into material the model is already being shown.
+            neighbors = [
+                (idx, text)
+                for idx, text in neighbors
+                if (c.document_id, idx) not in retrieved_keys
+            ]
             # Sort and combine neighbors with the current chunk
             all_parts = [(c.chunk_index, c.text), *neighbors]
             all_parts.sort(key=lambda x: x[0])

@@ -9,9 +9,11 @@ from functools import lru_cache
 
 from sqlalchemy import func, select, update
 
+from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChatSuggestionHistoryModel, ChunkModel, SectionSummaryModel, SummaryModel
 from app.services.llm import LLMUnavailableError, get_llm_service
+from app.services.llm_admission import YieldedToInteractive, run_yielding_to_interactive
 from app.services.prompt_spec import NO_FENCES, PromptSpec, render_for
 
 logger = logging.getLogger(__name__)
@@ -388,14 +390,30 @@ class SuggestionService:
             )
 
         try:
-            raw = await get_llm_service().complete(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=0.7,
-                background=True,
+            # Abandoned if the user ends up waiting on it. Suggestions are the
+            # one LLM call here that is safe to lose: they are regenerable, and
+            # an empty return already means "templates answer instead" at both
+            # callers. Nothing is persisted until after this returns, so a
+            # cancelled call leaves no half-written state.
+            raw = await run_yielding_to_interactive(
+                get_llm_service().complete(
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    temperature=0.7,
+                    background=True,
+                ),
+                after_seconds=get_settings().LLM_BACKGROUND_YIELD_AFTER_SECONDS,
             )
+        except YieldedToInteractive:
+            logger.info(
+                "suggestions: abandoned for doc=%s so a waiting question could have "
+                "the slot; templates answer instead",
+                document_id,
+            )
+            return []
+        try:
             candidates = _parse_questions(raw)
             filtered = self.filter_near_duplicates(candidates, history)
             # An empty return falls back to templates at the caller. That fallback

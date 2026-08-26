@@ -104,6 +104,16 @@ services:
       # it, so a per-call value never applied and the model unloaded on
       # Ollama's own 5-minute default -- paying a full reload on a machine
       # where a reload is measured in tens of seconds.
+      #
+      # 30m and not -1, deliberately. On a host without GPU acceleration a load
+      # is the largest thing a question waits on -- measured on an Intel
+      # i7-8850H in a 12GB VM, qwen3.5:4b loads in 9.6s-155s, and one question
+      # spent 86 of its 261 seconds there -- but -1 pins 3.4GB for as long as
+      # Ollama runs, which is the wrong trade on a host that loads in seconds.
+      # Compose cannot tell those apart. The backend can and does: it times a
+      # real load at start-up and keeps the model warm only where that
+      # measurement says a load is expensive (I-37). Set OLLAMA_KEEP_ALIVE=-1
+      # yourself to take eviction off the table regardless.
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       # Ollama leaves llama.cpp's prompt cache at 8192 MiB on every host --
       # measured, not inferred: unset reports "size limit: 8192 MiB", which on a
