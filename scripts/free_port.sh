@@ -27,15 +27,21 @@
 # enrichment worker and cancels in-flight ingestion, and it is what leaves the
 # Kuzu lock held against the next launch.
 #
-# The 30s grace is measured, not guessed. A full stop of the app container takes
-# ~10.8s: the FastAPI lifespan itself finishes in well under a second, then the
-# process sits in loop.run_until_complete cleaning up an unawaited LiteLLM
-# coroutine (`BaseLLMHTTPHandler.async_completion`) before the interpreter exits.
-# That is just over `docker stop`'s 10s default, so the default produced exit 137
-# on one run and exit 0 on the next -- a SIGKILLed shutdown, at random, on the
-# path users take every day. Both the container timeout and the native grace are
-# set here so neither can drift back under the real number. A shorter value does
-# not make stop faster: free_port returns the moment the port is released.
+# The 90s grace is a CEILING, not a wait: `docker stop -t N` and the poll below
+# both return the moment the process exits, so a large N costs nothing on a
+# normal stop and only bounds a pathological one.
+#
+# It has to be this large because shutdown time is VARIABLE, which is the part
+# that bit us. Measured on one machine: 10.8s on a settled container, 17s during
+# warmup, and over 30s when the stop landed while GLiNER was loading. The FastAPI
+# lifespan itself always finishes fast -- the logs reach "Application shutdown
+# complete" every time -- but the process then blocks in shutdown_model_executor()
+# on an in-flight model load, which cannot be cancelled, before the interpreter
+# exits. Docker's and compose's 10s defaults, and a first attempt at 30s, both
+# SIGKILLed healthy shutdowns; exit 137 risks leaving the Kuzu lock held.
+#
+# Do not tune this down to make a stop "feel" faster. It will not, and the only
+# thing a lower ceiling buys is a forced kill during warmup.
 
 _fp_listeners() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true; }
 
@@ -62,7 +68,7 @@ _fp_stop_container() {
         *luminary*|*Luminary*)
             printf '  :%s is served by container %s — docker stop (graceful)\n' \
                 "$_fpc_port" "$(printf '%s' "$_fpc_row" | awk '{print $2}')"
-            docker stop -t "${FREE_PORT_GRACE:-30}" "$_fpc_id" >/dev/null 2>&1 && return 0
+            docker stop -t "${FREE_PORT_GRACE:-90}" "$_fpc_id" >/dev/null 2>&1 && return 0
             return 1 ;;
         *)
             printf '  :%s is published by a NON-Luminary container (%s) — left alone.\n' \
@@ -74,7 +80,7 @@ _fp_stop_container() {
 # free_port PORT [GRACE_SECONDS]
 free_port() {
     _fp_port="$1"
-    _fp_grace="${2:-${FREE_PORT_GRACE:-30}}"
+    _fp_grace="${2:-${FREE_PORT_GRACE:-90}}"
     _fp_pids="$(_fp_listeners "$_fp_port")"
 
     if [ -z "$_fp_pids" ]; then

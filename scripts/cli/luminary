@@ -48,7 +48,7 @@ _free_port() {
                             --format '{{.ID}}' 2>/dev/null | head -1)"
                     if [ -n "$cid" ]; then
                         _info "Stopping Luminary container $cid (graceful)."
-                        docker stop -t 30 "$cid" >/dev/null 2>&1 || true
+                        docker stop -t 90 "$cid" >/dev/null 2>&1 || true
                         return 0
                     fi
                 fi
@@ -70,7 +70,7 @@ _free_port() {
 
     pids="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
     [ -n "$pids" ] || return 0
-    _warn "Still listening after 30s; SIGKILL. This can leave the Kuzu lock held."
+    _warn "Still listening after 90s; SIGKILL. This can leave the Kuzu lock held."
     for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
 }
 

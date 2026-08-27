@@ -195,6 +195,29 @@ Everything below is the Docker path. Apple Silicon Macs use the native path abov
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/), running —
    check its memory and disk against
    [Running under Docker](#running-under-docker) before the first build.
+   **Keep it current.** The compose targets need a stable `docker compose` (v2 or
+   later, not a pre-release) and **buildx 0.17.0 or later**, both of which ship
+   inside the Docker Desktop bundle. `make docker-run…` checks each and refuses
+   with the fix rather than hanging. Verify with:
+
+   ```bash
+   docker compose version   # must not say alpha/beta/rc
+   docker buildx version    # must be >= v0.17.0
+   ```
+
+   On a Docker Desktop too old to upgrade in place, you can override just these
+   two plugins — the CLI prefers `~/.docker/cli-plugins` over the app bundle:
+
+   ```bash
+   brew install docker-compose docker-buildx
+   mkdir -p ~/.docker/cli-plugins
+   ln -sfn "$(brew --prefix)/opt/docker-compose/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
+   ln -sfn "$(brew --prefix)/opt/docker-buildx/bin/docker-buildx"   ~/.docker/cli-plugins/docker-buildx
+   ```
+
+   A 2021 Docker Desktop failed twice this way — its compose created the
+   container and never started it, and its buildx was refused by a current
+   compose — while its daemon was fine. Upgrading Desktop fixes both at once.
 2. [Homebrew](https://brew.sh), then `brew install ollama` — only for the
    recommended path; the all-in-Docker path needs nothing but Docker.
 

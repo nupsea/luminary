@@ -15,12 +15,13 @@ services:
       - "127.0.0.1:7820:7820"
     volumes:
       - luminary-data:/data
-    # A full shutdown takes ~10.8s: the FastAPI lifespan finishes fast, then the
-    # process drains an unawaited LiteLLM coroutine before the interpreter exits.
-    # Compose's default grace is 10s, so Ctrl-C here landed on either side of the
-    # boundary at random -- exit 0 on one run, SIGKILL (137) on the next, with the
-    # Kuzu lock left held. Do not lower this below the measured number.
-    stop_grace_period: 30s
+    # A ceiling, not a wait: compose stops as soon as the process exits. Shutdown
+    # is variable -- 10.8s settled, 17s during warmup, over 30s when it lands
+    # while a model is loading, because the process blocks on an uncancellable
+    # model load after the lifespan has already finished. Compose's 10s default
+    # and a first attempt at 30s both SIGKILLed healthy shutdowns (exit 137),
+    # which risks leaving the Kuzu lock held. Do not lower this.
+    stop_grace_period: 90s
     environment:
       - LUMINARY_MODE=public
       - DATA_DIR=/data

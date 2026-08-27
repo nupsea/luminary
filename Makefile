@@ -220,6 +220,12 @@ require-docker:
 		     echo "Every compose target here uses v2, not the docker-compose binary."; \
 		     echo "Upgrade Docker Desktop, or: brew install docker-compose"; exit 1; }
 
+# The build toolchain: compose AND buildx. Both live in the Docker Desktop
+# bundle, so a stale Desktop fails here in two different places, one at a time --
+# a current compose still refuses to build against buildx 0.5.1 with "compose
+# build requires buildx 0.17.0 or later", arriving only after the Ollama probes
+# have printed and the build has started.
+#
 # A pre-release compose is not a supported configuration here, and this is a
 # separate gate from require-docker on purpose: it blocks the RUN targets only.
 # Stopping and tearing down must keep working on a broken compose -- refusing to
@@ -249,6 +255,19 @@ require-compose-release: require-docker
 				exit 1; \
 			fi ;; \
 	esac
+	@bx="$$(docker buildx version 2>/dev/null | sed -n 's/.*v\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)"; \
+	[ -n "$$bx" ] || { echo "docker buildx is missing; compose needs it to build."; \
+	                   echo "   brew install docker-buildx"; exit 1; }; \
+	maj=$${bx%%.*}; min=$${bx#*.}; \
+	if [ "$$maj" -eq 0 ] && [ "$$min" -lt 17 ]; then \
+		echo "docker buildx $$bx is too old -- compose build needs 0.17.0 or later."; \
+		echo "Docker Desktop bundles buildx, so an old Desktop fails here even with"; \
+		echo "a current compose. Upgrade Docker Desktop, or override just this plugin:"; \
+		echo "   brew install docker-buildx"; \
+		echo "   mkdir -p ~/.docker/cli-plugins"; \
+		echo "   ln -sfn $$(brew --prefix 2>/dev/null || echo /usr/local)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx"; \
+		exit 1; \
+	fi
 
 docker-build: require-docker
 	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
@@ -305,11 +324,12 @@ docker-run-host-ollama: require-compose-release
 # There was no way to bring the stack down. `make stop` frees the port -- and now
 # stops the container serving it -- but nothing removed the container and network
 # compose creates, so a re-run met a half-existing stack. Both use -t 30 for the
-# same measured reason as every other stop in this repo: a full shutdown takes
-# ~10.8s and the 10s default SIGKILLed it at random.
+# same reason as every other stop here: shutdown is variable (10.8s settled, over
+# 30s during a model load) and both the 10s default and a 30s ceiling SIGKILLed
+# healthy shutdowns. -t is a ceiling, not a wait.
 docker-stop: require-docker
 	@echo "Stopping the Luminary compose stack (containers kept for a fast restart)..."
-	@docker compose --profile ai stop -t 30
+	@docker compose --profile ai stop -t 90
 	@echo "Stopped. 'make docker-down' also removes the containers and network."
 
 # down removes containers and the network. It NEVER takes --volumes: that deletes
@@ -317,7 +337,7 @@ docker-stop: require-docker
 # allowed to do that silently. Do not add it.
 docker-down: require-docker
 	@echo "Stopping and removing Luminary containers and network..."
-	@docker compose --profile ai down -t 30
+	@docker compose --profile ai down -t 90
 	@echo "Done. Your library volume is untouched:"
 	@docker volume ls --filter name=luminary --format '  {{.Name}}' 2>/dev/null || true
 

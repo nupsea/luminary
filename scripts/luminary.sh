@@ -104,9 +104,10 @@ FRONTEND_PIPE_PID=$!
 _stop() {
     if [[ -n "$DOCKER_CONTAINER" ]]; then
         _info "Stopping Docker container ($DOCKER_CONTAINER)..."
-        # -t 30, not the 10s default: a full stop takes ~10.8s, so the default
-        # SIGKILLed a healthy shutdown on roughly half of Ctrl-C exits.
-        docker stop -t 30 "$DOCKER_CONTAINER" 2>/dev/null || true
+        # -t 90, a ceiling not a wait. Shutdown is variable (10.8s settled, over
+        # 30s if it lands during a model load); 10s and 30s both SIGKILLed
+        # healthy shutdowns. See scripts/free_port.sh.
+        docker stop -t 90 "$DOCKER_CONTAINER" 2>/dev/null || true
     fi
     kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true

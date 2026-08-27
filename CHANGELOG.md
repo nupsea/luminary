@@ -14,13 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`make stop` and `make clean` killed browsers instead of the app.** Both
   matched every socket on the port rather than the listener, so a tab left open
   on Luminary was SIGTERMed then SIGKILLed while the app kept running.
-- **Stopping the container SIGKILLed it about half the time.** A full shutdown
-  takes ~10.8s against `docker stop`'s 10s default, so exit 137 or 0 was a coin
-  toss; the timeout is now 30s and a forced kill can no longer strand the Kuzu
-  lock on a healthy stop.
-- **A pre-release `docker compose` now fails in under a second instead of
-  hanging.** 2.0.0-beta.4 creates the container and never starts it, attached or
-  detached; the run targets refuse it, while stop and down still work.
+- **Stopping the container SIGKILLed it about half the time.** Shutdown is
+  variable — 10.8s settled, over 30s if it lands while a model is loading — and
+  Docker's 10s default cut it off, risking a stranded Kuzu lock. Every stop
+  ceiling is now 90s; `-t` returns as soon as the process exits, so a normal stop
+  is no slower.
+- **A stale Docker build toolchain now fails in under a second instead of
+  hanging or dying mid-build.** compose 2.0.0-beta.4 creates the container and
+  never starts it, attached or detached; buildx below 0.17.0 is refused outright
+  by a current compose. Both are checked up front, while stop and down keep
+  working regardless.
 - **The docker targets failed with `command not found` when Docker was merely
   not started.** Docker Desktop installs its CLI symlinks only on first
   successful run, so "not on PATH" was never evidence it was missing.
