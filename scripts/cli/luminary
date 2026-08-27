@@ -24,14 +24,54 @@ _healthy() { curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>
 
 # start.sh has no port-clearing, so a stale listener turns into a raw uvicorn
 # bind error. Clear it before handing the port back to launchd.
+#
+# Deliberately duplicated from scripts/free_port.sh: bootstrap.sh installs THIS
+# FILE ALONE into the bin directory, so it cannot source a sibling. Keep the two
+# in step. Both rules matter here as much as there -- `lsof -ti :PORT` returns
+# clients too (a browser tab on the app sits in CLOSE_WAIT and was being
+# SIGKILLed), and under Docker the listener is com.docker.backend, which must
+# never be signalled to free a port.
+_fp_cmd() { ps -p "$1" -o comm= 2>/dev/null | head -1; }
+
 _free_port() {
-    local pids
-    pids="$(lsof -ti :"$PORT" 2>/dev/null || true)"
-    if [ -n "$pids" ]; then
-        _warn "Port $PORT was held by PID(s) $pids — releasing."
-        kill -9 $pids 2>/dev/null || true
-        sleep 1
-    fi
+    local pids pid
+    pids="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    [ -n "$pids" ] || return 0
+
+    for pid in $pids; do
+        case "$(_fp_cmd "$pid")" in
+            *com.docker.backend*|*docker-proxy*|*vpnkit*)
+                _warn "Port $PORT is published by Docker, not a local process."
+                if command -v docker >/dev/null 2>&1; then
+                    local cid
+                    cid="$(docker ps --filter "publish=$PORT" --filter "name=luminary" \
+                            --format '{{.ID}}' 2>/dev/null | head -1)"
+                    if [ -n "$cid" ]; then
+                        _info "Stopping Luminary container $cid (graceful)."
+                        docker stop -t 30 "$cid" >/dev/null 2>&1 || true
+                        return 0
+                    fi
+                fi
+                _die "Refusing to signal $(_fp_cmd "$pid") — that would stop Docker itself. Check: docker ps --filter publish=$PORT"
+                ;;
+        esac
+    done
+
+    _warn "Port $PORT was held by PID(s) $pids — stopping (SIGTERM)."
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+
+    # 30s, not 5: a full stop takes ~10.8s (lifespan is fast, then the loop
+    # drains an unawaited LiteLLM coroutine). 5s SIGKILLed a healthy shutdown.
+    local waited=0
+    while [ "$waited" -lt 30 ]; do
+        sleep 1; waited=$((waited + 1))
+        [ -z "$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)" ] && return 0
+    done
+
+    pids="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    [ -n "$pids" ] || return 0
+    _warn "Still listening after 30s; SIGKILL. This can leave the Kuzu lock held."
+    for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
 }
 
 _wait_ready() {

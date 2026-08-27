@@ -25,15 +25,12 @@ w = warn_if_configuration_exceeds_host(); \
 print('  (.env + registry defaults; a model chosen in Settings is stored in the'); \
 print('   database and only shows at GET /settings/models on a running server)')"
 
+# Was: `lsof -ti :$$port` then an immediate `kill -9`. That query matches
+# clients as well as listeners, so it force-killed browser tabs pointed at the
+# app, and -9 skips the shutdown that releases the Kuzu lock. See free_port.sh.
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
-	@for port in 7820 5173 5174; do \
-		pid=$$(lsof -ti :$$port 2>/dev/null); \
-		if [ -n "$$pid" ]; then \
-			echo "  killing PID $$pid on :$$port"; \
-			kill -9 $$pid; \
-		fi; \
-	done
+	@sh scripts/free_port.sh 7820 5173 5174
 	@echo "Done."
 
 dev:
@@ -276,23 +273,8 @@ docker-run-host-ollama: require-docker
 		docker compose --profile ai up --build --no-deps app
 
 stop:
-	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
-	if [ -z "$$pids" ]; then \
-		echo "No Luminary app running on :$(LUMINARY_PORT)."; \
-	else \
-		echo "Gracefully stopping Luminary on :$(LUMINARY_PORT) (SIGTERM to $$pids)..."; \
-		kill $$pids 2>/dev/null || true; \
-		for i in 1 2 3 4 5 6 7 8 9 10; do \
-			sleep 0.5; \
-			pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
-			[ -z "$$pids" ] && break; \
-		done; \
-		if [ -n "$$pids" ]; then \
-			echo "  still alive after 5s; sending SIGKILL to $$pids"; \
-			kill -9 $$pids 2>/dev/null || true; \
-		fi; \
-		echo "Stopped."; \
-	fi
+	@echo "Stopping Luminary on :$(LUMINARY_PORT)..."
+	@sh scripts/free_port.sh $(LUMINARY_PORT)
 
 # The frontend typecheck needs `tsc -b`: tsconfig.json is solution-style
 # ("files": []), so a bare `tsc --noEmit` resolves zero files and always passes.
