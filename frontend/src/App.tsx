@@ -29,7 +29,6 @@ import { LLMModeBadge, SettingsDrawer } from "./components/SettingsDrawer"
 import { StreakXPWidget } from "./components/StreakXPWidget"
 import { SearchDialog } from "./components/SearchDialog"
 import { StudyLauncher } from "./components/StudyLauncher"
-import { FocusTimerPill } from "./components/FocusTimerPill"
 import { Skeleton } from "./components/ui/skeleton"
 import { useReviewNotification } from "./hooks/useReviewNotification"
 import { IngestionTrackerProvider } from "./hooks/IngestionTrackerProvider"
@@ -44,6 +43,25 @@ const Learning = lazy(() => import("@/pages/Learning"))
 const Notes = lazy(() => import("@/pages/Notes"))
 const Study = lazy(() => import("@/pages/Study"))
 const Viz = lazy(() => import("@/pages/Viz"))
+
+// Full-mode only, and folded at BUILD time rather than hidden at runtime.
+// `isSurfaceVisible("pomodoro")` decides what renders; it does not decide what
+// is compiled in, so a static import shipped lib/focusApi and its /pomodoro/*
+// calls to every public user. LUMINARY_MODE is a vite `define`, so in a public
+// build this ternary folds to null and the dynamic import is dropped entirely.
+// scripts/check_public_bundle_excludes_full.py fails the build if it comes back.
+// Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
+// LUMINARY_MODE constant. vite `define` substitutes the env expression
+// textually before parsing, so this folds to `"public" === "full"` -> false and
+// Rollup drops the branch with its dynamic import. LUMINARY_MODE is the return
+// value of resolveMode(), which Rollup cannot constant-fold -- using it here
+// emits a separate chunk that still ships. Measured both ways.
+const FocusTimerPill =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? lazy(() =>
+        import("./components/FocusTimerPill").then((m) => ({ default: m.FocusTimerPill })),
+      )
+    : null
 const Quality = lazy(() => import("@/pages/Quality"))
 const Progress = lazy(() => import("@/pages/Progress"))
 const Admin = lazy(() => import("@/pages/Admin"))
@@ -568,9 +586,11 @@ function AppShell() {
           </div>
         )}
         {/* Focus timer pill (app-wide) -- full-mode surface, only when pomodoro is visible */}
-        {pomodoroVisible && (
+        {pomodoroVisible && FocusTimerPill && (
           <div className="flex items-center justify-end gap-2 px-4 pt-3">
-            <FocusTimerPill />
+            <Suspense fallback={null}>
+              <FocusTimerPill />
+            </Suspense>
           </div>
         )}
         <Routes>

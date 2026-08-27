@@ -6,7 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, BookOpen, Download, Feather, FileText, Loader2, Network, Newspaper, Pencil, Plus, Tag, Trash2, Wand2, X } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { NEW_NOTE_ROUTE_ID } from "@/lib/noteAutosave"
@@ -18,10 +18,33 @@ import { GapDetectDialog } from "@/components/GapDetectDialog"
 import { OrganizationPlanDialog, type NamingViolation } from "@/components/OrganizationPlanDialog"
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
-import { BlogPublishDialog } from "@/components/blog/BlogPublishDialog"
-import { BlogsPanel } from "@/components/blog/BlogsPanel"
 import type { BlogKind } from "@/lib/blogApi"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
+
+// Full-mode only, folded at BUILD time. `isSurfaceVisible("blog")` below decides
+// what renders; it does not decide what is compiled in, so a static import put
+// the whole publish dialog and lib/blogApi into the public Notes chunk. In a
+// public build LUMINARY_MODE folds this to null and the dynamic import is
+// dropped. Guarded by scripts/check_public_bundle_excludes_full.py.
+// Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
+// LUMINARY_MODE constant. vite `define` substitutes the env expression
+// textually before parsing, so this folds to `"public" === "full"` -> false and
+// Rollup drops the branch with its dynamic import. LUMINARY_MODE is the return
+// value of resolveMode(), which Rollup cannot constant-fold -- using it here
+// emits a separate chunk that still ships. Measured both ways.
+const BlogsPanel =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? lazy(() => import("@/components/blog/BlogsPanel").then((m) => ({ default: m.BlogsPanel })))
+    : null
+
+const BlogPublishDialog =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? lazy(() =>
+        import("@/components/blog/BlogPublishDialog").then((m) => ({
+          default: m.BlogPublishDialog,
+        })),
+      )
+    : null
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -668,7 +691,8 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {publishKind && (
+      {publishKind && BlogPublishDialog && (
+        <Suspense fallback={null}>
         <BlogPublishDialog
           open={!!publishKind}
           kind={publishKind}
@@ -676,6 +700,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           noteId={note.id}
           noteContent={note.content}
         />
+        </Suspense>
       )}
     </div>
   )
@@ -917,8 +942,12 @@ export default function NotesPage() {
         navigate={navigate}
       />
     )
-  } else if (filter.type === "blogs") {
-    panelContent = <BlogsPanel />
+  } else if (filter.type === "blogs" && BlogsPanel) {
+    panelContent = (
+      <Suspense fallback={null}>
+        <BlogsPanel />
+      </Suspense>
+    )
   } else if (isSearchMode) {
     if (searchLoading) {
       panelContent = (
