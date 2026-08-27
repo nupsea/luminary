@@ -196,6 +196,26 @@ class Settings(BaseSettings):
     # this as a shipped default rather than an opt-in for hosts that are unusable
     # without it.
     QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST: int = 750
+    # Whether a host measured slow still spends a whole LLM call classifying
+    # intent. Same gate as the budget above, and the reason it is separate is
+    # that this one's cost IS measured.
+    #
+    # What it saves: on an i7-8850H with the model resident, `classify_node`
+    # spent 17.02s of a 50.12s question deciding `summary` -- the label the
+    # heuristic had already returned. ~8s of that is this host's floor for
+    # issuing any local call at all (the keep-warm ping measures the same floor),
+    # which no prompt or output bound reaches. It fires on 4% of `intents` and
+    # 28% of `intents_adversarial`.
+    #
+    # What it costs, measured on this branch against a live backend:
+    #   intents (50)              1.0000 -> 1.0000   the LLM changes nothing
+    #   intents_adversarial (29)  0.9655 -> 0.8276   4 rescues lost
+    # The committed threshold (routing_accuracy >= 0.85, `intents`) is untouched;
+    # the adversarial set is the floor the Makefile already labels "not the
+    # routing". Below 0.7 the heuristic is guessing, and here the guess stands.
+    #
+    # Set this True to buy those 4 rescues back at ~17s per affected question.
+    QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST: bool = False
     # Hard ceiling on everything the synthesis prompt carries, not just the chunk
     # context. QA_CONTEXT_TOKEN_BUDGET bounds `chunks_context` only; section
     # context, image context and a prepended executive summary are appended AFTER

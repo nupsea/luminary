@@ -118,10 +118,30 @@ this and cannot be compared to one that has it.
 and the classifier runs at temperature 0, so a single run is a valid measurement here and a small
 delta is real, unlike generation. Measured 1.0000 on all four routes.
 
-**The 1.0000 is on easy rows.** The same classifier scores **0.5862** on 29 adversarial
-phrasings, where search absorbs 11 of 12 misroutes: `graph` and `comparative` fire on their
-keyword and nothing else. Read the gated golden as a regression check, never as evidence that
-routing is solved.
+**The 1.0000 is on easy rows.** The same classifier scores **0.8276** on 29 adversarial
+phrasings with the heuristic alone, and **0.9655** with the LLM fallback that fires below
+confidence 0.7. Search absorbs all five heuristic misroutes: `graph` and `comparative` fire on
+their keyword and nothing else. Read the gated golden as a regression check, never as evidence
+that routing is solved.
+
+**Which of those two arms a user gets depends on the host.** `should_use_llm_fallback` drops the
+LLM call where the start-up probe measured local inference expensive — it cost 17.02s of a 50.12s
+question on an i7-8850H, with the model already resident — so on such a host the heuristic arm is
+not a floor, it is the routing:
+
+| dataset | heuristic alone | + LLM fallback |
+|---|---|---|
+| `intents` (50, gated) | 1.0000 | 1.0000 |
+| `intents_adversarial` (29, report-only) | 0.8276 | 0.9655 |
+
+The gated golden does not move, because the 2 of 50 rows that reach the LLM there are ones the
+heuristic already routes correctly. The cost is four adversarial rescues, and
+`QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST=true` buys them back at ~17s per affected question. The
+fallback fires on 4% of `intents` and 28% of `intents_adversarial`.
+
+`/qa/classify-only` is deliberately NOT gated the same way: an eval must be able to measure both
+arms on whatever machine it runs on, and the numbers above were taken on a host where the graph
+itself would have skipped the call.
 
 **A perfect score on a 50-row golden proves very little**, which is why routing carries a
 generalisation suite as well (`tests/test_intent_generalisation.py`). It holds each phrasing and

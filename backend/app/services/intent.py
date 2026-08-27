@@ -164,6 +164,16 @@ _SUMMARY_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"[\w\s-]{0,24}\babout\b"
     ),
     re.compile(r"\bwhat\s+(?:is|are)\s+[\w\s-]{0,24}\b(?:mainly|broadly|generally)\s+about\b"),
+    # The verb, in both spellings and all four forms. `summarize` and `summary`
+    # are keywords, but _inflected_regex only adds an optional (e)s -- so
+    # "summarised", "summarising" and every -ise spelling matched nothing and
+    # fell to the 0.5 catch-all, which is BELOW LLM_FALLBACK_BELOW. On a slow
+    # host that turned "Summarise the main argument in two sentences." into a
+    # 17s LLM call to be told `summary`; with the fallback gated off it routes
+    # to search instead, which is the wrong answer rather than a slow one.
+    # A shape, not a phrase list: it generalises to the spellings and tenses no
+    # golden enumerates, which is why it lives here and not in _SUMMARY_KWS.
+    re.compile(r"\bsummari[sz](?:e|es|ed|ing)\b"),
 )
 
 _RELATIONAL_KWS: frozenset[str] = frozenset(
@@ -543,6 +553,47 @@ def classify_intent_heuristic(question: str) -> tuple[str, float]:
 # Below this the heuristic is guessing and the LLM decides. Shared so the chat
 # graph and anything measuring it cannot drift apart.
 LLM_FALLBACK_BELOW = 0.7
+
+
+def should_use_llm_fallback(confidence: float) -> tuple[bool, str]:
+    """(ask the LLM classifier, why) for THIS host.
+
+    Lives here rather than in the chat node for the same reason
+    `resolve_context_budget` lives in the packer: one predicate, so the graph
+    and anything measuring the graph cannot drift apart.
+
+    The gate is the same measured host fact as the keep-warm loop and the
+    context budget -- `local_inference_is_slow()` -- rather than a third
+    threshold that could disagree with them. Unmeasured is not slow, so a host
+    nothing is known about keeps the shipped behaviour.
+
+    Why a classifier call is worth gating at all: it is not a rounding error
+    against the answer on a host like this. Measured on an i7-8850H with the
+    model already resident (`/api/ps` showed one model, no load), `classify_node`
+    spent 17.02s of a 50.12s question to return `summary` -- the label the
+    heuristic had already returned at 0.50.
+
+    The cost is real and is NOT hidden: below the threshold the heuristic is
+    guessing, and on a slow host the guess now stands. It is measured on
+    `intents_adversarial` (0.9655 -> 0.8276) and zero on `intents`, which is the
+    set carrying the committed threshold. `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST`
+    buys those rescues back.
+    """
+    if confidence >= LLM_FALLBACK_BELOW:
+        return (False, "heuristic confident")
+
+    from app.config import get_settings  # noqa: PLC0415
+    from app.services import model_keepwarm  # noqa: PLC0415
+
+    if get_settings().QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST:
+        return (True, "heuristic below threshold")
+    if model_keepwarm.local_inference_is_slow():
+        probe = model_keepwarm.measured_probe_seconds()
+        return (
+            False,
+            f"slow host (probe {probe:.1f}s)" if probe is not None else "slow host",
+        )
+    return (True, "heuristic below threshold")
 
 
 # The classifier prompt as a contract plus what this model needed to follow it.

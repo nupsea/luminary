@@ -80,6 +80,7 @@ from app.services.intent import (
     LLM_FALLBACK_BELOW,
     _llm_classify_fallback,
     classify_intent_heuristic,
+    should_use_llm_fallback,
 )
 from app.services.qa import (
     _maybe_rewrite_query,
@@ -226,7 +227,19 @@ async def classify_node(state: ChatState) -> dict:
     intent, confidence = classify_intent_heuristic(question)
     source = "heuristic"
 
-    if confidence < LLM_FALLBACK_BELOW:
+    use_llm, why = should_use_llm_fallback(confidence)
+    if not use_llm and confidence < LLM_FALLBACK_BELOW:
+        # Skipped, not failed, and said out loud: the heuristic's guess is what
+        # the user gets, and a route that looks wrong needs this line to be
+        # readable from a log rather than inferred from its absence.
+        logger.info(
+            "classify_node: LLM fallback SKIPPED (%s) -- heuristic intent=%s at "
+            "%.2f stands",
+            why,
+            intent,
+            confidence,
+        )
+    if use_llm:
         t_clf = time.perf_counter()
         intent = await _llm_classify_fallback(question, scope=scope, default=intent)
         source = "llm"
