@@ -46,19 +46,13 @@ fi
 # ---------------------------------------------------------------------------
 # Clear stale processes on required ports (graceful restart support)
 # ---------------------------------------------------------------------------
-_free_port() {
-    local port="$1"
-    local pid
-    pid=$(lsof -ti :"$port" 2>/dev/null)
-    if [ -n "$pid" ]; then
-        _info "Port $port in use by PID $pid — stopping it..."
-        kill "$pid" 2>/dev/null || true
-        # Give it a moment to release; force-kill if it lingers
-        sleep 1
-        pid=$(lsof -ti :"$port" 2>/dev/null)
-        [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
-    fi
-}
+# Listener-only, Docker-aware, SIGTERM-first. The previous version matched any
+# socket on the port -- including a browser tab in CLOSE_WAIT -- and force-killed
+# it after one second. See scripts/free_port.sh for the two incidents.
+# shellcheck source=scripts/free_port.sh
+. "$(dirname "${BASH_SOURCE[0]}")/free_port.sh"
+
+_free_port() { free_port "$1"; }
 _free_port "$BACKEND_PORT"
 _free_port 5173
 _free_port 5174
@@ -110,7 +104,9 @@ FRONTEND_PIPE_PID=$!
 _stop() {
     if [[ -n "$DOCKER_CONTAINER" ]]; then
         _info "Stopping Docker container ($DOCKER_CONTAINER)..."
-        docker stop "$DOCKER_CONTAINER" 2>/dev/null || true
+        # -t 30, not the 10s default: a full stop takes ~10.8s, so the default
+        # SIGKILLed a healthy shutdown on roughly half of Ctrl-C exits.
+        docker stop -t 30 "$DOCKER_CONTAINER" 2>/dev/null || true
     fi
     kill "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true
     wait "$BACKEND_PIPE_PID" "$FRONTEND_PIPE_PID" 2>/dev/null || true

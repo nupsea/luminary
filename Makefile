@@ -1,4 +1,4 @@
-.PHONY: docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -25,15 +25,12 @@ w = warn_if_configuration_exceeds_host(); \
 print('  (.env + registry defaults; a model chosen in Settings is stored in the'); \
 print('   database and only shows at GET /settings/models on a running server)')"
 
+# Was: `lsof -ti :$$port` then an immediate `kill -9`. That query matches
+# clients as well as listeners, so it force-killed browser tabs pointed at the
+# app, and -9 skips the shutdown that releases the Kuzu lock. See free_port.sh.
 clean:
 	@echo "Stopping processes on Luminary ports (7820, 5173, 5174)..."
-	@for port in 7820 5173 5174; do \
-		pid=$$(lsof -ti :$$port 2>/dev/null); \
-		if [ -n "$$pid" ]; then \
-			echo "  killing PID $$pid on :$$port"; \
-			kill -9 $$pid; \
-		fi; \
-	done
+	@sh scripts/free_port.sh 7820 5173 5174
 	@echo "Done."
 
 dev:
@@ -150,7 +147,80 @@ release:
 # silently ignored on exactly one of the two documented ways to build.
 WITH_MEDIA ?= 0
 
-docker-build:
+# Every docker target below fails the same way on a machine without a working
+# daemon, and the bare failure is unhelpful: `docker: command not found` with a
+# make Error 127, arriving AFTER this file has printed "Using host Ollama at
+# :11434" -- which reads like the run started. Check the three things separately,
+# because they fail independently: the CLI, the daemon, and the compose v2
+# subcommand (every compose target here uses `docker compose`, not
+# `docker-compose`). They run in that order for the reasons noted at each.
+#
+# Only the ABSENT cases are fatal. A daemon that is merely stopped is a state
+# this target can fix, so it starts Docker Desktop (or colima) and waits, rather
+# than making you run one command and re-run make. DOCKER_AUTOSTART=0 opts out --
+# set it where a build should never launch a GUI app. The wait has to be generous
+# and it has to end: Docker Desktop cold-starts a Linux VM, and a version too old
+# for the host macOS hangs instead of failing, which is what the timeout catches.
+DOCKER_AUTOSTART ?= 1
+DOCKER_WAIT_SECS ?= 120
+
+# Docker Desktop installs /usr/local/bin/docker and its compose plugin the FIRST
+# TIME IT SUCCESSFULLY RUNS, through a privileged helper. Until that happens
+# `docker` is not on PATH at all even though Docker is installed -- the failure
+# reads as "not installed" when it is really "never started", which is a
+# different fix. Fall back to the CLI inside the app bundle so this target can
+# start Desktop instead of telling you to install what you already have.
+# Appended, not prepended: a properly linked docker always wins over the bundle.
+DOCKER_APP_BIN := /Applications/Docker.app/Contents/Resources/bin
+ifneq ($(wildcard $(DOCKER_APP_BIN)/docker),)
+export PATH := $(PATH):$(DOCKER_APP_BIN)
+endif
+require-docker:
+	@command -v docker >/dev/null 2>&1 \
+		|| { echo "No docker CLI found -- not on PATH, and no Docker.app to fall"; \
+		     echo "back to. Install Docker Desktop:"; \
+		     echo "   https://www.docker.com/products/docker-desktop/"; \
+		     echo "or a lighter daemon:"; \
+		     echo "   brew install colima docker docker-compose && colima start"; exit 1; }
+	@docker info >/dev/null 2>&1 && exit 0; \
+	if [ "$(DOCKER_AUTOSTART)" != "1" ]; then \
+		echo "docker is installed but the daemon is not answering, and"; \
+		echo "DOCKER_AUTOSTART=0. Start it yourself, then retry."; exit 1; \
+	fi; \
+	if [ "$$(uname -s)" = "Darwin" ] && [ -d /Applications/Docker.app ]; then \
+		starter="Docker Desktop"; \
+		open -g -a Docker \
+			|| { echo "Could not launch Docker Desktop."; exit 1; }; \
+	elif command -v colima >/dev/null 2>&1; then \
+		starter="colima"; \
+		colima start || { echo "'colima start' failed."; exit 1; }; \
+	else \
+		echo "docker is installed but the daemon is not answering, and there"; \
+		echo "is nothing here to start it (no Docker.app, no colima)."; \
+		echo "Start your daemon and retry -- on Linux:"; \
+		echo "   sudo systemctl start docker"; exit 1; \
+	fi; \
+	printf "Daemon down; started %s, waiting up to %ss" "$$starter" "$(DOCKER_WAIT_SECS)"; \
+	i=0; \
+	while [ $$i -lt $(DOCKER_WAIT_SECS) ]; do \
+		if docker info >/dev/null 2>&1; then echo " -- up."; exit 0; fi; \
+		printf "."; sleep 2; i=$$((i+2)); \
+	done; \
+	echo ""; \
+	echo "$$starter did not come up within $(DOCKER_WAIT_SECS)s."; \
+	echo "It may be too old for this macOS, or wedged. Check it with:"; \
+	echo "   docker info"; exit 1
+# Compose is checked LAST, not alongside the CLI: starting Desktop is what
+# installs the v2 plugin, so a machine that has never run it fails this check for
+# a reason the step above already fixed.
+	@docker compose version >/dev/null 2>&1 \
+		|| { echo "The docker daemon is up, but this CLI has no 'docker compose'"; \
+		     echo "(v2) subcommand:"; \
+		     echo "   $$(docker --version 2>&1)"; \
+		     echo "Every compose target here uses v2, not the docker-compose binary."; \
+		     echo "Upgrade Docker Desktop, or: brew install docker-compose"; exit 1; }
+
+docker-build: require-docker
 	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
 
 # OLLAMA_URL pinned, not left to the ambient environment. The compose file now
@@ -158,7 +228,7 @@ docker-build:
 # shell that exports OLLAMA_URL for `make dev` -- 127.0.0.1, the loopback of the
 # machine, not of the container -- would otherwise reach in here and point the
 # container at itself.
-docker-run:
+docker-run: require-docker
 	OLLAMA_URL=http://ollama:11434 docker compose --profile ai up --build
 
 # Same stack, but inference runs on the HOST instead of in the compose network.
@@ -179,7 +249,7 @@ docker-run:
 # a selectable service at all; naming it and passing --no-deps is what leaves the
 # ollama sidecars out. Do not drop --no-deps to "simplify" this -- the ollama
 # container comes back and takes the VM's CPU with it, which is the whole point.
-docker-run-host-ollama:
+docker-run-host-ollama: require-docker
 	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
 	@curl -sf http://localhost:11434/api/tags >/dev/null \
 		|| { echo "Ollama is not answering on :11434. Start it with:"; \
@@ -203,23 +273,8 @@ docker-run-host-ollama:
 		docker compose --profile ai up --build --no-deps app
 
 stop:
-	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
-	if [ -z "$$pids" ]; then \
-		echo "No Luminary app running on :$(LUMINARY_PORT)."; \
-	else \
-		echo "Gracefully stopping Luminary on :$(LUMINARY_PORT) (SIGTERM to $$pids)..."; \
-		kill $$pids 2>/dev/null || true; \
-		for i in 1 2 3 4 5 6 7 8 9 10; do \
-			sleep 0.5; \
-			pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
-			[ -z "$$pids" ] && break; \
-		done; \
-		if [ -n "$$pids" ]; then \
-			echo "  still alive after 5s; sending SIGKILL to $$pids"; \
-			kill -9 $$pids 2>/dev/null || true; \
-		fi; \
-		echo "Stopped."; \
-	fi
+	@echo "Stopping Luminary on :$(LUMINARY_PORT)..."
+	@sh scripts/free_port.sh $(LUMINARY_PORT)
 
 # The frontend typecheck needs `tsc -b`: tsconfig.json is solution-style
 # ("files": []), so a bare `tsc --noEmit` resolves zero files and always passes.
@@ -540,6 +595,7 @@ ci:
 	@echo "Running CI checks..."
 ifeq ($(shell uname -s)-$(shell uname -m),Darwin-x86_64)
 	@echo "Intel Mac detected: running backend CI in Docker (lancedb has no x86_64 macOS wheel)..."
+	@$(MAKE) --no-print-directory require-docker
 	docker build -q -t luminary-ci -f backend/Dockerfile.ci backend/
 	docker run --rm luminary-ci
 else
