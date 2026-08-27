@@ -52,8 +52,6 @@ def _cap_text_tokens(text: str, token_cap: int) -> str:
     return " ".join(words[:cap_words]) + " ..."
 
 
-
-
 # Citation gating. A cited source should actually contain the text the user is
 # sent to — a weakly-related chunk only pollutes the reference list. Cap the list
 # and drop low-relevance sources, but always keep the single best source so a
@@ -211,19 +209,25 @@ async def synthesize_node(state: ChatState) -> dict:
         logger.info("synthesize_node: no context available — returning not_found")
         return {"not_found": True}
 
+    # Resolved before the first log line, not after it: this used to print the
+    # configured QA_CONTEXT_TOKEN_BUDGET while the pack below ran at the
+    # slow-host one, so the two `synthesize_node:` lines disagreed about the
+    # budget on exactly the hosts the profile exists for -- and both are what
+    # scripts/diagnose-slow-host.sh pastes.
+    token_budget, budget_reason = resolve_context_budget()
+
     logger.info(
-        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d",
+        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d (%s)",
         intent,
         len(chunks_dicts),
         "yes" if section_context else "no",
-        get_settings().QA_CONTEXT_TOKEN_BUDGET,
+        token_budget,
+        budget_reason,
     )
-
 
     # Assemble chunk context using the pure context packer (dedup + section grouping).
     # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
     # it came from and have its excerpt filled in from that chunk (I-33).
-    token_budget, budget_reason = resolve_context_budget()
     chunks_context, cited_chunks = (
         pack_context_indexed(chunks_dicts, token_budget=token_budget)
         if chunks_dicts
@@ -238,13 +242,16 @@ async def synthesize_node(state: ChatState) -> dict:
         budget_reason,
     )
 
-    # section_context (graph results, executive summary) capped at 1000 tokens
+    # section_context (graph results, executive summary): the same cap as every
+    # other optional injection, through the same helper. It was an open-coded
+    # copy of _cap_text_tokens against a literal 1000, which is the number
+    # QA_SUMMARY_INJECTION_TOKEN_CAP was chosen to match -- two places to change
+    # for one decision.
     context_parts: list[str] = []
     if section_context:
-        words = section_context.split()
-        cap_words = int(1000 / 1.3)  # approx word count for 1000 tokens
-        if len(words) > cap_words:
-            section_context = " ".join(words[:cap_words]) + " ..."
+        section_context = _cap_text_tokens(
+            section_context, get_settings().QA_SUMMARY_INJECTION_TOKEN_CAP
+        )
         context_parts.append(section_context)
 
     if chunks_context:

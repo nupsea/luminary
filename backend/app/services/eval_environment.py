@@ -51,6 +51,8 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
 
     generation_model = resolve("generation").model
 
+    context_budget, context_budget_reason = resolve_context_budget()
+
     # Both arms, because `hybrid` resolves them to different models: interactive
     # goes to the cloud while background stays local. A run that records one
     # model for a mode with two describes a system that does not exist.
@@ -92,8 +94,8 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         # outside the process previously needed the container's logs.
         "startup_probe_seconds": model_keepwarm.measured_probe_seconds(),
         "local_inference_slow": model_keepwarm.local_inference_is_slow(),
-        "qa_context_token_budget": resolve_context_budget()[0],
-        "qa_context_budget_reason": resolve_context_budget()[1],
+        "qa_context_token_budget": context_budget,
+        "qa_context_budget_reason": context_budget_reason,
         "query_spell_correct": settings.QUERY_SPELL_CORRECT,
         "llm_mode": llm["mode"],
         "chat_model": interactive_model,
