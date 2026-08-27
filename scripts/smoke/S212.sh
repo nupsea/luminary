@@ -31,7 +31,7 @@ trap 'rm -f "${AUDIT_OUT}"' EXIT
 
 cd "${EVALS_DIR}"
 
-for ds in book_time_machine book_alice book_odyssey; do
+for ds in book_time_machine book_alice odyssey; do
   if uv run python audit_golden.py --dataset "${ds}" --backend-url "${BASE}" --quiet > "${AUDIT_OUT}" 2>&1; then
     :
   else
@@ -49,13 +49,18 @@ if "JSON summary:" not in out:
     print(-1); sys.exit(0)
 blob = out.split("JSON summary:", 1)[1].strip()
 data = json.loads(blob)
+# An empty summary is "nothing was audited", which summed to zero empties and
+# read as healthy. It is how `book_odyssey` -- a dataset with no golden file --
+# passed this check for as long as the name has been wrong.
+if not data:
+    print(-1); sys.exit(0)
 empties = sum(d.get("empty", 0) for d in data)
 print(empties)
 PY
 )
 
   if [ "${EMPTY}" = "-1" ]; then
-    echo "FAIL: could not parse audit output for ${ds}"
+    echo "FAIL: audit of ${ds} reported nothing to score (missing golden, or unparseable output)"
     cat "${AUDIT_OUT}"
     exit 1
   fi
