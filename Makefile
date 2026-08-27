@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -155,6 +155,25 @@ docker-build:
 
 docker-run:
 	docker compose --profile ai up --build
+
+# Same stack, but inference runs on the HOST instead of in the compose network.
+# On a Mac, Docker Desktop is a Linux VM: the `ai` profile puts Ollama inside it,
+# where it shares a capped CPU and memory allowance with the app container --
+# which is also running the embedder, reranker and entity model. A measured 91.07s
+# start-up probe on an i7-8850H paid NO model load at all; those seconds were
+# contention for 8 vCPUs. Moving inference out gives it the whole machine, and is
+# the only latency lever measured so far that costs no answer quality.
+#
+# Ollama must listen beyond loopback or the container cannot reach it: it binds
+# 127.0.0.1 by default, and `host.docker.internal` arrives from the bridge.
+#   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+docker-run-host-ollama:
+	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
+	@curl -sf http://localhost:11434/api/tags >/dev/null \
+		|| { echo "Ollama is not answering on :11434. Start it with:"; \
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }
+	@echo "Using host Ollama at :11434 (no ai profile, no ollama container)."
+	OLLAMA_URL=http://host.docker.internal:11434 docker compose up --build
 
 stop:
 	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
