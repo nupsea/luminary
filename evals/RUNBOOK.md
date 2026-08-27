@@ -58,7 +58,8 @@ library or let `make eval-d2l` ingest it on first run.
 Direct invocations (what the Make targets wrap):
 
 ```bash
-# HR@5 / MRR (retrieval-only, no LLM)
+# HR@5 / MRR (retrieval-only, no LLM). With no --rerank flag the arm matches
+# whatever the backend reports shipping, which is the funnel a user gets.
 cd evals && uv run --no-sync python run_eval.py --dataset d2l \
   --backend-url http://localhost:7820 --assert-thresholds
 
@@ -67,6 +68,7 @@ cd evals && uv run --no-sync python run_eval.py --dataset d2l \
 # `uvicorn --reload` dev backend; run this against a fresh/restarted dev or a
 # production (`make start`) backend, or the A/B will read as a no-op.
 cd evals && uv run --no-sync python run_eval.py --dataset d2l --rerank
+cd evals && uv run --no-sync python run_eval.py --dataset d2l --no-rerank
 cd evals && uv run --no-sync python run_eval.py --dataset d2l --ablation
 
 # Topic generation quality (backend venv — imports topic_service)

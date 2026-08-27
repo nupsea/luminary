@@ -15,7 +15,12 @@ qa_check() {
   local tmp_file="/tmp/s80_qa_${RANDOM}.txt"
 
   echo "Testing $label ..."
-  HTTP_CODE=$(curl -s --max-time 30 -o "$tmp_file" -w "%{http_code}" \
+  # 180s for the reason S78 and S79 carry: a bound on a local generation is a
+  # hang detector, not a grade for the host. The four questions below measure
+  # 10.0s / 10.7s / 11.0s / 19.2s alone on this library with the model resident,
+  # and they all exceeded the old 30s when the machine was also running `make
+  # ci` -- so 30s was measuring what else the host was doing.
+  HTTP_CODE=$(curl -s --max-time 180 -o "$tmp_file" -w "%{http_code}" \
     -X POST "${BASE}/qa" \
     -H "Content-Type: application/json" \
     -d "{\"question\": \"${question}\", \"document_ids\": [], \"scope\": \"${scope}\"}")

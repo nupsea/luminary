@@ -1,4 +1,4 @@
-.PHONY: dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -153,8 +153,54 @@ WITH_MEDIA ?= 0
 docker-build:
 	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
 
+# OLLAMA_URL pinned, not left to the ambient environment. The compose file now
+# interpolates it (so the host-Ollama target below can move it), which means a
+# shell that exports OLLAMA_URL for `make dev` -- 127.0.0.1, the loopback of the
+# machine, not of the container -- would otherwise reach in here and point the
+# container at itself.
 docker-run:
-	docker compose --profile ai up --build
+	OLLAMA_URL=http://ollama:11434 docker compose --profile ai up --build
+
+# Same stack, but inference runs on the HOST instead of in the compose network.
+# On a Mac, Docker Desktop is a Linux VM: the `ai` profile puts Ollama inside it,
+# where it shares a capped CPU and memory allowance with the app container --
+# which is also running the embedder, reranker and entity model. A measured 91.07s
+# start-up probe on an i7-8850H paid NO model load at all; those seconds were
+# contention for 8 vCPUs. Moving inference out gives it the whole machine, and is
+# the only latency lever measured so far that costs no answer quality.
+#
+# Ollama must listen beyond loopback or the container cannot reach it: it binds
+# 127.0.0.1 by default, and `host.docker.internal` arrives from the bridge.
+#   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+#
+# `--profile ai ... --no-deps app`, not a bare `docker compose up`. Every service
+# in this file carries a profile, so with none selected Compose 2.0.0-beta.4 built
+# nothing and exited with "no service selected". Enabling `ai` is what makes `app`
+# a selectable service at all; naming it and passing --no-deps is what leaves the
+# ollama sidecars out. Do not drop --no-deps to "simplify" this -- the ollama
+# container comes back and takes the VM's CPU with it, which is the whole point.
+docker-run-host-ollama:
+	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
+	@curl -sf http://localhost:11434/api/tags >/dev/null \
+		|| { echo "Ollama is not answering on :11434. Start it with:"; \
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }
+	@if command -v lsof >/dev/null 2>&1; then \
+		lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null \
+			| grep -qE "TCP \*:11434|TCP 0\.0\.0\.0:11434" \
+		|| { echo "Ollama is listening on loopback only, so the container cannot reach it."; \
+		     echo "The curl above passes over 127.0.0.1 and proves nothing about the bridge:"; \
+		     echo "that is exactly the case this check exists to catch. Restart it as:"; \
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }; \
+	fi
+	@m=$${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}; m=$${m#ollama/}; \
+	curl -sf http://localhost:11434/api/tags | grep -q "\"$$m\"" \
+		|| { echo "Host Ollama is up but does not have $$m."; \
+		     echo "The ollama-pull sidecar does not run in this topology, so nothing"; \
+		     echo "will fetch it for you and the app will report the model missing:"; \
+		     echo "   ollama pull $$m"; exit 1; }
+	@echo "Using host Ollama at :11434 (no ollama container)."
+	OLLAMA_URL=http://host.docker.internal:11434 \
+		docker compose --profile ai up --build --no-deps app
 
 stop:
 	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
@@ -240,7 +286,7 @@ ner-compare:
 eval-intent:
 	@echo "Intent routing accuracy (backend must be running)..."
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
-	@echo "Adversarial phrasing, heuristic only -- the floor, not the routing..."
+	@echo "Adversarial phrasing, heuristic only -- the floor, and the routing on a slow host..."
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL)
 	@echo "Adversarial phrasing, heuristic + LLM fallback -- what a user gets..."
@@ -369,9 +415,11 @@ eval-all:
 
 # D2L technical-corpus retrieval (HR@5/MRR). Backend on :7820 with d2l ingested.
 # Retrieval-only (--judge-model "" disables the RAGAS judge) so it runs in seconds.
+# --no-rerank is explicit: this is the unreranked arm of the A/B below, and the
+# harness now defaults to the funnel the app ships (which reranks).
 eval-d2l:
-	@echo "Retrieval eval on the d2l technical corpus (HR@5/MRR, no judge)..."
-	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model "" --assert-thresholds
+	@echo "Retrieval eval on the d2l technical corpus (HR@5/MRR, no judge, no rerank)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset d2l --backend-url $(BACKEND_URL) --judge-model "" --no-rerank --assert-thresholds
 
 # Same dataset WITH the cross-encoder reranker — compare HR@5/MRR against `eval-d2l`.
 eval-d2l-rerank:

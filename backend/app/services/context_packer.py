@@ -207,6 +207,35 @@ def _pack(
     return "".join(parts), emitted_src
 
 
+def resolve_context_budget() -> tuple[int, str]:
+    """(token budget, why) for the synthesis context on THIS host.
+
+    A measurement, never a platform check -- literally the same gate as the
+    keep-warm loop, via the `local_inference_is_slow()` host fact rather than a
+    second threshold that could drift from it. Unmeasured is not slow, so a host
+    whose Ollama was down at start-up keeps the full budget.
+
+    Note the inherited coupling: that helper returns False when
+    LLM_KEEP_WARM_ENABLED is off, so switching keep-warm off also restores the
+    full budget. Both are "this host is expensive" behaviours, and one switch for
+    both beats two that can disagree.
+
+    Lives here rather than in the chat node so `eval_environment` can report the
+    resolved budget without a service importing runtime.
+    """
+    from app.config import get_settings  # noqa: PLC0415
+    from app.services import model_keepwarm  # noqa: PLC0415
+
+    settings = get_settings()
+    if model_keepwarm.local_inference_is_slow():
+        probe = model_keepwarm.measured_probe_seconds()
+        return (
+            settings.QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST,
+            f"slow host (probe {probe:.1f}s)" if probe is not None else "slow host",
+        )
+    return settings.QA_CONTEXT_TOKEN_BUDGET, "default"
+
+
 def pack_context(
     chunks: list[dict],
     token_budget: int = 3000,

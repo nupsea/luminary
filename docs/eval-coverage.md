@@ -118,10 +118,36 @@ this and cannot be compared to one that has it.
 and the classifier runs at temperature 0, so a single run is a valid measurement here and a small
 delta is real, unlike generation. Measured 1.0000 on all four routes.
 
-**The 1.0000 is on easy rows.** The same classifier scores **0.5862** on 29 adversarial
-phrasings, where search absorbs 11 of 12 misroutes: `graph` and `comparative` fire on their
-keyword and nothing else. Read the gated golden as a regression check, never as evidence that
-routing is solved.
+**The 1.0000 is on easy rows.** The same classifier scores **0.8276** on 29 adversarial
+phrasings with the heuristic alone, and **0.8966** with the LLM fallback that fires below
+confidence 0.7. Search absorbs all five heuristic misroutes: `graph` and `comparative` fire on
+their keyword and nothing else. Read the gated golden as a regression check, never as evidence
+that routing is solved.
+
+**The fallback arm is a number about the model, not about the router.** The same 29 rows score
+0.9655 on `qwen2.5:14b-instruct`, 0.8966 on the shipped `qwen3.5:4b` and 0.8276 on
+`qwen3.5:0.8b` (`scores_history.jsonl` records `chat_model` per run). Quote it against the model
+in `chat_model`, and never subtract one model's arm from another's.
+
+**Which of those two arms a user gets depends on the host.** `should_use_llm_fallback` drops the
+LLM call where the start-up probe measured local inference expensive — it cost 17.02s of a 50.12s
+question on an i7-8850H, with the model already resident — so on such a host the heuristic arm is
+not a floor, it is the routing:
+
+| dataset | heuristic alone | + LLM fallback |
+|---|---|---|
+| `intents` (50, gated) | 1.0000 | 1.0000 |
+| `intents_adversarial` (29, report-only) | 0.8276 | 0.8966 |
+
+Measured 2026-08-27 on `ollama/qwen3.5:4b`, backend 0.7.9. The gated golden does not move,
+because the 2 of 50 rows that reach the LLM there are ones the heuristic already routes
+correctly. The cost is two adversarial rescues (26/29 → 24/29), and
+`QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST=true` buys them back at ~17s per affected question. The
+fallback fires on 4% of `intents` and 28% of `intents_adversarial`.
+
+`/qa/classify-only` is deliberately NOT gated the same way: an eval must be able to measure both
+arms on whatever machine it runs on, and the numbers above were taken on a host where the graph
+itself would have skipped the call.
 
 **A perfect score on a 50-row golden proves very little**, which is why routing carries a
 generalisation suite as well (`tests/test_intent_generalisation.py`). It holds each phrasing and
@@ -143,6 +169,15 @@ generation-side over repeated runs and compare distributions.
 **Floors are collapse detectors, not quality bars.** Every generation floor is `mean - 3sd` of the
 weaker dataset. Passing means no leg of the pipeline died. It does not mean the product is good,
 and the number to beat is always the measured mean.
+
+**The retrieval arm measures the funnel the app ships.** `/search` defaults `rerank=false`
+while the answering path resolves `get_rerank_enabled()` (default true), so an arm that did not
+ask measured a funnel no user gets — and still recorded a `rerank_model`, which read as proof it
+had been used. The harness now defaults `--rerank` to the backend's `rerank_enabled` and refuses
+to guess when it cannot read it; `--no-rerank` measures the ablation and says so. Isolated on
+`study` in one library state: HR@5 0.5667 unreranked against 0.7000 shipped. Retrieval baselines
+and floors recorded before 2026-08-26 are the unreranked funnel and are not comparable to later
+ones.
 
 **Check the stage before attributing a change.** A retrieval regression can come from ingestion;
 a generation regression can come from retrieval. `eval-ingest` first, then `eval`, then

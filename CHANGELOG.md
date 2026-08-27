@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-27
+
+### Added
+- **Inference can run on the host instead of inside the Docker VM.**
+  `make docker-run-host-ollama` leaves the Ollama container out, so the model
+  stops competing with the embedder, reranker and entity model for the VM's
+  capped CPU.
+- **`scripts/diagnose-slow-host.sh` answers "why is answering slow here" in one
+  command** — build, start-up probe, resolved context budget, and where a real
+  question's seconds went. It starts nothing and changes nothing.
+
+### Changed
+- **A host that measured local inference expensive at start-up now answers with
+  a narrower prompt**, and skips the LLM call that confirms the intent the
+  heuristic already chose. Both follow the same start-up measurement, never a
+  platform check; `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST=true` restores the call
+  at the cost of ~17s per affected question.
+
+### Fixed
+- **"Summarise" never routed to a summary.** Only two of the verb's eight
+  spellings matched, so every `-ise` form and every tense fell through to search.
+- **A cached document summary was prepended to the prompt unbounded.** The
+  context budget bounded the retrieved passages only, so a summary question
+  against a long document pushed the prompt past it.
+- **`OLLAMA_URL` was hardcoded in the compose file**, so exporting it to move
+  inference onto the host was accepted by the shell and silently discarded.
+- **The retrieval eval measured a funnel the app does not ship.** `/search`
+  defaults `rerank=false` and the arm never asked, while the same run's
+  answering path reranked. Retrieval baselines recorded before this are the
+  unreranked funnel and do not compare to later ones.
+
 ## [0.7.9] - 2026-08-25
 
 ### Fixed

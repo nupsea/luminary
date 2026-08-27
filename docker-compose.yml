@@ -32,7 +32,17 @@ services:
       # cores for something else.
       # Point the backend at the ollama service. The backend reads OLLAMA_URL
       # (NOT OLLAMA_HOST); its default 127.0.0.1 would resolve to this container.
-      - OLLAMA_URL=http://ollama:11434
+      #
+      # Interpolated, not hardcoded: `make docker-run-host-ollama` exports
+      # OLLAMA_URL=http://host.docker.internal:11434 to move inference onto the
+      # host. Hardcoded, that export was accepted by the shell and silently
+      # discarded here -- the container still dialled the `ollama` service name,
+      # which in that topology does not exist.
+      #
+      # Both make targets pass this explicitly, so an OLLAMA_URL exported for a
+      # native `make dev` (127.0.0.1 -- the container's own loopback) cannot leak
+      # in. A raw `docker compose --profile ai up` in such a shell still can.
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       # Must match the ollama service: the backend sizes its semaphore from it.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
       # Without these the app never learned which model `ollama-pull` below

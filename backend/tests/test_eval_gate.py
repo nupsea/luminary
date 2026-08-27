@@ -70,6 +70,20 @@ def _wire(monkeypatch, history, *, qa=None, judge_scores=None, nli_score=0.95):
     monkeypatch.setattr(run_eval, "is_document_alive", lambda *a, **k: True)
     monkeypatch.setattr(run_eval, "resolve_backend_base", lambda url: url)
     monkeypatch.setattr(run_eval, "require_backend", lambda *a, **k: None)
+    # The retrieval arm defaults to the funnel the backend reports shipping, and
+    # refuses to guess when it cannot read it. These tests have no backend, so
+    # state the funnel here rather than letting every one of them exit 2.
+    monkeypatch.setattr(run_eval, "shipped_rerank", lambda *a, **k: False)
+    # These tests assert gate MECHANICS -- that a violation exits, that a clean run
+    # does not, that an absent metric is a skip rather than a failure -- against a
+    # 2-row synthetic golden whose HR@5 is 0.5 by construction. Pin the floors to
+    # the global defaults so re-deriving a real dataset's floor cannot silently turn
+    # a mechanics test red, which is exactly what per-dataset retrieval floors did.
+    monkeypatch.setattr(
+        run_eval,
+        "thresholds_for_dataset",
+        lambda dataset: {**run_eval.THRESHOLDS},
+    )
     monkeypatch.setattr(run_eval, "search_chunks", lambda *a, **k: [_CHUNK])
     monkeypatch.setattr(
         run_eval,

@@ -272,8 +272,21 @@ def main() -> None:
     for ds in targets:
         path = GOLDEN_DIR / f"{ds}.jsonl"
         if not path.exists():
-            print(f"  {ds:24s}  SKIP (no golden file at {path})")
-            continue
+            if args.all:
+                # Unreachable via --all (the list above filters on existence),
+                # kept so a future change to that filter still says what it did.
+                print(f"  {ds:24s}  SKIP (no golden file at {path})")
+                continue
+            # Named explicitly and absent: an error, never a skip. This printed
+            # SKIP and exited 0 with an empty JSON summary, so scripts/smoke/S212
+            # summed zero "empty" entries out of nothing and reported the dataset
+            # healthy -- for a name (`book_odyssey`) that has never existed.
+            print(
+                f"ERROR: no golden file at {path}. Nothing was audited, which is "
+                f"not the same as auditing clean. Valid datasets: {VALID_DATASETS}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         if not args.quiet:
             print(f"\nAuditing {ds} ...")
         rows = audit_dataset(

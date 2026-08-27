@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for S78: strategy nodes — summary_lookup, graph_traversal, comparative, search.
-# POST /qa twice with different question types; both must return HTTP 200 within 30 seconds.
+# POST /qa twice with different question types; both must return HTTP 200 with a done event.
 # Requires the backend to be running on localhost:7820.
 
 set -euo pipefail
@@ -66,5 +66,5 @@ qa_check "factual (search_node)" "Who is Achilles?"
 qa_check "summary (summary_node)" "Summarize this document"
 
 echo ""
-echo "PASS: All S78 /qa calls returned HTTP 200 within 30 seconds"
+echo "PASS: All S78 /qa calls returned HTTP 200 with a done event"
 exit 0

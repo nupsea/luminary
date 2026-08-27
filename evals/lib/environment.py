@@ -53,6 +53,25 @@ def capture(backend_url: str, **run_args: Any) -> dict[str, Any]:
     return env
 
 
+def shipped_rerank(backend_url: str) -> bool | None:
+    """Whether the app itself reranks, or None when the backend cannot say.
+
+    The retrieval arm queries `/search`, whose `rerank` parameter defaults to
+    false, while the answering path resolves `get_rerank_enabled()` (default
+    true). An arm that does not ask therefore measured a funnel the product does
+    not ship -- and recorded a `rerank_model` while doing it. Default the arm to
+    this rather than to the endpoint's default, so measuring the ablation stays
+    possible but has to be asked for.
+    """
+    try:
+        resp = httpx.get(f"{backend_url.rstrip('/')}/evals/environment", timeout=15.0)
+        resp.raise_for_status()
+        value = resp.json().get("rerank_enabled")
+    except (httpx.HTTPError, ValueError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
 def output_stats(backend_url: str) -> dict[str, Any] | None:
     """Repair counters as they stand right now, or None when unreadable.
 

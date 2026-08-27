@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.paths import app_version
 from app.repos.document_repo import DocumentRepo
-from app.services import settings_service
+from app.services import model_keepwarm, settings_service
+from app.services.context_packer import resolve_context_budget
 from app.services.embedder import MODEL_NAME as EMBEDDING_MODEL
 from app.services.prompt_spec import withheld
 from app.services.vector_store import TABLE_NAME as CHUNK_VECTOR_TABLE
@@ -49,6 +50,8 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
     from app.services.model_router import resolve  # noqa: PLC0415
 
     generation_model = resolve("generation").model
+
+    context_budget, context_budget_reason = resolve_context_budget()
 
     # Both arms, because `hybrid` resolves them to different models: interactive
     # goes to the cloud while background stays local. A run that records one
@@ -79,6 +82,20 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         "rerank_model": settings.RERANK_MODEL,
         "rerank_depth": settings.RERANK_DEPTH,
         "rerank_blend_alpha": settings.RERANK_BLEND_ALPHA,
+        # Whether the reranker actually runs, not merely which one is configured.
+        # `/search` defaults `rerank=false` while the chat path resolves this
+        # setting, so an eval arm querying `/search` measured a funnel the app
+        # does not ship -- and the block still named a reranker, which read as
+        # proof it had been used. Recorded so the two can be compared.
+        "rerank_enabled": await settings_service.get_rerank_enabled(db),
+        # The slow-host profile, readable without log access. "Still slow" has
+        # several independent causes -- wrong build, no start-up probe recorded,
+        # profile engaged but prefill still dominant -- and separating them from
+        # outside the process previously needed the container's logs.
+        "startup_probe_seconds": model_keepwarm.measured_probe_seconds(),
+        "local_inference_slow": model_keepwarm.local_inference_is_slow(),
+        "qa_context_token_budget": context_budget,
+        "qa_context_budget_reason": context_budget_reason,
         "query_spell_correct": settings.QUERY_SPELL_CORRECT,
         "llm_mode": llm["mode"],
         "chat_model": interactive_model,

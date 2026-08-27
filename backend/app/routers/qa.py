@@ -99,10 +99,18 @@ async def classify_only(
 ) -> ClassifyOnlyResponse:
     """Classify the chat route without executing retrieval/LLM graph nodes.
 
-    The heuristic alone is not what production routes on: `chat_graph` sends
-    anything below 0.7 to the LLM, and the catch-all sits at 0.5. Measuring this
-    endpoint without `llm_fallback` therefore measures a path no user takes on
-    its own -- it is the floor, not the routing.
+    The heuristic alone is not what production routes on -- on a quick host.
+    `chat_graph` sends anything below 0.7 to the LLM there, and the catch-all
+    sits at 0.5, so measuring this endpoint without `llm_fallback` measures the
+    floor rather than the routing. On a host the start-up probe measured slow the
+    two converge: `should_use_llm_fallback` drops that call, and the heuristic
+    alone IS what the user gets.
+
+    This parameter is deliberately NOT gated on the host the way the graph is.
+    An eval has to be able to measure both arms on whatever machine it runs on;
+    gating it here would have made the slow-host arm unmeasurable on exactly the
+    hosts the gate exists for, and the 0.9655 -> 0.8276 figure that quantifies
+    its cost came from asking for both arms on such a machine.
     """
     intent, confidence = classify_intent_heuristic(req.question)
     source = "heuristic"

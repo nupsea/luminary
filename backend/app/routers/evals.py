@@ -587,6 +587,14 @@ class EvalEnvironmentResponse(BaseModel):
     rerank_model: str
     rerank_depth: int
     rerank_blend_alpha: float | None
+    # The app's resolved setting, not the eval arm's choice. See eval_environment.py.
+    rerank_enabled: bool = True
+    # Slow-host profile state. None probe means start-up never measured this host,
+    # which is "unmeasured" and therefore NOT slow.
+    startup_probe_seconds: float | None = None
+    local_inference_slow: bool = False
+    qa_context_token_budget: int = 0
+    qa_context_budget_reason: str = "unknown"
     query_spell_correct: bool
     llm_mode: str
     chat_model: str

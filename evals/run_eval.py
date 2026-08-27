@@ -44,6 +44,7 @@ from evals.lib.citation_metrics import (  # noqa: E402
 )
 from evals.lib.environment import capture as capture_environment  # noqa: E402
 from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
+from evals.lib.environment import shipped_rerank  # noqa: E402
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -153,24 +154,55 @@ THRESHOLDS = {
 }
 
 # Floors are collapse detectors, not quality bars -- see the `eval-integrity` skill.
-# A dataset appears here only when its floor must differ from the default; `paper`
-# used to, at 0.45/0.30, because 17 of its 40 questions asked about scrape furniture.
-# Regenerated clean 2026-08-12 it measures 0.850/0.703, so it carries the default.
+# A dataset appears here only when its floor must differ from the default. `paper`
+# once carried 0.45/0.30 because 17 of its 40 questions asked about scrape
+# furniture -- the floor had been lowered instead of the data fixed. It carries an
+# override again, in the opposite direction: regenerated clean it measures far
+# above the global bar, against which it could halve before anything fired.
+# `hit_rate_5` and `mrr` are the asserted ones; `ndcg_10` stays report-only
+# everywhere (see THRESHOLDS above), so the values below are the bar the UI draws,
+# not a gate.
 #
-# Retrieval baselines, measured 2026-08-12 in ONE library state (9 documents),
-# bit-reproducible across re-runs. Compare a change against these, never the floor.
-#   book      HR@5 0.5750  MRR 0.3979  nDCG 0.5074   40 rows,  ~1.6k chunks
-#   paper     HR@5 0.8500  MRR 0.7025  nDCG 0.7461   40 rows,   146 chunks
-#   legal     HR@5 0.5333  MRR 0.3728  nDCG 0.4508   60 rows,  2537 chunks
-#   play      HR@5 0.6500  MRR 0.4406  nDCG 0.5263   60 rows,   394 chunks
-#   study     HR@5 0.5833  MRR 0.4136  nDCG 0.4832   60 rows,  1939 chunks (PDF)
-#   thoughts  HR@5 1.0000  MRR 1.0000  nDCG 1.0000    4 rows,     7 chunks
-# `thoughts` reads 1.000 because top-5 over a 7-chunk document returns most of it.
-# That is a property of the document, not of retrieval, which is why a 4-row
+# Retrieval baselines, measured 2026-08-26 on the SHIPPED funnel (rerank on, which
+# is what `get_rerank_enabled` returns by default), ONE library state -- 50
+# documents / 75537 chunks -- and bit-reproducible across re-runs. Compare a change
+# against these, never the floor.
+#   book      HR@5 0.6750  MRR 0.5396  nDCG 0.6000   40 rows
+#   paper     HR@5 0.9000  MRR 0.7279  nDCG 0.7797   40 rows
+#   legal     HR@5 0.6500  MRR 0.5142  nDCG 0.5686   60 rows
+#   play      HR@5 0.8000  MRR 0.6267  nDCG 0.6906   60 rows
+#   study     HR@5 0.7000  MRR 0.4692  nDCG 0.5370   60 rows (PDF)
+#   d2l       HR@5 0.9200  MRR 0.7170  nDCG 0.7876   (unreranked arm: .8400/.6347/.7184)
+#
+# The 2026-08-12 table these replace was measured with rerank OFF, because
+# `/search` defaults `rerank=false` and the arm never asked -- while `/qa`, which
+# produced the generation metrics in the same run, reranked. One run described two
+# funnels. Isolated on `study` in one library state: HR@5 0.5667 unreranked against
+# 0.7000 shipped. The superseded numbers are NOT comparable to the table above, and
+# the older ones also sat in a 9-document library, so two confounds are stacked.
+#
+# Floors are (weakest measured - 0.10), rounded down to 0.05, per dataset. The
+# subtrahend is headroom for library-state coupling, which is real: study's HR@5
+# moved 0.0166 and its MRR 0.0156 between the 9-document and 50-document states
+# with nothing about the dataset touched. 0.10 is ~6x that. Bracketing the choice:
+# 0.05 would put study's MRR floor at 0.40 against a measured 0.4692, which is
+# inside two library moves; 0.20 would let `paper` fall from 0.90 to 0.70 without
+# firing. Retrieval is deterministic on a fixed corpus, so none of this is sampling
+# noise -- a floor that fires means the corpus or a leg of the funnel changed.
+#
+# `thoughts` reads HR@5 1.0000 because top-5 over a 7-chunk document returns most
+# of it. That is a property of the document, not of retrieval, which is why a 4-row
 # dataset is recorded and never gated (tests/test_golden_integrity.py).
 DATASET_THRESHOLDS: dict[str, dict[str, float]] = {
     "conversation": {"hit_rate_5": 0.55, "mrr": 0.40},
     "notes": {"hit_rate_5": 0.60, "mrr": 0.45},
+    "book": {"hit_rate_5": 0.55, "mrr": 0.40, "ndcg_10": 0.50},
+    "paper": {"hit_rate_5": 0.80, "mrr": 0.60, "ndcg_10": 0.65},
+    "legal": {"hit_rate_5": 0.55, "mrr": 0.40, "ndcg_10": 0.45},
+    "play": {"hit_rate_5": 0.70, "mrr": 0.50, "ndcg_10": 0.55},
+    # study takes the default mrr/ndcg_10: measured 0.4692/0.5370, its floors land
+    # exactly on the global ones, and restating a default reads as a decision.
+    "study": {"hit_rate_5": 0.60},
 }
 
 
@@ -569,7 +601,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--rerank", action="store_true", help="Enable cross-encoder reranking."
+        "--rerank",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Cross-encoder reranking. Defaults to what the backend actually "
+            "ships (`rerank_enabled` in /evals/environment), so the arm measures "
+            "the funnel a user gets. Pass --no-rerank to measure the ablation."
+        ),
     )
     parser.add_argument(
         "--rerank-depth",
@@ -668,6 +707,28 @@ def main() -> None:
     # Auto-detect /api prefix so the harness works against prod backends too.
     args.backend_url = resolve_backend_base(args.backend_url)
 
+    # Resolve the retrieval arm against the funnel the app ships, not against
+    # `/search`'s parameter default. Unasked, this arm reranked nothing while the
+    # answering path reranked everything, so one run's retrieval and generation
+    # metrics described two different funnels. Measured on `study` 2026-08-26:
+    # HR@5 0.5667 unreranked against 0.7000 shipped, on one corpus.
+    shipped = shipped_rerank(args.backend_url)
+    if args.rerank is None:
+        if shipped is None:
+            print(
+                "ERROR: could not read `rerank_enabled` from the backend, so the "
+                "arm cannot be matched to the shipped funnel. Check the backend is "
+                "up, or pass --rerank / --no-rerank to state the arm explicitly.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        args.rerank = shipped
+    elif shipped is not None and shipped != args.rerank:
+        print(
+            f"  NOTE: measuring rerank={args.rerank} while the app ships "
+            f"rerank={shipped}. This arm is an ablation, not the product."
+        )
+
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
         rows = load_golden_by_id(args.backend_url, args.dataset_id)
@@ -759,7 +820,13 @@ def main() -> None:
                     question,
                     doc_id,
                     hyde=args.hyde,
-                    rerank=do_rerank or args.rerank,
+                    # The ARM decides, never `args.rerank`. This read
+                    # `do_rerank or args.rerank` while that default was False,
+                    # which was harmless; once the arm defaults to the shipped
+                    # funnel (rerank on) it silently reranked `vector`, `fts`,
+                    # `graph` and `rrf` too, and printed the flat table under
+                    # their own labels. An ablation states every arm itself.
+                    rerank=do_rerank,
                     rerank_depth=depth,
                     rerank_threshold=args.rerank_threshold,
                     rerank_blend=blend,

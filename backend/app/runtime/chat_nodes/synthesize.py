@@ -22,7 +22,7 @@ from app.models import DocumentModel, ImageModel
 from app.repos.document_repo import fetch_chunk_locations
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
-from app.services.context_packer import pack_context_indexed
+from app.services.context_packer import pack_context_indexed, resolve_context_budget
 from app.services.qa import (
     CITATION_MIN_SCORE,
     CITATION_REL_RATIO,
@@ -33,6 +33,23 @@ from app.services.summarizer import get_summarization_service
 from app.types import ChatState, TransparencyInfo
 
 logger = logging.getLogger(__name__)
+
+
+def _cap_text_tokens(text: str, token_cap: int) -> str:
+    """Trim *text* to roughly *token_cap* tokens on a word boundary.
+
+    Same ~1.3 tokens-per-word approximation the section-context cap has always
+    used. Applied to the OPTIONAL prompt injections only -- never to the packed
+    chunk context, because an `[S3]` marker the model is told to cite must still
+    have its passage present when the citation is resolved (I-33).
+    """
+    if token_cap <= 0 or not text:
+        return text
+    words = text.split()
+    cap_words = int(token_cap / 1.3)
+    if len(words) <= cap_words:
+        return text
+    return " ".join(words[:cap_words]) + " ..."
 
 
 # Citation gating. A cited source should actually contain the text the user is
@@ -192,39 +209,49 @@ async def synthesize_node(state: ChatState) -> dict:
         logger.info("synthesize_node: no context available — returning not_found")
         return {"not_found": True}
 
+    # Resolved before the first log line, not after it: this used to print the
+    # configured QA_CONTEXT_TOKEN_BUDGET while the pack below ran at the
+    # slow-host one, so the two `synthesize_node:` lines disagreed about the
+    # budget on exactly the hosts the profile exists for -- and both are what
+    # scripts/diagnose-slow-host.sh pastes.
+    token_budget, budget_reason = resolve_context_budget()
+
     logger.info(
-        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d",
+        "synthesize_node: intent=%s chunks=%d section_context=%s budget=%d (%s)",
         intent,
         len(chunks_dicts),
         "yes" if section_context else "no",
-        get_settings().QA_CONTEXT_TOKEN_BUDGET,
+        token_budget,
+        budget_reason,
     )
-
 
     # Assemble chunk context using the pure context packer (dedup + section grouping).
     # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
     # it came from and have its excerpt filled in from that chunk (I-33).
-    token_budget = get_settings().QA_CONTEXT_TOKEN_BUDGET
     chunks_context, cited_chunks = (
         pack_context_indexed(chunks_dicts, token_budget=token_budget)
         if chunks_dicts
         else ("", [])
     )
     logger.info(
-        "synthesize_node: packed %d/%d passages into %d chars at budget %d",
+        "synthesize_node: packed %d/%d passages into %d chars at budget %d (%s)",
         len(cited_chunks),
         len(chunks_dicts),
         len(chunks_context),
         token_budget,
+        budget_reason,
     )
 
-    # section_context (graph results, executive summary) capped at 1000 tokens
+    # section_context (graph results, executive summary): the same cap as every
+    # other optional injection, through the same helper. It was an open-coded
+    # copy of _cap_text_tokens against a literal 1000, which is the number
+    # QA_SUMMARY_INJECTION_TOKEN_CAP was chosen to match -- two places to change
+    # for one decision.
     context_parts: list[str] = []
     if section_context:
-        words = section_context.split()
-        cap_words = int(1000 / 1.3)  # approx word count for 1000 tokens
-        if len(words) > cap_words:
-            section_context = " ".join(words[:cap_words]) + " ..."
+        section_context = _cap_text_tokens(
+            section_context, get_settings().QA_SUMMARY_INJECTION_TOKEN_CAP
+        )
         context_parts.append(section_context)
 
     if chunks_context:
@@ -241,6 +268,9 @@ async def synthesize_node(state: ChatState) -> dict:
             image_doc_titles = await _fetch_doc_titles_for_chunks(chunks_dicts)
             image_context = await _fetch_image_context(image_ids, image_doc_titles)
             if image_context:
+                image_context = _cap_text_tokens(
+                    image_context, get_settings().QA_SUMMARY_INJECTION_TOKEN_CAP
+                )
                 context = f"{context}\n\n---\n\n{image_context}" if context else image_context
                 logger.info(
                     "synthesize_node: injected image context (%d chars)", len(image_context)
@@ -261,7 +291,14 @@ async def synthesize_node(state: ChatState) -> dict:
                 state["doc_ids"][0], "executive"
             )
             if exec_summary:
-                context = f"[Document Summary]\n{exec_summary.content}\n\n---\n\n{context}"
+                # Uncapped until 2026-08-27: `_should_use_summary` is a keyword
+                # match, so this fires on exactly the questions asked of long
+                # documents and prepended a whole cached summary past the context
+                # budget. The budget bounded chunks_context only.
+                summary_text = _cap_text_tokens(
+                    exec_summary.content, get_settings().QA_SUMMARY_INJECTION_TOKEN_CAP
+                )
+                context = f"[Document Summary]\n{summary_text}\n\n---\n\n{context}"
         except Exception:
             logger.warning("synthesize_node: failed to fetch executive summary", exc_info=True)
 
@@ -295,6 +332,9 @@ async def synthesize_node(state: ChatState) -> dict:
         try:
             contradiction_ctx = await _fetch_contradiction_context(state["doc_ids"])
             if contradiction_ctx:
+                contradiction_ctx = _cap_text_tokens(
+                    contradiction_ctx, get_settings().QA_SUMMARY_INJECTION_TOKEN_CAP
+                )
                 context = contradiction_ctx + "\n\n---\n\n" + context
                 logger.info(
                     "synthesize_node: injected contradiction context (%d chars)",
@@ -308,6 +348,25 @@ async def synthesize_node(state: ChatState) -> dict:
     else:
         prompt = f"Context:\n\n{context}\n\nQuestion: {question}"
     system_prompt = _get_system_prompt(intent)
+
+    # Prefill is ~linear in prompt size and is the whole wait on a CPU-only host,
+    # yet nothing reported what the prompt actually weighed -- only what the chunk
+    # packer contributed, which is one of five additive sources. Approximate
+    # (~1.3 tokens/word) on purpose: an exact count costs a tokenizer pass on every
+    # answer to inform a log line.
+    _approx_prompt_tokens = int(len((prompt + system_prompt).split()) * 1.3)
+    _ceiling = get_settings().QA_PROMPT_TOKEN_CEILING
+    if _ceiling and _approx_prompt_tokens > _ceiling:
+        logger.warning(
+            "synthesize_node: prompt ~%d tokens exceeds ceiling %d (context %d chars, "
+            "budget %d) -- an injection is outgrowing the context budget",
+            _approx_prompt_tokens,
+            _ceiling,
+            len(context),
+            token_budget,
+        )
+    else:
+        logger.info("synthesize_node: prompt ~%d tokens", _approx_prompt_tokens)
 
     # For library-wide factual/exploratory queries, instruct the LLM to attribute sources
     if scope == "all" and intent in ("factual", "exploratory"):

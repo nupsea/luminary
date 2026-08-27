@@ -195,6 +195,45 @@ to text** from Settings — Luminary fetches that one itself.
 <summary><b>macOS (Intel / x86_64) — via Docker</b></summary>
 
 Intel Macs have no native `lancedb` wheel, so `make install` cannot run there.
+Everything below is the Docker path. Apple Silicon Macs use the native path above.
+
+**Install first**
+
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) — running,
+   with at least **10 GB free** in its disk image (see
+   [How much memory it actually needs](#how-much-memory-it-actually-needs)).
+2. [Homebrew](https://brew.sh), then `brew install ollama` — only for the
+   recommended path; the all-in-Docker path needs nothing but Docker.
+
+**Recommended: inference on the host, app in Docker**
+
+Docker Desktop on a Mac is a Linux VM with a capped CPU and memory allowance,
+and the app container is already running the embedder, reranker and entity
+model inside it. Putting Ollama there too makes them compete. Running Ollama on
+the host gives it the whole machine, and is the only latency change measured so
+far that costs nothing in answer quality.
+
+```bash
+# terminal 1 — Ollama must listen beyond loopback, or the container cannot
+# reach it. It binds 127.0.0.1 by default; the container arrives via the bridge.
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+
+# terminal 2
+ollama pull qwen3.5:4b
+git clone https://github.com/nupsea/luminary.git
+cd luminary
+make docker-run-host-ollama
+```
+
+The target refuses to start rather than fail obscurely: it checks that Ollama
+answers, that it is **not** bound to loopback only, and that the model is
+present — the model sidecar does not run in this topology, so nothing else
+will fetch it for you.
+
+**Simplest: everything in Docker**
+
+No Homebrew, no host Ollama. One command, and the model is pulled for you into
+a Docker volume on first run:
 
 ```bash
 git clone https://github.com/nupsea/luminary.git
@@ -204,7 +243,22 @@ make docker-run
 
 *(or directly via compose: `docker compose --profile ai up --build`)*
 
-Then open http://localhost:7820. Apple Silicon Macs use the native path above.
+Either way, open http://localhost:7820. First run pulls a ~3.4 GB model and
+builds the image, so give it time.
+
+**If answering feels slow**
+
+```bash
+bash scripts/diagnose-slow-host.sh
+```
+
+One command, one paste: which build is running, whether this host measured
+itself slow at start-up, which context budget that resolved to, and where a
+real question's seconds went. It starts nothing and changes nothing.
+
+Expect single-digit tokens per second either way — Docker on any Mac is
+CPU-only, no GPU passes through. On an Intel i7-8850H with host Ollama,
+`qwen3.5:4b` decodes at ~6 tok/s, so answer length is what you feel most.
 
 Audio, video and YouTube ingestion are **off** in this image. They need ffmpeg
 and a transcriber, which are GPL and so are never part of anything Luminary
@@ -261,7 +315,9 @@ that deletes `luminary-data`, which is your library.
 
 Docker on any Mac is CPU-only — no GPU passes through — so generation runs at a
 few tokens per second whatever the memory. On an Intel Mac especially, prefer
-more RAM and expect ingestion to take minutes.
+more RAM and expect ingestion to take minutes. The memory above is for the
+all-in-Docker path; `make docker-run-host-ollama` moves the model's share of it
+out of the VM and onto the host.
 
 Two runtime bounds ship set, because Ollama's own defaults are not sized for a
 laptop: the model stays resident for 30 minutes rather than Ollama's 5, and

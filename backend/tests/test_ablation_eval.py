@@ -99,6 +99,7 @@ async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
 def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
     strategies_seen: list[str] = []
     expand_flags: list[bool] = []
+    rerank_flags: list[bool] = []
     history_rows: list[tuple[str, dict]] = []
     store_rows: list[tuple[str, dict]] = []
 
@@ -116,12 +117,18 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
         ],
     )
     monkeypatch.setattr(run_eval, "load_manifest", lambda: {})
+    # The shipped funnel RERANKS, and the base run resolves `--rerank` against it.
+    # Pinned to True on purpose: an ablation states every arm itself, so the
+    # unreranked arms below must stay unreranked against a backend that ships
+    # reranking. Pinning it False here would hide exactly that.
+    monkeypatch.setattr(run_eval, "shipped_rerank", lambda *a, **k: True)
     monkeypatch.setattr(
         run_eval,
         "search_chunks",
         lambda *args, **kwargs: (
             strategies_seen.append(kwargs.get("strategy", "rrf")),
             expand_flags.append(kwargs.get("graph_expand", True)),
+            rerank_flags.append(bool(kwargs.get("rerank", False))),
         )
         and ["answer hint"],
     )
@@ -154,6 +161,9 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
     # Only the -nogx arms switch expansion off; everything else inherits the
     # /search default, which is what the shipped pipeline runs with.
     assert expand_flags == [True, True, True, True, False, True, True, False, True]
+    # Only the arms that declare a reranker get one. The last entry is the
+    # rrf-pool recall arm, which measures the L1 candidate pool and must not.
+    assert rerank_flags == [False, False, False, False, False, True, True, True, False]
     assert history_rows[0][0] == "ablation"
     assert set(history_rows[0][1]["ablation_metrics"]) == {
         "vector", "fts", "graph", "rrf", "rrf-nogx",
