@@ -22,8 +22,7 @@ from app.models import DocumentModel, ImageModel
 from app.repos.document_repo import fetch_chunk_locations
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
-from app.services import model_keepwarm
-from app.services.context_packer import pack_context_indexed
+from app.services.context_packer import pack_context_indexed, resolve_context_budget
 from app.services.qa import (
     CITATION_MIN_SCORE,
     CITATION_REL_RATIO,
@@ -53,27 +52,6 @@ def _cap_text_tokens(text: str, token_cap: int) -> str:
     return " ".join(words[:cap_words]) + " ..."
 
 
-def _resolve_context_budget() -> tuple[int, str]:
-    """(token budget, why) for the synthesis context on THIS host.
-
-    A measurement, never a platform check -- literally the same gate as the
-    keep-warm loop, via the `local_inference_is_slow()` host fact rather than a
-    second threshold that could drift away from it. Unmeasured is not slow, so a
-    host whose Ollama was down at start-up keeps the full budget.
-
-    Note the inherited coupling: that helper returns False when
-    LLM_KEEP_WARM_ENABLED is off, so switching keep-warm off also restores the
-    full budget. Both are "this host is expensive" behaviours, and one switch for
-    both beats two that can disagree.
-    """
-    settings = get_settings()
-    if model_keepwarm.local_inference_is_slow():
-        probe = model_keepwarm.measured_probe_seconds()
-        return (
-            settings.QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST,
-            f"slow host (probe {probe:.1f}s)" if probe is not None else "slow host",
-        )
-    return settings.QA_CONTEXT_TOKEN_BUDGET, "default"
 
 
 # Citation gating. A cited source should actually contain the text the user is
@@ -245,7 +223,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # Assemble chunk context using the pure context packer (dedup + section grouping).
     # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
     # it came from and have its excerpt filled in from that chunk (I-33).
-    token_budget, budget_reason = _resolve_context_budget()
+    token_budget, budget_reason = resolve_context_budget()
     chunks_context, cited_chunks = (
         pack_context_indexed(chunks_dicts, token_budget=token_budget)
         if chunks_dicts

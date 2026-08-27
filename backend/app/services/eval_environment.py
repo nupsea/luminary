@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.paths import app_version
 from app.repos.document_repo import DocumentRepo
-from app.services import settings_service
+from app.services import model_keepwarm, settings_service
+from app.services.context_packer import resolve_context_budget
 from app.services.embedder import MODEL_NAME as EMBEDDING_MODEL
 from app.services.prompt_spec import withheld
 from app.services.vector_store import TABLE_NAME as CHUNK_VECTOR_TABLE
@@ -85,6 +86,14 @@ async def collect_environment(db: AsyncSession) -> dict[str, Any]:
         # does not ship -- and the block still named a reranker, which read as
         # proof it had been used. Recorded so the two can be compared.
         "rerank_enabled": await settings_service.get_rerank_enabled(db),
+        # The slow-host profile, readable without log access. "Still slow" has
+        # several independent causes -- wrong build, no start-up probe recorded,
+        # profile engaged but prefill still dominant -- and separating them from
+        # outside the process previously needed the container's logs.
+        "startup_probe_seconds": model_keepwarm.measured_probe_seconds(),
+        "local_inference_slow": model_keepwarm.local_inference_is_slow(),
+        "qa_context_token_budget": resolve_context_budget()[0],
+        "qa_context_budget_reason": resolve_context_budget()[1],
         "query_spell_correct": settings.QUERY_SPELL_CORRECT,
         "llm_mode": llm["mode"],
         "chat_model": interactive_model,
