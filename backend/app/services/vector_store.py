@@ -140,7 +140,15 @@ class LanceDBService:
             except Exception as exc:
                 logger.warning("Could not inspect note_vectors_v2 schema: %s", exc)
             return tbl
-        return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+        try:
+            return self._db.create_table(NOTE_TABLE_NAME, schema=NOTE_SCHEMA)
+        except ValueError:
+            # list_tables() then create_table() is check-then-act, and two
+            # concurrent callers both pass the check. Reachable without any test
+            # harness: `POST /notes` schedules its embedding as a background
+            # task, so creating two notes in quick succession on a fresh install
+            # races here and one of them raises "Table already exists".
+            return self._db.open_table(NOTE_TABLE_NAME)
 
     def upsert_note_vector(
         self, note_id: str, document_id: str | None, content: str, vector: list[float]
@@ -162,13 +170,24 @@ class LanceDBService:
         logger.debug("Upserted note vector note_id=%s", note_id)
 
     def delete_note_vector(self, note_id: str) -> None:
-        """Delete the vector for the given note_id."""
+        """Delete the vector for the given note_id.
+
+        Non-fatal on purpose: a vector-store hiccup must not fail the user's
+        `DELETE /notes/{id}`, which has already removed the note itself. What
+        makes that safe is `NoteSearchService._drop_deleted` -- the semantic arm
+        resolves every hit against `notes`, so a row this call failed to remove
+        is invisible rather than served as a live note. Before that join existed,
+        one swallowed exception here kept a deleted note searchable forever.
+
+        Logged with the traceback, not just a message: a silent counter of
+        "deletes that did not happen" is how the ghost went unnoticed.
+        """
         try:
             table = self._get_or_create_note_table()
             table.delete(f"note_id = '{note_id}'")
             logger.debug("Deleted note vector note_id=%s", note_id)
-        except Exception as exc:
-            logger.warning("delete_note_vector failed for note_id=%s: %s", note_id, exc)
+        except Exception:
+            logger.exception("delete_note_vector failed for note_id=%s", note_id)
 
     def _get_image_table(self) -> Any:
         self._connect()

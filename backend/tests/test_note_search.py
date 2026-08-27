@@ -203,3 +203,110 @@ def test_alice_note_search_slow(all_books_ingested):
         results = resp.json()["results"]
         top3_ids = [r["note_id"] for r in results[:3]]
         assert note_id in top3_ids, f"Note not in top-3: {[r['note_id'] for r in results]}"
+
+
+# A ghost vector is a row in the LanceDB note table whose note no longer exists
+# in `notes`. `delete_note_vector` swallows its exceptions by design, so one is
+# reachable in production whenever the vector store hiccups during a delete --
+# which is why these tests inject one directly instead of hoping a delete fails.
+
+
+def _embed_now(note_id: str, content: str) -> None:
+    """Write the note's vector without waiting on the background task.
+
+    `POST /notes` schedules `embed_and_store_note` with `asyncio.create_task`, so
+    the vector's existence is not ordered against the next request. Tests that
+    need the semantic arm specifically -- ones whose query shares no word with
+    the note, so the FTS arm cannot answer -- would otherwise race the scheduler.
+    Same service the background task calls, just awaited here.
+    """
+    from app.services.embedder import get_embedding_service
+    from app.services.vector_store import get_lancedb_service
+
+    vector = get_embedding_service().encode([content])[0]
+    get_lancedb_service().upsert_note_vector(note_id, None, content, vector)
+
+
+def _inject_ghost_vector(content: str) -> str:
+    """Put a vector in the note table for a note_id that has no `notes` row."""
+    import uuid as _uuid
+
+    from app.services.embedder import get_embedding_service
+    from app.services.vector_store import get_lancedb_service
+
+    ghost_id = f"ghost-{_uuid.uuid4()}"
+    vector = get_embedding_service().encode([content])[0]
+    get_lancedb_service().upsert_note_vector(ghost_id, None, content, vector)
+    return ghost_id
+
+
+def test_a_deleted_note_cannot_come_back_through_the_semantic_arm(client):
+    """The defect this file's delete test only caught by luck.
+
+    The FTS arm joins `notes_fts` against `notes`, so it can never serve a
+    deleted note. The semantic arm read LanceDB directly and had no such join,
+    so anything left in that table was returned as a live note.
+    """
+    content = "Luminiferous ether hypothesis and the Michelson Morley experiment"
+    ghost_id = _inject_ghost_vector(content)
+
+    resp = client.get("/notes/search", params={"q": "Luminiferous ether"})
+    assert resp.status_code == 200
+    assert ghost_id not in [r["note_id"] for r in resp.json()["results"]]
+
+
+def test_the_semantic_arm_still_matches_without_a_word_in_common(client):
+    """The floor must not become the literal-term filter it replaced.
+
+    "feline that disappears" shares no word with the note and scores 0.7516, so
+    a check for query terms in the content -- the previous behaviour -- dropped
+    exactly the hit the semantic arm exists to produce.
+    """
+    content = "Cheshire Cat can vanish leaving only its grin"
+    create = client.post("/notes", json={"content": content, "tags": []})
+    assert create.status_code == 201
+    note_id = create.json()["id"]
+    _embed_now(note_id, content)
+
+    resp = client.get("/notes/search", params={"q": "feline that disappears"})
+    assert resp.status_code == 200
+    assert note_id in [r["note_id"] for r in resp.json()["results"]]
+
+
+def test_an_unrelated_note_is_below_the_similarity_floor(client):
+    """`limit(k)` has no floor, so in a library smaller than k the semantic arm
+    returns every note however unrelated. 0.5004 is the measured similarity of
+    this pair and it must not clear NOTE_SEMANTIC_MIN_SIMILARITY."""
+    create = client.post(
+        "/notes", json={"content": "baroque fugue counterpoint harpsichord sonata", "tags": []}
+    )
+    assert create.status_code == 201
+    note_id = create.json()["id"]
+
+    resp = client.get("/notes/search", params={"q": "photosynthesis chloroplast"})
+    assert resp.status_code == 200
+    assert note_id not in [r["note_id"] for r in resp.json()["results"]]
+
+
+def test_the_floor_sits_between_the_two_cases_that_set_it():
+    """Bracketing, so a future tweak has to move one of these to justify itself."""
+    from app.services.note_search import NOTE_SEMANTIC_MIN_SIMILARITY
+
+    assert 0.5004 < NOTE_SEMANTIC_MIN_SIMILARITY < 0.7516
+
+
+def test_a_semantic_hit_carries_the_notes_own_tags(client):
+    """The vector arm reported tags=[] and group_name=None for every hit,
+    because it read them from the vector table, which stores neither."""
+    create = client.post(
+        "/notes",
+        json={"content": "Cheshire Cat can vanish leaving only its grin", "tags": ["wonderland"]},
+    )
+    assert create.status_code == 201
+    note_id = create.json()["id"]
+    _embed_now(note_id, "Cheshire Cat can vanish leaving only its grin")
+
+    resp = client.get("/notes/search", params={"q": "feline that disappears"})
+    assert resp.status_code == 200
+    hit = next(r for r in resp.json()["results"] if r["note_id"] == note_id)
+    assert hit["tags"] == ["wonderland"]
