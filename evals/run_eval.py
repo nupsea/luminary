@@ -154,9 +154,14 @@ THRESHOLDS = {
 }
 
 # Floors are collapse detectors, not quality bars -- see the `eval-integrity` skill.
-# A dataset appears here only when its floor must differ from the default; `paper`
-# used to, at 0.45/0.30, because 17 of its 40 questions asked about scrape furniture.
-# Regenerated clean 2026-08-12 it measures 0.850/0.703, so it carries the default.
+# A dataset appears here only when its floor must differ from the default. `paper`
+# once carried 0.45/0.30 because 17 of its 40 questions asked about scrape
+# furniture -- the floor had been lowered instead of the data fixed. It carries an
+# override again, in the opposite direction: regenerated clean it measures far
+# above the global bar, against which it could halve before anything fired.
+# `hit_rate_5` and `mrr` are the asserted ones; `ndcg_10` stays report-only
+# everywhere (see THRESHOLDS above), so the values below are the bar the UI draws,
+# not a gate.
 #
 # Retrieval baselines, measured 2026-08-26 on the SHIPPED funnel (rerank on, which
 # is what `get_rerank_enabled` returns by default), ONE library state -- 50
@@ -707,24 +712,22 @@ def main() -> None:
     # answering path reranked everything, so one run's retrieval and generation
     # metrics described two different funnels. Measured on `study` 2026-08-26:
     # HR@5 0.5667 unreranked against 0.7000 shipped, on one corpus.
+    shipped = shipped_rerank(args.backend_url)
     if args.rerank is None:
-        shipped = shipped_rerank(args.backend_url)
         if shipped is None:
             print(
                 "ERROR: could not read `rerank_enabled` from the backend, so the "
-                "arm cannot be matched to the shipped funnel. Pass --rerank or "
-                "--no-rerank to state it explicitly.",
+                "arm cannot be matched to the shipped funnel. Check the backend is "
+                "up, or pass --rerank / --no-rerank to state the arm explicitly.",
                 file=sys.stderr,
             )
             sys.exit(2)
         args.rerank = shipped
-    else:
-        shipped = shipped_rerank(args.backend_url)
-        if shipped is not None and shipped != args.rerank:
-            print(
-                f"  NOTE: measuring rerank={args.rerank} while the app ships "
-                f"rerank={shipped}. This arm is an ablation, not the product."
-            )
+    elif shipped is not None and shipped != args.rerank:
+        print(
+            f"  NOTE: measuring rerank={args.rerank} while the app ships "
+            f"rerank={shipped}. This arm is an ablation, not the product."
+        )
 
     dataset_label = args.dataset or args.dataset_id
     if args.dataset_id:
@@ -817,7 +820,13 @@ def main() -> None:
                     question,
                     doc_id,
                     hyde=args.hyde,
-                    rerank=do_rerank or args.rerank,
+                    # The ARM decides, never `args.rerank`. This read
+                    # `do_rerank or args.rerank` while that default was False,
+                    # which was harmless; once the arm defaults to the shipped
+                    # funnel (rerank on) it silently reranked `vector`, `fts`,
+                    # `graph` and `rrf` too, and printed the flat table under
+                    # their own labels. An ablation states every arm itself.
+                    rerank=do_rerank,
                     rerank_depth=depth,
                     rerank_threshold=args.rerank_threshold,
                     rerank_blend=blend,

@@ -152,7 +152,7 @@ Corpus-wide numbers run well below scoped-ablation numbers — this is the least
 | `--export-html PATH` | — | Write a self-contained HTML report |
 | `--check-citations` | false | Judge whether inline citations support their claims |
 | `--hyde` | false | Enable HyDE-style query expansion |
-| `--rerank` | false | Enable cross-encoder reranking |
+| `--rerank` / `--no-rerank` | the backend's `rerank_enabled` | Cross-encoder reranking. Unset, the arm matches the funnel the app ships; `--no-rerank` measures the ablation. Exits 2 rather than guessing if the backend cannot be read. |
 | `--ablation` | false | Compare vector / fts / graph / rrf / rrf+rerank strategies |
 
 ---
