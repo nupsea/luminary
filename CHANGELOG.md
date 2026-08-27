@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`make docker-stop` and `make docker-down`.** There was no way to bring the
+  compose stack down; `down` never passes `--volumes`, so the library survives.
+
 ### Fixed
 - **`make stop` and `make clean` killed browsers instead of the app.** Both
   matched every socket on the port rather than the listener, so a tab left open
@@ -14,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes ~10.8s against `docker stop`'s 10s default, so exit 137 or 0 was a coin
   toss; the timeout is now 30s and a forced kill can no longer strand the Kuzu
   lock on a healthy stop.
+- **A pre-release `docker compose` now fails in under a second instead of
+  hanging.** 2.0.0-beta.4 creates the container and never starts it, attached or
+  detached; the run targets refuse it, while stop and down still work.
 - **The docker targets failed with `command not found` when Docker was merely
   not started.** Docker Desktop installs its CLI symlinks only on first
   successful run, so "not on PATH" was never evidence it was missing.

@@ -1,4 +1,4 @@
-.PHONY: require-docker docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -220,6 +220,36 @@ require-docker:
 		     echo "Every compose target here uses v2, not the docker-compose binary."; \
 		     echo "Upgrade Docker Desktop, or: brew install docker-compose"; exit 1; }
 
+# A pre-release compose is not a supported configuration here, and this is a
+# separate gate from require-docker on purpose: it blocks the RUN targets only.
+# Stopping and tearing down must keep working on a broken compose -- refusing to
+# let someone shut the stack down because their compose is old is the wrong
+# failure.
+#
+# 2.0.0-beta.4 creates the container and then never starts it, in BOTH attached
+# and detached mode, so `make docker-run` parks at "Container luminary_app_1
+# Created" and hangs indefinitely -- measured at 6min attached and 3min20s with
+# -d before being killed, container still in Created both times. The same beta
+# also refused to select any service until --profile ai was passed explicitly
+# (see docker-run-host-ollama). Two independent breakages in one version is
+# enough to stop guessing.
+require-compose-release: require-docker
+	@v="$$(docker compose version --short 2>/dev/null)"; \
+	case "$$v" in \
+		*alpha*|*beta*|*rc*) \
+			if [ "$(ALLOW_PRERELEASE_COMPOSE)" = "1" ]; then \
+				echo "warning: docker compose $$v is a pre-release; ALLOW_PRERELEASE_COMPOSE=1 set."; \
+			else \
+				echo "docker compose $$v is a pre-release, and this one does not work:"; \
+				echo "it creates the container and never starts it, so the run hangs"; \
+				echo "with nothing to show for it."; \
+				echo "Upgrade Docker Desktop (Settings -> Software updates), or:"; \
+				echo "   brew install docker-compose"; \
+				echo "To run anyway: make $(MAKECMDGOALS) ALLOW_PRERELEASE_COMPOSE=1"; \
+				exit 1; \
+			fi ;; \
+	esac
+
 docker-build: require-docker
 	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
 
@@ -228,7 +258,7 @@ docker-build: require-docker
 # shell that exports OLLAMA_URL for `make dev` -- 127.0.0.1, the loopback of the
 # machine, not of the container -- would otherwise reach in here and point the
 # container at itself.
-docker-run: require-docker
+docker-run: require-compose-release
 	OLLAMA_URL=http://ollama:11434 docker compose --profile ai up --build
 
 # Same stack, but inference runs on the HOST instead of in the compose network.
@@ -249,7 +279,7 @@ docker-run: require-docker
 # a selectable service at all; naming it and passing --no-deps is what leaves the
 # ollama sidecars out. Do not drop --no-deps to "simplify" this -- the ollama
 # container comes back and takes the VM's CPU with it, which is the whole point.
-docker-run-host-ollama: require-docker
+docker-run-host-ollama: require-compose-release
 	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
 	@curl -sf http://localhost:11434/api/tags >/dev/null \
 		|| { echo "Ollama is not answering on :11434. Start it with:"; \
@@ -271,6 +301,25 @@ docker-run-host-ollama: require-docker
 	@echo "Using host Ollama at :11434 (no ollama container)."
 	OLLAMA_URL=http://host.docker.internal:11434 \
 		docker compose --profile ai up --build --no-deps app
+
+# There was no way to bring the stack down. `make stop` frees the port -- and now
+# stops the container serving it -- but nothing removed the container and network
+# compose creates, so a re-run met a half-existing stack. Both use -t 30 for the
+# same measured reason as every other stop in this repo: a full shutdown takes
+# ~10.8s and the 10s default SIGKILLed it at random.
+docker-stop: require-docker
+	@echo "Stopping the Luminary compose stack (containers kept for a fast restart)..."
+	@docker compose --profile ai stop -t 30
+	@echo "Stopped. 'make docker-down' also removes the containers and network."
+
+# down removes containers and the network. It NEVER takes --volumes: that deletes
+# luminary-data, which is the user's library, and no target in this file is
+# allowed to do that silently. Do not add it.
+docker-down: require-docker
+	@echo "Stopping and removing Luminary containers and network..."
+	@docker compose --profile ai down -t 30
+	@echo "Done. Your library volume is untouched:"
+	@docker volume ls --filter name=luminary --format '  {{.Name}}' 2>/dev/null || true
 
 stop:
 	@echo "Stopping Luminary on :$(LUMINARY_PORT)..."

@@ -36,7 +36,8 @@ Prose versions in this repo have drifted before.
 | `make db-revision m="…"` | generate an Alembic revision (never raw `alembic revision` — see I-23) |
 | `make db-migrate` | apply migrations to the dev database |
 | `make regen-api-types` | regenerate `frontend/src/types/api.ts` from the OpenAPI schema |
-| `make clean` | kill anything on :7820, :5173, :5174 |
+| `make clean` | free :7820, :5173, :5174 — listeners only, SIGTERM first |
+| `make docker-stop` / `docker-down` | stop the compose stack / also remove containers + network (never volumes) |
 
 Ports: backend **7820**, frontend **5173**. Dev database: `<repo>/.luminary/luminary.db`.
 The bundled desktop app uses `~/Library/Application Support/sh.luminary.app/` instead.
