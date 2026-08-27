@@ -286,7 +286,7 @@ ner-compare:
 eval-intent:
 	@echo "Intent routing accuracy (backend must be running)..."
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py --backend-url $(BACKEND_URL) --assert-thresholds
-	@echo "Adversarial phrasing, heuristic only -- the floor, not the routing..."
+	@echo "Adversarial phrasing, heuristic only -- the floor, and the routing on a slow host..."
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL)
 	@echo "Adversarial phrasing, heuristic + LLM fallback -- what a user gets..."
