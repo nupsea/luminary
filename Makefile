@@ -153,8 +153,13 @@ WITH_MEDIA ?= 0
 docker-build:
 	docker build --build-arg WITH_MEDIA=$(WITH_MEDIA) -t luminary:latest .
 
+# OLLAMA_URL pinned, not left to the ambient environment. The compose file now
+# interpolates it (so the host-Ollama target below can move it), which means a
+# shell that exports OLLAMA_URL for `make dev` -- 127.0.0.1, the loopback of the
+# machine, not of the container -- would otherwise reach in here and point the
+# container at itself.
 docker-run:
-	docker compose --profile ai up --build
+	OLLAMA_URL=http://ollama:11434 docker compose --profile ai up --build
 
 # Same stack, but inference runs on the HOST instead of in the compose network.
 # On a Mac, Docker Desktop is a Linux VM: the `ai` profile puts Ollama inside it,
@@ -167,13 +172,35 @@ docker-run:
 # Ollama must listen beyond loopback or the container cannot reach it: it binds
 # 127.0.0.1 by default, and `host.docker.internal` arrives from the bridge.
 #   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+#
+# `--profile ai ... --no-deps app`, not a bare `docker compose up`. Every service
+# in this file carries a profile, so with none selected Compose 2.0.0-beta.4 built
+# nothing and exited with "no service selected". Enabling `ai` is what makes `app`
+# a selectable service at all; naming it and passing --no-deps is what leaves the
+# ollama sidecars out. Do not drop --no-deps to "simplify" this -- the ollama
+# container comes back and takes the VM's CPU with it, which is the whole point.
 docker-run-host-ollama:
 	@command -v ollama >/dev/null || { echo "Install Ollama first: https://ollama.com/download"; exit 1; }
 	@curl -sf http://localhost:11434/api/tags >/dev/null \
 		|| { echo "Ollama is not answering on :11434. Start it with:"; \
 		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }
-	@echo "Using host Ollama at :11434 (no ai profile, no ollama container)."
-	OLLAMA_URL=http://host.docker.internal:11434 docker compose up --build
+	@if command -v lsof >/dev/null 2>&1; then \
+		lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null \
+			| grep -qE "TCP \*:11434|TCP 0\.0\.0\.0:11434" \
+		|| { echo "Ollama is listening on loopback only, so the container cannot reach it."; \
+		     echo "The curl above passes over 127.0.0.1 and proves nothing about the bridge:"; \
+		     echo "that is exactly the case this check exists to catch. Restart it as:"; \
+		     echo "   OLLAMA_HOST=0.0.0.0:11434 ollama serve"; exit 1; }; \
+	fi
+	@m=$${LITELLM_DEFAULT_MODEL:-ollama/qwen3.5:4b}; m=$${m#ollama/}; \
+	curl -sf http://localhost:11434/api/tags | grep -q "\"$$m\"" \
+		|| { echo "Host Ollama is up but does not have $$m."; \
+		     echo "The ollama-pull sidecar does not run in this topology, so nothing"; \
+		     echo "will fetch it for you and the app will report the model missing:"; \
+		     echo "   ollama pull $$m"; exit 1; }
+	@echo "Using host Ollama at :11434 (no ollama container)."
+	OLLAMA_URL=http://host.docker.internal:11434 \
+		docker compose --profile ai up --build --no-deps app
 
 stop:
 	@pids=$$(lsof -ti :$(LUMINARY_PORT) 2>/dev/null); \
