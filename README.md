@@ -157,24 +157,20 @@ build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64)
 <details>
 <summary><b>Windows — Docker, or native</b></summary>
 
-Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/) running):
+Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+running — check [Running under Docker](#running-under-docker) first):
 
 ```powershell
 docker compose --profile ai up --build
 ```
 
-Audio, video and YouTube ingestion are **off** in that image — they need ffmpeg
-and a transcriber, which are GPL and never travel inside anything Luminary
-distributes. The image is built on your machine, so you can opt in. PowerShell
-has no inline `VAR=value` form, so set it first:
+Audio, video and YouTube ingestion are **off** in that image; PowerShell has no
+inline `VAR=value` form, so opt in by setting it first:
 
 ```powershell
 $env:WITH_MEDIA=1
 docker compose --profile ai up --build
 ```
-
-That adds about 850 MB. Installing ffmpeg on Windows itself does nothing for the
-Docker path — the backend is a Linux container and cannot see your `PATH`.
 
 Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
 
@@ -183,10 +179,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-
 .\start.ps1                                                              # each time after
 ```
 
-Open http://localhost:7820 when the log settles. First start downloads models —
-the launcher prints `Luminary is ready` only when it truly is.
-
-The native install covers everything except audio and video. For those, install
+Open http://localhost:7820 when the log settles. The native install covers everything except audio and video. For those, install
 ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
 to text** from Settings — Luminary fetches that one itself.
 </details>
@@ -199,19 +192,18 @@ Everything below is the Docker path. Apple Silicon Macs use the native path abov
 
 **Install first**
 
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) — running,
-   with at least **10 GB free** in its disk image (see
-   [How much memory it actually needs](#how-much-memory-it-actually-needs)).
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/), running —
+   check its memory and disk against
+   [Running under Docker](#running-under-docker) before the first build.
 2. [Homebrew](https://brew.sh), then `brew install ollama` — only for the
    recommended path; the all-in-Docker path needs nothing but Docker.
 
 **Recommended: inference on the host, app in Docker**
 
-Docker Desktop on a Mac is a Linux VM with a capped CPU and memory allowance,
-and the app container is already running the embedder, reranker and entity
-model inside it. Putting Ollama there too makes them compete. Running Ollama on
-the host gives it the whole machine, and is the only latency change measured so
-far that costs nothing in answer quality.
+The container is already running the embedder, reranker and entity model inside
+Docker's Linux VM; putting Ollama there too makes them compete for one capped
+CPU allowance. On the host it gets the whole machine, and it is the only latency
+change measured so far that costs nothing in answer quality.
 
 ```bash
 # terminal 1 — Ollama must listen beyond loopback, or the container cannot
@@ -256,22 +248,16 @@ One command, one paste: which build is running, whether this host measured
 itself slow at start-up, which context budget that resolved to, and where a
 real question's seconds went. It starts nothing and changes nothing.
 
-Expect single-digit tokens per second either way — Docker on any Mac is
-CPU-only, no GPU passes through. On an Intel i7-8850H with host Ollama,
-`qwen3.5:4b` decodes at ~6 tok/s, so answer length is what you feel most.
+Expect single-digit tokens per second either way (see
+[Running under Docker](#running-under-docker)). On an Intel i7-8850H with host
+Ollama, `qwen3.5:4b` decodes at ~6 tok/s, so answer length is what you feel most.
 
-Audio, video and YouTube ingestion are **off** in this image. They need ffmpeg
-and a transcriber, which are GPL and so are never part of anything Luminary
-distributes. The image is built on your machine, so you can opt in:
-
-```bash
-WITH_MEDIA=1 docker compose --profile ai up --build
-```
-
-That installs ffmpeg from Debian plus the download and transcription packages,
-by your own action, and adds about 850 MB to the image. Installing ffmpeg on
-the Mac itself does nothing here -- the backend is a Linux container and cannot
-see the host's PATH.
+Audio, video and YouTube ingestion are **off** in this image — ffmpeg and a
+transcriber are GPL, so they never travel inside anything Luminary distributes.
+The image is built on your machine, so you can opt in with
+`WITH_MEDIA=1 docker compose --profile ai up --build` (+850 MB). Installing
+ffmpeg on the Mac itself does nothing: the backend is a Linux container and
+cannot see the host's `PATH`.
 </details>
 
 > First launch is slow because it downloads ML models. Every launcher polls the
@@ -295,29 +281,34 @@ Measured, not estimated — every figure below was read off a running instance.
 but will swap under load.** Ingestion is the peak; answering questions afterwards
 sits around 6.5 GB.
 
-**Docker users: this is the VM's memory, not your machine's.** Docker Desktop
-gives its Linux VM a fraction of the host — often half — so a 16 GB Mac presents
-as roughly 7.7 GB and lands under the floor. Raise it in **Settings → Resources →
-Memory**. Luminary reads the VM, not the Mac, and says so at startup:
+### Running under Docker
+
+Docker Desktop is a Linux VM. **Every number above is that VM's allowance, not
+your machine's** — it gets a fraction of the host, often half, so a 16 GB Mac
+presents as roughly 7.7 GB and lands under the floor. Luminary reads the VM and
+says so at startup:
 
 ```
 model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it will swap under load
 ```
 
-**Docker also needs disk, and more than people expect.** The image is 3.4 GB, or
-4.2 GB with `WITH_MEDIA=1`, and the model blob is another 3.4 GB — so budget
-**10 GB free** in Docker Desktop's disk image before the first build, or `apt`
-fails partway through with `You don't have enough free space in
-/var/cache/apt/archives/`. Reclaim it with `docker builder prune -af` (build
-cache only) and `docker image prune -af` (unused images), or raise the slider in
-**Settings → Resources → Disk image size**. Do not pass `--volumes` to a prune:
-that deletes `luminary-data`, which is your library.
+| | |
+|---|---|
+| **Memory** | Raise it in **Settings → Resources → Memory** |
+| **Disk** | **10 GB free** before the first build, or `apt` fails partway through: a 3.4 GB image (4.2 with `WITH_MEDIA=1`) plus a 3.4 GB model blob |
+| **GPU** | None passes through on any Mac, so generation runs at a few tokens per second whatever the memory |
+| **Model** | Pulled into a Docker volume on first run by the `--profile ai` sidecar |
+| **Secrets** | A container has no OS keyring, so a cloud API key saved in Settings is stored in the database as plain text — readable by anyone who can read the `luminary-data` volume. Put it in `.env` beside the compose file instead |
 
-Docker on any Mac is CPU-only — no GPU passes through — so generation runs at a
-few tokens per second whatever the memory. On an Intel Mac especially, prefer
-more RAM and expect ingestion to take minutes. The memory above is for the
-all-in-Docker path; `make docker-run-host-ollama` moves the model's share of it
-out of the VM and onto the host.
+`make docker-run-host-ollama` runs the model on your Mac instead of in the VM,
+which takes the memory and speed rows off the table. macOS only — on Linux the
+container needs `extra_hosts: host-gateway` to reach the host.
+
+Reclaim disk with `docker builder prune -af` (build cache) and
+`docker image prune -af` (unused images). **Never add `--volumes`** — that
+deletes `luminary-data`, which is your library.
+
+### Runtime bounds
 
 Two runtime bounds ship set, because Ollama's own defaults are not sized for a
 laptop: the model stays resident for 30 minutes rather than Ollama's 5, and
@@ -367,8 +358,8 @@ abandoned.
 
 If Ollama is not running or no model is pulled, only the LLM features (chat,
 teach-back, flashcards) pause — reading, search and review keep working. Fix it
-with `ollama serve` and `ollama pull qwen3.5:4b`. Docker users: the `--profile ai`
-sidecar does this on first start.
+with `ollama serve` and `ollama pull qwen3.5:4b` (under Docker the `--profile ai`
+sidecar does it on first start).
 
 Luminary sizes its models from your machine's RAM, and `make install` pulls what
 that band needs.
@@ -418,12 +409,9 @@ which model, and any warnings.
 **Cloud models.** An id is `provider/name`. A local model needs no key; a hosted
 one does. You can also add the key in Settings.
 
-Where that key is stored depends on the install. A native install puts it in
-your OS keychain. **A container has no OS keyring, so Docker installs fall back
-to storing the key in the SQLite database in plain text** — readable by anyone
-who can read the `luminary-data` volume. If that matters to you, pass the key
-as an environment variable instead of saving it in Settings, and remember that
-`docker compose` reads a `.env` file beside the compose file.
+A native install puts that key in your OS keychain. A container has none, so
+Docker installs store it in the database as plain text — pass it as an
+environment variable instead (see [Running under Docker](#running-under-docker)).
 
 ```bash
 LITELLM_DEFAULT_MODEL=openai/gpt-4o
