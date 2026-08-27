@@ -574,10 +574,13 @@ def should_use_llm_fallback(confidence: float) -> tuple[bool, str]:
     heuristic had already returned at 0.50.
 
     The cost is real and is NOT hidden: below the threshold the heuristic is
-    guessing, and on a slow host the guess now stands. It is measured on
-    `intents_adversarial` (0.9655 -> 0.8276) and zero on `intents`, which is the
-    set carrying the committed threshold. `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST`
-    buys those rescues back.
+    guessing, and on a slow host the guess now stands. On the model the app ships
+    (`ollama/qwen3.5:4b`) that is `intents_adversarial` 0.8966 -> 0.8276, two of
+    29 rows, and zero on `intents`, which is the set carrying the committed
+    threshold. `QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST` buys those rescues back.
+    The arm is strongly model-dependent -- 0.9655 on `qwen2.5:14b-instruct`,
+    0.8276 on `qwen3.5:0.8b` -- so price it on the model in `chat_model`, never
+    across two.
     """
     if confidence >= LLM_FALLBACK_BELOW:
         return (False, "heuristic confident")

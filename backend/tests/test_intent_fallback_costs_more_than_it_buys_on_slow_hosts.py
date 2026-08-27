@@ -12,10 +12,16 @@ The gate is `local_inference_is_slow()` -- the same measured fact as the
 keep-warm loop and the context budget, not a third threshold that could drift
 from them. Unmeasured is not slow.
 
-What the gate costs is measured, not assumed, against a live backend:
+What the gate costs is measured, not assumed, against a live backend running the
+model the app ships (`ollama/qwen3.5:4b`, 2026-08-27), fallback on -> off:
 
     intents (50)              1.0000 -> 1.0000   the LLM changes nothing
-    intents_adversarial (29)  0.9655 -> 0.8276   4 rescues lost
+    intents_adversarial (29)  0.8966 -> 0.8276   2 rescues lost
+
+Measure this arm on the model in `chat_model` and on no other. The same 29 rows
+score 0.9655 on `qwen2.5:14b-instruct` and 0.8276 on `qwen3.5:0.8b`
+(`evals/scores_history.jsonl`), so a delta taken across two models prices the
+gate at a cost no user pays.
 
 `intents` carries the committed threshold (routing_accuracy >= 0.85) and does
 not move, because the 2 of 50 rows that reach the LLM there are ones the

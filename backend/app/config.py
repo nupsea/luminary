@@ -169,15 +169,6 @@ class Settings(BaseSettings):
     # i7-8850H (~31 tok/s prefill) 1500 -> 750 is ~56s -> ~29s.
     # Read the `synthesize_node: packed N/M` log before changing it. Do NOT
     # restore the old table: it measured the pre-de-duplication funnel.
-    # Prepend each section's generated summary to its chunks in the prompt.
-    # Off, and the default is the measurement rather than a preference: the
-    # lookup is keyed on (document_id, section_heading), and every retrieved
-    # chunk carried an empty heading until that was fixed, so this has never
-    # actually fired in a shipped build. Switching it on inflates candidate text
-    # by 42.2% and, against QA_CONTEXT_TOKEN_BUDGET, drops the passages that
-    # reach the model from 39 to 28 across an 8-query sample -- one query fell
-    # from 4 passages to 1. Turning it on means raising the budget with it, and
-    # that costs prefill latency and KV cache (I-27).
     # Slow-host context budget, used in place of QA_CONTEXT_TOKEN_BUDGET where the
     # start-up probe says local inference is expensive. Same gate as the keep-warm
     # loop and for the same reason: a MEASUREMENT of this host, never a platform
@@ -207,21 +198,32 @@ class Settings(BaseSettings):
     # which no prompt or output bound reaches. It fires on 4% of `intents` and
     # 28% of `intents_adversarial`.
     #
-    # What it costs, measured on this branch against a live backend:
+    # What it costs, measured 2026-08-27 against a live backend on the model the
+    # app ships (`ollama/qwen3.5:4b`), fallback on -> fallback off:
     #   intents (50)              1.0000 -> 1.0000   the LLM changes nothing
-    #   intents_adversarial (29)  0.9655 -> 0.8276   4 rescues lost
+    #   intents_adversarial (29)  0.8966 -> 0.8276   2 rescues lost (26/29 -> 24/29)
+    # Read the model, not just the number: `scores_history.jsonl` has this arm at
+    # 0.9655 on `qwen2.5:14b-instruct` and 0.8276 on `qwen3.5:0.8b`, so a delta
+    # taken across two models prices this gate at something no user pays. The
+    # 0.8966 figure is eight recorded runs on the shipped model, all identical.
     # The committed threshold (routing_accuracy >= 0.85, `intents`) is untouched;
-    # the adversarial set is the floor the Makefile already labels "not the
-    # routing". Below 0.7 the heuristic is guessing, and here the guess stands.
+    # the adversarial set is report-only. Below 0.7 the heuristic is guessing,
+    # and on a slow host that guess now stands.
     #
-    # Set this True to buy those 4 rescues back at ~17s per affected question.
+    # Set this True to buy those 2 rescues back at ~17s per affected question.
     QA_INTENT_LLM_FALLBACK_ON_SLOW_HOST: bool = False
-    # Hard ceiling on everything the synthesis prompt carries, not just the chunk
+    # Alarm level for everything the synthesis prompt carries, not just the chunk
     # context. QA_CONTEXT_TOKEN_BUDGET bounds `chunks_context` only; section
     # context, image context and a prepended executive summary are appended AFTER
     # it, and the summary had no cap at all. A budget that bounds one component
     # while another is unbounded gives a good average and an unbounded worst case,
-    # which is the shape of the original 173s report. 0 disables the ceiling.
+    # which is the shape of the original 173s report.
+    #
+    # It WARNS, it does not truncate, and that is deliberate: cutting an assembled
+    # prompt would strip `[S<n>]` passages the model is told to cite (I-33), which
+    # buys latency by spending the answer's provenance. Bound the work upstream --
+    # the per-source caps below -- and let this line say when one of them has been
+    # outgrown. 0 disables the check.
     QA_PROMPT_TOKEN_CEILING: int = 4000
     # Cap on the prepended executive summary specifically, matching the 1000 the
     # section context has always carried. `_should_use_summary` is a keyword match
@@ -229,6 +231,15 @@ class Settings(BaseSettings):
     # be asked of a long document -- 0/60 on the `study` golden, which is why it
     # was never seen.
     QA_SUMMARY_INJECTION_TOKEN_CAP: int = 1000
+    # Prepend each section's generated summary to its chunks in the prompt.
+    # Off, and the default is the measurement rather than a preference: the
+    # lookup is keyed on (document_id, section_heading), and every retrieved
+    # chunk carried an empty heading until that was fixed, so this has never
+    # actually fired in a shipped build. Switching it on inflates candidate text
+    # by 42.2% and, against QA_CONTEXT_TOKEN_BUDGET, drops the passages that
+    # reach the model from 39 to 28 across an 8-query sample -- one query fell
+    # from 4 passages to 1. Turning it on means raising the budget with it, and
+    # that costs prefill latency and KV cache (I-27).
     QA_ATTACH_SECTION_SUMMARIES: bool = False
     # L2 funnel: how many RRF candidates the cross-encoder re-scores. HR@k of
     # the reranked list is bounded by HR@depth of the RRF pool, so depth is the
