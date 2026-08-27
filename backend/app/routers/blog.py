@@ -22,6 +22,7 @@ from app.schemas.blog import (
     BlogConfigResponse,
     BlogDraftRequest,
     BlogDraftResponse,
+    BlogDraftSummary,
     BlogLivePreviewCleanupRequest,
     BlogLivePreviewRequest,
     BlogLivePreviewResponse,
@@ -97,9 +98,9 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def _fallback_title(content: str) -> str:
-    first = next((ln.strip() for ln in content.splitlines() if ln.strip()), "")
-    first = re.sub(r"^#+\s*", "", first)
-    return first[:60] or "Untitled"
+    # One derivation, in the service: GET /blog/drafts decides "already published"
+    # by slugging this title, so a second copy here would let the two disagree.
+    return blog_service.fallback_title(content)
 
 
 @router.get("/config", response_model=BlogConfigResponse)
@@ -279,6 +280,30 @@ def _post_path(slug: str, kind: str) -> tuple[Path, Path, str]:
 
 def _post_url(slug: str, kind: str) -> str:
     return f"{get_settings().LUMINARY_BLOG_URL_BASE}/{kind}/{slug}/"
+
+
+@router.get("/drafts", response_model=list[BlogDraftSummary])
+async def list_drafts(
+    kind: str = "blog",
+    repo: NoteRepo = Depends(get_note_repo),
+) -> list[BlogDraftSummary]:
+    """Notes in the `kind` collection that have no post on the site yet.
+
+    The publish entry point is a chip on the note card, so a note written for the
+    site is only findable by remembering which note it was. This is the other
+    half of the management panel, which until now listed published posts and so
+    could never show the thing you were about to publish.
+    """
+    _check_kind(kind)
+    notes = await repo.in_collection_named(kind)
+    rows = [
+        (n.id, n.title, n.content, n.updated_at.isoformat() if n.updated_at else None)
+        for n in notes
+    ]
+    return [
+        BlogDraftSummary(**d)
+        for d in blog_service.unpublished_notes(rows, _content_dir(kind))
+    ]
 
 
 @router.get("/posts", response_model=list[BlogPostSummary])

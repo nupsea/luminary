@@ -121,6 +121,19 @@ export const blogLivePreviewCleanup = (slug: string, kind: BlogKind = "blog"): P
 
 // -- published-post management --------------------------------------------
 
+/** A collected note with no post on the site yet -- what you are about to publish. */
+export interface BlogDraftSummary {
+  note_id: string
+  title: string
+  /** The slug publishing WOULD use; how "already published" is decided. */
+  slug: string
+  excerpt: string
+  updated_at?: string | null
+}
+
+export const listBlogDrafts = (kind: BlogKind = "blog"): Promise<BlogDraftSummary[]> =>
+  apiGet<BlogDraftSummary[]>(`/blog/drafts${q(kind)}`)
+
 export interface BlogPostSummary {
   slug: string
   title: string

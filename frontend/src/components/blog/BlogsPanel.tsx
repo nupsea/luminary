@@ -1,25 +1,29 @@
 /**
- * BlogsPanel — lists the published posts in the site repo (GET /blog/posts).
+ * BlogsPanel — drafts you have not published yet (GET /blog/drafts), then the
+ * published posts in the site repo (GET /blog/posts).
  * Each post can be opened for editing (BlogEditDialog) or deleted in place
  * (both commit locally; the user pushes). Shown in the Notes page "Blogs" view.
  */
 
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Loader2, Pencil, Trash2 } from "lucide-react"
+import { ExternalLink, Loader2, Pencil, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   deleteBlogPost,
   getBlogConfig,
+  listBlogDrafts,
   listBlogPosts,
   KIND_PLURAL,
   KIND_SINGULAR,
   type BlogKind,
   type BlogPostSummary,
 } from "@/lib/blogApi"
+import { getNote } from "@/lib/notesApi"
 import { BlogEditDialog } from "./BlogEditDialog"
+import { BlogPublishDialog } from "./BlogPublishDialog"
 import { PushBlogButton } from "./PushBlogButton"
 
 const KINDS: BlogKind[] = ["blog", "thoughts"]
@@ -36,6 +40,7 @@ export function BlogsPanel() {
   const [kind, setKind] = useState<BlogKind>("blog")
   const [editing, setEditing] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState<string | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["blog-posts", kind],
@@ -50,11 +55,30 @@ export function BlogsPanel() {
   })
   const unconfigured = !!config && (!config.is_git_repo || !config.content_dir_exists)
 
+  // Notes in the matching collection with nothing on the site yet. Listed here
+  // because the publish action otherwise lives only on the note card, so the
+  // panel named for a collection could not show the thing you came to publish.
+  const { data: drafts } = useQuery({
+    queryKey: ["blog-drafts", kind],
+    queryFn: () => listBlogDrafts(kind),
+  })
+  const draftRows = drafts ?? []
+
+  // The publish dialog renders mermaid from the note's FULL markdown; the row's
+  // excerpt is truncated, so passing that would quietly drop diagrams. Fetch the
+  // note and hold the dialog back until it is here.
+  const { data: publishingNote } = useQuery({
+    queryKey: ["note", publishing],
+    queryFn: () => getNote(publishing as string),
+    enabled: !!publishing,
+  })
+
   const deleteMut = useMutation({
     mutationFn: (slug: string) => deleteBlogPost(slug, kind),
     onSuccess: (_res, slug) => {
       setConfirming(null)
       void qc.invalidateQueries({ queryKey: ["blog-posts"] })
+      void qc.invalidateQueries({ queryKey: ["blog-drafts"] })
       void qc.invalidateQueries({ queryKey: ["blog-config"] })
       toast.success(`Deleted ${slug} (committed locally)`)
     },
@@ -207,7 +231,53 @@ export function BlogsPanel() {
         </div>
       </div>
 
+      {draftRows.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Drafts — in {KIND_PLURAL[kind]}, not published yet
+          </h2>
+          <ul className="flex flex-col gap-1.5">
+            {draftRows.map((d) => (
+              <li
+                key={d.note_id}
+                className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{d.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">{d.excerpt}</p>
+                </div>
+                <code className="hidden shrink-0 truncate rounded bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:block">
+                  {d.slug}.md
+                </code>
+                <button
+                  onClick={() => setPublishing(d.note_id)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20"
+                >
+                  <Send size={12} />
+                  Publish
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {content}
+
+      {publishing && publishingNote && (
+        <BlogPublishDialog
+          open={!!publishing}
+          kind={kind}
+          noteId={publishing}
+          noteContent={publishingNote.content}
+          onClose={() => {
+            setPublishing(null)
+            void qc.invalidateQueries({ queryKey: ["blog-drafts"] })
+            void qc.invalidateQueries({ queryKey: ["blog-posts"] })
+            void qc.invalidateQueries({ queryKey: ["blog-config"] })
+          }}
+        />
+      )}
 
       {editing && (
         <BlogEditDialog
@@ -217,6 +287,7 @@ export function BlogsPanel() {
           onClose={() => setEditing(null)}
           onChanged={() => {
             void qc.invalidateQueries({ queryKey: ["blog-posts"] })
+      void qc.invalidateQueries({ queryKey: ["blog-drafts"] })
             void qc.invalidateQueries({ queryKey: ["blog-config"] })
           }}
         />
