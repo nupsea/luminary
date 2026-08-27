@@ -21,8 +21,8 @@ import pytest
 
 from app.config import get_settings
 from app.runtime.chat_nodes.synthesize import _cap_text_tokens
-from app.services.context_packer import resolve_context_budget
 from app.services import model_keepwarm
+from app.services.context_packer import resolve_context_budget
 
 
 @pytest.fixture(autouse=True)
