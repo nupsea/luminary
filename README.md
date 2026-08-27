@@ -528,7 +528,7 @@ frontend/src/
 | `make install` | One-time setup (uv, Node, Ollama, models, build) |
 | `make start` | Public-mode server on :7820 |
 | `make luminary` | Backend + frontend in full mode (:7820 + :5173) |
-| `make stop` | Stop all Luminary processes |
+| `make stop` | Stop Luminary on :7820, gracefully (also stops the container when it serves the port) |
 | `make test` | Backend unit + integration tests |
 | `make lint` | Ruff + tsc + eslint + manifest checks |
 | `make ci` | **The gate.** Lint, layer check, tests, build, tsc, eslint, vitest |
@@ -536,6 +536,8 @@ frontend/src/
 | `make db-migrate` | Apply pending migrations (the server also does this on boot) |
 | `make db-revision m="..."` | Generate a migration after changing `models.py` |
 | `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
+| `make docker-stop` | Stop the compose stack, containers kept for a fast restart |
+| `make docker-down` | Stop and remove containers and network; **volumes, i.e. your library, are kept** |
 
 **Evaluation harness.** Retrieval is scored with HR@5 / MRR / nDCG@10;
 faithfulness uses a dedicated NLI model (Vectara HHEM-2.1-Open) rather than an
