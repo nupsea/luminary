@@ -118,6 +118,45 @@ async def test_enrich_semaphore_sized_from_setting(monkeypatch) -> None:
     assert ie._get_enrich_sem() is sem
 
 
+@pytest.mark.asyncio
+async def test_vision_timeout_follows_the_host_measurement(monkeypatch, tmp_path: Path) -> None:
+    """A slow host gets the larger ceiling; an unmeasured or fast one does not.
+
+    Measured on an Intel i7-8850H reading SQL_Cookbook_2006 through Docker,
+    consecutive figures took 296s, 278s, 305s and 305s against a 300s ceiling,
+    so the job failed on whichever figure happened to land above it. The gate is
+    the start-up measurement (I-37), never a CPU or platform check.
+    """
+    import app.services.image_enricher as ie
+    import app.services.model_keepwarm as keepwarm
+
+    img_path = tmp_path / "fig.png"
+    PILImage.new("RGB", (200, 200), (10, 20, 30)).save(img_path)
+
+    settings = MagicMock()
+    settings.OLLAMA_URL = "http://ollama:11434"
+    settings.VISION_TIMEOUT_SECONDS = 300.0
+    settings.VISION_TIMEOUT_SLOW_HOST_SECONDS = 900.0
+    settings.VISION_KEEP_ALIVE = "60s"
+
+    seen: list[float] = []
+
+    async def _capture(**kwargs):
+        seen.append(kwargs["timeout"])
+        return '{"image_type": "chart", "description": "x"}'
+
+    svc = MagicMock()
+    svc.complete = _capture
+    monkeypatch.setattr(ie, "get_llm_service", lambda: svc)
+    monkeypatch.setattr(ie, "get_vision_model", lambda: "ollama/qwen3.5:4b")
+
+    for is_slow, expected in ((False, 300.0), (True, 900.0)):
+        monkeypatch.setattr(keepwarm, "local_inference_is_slow", lambda _s=is_slow: _s)
+        await ie._call_vision_llm(img_path, settings, "")
+
+    assert seen == [300.0, 900.0]
+
+
 def test_enrich_semaphore_is_per_event_loop(monkeypatch) -> None:
     """A second loop gets its own semaphore rather than reusing one bound elsewhere."""
     import weakref

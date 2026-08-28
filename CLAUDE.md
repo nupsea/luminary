@@ -11,7 +11,7 @@ This file is a table of contents. The system of record is `docs/`.
 | Before you… | Read |
 |---|---|
 | proposing or scoping work | `docs/roadmap.md` — the only doc carrying status |
-| any backend change | `docs/invariants.md` (37 hard rules, each from a real incident) |
+| any backend change | `docs/invariants.md` (38 hard rules, each from a real incident) |
 | a structural change | `docs/architecture.md` (6-layer rule, stores, directories) |
 | writing backend code | `docs/patterns.md` (accumulated codebase patterns) |
 | a schema change | I-23, then the `alembic-migration` skill |

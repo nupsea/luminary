@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy import update as _update
 
 from app.config import get_settings
 from app.database import get_session_factory
@@ -252,6 +253,33 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
         if existing is not None:
             return ReextractResponse(job_id=existing.id, queued=False)
 
+        # Drop any pending image_analyze for this document. Its input set is
+        # exactly what this re-extraction is about to change, and the worker
+        # runs a document's jobs sequentially -- so left queued, the analyze
+        # job runs FIRST and the re-extract waits behind it. On the case this
+        # exists for, that is the wrong way round by hours: 77 stale full-page
+        # rasters were queued for a vision call each, and the re-extract that
+        # would have retired them sat behind all 77. The handler enqueues a
+        # fresh analyze job for whatever survives.
+        superseded = (
+            await session.execute(
+                _update(EnrichmentJobModel)
+                .where(
+                    EnrichmentJobModel.document_id == document_id,
+                    EnrichmentJobModel.job_type == "image_analyze",
+                    EnrichmentJobModel.status == "pending",
+                )
+                .values(
+                    status="done",
+                    error_message=(
+                        "Superseded by a re-extraction; a fresh analyze job "
+                        "covers the images that survived it."
+                    ),
+                )
+                .returning(EnrichmentJobModel.id)
+            )
+        ).all()
+
         job = EnrichmentJobModel(
             id=str(uuid.uuid4()),
             document_id=document_id,
@@ -260,6 +288,13 @@ async def reextract_document_images(document_id: str) -> ReextractResponse:
         )
         session.add(job)
         await session.commit()
+
+    if superseded:
+        logger.info(
+            "reextract_document_images: superseded %d pending image_analyze job(s) doc=%s",
+            len(superseded),
+            document_id,
+        )
 
     logger.info("reextract_document_images: queued job=%s doc=%s", job.id, document_id)
     return ReextractResponse(job_id=job.id, queued=True)

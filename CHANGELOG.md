@@ -6,6 +6,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A 128-page book extracted 81 "figures", 79 of them pages of body text.**
+  PDFs generated from reflowable sources carry one fill rectangle spanning the
+  whole flow; the wash guard clipped it to the page before measuring, which is
+  exactly the page's text column. Each cost a vision call to paraphrase text
+  already indexed verbatim — 34 minutes to fail on this host. Now 2 images and
+  143 seconds. Re-extraction also retires figures the extractor no longer
+  produces, so an existing library is fixed by re-extracting rather than
+  re-uploading. Do not restore the clip-then-measure order (I-38).
+- **Vision calls timed out at 300s on a host where they take 278-305s.**
+  The ceiling now follows the start-up host measurement, so only a host that
+  measured itself slow waits longer; fast hosts are unchanged.
+- **The Intel Mac path of `make ci` could not run the backend suite at all.**
+  The CI image was built from `backend/` and so never contained
+  `surface-manifest.json`; every test importing `app.main` died at collection.
+  It builds from the repo root now and runs the suite.
+- **A re-extraction that could not read every image deleted the ones it missed.**
+  The extractors skip an object they cannot decode, rasterize or write, so one
+  transient read failure retired a stored figure and the description that cost
+  minutes of vision time. Retiring now requires a complete pass (I-38).
+- **The Intel Mac CI image inherited the host's model cache.** `backend/.luminary`
+  survived a context-root-anchored ignore rule, so `ruff` linted 418MB of
+  vendored model sources and the gate went red before pytest ran.
+- **`DEEP_DIVE.md` quoted eval thresholds and SLOs that were not real.** It
+  listed HR@5 ≥ 0.60 / MRR ≥ 0.45 / faithfulness ≥ 0.65 against actual floors of
+  0.50 / 0.35 / 0.30, called nDCG@10 a gate when it is report-only, described a
+  70-row corpus that is now 27 files, and claimed performance SLOs are "enforced
+  in CI" when every one of them is `@pytest.mark.slow` and excluded. Rewritten
+  against the code, and the README's matching nDCG@10 claim corrected.
+
 ## [0.8.2] - 2026-08-28
 
 ### Added
