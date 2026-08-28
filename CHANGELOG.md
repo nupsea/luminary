@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.28] - 2026-08-28
+
 ### Fixed
 - **Re-uploading a document you already have looked like it did nothing.**
   Ingestion dedupes on file hash, but the endpoint answered `"processing"` for a
