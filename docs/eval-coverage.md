@@ -22,10 +22,11 @@ whatever retrieval returned.
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
+| Note search | `make eval-notes` — recall over the user's own notes | no committed golden, by design (see below) | baseline only, corpus-coupled |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, shape deviations, card-gate rejections, attempts per generation | any run | recorded per eval run |
 | Model choice | `make eval-matrix MODELS=a,b` — the model-sensitive runners across candidates, structural tier only | whatever the chosen tasks use | `--assert-separation` gates the instrument, not a model |
 | Generation variance | `make eval-variance` — mean/sd over N runs, gated on the mean | any dataset | on demand |
-| HTTP contract | `make smoke` — ~230 scripts | live backend | yes, separately |
+| HTTP contract | `make smoke` — ~180 scripts | live backend | yes, separately |
 
 ## What is not covered
 

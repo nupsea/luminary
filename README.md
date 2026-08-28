@@ -96,10 +96,16 @@ machine**, and it will not even offer you a cloud model.
 | **Study** | Regular, cloze and code-trace cards; FSRS scheduling; three-phase sessions; prediction calibration |
 | **Notes** | Markdown editor with live preview, wiki-links, backlinks, Mermaid and Excalidraw |
 | **Track** | Mastery rings per document, "what's about to slip", study activity, time on task |
+| **Figures** | Diagrams and charts pulled out of PDFs and described by a vision model, so an answer can draw on them |
 | **Export** | Markdown vault (Obsidian-compatible), Anki `.apkg`, flashcard CSV |
 
 The Hub is the daily entry point: it picks the one thing most worth doing now —
 review what is due, carry on reading, or write something down.
+
+Figure descriptions are the one genuinely expensive part of ingest — one vision
+call per figure — so on a CPU-only host a heavily illustrated PDF takes a while
+to finish enriching. The document is readable and searchable before that
+finishes, and `PDF_VECTOR_FIGURES=false` turns the fallback off.
 
 ---
 
@@ -261,6 +267,29 @@ make docker-run
 
 Either way, open http://localhost:7820. First run pulls a ~3.4 GB model and
 builds the image, so give it time.
+
+**Fastest on Intel: point generation at a hosted model**
+
+Both options above run generation on an Intel CPU with no GPU, and that is the
+whole of the cost. Measured on an i7-8850H: `qwen3.5:4b` decodes at ~6 tok/s, a
+question takes ~121s end to end, five flashcards ~118s, and enriching a
+128-page book ~143s. Nothing in the retrieval stack is slow — search is
+milliseconds — the model is. **If this is your first look at Luminary on an
+Intel Mac, use a hosted model for generation.** Everything else still runs on
+your machine: ingestion, embeddings, search, the graph and your library never
+leave it.
+
+```bash
+# in .env beside the compose file — a Docker container has no OS keyring, so a
+# key saved in Settings would be stored in the database as plain text
+LITELLM_DEFAULT_MODEL=openai/gpt-4o
+OPENAI_API_KEY=sk-...
+```
+
+The trade is explicit and worth stating: your question and the passages
+retrieved for it go to that provider. Nothing else does, and Private mode turns
+it off entirely — see [Choosing a model](#choosing-a-model). Apple Silicon does
+not need this; local generation there is comfortable.
 
 **If answering feels slow**
 
@@ -648,7 +677,7 @@ being skipped.
 | Platform | Status |
 |---------|--------|
 | macOS Apple Silicon | Native, fully supported |
-| macOS Intel | Docker required for backend |
+| macOS Intel | Docker required for backend; a hosted model is recommended for generation (no GPU, ~6 tok/s locally) |
 | Linux / WSL | Native, same steps |
 | Windows | Docker, or natively via `scripts/install.ps1` |
 

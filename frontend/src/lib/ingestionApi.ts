@@ -51,10 +51,16 @@ export async function detectFileType(file: File): Promise<ContentTypeValue | nul
   }
 }
 
+export interface FileIngestResult {
+  documentId: string
+  /** The library already held this file; nothing is running, so do not track it. */
+  duplicate: boolean
+}
+
 export async function submitFile(
   file: File,
   contentType: ContentTypeValue | null,
-): Promise<string> {
+): Promise<FileIngestResult> {
   const form = new FormData()
   form.append("file", file)
   // Omitted, not blank, when the user did not choose: the backend skips
@@ -62,11 +68,11 @@ export async function submitFile(
   // silently overrides detection.
   if (contentType) form.append("content_type", contentType)
   try {
-    const data = await apiPost<{ document_id: string }>(
+    const data = await apiPost<{ document_id: string; status: string }>(
       "/documents/ingest",
       form,
     )
-    return data.document_id
+    return { documentId: data.document_id, duplicate: data.status === "duplicate" }
   } catch (err) {
     throw detailFromError(err, "Upload failed")
   }

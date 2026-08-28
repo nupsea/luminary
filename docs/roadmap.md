@@ -228,6 +228,46 @@ Both are opt-out-able, both change what a user receives, and neither has a numbe
   drop, 0.7516 keep), which justifies the threshold and does not measure the axis. `vector_share`
   catches the arm dying, not the arm getting worse.
 
+### 10. The ingestion tests' entity extractor is a double that always raises
+
+`NERService.extract` is `(chunks, content_type="unknown", is_technical=None)`
+(`services/ner.py:458`) and `entity_extract_node` calls it with all three
+(`workflows/ingestion_nodes/entity_extract.py:258`). Both test doubles stopped at the
+signature it had before `is_technical`: `tests/test_e2e_upload.py:187` takes two, and
+`tests/test_concurrent.py:50` takes one. **Every call raises `TypeError`**, which the node
+catches as non-fatal and proceeds — so the ingestion tests pass without ever exercising
+entity extraction, and each mock's carefully-built return value is dead code.
+
+Correcting either signature is not a one-line fix, which is why this is an item rather than a
+commit. Measured on one machine, minutes apart: with the broken doubles
+`tests/test_e2e_upload.py` is **3 passed in 7.9s**; with the signatures corrected so
+extraction actually runs, it **exceeds the 120s per-test timeout** and ingestion stalls at
+`stage=indexing, progress_pct=80`. The `TypeError` is load-bearing for the suite being green.
+
+So there are two defects stacked: the doubles have drifted, and the path they were hiding does
+not complete under test. Fix the second before the first, or the gate goes red. Related to the
+`unstable` quarantine (item 3) and to the leaked-task shutdown work — do not attempt it with a
+timing policy, which failed before. The patch that corrects the doubles is trivial to
+reconstruct from the signatures above.
+
+### 11. `GET /documents` costs ~1.3s because its per-row counts are unindexed
+
+The library list runs about thirteen correlated subqueries per row. Measured on a 59-document
+library while three documents enriched: `GET /documents?page_size=24` takes **1.5s**, against
+**0.003s** for `GET /enrichment/queue` on the same server — so this is the query, not event-loop
+contention, and enrichment is not the cause.
+
+The counts are over tables with no `document_id` index: `chunks` (75,646 rows), `sections`
+(2,346), `flashcards` (826), `summaries` (452). `reading_progress`, `prediction_events` and
+`learning_objectives` already have one; `enrichment_jobs` does too, and at 162 rows it is not
+the cost. So the fix is an Alembic migration adding the missing indexes (I-23), not a query
+rewrite — and it wants a before/after measurement on a library this size rather than a rushed one.
+
+Bracketing what is already known: the enrichment aggregate added in `b647604` accounts for
+about 0.2s of the 1.5s (the single-job version it replaced measured 1.27s on the same library,
+same load). That is a real cost and worth re-measuring once the indexes exist, but it is not
+what makes the page slow.
+
 ## Deferred — decided, not scheduled
 
 Nothing currently deferred.

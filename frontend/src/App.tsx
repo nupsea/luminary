@@ -664,7 +664,10 @@ function App() {
           <BrowserRouter>
             <AppShell />
           </BrowserRouter>
-          <div className="pointer-events-none fixed bottom-5 left-5 z-40 flex flex-col gap-3">
+          {/* Clear of the nav rail: it is w-[4.5rem] and unconditional, so a
+              bottom-left overlay at left-5 sits on top of the streak widget,
+              the dev icons and the settings controls at the foot of it. */}
+          <div className="pointer-events-none fixed bottom-5 left-[5.75rem] z-40 flex flex-col gap-3">
             <IngestionProgressPills />
             <EnrichmentStatusPill />
           </div>

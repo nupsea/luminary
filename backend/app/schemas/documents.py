@@ -164,6 +164,19 @@ class YouTubeIngestRequest(BaseModel):
     url: str
 
 
+class IngestResponse(BaseModel):
+    """Result of POST /documents/ingest.
+
+    `status` distinguishes work started from a file we already hold. Ingestion
+    dedupes on file hash, and a duplicate of an already-complete document used to
+    be reported as "processing" -- so the client tracked a document that would
+    never progress, and the user saw an upload that appeared to do nothing.
+    """
+
+    document_id: str
+    status: Literal["processing", "duplicate"]
+
+
 class KindleIngestResponse(BaseModel):
     document_ids: list[str]
     book_count: int
