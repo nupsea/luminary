@@ -417,6 +417,14 @@ eval-intent:
 	uv run --project $(CURDIR)/backend python evals/run_intent_eval.py \
 		--dataset intents_adversarial --backend-url $(BACKEND_URL) --llm-fallback
 
+# Note search: does /notes/search find the note, and only the note. No golden --
+# queries are derived from whatever notes the machine has, so the numbers are
+# corpus-coupled and comparable only against your own previous run.
+eval-notes:
+	@echo "Note search eval (backend must be running)..."
+	uv run --project $(CURDIR)/backend python evals/run_note_search_eval.py \
+		--backend-url $(BACKEND_URL) --assert-thresholds
+
 # Ingestion fidelity: how much of each source document survives into chunks.
 # Deterministic, LLM-free, no backend needed -- it reads the dev database directly.
 # Retrieval scores what was indexed and cannot report what never arrived, so this
