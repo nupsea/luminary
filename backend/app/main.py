@@ -560,7 +560,10 @@ async def patch_settings(
     request: SettingsUpdate,
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    # TODO: migrate to OS keychain — see tech-debt-tracker.md
+    # Writes straight to SettingsModel, so it does NOT reach the OS keyring.
+    # Secrets must go through PATCH /settings/llm, which routes them via
+    # settings_service (keyring where there is one, `__plain__:` in a container).
+    # Never add an API key to whatever calls this.
     updates = request.root
     for key, value in updates.items():
         setting = SettingsModel(key=key, value=value)
