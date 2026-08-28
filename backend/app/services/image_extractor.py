@@ -9,6 +9,7 @@ import hashlib
 import logging
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
@@ -29,6 +30,26 @@ from app.services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExtractionOutcome:
+    """How many images a pass failed to read, as opposed to declined to keep.
+
+    The extractors degrade per image: an object that will not decode, a page
+    that will not rasterize, a PNG that will not write are each logged and
+    skipped so one bad object does not cost a document its other figures. That
+    is right for extraction and wrong for the retire step, which asks whether
+    the extractor still *produces* an image and reads a partial pass as "no".
+    A single skipped object would otherwise delete a stored figure, its file and
+    its description -- minutes of vision time -- because a read failed once.
+
+    Deliberate rejections (dedup, the size bounds) are not skips: those are the
+    extractor deciding, and deciding is exactly what the retire step may act on.
+    """
+
+    skipped: int = 0
+
 
 _MIN_WIDTH = 150
 _MIN_HEIGHT = 100
@@ -248,12 +269,15 @@ def _cluster_drawings(page) -> list:
                         visited[neighbour] = 1
                         queue.append(neighbour)
 
-        bbox = fitz.Rect(
-            page_rect.x0 + min_x * _CLUSTER_CELL_PT,
-            page_rect.y0 + min_y * _CLUSTER_CELL_PT,
-            page_rect.x0 + (max_x + 1) * _CLUSTER_CELL_PT,
-            page_rect.y0 + (max_y + 1) * _CLUSTER_CELL_PT,
-        ) & page_rect
+        bbox = (
+            fitz.Rect(
+                page_rect.x0 + min_x * _CLUSTER_CELL_PT,
+                page_rect.y0 + min_y * _CLUSTER_CELL_PT,
+                page_rect.x0 + (max_x + 1) * _CLUSTER_CELL_PT,
+                page_rect.y0 + (max_y + 1) * _CLUSTER_CELL_PT,
+            )
+            & page_rect
+        )
         if bbox.width < _MIN_FIGURE_PT or bbox.height < _MIN_FIGURE_PT:
             continue
         if bbox.get_area() > _MAX_FIGURE_PAGE_FRACTION * page_area:
@@ -302,6 +326,7 @@ def _store_png(
     page_idx: int,
     index: int,
     filename: str,
+    outcome: ExtractionOutcome,
 ) -> ExtractedImage | None:
     """Apply the shared size/dedup rules and write the PNG. None when rejected."""
     if content_hash in seen_hashes:
@@ -310,6 +335,7 @@ def _store_png(
     try:
         w, h = img_pil.size
     except Exception:
+        outcome.skipped += 1
         return None
 
     if w < _MIN_WIDTH or h < _MIN_HEIGHT:
@@ -331,6 +357,7 @@ def _store_png(
         img_pil.save(str(abs_path), format="PNG")
     except Exception as exc:
         logger.warning("Could not save PNG doc=%s page=%d: %s", doc_id, page_idx, exc)
+        outcome.skipped += 1
         return None
 
     seen_hashes.add(content_hash)
@@ -352,6 +379,7 @@ def _extract_vector_figures_page(
     doc_id: str,
     seen_hashes: set[str],
     limit: int,
+    outcome: ExtractionOutcome,
 ) -> list[ExtractedImage]:
     """Rasterize up to `limit` of the vector-drawn figures on one page."""
     results: list[ExtractedImage] = []
@@ -360,12 +388,15 @@ def _extract_vector_figures_page(
             break
         # Drawing bounds exclude text, so axis labels and captions sitting just
         # outside the strokes are only captured by padding the clip.
-        clip = fitz.Rect(
-            bbox.x0 - _CLIP_PAD_PT,
-            bbox.y0 - _CLIP_PAD_PT,
-            bbox.x1 + _CLIP_PAD_PT,
-            bbox.y1 + _CLIP_PAD_PT,
-        ) & page.rect
+        clip = (
+            fitz.Rect(
+                bbox.x0 - _CLIP_PAD_PT,
+                bbox.y0 - _CLIP_PAD_PT,
+                bbox.x1 + _CLIP_PAD_PT,
+                bbox.y1 + _CLIP_PAD_PT,
+            )
+            & page.rect
+        )
         try:
             raw_bytes = page.get_pixmap(clip=clip, dpi=_VECTOR_RENDER_DPI).tobytes("png")
             img_pil = PILImage.open(BytesIO(raw_bytes))
@@ -378,6 +409,7 @@ def _extract_vector_figures_page(
                 fig_idx,
                 exc,
             )
+            outcome.skipped += 1
             continue
 
         if _is_blank_render(img_pil):
@@ -392,6 +424,7 @@ def _extract_vector_figures_page(
             page_idx,
             fig_idx,
             f"{page_idx}_v{fig_idx}.png",
+            outcome,
         )
         if stored is not None:
             results.append(stored)
@@ -403,6 +436,7 @@ def extract_images_pdf(
     images_dir: Path,
     doc_id: str,
     vector_fallback: bool = True,
+    outcome: ExtractionOutcome | None = None,
 ) -> list[ExtractedImage]:
     """Extract images from a PDF file.
 
@@ -416,6 +450,7 @@ def extract_images_pdf(
     drawings are clustered into figure regions and rasterized instead — without
     this, a LaTeX-authored paper extracts zero images however many figures it has.
     """
+    outcome = outcome if outcome is not None else ExtractionOutcome()
     out_dir = images_dir / doc_id
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[ExtractedImage] = []
@@ -435,6 +470,7 @@ def extract_images_pdf(
                 logger.warning(
                     "PDF image extraction failed xref=%d page=%d: %s", xref, page_idx, exc
                 )
+                outcome.skipped += 1
                 continue
 
             raw_bytes = img_data["image"]
@@ -442,6 +478,7 @@ def extract_images_pdf(
                 img_pil = PILImage.open(BytesIO(raw_bytes))
             except Exception:
                 logger.debug("undecodable embedded image, skipped", exc_info=True)
+                outcome.skipped += 1
                 continue
 
             stored = _store_png(
@@ -453,6 +490,7 @@ def extract_images_pdf(
                 page_idx,
                 img_idx,
                 f"{page_idx}_{img_idx}.png",
+                outcome,
             )
             if stored is not None:
                 results.append(stored)
@@ -465,12 +503,13 @@ def extract_images_pdf(
             continue
         try:
             figures = _extract_vector_figures_page(
-                page, page_idx, out_dir, doc_id, seen_hashes, budget
+                page, page_idx, out_dir, doc_id, seen_hashes, budget, outcome
             )
         except Exception as exc:
             logger.warning(
                 "Vector figure detection failed doc=%s page=%d: %s", doc_id, page_idx, exc
             )
+            outcome.skipped += 1
             continue
         vector_count += len(figures)
         results.extend(figures)
@@ -491,6 +530,7 @@ def extract_images_epub(
     file_path: Path,
     images_dir: Path,
     doc_id: str,
+    outcome: ExtractionOutcome | None = None,
 ) -> list[ExtractedImage]:
     """Extract images from an EPUB file.
 
@@ -498,6 +538,7 @@ def extract_images_epub(
     Same size/dedup rules as PDF extraction.
     """
 
+    outcome = outcome if outcome is not None else ExtractionOutcome()
     out_dir = images_dir / doc_id
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[ExtractedImage] = []
@@ -516,6 +557,7 @@ def extract_images_epub(
             img_pil = PILImage.open(BytesIO(raw_bytes))
         except Exception:
             logger.debug("undecodable EPUB image, skipped", exc_info=True)
+            outcome.skipped += 1
             continue
 
         stored = _store_png(
@@ -527,6 +569,7 @@ def extract_images_epub(
             0,  # EPUB has no page numbers
             img_idx,
             f"epub_{img_idx}.png",
+            outcome,
         )
         if stored is not None:
             results.append(stored)
@@ -539,12 +582,14 @@ def extract_images_epub(
 def extract_images_md(
     images_dir: Path,
     doc_id: str,
+    outcome: ExtractionOutcome | None = None,
 ) -> list[ExtractedImage]:
     """Scan already-mirrored images for a web article (markdown).
 
     ArticleExtractor mirrors images to images/{doc_id} during parsing.
     We scan that directory and create ExtractedImage objects for each file.
     """
+    outcome = outcome if outcome is not None else ExtractionOutcome()
     out_dir = images_dir / doc_id
     if not out_dir.exists():
         logger.info("MD image extraction: no images found for doc=%s", doc_id)
@@ -579,6 +624,7 @@ def extract_images_md(
             )
         except Exception as exc:
             logger.warning("MD image scanning failed for %s: %s", img_path, exc)
+            outcome.skipped += 1
 
     logger.info("MD image scanning complete doc=%s images=%d", doc_id, len(results))
     return results
@@ -610,8 +656,6 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     Extracts images from the document file, stores ImageModel rows.
     Non-fatal: failures are caught by the worker and set job status='failed'.
     """
-
-
 
     settings = _config_module.get_settings()
     images_dir = Path(settings.DATA_DIR).expanduser() / "images"
@@ -649,6 +693,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     # Off-loop because rasterizing a large PDF is seconds of CPU on the single
     # server loop the worker shares with every live request.
     note: str | None = None
+    outcome = ExtractionOutcome()
     try:
         if fmt == "pdf":
             extracted = await asyncio.to_thread(
@@ -657,13 +702,14 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
                 images_dir,
                 document_id,
                 settings.PDF_VECTOR_FIGURES,
+                outcome,
             )
         elif fmt == "epub":
             extracted = await asyncio.to_thread(
-                extract_images_epub, file_path, images_dir, document_id
+                extract_images_epub, file_path, images_dir, document_id, outcome
             )
         else:
-            extracted = extract_images_md(images_dir, document_id)
+            extracted = extract_images_md(images_dir, document_id, outcome)
     except Exception as exc:
         extracted = []
         note = (
@@ -705,11 +751,25 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
     # model time on a CPU host, describing text already indexed verbatim -- and
     # a re-extract cannot clear them because it only ever adds.
     #
-    # Guarded on the extractor having actually run. `extracted` is also empty
-    # when the PDF could not be opened, and pruning on that path would delete a
-    # document's entire image set because its file was briefly unreadable.
+    # Guarded on the extractor having actually run, and on it having read
+    # everything. `extracted` is also empty when the PDF could not be opened,
+    # and pruning on that path would delete a document's entire image set
+    # because its file was briefly unreadable. A PARTIAL pass is the same
+    # hazard one image at a time: the extractors log and skip an object they
+    # cannot decode, rasterize or write, so a single transient read failure
+    # would otherwise retire a stored figure -- its row, its PNG and the
+    # description that cost minutes of vision time -- on evidence that says
+    # only "not this run". Retire on a complete pass or not at all.
     retired_ids: list[str] = []
-    if note is None and extracted:
+    if note is None and extracted and outcome.skipped:
+        logger.warning(
+            "image_extract_handler: not retiring stale images doc=%s -- the pass "
+            "skipped %d image(s) it could not read, so what it produced is not "
+            "evidence about what the extractor still produces",
+            document_id,
+            outcome.skipped,
+        )
+    if note is None and extracted and not outcome.skipped:
         fresh_hashes = {img.content_hash for img in extracted}
         async with _database_module.get_session_factory()() as session:
             stale = (
@@ -722,9 +782,7 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
             ).all()
             retired_ids = [row[0] for row in stale]
             if retired_ids:
-                await session.execute(
-                    _delete(ImageModel).where(ImageModel.id.in_(retired_ids))
-                )
+                await session.execute(_delete(ImageModel).where(ImageModel.id.in_(retired_ids)))
                 await session.commit()
 
         # Secondary indexes, each in its own transaction. An orphaned FTS row is

@@ -18,6 +18,7 @@ from app.services.image_extractor import (
     _MAX_DIM,
     _MIN_HEIGHT,
     _MIN_WIDTH,
+    ExtractionOutcome,
     _is_prose_block,
     extract_images_pdf,
     image_extract_handler,
@@ -342,8 +343,9 @@ def test_prose_guard_refuses_to_judge_a_short_label_run(tmp_path):
     """
     doc = fitz.open()
     page = doc.new_page()
-    page.insert_text(fitz.Point(100, 300), "a single very wide label spanning the region", 
-                     fontsize=11)
+    page.insert_text(
+        fitz.Point(100, 300), "a single very wide label spanning the region", fontsize=11
+    )
     bbox = fitz.Rect(90, 280, 400, 340)
 
     assert _is_prose_block(page, bbox) is False
@@ -408,9 +410,7 @@ async def test_handler_degrades_when_pdf_cannot_be_opened(handler_db, tmp_path):
             await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         ).scalar_one()
         job = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
 
     assert doc.stage == "complete", "The handler must finish rather than abort on the error"
@@ -418,9 +418,7 @@ async def test_handler_degrades_when_pdf_cannot_be_opened(handler_db, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reextraction_retires_images_the_extractor_no_longer_produces(
-    handler_db, tmp_path
-):
+async def test_reextraction_retires_images_the_extractor_no_longer_produces(handler_db, tmp_path):
     """A document must not keep figures a past extractor version emitted.
 
     Extraction dedupes on content hash, so a re-extract only ever added. The 79
@@ -456,9 +454,7 @@ async def test_reextraction_retires_images_the_extractor_no_longer_produces(
     with (
         patch("app.database.get_session_factory", return_value=handler_db),
         patch("app.config.get_settings") as mock_settings,
-        patch(
-            "app.services.vector_store.get_lancedb_service", return_value=lancedb
-        ),
+        patch("app.services.vector_store.get_lancedb_service", return_value=lancedb),
     ):
         settings = MagicMock()
         settings.DATA_DIR = str(tmp_path)
@@ -469,10 +465,14 @@ async def test_reextraction_retires_images_the_extractor_no_longer_produces(
 
     async with handler_db() as session:
         remaining = (
-            await session.execute(
-                select(ImageModel.content_hash).where(ImageModel.document_id == doc_id)
+            (
+                await session.execute(
+                    select(ImageModel.content_hash).where(ImageModel.document_id == doc_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert "a-hash-this-pdf-does-not-produce" not in remaining, "stale row must be gone"
     assert len(remaining) == 1, "the figure this PDF does produce must be kept"
@@ -520,12 +520,112 @@ async def test_a_failed_extraction_never_retires_anything(handler_db, tmp_path):
 
     async with handler_db() as session:
         remaining = (
-            await session.execute(
-                select(ImageModel.content_hash).where(ImageModel.document_id == doc_id)
+            (
+                await session.execute(
+                    select(ImageModel.content_hash).where(ImageModel.document_id == doc_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert remaining == ["hash-that-must-survive"]
+
+
+def _fail_the_first_decode(monkeypatch) -> None:
+    """Make exactly one embedded image fail to decode, as a transient read does.
+
+    The extractors log and skip such an object so one bad image does not cost a
+    document its other figures. Everything after it extracts normally.
+    """
+    real_open = PILImage.open
+    calls = {"n": 0}
+
+    def _flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("truncated image stream")
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(PILImage, "open", _flaky)
+
+
+def test_an_image_that_will_not_decode_is_recorded_as_a_skip(tmp_path, monkeypatch):
+    """A degraded pass has to say it was degraded, or the retire step misreads it."""
+    pdf = _pdf_with_vector_figure(tmp_path / "flaky.pdf", with_raster=True)
+    outcome = ExtractionOutcome()
+    _fail_the_first_decode(monkeypatch)
+
+    results = extract_images_pdf(pdf, tmp_path / "out", "flaky-doc", True, outcome)
+
+    assert outcome.skipped == 1, "the skipped object must be counted, not just logged"
+    assert results, "one unreadable object must not cost the page its other figures"
+
+
+@pytest.mark.asyncio
+async def test_a_partial_extraction_never_retires_anything(handler_db, tmp_path, monkeypatch):
+    """What a degraded pass produced is not evidence about what the extractor produces.
+
+    The extractors skip an object they cannot decode, rasterize or write. Left
+    ungated, one transient read failure retires a stored figure -- its row, its
+    PNG and the description that cost minutes of vision time -- on nothing more
+    than "not this run". The clean-pass case is
+    test_reextraction_retires_images_the_extractor_no_longer_produces.
+    """
+    doc_id, job_id = "doc-partial", "job-partial"
+    pdf = _pdf_with_vector_figure(tmp_path / "fig.pdf", with_raster=True)
+    await _seed_doc_and_job(handler_db, doc_id, job_id, pdf)
+
+    kept_id = "22222222-3333-4444-5555-666666666666"
+    kept_rel = f"images/{doc_id}/kept.png"
+    kept_abs = tmp_path / kept_rel
+    kept_abs.parent.mkdir(parents=True, exist_ok=True)
+    kept_abs.write_bytes(_make_png_bytes(200, 200))
+    async with handler_db() as session:
+        session.add(
+            ImageModel(
+                id=kept_id,
+                document_id=doc_id,
+                page=3,
+                path=kept_rel,
+                width=200,
+                height=200,
+                content_hash="a-hash-this-degraded-pass-did-not-produce",
+                description="Figure 3: the residual block.",
+            )
+        )
+        await session.commit()
+
+    lancedb = MagicMock()
+    _fail_the_first_decode(monkeypatch)
+    with (
+        patch("app.database.get_session_factory", return_value=handler_db),
+        patch("app.config.get_settings") as mock_settings,
+        patch("app.services.vector_store.get_lancedb_service", return_value=lancedb),
+    ):
+        settings = MagicMock()
+        settings.DATA_DIR = str(tmp_path)
+        settings.PDF_VECTOR_FIGURES = True
+        mock_settings.return_value = settings
+
+        await image_extract_handler(doc_id, job_id)
+
+    async with handler_db() as session:
+        remaining = (
+            (
+                await session.execute(
+                    select(ImageModel.content_hash).where(ImageModel.document_id == doc_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert "a-hash-this-degraded-pass-did-not-produce" in remaining, (
+        "a skipped read must not retire a stored figure"
+    )
+    assert kept_abs.exists(), "nor delete its file"
+    lancedb.delete_image_vectors.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -552,9 +652,7 @@ async def test_handler_notes_when_a_pdf_yields_no_images(handler_db, tmp_path):
 
     async with handler_db() as session:
         job = (
-            await session.execute(
-                select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id)
-            )
+            await session.execute(select(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id))
         ).scalar_one()
         stage = (
             await session.execute(select(DocumentModel.stage).where(DocumentModel.id == doc_id))
