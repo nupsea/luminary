@@ -287,6 +287,32 @@ cannot see the host's `PATH`.
 > First launch is slow because it downloads ML models. Every launcher polls the
 > server and prints `Luminary is ready` only when it is. Background `Warmup:` log
 > lines after that are normal.
+
+## Updating
+
+**Your library is never touched by an update.** It lives at `~/.luminary` (or
+`~/Library/Application Support/sh.luminary.app` for the bundled app), outside
+whatever the update replaces. Schema changes are applied by migrations when the
+server next boots.
+
+| How you installed | How you update |
+|---|---|
+| One-command script (`bootstrap.sh`) | `luminary update` — re-runs the installer against the latest release |
+| DMG | Download the new DMG and replace the app |
+| From source | `git pull && make install` — `install.sh` is idempotent |
+| Docker | `git pull && make docker-run` — it passes `--build`, so this rebuilds |
+
+`luminary update` resolves the newest **published release**, not `master`, and
+verifies the download against the release's `.sha256` before replacing anything.
+It stages the download and swaps it in, so an interrupted update cannot leave a
+half-replaced install behind. Pin a specific version with
+`LUMINARY_VERSION=0.8.24`.
+
+Under Docker, `make docker-run` already passes `--build`, so it rebuilds the
+image and recreates the containers in one step — `make docker-build` is only for
+building without starting. Neither stop target passes `--volumes`, so your
+library survives `make docker-down`.
+
 ## Running it on real hardware
 
 Everything below is reference. Skip it unless something feels slow or the app
@@ -582,13 +608,18 @@ frontend/src/
 | `make install` | One-time setup (uv, Node, Ollama, models, build) |
 | `make start` | Public-mode server on :7820 |
 | `make luminary` | Backend + frontend in full mode (:7820 + :5173) |
+| `make dev` | Backend with `--reload` + frontend dev server, for editing code |
 | `make stop` | Stop Luminary on :7820, gracefully (also stops the container when it serves the port) |
+| `make clean` | Free :7820, :5173 and :5174 — listeners only, SIGTERM first |
+| `make logs` | Backend + frontend with colorized, prefixed output in one terminal |
 | `make test` | Backend unit + integration tests |
 | `make lint` | Ruff + tsc + eslint + manifest checks |
 | `make ci` | **The gate.** Lint, layer check, tests, build, tsc, eslint, vitest |
 | `make smoke` | ~180 HTTP contract scripts against a running backend |
+| `make eval` | Retrieval quality against committed floors; needs a running backend |
 | `make db-migrate` | Apply pending migrations (the server also does this on boot) |
 | `make db-revision m="..."` | Generate a migration after changing `models.py` |
+| `make docker-build` | Build the image (`WITH_MEDIA=1` adds ffmpeg and the transcriber) |
 | `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
 | `make docker-stop` | Stop the compose stack, containers kept for a fast restart |
 | `make docker-down` | Stop and remove containers and network; **volumes, i.e. your library, are kept** |

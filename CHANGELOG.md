@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The README had no updating section.** Four install paths, no statement of how
+  to update any of them, and the Docker one is easy to get wrong (`make
+  docker-run` already passes `--build`). `make dev`, `make clean`, `make logs`,
+  `make eval` and `make docker-build` were also missing from the command table.
+- **A TODO pointed at a doc that does not exist** and at work already done: the
+  OS-keychain migration shipped in `settings_service`. Replaced with what is
+  actually load-bearing — the generic `PATCH /settings` bypasses the keyring, so
+  secrets must go through `PATCH /settings/llm`.
+
 ## [0.8.24] - 2026-08-28
 
 ### Fixed
