@@ -211,20 +211,34 @@ def test_alice_note_search_slow(all_books_ingested):
 # which is why these tests inject one directly instead of hoping a delete fails.
 
 
-def _embed_now(note_id: str, content: str) -> None:
-    """Write the note's vector without waiting on the background task.
+def _await_embedding(note_id: str, timeout: float = 120.0) -> None:
+    """Block until `POST /notes`'s background embed has written this note's vector.
 
-    `POST /notes` schedules `embed_and_store_note` with `asyncio.create_task`, so
-    the vector's existence is not ordered against the next request. Tests that
-    need the semantic arm specifically -- ones whose query shares no word with
-    the note, so the FTS arm cannot answer -- would otherwise race the scheduler.
-    Same service the background task calls, just awaited here.
+    Waits for the app's own task rather than writing the vector here. Writing it
+    from the test thread races that task on the same LanceDB table and CI hit the
+    losing side: `Commit conflict for version 2: this Update transaction is
+    incompatible with concurrent transaction Overwrite`. It passed locally three
+    times first -- the race is real either way, and only one writer is correct.
+
+    Needed only by the tests whose query shares no word with the note, where the
+    FTS arm cannot answer and the semantic arm is the whole point.
     """
-    from app.services.embedder import get_embedding_service
+    import time
+
     from app.services.vector_store import get_lancedb_service
 
-    vector = get_embedding_service().encode([content])[0]
-    get_lancedb_service().upsert_note_vector(note_id, None, content, vector)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        table = get_lancedb_service()._get_or_create_note_table()
+        if table.count_rows() and any(
+            r["note_id"] == note_id for r in table.search().limit(10_000).to_list()
+        ):
+            return
+        time.sleep(0.5)
+    raise AssertionError(
+        f"note {note_id} was never embedded within {timeout}s -- the background "
+        "task in POST /notes did not write its vector"
+    )
 
 
 def _inject_ghost_vector(content: str) -> str:
@@ -266,7 +280,7 @@ def test_the_semantic_arm_still_matches_without_a_word_in_common(client):
     create = client.post("/notes", json={"content": content, "tags": []})
     assert create.status_code == 201
     note_id = create.json()["id"]
-    _embed_now(note_id, content)
+    _await_embedding(note_id)
 
     resp = client.get("/notes/search", params={"q": "feline that disappears"})
     assert resp.status_code == 200
@@ -304,7 +318,7 @@ def test_a_semantic_hit_carries_the_notes_own_tags(client):
     )
     assert create.status_code == 201
     note_id = create.json()["id"]
-    _embed_now(note_id, "Cheshire Cat can vanish leaving only its grin")
+    _await_embedding(note_id)
 
     resp = client.get("/notes/search", params={"q": "feline that disappears"})
     assert resp.status_code == 200
