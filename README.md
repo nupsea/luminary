@@ -327,6 +327,14 @@ model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it 
 which takes the memory and speed rows off the table. macOS only — on Linux the
 container needs `extra_hosts: host-gateway` to reach the host.
 
+**Stopping.** `make docker-stop` leaves the containers in place for a fast
+restart; `make docker-down` also removes them and the network. Neither touches
+your library — no target here ever passes `--volumes`.
+
+**A stale Docker toolchain is refused up front** rather than hanging mid-build:
+compose needs buildx 0.17.0+, and compose 2.0.0-beta.4 creates a container it
+never starts. Stopping still works whatever the version.
+
 Reclaim disk with `docker builder prune -af` (build cache) and
 `docker image prune -af` (unused images). **Never add `--volumes`** — that
 deletes `luminary-data`, which is your library.
