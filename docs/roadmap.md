@@ -207,6 +207,26 @@ articles; the ninth returned 0 images statically against 78 rendered.
 Windows (#24) and Linux need their own shell before rendering follows. Canvas-drawn figures are
 not covered on any platform: they need an element screenshot, not a DOM capture.
 
+### 9. Two behaviours that ship without a measurement
+
+Both are opt-out-able, both change what a user receives, and neither has a number attached.
+
+- **The slow-host context budget.** Where the start-up probe measures local inference expensive,
+  `resolve_context_budget()` narrows the synthesis budget from 1500 to 750 tokens
+  (`config.py`, `QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST`). The latency it buys is measured
+  (~56s → ~29s prefill at 31 tok/s) and the passages it costs are measured (roughly half), but
+  **the answer-quality cost is not** — the constant says so itself. It engages automatically
+  above a 20s probe, so the hosts that get it are the ones least able to spare quality. Measure
+  with `QA_CONTEXT_TOKEN_BUDGET=750` and a `study --generate` run before treating it as a
+  shipped default rather than a rescue for hosts that are unusable without it.
+
+- **Paraphrase recall in note search.** `make eval-notes` gates `self_recall_1`, `ghost_rate`,
+  `vector_share` and `noise_rejection`, but every query it builds shares words with the note it
+  should find. Nothing scores the case the semantic arm exists for: a query with no lexical
+  overlap. `NOTE_SEMANTIC_MIN_SIMILARITY = 0.62` is bracketed by two measured cases (0.5004
+  drop, 0.7516 keep), which justifies the threshold and does not measure the axis. `vector_share`
+  catches the arm dying, not the arm getting worse.
+
 ## Deferred — decided, not scheduled
 
 Nothing currently deferred.

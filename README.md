@@ -287,8 +287,16 @@ cannot see the host's `PATH`.
 > First launch is slow because it downloads ML models. Every launcher polls the
 > server and prints `Luminary is ready` only when it is. Background `Warmup:` log
 > lines after that are normal.
+## Running it on real hardware
 
-## How much memory it actually needs
+Everything below is reference. Skip it unless something feels slow or the app
+warns you about memory — the defaults are sized for the machine you are on.
+
+**On a Mac under Docker, expect ingestion to be slow.** No GPU passes through;
+run the model outside the container instead. The Docker section has both ways.
+
+<details>
+<summary><b>How much memory it actually needs</b></summary>
 
 Measured, not estimated — every figure below was read off a running instance.
 
@@ -304,6 +312,7 @@ Measured, not estimated — every figure below was read off a running instance.
 **Give Luminary 12 GB to work with, and treat 8 GB as the floor where it runs
 but will swap under load.** Ingestion is the peak; answering questions afterwards
 sits around 6.5 GB.
+</details>
 
 ### Running under Docker
 
@@ -338,9 +347,10 @@ model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it 
 | **Model** | Pulled into a Docker volume on first run by the `--profile ai` sidecar |
 | **Secrets** | A container has no OS keyring, so a cloud API key saved in Settings is stored in the database as plain text — readable by anyone who can read the `luminary-data` volume. Put it in `.env` beside the compose file instead |
 
-`make docker-run-host-ollama` runs the model on your Mac instead of in the VM,
-which takes the memory and speed rows off the table. macOS only — on Linux the
-container needs `extra_hosts: host-gateway` to reach the host.
+`make docker-run-host-ollama` runs the model on your machine instead of in the
+VM, which takes the memory and speed rows off the table. The compose file maps
+`host.docker.internal` to the host gateway, so this works on Linux as well as
+Docker Desktop.
 
 **Stopping.** `make docker-stop` leaves the containers in place for a fast
 restart; `make docker-down` also removes them and the network. Neither touches
@@ -354,17 +364,8 @@ Reclaim disk with `docker builder prune -af` (build cache) and
 `docker image prune -af` (unused images). **Never add `--volumes`** — that
 deletes `luminary-data`, which is your library.
 
-### Runtime bounds
-
-Two runtime bounds ship set, because Ollama's own defaults are not sized for a
-laptop: the model stays resident for 30 minutes rather than Ollama's 5, and
-llama.cpp's prompt cache is capped at 512 MB rather than its default 8192 MB —
-which is more than a default Docker VM has in total. Override either with
-`OLLAMA_KEEP_ALIVE` and `LLAMA_ARG_CACHE_RAM`. On a native macOS or Linux
-install the Ollama server is yours, not ours, so set them there (`launchctl
-setenv`, or your systemd unit) if you want them changed.
-
-### When the first question after a break is slow
+<details>
+<summary><b>Why the first question after a break is slow, and what is already done about it</b></summary>
 
 On a host without GPU acceleration, loading the model is the single largest
 thing a question can wait on. Measured on an Intel i7-8850H in a 12 GB Docker
@@ -395,7 +396,14 @@ abandoned and the ready-made suggestions are shown instead — the question gets
 the machine. Where suggestions are quick they finish first and nothing is
 abandoned.
 
----
+**Two runtime bounds ship set.** Ollama's own defaults are not sized for a
+laptop: the model stays resident for 30 minutes rather than Ollama's 5, and
+llama.cpp's prompt cache is capped at 512 MB rather than its default 8192 MB —
+which is more than a default Docker VM has in total. Override either with
+`OLLAMA_KEEP_ALIVE` and `LLAMA_ARG_CACHE_RAM`. On a native macOS or Linux
+install the Ollama server is yours, not ours, so set them there (`launchctl
+setenv`, or your systemd unit) if you want them changed.
+</details>
 
 ## Choosing a model
 
