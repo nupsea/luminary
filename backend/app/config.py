@@ -341,6 +341,25 @@ class Settings(BaseSettings):
     # pair with OLLAMA_NUM_PARALLEL so a single Ollama batches the calls. The install
     # profile sets this: public=1, standard=2, performance=4.
     ENRICHMENT_VISION_CONCURRENCY: int = 1
+    # How long one figure may take before the call is abandoned.
+    #
+    # 300s is Ollama's own OLLAMA_LOAD_TIMEOUT default and is right where a
+    # figure is answered in seconds. It is a coin flip where it is not.
+    # Measured on an Intel i7-8850H (CPU-only, no GPU offload) reading
+    # SQL_Cookbook_2006 through Docker, five consecutive figures took 296s,
+    # 278s, 305s and 305s -- straddling the ceiling, so the run failed on the
+    # figure that happened to land above it rather than on anything about that
+    # figure. A retry re-rolls the same dice. The whole enrichment job was
+    # marked failed after 34 minutes with four figures described.
+    #
+    # The larger ceiling is applied only where start-up measured local
+    # inference to be expensive (I-37, model_keepwarm.local_inference_is_slow),
+    # never behind a CPU or platform check: an unmeasured or fast host keeps
+    # 300s exactly as before. This buys reliability with waiting, which is the
+    # right trade for background work and the wrong one for an interactive
+    # path -- nothing interactive reads these.
+    VISION_TIMEOUT_SECONDS: float = 300.0
+    VISION_TIMEOUT_SLOW_HOST_SECONDS: float = 900.0
     # Rasterize vector-drawn PDF figures when a page has no embedded raster image.
     # LaTeX-authored papers draw figures with path operators, so without this they
     # extract zero images. Costs a vision LLM call per recovered figure — turn off

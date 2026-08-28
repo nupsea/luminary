@@ -16,12 +16,17 @@ import ebooklib
 import fitz  # PyMuPDF
 from ebooklib import epub
 from PIL import Image as PILImage
-from sqlalchemy import select
+from sqlalchemy import delete as _delete
+from sqlalchemy import func, select
+from sqlalchemy import text as _text
 from sqlalchemy import update as _update
 
 from app import config as _config_module  # indirect: get_settings is patched
 from app import database as _database_module  # indirect: get_session_factory is patched
 from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
+from app.services import (
+    vector_store as _vector_store_module,  # indirect: get_lancedb_service is patched
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,28 @@ _MIN_FIGURE_PT = 60.0  # smaller regions are rules, bullets and highlight boxes
 _MIN_FIGURE_PRIMITIVES = 3
 # A region covering nearly the whole page is a page frame or background wash.
 _MAX_FIGURE_PAGE_FRACTION = 0.85
+# How far past the page box a drawing primitive may extend before it is read as
+# a flowed-column container rather than ink. Ink is bounded by the page it is
+# drawn on; a background rectangle inherited from a reflowable source is bounded
+# by the *flow*, so it arrives hundreds of points tall on a 792pt page.
+#
+# Bracketed by two measured cases from SQL_Cookbook_2006 (128pp, PDF from an
+# EPUB-style flow): the largest primitive that is genuinely on a page measures
+# 0.938x the page box, and the smallest column container measures 1.20x --
+# the rest of that population runs to 42.21x, a median of 29.78x. 1.05 sits in
+# that gap with room on both sides, and the margin above 1.0 is for a figure
+# that bleeds a few points past the trim.
+_MAX_PRIMITIVE_PAGE_SPAN = 1.05
+# Prose detection, bracketed by measurement in _is_prose_block. A text line
+# spanning more than _PROSE_LINE_WIDTH_FRACTION of a region's width is a
+# full-width line; when more than _MAX_PROSE_LINE_SHARE of a region's lines are
+# full-width, the region is a paragraph someone drew a border around. The gap
+# measured across five documents is 0.176 (widest real figure) to 0.333
+# (narrowest prose block).
+_PROSE_LINE_WIDTH_FRACTION = 0.6
+_MAX_PROSE_LINE_SHARE = 0.25
+# Fewer lines than a paragraph has: refuse to judge rather than guess.
+_MIN_PROSE_LINES = 3
 _VECTOR_RENDER_DPI = 150
 # One color covering this much of a render means an empty framed box. Sparse
 # line-art figures measure well below it, so real diagrams survive.
@@ -69,6 +96,85 @@ class ExtractedImage:
         self.rel_path = rel_path
 
 
+def _exceeds_page_box(raw_rect, page_rect) -> bool:
+    """True when a drawing primitive is larger than the page it sits on.
+
+    Such a primitive is not a drawing of anything. It is the background of a
+    reflowed text column: PDFs generated from EPUB-style flowable sources emit
+    one fill rectangle spanning the whole flow, which is then clipped to each
+    page as it is laid out.
+
+    The measurement has to happen on the UNCLIPPED rectangle. Clipped, a
+    21,608pt-tall column background on a 792pt page becomes exactly the page's
+    text column -- 0.765 of the page area, comfortably under
+    _MAX_FIGURE_PAGE_FRACTION -- so the wash guard passes it, it paints the
+    whole column onto the occupancy grid, and every page of prose in the book
+    is recovered as a "figure". SQL_Cookbook_2006 yielded 81 images that way,
+    79 of them full pages of body text, each costing a vision LLM call to
+    describe text that ingestion had already chunked and indexed verbatim.
+    """
+    if page_rect.width <= 0 or page_rect.height <= 0:
+        return False
+    return (
+        raw_rect.width > _MAX_PRIMITIVE_PAGE_SPAN * page_rect.width
+        or raw_rect.height > _MAX_PRIMITIVE_PAGE_SPAN * page_rect.height
+    )
+
+
+def _is_prose_block(page, bbox) -> bool:
+    """True when a candidate region is a bordered paragraph, not a figure.
+
+    The second half of the reflowed-source problem. `_exceeds_page_box` removes
+    the column container; what survives it are the ruled boxes a book draws
+    around admonitions -- TIP/NOTE callouts, title-page panels, code washes.
+    Those are three primitives around a paragraph, so every geometric test
+    passes them, and the vision model duly reports "the image displays a section
+    of text" for a paragraph ingestion already chunked, embedded and indexed
+    verbatim. That description is a lossy paraphrase of text already indexed, so
+    the call costs minutes to make image search slightly worse.
+
+    The signal is line *shape*, not how much text there is. A paragraph's lines
+    span the box that contains them; a diagram's labels annotate geometry and do
+    not. Density fails here and was tried first: ResNet's Figure 2 -- the
+    residual block, four labels in 102x96pt -- is 0.212 text by area, denser
+    than three of the four SQL Cookbook callouts, and a coverage threshold drops
+    it. Line-span separates the same two populations cleanly.
+
+    Measured over 96 candidate regions from five documents (SQL_Cookbook_2006
+    and the arXiv PDFs for Attention/BERT/ResNet/Adam), as the share of a
+    region's text lines that span more than _PROSE_LINE_WIDTH_FRACTION of its
+    width:
+
+        ResNet Fig 2, residual block          0.143  <- keep
+        Adam Fig 3, widest real figure        0.176  <- keep  (the ceiling)
+        ...
+        SQL Cookbook title panel, 3 lines     0.333  <- drop  (the floor)
+        NOTE callouts, pages 7 / 40 / 91      0.778
+        title panel, page 1                   1.000
+
+    _MAX_PROSE_LINE_SHARE sits in that 0.176-0.333 gap. The floor of the prose
+    population is a three-line panel, which is why _MIN_PROSE_LINES refuses to
+    judge anything shorter: below three lines there is no paragraph shape to
+    read, and a figure carrying one wide caption line would otherwise score 1.0.
+    """
+    lines: list[float] = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:  # 0 = text; 1 = image
+            continue
+        for line in block["lines"]:
+            if not "".join(span["text"] for span in line["spans"]).strip():
+                continue
+            rect = fitz.Rect(line["bbox"])
+            centre = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+            if bbox.contains(centre):
+                lines.append((rect.x1 - rect.x0) / bbox.width)
+
+    if len(lines) < _MIN_PROSE_LINES:
+        return False
+    full_width = sum(1 for width in lines if width > _PROSE_LINE_WIDTH_FRACTION)
+    return (full_width / len(lines)) > _MAX_PROSE_LINE_SHARE
+
+
 def _cluster_drawings(page) -> list:
     """Group a page's vector drawing primitives into candidate figure regions.
 
@@ -88,7 +194,14 @@ def _cluster_drawings(page) -> list:
         raw_rect = drawing.get("rect")
         if raw_rect is None:
             continue
-        rect = fitz.Rect(raw_rect) & page_rect
+        raw = fitz.Rect(raw_rect)
+        # A container from a reflowed source, measured BEFORE clipping. Ink is
+        # bounded by the page it is drawn on; a column background inherited from
+        # an EPUB-style flow is not, and clipping is what hides it -- see
+        # _exceeds_page_box.
+        if _exceeds_page_box(raw, page_rect):
+            continue
+        rect = raw & page_rect
         if rect.is_empty or rect.width <= 0 or rect.height <= 0:
             continue
         # A background wash or page border spans the grid and would bridge every
@@ -151,6 +264,8 @@ def _cluster_drawings(page) -> list:
             if bbox.contains(fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2))
         )
         if primitives < _MIN_FIGURE_PRIMITIVES:
+            continue
+        if _is_prose_block(page, bbox):
             continue
         figures.append(bbox)
 
@@ -581,6 +696,80 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
                 break
         return best_id
 
+    # Retire figures the current extractor no longer produces.
+    #
+    # Extraction dedupes on content hash, so without this a document keeps every
+    # image any past version of the extractor ever emitted. That is not merely
+    # untidy: the 79 full-page text rasters SQL_Cookbook_2006 yielded before
+    # _exceeds_page_box existed stay queued for a vision call each -- hours of
+    # model time on a CPU host, describing text already indexed verbatim -- and
+    # a re-extract cannot clear them because it only ever adds.
+    #
+    # Guarded on the extractor having actually run. `extracted` is also empty
+    # when the PDF could not be opened, and pruning on that path would delete a
+    # document's entire image set because its file was briefly unreadable.
+    retired_ids: list[str] = []
+    if note is None and extracted:
+        fresh_hashes = {img.content_hash for img in extracted}
+        async with _database_module.get_session_factory()() as session:
+            stale = (
+                await session.execute(
+                    select(ImageModel.id, ImageModel.path).where(
+                        ImageModel.document_id == document_id,
+                        ImageModel.content_hash.notin_(fresh_hashes),
+                    )
+                )
+            ).all()
+            retired_ids = [row[0] for row in stale]
+            if retired_ids:
+                await session.execute(
+                    _delete(ImageModel).where(ImageModel.id.in_(retired_ids))
+                )
+                await session.commit()
+
+        # Secondary indexes, each in its own transaction. An orphaned FTS row is
+        # a far smaller problem than a prune that rolls back: images_fts is an
+        # FTS5 virtual table created by db_init rather than by the model
+        # metadata, so it is legitimately absent in some contexts and an error
+        # here would poison the transaction that removed the rows.
+        if retired_ids:
+            try:
+                async with _database_module.get_session_factory()() as session:
+                    for image_id in retired_ids:
+                        await session.execute(
+                            _text("DELETE FROM images_fts WHERE image_id = :image_id"),
+                            {"image_id": image_id},
+                        )
+                    await session.commit()
+            except Exception as exc:
+                logger.warning(
+                    "image_extract_handler: could not clear images_fts for %d retired "
+                    "image(s) doc=%s: %s",
+                    len(retired_ids),
+                    document_id,
+                    exc,
+                )
+
+        if retired_ids:
+            data_dir = Path(settings.DATA_DIR).expanduser()
+            for _image_id, rel_path in stale:
+                try:
+                    (data_dir / rel_path).unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("could not remove retired image %s: %s", rel_path, exc)
+            # I-2: LanceDB is synchronous.
+            await asyncio.to_thread(
+                _vector_store_module.get_lancedb_service().delete_image_vectors,
+                retired_ids,
+            )
+            existing_hashes &= fresh_hashes
+            logger.info(
+                "image_extract_handler: retired %d image(s) the current extractor "
+                "no longer produces doc=%s",
+                len(retired_ids),
+                document_id,
+            )
+
     new_images: list[ImageModel] = []
     for img in extracted:
         if img.content_hash in existing_hashes:
@@ -605,9 +794,36 @@ async def image_extract_handler(document_id: str, job_id: str) -> None:
             session.add_all(new_images)
             await session.commit()
 
-        # Enqueue image_analyze job for vision LLM analysis
+    # Analyze whatever still has no description, which is not the same set as
+    # `new_images`. A re-extraction that only retires figures adds nothing, and
+    # gating the enqueue on `new_images` left the images that SURVIVED the prune
+    # undescribed with no job to describe them -- the one real figure in
+    # SQL_Cookbook_2006 among them. Asking the question of the table also makes
+    # this self-healing after an interrupted analyze run.
+    async with _database_module.get_session_factory()() as session:
+        undescribed = (
+            await session.execute(
+                select(func.count())
+                .select_from(ImageModel)
+                .where(
+                    ImageModel.document_id == document_id,
+                    ImageModel.description.is_(None),
+                )
+            )
+        ).scalar_one()
+        queued_already = (
+            await session.execute(
+                select(func.count())
+                .select_from(EnrichmentJobModel)
+                .where(
+                    EnrichmentJobModel.document_id == document_id,
+                    EnrichmentJobModel.job_type == "image_analyze",
+                    EnrichmentJobModel.status.in_(["pending", "running"]),
+                )
+            )
+        ).scalar_one()
 
-
+    if undescribed and not queued_already:
         analyze_job_id = str(uuid.uuid4())
         async with _database_module.get_session_factory()() as session:
             session.add(

@@ -253,6 +253,16 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
 
+    # I-37: the host measured itself at start-up. A figure that takes ~300s to
+    # read on this machine must not be abandoned at a 300s ceiling.
+    from app.services.model_keepwarm import local_inference_is_slow  # noqa: PLC0415
+
+    timeout_s = (
+        settings.VISION_TIMEOUT_SLOW_HOST_SECONDS  # type: ignore[attr-defined]
+        if local_inference_is_slow()
+        else settings.VISION_TIMEOUT_SECONDS  # type: ignore[attr-defined]
+    )
+
     last_exc: Exception | None = None
     raw = ""
     for model in models_to_try:
@@ -283,7 +293,7 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
                     ],
                     model=model,
                     temperature=0.0,
-                    timeout=300.0,
+                    timeout=timeout_s,
                     api_base=api_base,
                     # Release the largest resident model soon after the last
                     # figure instead of holding it for OLLAMA_KEEP_ALIVE.
