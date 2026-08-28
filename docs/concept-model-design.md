@@ -124,5 +124,5 @@ grouped them, what score let it through.
 - Full-text entity->chunk matching OOM-killed `make concepts` (exit 143) -> use the short
   `entities_text`, not full chunk text.
 - All-pairs concept edges exploded persist + produced a hairball -> k-NN with a cutoff.
-- Never run heavy concept work in the live server lifespan -- sync Kuzu starves the event loop. Offline
-  `make concepts` (server stopped) is the path; an idle/background trigger is still TODO.
+- Never run heavy concept work in the live server lifespan -- sync Kuzu starves the event loop.
+  Offline `make concepts`, with the server stopped, is the only supported path.

@@ -602,12 +602,15 @@ LLM judge, so it is deterministic and needs no API key. See
 cd evals && uv run python run_eval.py --dataset book --backend-url http://localhost:7820
 ```
 
-Enforced thresholds: HR@5 ≥ 0.50, MRR ≥ 0.35, nDCG@10 ≥ 0.40, and — whenever a
-run generated answers — faithfulness ≥ 0.30. The `notes` dataset holds a higher
-bar (HR@5 ≥ 0.60, MRR ≥ 0.45). These are **collapse detectors, not quality
-bars** — clearing them says a leg of the funnel is alive, not that a change was
-an improvement. A metric that was requested and could not be computed fails the
-run rather than being skipped.
+Asserted thresholds: HR@5 ≥ 0.50, MRR ≥ 0.35, and — whenever a run generated
+answers — faithfulness ≥ 0.30, answer rate ≥ 0.75 and citation coverage ≥ 0.60.
+The `notes` dataset holds a higher bar (HR@5 ≥ 0.60, MRR ≥ 0.45); `paper` holds
+0.80 / 0.60. nDCG@10 is computed and reported but **never asserted** — most
+goldens carry single-passage relevance, where nDCG degrades to a log-discounted
+single-hit metric. These are **collapse detectors, not quality bars** — clearing
+them says a leg of the funnel is alive, not that a change was an improvement. A
+metric that was requested and could not be computed fails the run rather than
+being skipped.
 
 **Platform support.**
 

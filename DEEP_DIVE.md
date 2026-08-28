@@ -20,13 +20,13 @@
 12. [Knowledge Graph: Entity Extraction and Disambiguation](#knowledge-graph-entity-extraction-and-disambiguation)
 13. [Summarization: A Hierarchical Knowledge Pyramid](#summarization-a-hierarchical-knowledge-pyramid)
 14. [The Learning Engine](#the-learning-engine)
-15. [The Frontend: A 72px Nav Rail, Six Learner Surfaces, Two Dev Surfaces](#the-frontend-a-72px-nav-rail-six-learner-surfaces-two-dev-surfaces)
+15. [The Frontend: A 72px Nav Rail, Seven Learner Surfaces, Three Dev Surfaces](#the-frontend-a-72px-nav-rail-seven-learner-surfaces-three-dev-surfaces)
 16. [Observability and Evaluation](#observability-and-evaluation)
 17. [Deployment Model](#deployment-model)
 18. [Model Selection: One Registry, Three Bands](#model-selection-one-registry-three-bands)
 19. [Performance Characteristics](#performance-characteristics)
 20. [Engineering Philosophy: The Harness Engineering Framework](#engineering-philosophy-the-harness-engineering-framework)
-21. [Possible Future Extensions](#possible-future-extensions)
+21. [What is not built](#what-is-not-built)
 22. [Summary](#summary)
 
 ---
@@ -176,6 +176,28 @@ complete
 Progress is tracked in real-time and surfaced in the UI: parsing = 10%, chunking = 40%, embedding = 70%, complete = 100%. The upload dialog stays open until ingestion finishes, so the user always knows what is happening.
 
 Content-type classification uses a heuristic cascade: file extension for audio/video/code, structural patterns for conversations (speaker labels) and papers (abstract, methodology, references), word count and chapter patterns for books, and code-fence density for technical books. A fallback to LLM classification fires only when heuristics are inconclusive.
+
+### Enrichment runs after ingestion, on a queue
+
+`store_node` is where a document becomes searchable; enrichment is separate work queued
+behind it and drained by `EnrichmentQueueWorker` — `image_extract`, then `image_analyze`,
+plus `concept_link`. A document is usable before any of it finishes.
+
+Image extraction pulls embedded rasters and, for pages that carry none, rasterizes clustered
+vector drawings — without that fallback a LaTeX-authored paper yields zero figures, because
+its figures are path operators rather than image XObjects. Each recovered figure then costs
+one vision-model call to describe, and those descriptions are what image search retrieves.
+
+**This is the most expensive thing the system does per document, and over-extraction is the
+failure mode that matters.** A PDF generated from a reflowable source carries one fill
+rectangle spanning the whole flow, which, if measured after being clipped to the page, looks
+exactly like a page-sized figure. One 128-page book produced 81 "figures", 79 of them pages
+of body text — hours of queued vision time spent paraphrasing prose the pipeline had already
+chunked and indexed verbatim, and the paraphrases then made image search worse. The guard is
+that a drawing primitive larger than its own page is a container, not ink, and the
+measurement must happen before the clip (I-38). Re-extraction retires figures the current
+extractor no longer produces, so an existing library is repaired by re-extracting rather than
+re-uploading.
 
 ---
 
@@ -430,14 +452,17 @@ This is teach-back learning automated: the user proves their understanding by ex
 
 ---
 
-## The Frontend: A 72px Nav Rail, Six Learner Surfaces, Two Dev Surfaces
+## The Frontend: A 72px Nav Rail, Seven Learner Surfaces, Three Dev Surfaces
 
-The frontend is a single-page React 19 application. A fixed 72px violet-gradient sidebar on the left holds six learner-facing tabs (top of rail) plus two dev surfaces (bottom of rail). A 450px slide-over chat panel docks on the right, callable from anywhere. `Cmd+K` opens a global search dialog over whichever tab is active.
+The frontend is a single-page React 19 application. A fixed 72px violet-gradient sidebar on the left holds seven learner-facing tabs (top of rail) plus three dev surfaces (bottom of rail). The rail is generated from `surface-manifest.json`, not hardcoded, and surfaces marked `full` (Map and all three dev tabs) are absent from a `public` build. A 450px slide-over chat panel docks on the right, callable from anywhere. `Cmd+K` opens a global search dialog over whichever tab is active.
 
 The post-refactor labels (`Ask` instead of `Chat`, `Map` instead of `Viz`) are cosmetic only — the underlying routes (`/chat`, `/viz`) are preserved so deep links and the cross-tab `luminary:navigate` event bus keep working.
 
-### Library (`/`, icon: BookOpen)
-The document grid is the landing surface. Cards carry a 1px top-edge gradient accent band per content-type (book, paper, code, audio, epub, kindle, tech-book, tech-article, conversation, youtube), hover-lift on `-translate-y-0.5`, content-type badge, eyebrow metadata row, and an action menu (read, chat about, study, view in graph, delete). A `TodayHero` strip at the top of the page surfaces the highest-leverage action: if cards are due, a full-violet "N cards due · Start review" CTA wins primary placement; otherwise the existing low-contrast "Continue reading" strip falls back in. Clicking a card opens the `DocumentReader` in place; PDF/EPUB/YouTube each render in their own viewer with shared chrome.
+### Luminary (`/`, icon: Luminary lantern glyph)
+The hub, and the landing surface. One 780px reading column answering the single decision it exists for — carry on reading, or start the review — then today's focus, the continue lane (documents, notes and an open study session), the fading/refresher lane, tag cloud, active collections and a week summary. All of it comes from one `GET /home/overview` fetch. Stored titles render through `humanizeTitle`, because in one real library two thirds of titles were the filename the document arrived as.
+
+### Library (`/library`, icon: BookOpen)
+The document grid. Cards carry a 1px top-edge gradient accent band per content-type (book, paper, code, audio, epub, kindle, tech-book, tech-article, conversation, youtube), hover-lift on `-translate-y-0.5`, content-type badge, eyebrow metadata row, and an action menu (read, chat about, study, view in graph, delete). A `TodayHero` strip at the top of the page surfaces the highest-leverage action: if cards are due, a full-violet "N cards due · Start review" CTA wins primary placement; otherwise the existing low-contrast "Continue reading" strip falls back in. Clicking a card opens the `DocumentReader` in place; PDF/EPUB/YouTube each render in their own viewer with shared chrome.
 
 ### Notes (`/notes`, icon: StickyNote)
 Markdown notes with collections (sidebar tree), tags (sidebar list, auto-suggested via `NoteTaggerService`), source-document linking, link autocomplete between notes, and embeds (Mermaid diagrams, Excalidraw sketches). The list view supports filter-by-collection, filter-by-tag, filter-by-source-doc, and FTS5 + vector hybrid search. Notes opens its editor in a side sheet (`NoteReaderSheet`).
@@ -456,7 +481,8 @@ The learner's progress dashboard: streak + XP widget, FSRS due-count, knowledge 
 
 ### Dev rail (bottom of sidebar)
 
-- **Quality (`/quality`, icon: ClipboardCheck)** — RAGAS retrieval eval dashboard. Demoted from the learner rail because it's an engineering surface, not a learner surface.
+- **Quality (`/quality`, icon: ClipboardCheck)** — the retrieval and generation eval dashboard. Demoted from the learner rail because it is an engineering surface, not a learner one.
+- **Monitoring (`/monitoring`, icon: Activity)** — Phoenix traces and run history.
 - **Admin (`/admin`, icon: Wrench)** — dev tools: ingestion queue, model usage, recent OpenTelemetry traces, mastery heatmap, weak-spots panel.
 
 **Architectural patterns:**
@@ -480,19 +506,53 @@ Every LLM call, retrieval query, and ingestion step is traced via OpenTelemetry.
 - **Retriever spans** for vector/keyword/graph search with chunk count and latency
 - **LLM spans** (auto-instrumented via LiteLLMInstrumentor) with messages, token counts, and model name
 
-### RAGAS Evaluation
+### Retrieval and generation evaluation
 
-Retrieval quality is evaluated against golden datasets (`evals/golden/*.jsonl`). Each entry includes a question, expected answer, and a `context_hint` substring that must appear in the retrieved context for a "hit". Metrics:
+Quality is scored against golden datasets (`evals/golden/*.jsonl`). Each entry carries a
+question and a `context_hint` substring that must appear in the retrieved context for a
+"hit". Faithfulness uses a dedicated NLI model (Vectara HHEM-2.1-Open), not an LLM judge,
+so it is deterministic and needs no API key.
 
-| Metric | Threshold | What It Measures |
-|--------|-----------|-----------------|
-| HR@5 | >= 0.60 | Does the relevant passage appear in the top 5 results? |
-| MRR | >= 0.45 | How high does the relevant passage rank? |
-| Faithfulness | >= 0.65 | Is the answer grounded in the retrieved context? |
+| Metric | Floor | Asserted |
+|---|---|---|
+| HR@5 | 0.50 | yes |
+| MRR | 0.35 | yes |
+| Faithfulness (NLI) | 0.30 | when a run generated answers |
+| Answer rate | 0.75 | when generation was requested |
+| Citation coverage | 0.60 | when generation was requested |
+| Citation support | 0.45 | when `--check-citations` |
+| nDCG@10 | 0.40 | **no — reported only** |
 
-These thresholds are CI gates (`make eval` exits non-zero on failure), not just reports. The Monitoring tab allows triggering eval runs from the UI and displays results as color-coded rows (green/amber/red).
+Per-dataset overrides raise the bar where a corpus measures higher: `paper` 0.80 / 0.60,
+`play` 0.70 / 0.50, `notes` 0.60 / 0.45. The live values are `THRESHOLDS` and
+`DATASET_THRESHOLDS` in `evals/run_eval.py`; that file, not this one, is the source of truth.
 
-The golden dataset currently covers 70 entries across three canonical books: The Time Machine (30), Alice in Wonderland (20), and The Odyssey (20). All context_hint passages are verified against the actual source texts.
+**These floors are collapse detectors, not quality bars.** Clearing them says a leg of the
+funnel is alive, not that a change was good. Two consequences that are easy to get wrong:
+
+- **Faithfulness 0.30 is not "30% correct".** HHEM scores grounding in the retrieved
+  context, not truth — a correct answer written from parametric knowledge scores low by
+  design. Measured on `d2l` (12 answers): dataset mean 0.46–0.48, nothing above 0.66. The
+  inherited RAGAS bar of 0.65 would have failed 11 of 12. The distribution is unimodal, so
+  there is no gap to place a quality bar in without labelled answers.
+- **nDCG@10 is not a gate.** Most goldens carry single-passage relevance, where nDCG
+  degrades to a log-discounted single-hit metric. It is promoted only once graded goldens
+  exist.
+
+Generation metrics carry real run-to-run variance on a frozen build: `book`'s citation
+support ranged 0.5893–0.7065 across four identical runs. **A single run cannot resolve a
+generation change smaller than ~0.10 on `book` or ~0.05 on `paper`** — compare distributions
+over repeated runs, never two points. Retrieval metrics are exempt: they are
+bit-reproducible on a fixed corpus.
+
+A metric that was requested and could not be computed **fails** the run; it is never
+defaulted to a neutral value. Retrieval baselines on the shipped funnel (rerank on, 50
+documents / 75,537 chunks, 2026-08-26) are recorded next to the thresholds — compare a
+change against those, never against the floor.
+
+The corpus spans 27 golden files: retrieval sets for `book` (three books, 40 rows each),
+`paper`, `legal`, `play`, `study` (PDF), `d2l`, `notes`, `conversation` and `code`, plus
+labelled sets for intents, flashcards and summaries.
 
 ---
 
@@ -618,29 +678,54 @@ rather than an error.
 
 ## Performance Characteristics
 
-Performance targets are defined as SLOs and enforced in CI:
+**Three latency and memory assertions exist, and none of them runs in `make ci`.**
+`backend/tests/test_performance.py` is `@pytest.mark.slow`, and `slow` is excluded by
+default. Run them deliberately:
 
-| Operation | Target | Achieved |
-|-----------|--------|----------|
-| Ingestion pipeline (p95) | < 30s | parse -> entity_extract |
-| NER extraction (p95) | < 3 min | per 500 chunks (batched) |
-| Summary display (cached) | < 200ms | cache hit, single SSE event |
-| Summary display (on-demand) | < 5 min | cache miss, map-reduce |
-| Q&A response (p95) | < 3s | end-to-end (with Ollama) |
-| Embedding batch (p95) | < 60s | per 100 chunks |
-| Flashcard generation (p95) | < 5s | per document |
-| Hybrid search (p95) | < 500ms | RRF query |
+```bash
+cd backend && uv run pytest tests/test_performance.py -m slow
+```
 
-**Key optimizations:**
-- Embedding uses ONNX Runtime for CPU inference (batch size 128, normalize in-place)
-- GLiNER uses `batch_predict_entities()` for single-pass NER (4-6x faster than per-item loop)
-- Section summaries run with Semaphore(10) for parallelism without overwhelming local LLM
-- Context packer uses LCS on first 300 chars only (O(n^2) but n is small)
-- LanceDB vector search is sub-5ms (in-process, no network hop)
-- FTS5 BM25 search is sub-10ms (SQLite in-process, inverted index)
-- Kuzu graph traversal is sub-20ms (in-process, compiled Cypher)
+| What is asserted | Bound | Caveat |
+|---|---|---|
+| Hybrid search latency | p50 < 500ms, p95 < 2000ms over 20 queries | in-process stores, no model call |
+| 10 documents reach `complete` | < 120s | **mocked embedder** — measures the pipeline, not ML |
+| RSS growth over 10 ingests | < 500MB | growth only, not total footprint |
 
-**Memory:** Performance tests assert RSS growth < 500MB while ingesting 10 documents, ensuring the application stays within reasonable bounds on a laptop.
+Everything else below is a measurement, not a gate.
+
+**Local generation is the cost, and it is measured in minutes on CPU.** Nothing about the
+retrieval stack is slow; the model is. On an Intel i7-8850H (CPU-only, Docker, host Ollama,
+`qwen3.5:4b`): a question through `/api/qa` took 121s, five flashcards 118s, and enriching a
+128-page book 143s. The same work on Apple Silicon is a small fraction of that. A model load
+alone on that host measured 9.6s–155.5s and is billed to whichever call provokes it (I-37),
+so a single slow call is not evidence about the component that reported it.
+
+**In-process store latencies** (no network hop, measured on Apple Silicon): LanceDB vector
+search sub-5ms, FTS5 BM25 sub-10ms, Kuzu traversal sub-20ms.
+
+**Key optimizations**
+
+- Embedding runs on ONNX Runtime for CPU inference (batch 128, normalize in-place).
+- GLiNER uses `batch_predict_entities()` for single-pass NER.
+- Section summaries run under a semaphore sized *at* the Ollama slot count — enrichment cost
+  is call count, never concurrency (I-31). More parallelism against one Ollama slot buys
+  nothing and starves interactive questions.
+- Context packing compares only the first 300 characters, so its O(n^2) step stays small.
+
+**Memory.** Resident footprint while ingesting is ~7.6GB: Ollama serving `qwen3.5:4b` 4.2,
+PyTorch + embedder 0.8, reranker 0.2, GLiNER 1.3, plus ~1.1 peak during ingestion. Answering
+questions afterwards sits near 6.5GB. **Give Luminary 12GB; 8GB is the floor where it runs
+but swaps under load.** These figures are read off a running instance, not estimated, and are
+the same ones the README quotes.
+
+**The vision model is a second resident model, and it is not in that 7.6GB.** Ollama's
+`OLLAMA_MAX_LOADED_MODELS` defaults to 3, so a chat runner and a vision runner co-reside for
+the length of `OLLAMA_KEEP_ALIVE`. The script installers cap it; the DMG path does not yet
+(`docs/roadmap.md`). Enriching a document with figures on an 8GB machine is therefore the
+case most likely to swap. A model's context window is a property of the model, not of the
+caller (I-27) — two callers of one loaded model share a single window, and no call site can
+ask for a larger one.
 
 ---
 
@@ -660,45 +745,33 @@ Luminary's engineering practices are codified in 25 "golden principles" derived 
 
 ---
 
-## Possible Future Extensions
+## What is not built
 
-The story-based PRD queue (ralph workflow, `prd-v2.json`) was retired on 2026-05-04. Active planning now lives in `docs/redesign-phase-2-plan.md`. The list below summarises near-term, medium-term, and long-term direction beyond what's already shipped.
+Status lives in one place: [`docs/roadmap.md`](docs/roadmap.md) — what is built, what is
+open (each item carrying `file:line` evidence), and what was deliberately abandoned. It is
+the only file in the repo that describes work that does not exist, and an implementation
+plan is deleted there once its work ships.
 
-### Active plan: design refactor Phase 2 (see `docs/redesign-phase-2-plan.md`)
+Two limits are structural rather than scheduled, and worth stating here because the
+architecture assumes them:
 
-- **Collections + tags as cross-cutting primitives** — extend the existing polymorphic `CollectionMemberModel` so docs, notes, and flashcards share collections and tags as first-class navigation. Library gains a collapsible left rail for collections + tags; `/collections/:id` becomes a unified workspace.
-- **Editor real-estate consolidation** — collapse `NoteEditorDialog` (90vw) and `NoteReaderSheet` (85vw) into one layout-agnostic `<NoteEditor>` core, with a slim in-reader side panel replacing the dialog-takeover when capturing notes mid-read.
-- **Auto-tagging at ingestion** — apply the existing `NoteTaggerService` to document one-sentence summaries so docs get tagged automatically; optionally project top-N graph entities onto doc tags as reinforcement.
-- **`⌘K` cross-content seek** — upgrade `SearchDialog` from docs-only full-text to a faceted seek across docs + notes + flashcards with collection / tag / content-type chips.
-- **Workflow seams** — `⌘+1..6` tab nav, `⌘+N` capture-from-anywhere, drag-drop docs into collections, reader→notes co-presence indicator.
-
-### Deferred from Phase 1
-
-- **Mastery aggregate on `DocumentListItem`** — backend SQL subquery over `FlashcardModel.fsrs_stability` to power a "Weakest first" sort and per-card mastery rings. Investigated but non-trivial; spec in the Phase 2 plan.
-
-### Architecturally compatible, not yet started
-
-- **Cross-document concept linking** — `SAME_CONCEPT` edges in Kuzu when two documents discuss the same idea under different names. Confidence + contradiction tracking.
-- **Image enrichment** — extract diagrams from PDFs, generate text descriptions via vision model, embed for retrieval.
-- **Prerequisite detection** — `PREREQUISITE_OF` edges in Kuzu, rendered as the Map's prerequisite layer and used by the FSRS study path (`GET /study/path`).
-- **Study path generation** — sequence documents into an optimal learning order from prerequisite graph + FSRS mastery + gap detection.
-- **Multi-modal ingestion** — YouTube transcription is already scaffolded; podcasts, slide decks, and handwritten OCR would follow the same pipeline with format-specific parse nodes.
-- **Export and interop** — Anki flashcard export, Neo4j/GraphML knowledge-graph export, Notion / Markdown summary export.
-
-### Would require architectural evolution
-
-- **Collaborative knowledge bases** — multi-user with access controls, per-user data isolation, conflict resolution for shared entities. Needs authentication (not present in v1).
-- **Mobile companion** — read-only mobile app for flashcard review and note browsing. Backend API is already HTTP-based.
-- **Federated knowledge graphs** — connect multiple Luminary instances across users/orgs. Needs a gossip protocol or central coordination service.
-- **Active learning planner** — agent that reasons over gap detection + prerequisite chains + calendar availability to suggest what to read next.
-- **Fine-tuned local models** — use Q&A history + flashcard performance as training signal for PEFT/LoRA. Would require careful evaluation to prevent catastrophic forgetting.
+- **Single user, no authentication.** Every store is a local file opened by one process.
+  Collaboration, per-user isolation and shared-entity conflict resolution are not
+  deferred features; they would change the persistence model.
+- **One Ollama context window, shared.** Model residency is a measured property of the
+  host, not a constant (I-37), and the context window is global to a loaded model (I-27).
+  Anything that assumes per-request model isolation does not hold here.
 
 ---
 
 ## Summary
 
-Luminary is a case study in what happens when you take the local-first constraint seriously and build a real application around it. Every design decision -- polyglot persistence, hybrid retrieval, agentic routing, hierarchical summarization, spaced repetition -- flows from two constraints: (1) all data stays on the user's machine, and (2) the system must be genuinely useful for learning, not just for querying.
+Two constraints produce every design decision above: all data stays on the user's machine,
+and the system has to be useful for *learning*, not only for querying. Polyglot persistence,
+hybrid retrieval, agentic routing, hierarchical summarization and spaced repetition each
+follow from one or both.
 
-The result is an application that is more complex than a typical RAG demo but earns that complexity by solving real problems: comparative queries across documents, learning gap identification, confidence-adaptive retry, entity disambiguation, and structured spaced repetition. Each component has a clear value proposition, and the architecture ensures they compose without creating an unmaintainable tangle.
-
-The engineering philosophy -- mechanical invariant enforcement, repository as system of record, real artifacts at real scale -- is as much a part of the system as the code itself. It is what makes the codebase navigable by both humans and AI agents, and what keeps quality from degrading as the system grows.
+The cost of that is complexity a single-store RAG demo does not carry, and the thing that
+keeps it navigable is mechanical enforcement rather than discipline: the layer linter, the
+38 invariants, the surface manifest and the eval floors are all gates a change has to pass
+rather than conventions it can drift from.

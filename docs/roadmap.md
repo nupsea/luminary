@@ -23,7 +23,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 37 hard invariants | `invariants.md` |
+| The 38 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -38,6 +38,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Learner-facing metrics carrying sample size, definition and basis | `metrics.md` |
 | An existing install carried to the model its host should run: Windows records what it pulled, a Settings card surfaces drift and switches only after the download completes | `model_router.narrowed_defaults()`, `ModelDriftNotice.tsx` |
 | Content-type classification, scored against a labelled corpus rather than asserted | `services/content_classifier.py`, `tests/fixtures/content_type_labels.json` |
+| Image extraction and vision enrichment, including the vector-figure fallback and its over-extraction guards | `invariants.md` I-38, `services/image_extractor.py` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on

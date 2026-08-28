@@ -6,15 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-08-28
-
-### Added
-- **The Blog & Thoughts panel lists what you have not published yet.** It showed
-  posts already on your site, so the note you opened it to publish was the one
-  thing it could not show.
-- **`make docker-stop` and `make docker-down`.** There was no way to bring the
-  compose stack down; `down` never passes `--volumes`, so the library survives.
-
 ### Fixed
 - **A 128-page book extracted 81 "figures", 79 of them pages of body text.**
   PDFs generated from reflowable sources carry one fill rectangle spanning the
@@ -31,6 +22,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The CI image was built from `backend/` and so never contained
   `surface-manifest.json`; every test importing `app.main` died at collection.
   It builds from the repo root now and runs the suite.
+- **A re-extraction that could not read every image deleted the ones it missed.**
+  The extractors skip an object they cannot decode, rasterize or write, so one
+  transient read failure retired a stored figure and the description that cost
+  minutes of vision time. Retiring now requires a complete pass (I-38).
+- **The Intel Mac CI image inherited the host's model cache.** `backend/.luminary`
+  survived a context-root-anchored ignore rule, so `ruff` linted 418MB of
+  vendored model sources and the gate went red before pytest ran.
+- **`DEEP_DIVE.md` quoted eval thresholds and SLOs that were not real.** It
+  listed HR@5 ≥ 0.60 / MRR ≥ 0.45 / faithfulness ≥ 0.65 against actual floors of
+  0.50 / 0.35 / 0.30, called nDCG@10 a gate when it is report-only, described a
+  70-row corpus that is now 27 files, and claimed performance SLOs are "enforced
+  in CI" when every one of them is `@pytest.mark.slow` and excluded. Rewritten
+  against the code, and the README's matching nDCG@10 claim corrected.
+
+## [0.8.2] - 2026-08-28
+
+### Added
+- **The Blog & Thoughts panel lists what you have not published yet.** It showed
+  posts already on your site, so the note you opened it to publish was the one
+  thing it could not show.
+- **`make docker-stop` and `make docker-down`.** There was no way to bring the
+  compose stack down; `down` never passes `--volumes`, so the library survives.
+
+### Fixed
 - **`make stop` and `make clean` killed browsers instead of the app.** Both
   matched every socket on the port rather than the listener, so a tab left open
   on Luminary was SIGTERMed then SIGKILLed while the app kept running.
