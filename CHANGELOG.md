@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A library card could say a document was finished while its enrichment was
+  still running.** The badge reported one job — image_analyze, else
+  image_extract, else the newest — not the document. Six job types exist, so a
+  document whose image work had finished read "Analysis complete" while its
+  concept_link was still queued, contradicting the enrichment pill on the same
+  screen. It now aggregates over every job for the document.
+- **The enrichment and ingestion overlays covered the nav rail.** Both sat at
+  `left-5` while the rail is 72px wide and always rendered, so they hid the
+  streak widget, the dev icons and the settings controls.
+- **The README did not say what an Intel Mac should actually do.** Both documented
+  Docker topologies run generation on a CPU with no GPU (~6 tok/s, ~121s a
+  question), and neither the install section nor the platform table suggested
+  the hosted-model option that fixes it. Says so now, with the privacy trade
+  stated.
+- **Figures were missing from the feature table** despite being extracted,
+  described by a vision model and fed into answers — and being the one genuinely
+  expensive part of ingest.
+- **`eval-coverage.md` claimed `make smoke` runs ~230 scripts.** It runs 178.
+  The note-search eval was also missing from the coverage table.
 - **The README had no updating section.** Four install paths, no statement of how
   to update any of them, and the Docker one is easy to get wrong (`make
   docker-run` already passes `--build`). `make dev`, `make clean`, `make logs`,
