@@ -680,6 +680,7 @@ endif
 	python3 scripts/check_public_surface_calls.py
 	bash scripts/check_powershell.sh
 	cd frontend && npm run build
+	python3 scripts/check_public_bundle_excludes_full.py
 	cd frontend && npx tsc -b --noEmit
 	cd frontend && npm run lint
 	# The frontend suite was never wired into a gate: 59 files of pure-logic

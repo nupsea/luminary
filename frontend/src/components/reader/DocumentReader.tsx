@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -18,10 +18,30 @@ import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
 import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
-import { LUMINARY_MODE, isSurfaceVisible } from "@/lib/surfaceManifest"
+import { isSurfaceVisible } from "@/lib/surfaceManifest"
+
+// Full-mode only, folded at BUILD time. FEYNMAN_VISIBLE below gates rendering,
+// which hid the button but still compiled the dialog and its /feynman/* calls
+// into the public Learning chunk. LUMINARY_MODE is a vite `define`, so a public
+// build folds this to null and drops the dynamic import.
+// Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
+// LUMINARY_MODE constant. vite `define` substitutes the env expression
+// textually before parsing, so this folds to `"public" === "full"` -> false and
+// Rollup drops the branch with its dynamic import. LUMINARY_MODE is the return
+// value of resolveMode(), which Rollup cannot constant-fold -- using it here
+// emits a separate chunk that still ships. Measured both ways.
+const loadLastPracticed =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? (documentId: string) =>
+        import("./feynmanSessions").then((m) => m.lastPracticedBySection(documentId))
+    : null
+
+const FeynmanDialog =
+  import.meta.env.VITE_LUMINARY_MODE === "full"
+    ? lazy(() => import("./FeynmanDialog").then((m) => ({ default: m.FeynmanDialog })))
+    : null
 
 import { EPUBViewer } from "./EPUBViewer"
-import { FeynmanDialog } from "./FeynmanDialog"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
 import { readerLandingTab } from "./hooks/readerLandingTab"
@@ -649,23 +669,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Powers the "last practiced" badge in the section list.
   const { data: lastPracticedBySection } = useQuery<Map<string, string>>({
     queryKey: ["feynman-sessions-by-section", documentId],
-    queryFn: async () => {
-      try {
-        const sessions = await apiGet<
-          Array<{ section_id: string | null; created_at: string }>
-        >("/feynman/sessions", { document_id: documentId })
-        const byId = new Map<string, string>()
-        // Sessions are returned in created_at desc; first hit per section wins.
-        for (const s of sessions) {
-          if (!s.section_id) continue
-          if (!byId.has(s.section_id)) byId.set(s.section_id, s.created_at)
-        }
-        return byId
-      } catch {
-        return new Map<string, string>()
-      }
-    },
-    enabled: LUMINARY_MODE === "full",
+    queryFn: () =>
+      loadLastPracticed ? loadLastPracticed(documentId) : new Map<string, string>(),
+    enabled: !!loadLastPracticed,
     staleTime: 30_000,
   })
 
@@ -1567,7 +1573,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       )}
 
       {/* Feynman dialog */}
-      {feynmanSection && (
+      {feynmanSection && FeynmanDialog && (
+        <Suspense fallback={null}>
         <FeynmanDialog
           documentId={documentId}
           sectionId={feynmanSection}
@@ -1583,6 +1590,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
           }}
         />
+        </Suspense>
       )}
 
       {/* Flashcard generation dialog — scoped to selected text context */}

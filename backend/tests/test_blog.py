@@ -441,3 +441,91 @@ def test_suggest_description_keeps_note_content_local(client, monkeypatch):
     resp = client.post("/blog/suggest-description", json={"note_id": note_id})
     assert resp.status_code == 200
     assert seen["background"] is True
+
+
+# -- GET /blog/drafts -------------------------------------------------------
+#
+# The management panel listed published posts only, so the one thing you were
+# about to publish was the one thing it could not show. These cover the two
+# halves that make the listing mean something: membership decides what is
+# eligible, and the slug decides what has already gone out.
+
+
+def _collect(client, note_id: str, name: str) -> None:
+    """Put a note in a collection with this name, creating it if needed."""
+    tree = client.get("/collections/tree").json()
+    existing = {c["name"].lower(): c["id"] for c in tree}
+    cid = existing.get(name.lower()) or client.post(
+        "/collections", json={"name": name}
+    ).json()["id"]
+    client.post(
+        f"/collections/{cid}/members",
+        json={"member_ids": [note_id], "member_type": "note"},
+    )
+
+
+def test_drafts_lists_a_collected_note_that_is_not_published_yet(client, blog_repo):
+    note_id = client.post(
+        "/notes", json={"content": "# Unshipped Idea\n\nbody text", "tags": []}
+    ).json()["id"]
+    _collect(client, note_id, "BLOG")
+
+    drafts = client.get("/blog/drafts").json()
+    mine = [d for d in drafts if d["note_id"] == note_id]
+    assert len(mine) == 1
+    assert mine[0]["title"] == "Unshipped Idea"
+    assert mine[0]["slug"] == "unshipped-idea"
+    assert "body text" in mine[0]["excerpt"]
+
+
+def test_a_note_outside_the_collection_is_not_a_draft(client, blog_repo):
+    """Membership is the eligibility rule, matching the note card's chip."""
+    note_id = client.post(
+        "/notes", json={"content": "# Private Musing\n\nnot for the site", "tags": ["blog"]}
+    ).json()["id"]
+
+    drafts = client.get("/blog/drafts").json()
+    assert all(d["note_id"] != note_id for d in drafts)
+
+
+def test_publishing_a_draft_removes_it_from_the_list(client, blog_repo):
+    """The whole point: the list has to empty out as you ship."""
+    note_id = client.post(
+        "/notes", json={"content": "# Ship Me\n\nbody", "tags": []}
+    ).json()["id"]
+    _collect(client, note_id, "BLOG")
+    assert any(d["note_id"] == note_id for d in client.get("/blog/drafts").json())
+
+    draft = client.post("/blog/draft", json={"note_id": note_id}).json()
+    client.post(
+        "/blog/publish",
+        json={
+            "note_id": note_id,
+            "slug": draft["slug"],
+            "title": draft["title"],
+            "description": "d",
+            "pub_date": draft["pub_date"],
+            "markdown": draft["markdown"],
+            "overwrite": False,
+        },
+    )
+
+    assert all(d["note_id"] != note_id for d in client.get("/blog/drafts").json())
+
+
+def test_drafts_are_isolated_per_kind(client, blog_repo):
+    """A BLOG note is not a thoughts draft; `kind` selects both the collection
+    and the content directory it is checked against."""
+    (blog_repo / "src/content/thoughts").mkdir(parents=True, exist_ok=True)
+    note_id = client.post(
+        "/notes", json={"content": "# Blog Only\n\nbody", "tags": []}
+    ).json()["id"]
+    _collect(client, note_id, "BLOG")
+
+    assert any(d["note_id"] == note_id for d in client.get("/blog/drafts").json())
+    thoughts = client.get("/blog/drafts", params={"kind": "thoughts"}).json()
+    assert all(d["note_id"] != note_id for d in thoughts)
+
+
+def test_drafts_rejects_an_unknown_kind(client, blog_repo):
+    assert client.get("/blog/drafts", params={"kind": "wat"}).status_code == 422

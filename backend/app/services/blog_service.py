@@ -56,6 +56,47 @@ def slugify(text: str) -> str:
     return slug or "untitled"
 
 
+def fallback_title(content: str) -> str:
+    """Title for a note that has none: its first non-blank line, heading marks off.
+
+    Lives here rather than in the router because the drafts listing and the draft
+    endpoint must derive the SAME title -- a note whose title differs between
+    them would slug differently and so look unpublished forever.
+    """
+    first = next((ln.strip() for ln in (content or "").splitlines() if ln.strip()), "")
+    first = re.sub(r"^#+\s*", "", first)
+    return first[:60] or "Untitled"
+
+
+def unpublished_notes(
+    notes: list[tuple[str, str | None, str, str | None]], content_dir: Path
+) -> list[dict]:
+    """(note_id, title, content, updated_at) tuples that have no post on the site.
+
+    "Published" is decided by slug, the same key `publish` writes under, so a
+    note republished under an edited title correctly reappears here -- the old
+    post still exists but this note no longer maps onto it.
+    """
+    published = existing_slugs(content_dir)
+    out: list[dict] = []
+    for note_id, title, content, updated_at in notes:
+        resolved = (title or fallback_title(content)).strip()
+        slug = slugify(resolved)
+        if slug in published:
+            continue
+        excerpt = " ".join((content or "").split())[:160]
+        out.append(
+            {
+                "note_id": note_id,
+                "title": resolved,
+                "slug": slug,
+                "excerpt": excerpt,
+                "updated_at": updated_at,
+            }
+        )
+    return out
+
+
 def format_pub_date(when: date | datetime) -> str:
     # Matches the site's existing posts, e.g. "Jun 15 2026". %-d is non-portable,
     # so strip a leading zero from the day manually.

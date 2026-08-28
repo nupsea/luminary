@@ -115,6 +115,20 @@ class BlogPostSummary(BaseModel):
     url: str
 
 
+class BlogDraftSummary(BaseModel):
+    """A note that is eligible to publish but has no post on the site yet.
+
+    `slug` is what publishing WOULD use, derived the same way `POST /blog/draft`
+    derives it, so the two cannot disagree about whether a note is already out.
+    """
+
+    note_id: str
+    title: str
+    slug: str
+    excerpt: str
+    updated_at: str | None = None
+
+
 class BlogPostDetail(BlogPostSummary):
     hero_image: str | None = None
     body: str
