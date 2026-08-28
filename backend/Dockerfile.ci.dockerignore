@@ -12,7 +12,13 @@
 frontend/
 src-tauri/
 docs/
-.luminary/
+# Anchored patterns match the CONTEXT ROOT only, and this context is the repo
+# root -- so `.luminary/` alone leaves backend/.luminary/ in the build. That
+# directory is a host artefact: 418MB of downloaded model weights, including
+# vendored third-party sources that `ruff check .` then lints (8 errors, gate
+# red) and a mem_profile the container's DATA_DIR would inherit. A gate whose
+# result depends on the developer's working tree is not a gate.
+**/.luminary/
 **/__pycache__/
 **/*.pyc
 **/.env
@@ -24,6 +30,6 @@ backend/.venv/
 backend/.pytest_cache/
 backend/htmlcov/
 backend/.coverage
-*.db
-*.db-shm
-*.db-wal
+**/*.db
+**/*.db-shm
+**/*.db-wal
