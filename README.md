@@ -248,7 +248,8 @@ will fetch it for you.
 **Simplest: everything in Docker**
 
 No Homebrew, no host Ollama. One command, and the model is pulled for you into
-a Docker volume on first run:
+a Docker volume on first run. Good for trying Luminary; slow for real ingestion
+— see [Running under Docker](#running-under-docker):
 
 ```bash
 git clone https://github.com/nupsea/luminary.git
@@ -305,6 +306,20 @@ but will swap under load.** Ingestion is the peak; answering questions afterward
 sits around 6.5 GB.
 
 ### Running under Docker
+
+> **Run the model outside the container.** Docker on a Mac is CPU-only — no GPU
+> passes through — and the container is already sharing that CPU with the
+> embedder, reranker and entity model. Ingesting a full technical book this way
+> takes a long time and there is no setting that fixes it. Two ways out, either
+> of which moves generation off the VM entirely:
+>
+> - **`make docker-run-host-ollama`** — Ollama on your Mac, app in Docker.
+> - **A hosted model** — set `LITELLM_DEFAULT_MODEL` and its API key in `.env`
+>   beside the compose file, or in Settings. See
+>   [Choosing a model](#choosing-a-model).
+>
+> The all-in-Docker path is the simplest way to *try* Luminary, not the way to
+> run a library through it.
 
 Docker Desktop is a Linux VM. **Every number above is that VM's allowance, not
 your machine's** — it gets a fraction of the host, often half, so a 16 GB Mac
