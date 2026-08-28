@@ -128,6 +128,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# Mirrors the CASE in the enrichment aggregate below; keep the two in step.
+# `pending` and `running` collapse to one reported state because the reader acts
+# on them identically -- work is outstanding.
+_ENRICHMENT_STATUS_BY_PRIORITY: dict[int, str] = {
+    1: "running",
+    2: "failed",
+    3: "skipped",
+    4: "done",
+}
+
 # DocumentDetail carries one preview per section, so the stored cap is far too
 # large for the wire. Set well above the two lines the section list renders,
 # because PredictPanel reads the first code fence from this field and the
@@ -253,19 +263,33 @@ async def list_documents(
             .correlate(DocumentModel)
             .scalar_subquery()
         )
-        enrichment_status_sq = (
-            select(EnrichmentJobModel.status)
-            .where(EnrichmentJobModel.document_id == DocumentModel.id)
-            .order_by(
-                # Prioritize image-related jobs for the status display
-                case(
-                    (EnrichmentJobModel.job_type == "image_analyze", 1),
-                    (EnrichmentJobModel.job_type == "image_extract", 2),
-                    else_=3,
-                ),
-                EnrichmentJobModel.created_at.desc(),
+        # The document's enrichment state, aggregated over ALL its jobs.
+        #
+        # This used to report a single job -- image_analyze, else image_extract,
+        # else whichever was newest -- which is not the document's state. Six job
+        # types are registered, so a document whose image work had finished read
+        # "Analysis complete" while its concept_link or web_refs was still queued,
+        # and the card contradicted the enrichment queue that was still counting
+        # the task. A badge that says a document is finished while work is running
+        # is worse than no badge.
+        #
+        # Precedence is by what the reader can act on, not by job type:
+        # outstanding work first, then a failure, then a skip (a model that was
+        # never installed -- actionable, so it must not hide behind "done"), then
+        # done. MIN over the priority keeps it to one correlated subquery.
+        enrichment_priority_sq = (
+            select(
+                func.min(
+                    case(
+                        (EnrichmentJobModel.status.in_(("pending", "running")), 1),
+                        (EnrichmentJobModel.status == "failed", 2),
+                        (EnrichmentJobModel.status == "skipped", 3),
+                        (EnrichmentJobModel.status == "done", 4),
+                        else_=5,
+                    )
+                )
             )
-            .limit(1)
+            .where(EnrichmentJobModel.document_id == DocumentModel.id)
             .correlate(DocumentModel)
             .scalar_subquery()
         )
@@ -394,7 +418,7 @@ async def list_documents(
             chunk_count_sq.label("chunk_count"),
             section_count_sq.label("section_count"),
             read_section_count_sq.label("read_section_count"),
-            enrichment_status_sq.label("enrichment_status"),
+            enrichment_priority_sq.label("enrichment_priority"),
             objectives_total_sq.label("objectives_total"),
             objectives_covered_sq.label("objectives_covered"),
             mastery_sum_contribution_sq.label("mastery_sum_contribution"),
@@ -426,7 +450,7 @@ async def list_documents(
         chunk_count = row[5] or 0
         section_count = row[6] or 0
         read_section_count = row[7] or 0
-        enrichment_status = row[8]
+        enrichment_status = _ENRICHMENT_STATUS_BY_PRIORITY.get(row[8])
         objectives_total = row[9] or 0
         objectives_covered = row[10] or 0
         mastery_sum_contribution = row[11]
