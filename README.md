@@ -248,7 +248,8 @@ will fetch it for you.
 **Simplest: everything in Docker**
 
 No Homebrew, no host Ollama. One command, and the model is pulled for you into
-a Docker volume on first run:
+a Docker volume on first run. Good for trying Luminary; slow for real ingestion
+— see [Running under Docker](#running-under-docker):
 
 ```bash
 git clone https://github.com/nupsea/luminary.git
@@ -306,6 +307,20 @@ sits around 6.5 GB.
 
 ### Running under Docker
 
+> **Run the model outside the container.** Docker on a Mac is CPU-only — no GPU
+> passes through — and the container is already sharing that CPU with the
+> embedder, reranker and entity model. Ingesting a full technical book this way
+> takes a long time and there is no setting that fixes it. Two ways out, either
+> of which moves generation off the VM entirely:
+>
+> - **`make docker-run-host-ollama`** — Ollama on your Mac, app in Docker.
+> - **A hosted model** — set `LITELLM_DEFAULT_MODEL` and its API key in `.env`
+>   beside the compose file, or in Settings. See
+>   [Choosing a model](#choosing-a-model).
+>
+> The all-in-Docker path is the simplest way to *try* Luminary, not the way to
+> run a library through it.
+
 Docker Desktop is a Linux VM. **Every number above is that VM's allowance, not
 your machine's** — it gets a fraction of the host, often half, so a 16 GB Mac
 presents as roughly 7.7 GB and lands under the floor. Luminary reads the VM and
@@ -326,6 +341,14 @@ model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it 
 `make docker-run-host-ollama` runs the model on your Mac instead of in the VM,
 which takes the memory and speed rows off the table. macOS only — on Linux the
 container needs `extra_hosts: host-gateway` to reach the host.
+
+**Stopping.** `make docker-stop` leaves the containers in place for a fast
+restart; `make docker-down` also removes them and the network. Neither touches
+your library — no target here ever passes `--volumes`.
+
+**A stale Docker toolchain is refused up front** rather than hanging mid-build:
+compose needs buildx 0.17.0+, and compose 2.0.0-beta.4 creates a container it
+never starts. Stopping still works whatever the version.
 
 Reclaim disk with `docker builder prune -af` (build cache) and
 `docker image prune -af` (unused images). **Never add `--volumes`** — that
