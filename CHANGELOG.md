@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.24] - 2026-08-28
+
 ### Fixed
 - **A 128-page book extracted 81 "figures", 79 of them pages of body text.**
   PDFs generated from reflowable sources carry one fill rectangle spanning the
