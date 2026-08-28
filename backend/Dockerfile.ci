@@ -2,15 +2,64 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# The blog tests drive a real repository (`git init`, add, commit) rather than
+# mocking the porcelain, and python:3.13-slim carries no git -- so `git init`
+# exited 255 and four of them failed on an error that named no missing file.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Install all dependencies including dev group
-COPY pyproject.toml uv.lock ./
+COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --all-groups
 
 # Copy application code, tests, and tools
-COPY . .
+COPY backend/ .
+
+# surface_manifest.py resolves Path(__file__).parents[2]/surface-manifest.json;
+# here __file__=/app/app/surface_manifest.py so parents[2]=/. Without this every
+# test that imports app.main died at collection with
+# "FileNotFoundError: '/surface-manifest.json'" -- 161 of them -- so the Intel
+# Mac path of `make ci` (which routes the backend suite through this image
+# because lancedb has no x86_64 macOS wheel) could not run the suite at all.
+# The build context is the repo root for this reason; it cannot be backend/.
+COPY surface-manifest.json /surface-manifest.json
+
+# The suite reaches outside backend/ for three more things, each resolved the
+# same parents[2]=="/" way: `evals` is imported as a top-level package by the
+# eval tests, scripts/prompt_dump.py is read by test_prompt_spec, and both sit
+# at the repo root. Under the old backend/-only build context none of them
+# could be present, so 27 modules failed collection.
+COPY evals/ /evals/
+COPY scripts/ /scripts/
+
+# The same parents[2]=="/" resolution the production Dockerfile documents:
+# app_version() reads /backend/pyproject.toml, db_init.alembic_ini() wants
+# /backend/alembic.ini, and the compose tests read the compose file that the
+# release actually ships.
+COPY backend/pyproject.toml /backend/pyproject.toml
+COPY backend/alembic.ini /backend/alembic.ini
+COPY backend/alembic/ /backend/alembic/
+COPY docker-compose.yml /docker-compose.yml
+# test_book_content reads DATA/books/manifest.json; the corpus is text files.
+COPY DATA/ /DATA/
+# test_api_key_storage_disclosure asserts the README tells the truth about
+# where keys are stored, so the README is part of the suite's inputs.
+COPY README.md /README.md
+# The suite asserts on the shipped launcher and the knob documentation
+# themselves: test_launchers_do_not_resolve and test_media_component_message
+# read the Dockerfile, test_env_example_documents_the_knobs reads backend/.env.example, which
+# arrives via `COPY backend/ .` once the ignore file stops excluding it.
+COPY Dockerfile /Dockerfile
+
+# test_ollama_keep_alive reads the LLM service's own source at
+# app_root()/backend/app/... to assert on how the completion path is written.
+# A symlink rather than a second COPY: one source tree, so the test can never
+# read a stale copy of the file it is asserting about.
+RUN ln -s /app/app /backend/app
 
 # Relative DATA_DIR now anchors to the source root (== "/" in this image), so
 # pin the container's store location explicitly.

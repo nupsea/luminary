@@ -665,7 +665,7 @@ ci:
 ifeq ($(shell uname -s)-$(shell uname -m),Darwin-x86_64)
 	@echo "Intel Mac detected: running backend CI in Docker (lancedb has no x86_64 macOS wheel)..."
 	@$(MAKE) --no-print-directory require-docker
-	docker build -q -t luminary-ci -f backend/Dockerfile.ci backend/
+	docker build -q -t luminary-ci -f backend/Dockerfile.ci .
 	docker run --rm luminary-ci
 else
 	cd backend && uv sync

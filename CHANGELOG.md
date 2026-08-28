@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compose stack down; `down` never passes `--volumes`, so the library survives.
 
 ### Fixed
+- **A 128-page book extracted 81 "figures", 79 of them pages of body text.**
+  PDFs generated from reflowable sources carry one fill rectangle spanning the
+  whole flow; the wash guard clipped it to the page before measuring, which is
+  exactly the page's text column. Each cost a vision call to paraphrase text
+  already indexed verbatim — 34 minutes to fail on this host. Now 2 images and
+  143 seconds. Re-extraction also retires figures the extractor no longer
+  produces, so an existing library is fixed by re-extracting rather than
+  re-uploading. Do not restore the clip-then-measure order (I-38).
+- **Vision calls timed out at 300s on a host where they take 278-305s.**
+  The ceiling now follows the start-up host measurement, so only a host that
+  measured itself slow waits longer; fast hosts are unchanged.
+- **The Intel Mac path of `make ci` could not run the backend suite at all.**
+  The CI image was built from `backend/` and so never contained
+  `surface-manifest.json`; every test importing `app.main` died at collection.
+  It builds from the repo root now and runs the suite.
 - **`make stop` and `make clean` killed browsers instead of the app.** Both
   matched every socket on the port rather than the listener, so a tab left open
   on Luminary was SIGTERMed then SIGKILLed while the app kept running.

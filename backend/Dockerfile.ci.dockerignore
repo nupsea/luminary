@@ -1,0 +1,29 @@
+# Applies to backend/Dockerfile.ci INSTEAD of the repo-root .dockerignore
+# (BuildKit reads <dockerfile-path>.dockerignore when one exists).
+#
+# The root file excludes backend/tests/, which is right for the production
+# image and wrong for this one: with the root rules applied, `uv run pytest`
+# collected 0 items and the CI image reported success having run nothing.
+# This build needs the repo root as its context to reach surface-manifest.json,
+# so it needs its own ignore rules too.
+.git/
+.github/
+.claude/
+frontend/
+src-tauri/
+docs/
+.luminary/
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*
+# ...but backend/.env.example is a documentation fixture the suite asserts
+# against (test_env_example_documents_the_knobs), so it must survive.
+!backend/.env.example
+backend/.venv/
+backend/.pytest_cache/
+backend/htmlcov/
+backend/.coverage
+*.db
+*.db-shm
+*.db-wal
