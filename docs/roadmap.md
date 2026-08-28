@@ -250,6 +250,24 @@ not complete under test. Fix the second before the first, or the gate goes red. 
 timing policy, which failed before. The patch that corrects the doubles is trivial to
 reconstruct from the signatures above.
 
+### 11. `GET /documents` costs ~1.3s because its per-row counts are unindexed
+
+The library list runs about thirteen correlated subqueries per row. Measured on a 59-document
+library while three documents enriched: `GET /documents?page_size=24` takes **1.5s**, against
+**0.003s** for `GET /enrichment/queue` on the same server — so this is the query, not event-loop
+contention, and enrichment is not the cause.
+
+The counts are over tables with no `document_id` index: `chunks` (75,646 rows), `sections`
+(2,346), `flashcards` (826), `summaries` (452). `reading_progress`, `prediction_events` and
+`learning_objectives` already have one; `enrichment_jobs` does too, and at 162 rows it is not
+the cost. So the fix is an Alembic migration adding the missing indexes (I-23), not a query
+rewrite — and it wants a before/after measurement on a library this size rather than a rushed one.
+
+Bracketing what is already known: the enrichment aggregate added in `b647604` accounts for
+about 0.2s of the 1.5s (the single-job version it replaced measured 1.27s on the same library,
+same load). That is a real cost and worth re-measuring once the indexes exist, but it is not
+what makes the page slow.
+
 ## Deferred — decided, not scheduled
 
 Nothing currently deferred.
