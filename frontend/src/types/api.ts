@@ -139,6 +139,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/blog/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Drafts
+         * @description Notes in the `kind` collection that have no post on the site yet.
+         *
+         *     The publish entry point is a chip on the note card, so a note written for the
+         *     site is only findable by remembering which note it was. This is the other
+         *     half of the management panel, which until now listed published posts and so
+         *     could never show the thing you were about to publish.
+         */
+        get: operations["list_drafts_blog_drafts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/blog/posts": {
         parameters: {
             query?: never;
@@ -4342,10 +4367,18 @@ export interface paths {
          * Classify Only
          * @description Classify the chat route without executing retrieval/LLM graph nodes.
          *
-         *     The heuristic alone is not what production routes on: `chat_graph` sends
-         *     anything below 0.7 to the LLM, and the catch-all sits at 0.5. Measuring this
-         *     endpoint without `llm_fallback` therefore measures a path no user takes on
-         *     its own -- it is the floor, not the routing.
+         *     The heuristic alone is not what production routes on -- on a quick host.
+         *     `chat_graph` sends anything below 0.7 to the LLM there, and the catch-all
+         *     sits at 0.5, so measuring this endpoint without `llm_fallback` measures the
+         *     floor rather than the routing. On a host the start-up probe measured slow the
+         *     two converge: `should_use_llm_fallback` drops that call, and the heuristic
+         *     alone IS what the user gets.
+         *
+         *     This parameter is deliberately NOT gated on the host the way the graph is.
+         *     An eval has to be able to measure both arms on whatever machine it runs on;
+         *     gating it here would have made the slow-host arm unmeasurable on exactly the
+         *     hosts the gate exists for, and the 0.9655 -> 0.8276 figure that quantifies
+         *     its cost came from asking for both arms on such a machine.
          */
         post: operations["classify_only_qa_classify_only_post"];
         delete?: never;
@@ -6429,6 +6462,25 @@ export interface components {
             /** Collision */
             collision: boolean;
         };
+        /**
+         * BlogDraftSummary
+         * @description A note that is eligible to publish but has no post on the site yet.
+         *
+         *     `slug` is what publishing WOULD use, derived the same way `POST /blog/draft`
+         *     derives it, so the two cannot disagree about whether a note is already out.
+         */
+        BlogDraftSummary: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title: string;
+            /** Slug */
+            slug: string;
+            /** Excerpt */
+            excerpt: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
         /** BlogLivePreviewCleanupRequest */
         BlogLivePreviewCleanupRequest: {
             /** Slug */
@@ -7535,6 +7587,28 @@ export interface components {
             rerank_depth: number;
             /** Rerank Blend Alpha */
             rerank_blend_alpha: number | null;
+            /**
+             * Rerank Enabled
+             * @default true
+             */
+            rerank_enabled: boolean;
+            /** Startup Probe Seconds */
+            startup_probe_seconds?: number | null;
+            /**
+             * Local Inference Slow
+             * @default false
+             */
+            local_inference_slow: boolean;
+            /**
+             * Qa Context Token Budget
+             * @default 0
+             */
+            qa_context_token_budget: number;
+            /**
+             * Qa Context Budget Reason
+             * @default unknown
+             */
+            qa_context_budget_reason: string;
             /** Query Spell Correct */
             query_spell_correct: boolean;
             /** Llm Mode */
@@ -11255,6 +11329,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BlogPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_drafts_blog_drafts_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlogDraftSummary"][];
                 };
             };
             /** @description Validation Error */

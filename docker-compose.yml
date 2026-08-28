@@ -15,6 +15,13 @@ services:
       - "127.0.0.1:7820:7820"
     volumes:
       - luminary-data:/data
+    # `make docker-run-host-ollama` points OLLAMA_URL at host.docker.internal.
+    # Docker Desktop resolves that name for free; plain Linux does not, so the
+    # host-Ollama path failed there with a DNS error while working on a Mac.
+    # host-gateway is a no-op where the name already resolves, so this costs the
+    # Desktop path nothing and makes the Linux one work.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # A ceiling, not a wait: compose stops as soon as the process exits. Shutdown
     # is variable -- 10.8s settled, 17s during warmup, over 30s when it lands
     # while a model is loading, because the process blocks on an uncancellable

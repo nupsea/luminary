@@ -179,6 +179,40 @@ to guess when it cannot read it; `--no-rerank` measures the ablation and says so
 and floors recorded before 2026-08-26 are the unreranked funnel and are not comparable to later
 ones.
 
+## Note search
+
+`make eval-notes` (`evals/run_note_search_eval.py`). Note search had no eval at all until
+2026-08-28, which mattered because it is the surface 0.8.2 changed most — a liveness join
+against `notes` and a cosine floor on the semantic arm both alter what comes back.
+
+**It carries no golden, deliberately.** The corpus is the user's own notes, so a committed
+golden would measure one machine's library and nothing else. Queries are derived from whatever
+notes exist. The cost is that the recall numbers are corpus-coupled: compare a change against
+your own previous run on an unchanged library, never against the floor.
+
+| metric | measured 2026-08-28 | gate | what it catches |
+|---|---|---|---|
+| `self_recall_1` | 0.9000 | floor 0.70 | the funnel stops finding a note by its own words |
+| `self_recall_5` | 1.0000 | **none** | saturated — a self-query is answerable by the keyword arm alone |
+| `ghost_rate` | 0.0000 | ceiling 0.0 | deleted content being served; the only real invariant here |
+| `vector_share` | 0.7563 | floor 0.20 | the semantic arm going silent |
+| `noise_rejection` | 1.0000 | floor 0.75 | the similarity floor missing, so everything matches everything |
+
+Measured against a 125-note library, 40 sampled at seed 42, 119 result slots; bit-reproducible
+across re-runs.
+
+**`self_recall_5` is reported and not gated.** It saturates: the query is a phrase from the
+note's own body, so the keyword arm answers it without the semantic arm doing anything. Quote it
+only when it drops.
+
+**`vector_share` is the one that earns its place.** Raise `NOTE_SEMANTIC_MIN_SIMILARITY` too far
+and the semantic arm stops contributing while every other metric here stays green — the keyword
+arm alone still answers a self-query. That failure is invisible without this number.
+
+**Still not measured:** paraphrase recall. Nothing here scores a query that shares no words with
+the note it should find, which is the case the semantic arm exists for; the floor is bracketed by
+two measured cases (0.5004 drop, 0.7516 keep) but that justifies a threshold, not a quality bar.
+
 **Check the stage before attributing a change.** A retrieval regression can come from ingestion;
 a generation regression can come from retrieval. `eval-ingest` first, then `eval`, then
 `eval-gen` — in that order, because each is the ceiling on the next.

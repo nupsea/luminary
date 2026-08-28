@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import (
     CollectionMemberModel,
+    CollectionModel,
     NoteLinkModel,
     NoteModel,
     NoteSourceModel,
@@ -109,6 +110,30 @@ class NoteRepo:
         await self.session.commit()
 
     # -- collection / source membership reads ------------------------------
+
+    async def in_collection_named(self, name: str) -> list[NoteModel]:
+        """Notes in the collection with this NAME, case-insensitively.
+
+        Matched by name rather than id because that is what the publishing
+        surfaces key off: collections carry no category field, so "is this a
+        blog note" is answered by belonging to a collection called "BLOG" --
+        the same rule the note card's chip uses in the frontend. Name is not
+        unique, so every collection sharing it contributes.
+        """
+        stmt = (
+            select(NoteModel)
+            .join(
+                CollectionMemberModel,
+                (CollectionMemberModel.member_id == NoteModel.id)
+                & (CollectionMemberModel.member_type == "note"),
+            )
+            .join(CollectionModel, CollectionModel.id == CollectionMemberModel.collection_id)
+            .where(func.lower(CollectionModel.name) == name.lower())
+            .order_by(NoteModel.updated_at.desc())
+            .distinct()
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def collection_ids_for(self, note_id: str) -> list[str]:
         result = await self.session.execute(

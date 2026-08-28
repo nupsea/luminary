@@ -1926,7 +1926,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "luminary-desktop"
-version = "0.8.0"
+version = "0.8.2"
 dependencies = [
  "chrono",
  "libc",

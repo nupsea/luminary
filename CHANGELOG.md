@@ -6,7 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-28
+
 ### Added
+- **The Blog & Thoughts panel lists what you have not published yet.** It showed
+  posts already on your site, so the note you opened it to publish was the one
+  thing it could not show.
 - **`make docker-stop` and `make docker-down`.** There was no way to bring the
   compose stack down; `down` never passes `--volumes`, so the library survives.
 
@@ -42,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The docker targets failed with `command not found` when Docker was merely
   not started.** Docker Desktop installs its CLI symlinks only on first
   successful run, so "not on PATH" was never evidence it was missing.
+- **A deleted note could keep coming back from note search.** Keyword search
+  joins the notes table so it could never serve one; semantic search read the
+  vector index directly and had no such join, so a delete that failed silently
+  left the note findable for good.
+- **Public builds shipped code for features they cannot run.** Mode gating hid
+  the buttons but still compiled the components in; a build check now keeps them
+  out.
 
 ## [0.8.0] - 2026-08-27
 
