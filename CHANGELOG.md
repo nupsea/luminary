@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Re-uploading a document you already have looked like it did nothing.**
+  Ingestion dedupes on file hash, but the endpoint answered `"processing"` for a
+  copy that was already complete — so the client tracked a document that would
+  never move and no progress ever appeared. It now answers `"duplicate"`, and
+  the upload dialog says the document is already in your library.
 - **A library card could say a document was finished while its enrichment was
   still running.** The badge reported one job — image_analyze, else
   image_extract, else the newest — not the document. Six job types exist, so a

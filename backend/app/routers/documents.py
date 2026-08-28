@@ -52,6 +52,7 @@ from app.schemas.documents import (
     EpubChapterResponse,
     EpubChapterTocItem,
     EpubTocResponse,
+    IngestResponse,
     KindleIngestResponse,
     LearningObjectiveItem,
     LearningObjectivesResponse,
@@ -700,7 +701,7 @@ async def detect_document_type(file: UploadFile = File(...)):
         tmp.unlink(missing_ok=True)
 
 
-@router.post("/ingest")
+@router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
     file: UploadFile = File(...),
     content_type: ContentType | None = Form(None),
@@ -768,7 +769,9 @@ async def ingest_document(
                         "Duplicate upload detected (stage=complete), returning existing doc",
                         extra={"doc_id": existing.id, "file_hash": file_hash},
                     )
-                return {"document_id": existing.id, "status": "processing"}
+                # Already complete: nothing will progress, so saying "processing"
+                # leaves the client tracking a document that never moves.
+                return {"document_id": existing.id, "status": "duplicate"}
 
             if existing.stage == "error":
                 # Previous attempt failed — reset stage and retry ingestion on

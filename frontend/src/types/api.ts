@@ -8707,6 +8707,24 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /**
+         * IngestResponse
+         * @description Result of POST /documents/ingest.
+         *
+         *     `status` distinguishes work started from a file we already hold. Ingestion
+         *     dedupes on file hash, and a duplicate of an already-complete document used to
+         *     be reported as "processing" -- so the client tracked a document that would
+         *     never progress, and the user saw an upload that appeared to do nothing.
+         */
+        IngestResponse: {
+            /** Document Id */
+            document_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "processing" | "duplicate";
+        };
         /** InstallableModel */
         InstallableModel: {
             /** Id */
@@ -13039,7 +13057,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IngestResponse"];
                 };
             };
             /** @description Validation Error */

@@ -438,8 +438,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     logger.info("[Upload] start", { filename: file.name, size_mb: sizeMB.toFixed(2), content_type: contentType })
 
     try {
-      const docId = await submitFile(file, contentType)
-      logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId })
+      const { documentId: docId, duplicate } = await submitFile(file, contentType)
+      logger.info("[Upload] uploaded", { filename: file.name, doc_id: docId, duplicate })
+      if (duplicate) {
+        // Ingestion dedupes on file hash and this copy is already complete, so
+        // there is no job to follow. Tracking it would show a progress card that
+        // never moves, which is what made a re-upload look like it did nothing.
+        toast.success(`${title} is already in your library`)
+        reset()
+        onClose()
+        return
+      }
       track(docId, title)
       setTrackedDocId(docId)
       // Close the dialog immediately — progress is shown via the
