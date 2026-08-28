@@ -26,8 +26,11 @@ docs/
 # ...but backend/.env.example is a documentation fixture the suite asserts
 # against (test_env_example_documents_the_knobs), so it must survive.
 !backend/.env.example
-backend/.venv/
-backend/.pytest_cache/
+# Same anchoring point, and the same reason: evals/.venv is ~1GB of the
+# developer's virtualenv, and the image builds its own with `uv sync`.
+**/.venv/
+**/.ruff_cache/
+**/.pytest_cache/
 backend/htmlcov/
 backend/.coverage
 **/*.db
