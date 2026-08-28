@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-08-28
+## [0.8.2] - 2026-08-28
 
 ### Added
 - **The Blog & Thoughts panel lists what you have not published yet.** It showed
