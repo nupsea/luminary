@@ -25,7 +25,7 @@
 17. [Deployment Model](#deployment-model)
 18. [Model Selection: One Registry, Three Bands](#model-selection-one-registry-three-bands)
 19. [Performance Characteristics](#performance-characteristics)
-20. [Engineering Philosophy: The Harness Engineering Framework](#engineering-philosophy-the-harness-engineering-framework)
+20. [Engineering Philosophy](#engineering-philosophy)
 21. [What is not built](#what-is-not-built)
 22. [Summary](#summary)
 
@@ -794,19 +794,50 @@ ask for a larger one.
 
 ---
 
-## Engineering Philosophy: The Harness Engineering Framework
+## Engineering Philosophy
 
-Luminary's engineering practices are codified in 25 "golden principles" derived from the OpenAI Harness Engineering framework. A few of the most consequential:
+The practices here were not adopted from a framework. Each one is the residue of something that
+went wrong, which is why they read as specific rather than aspirational.
 
-**Repository is the system of record.** All architectural decisions, design choices, patterns, and conventions live as versioned Markdown in `docs/`. If it is not in the repo, it does not exist. This is critical for agent-assisted development: an AI agent has no memory between sessions, so the repository must contain everything it needs to make correct decisions.
+**The repository is the system of record.** Architecture, patterns and invariants live as
+versioned Markdown in `docs/`, and every file there describes something that **exists**.
+`docs/roadmap.md` is the single exception and the only place status lives -- an implementation
+plan is deleted once its work ships, because a shipped spec left lying in the tree is
+indistinguishable from a live contract to anyone reading it for the first time.
 
-**Enforce invariants mechanically.** The project has 35 mechanically enforced invariants documented in `docs/invariants.md` (grouped by Async/Concurrency, FTS5/SQLite, Imports, LLM/SSE, Vector Dimensions, Frontend, Quality Gates, Packages, Privacy & Local-First). They include: no pip (only uv), no direct LLM SDK imports (only LiteLLM), no raw dicts at API boundaries (only Pydantic models), no `print()` in production code (only structured logging), TypeScript strict mode, and more. Each invariant is checked by either a CI linter, a pre-commit hook, or a Claude Code PreToolUse hook. Violation messages include remediation instructions.
+**Invariants are mechanical, and each names its incident.** `docs/invariants.md` carries 38 of
+them, grouped by Async/Concurrency, FTS5/SQLite, Imports, LLM/SSE, Vector Dimensions, Frontend,
+Quality Gates, Packages, and Privacy. Each is written as incident -> rule -> mechanism -> the
+test that guards it, because a rule without a mechanism is a preference. `layer_linter.py`
+fails the build on a reverse import and its `KNOWN_VIOLATIONS` set may only shrink.
 
-**Tests must use real artifacts at real scale.** Integration tests ingest full, untruncated public-domain books with real ML models (BAAI/bge-small-en-v1.5, GLiNER). Only LiteLLM is mocked (to avoid requiring Ollama in CI). Golden datasets for evaluation are grounded in actually ingested content with verifiable context passages.
+**Nothing the system supplies may satisfy a check on the system's output.** A flashcard prompt's
+worked example once contained a plausible `source_excerpt`, and the model pasted that exact
+string back as its evidence for two unrelated documents. It was rejected by luck, not by
+mechanism. That example text is now named in code and refused explicitly. When a check reads
+something a model produced, the question to ask is where else that value could have come from --
+and if the answer includes "from us", the check is decorative.
 
-**Quality metrics are CI gates, not reports.** HR@5, MRR, and Faithfulness have enforced minimum thresholds. `make eval` exits non-zero when any metric falls below its threshold. A metric that cannot fail is not a metric.
+**A check that cannot fail is not a check.** A judge asked whether a card was "atomic", with the
+term undefined, returned true for every card in a sample that was two thirds multi-point answers
+-- a perfect score that certified nothing. Fire every gate on purpose once, and see it fail,
+before trusting it.
 
-**Pure functions for core domain logic.** Response parsing, retrieval scoring, RRF fusion, diversification, and text transformations are all pure functions: no I/O, no network calls, same output for same inputs. This makes them testable with simple `assert` statements and no fixture setup.
+**Floors detect collapse; they do not measure quality.** The eval thresholds fire when a leg of
+the pipeline dies. Clearing them says the funnel is alive, not that a change was good. A metric
+that was requested and could not be computed **fails** the run rather than being skipped -- it is
+never defaulted to a neutral value.
+
+**Never buy a number by spending the content.** A `max_tokens` cap once cut worst-case latency
+from 173s to 52s by truncating the stored summary mid-word, dropping half the document. The
+latency table looked like a win. Bound the work, never the output.
+
+**Tests use real artifacts at real scale.** Integration tests ingest full, untruncated
+public-domain books with real ML models. Only the LLM is mocked, so CI does not need Ollama.
+
+**Pure functions for core domain logic.** RRF fusion, scoring, diversification, response parsing
+and text transformations take inputs and return outputs -- no I/O, no network, same answer every
+time. They are testable with a bare `assert` and no fixtures.
 
 ---
 

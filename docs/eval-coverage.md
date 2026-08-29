@@ -4,9 +4,9 @@ description: What the eval suite measures, what it does not, and which gate enfo
 
 # Eval coverage
 
-What is measured, by which target, on which corpus. Read `docs/model-and-eval-plan.md` for the
-numbers themselves, what the suite cannot yet decide, and the staged plan that closes it; the
-`eval-integrity` skill carries the rules that keep a number honest.
+What is measured, by which target, on which corpus. The measured baselines live next to the
+thresholds they gate, in `evals/run_eval.py`; the `eval-integrity` skill carries the rules that
+keep a number honest, and `docs/roadmap.md` carries anything still open.
 
 The pipeline has three stages, and a number from one says nothing about the others. Retrieval
 scores what was indexed and cannot report what never arrived; generation scores answers over

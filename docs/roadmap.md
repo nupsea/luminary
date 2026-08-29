@@ -39,6 +39,9 @@ The named doc is the live contract. The plan that produced the work is gone.
 | An existing install carried to the model its host should run: Windows records what it pulled, a Settings card surfaces drift and switches only after the download completes | `model_router.narrowed_defaults()`, `ModelDriftNotice.tsx` |
 | Content-type classification, scored against a labelled corpus rather than asserted | `services/content_classifier.py`, `tests/fixtures/content_type_labels.json` |
 | Image extraction and vision enrichment, including the vector-figure fallback and its over-extraction guards | `invariants.md` I-38, `services/image_extractor.py` |
+| Model footprint measured rather than estimated, three RAM bands, and a registry that refuses a model the host cannot hold | `model_registry.py`, `metrics.md` |
+| Interactive work outranks background work for the Ollama slot | `services/llm_admission.py`, `tests/test_background_yields_the_slot_to_a_waiting_question.py` |
+| Eval runs carry their own provenance (model, embedder, corpus fingerprint, library state) and a repair/first-pass tier | `evals/run_eval.py` `capture_environment`, `GET /evals/output-stats` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -89,29 +92,7 @@ needs the background work (`test_e2e_upload` does).
 Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
 marker over two causes is why this has stalled twice.
 
-### 4. Model footprint, scheduling, substitutability, and the eval baseline that gates them
-
-A 0.5.0 user reported ~16GB resident and a crash ingesting a PDF. `spawn_ollama` in
-`src-tauri/src/supervisor.rs` sets `OLLAMA_KEEP_ALIVE=30m` but never
-`OLLAMA_MAX_LOADED_MODELS`, whose Ollama default is 3, so chat and vision runners co-reside
-for half an hour. `scripts/install.sh:198` and `scripts/bootstrap.sh:257` both cap it; the
-DMG path does not.
-
-Two further problems share the fix. Deferred summaries and enrichment issue LLM calls into
-the slots an interactive Ask needs, with no scheduling priority between them. And model
-substitution (#48) does not move eval numbers, because prompts, parsers and budgets are
-sized for llama3.2 and no metric distinguishes a model that emits clean JSON from one whose
-output is repaired — there are two tolerant parsers and nothing counts a repair.
-
-A fourth problem gates all three. Three independent eval audits (2026-08-14) found that no
-number in the suite survives being compared across a change: a run records nothing about the
-embedder, model or library state that produced it, one generation run cannot resolve a change
-below ~0.10, `run_summary_eval.py:38` judges summaries against 8,000 raw bytes, and every gated
-arm pins `document_id` so cross-document routing is unmeasured.
-
-Plan, six stages: `model-and-eval-plan.md`. Delete it when the last stage ships.
-
-### 5. The Hub sketch, and what is still approximate in it
+### 4. The Hub sketch, and what is still approximate in it
 
 Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
 quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
@@ -150,7 +131,7 @@ What remains is smaller and worth stating rather than assuming.
   nor route state, so "reflect on this" affordances elsewhere can only link to the page, which
   the sidebar already does.
 
-### 6. What the reported reader and study defects left behind
+### 5. What the reported reader and study defects left behind
 
 All three are fixed (per-chunk citation pages, the unreachable Study landing, the search-highlight
 flicker and the sheet-vs-printed page footer), as is the reader opening on its section list.
@@ -167,7 +148,7 @@ Three smaller things surfaced while fixing them and are worth stating rather tha
   titled `27` and `265` — page numbers picked up as headings. It does not lose text, so it is a
   reading-quality defect rather than a data one.
 
-### 7. Formats other than HTML and PDF are unmeasured
+### 6. Formats other than HTML and PDF are unmeasured
 
 `universal-reader.md` is the contract for the reader. Region selection, the Markdown serialiser,
 webview rendering and `documents.extraction_report` shipped after it was written, so it does not
@@ -198,7 +179,7 @@ yet describe them.
   renders as a heading. Demoting it means the serialiser overruling the author's markup, which
   is a decision, not a bug fix.
 
-### 8. Rendering reaches only the platform with a shell
+### 7. Rendering reaches only the platform with a shell
 
 `render_page` (`src-tauri/src/render.rs`) uses the webview the desktop shell embeds, so it
 exists only where that shell runs — macOS today. The browser dev server, Docker and the script
@@ -208,7 +189,7 @@ articles; the ninth returned 0 images statically against 78 rendered.
 Windows (#24) and Linux need their own shell before rendering follows. Canvas-drawn figures are
 not covered on any platform: they need an element screenshot, not a DOM capture.
 
-### 9. Two behaviours that ship without a measurement
+### 8. Two behaviours that ship without a measurement
 
 Both are opt-out-able, both change what a user receives, and neither has a number attached.
 
@@ -228,7 +209,7 @@ Both are opt-out-able, both change what a user receives, and neither has a numbe
   drop, 0.7516 keep), which justifies the threshold and does not measure the axis. `vector_share`
   catches the arm dying, not the arm getting worse.
 
-### 10. The ingestion tests' entity extractor is a double that always raises
+### 9. The ingestion tests' entity extractor is a double that always raises
 
 `NERService.extract` is `(chunks, content_type="unknown", is_technical=None)`
 (`services/ner.py:458`) and `entity_extract_node` calls it with all three
@@ -250,7 +231,7 @@ not complete under test. Fix the second before the first, or the gate goes red. 
 timing policy, which failed before. The patch that corrects the doubles is trivial to
 reconstruct from the signatures above.
 
-### 11. `GET /documents` costs ~1.3s because its per-row counts are unindexed
+### 10. `GET /documents` costs ~1.3s because its per-row counts are unindexed
 
 The library list runs about thirteen correlated subqueries per row. Measured on a 59-document
 library while three documents enriched: `GET /documents?page_size=24` takes **1.5s**, against
