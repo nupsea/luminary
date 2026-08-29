@@ -1,6 +1,6 @@
 """Shared state, diagnostics, and config for the concept-generation pipeline.
 
-The pipeline is a sequential workflow of swappable nodes (docs/concept-model-design.md
+The pipeline is a sequential workflow of swappable nodes (docs/concepts.md
 §11). Every node reads/writes `ConceptPipelineState` and appends a structured block to
 `state["diagnostics"]` so a run is fully inspectable (--dry-run dumps it). Each stage can
 be evaluated, replaced, or A/B'd in isolation -- the point is to explore Lumen's reasoning.
@@ -72,7 +72,7 @@ def is_junk_entity(name: str) -> bool:
         return True
     return bool(_MATHY.search(n))
 
-# --- entity-type policy (relevance lever 1; docs/concept-model-design.md §2) ---
+# --- entity-type policy (relevance lever 1; docs/concepts.md §2) ---
 # Concept-bearing types we keep as concept seeds.
 CONCEPT_TYPES: frozenset[str] = frozenset(
     {

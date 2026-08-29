@@ -1,4 +1,4 @@
-"""A concept rebuild preserves the learner's record (docs/concept-model-design.md).
+"""A concept rebuild preserves the learner's record (docs/concepts.md).
 
 persist_concepts wipes + recreates the concept layer with fresh ids, but cards carry a STABLE
 `concept_slug`, so the rebuild re-maps them (by slug, or by re-grounding through their source

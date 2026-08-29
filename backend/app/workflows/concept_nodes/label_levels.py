@@ -1,4 +1,4 @@
-"""label_levels node -- name each concept (docs/concept-model-design.md §5).
+"""label_levels node -- name each concept (docs/concepts.md §5).
 
 A concept's label is its sun (medoid entity) -- cheap, no LLM, and already meaningful
 ("spark sql", "iceberg catalog"). The flat concept layer labels itself.

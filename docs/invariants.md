@@ -265,7 +265,7 @@ The legacy `chunk.text ILIKE '%name%'` mastery computation is removed. Mastery i
 A concept's LanceDB vector (`concept_vectors_v1`) is the 384-dim centroid of its evidence-chunk embeddings, in **chunk space** (bge-small-en-v1.5; chunks, notes, and concepts are all 384-dim in one shared space). Recomputed when evidence changes. Use it only for concept-to-concept and material-to-concept similarity (linking, dedup, candidate seeding, scope resolution). Chunk vectors + FTS5 + graph (RRF) remain the RAG backbone.
 
 **I-21. OKF is a projection, never a transport and never a source of truth.**
-LiteLLM carries bytes; OKF carries portable knowledge -- never couple them. OKF files are regenerated from SQLite + Kuzu. A user edit to an OKF file re-enters the system only as an `override` (re-applied after re-parse), exactly like a graph rename/merge. See `docs/okf.md`.
+LiteLLM carries bytes; OKF carries portable knowledge -- never couple them. OKF files are regenerated from SQLite + Kuzu. A user edit to an OKF file re-enters the system only as an `override` (re-applied after re-parse), exactly like a graph rename/merge. See `docs/concepts.md`.
 
 **I-22. A rejected or edited graph element must not reappear after re-parse.**
 Re-parse produces fresh proposals, then `applyOverrides()` re-applies every user decision on top. Rejected concepts/edges and dismissed gaps stay gone (hidden, not deleted). Overrides survive re-parsing -- they are the user's permanent voice over Lumen's guesses.

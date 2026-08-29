@@ -1,4 +1,4 @@
-"""okf_context (GraphRAG grounding, docs/okf.md): resolve scope -> concepts ->
+"""okf_context (GraphRAG grounding, docs/concepts.md): resolve scope -> concepts ->
 expand graph + evidence -> OKF text, and the self-contained POST /qa/grounded answer over it.
 """
 

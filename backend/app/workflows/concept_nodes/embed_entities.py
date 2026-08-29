@@ -1,4 +1,4 @@
-"""embed_entities node -- vectorize concept seeds by CONTEXT (docs/concept-model-design.md §3).
+"""embed_entities node -- vectorize concept seeds by CONTEXT (docs/concepts.md §3).
 
 An entity's vector = the centroid of the chunk vectors where it actually occurs. This
 captures *how the term is used*, not just its surface string -- so "bloom filter"

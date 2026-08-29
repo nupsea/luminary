@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   describes the grounding assembler that exists, not the file projection that
   does not. DEEP_DIVE's philosophy section rewritten — the "25 golden
   principles" framing it cited exists nowhere else in the repo.
+- **19 docs became 13.** `release-credentials.md` and `demo-assets.md` folded
+  into `releasing.md`, `router-verification.md` into `patterns.md`, and
+  `concept-model-design.md` + `okf.md` into `concepts.md` — one subject that had
+  been split across three files. The two heavily-referenced study contracts were
+  left alone: they are live contracts, not short unimportant files. Verifying
+  afterwards caught two things the link checker cannot see — a find-and-replace
+  that turned a true roadmap sentence false, and four `§N` citations in code
+  pointing at sections that never existed.
 
 ## [0.8.28] - 2026-08-28
 

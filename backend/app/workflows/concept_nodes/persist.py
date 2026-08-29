@@ -4,7 +4,7 @@ Wipes the old concept layer, then persists concepts (level 2) as ConceptModel ro
 Concept nodes + lateral RELATED_TO edges, and LanceDB centroid vectors. Identity is a STABLE
 lineage-signature slug (hash of
 member entities), not the volatile label -- so re-runs keep the same identity and user
-overrides re-apply (docs/concept-model-design.md §6). Concept→chunk lineage is stashed in
+overrides re-apply (docs/concepts.md §6). Concept→chunk lineage is stashed in
 evidence_json for downstream generation/mastery. No-ops on a dry run.
 """
 

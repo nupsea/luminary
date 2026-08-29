@@ -64,7 +64,7 @@ any concept/mastery/graph/study work, read:
 - `docs/concepts.md` -- the Concept primitive (the canonical "what is a concept").
 - `docs/two-lane-model.md` -- the orchestration spine (Lane A/B, Study Events, the 14-rule constitution).
 - `docs/study-launcher.md` -- one sheet, many doors; `POST /study/assemble` + scope resolver.
-- `docs/okf.md` -- the portable knowledge projection (export/grounding/import).
+- `docs/concepts.md` -- the portable knowledge projection (export/grounding/import).
 
 ## Navigation Tabs
 

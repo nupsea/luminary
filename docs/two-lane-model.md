@@ -79,7 +79,7 @@ confirms. Keeps the doc-grounded graph honest while letting user material lead. 
 5. **Everything Lumen makes is proposed, evidenced, correctable.** Provenance always; corrections survive re-parse.
 6. **One call at a time.** Hub makes one recommendation with a *because*; "done for today" is a real state; no surface nags.
 7. **Activity is never mastery.** Read-% is cosmetic; the mastery number requires retrieval.
-8. **The learner model is files the user can read, edit, delete.** (OKF-backed -- see [okf.md](okf.md).)
+8. **The learner model stays inspectable and correctable.** Every proposal carries provenance and can be overridden, and a correction survives re-parse. The file projection that would make it literally editable outside the app is **not built** -- see [roadmap.md](roadmap.md).
 9. **Local by default, degraded gracefully.** Model down => review, reading, notes, manual cards still work.
 10. **Every surface earns its place by routing to action.** Can't launch a study event, link material, or correct the graph in one tap => it's decoration.
 11. **The manifest is law.** Every surface declares a mode; core (public) never hard-depends on a full-mode feature.
@@ -116,5 +116,5 @@ banner; note concept-chips fall back to title/centroid-vector match.
 
 - [concepts.md](concepts.md) -- the Concept primitive (the studyable atom).
 - [study-launcher.md](study-launcher.md) -- one sheet, many doors; `POST /study/assemble`.
-- [okf.md](okf.md) -- portable knowledge projection.
+- [concepts.md](concepts.md) -- portable knowledge projection.
 - [architecture.md](architecture.md), [invariants.md](invariants.md) -- the hard rules.

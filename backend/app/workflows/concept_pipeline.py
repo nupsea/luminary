@@ -2,7 +2,7 @@
 
 Each stage is one node fn per file in concept_nodes/, run in order over a shared
 ConceptPipelineState; each is independently swappable/reorderable and emits diagnostics
-(docs/concept-model-design.md §11-12). Persist runs only on a real run; --dry-run stops
+(docs/concepts.md §7). Persist runs only on a real run; --dry-run stops
 before it so the output can be judged without touching the DB.
 
 Node order:
@@ -26,7 +26,7 @@ logger = logging.getLogger("concepts.pipeline")
 
 # The ordered, swappable node sequence. persist_concepts no-ops on a dry run, so the
 # dry-run report shows everything up to (not including) the DB write
-# (docs/concept-model-design.md §11).
+# (docs/concepts.md §7).
 _NODES = [
     ("select_entities", select_entities),
     ("embed_entities", embed_entities),

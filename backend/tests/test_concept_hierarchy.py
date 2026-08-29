@@ -1,4 +1,4 @@
-"""build_hierarchy node -- the flat concept layer (docs/concept-model-design.md §0).
+"""build_hierarchy node -- the flat concept layer (docs/concepts.md §3).
 
 Verifies the dendrogram cut produces studyable concepts and that the distance-encoded
 RELATED_TO edges never link unrelated domains (data-eng vs philosophy).

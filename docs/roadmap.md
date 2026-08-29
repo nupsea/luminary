@@ -27,10 +27,10 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
-| Concepts, mastery, the studyable atom | `concepts.md`, `concept-model-design.md` |
+| Concepts, mastery, the studyable atom | `concepts.md`, `concepts.md` |
 | Study orchestration, `POST /study/assemble` | `two-lane-model.md`, `study-launcher.md` |
-| Signed macOS `.app`, notarized DMG, release flow | `desktop-bundle.md`, `releasing.md`, `release-credentials.md` |
-| Client-side routing verification | `router-verification.md` |
+| Signed macOS `.app`, notarized DMG, release flow | `desktop-bundle.md`, `releasing.md`, `releasing.md` |
+| Client-side routing verification | `patterns.md` |
 | Notes: CodeMirror 6 editor, wiki-links, backlinks | `architecture.md` (nav section) |
 | Hub recommender + misconception lifecycle | `recommender_service.py`, `misconceptions.py` |
 | Flashcard source grounding: per-card verdict, deck audit, review-time display | `invariants.md` I-34 |
@@ -66,13 +66,16 @@ are the pattern to copy. Do not "fix" those — they are already correct.
 
 ### 2. OKF is a grounding service, not yet a projection
 
-`okf.md` describes a folder of Markdown files — one per concept, plus `index.md` and `log.md` —
-as an export/import/grounding layer. Only the grounding half exists: `services/okf_context.py`
-provides `resolve_concepts` and `build_concept_context`, consumed by `routers/qa.py`. There is
-no file projection, no export endpoint, and no import path.
+Only the grounding half of OKF exists: `services/okf_context.py` provides `resolve_concepts`
+and `build_concept_context`, consumed by `routers/qa.py`, and `concepts.md` documents that and
+only that.
 
-I-21 already governs the unbuilt half (OKF is a projection, never a transport and never a source
-of truth), so build it against that invariant when it is built. `okf.md` is marked accordingly.
+The unbuilt half is a **file projection** — a folder of Markdown, one file per concept plus an
+index and a log, exportable and importable, so a learner model is something you can read and
+edit outside the app. There is no projection, no export endpoint and no import path, and no doc
+describes one: the design was removed from `docs/` on 2026-08-29 rather than left to read as a
+contract. I-21 governs it if it is built (OKF is a projection, never a transport and never a
+source of truth).
 
 ### 3. The `unstable` test quarantine
 
