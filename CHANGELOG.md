@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`DEEP_DIVE.md` described a version of Luminary that no longer exists.** It
+  named `mistral` as the default model and port 8000 as the backend, said the
+  OS-keychain migration was "planned" and that a Tauri desktop wrapper was "not
+  on the active roadmap" — all four shipped or changed. It also had the wrong
+  FSRS version, an unsourced retention claim, a `Semaphore(10)` that is 3, two
+  graph diagrams naming nodes that do not exist, no mention of Concepts (the
+  studyable atom), 2 of 5 Kuzu node tables and 4 of 27 relationships, and no
+  cross-encoder in the retrieval funnel. Rewritten against the code.
+
 ## [0.8.28] - 2026-08-28
 
 ### Fixed
