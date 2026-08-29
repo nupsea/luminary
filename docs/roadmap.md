@@ -212,27 +212,36 @@ Both are opt-out-able, both change what a user receives, and neither has a numbe
   drop, 0.7516 keep), which justifies the threshold and does not measure the axis. `vector_share`
   catches the arm dying, not the arm getting worse.
 
-### 9. The ingestion tests' entity extractor is a double that always raises
+### 9. Entity extraction is untested, and both ways of fixing that are blocked
 
-`NERService.extract` is `(chunks, content_type="unknown", is_technical=None)`
-(`services/ner.py:458`) and `entity_extract_node` calls it with all three
-(`workflows/ingestion_nodes/entity_extract.py:258`). Both test doubles stopped at the
-signature it had before `is_technical`: `tests/test_e2e_upload.py:187` takes two, and
-`tests/test_concurrent.py:50` takes one. **Every call raises `TypeError`**, which the node
-catches as non-fatal and proceeds — so the ingestion tests pass without ever exercising
-entity extraction, and each mock's carefully-built return value is dead code.
+**The doubles have drifted.** `NERService.extract` is
+`(chunks, content_type="unknown", is_technical=None)` (`services/ner.py:458`) and
+`entity_extract_node` calls it with all three (`ingestion_nodes/entity_extract.py:258`), but
+`tests/test_e2e_upload.py:187` takes two and `tests/test_concurrent.py:50` takes one. Every call
+raises `TypeError`, the node catches it as non-fatal, and the ingestion tests pass without ever
+exercising entity extraction or the Kuzu writes behind it.
 
-Correcting either signature is not a one-line fix, which is why this is an item rather than a
-commit. Measured on one machine, minutes apart: with the broken doubles
-`tests/test_e2e_upload.py` is **3 passed in 7.9s**; with the signatures corrected so
-extraction actually runs, it **exceeds the 120s per-test timeout** and ingestion stalls at
-`stage=indexing, progress_pct=80`. The `TypeError` is load-bearing for the suite being green.
+**Correcting them fails the gate.** With the signatures fixed the file passes **24/24 in
+isolation** at normal load — but `make ci` times out on it, because the rest of the suite
+supplies the load the isolated runs lack. Measuring the file alone is not measuring the gate,
+which is the trap here.
 
-So there are two defects stacked: the doubles have drifted, and the path they were hiding does
-not complete under test. Fix the second before the first, or the gate goes red. Related to the
-`unstable` quarantine (item 3) and to the leaked-task shutdown work — do not attempt it with a
-timing policy, which failed before. The patch that corrects the doubles is trivial to
-reconstruct from the signatures above.
+**The obvious cause is not the cause.** `entity_extract_node` runs `graph.upsert_document`,
+`graph.get_entities_by_type_for_document` and the whole `write_entity_graph` loop synchronously
+on the event loop, so a status poll cannot be served while Kuzu writes. I-2 says wrap it, and
+wrapping it in `asyncio.to_thread` **made things measurably worse**: under reproduced CPU load,
+12 runs per arm across two orderings, **2/12 timeouts without the wrap against 7/12 with it**.
+Magnitudes were noisy (0/6 then 2/6; 4/6 then 3/6); the direction held both ways. Reverted.
+
+Why is not understood. One hypothesis: the node already drives GLiNER through
+`loop.run_in_executor(None, ...)`, so Kuzu work queues behind a long extraction in the same
+bounded default pool. That is a hypothesis, not a finding.
+
+So both halves are blocked on the same missing explanation, and the order matters: understand
+the event-loop/Kuzu interaction first, then correct the doubles. **Do not re-apply the
+`to_thread` wrap on the strength of I-2 alone** — that is exactly the reasoning that produced
+the 7/12, and the invariant's one-line statement is not sufficient justification here. Do not
+reach for a timing policy either; that was tried on the `unstable` quarantine and failed.
 
 ### 10. `GET /documents` costs ~1.3s because its per-row counts are unindexed
 
