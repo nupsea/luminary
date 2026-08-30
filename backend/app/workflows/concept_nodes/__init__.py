@@ -1,1 +1,1 @@
-"""Concept-generation pipeline nodes (LangGraph). See docs/concept-model-design.md."""
+"""Concept-generation pipeline nodes (LangGraph). See docs/concepts.md."""

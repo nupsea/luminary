@@ -177,15 +177,15 @@ Models live in `DATA_DIR` and are never re-downloaded by an update.
 | `KEYCHAIN_PASSWORD` | any value; for the ephemeral CI keychain |
 | `APPLE_API_KEY` | base64 of the App Store Connect `AuthKey_*.p8` |
 | `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, `APPLE_TEAM_ID` | from App Store Connect |
-| `TAURI_SIGNING_PRIVATE_KEY` | `tauri signer generate` output; **not** in the repo |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
 
-The updater keypair must be generated once and kept: losing the private key
-means no existing install can ever be updated again.
+**There is no Tauri updater.** `tauri.conf.json` declares no updater plugin and the release
+workflow sets no `TAURI_SIGNING_PRIVATE_KEY`, so there is no update keypair to generate or lose.
+A new version is installed by downloading the new DMG; `luminary update` covers the script
+install instead. Do not add updater secrets to CI without adding the plugin that reads them.
 
 ### Sizes
 
-1.6 GB `.app` → 698 MB DMG (ULFO/LZFSE), measured at 0.2.8.
+678 MB DMG (ULFO/LZFSE), measured on the v0.8.28 release artifact (678,401,570 bytes).
 
 ## Scripts
 

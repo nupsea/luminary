@@ -1,5 +1,5 @@
 """persist_concepts node (NW5): writes the flat concept layer to SQLite with stable slug
-identity + RELATED_TO edges, status honoured from score_concepts (concept-model-design.md §6)."""
+identity + RELATED_TO edges, status honoured from score_concepts (concepts.md §6)."""
 
 import pytest
 from sqlalchemy import select

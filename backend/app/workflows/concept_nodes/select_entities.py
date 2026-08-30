@@ -1,4 +1,4 @@
-"""select_entities node -- relevance lever 1 (docs/concept-model-design.md §2).
+"""select_entities node -- relevance lever 1 (docs/concepts.md §2).
 
 Gathers entities from the graph and keeps only concept-bearing ones: drops the NER
 noise (PERSON / ORGANIZATION / PLACE / DATE / EVENT) and hapax mentions. This is the

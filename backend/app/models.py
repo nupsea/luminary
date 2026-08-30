@@ -197,7 +197,7 @@ class FlashcardModel(Base):
     concept_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     # Durable card->concept binding by STABLE slug (concept_id churns on a concept rebuild).
     # persist_concepts re-maps cards by this slug so a rebuild re-derives mastery instead of
-    # orphaning the learner's work (docs/concept-model-design.md).
+    # orphaning the learner's work (docs/concepts.md).
     concept_slug: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     source_scope: Mapped[str | None] = mapped_column(String, nullable=True)
     # server_default so Base.metadata.create_all emits a SQL DEFAULT -- keeps raw-SQL
@@ -275,7 +275,7 @@ class OverrideModel(Base):
 
     Keyed by STABLE identity (concept slug, edge key) so it survives re-parse: re-parse
     produces fresh proposals, then apply_overrides re-applies every decision on top (I-22).
-    See docs/concepts.md (corrections) and docs/okf.md (file edits feed this same channel).
+    See docs/concepts.md (corrections) and docs/concepts.md (file edits feed this same channel).
     """
 
     __tablename__ = "overrides"

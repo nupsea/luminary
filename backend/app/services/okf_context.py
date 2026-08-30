@@ -1,9 +1,9 @@
-"""okf_context -- the model-agnostic grounding assembler (docs/okf.md).
+"""okf_context -- the model-agnostic grounding assembler (docs/concepts.md).
 
 GraphRAG for Lumen: resolve a scope (a concept or a free-text query) to concept ids,
 EXPAND the concept graph (RELATED_TO neighbours), pull each concept's evidence passages, and project
 it all as one portable OKF text block. The same block grounds a local Ollama model and a cloud model
-identically -- OKF is the payload, LiteLLM is the wire (okf.md). Strictly local assembly.
+identically -- OKF is the payload, LiteLLM is the wire (concepts.md). Strictly local assembly.
 
 This is the reusable core; callers (grounded QA now, the study assembler / live chat graph later)
 decide what to do with the string. Community-summary caching for global questions is a follow-up.

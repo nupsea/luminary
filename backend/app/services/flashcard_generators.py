@@ -393,7 +393,7 @@ async def _screen_factuality(cards: list[dict], source_text: str | None) -> list
     Runs only when a checker is configured. It is a second model on a runtime that
     serves one at a time (I-27/I-31), so the checks are batched after generation
     rather than interleaved with it: one model switch per batch instead of one per
-    card. Cost is stated in `docs/model-and-eval-plan.md`.
+    card. Cost is stated in `docs/eval-coverage.md`.
 
     A card the checker could not judge is kept and recorded `unverifiable`. Failing
     closed would let an unreachable checker silently empty the deck, which is a

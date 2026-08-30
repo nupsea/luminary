@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`docs/roadmap.md` is a roadmap again.** It had drifted into a defect log
+  against its own rule; the nine remaining defects moved to the issue tracker
+  (#95-#103) with their evidence, and the file now carries four upcoming
+  features — Anki import, sync through a file-sync service, a mobile client,
+  and multi-language support. 297 lines to 167.
+
+### Fixed
+- **`DEEP_DIVE.md` described a version of Luminary that no longer exists.** It
+  named `mistral` as the default model and port 8000 as the backend, said the
+  OS-keychain migration was "planned" and that a Tauri desktop wrapper was "not
+  on the active roadmap" — all four shipped or changed. It also had the wrong
+  FSRS version, an unsourced retention claim, a `Semaphore(10)` that is 3, two
+  graph diagrams naming nodes that do not exist, no mention of Concepts (the
+  studyable atom), 2 of 5 Kuzu node tables and 4 of 27 relationships, and no
+  cross-encoder in the retrieval funnel. Rewritten against the code.
+- **`docs/` carried a 1,780-line plan whose work had shipped.** Every problem
+  `model-and-eval-plan.md` gated is closed — run provenance, repair counting,
+  corpus routing, the summary judge reading 8,000 raw bytes, the uncapped
+  `OLLAMA_MAX_LOADED_MODELS` on the DMG path, and interactive-vs-background
+  scheduling. Deleted per the roadmap's own instruction, its capabilities moved
+  to the Shipped table, and its footprint estimates were already superseded by
+  the registry's measured values. `okf.md` cut from 97 lines to 34: it now
+  describes the grounding assembler that exists, not the file projection that
+  does not. DEEP_DIVE's philosophy section rewritten — the "25 golden
+  principles" framing it cited exists nowhere else in the repo.
+- **19 docs became 13.** `release-credentials.md` and `demo-assets.md` folded
+  into `releasing.md`, `router-verification.md` into `patterns.md`, and
+  `concept-model-design.md` + `okf.md` into `concepts.md` — one subject that had
+  been split across three files. The two heavily-referenced study contracts were
+  left alone: they are live contracts, not short unimportant files. Verifying
+  afterwards caught two things the link checker cannot see — a find-and-replace
+  that turned a true roadmap sentence false, and four `§N` citations in code
+  pointing at sections that never existed.
+
 ## [0.8.28] - 2026-08-28
 
 ### Fixed

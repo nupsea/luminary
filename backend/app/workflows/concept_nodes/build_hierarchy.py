@@ -1,4 +1,4 @@
-"""build_hierarchy node -- group entity seeds into studyable concepts (concept-model-design.md §0).
+"""build_hierarchy node -- group entity seeds into studyable concepts (docs/concepts.md §3).
 
 One average-linkage cosine dendrogram over the concept seeds, cut once into concepts
 (solar systems). Each concept has a "sun" (medoid). Concepts then link to their nearest
