@@ -214,6 +214,19 @@ Both are opt-out-able, both change what a user receives, and neither has a numbe
 
 ### 9. Entity extraction is untested, and both ways of fixing that are blocked
 
+**It is contained, not fixed, and the containment has a cost.** All three `integration_http`
+tests carry `@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in CI")`,
+so GitHub never runs them -- verified: 3 skipped under `GITHUB_ACTIONS=true`, 3 passed locally.
+They cannot redden the shared gate, which is why every GH run stays green. The cost is that the
+only environment exercising upload-to-complete ingestion over HTTP is a developer's laptop; on
+the environment that gates every PR and every release tag, that path is untested. A local
+`make ci` does run them, with no retry, so a timeout there fails the whole gate.
+
+**The flake predates the doubles.** The `make ci` timeouts observed on 2026-08-29 happened with
+the doubles in their original broken state -- correcting them makes it worse, but does not
+create it. Any fix has to account for that, and for the fact that a green GitHub run says
+nothing about this test either way.
+
 **The doubles have drifted.** `NERService.extract` is
 `(chunks, content_type="unknown", is_technical=None)` (`services/ner.py:458`) and
 `entity_extract_node` calls it with all three (`ingestion_nodes/entity_extract.py:258`), but
