@@ -1,5 +1,5 @@
 ---
-description: What is built, what is open, and what will never be built. The single place to look before proposing work. Read before starting anything not already covered by a live contract doc.
+description: What is built, the features coming next, and what will never be built. The single place to look before proposing work. Defects live in the issue tracker, not here.
 ---
 
 # Roadmap
@@ -12,8 +12,15 @@ code plus its live contract doc is the record; git history holds the plan. A shi
 lying in `docs/` is indistinguishable from a live contract to anyone reading the tree for the
 first time, and that ambiguity is more expensive than the plan is worth.
 
-Each open item below carries evidence — a `file:line`, a gate, or a measured count. An item with
-no evidence is an opinion and does not belong here.
+**Defects are issues, not roadmap items.** This file had drifted into a defect log against its
+own rule; on 2026-08-29 the nine that were left moved to the tracker
+([#95](https://github.com/nupsea/luminary/issues/95)–[#103](https://github.com/nupsea/luminary/issues/103)),
+along with the evidence each carried. The test-suite quarantine lives in
+[#50](https://github.com/nupsea/luminary/issues/50).
+
+What belongs here is a **feature large enough to change what Luminary is for** — something a
+user would notice arriving, that needs a decision before it needs code. Each entry says what
+already exists, because the hard part is usually a constraint rather than the build.
 
 ## Shipped
 
@@ -47,232 +54,84 @@ Notes and the recommender shipped without a surviving contract doc because their
 adequately described by `architecture.md` plus the code. Their specs were deleted on
 2026-08-11 under the rule above.
 
-## Open
+## Roadmap
 
-### 1. String-interpolated SQL
+Four features, in the order they unblock each other. Each says what exists today, because most
+of them are half-seamed already and the work is smaller than it looks from the outside.
 
-Six sites build `IN (...)` clauses by quoting values into the string rather than binding them:
+### 1. Anki import, and a real round-trip
 
-- `services/vector_store.py:202,245,273`
-- `services/retriever.py:189`
-- `services/collection_health.py:98`
-- `services/graph_view.py:60` — guarded by `.isalpha()`, so lowest risk of the six
+**Export already ships**: `export_service.py` writes a `.apkg` through genanki, one card per
+`FlashcardModel` in a collection's deck (`GET /collections/{id}/export?format=anki`). There is
+no import path at all.
 
-Not currently exploitable: every interpolated id is internally generated. It is a latent
-primitive that one change in id provenance turns live, and it defeats statement caching.
+The point is not symmetry for its own sake — it is that a learner arrives with a deck they have
+already invested in, and today Luminary cannot read it. Import is the adoption path.
 
-`graph_view.py:208,283,339,428` and `graph_tech.py:464` already bind `$name` placeholders and
-are the pattern to copy. Do not "fix" those — they are already correct.
+The hard part is not the file format. A Luminary card carries `source_chunk_ids` and a
+per-card grounding verdict (I-34, I-35); an imported card has no passage in the library to
+point at. So importing has to answer what grounding means for a card whose source is elsewhere
+— shown as ungrounded, allowed to bind to a document later, or held in a separate lane. Decide
+that before writing a parser, or the invariant quietly stops meaning anything.
 
-### 2. OKF is a grounding service, not yet a projection
+FSRS state is the other question: an Anki deck carries SM-2 scheduling, and `fsrs` v6 state is
+not the same shape. Importing intervals naively would produce a schedule that looks continuous
+and is not.
 
-Only the grounding half of OKF exists: `services/okf_context.py` provides `resolve_concepts`
-and `build_concept_context`, consumed by `routers/qa.py`, and `concepts.md` documents that and
-only that.
+### 2. Sync the library through a file-sync service
 
-The unbuilt half is a **file projection** — a folder of Markdown, one file per concept plus an
-index and a log, exportable and importable, so a learner model is something you can read and
-edit outside the app. There is no projection, no export endpoint and no import path, and no doc
-describes one: the design was removed from `docs/` on 2026-08-29 rather than left to read as a
-contract. I-21 governs it if it is built (OKF is a projection, never a transport and never a
-source of truth).
+iCloud Drive, OneDrive, Dropbox, Google Drive — the services people already pay for, rather
+than a server Luminary would have to run. This keeps the local-first promise: no account, no
+backend, no data leaving except into storage the user already controls.
 
-### 3. The `unstable` test quarantine
+**The live stores cannot be the thing that syncs.** SQLite (with WAL), LanceDB and Kuzu are all
+mid-write-sensitive; a sync daemon copying a `-wal` or a Kuzu directory mid-write produces a
+corrupt library on the other machine, and Kuzu holds a lock besides. So the design is a
+snapshot/restore format that syncs, with the live stores rebuilt from it — never the stores
+themselves in a synced folder.
 
-**28 tests across 15 files** carry `@pytest.mark.unstable` and are excluded from the default
-run by `addopts`. Run them with `uv run pytest -m unstable`.
+That makes this the same work as the **OKF file projection**: a folder of Markdown, one file
+per concept plus an index and a log, that a user can read and edit outside the app. Only the
+grounding half of OKF exists today (`services/okf_context.py`, documented in `concepts.md`);
+the projection does not. I-21 governs it — OKF is a projection, never a transport and never a
+source of truth — which is exactly the property a sync format needs.
 
-They are two different problems wearing one marker. Roughly half genuinely fail against the
-current schema (the tag suite drifted). The rest pass individually but **cannot simply be
-un-marked**: reclaiming them was attempted and failed — cancel-on-teardown wedges GitHub runners
-into a mass error cascade, and grace-then-cancel pollutes shared Kuzu state, taking random
-unrelated tests down with it.
+Conflict resolution is the open question, and it is the reason this is a feature rather than a
+script: two machines that both studied offline have divergent FSRS state, and last-writer-wins
+would silently discard a review session.
 
-Do not retry with timing policies. The durable fix is per-site coroutine neutralization, in the
-style of the `_no_real_library_summary_generation` fixture, with opt-outs where a test genuinely
-needs the background work (`test_e2e_upload` does).
+### 3. A mobile client for capture and review
 
-Splitting the marker in two — `stale-schema` vs `leaks-tasks` — is the first step, because one
-marker over two causes is why this has stalled twice.
+Note taking and flashcard review — the two things you do away from a desk. Reading and ingest
+stay on the machine that has the models.
 
-### 4. The Hub sketch, and what is still approximate in it
+The backend is already HTTP, so the surface exists. Two things do not. **There is no
+authentication** — Luminary is single-user and local by design, and every store is a local file
+opened by one process; a phone reaching a laptop backend needs an answer to who is asking.
+And a phone that only works while the laptop is awake is not much of a client, so the honest
+version needs local storage on the device and a sync path back — which is feature 2, and why
+it comes second.
 
-Most of what issue #51 sketches is built. `frontend/src/pages/Hub.tsx` already renders the
-quote, today's focus, "continue where you left off", the fading/refresher lane, the tag cloud,
-active collections and a week summary, all from one fetch of `GET /home/overview`
-(`routers/home.py:58`).
+`surface-manifest.json` already declares each surface's mode, so a mobile build can be a
+third mode rather than a fork.
 
-Both gaps against the sketch are closed: the continue lane carries notes and an open study
-session, and `time_on_task` records per-activity duration for the week (`metrics.md` carries its
-contract). Stored titles render through `humanizeTitle`, because two thirds of one library's
-titles are the filename the document arrived as.
+### 4. Multi-language and cross-language support
 
-The page is now one 780px reading column rather than a two-column dashboard, following the
-`Luminary Home v2` design handoff: a single card for the decision the hub exists for — carry on
-reading, or start the review — then rows, then the week's shape two-up at the foot. The week
-split is labelled bars rather than a pie, because four magnitudes compared against each other is
-what a bar chart is for and a 72px pie made the small slices unreadable.
+Two separate pieces of work that get confused with each other.
 
-What remains is smaller and worth stating rather than assuming.
+**Interface localisation** is seamed but unbuilt: every surface in `surface-manifest.json`
+carries `labels: {"en": ...}`, so the shape is there and nothing else is.
 
-- **The ring's slices are foreground samples; `minutes_studied` beside them is session wall
-  clock.** Two bases on one card. They measure different things and are labelled so, but a
-  future edit that averages or sums them would produce a number meaning nothing.
-- **A study interval spanning local midnight lands on the day it began**, matching
-  EngagementService's approximation rather than splitting the interval.
-- **`Study` cannot be deep-linked to resume a session**, so the hub no longer offers a
-  continue-study lane at all: `Study.tsx` reads neither search params nor route state, and a
-  session id in the URL silently starts a fresh session. Restore the lane only alongside resume.
-- **"~N min left" is gone, and `readingTime.ts` with it.** It stacked a 200 wpm convention on
-  section-count progress standing in for word-count progress, and a tilde plus a hover title did
-  not make that legible to a reader. The hub shows the countable basis instead -- "2 of 22
-  sections" -- which is the same fact in units visible on the page. Restoring an estimate means
-  measuring reading speed rather than assuming one.
-- **A quote carries no field of its own.** Tagging each with a subject would need a taxonomy
-  applied by hand across the whole set, so the card shows author and source instead.
-- **Nothing prefills a note from elsewhere in the app.** `Notes.tsx` reads neither search params
-  nor route state, so "reflect on this" affordances elsewhere can only link to the page, which
-  the sidebar already does.
+**Cross-language retrieval** is the harder and more valuable one — asking a question in English
+about a German paper, or vice versa. The blocker is concrete: embeddings are
+`BAAI/bge-small-en-v1.5`, 384-dim and English-only, and every stored chunk, note, image and
+concept vector lives in that one space. Moving to a multilingual embedder changes the space, so
+**every vector in every library has to be regenerated** — which is a migration with a re-embed
+cost proportional to the library, not a config change. GLiNER is already multilingual
+(`gliner_multi_pii-v1`), so entity extraction would survive the move; retrieval would not.
 
-### 5. What the reported reader and study defects left behind
-
-All three are fixed (per-chunk citation pages, the unreachable Study landing, the search-highlight
-flicker and the sheet-vs-printed page footer), as is the reader opening on its section list.
-Three smaller things surfaced while fixing them and are worth stating rather than rediscovering.
-
-- **The page box counts sheets, and it is the only surface that still does.** The footer chip,
-  the contents list and every citation read the document's sheet-to-printed map, but the page
-  field jumps by sheet: typing `19` on a book with twenty pages of front matter lands nowhere
-  near the page printed `19`. Entering a printed number, or searching for one, has no path.
-- **Opening the in-document search leaves the reader.** `InDocSearchBar` renders inside the
-  section list, so Cmd+F from the Read view switches tabs to reach it — the same move the
-  `?search=` deep link makes. The search belongs to the document, not to one tab.
-- **The no-TOC PDF path invents headings from font size**, and on one book produced sections
-  titled `27` and `265` — page numbers picked up as headings. It does not lose text, so it is a
-  reading-quality defect rather than a data one.
-
-### 6. Formats other than HTML and PDF are unmeasured
-
-`universal-reader.md` is the contract for the reader. Region selection, the Markdown serialiser,
-webview rendering and `documents.extraction_report` shipped after it was written, so it does not
-yet describe them.
-
-- `md`, `epub`, `docx` and `txt` have **no post-`body`-column documents**, so those paths are
-  unmeasured rather than known good. Ingest one of each and compare stored `body` against source
-  before changing anything.
-- **A parent section can store its descendants' text as well as its own.** Measured: on one
-  1,017-section manual the top section holds 5,063,040 characters, and 60 of 60 sampled
-  sections have their opening text inside it; `SysDesign_2024_Blue` puts 55% of its document in
-  one section with 26 of 40 contained. `DDIA` shows 0 of 40, so this is not every document and
-  not every parser path. The reader now bounds what it fetches, so the symptom is gone, but the
-  duplicated text is still stored and still costs the section it was copied from. Find the path
-  that assigns a parent its children's span before changing the reader further.
-- **Audio documents ingested before 0.7.5 are still unreadable.** The cause is fixed — the
-  audio branch of `chunk_node` now writes one section per transcript chunk — but the fix runs at
-  ingestion, so documents already in a library keep their zero sections and still return `[]`
-  from `GET /sections/{id}/content`. Re-ingesting is the only way to gain them. A backfill would
-  have to reconstruct sections from stored chunks, which is what I-29 forbids; if one is built
-  it must read the transcript again, not reassemble it.
-- `pymupdf4llm>=1.28.2` is a **core dependency with no importer** (`pyproject.toml:41`, no
-  reference anywhere under `backend/`). It was added for the PDF-to-Markdown path, which is not
-  built. Either build that path or drop the dependency; a shipped dependency nothing imports is
-  weight in every install.
-- Two known losses remain on an interactive article measured at 13 headings: the site name
-  leaks as a one-word line, and a 205-character standfirst is `<h2>` in the source and therefore
-  renders as a heading. Demoting it means the serialiser overruling the author's markup, which
-  is a decision, not a bug fix.
-
-### 7. Rendering reaches only the platform with a shell
-
-`render_page` (`src-tauri/src/render.rs`) uses the webview the desktop shell embeds, so it
-exists only where that shell runs — macOS today. The browser dev server, Docker and the script
-installs take the static fetch, which measured full prose and headings on eight of nine test
-articles; the ninth returned 0 images statically against 78 rendered.
-
-Windows (#24) and Linux need their own shell before rendering follows. Canvas-drawn figures are
-not covered on any platform: they need an element screenshot, not a DOM capture.
-
-### 8. Two behaviours that ship without a measurement
-
-Both are opt-out-able, both change what a user receives, and neither has a number attached.
-
-- **The slow-host context budget.** Where the start-up probe measures local inference expensive,
-  `resolve_context_budget()` narrows the synthesis budget from 1500 to 750 tokens
-  (`config.py`, `QA_CONTEXT_TOKEN_BUDGET_SLOW_HOST`). The latency it buys is measured
-  (~56s → ~29s prefill at 31 tok/s) and the passages it costs are measured (roughly half), but
-  **the answer-quality cost is not** — the constant says so itself. It engages automatically
-  above a 20s probe, so the hosts that get it are the ones least able to spare quality. Measure
-  with `QA_CONTEXT_TOKEN_BUDGET=750` and a `study --generate` run before treating it as a
-  shipped default rather than a rescue for hosts that are unusable without it.
-
-- **Paraphrase recall in note search.** `make eval-notes` gates `self_recall_1`, `ghost_rate`,
-  `vector_share` and `noise_rejection`, but every query it builds shares words with the note it
-  should find. Nothing scores the case the semantic arm exists for: a query with no lexical
-  overlap. `NOTE_SEMANTIC_MIN_SIMILARITY = 0.62` is bracketed by two measured cases (0.5004
-  drop, 0.7516 keep), which justifies the threshold and does not measure the axis. `vector_share`
-  catches the arm dying, not the arm getting worse.
-
-### 9. Entity extraction is untested, and both ways of fixing that are blocked
-
-**It is contained, not fixed, and the containment has a cost.** All three `integration_http`
-tests carry `@pytest.mark.skipif(os.getenv("GITHUB_ACTIONS") == "true", reason="Flaky in CI")`,
-so GitHub never runs them -- verified: 3 skipped under `GITHUB_ACTIONS=true`, 3 passed locally.
-They cannot redden the shared gate, which is why every GH run stays green. The cost is that the
-only environment exercising upload-to-complete ingestion over HTTP is a developer's laptop; on
-the environment that gates every PR and every release tag, that path is untested. A local
-`make ci` does run them, with no retry, so a timeout there fails the whole gate.
-
-**The flake predates the doubles.** The `make ci` timeouts observed on 2026-08-29 happened with
-the doubles in their original broken state -- correcting them makes it worse, but does not
-create it. Any fix has to account for that, and for the fact that a green GitHub run says
-nothing about this test either way.
-
-**The doubles have drifted.** `NERService.extract` is
-`(chunks, content_type="unknown", is_technical=None)` (`services/ner.py:458`) and
-`entity_extract_node` calls it with all three (`ingestion_nodes/entity_extract.py:258`), but
-`tests/test_e2e_upload.py:187` takes two and `tests/test_concurrent.py:50` takes one. Every call
-raises `TypeError`, the node catches it as non-fatal, and the ingestion tests pass without ever
-exercising entity extraction or the Kuzu writes behind it.
-
-**Correcting them fails the gate.** With the signatures fixed the file passes **24/24 in
-isolation** at normal load — but `make ci` times out on it, because the rest of the suite
-supplies the load the isolated runs lack. Measuring the file alone is not measuring the gate,
-which is the trap here.
-
-**The obvious cause is not the cause.** `entity_extract_node` runs `graph.upsert_document`,
-`graph.get_entities_by_type_for_document` and the whole `write_entity_graph` loop synchronously
-on the event loop, so a status poll cannot be served while Kuzu writes. I-2 says wrap it, and
-wrapping it in `asyncio.to_thread` **made things measurably worse**: under reproduced CPU load,
-12 runs per arm across two orderings, **2/12 timeouts without the wrap against 7/12 with it**.
-Magnitudes were noisy (0/6 then 2/6; 4/6 then 3/6); the direction held both ways. Reverted.
-
-Why is not understood. One hypothesis: the node already drives GLiNER through
-`loop.run_in_executor(None, ...)`, so Kuzu work queues behind a long extraction in the same
-bounded default pool. That is a hypothesis, not a finding.
-
-So both halves are blocked on the same missing explanation, and the order matters: understand
-the event-loop/Kuzu interaction first, then correct the doubles. **Do not re-apply the
-`to_thread` wrap on the strength of I-2 alone** — that is exactly the reasoning that produced
-the 7/12, and the invariant's one-line statement is not sufficient justification here. Do not
-reach for a timing policy either; that was tried on the `unstable` quarantine and failed.
-
-### 10. `GET /documents` costs ~1.3s because its per-row counts are unindexed
-
-The library list runs about thirteen correlated subqueries per row. Measured on a 59-document
-library while three documents enriched: `GET /documents?page_size=24` takes **1.5s**, against
-**0.003s** for `GET /enrichment/queue` on the same server — so this is the query, not event-loop
-contention, and enrichment is not the cause.
-
-The counts are over tables with no `document_id` index: `chunks` (75,646 rows), `sections`
-(2,346), `flashcards` (826), `summaries` (452). `reading_progress`, `prediction_events` and
-`learning_objectives` already have one; `enrichment_jobs` does too, and at 162 rows it is not
-the cost. So the fix is an Alembic migration adding the missing indexes (I-23), not a query
-rewrite — and it wants a before/after measurement on a library this size rather than a rushed one.
-
-Bracketing what is already known: the enrichment aggregate added in `b647604` accounts for
-about 0.2s of the 1.5s (the single-job version it replaced measured 1.27s on the same library,
-same load). That is a real cost and worth re-measuring once the indexes exist, but it is not
-what makes the page slow.
+Worth measuring before committing: how far the current stack degrades on non-English text, so
+the re-embed is justified by a number rather than by an assumption.
 
 ## Deferred — decided, not scheduled
 
@@ -298,6 +157,11 @@ something else.
 
 ## Adding to this file
 
-An entry is warranted when work is **decided but not done**, or **rejected and likely to be
-re-proposed**. A bug is an issue, not a roadmap item. When an open item ships, delete its entry
-and add a row to Shipped naming the doc that now carries the contract.
+An entry is warranted when a **feature** is decided but not done, or rejected and likely to be
+re-proposed. When one ships, delete its entry and add a row to Shipped naming the doc that now
+carries the contract.
+
+**A bug is an issue, not a roadmap item** — that rule was already here, and this file drifted
+from it anyway. The tell is an entry that names a `file:line` and a symptom rather than a
+capability: that is a defect with good evidence, and the evidence belongs in the tracker where
+someone can close it. If an entry could be titled "X is broken", it is an issue.

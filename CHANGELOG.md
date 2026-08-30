@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`docs/roadmap.md` is a roadmap again.** It had drifted into a defect log
+  against its own rule; the nine remaining defects moved to the issue tracker
+  (#95-#103) with their evidence, and the file now carries four upcoming
+  features — Anki import, sync through a file-sync service, a mobile client,
+  and multi-language support. 297 lines to 167.
+
 ### Fixed
 - **`DEEP_DIVE.md` described a version of Luminary that no longer exists.** It
   named `mistral` as the default model and port 8000 as the backend, said the
