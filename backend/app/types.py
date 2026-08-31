@@ -25,8 +25,8 @@ class Section:
     text: str
     page_start: int
     page_end: int
-    admonition_type: str | None = None  # 'note'|'warning'|'tip'|'caution'|'important' or None
-    parent_heading: str | None = None  # heading string of the logical parent section
+    admonition_type: str | None = None  # 'note' | 'warning' | 'tip' | 'caution' | 'important'
+    parent_heading: str | None = None
     # Character offsets in `text` where a new page begins, excluding the first
     # page (whose number is `page_start`). Without this a chunk can only report
     # the page its *section* began on: measured on one library, every section of
@@ -49,8 +49,7 @@ class ParsedDocument:
     # their front matter separately. Only entries that differ from the sheet
     # number are kept, so an empty map means counting sheets is already right.
     page_labels: dict[int, str] = field(default_factory=dict)
-    # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
-    # static fetch could not capture). Empty when extraction was clean.
+    # Non-fatal extraction notices surfaced to the user; empty when extraction was clean.
     warnings: list[str] = field(default_factory=list)
     # Layout discovered from the document's own markers: book|paper|script|chat.
     # None when the parser that ran does not discover structure.
@@ -120,9 +119,8 @@ class ChatState(TypedDict):
     confidence: str  # 'high' | 'medium' | 'low'
     not_found: bool
 
-    # Internal streaming fields — set by synthesize_node, consumed by stream_answer().
-    # synthesize_node prepares the LLM prompt but does NOT call the LLM; stream_answer()
-    # calls the LLM streaming to yield tokens progressively as they are generated.
+    # Internal streaming fields: synthesize_node prepares the LLM prompt but does not
+    # call the LLM; stream_answer() calls it and streams tokens as they are generated.
     _llm_prompt: str | None
     _system_prompt: str | None
 
@@ -141,14 +139,13 @@ class ChatState(TypedDict):
     image_ids: list[str]
 
     # Web augmentation: optional per-conversation web search.
-    # web_snippets is transient per graph invocation -- never written to DB (privacy invariant).
+    # web_snippets is transient per graph invocation — never written to DB (privacy invariant).
     web_enabled: bool
     web_calls_used: int
     web_snippets: list[dict]
 
-    # chunk-derived source citations (SourceCitation dicts) collected by synthesize_node.
+    # Chunk-derived citations (SourceCitation shape) collected by synthesize_node.
     # Separate from 'citations' (LLM-extracted prose citations) to avoid field collision.
-    # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
 
     # chunks actually emitted into the prompt, in [S<n>] marker order, set by
@@ -156,12 +153,12 @@ class ChatState(TypedDict):
     # excerpt is filled from that chunk instead of retyped by the model (I-33).
     cited_chunks: list[dict]
 
-    # retrieval transparency metadata set by synthesize_node.
-    # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.
+    # Retrieval transparency metadata; emitted as a 'transparency' SSE event by
+    # stream_answer() after token streaming.
     transparency: "TransparencyInfo | None"
 
-    # flag set by augment_node to indicate context was augmented after low confidence.
-    # Checked by synthesize_node to set transparency.augmented = True.
+    # Set by augment_node when context was augmented after low confidence;
+    # synthesize_node reads it to set transparency.augmented.
     transparency_augmented: bool
 
 
@@ -169,16 +166,16 @@ class ChatState(TypedDict):
 
 
 class TransparencyInfo(TypedDict):
-    """Retrieval transparency metadata emitted as SSE event after answer streaming.
+    """Retrieval transparency metadata emitted as a 'transparency' SSE event.
 
     strategy_used values: 'executive_summary' | 'hybrid_retrieval' |
         'graph_traversal' | 'comparative' | 'augmented_hybrid'
     """
 
-    strategy_used: str  # how context was retrieved
-    chunk_count: int  # number of unique chunks used as context
-    section_count: int  # number of unique sections those chunks span
-    augmented: bool  # True if augment_node ran (context extended after low confidence)
+    strategy_used: str
+    chunk_count: int  # unique chunks
+    section_count: int  # unique sections spanned
+    augmented: bool  # True when augment_node extended context after low confidence
 
 
 # Notes search
@@ -249,7 +246,7 @@ class LearningPathNode:
 class LearningPathResponse(TypedDict):
     start_entity: str
     document_id: str
-    # nodes: topologically sorted LearningPathNode dataclasses (serialized to dicts on wire)
+    # topologically sorted; serialized to dicts on the wire
     nodes: list[LearningPathNode]
     edges: list[dict]  # list of {from_entity, to_entity, confidence}
 
@@ -260,7 +257,7 @@ class LearningPathResponse(TypedDict):
 @dataclass
 class StudyPathItem:
     concept: str
-    mastery: float  # 0.0 to 1.0 -- avg(fsrs_stability / 21.0) capped at 1.0
+    mastery: float  # 0.0 to 1.0 — avg(fsrs_stability / 21.0) capped at 1.0
     skip: bool  # True when avg_stability_days >= 14
     reason: str  # e.g. "avg_stability=18d" or "no flashcards"
     avg_stability_days: float
