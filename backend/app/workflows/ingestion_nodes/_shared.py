@@ -189,28 +189,54 @@ async def _update_stage(document_id: str, stage: str) -> None:
         await session.commit()
 
 
-async def detect_technical_transcript(raw_text: str) -> bool | None:
-    """Ask the LLM whether a transcript is technical content. None when undecidable.
+async def detect_technical_content(raw_text: str) -> bool | None:
+    """Ask the LLM whether a document's subject is technical. None when undecided.
 
-    Transcripts carry none of the structural signals resolve_technical_variant()
-    keys on (no fenced code, no numbered sections), so the decision has to come
-    from the language itself.
+    **The domain has to be read from the document, not inferred from its type.**
+    The type list this replaced (`content_type in TECHNICAL_CONTENT_TYPES`) wrote
+    a hard False for every paper and book, so "Attention Is All You Need" was
+    recorded as non-technical and lost every ALGORITHM, TECHNOLOGY and PROTOCOL
+    entity it should have had -- 70 entities extracted, 0 technical. So did
+    `d2l_dive_into_deep_learning`, at 165 and 0.
+
+    A vocabulary-density heuristic cannot stand in for this. `_TECH_VOCAB` is
+    ordinary computing vocabulary, so it reads an astronomy paper at 1.91 and a
+    LaTeX symbol table at 0.89 -- below a threshold that a CS blog post clears at
+    2.20. Any density floor that admits the blog post excludes the physics.
+
+    None on failure, never False: an unanswered probe is not a finding, and
+    `DocumentProfile` shows it as unclassified rather than as "general".
+    Re-runnable by `scripts/remeasure_domain.py`.
+
+    Scores 20/21 on the library's labelled documents, and repeats identically
+    across five runs on the same input. The miss is `art_of_unix`, whose opening
+    is design philosophy rather than engineering -- a genuine borderline, not a
+    tuning failure. Do not chase it with prompt wording: the case that would fix
+    it is the case that makes a meeting transcript technical again.
     """
+    from app.services.content_classifier import strip_boilerplate  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
 
-    snippet = raw_text[:2000].strip()
+    # The licence stripped, then the opening of the actual work -- not a sample
+    # of the body. Measured on 21 labelled documents: reading the opening scores
+    # 20/21 where sampling at 10/45/75% scores 17/21, because a talk states its
+    # subject in the first minute and its middle is conversational filler. The
+    # boilerplate strip is what makes the opening safe to read; without it every
+    # literary text classifies on its Gutenberg licence.
+    snippet = strip_boilerplate(raw_text)[:2000].strip()
     if not snippet:
         return None
     prompt = (
-        "Does this transcript discuss technical subject matter — software, "
-        "engineering, science, or mathematics?\n\n"
-        f"Transcript excerpt:\n{snippet}\n\n"
+        "Does this document's subject matter belong to a technical or scientific "
+        "field — software, engineering, mathematics, physics, medicine, or a "
+        "natural science?\n\n"
+        f"Excerpt:\n{snippet}\n\n"
         "Reply with exactly one word: yes or no."
     )
     try:
         raw = await get_llm_service().generate(prompt, background=True)
     except Exception as exc:
-        logger.warning("technical detection failed (non-fatal): %s", exc)
+        logger.warning("domain detection failed (non-fatal): %s", exc)
         return None
     answer = str(raw).strip().lower()
     if answer.startswith("yes"):
@@ -218,6 +244,10 @@ async def detect_technical_transcript(raw_text: str) -> bool | None:
     if answer.startswith("no"):
         return False
     return None
+
+
+# Kept: transcribe_node imported this name before the probe was generalised.
+detect_technical_transcript = detect_technical_content
 
 
 async def _persist_extraction_report(document_id: str, report: dict | None) -> None:

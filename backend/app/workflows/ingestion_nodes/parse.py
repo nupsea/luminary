@@ -24,6 +24,7 @@ from app.workflows.ingestion_nodes._shared import (
     _persist_extraction_report,
     _persist_structure_type,
     _update_stage,
+    detect_technical_content,
     resolve_technical_variant,
 )
 
@@ -86,6 +87,30 @@ async def parse_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
+async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
+    """Whether this document's subject is technical.
+
+    A content type only settles this when it names the subject outright.
+    Everything else is read from the document, because the type does not carry
+    it: `paper` says a work has an abstract and a method, not what field it is
+    in, and `book` covers both a novel and a deep-learning textbook.
+
+    The list this replaced answered for every type, which meant writing a hard
+    False for every paper and book. That is what stripped the technical entity
+    types from "Attention Is All You Need" (70 entities, 0 technical) and from
+    `d2l_dive_into_deep_learning` (165, 0).
+
+    None when the probe cannot answer -- never False. `scripts/remeasure_domain.py`
+    retries those.
+    """
+    if content_type in TECHNICAL_CONTENT_TYPES:
+        return True
+    raw_text = (pd or {}).get("raw_text") or ""
+    if not raw_text.strip():
+        return None
+    return await detect_technical_content(raw_text)
+
+
 async def classify_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
@@ -117,7 +142,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 extra={"doc_id": state["document_id"], "content_type": provided},
             )
             return {**state, "status": "chunking"}
-        is_technical = provided in TECHNICAL_CONTENT_TYPES
+        is_technical = await _measure_domain(provided, state.get("parsed_document"))
         await _persist_classification(state["document_id"], provided, is_technical)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
@@ -185,7 +210,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
 
             # Media documents are decided in transcribe_node instead — their text
             # does not exist yet at this point.
-            is_technical = content_type in TECHNICAL_CONTENT_TYPES
+            is_technical = await _measure_domain(content_type, pd)
             # The classified type has to reach the row, not just the state. Chunking
             # and NER read it from the state and were correct, so a document could
             # be chunked and entity-extracted as a tech_book while the library, the
