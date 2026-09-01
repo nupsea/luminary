@@ -18,6 +18,154 @@ ContentType = Literal[
 ]
 
 
+# Document facets
+#
+# `ContentType` above answers four questions with one value -- a container
+# (audio, epub, kindle_clippings), a shape (book, paper, conversation), a
+# subject (the tech_ prefix) and a size -- so it has to enumerate a cross
+# product and enumerates eleven of its cells. The facets below separate the
+# questions, and `format` on the row already carries the container.
+#
+# Being written alongside `content_type`, which stays authoritative until the
+# wire moves. See docs/roadmap.md rung 0.9.0.
+
+Form = Literal[
+    "prose",        # continuous long-form read start to finish
+    "article",      # one self-contained piece, shallow headings
+    "reference",    # manual or textbook: numbered sections, admonitions, code
+    "paper",        # abstract, method, results, references
+    "dialogue",     # speaker turns: chat, interview, meeting, talk transcript
+    "script",       # play or screenplay: scenes and stage directions
+    "entries",      # independent delimited units: clippings, journal, notes
+    "source_code",  # a program file
+]
+
+Domain = Literal["general", "technical"]
+
+# Whether the text tells a story or explains a subject. Nullable everywhere:
+# nothing populates it yet, and `card_genre` falls back to the behaviour that
+# shipped before it existed.
+Register = Literal["narrative", "expository"]
+
+CardGenre = Literal["narrative", "non-fiction", "technical", "academic", "conversation"]
+
+_FORM_BY_CONTENT_TYPE: dict[str, Form] = {
+    "book": "prose",
+    "epub": "prose",
+    "paper": "paper",
+    "tech_book": "reference",
+    "tech_article": "article",
+    "conversation": "dialogue",
+    "audio": "dialogue",
+    "video": "dialogue",
+    "notes": "entries",
+    "kindle_clippings": "entries",
+    "code": "source_code",
+    # Transient upload choice. classify_node resolves it to a tech_* variant
+    # before persisting, so this only covers a row read mid-ingest.
+    "technical": "article",
+}
+
+# Chunker settings per form. The values are the ones CHUNK_CONFIGS carried for
+# the content type each form replaces, so sizing does not move in this rung.
+# `reference` is 500/80 (tech_book) and `article` 350/60 (tech_article): what
+# used to be a length decision made at ingest is now carried by the form itself.
+_CHUNK_BY_FORM: dict[Form, tuple[int, int]] = {
+    "paper": (900, 150),
+    "prose": (600, 120),
+    "reference": (500, 80),
+    "dialogue": (450, 90),
+    "article": (350, 60),
+    "entries": (300, 75),
+    "source_code": (300, 75),
+    "script": (600, 120),
+}
+
+# Forms whose neighbouring chunks continue the same thought, so fetching them
+# adds context rather than noise. Replaces `_EXPANSION_TYPES`.
+_EXPANDING_FORMS: frozenset[str] = frozenset({"prose", "dialogue", "entries"})
+
+# Forms whose topics are the people and places in them. Everything else gets
+# concepts only: in a transcript or a manual, a PERSON is a speaker or a cited
+# author, which is noise as a browseable tag.
+_NARRATIVE_FORMS: frozenset[str] = frozenset({"prose", "entries", "script"})
+
+
+@dataclass(frozen=True)
+class DocumentProfile:
+    """What a document is, and every policy derived from it.
+
+    One definition per policy. Consumers ask this object rather than testing
+    `content_type` themselves -- five sites did the latter for "is this
+    technical" and disagreed with each other, two of them by matching the
+    document's title against a keyword list.
+    """
+
+    form: Form
+    domain: Domain
+    register: Register | None = None
+
+    @property
+    def is_technical(self) -> bool:
+        """Whether technical NER types and technical relation extraction apply."""
+        return self.domain == "technical"
+
+    @property
+    def chunk_config(self) -> dict[str, int]:
+        cfg = _CHUNK_BY_FORM[self.form]
+        return {"chunk_size": cfg[0], "chunk_overlap": cfg[1]}
+
+    @property
+    def expands_context(self) -> bool:
+        return self.form in _EXPANDING_FORMS
+
+    @property
+    def tag_entity_types(self) -> tuple[str, ...]:
+        if self.form in _NARRATIVE_FORMS:
+            return ("PERSON", "PLACE", "CONCEPT")
+        return ("CONCEPT",)
+
+    @property
+    def card_genre(self) -> CardGenre:
+        """What to ask of this material when writing flashcards.
+
+        `paper` is tested before `domain` because a paper is technical and
+        still wants the academic prompt. `narrative` is unreachable until
+        something populates `register`; before facets it was unreachable
+        outright, and a prose book reached the technical prompt only by its
+        title matching a keyword list.
+        """
+        if self.form == "source_code":
+            return "technical"
+        if self.form == "paper":
+            return "academic"
+        if self.form == "dialogue":
+            return "conversation"
+        if self.domain == "technical":
+            return "technical"
+        if self.register == "narrative":
+            return "narrative"
+        return "non-fiction"
+
+    @classmethod
+    def from_legacy(
+        cls,
+        content_type: str | None,
+        is_technical: bool | None = None,
+        register: Register | None = None,
+    ) -> "DocumentProfile":
+        """Build a profile from the columns that predate the facets.
+
+        Used to dual-write during ingest and to backfill. `is_technical`
+        resolves exactly as `is_technical_content` does, so NER sees the same
+        answer it saw before.
+        """
+        form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "article")
+        technical = is_technical_content(content_type, is_technical)
+        domain: Domain = "technical" if technical else "general"
+        return cls(form=form, domain=domain, register=register)
+
+
 @dataclass
 class Section:
     heading: str

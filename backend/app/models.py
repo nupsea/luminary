@@ -70,6 +70,17 @@ class DocumentModel(Base):
     # Layout discovered while parsing: book|paper|script|chat. Combined with
     # content_type to pick a reading profile. Null when undiscovered.
     structure_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Document facets, written alongside content_type while it stays
+    # authoritative. `form` is the shape (prose|article|reference|paper|
+    # dialogue|script|entries|source_code), `domain` the subject
+    # (general|technical), `register` whether it tells or explains
+    # (narrative|expository). See app/types.py DocumentProfile.
+    # Null = predates the facets, or nothing has classified this row yet.
+    form: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Nothing populates this yet; the classifier that decides it arrives with
+    # rung 0.10.0. The column exists now so adding it is not a second migration.
+    register: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # What the importer captured and what it could not: {"captured": {...},
     # "dropped": {...}, "notes": [...], "complete": bool}. Persisted so a
     # partial import is visible to the reader rather than a silence they have
