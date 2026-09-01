@@ -24,15 +24,13 @@ from app.services.fts_query import (  # noqa: F401  re-exported for retriever.py
     sanitize_fts_query as _sanitize_fts_query,
 )
 from app.services.model_loading import MODEL_LOAD_LOCK
-from app.types import ScoredChunk
+from app.types import DocumentProfile, ScoredChunk
 
 logger = logging.getLogger(__name__)
 
 # Fraction of top-k chunks from one section that triggers diversity re-ranking.
 _DIVERSITY_THRESHOLD = 0.6
 
-# Content types eligible for context expansion.
-_EXPANSION_TYPES = {"book", "conversation", "notes"}
 # Score multiplier for neighbour chunks added by context expansion.
 _EXPANSION_SCORE_FACTOR = 0.75
 
@@ -185,7 +183,8 @@ async def _expand_context(
     score = original_score * _EXPANSION_SCORE_FACTOR and source='context_expansion'.
 
     Rules:
-    - Only applies to content types in _EXPANSION_TYPES ('book', 'conversation', 'notes').
+    - Only applies where DocumentProfile.expands_context is true: the forms whose
+      neighbouring chunks continue the same thought (prose, dialogue, entries).
     - Dedup: if a neighbour's chunk_id already exists in the result set, keep
       whichever has the higher score and discard the other.
     - Total result capped at k * 2 (sorted by score desc).
@@ -208,8 +207,14 @@ async def _expand_context(
         )
         content_types: dict[str, str] = {row[0]: row[1] for row in ct_result.fetchall()}
 
-        # Check if any chunk qualifies for expansion
-        eligible_docs = {did for did, ct in content_types.items() if ct in _EXPANSION_TYPES}
+        # Neighbouring chunks only continue the same thought in some forms.
+        # Derived from content_type rather than read from `documents.form`
+        # because content_type is still the authoritative column in this rung.
+        eligible_docs = {
+            did
+            for did, ct in content_types.items()
+            if DocumentProfile.from_legacy(ct).expands_context
+        }
         if not eligible_docs:
             return chunks
 

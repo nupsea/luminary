@@ -28,7 +28,7 @@ from app.services import (
 from app.services.components import resolve_tool
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
-    _persist_is_technical,
+    _persist_classification,
     _update_stage,
     detect_technical_transcript,
 )
@@ -194,7 +194,9 @@ async def transcribe_node(state: IngestionState) -> IngestionState:
         # entity reindexing reaches the same answer.
         is_technical = await detect_technical_transcript(raw_text)
         if is_technical is not None:
-            await _persist_is_technical(doc_id, is_technical)
+            # Writes the facets too: a technical talk keeps content_type
+            # "audio" for the player and carries its subject in `domain`.
+            await _persist_classification(doc_id, content_type, is_technical)
 
         logger.info(
             "transcribe_node: done",

@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 _parser = DocumentParser()
 
+# No longer read by the chunkers -- `DocumentProfile.chunk_config` decides
+# sizing now. Kept as the pinned record of what each content type used to get,
+# and `tests/test_document_profile.py` asserts the profile still reproduces it.
+# Deleting this as dead code would silently void that comparison. It goes when
+# content_type does.
 CHUNK_CONFIGS: dict[str, dict[str, int]] = {
     # Papers are the densest content type and previously had the smallest budget,
     # tight enough that splits fell past word boundaries into mid-word cuts. The
@@ -215,20 +220,6 @@ async def detect_technical_transcript(raw_text: str) -> bool | None:
     return None
 
 
-async def _persist_is_technical(document_id: str, is_technical: bool) -> None:
-    from sqlalchemy import update  # noqa: PLC0415
-
-    from app.models import DocumentModel  # noqa: PLC0415
-
-    async with get_session_factory()() as session:
-        await session.execute(
-            update(DocumentModel)
-            .where(DocumentModel.id == document_id)
-            .values(is_technical=is_technical)
-        )
-        await session.commit()
-
-
 async def _persist_extraction_report(document_id: str, report: dict | None) -> None:
     """Store what the importer captured and what it could not.
 
@@ -266,17 +257,30 @@ async def _persist_structure_type(document_id: str, structure_type: str) -> None
         await session.commit()
 
 
-async def _persist_content_type(document_id: str, content_type: str) -> None:
-    """Write a resolved content_type back to the document row so the stored
-    value always names a concrete pipeline variant, never a merged choice."""
+async def _persist_classification(
+    document_id: str, content_type: str, is_technical: bool | None
+) -> None:
+    """Write the content type, the technical flag and the facets they imply.
+
+    One statement rather than three: `form` and `domain` are a function of the
+    other two columns, so writing them separately leaves a window in which the
+    row disagrees with itself. `register` is untouched -- nothing classifies it.
+    """
     from sqlalchemy import update  # noqa: PLC0415
 
     from app.models import DocumentModel  # noqa: PLC0415
+    from app.types import DocumentProfile  # noqa: PLC0415
 
+    profile = DocumentProfile.from_legacy(content_type, is_technical)
     async with get_session_factory()() as session:
         await session.execute(
             update(DocumentModel)
             .where(DocumentModel.id == document_id)
-            .values(content_type=content_type)
+            .values(
+                content_type=content_type,
+                is_technical=is_technical,
+                form=profile.form,
+                domain=profile.domain,
+            )
         )
         await session.commit()

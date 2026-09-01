@@ -20,9 +20,8 @@ from app.types import TECHNICAL_CONTENT_TYPES
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
-    _persist_content_type,
+    _persist_classification,
     _persist_extraction_report,
-    _persist_is_technical,
     _persist_structure_type,
     _update_stage,
     resolve_technical_variant,
@@ -100,8 +99,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 if pd
                 else "tech_article"
             )
-            await _persist_content_type(state["document_id"], resolved)
-            await _persist_is_technical(state["document_id"], True)
+            await _persist_classification(state["document_id"], resolved, True)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",
                 extra={"doc_id": state["document_id"], "content_type": resolved},
@@ -120,7 +118,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
             )
             return {**state, "status": "chunking"}
         is_technical = provided in TECHNICAL_CONTENT_TYPES
-        await _persist_is_technical(state["document_id"], is_technical)
+        await _persist_classification(state["document_id"], provided, is_technical)
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},
@@ -195,8 +193,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
             # seeded with. Harmless while this branch only ran for documents whose
             # row already held the caller's own value; a silent mislabel now that
             # classification is the normal path.
-            await _persist_content_type(state["document_id"], content_type)
-            await _persist_is_technical(state["document_id"], is_technical)
+            await _persist_classification(state["document_id"], content_type, is_technical)
 
             logger.info(
                 "Classified document",

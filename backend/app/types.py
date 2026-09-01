@@ -91,6 +91,13 @@ _EXPANDING_FORMS: frozenset[str] = frozenset({"prose", "dialogue", "entries"})
 _NARRATIVE_FORMS: frozenset[str] = frozenset({"prose", "entries", "script"})
 
 
+def chunk_config_for_form(form: Form) -> dict[str, int]:
+    """Chunker settings for a form, for the specialised chunkers that already
+    know which form they are handling and have no profile to hand."""
+    size, overlap = _CHUNK_BY_FORM[form]
+    return {"chunk_size": size, "chunk_overlap": overlap}
+
+
 @dataclass(frozen=True)
 class DocumentProfile:
     """What a document is, and every policy derived from it.
@@ -112,8 +119,7 @@ class DocumentProfile:
 
     @property
     def chunk_config(self) -> dict[str, int]:
-        cfg = _CHUNK_BY_FORM[self.form]
-        return {"chunk_size": cfg[0], "chunk_overlap": cfg[1]}
+        return chunk_config_for_form(self.form)
 
     @property
     def expands_context(self) -> bool:
@@ -160,7 +166,10 @@ class DocumentProfile:
         resolves exactly as `is_technical_content` does, so NER sees the same
         answer it saw before.
         """
-        form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "article")
+        # `entries` for an unmapped type, because that is the smallest chunk
+        # size and matches what the generic chunker fell back to. Guessing a
+        # larger one costs recall on a document nobody has classified.
+        form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "entries")
         technical = is_technical_content(content_type, is_technical)
         domain: Domain = "technical" if technical else "general"
         return cls(form=form, domain=domain, register=register)
