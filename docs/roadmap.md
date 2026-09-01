@@ -56,10 +56,69 @@ adequately described by `architecture.md` plus the code. Their specs were delete
 
 ## Roadmap
 
-Four features, in the order they unblock each other. Each says what exists today, because most
-of them are half-seamed already and the work is smaller than it looks from the outside.
+**1.0.0 is a major public release, reached through a ladder of minor versions.** Each rung carries
+one theme, one exit gate that can come out red, and leaves the app whole if the rung after it never
+ships. Patch numbers are release plumbing here — 0.8.0 to 0.8.28 took one day — so the minor is the
+planning unit.
 
-### 1. Anki import, and a real round-trip
+Rung numbers are ordering, not commitments. Several will split once scoped.
+
+| Rung | Theme | Exit gate |
+|---|---|---|
+| 0.9.0 | Model alignment | Per-axis classifier accuracy on a relabelled fixture; zero API diff |
+| 0.10.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
+| 0.11.0 | Stores that agree | A reprocess killed midway leaves no divergence between stores |
+| 0.12.0 | Ingest you can measure | Every ingest path reports a measured fidelity number |
+| 0.13.0 | Anki import | A real deck imports with an honest grounding state per card |
+| 0.14.0 | Windows | First-run setup completes on a machine that has never seen Luminary |
+| 0.15.0 | Snapshot and sync | Two machines that studied offline converge without losing a review |
+| 0.16.0 | Mobile capture and review | Capture and review from a phone with the laptop asleep |
+| 0.17.0 | Multi-language | A re-embed runs to completion on a real library, resumable |
+| 1.0.0 | The public release | Every rung's exit gate green together, on one build |
+
+**1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
+
+Startup only ever runs `upgrade head`, so a newer library cannot be opened by an older build
+(`releasing.md`). Every migration is a one-way door, which is why the migration-heavy rungs come
+first: walk through them while the room is nearly empty.
+
+### 1. The document model expresses what documents actually are — 0.9.0
+
+**`content_type` is four questions in one enum**: a container (`audio`, `epub`,
+`kindle_clippings`), a shape (`book`, `paper`, `conversation`), a subject (the `tech_` prefix) and
+a size — `content_classifier.py` says outright that `tech_book` vs `tech_article` is "a sizing
+choice, not a category". Eleven values enumerate eleven cells of a cross product, so most documents
+have nowhere to land, and `technical` is a transient upload state living in a persisted enum.
+
+The `is_technical` column exists because the enum could not carry technicality. Two of seven
+consumers read it; the rest re-derive it and disagree — `document_tagger.py` counts `paper` and
+`conversation` as technical, `types.py` does not, and `flashcard_prompts.py` and `chat_meta.py`
+fall back to matching the document **title** against a keyword regex.
+
+The replacement is three facets — form, domain, register — behind one derived `DocumentProfile`
+that owns every policy currently re-derived at each call site. Splitting the enum without that
+object gives five rival definitions three fields to disagree over instead of one.
+
+**Why this rung is first**: every other entry here gets harder with users. This one gets
+foreclosed. After 1.0 the document model is what the compatibility promise is about.
+
+**It spans three rungs by construction.** Phase 4 retires the legacy `content_type` projection, and
+a projection can only be retired after a shipped release stopped depending on it — so 0.9.0 takes
+the additive migration, the profile and the classifier (all internal, no wire change), 0.10.0 puts
+facets on the wire once `make smoke` is a gate again, and 0.11.0 retires the projection.
+
+The migration is additive only. `batch_alter_table` emits a plain `ALTER TABLE ADD COLUMN` for
+`add_column` but rebuilds the table — `DROP TABLE documents` included — for `alter_column`, so
+`domain` is a new column backfilled from `is_technical`, never a widening of it. The backfill reads
+only columns already on the row, so it needs no document text and no model, and re-running it is
+always safe. **No failure mode in this work requires a user to re-ingest.**
+
+Split the DDL and the backfill into separate revisions, and guard the backfill on data
+(`WHERE form IS NULL`) rather than on column existence: SQLite DDL escapes the surrounding
+transaction, so a crash mid-revision leaves the column committed and the backfill rolled back, and
+the existing `if _has_column(...): return` guard would then skip the backfill permanently.
+
+### 2. Anki import, and a real round-trip — 0.13.0
 
 **Export already ships**: `export_service.py` writes a `.apkg` through genanki, one card per
 `FlashcardModel` in a collection's deck (`GET /collections/{id}/export?format=anki`). There is
@@ -78,7 +137,7 @@ FSRS state is the other question: an Anki deck carries SM-2 scheduling, and `fsr
 not the same shape. Importing intervals naively would produce a schedule that looks continuous
 and is not.
 
-### 2. Sync the library through a file-sync service
+### 3. Sync the library through a file-sync service — 0.15.0
 
 iCloud Drive, OneDrive, Dropbox, Google Drive — the services people already pay for, rather
 than a server Luminary would have to run. This keeps the local-first promise: no account, no
@@ -100,7 +159,7 @@ Conflict resolution is the open question, and it is the reason this is a feature
 script: two machines that both studied offline have divergent FSRS state, and last-writer-wins
 would silently discard a review session.
 
-### 3. A mobile client for capture and review
+### 4. A mobile client for capture and review — 0.16.0
 
 Note taking and flashcard review — the two things you do away from a desk. Reading and ingest
 stay on the machine that has the models.
@@ -115,7 +174,7 @@ it comes second.
 `surface-manifest.json` already declares each surface's mode, so a mobile build can be a
 third mode rather than a fork.
 
-### 4. Multi-language and cross-language support
+### 5. Multi-language and cross-language support — 0.17.0
 
 Two separate pieces of work that get confused with each other.
 
@@ -132,6 +191,11 @@ cost proportional to the library, not a config change. GLiNER is already multili
 
 Worth measuring before committing: how far the current stack degrades on non-English text, so
 the re-embed is justified by a number rather than by an assumption.
+
+**This is the last rung before 1.0.0 deliberately.** It is the one migration that cannot be
+additive, and 0.x is the last point at which the compatibility promise is weak enough to absorb
+it. A 1.0 whose first significant act is a full re-embed has broken its own promise in its first
+minor.
 
 ## Deferred — decided, not scheduled
 
