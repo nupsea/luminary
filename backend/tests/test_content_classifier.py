@@ -20,8 +20,10 @@ from app.services.content_classifier import (
     _speaker_stats,
     classify_content,
     count_numbered_sections,
+    looks_like_front_matter,
     sample_body,
     strip_boilerplate,
+    subject_excerpt,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -183,6 +185,56 @@ def test_duplicated_extraction_does_not_multiply_the_section_count() -> None:
     skeleton = "3.1\nOne\n3.2\nTwo\n3.3\nThree\n"
     assert count_numbered_sections(skeleton) == 3
     assert count_numbered_sections(skeleton * 3) == 3
+
+
+class TestFrontMatter:
+    """A contents listing must not decide what a document is about.
+
+    `art_of_unix` was classified as non-technical because the opening 2,000
+    characters were its chapter contents, whose entries are headed "Philosophy".
+    The subject probe read a navigation aid and answered about that.
+    """
+
+    def test_a_run_on_contents_list_is_front_matter(self) -> None:
+        """Sentence density cannot catch this one.
+
+        Every entry ends in a full stop and starts with a capital, so the block
+        scores as prose. What gives it away is that it says so.
+        """
+        toc = (
+            "Chapter 4. Modularity\nTable of ContentsEncapsulation and Optimal Module Size."
+            "Compactness and Orthogonality. The SPOT Rule. Libraries. Unix and Object-"
+            "Oriented Languages. Coding for Modularity."
+        )
+        assert looks_like_front_matter(toc) is True
+
+    def test_a_paginated_contents_is_front_matter(self) -> None:
+        leaders = (
+            "Contents\n1 Introduction . . . . . . . . . . . . 9\n"
+            "2 Methods . . . . . . . . 14\n"
+        )
+        assert looks_like_front_matter(leaders) is True
+
+        column = "Introduction\n1\nBackground\n7\nMethod\n12\nResults\n19\nDiscussion\n24\n"
+        assert looks_like_front_matter(column) is True
+
+    def test_ordinary_prose_is_not_front_matter(self) -> None:
+        prose = (
+            "Those who do not understand Unix are condemned to reinvent it, poorly. "
+            "The design of an operating system reflects the assumptions of the people "
+            "who wrote it, and those assumptions outlive the hardware they were made for."
+        )
+        assert looks_like_front_matter(prose) is False
+
+    def test_the_excerpt_falls_back_only_when_the_opening_is_unusable(self) -> None:
+        """A clean opening must be read exactly as before, so a document that
+        never had this problem cannot be disturbed by the fix."""
+        body = "The engine converts fuel into motion. " * 200
+        assert subject_excerpt(body).startswith("The engine converts fuel")
+
+        contented = "Table of Contents\nOne\nTwo\nThree\n" + ("x" * 1900) + body
+        excerpt = subject_excerpt(contented)
+        assert "Table of Contents" not in excerpt
 
 
 def test_chapter_headings_do_not_decide_prose() -> None:

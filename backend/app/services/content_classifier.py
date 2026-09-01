@@ -150,6 +150,58 @@ def sample_body(raw_text: str, window: int = 6000) -> str:
     )
 
 
+# A contents listing announces itself, one way or another. `art_of_unix` opens
+# with a literal "Table of Contents"; a PDF textbook opens with dotted leaders
+# and a column of page numbers.
+_CONTENTS_MARKER = re.compile(r"table of contents|^\s*contents\s*$", re.I | re.M)
+_DOTTED_LEADER = re.compile(r"\.{4,}")
+_NUMERIC_LINE = re.compile(r"^\s*[\d.]+\s*$", re.M)
+
+# Above this share of lines being nothing but a number, the window is a listing
+# rather than text. Measured on the library: `sutton_barto_rl`'s contents pages
+# run 0.24 to 0.64, and the highest any prose window reaches is 0.0 -- the
+# floor sits in a gap wide enough that its exact value does not matter.
+_NUMERIC_LINE_SHARE = 0.15
+
+
+def looks_like_front_matter(window: str) -> bool:
+    """Whether this window is a contents listing rather than the work.
+
+    Sentence density cannot answer this. `art_of_unix` opens with a run-on
+    chapter contents whose every entry is a rule ending in a full stop --
+    "Rule of Clarity: Clarity is better than cleverness." -- so it reads as five
+    sentences per 1000 characters, indistinguishable from prose. What separates
+    it is that it says "Table of Contents"; what separates a PDF's contents is
+    the leaders and the column of page numbers.
+    """
+    if _CONTENTS_MARKER.search(window) or _DOTTED_LEADER.search(window):
+        return True
+    lines = [ln for ln in window.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    numeric = sum(1 for ln in lines if _NUMERIC_LINE.match(ln))
+    return numeric / len(lines) > _NUMERIC_LINE_SHARE
+
+
+def subject_excerpt(raw_text: str, window: int = 2000) -> str:
+    """The excerpt to judge a document's subject from.
+
+    The opening, because a work states its subject early and a talk states it in
+    the first minute -- measured at 20/21 against 17/21 for a body sample. But
+    the opening is only usable when it is the work: when it is a contents
+    listing, the sample comes from the body instead, where 24 of 24 documents in
+    the library have text.
+
+    The fallback fires only where the head is demonstrably front matter, so a
+    document with a clean opening is judged exactly as before.
+    """
+    body = strip_boilerplate(raw_text)
+    head = body[:window].strip()
+    if head and not looks_like_front_matter(head):
+        return head
+    return sample_body(raw_text, window=window).strip()
+
+
 def count_numbered_sections(text: str) -> int:
     """How many distinct numbered sections the text appears to carry.
 

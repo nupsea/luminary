@@ -226,16 +226,14 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     philosophy rather than engineering -- a genuine borderline. Chasing it with
     wording is how a prompt starts fitting the corpus in front of it.
     """
-    from app.services.content_classifier import strip_boilerplate  # noqa: PLC0415
+    from app.services.content_classifier import subject_excerpt  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
 
-    # The licence stripped, then the opening of the actual work -- not a sample
-    # of the body. Measured on 21 labelled documents: reading the opening scores
-    # 20/21 where sampling at 10/45/75% scores 17/21, because a talk states its
-    # subject in the first minute and its middle is conversational filler. The
-    # boilerplate strip is what makes the opening safe to read; without it every
-    # literary text classifies on its Gutenberg licence.
-    snippet = strip_boilerplate(raw_text)[:2000].strip()
+    # The opening of the work, falling back to the body when the opening is a
+    # contents listing. See `subject_excerpt` for why each half is needed: the
+    # opening wins on talks, and the fallback is what stops a chapter's table of
+    # contents deciding the subject of the chapter.
+    snippet = subject_excerpt(raw_text)
     if not snippet:
         return None
     # The fields are examples and the category is left open. A closed list is a
