@@ -95,7 +95,11 @@ async def classify_node(state: IngestionState) -> IngestionState:
     if provided is not None:
         if provided == "technical":
             pd = state.get("parsed_document")
-            resolved = resolve_technical_variant(pd["raw_text"]) if pd else "tech_article"
+            resolved = (
+                resolve_technical_variant(pd["raw_text"], pd["word_count"])
+                if pd
+                else "tech_article"
+            )
             await _persist_content_type(state["document_id"], resolved)
             await _persist_is_technical(state["document_id"], True)
             logger.info(

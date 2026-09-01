@@ -65,7 +65,25 @@ _TRANSCRIPT_HEADER = re.compile(
 )
 
 _CODE_FENCE = re.compile(r"^\s*```", re.M)
-_NUMBERED_SECTION = re.compile(r"^\s{0,4}\d+\.\d+[\s.]", re.M)
+# Captures the section number so callers can count DISTINCT ones.
+#
+# A PDF extracts "3.2" onto its own line with the title on the next, so a title
+# cannot be required on the same line -- the number has to be allowed to stand
+# alone. That admits every bare numeric literal in the document, which on a
+# quantitative paper is most of its tables and axis labels: the raw matches for
+# "Attention Is All You Need" were 199, and the distinct values were led by
+# 0.0, 0.1, 0.2, 0.3 -- plot ticks, not sections.
+#
+# Two guards, both measured on the stored papers. A section number never starts
+# with zero, which removes the whole 0.x family a chess paper's probabilities
+# live in (0.11, 0.21, 0.33, ...). Neither part exceeds two digits, so 2931529.5
+# cannot pose as a section. Counting distinct values then stops duplicated
+# extraction (issue #97) from multiplying one skeleton into a score it did not
+# earn.
+#
+# This narrows the signal; it does not make it exact. Data at or above 1.0 is
+# still indistinguishable from a section number by pattern alone.
+_NUMBERED_SECTION = re.compile(r"^[ \t]{0,4}([1-9]\d?(?:\.\d{1,2}){1,2})\.?(?=[ \t]|$)", re.M)
 _PAPER_HEADING = re.compile(
     r"^\s{0,4}(?:\d+\.?\s*)?(abstract|introduction|related work|methodology|methods|"
     r"experimental setup|results|discussion|conclusion|references|bibliography)\s*$",
@@ -130,6 +148,15 @@ def sample_body(raw_text: str, window: int = 6000) -> str:
     return "\n".join(
         body[int(len(body) * frac) : int(len(body) * frac) + third] for frac in (0.10, 0.45, 0.75)
     )
+
+
+def count_numbered_sections(text: str) -> int:
+    """How many distinct numbered sections the text appears to carry.
+
+    Distinct rather than total: extraction that repeats a section body would
+    otherwise multiply one skeleton into a structural score it did not earn.
+    """
+    return len(set(_NUMBERED_SECTION.findall(text)))
 
 
 def _speaker_stats(text: str) -> tuple[int, int, float]:
@@ -209,7 +236,7 @@ def classify_content(
     # sample. A 375 KB markdown textbook showed 0 fences in a 6 KB window and
     # dozens in the file.
     fences = len(_CODE_FENCE.findall(full_body))
-    numbered = len(_NUMBERED_SECTION.findall(full_body))
+    numbered = count_numbered_sections(full_body)
     tech_hits = len(_TECH_VOCAB.findall(body))
     tech_density = tech_hits / max(len(body.split()), 1) * 1000
     if fences >= 4:

@@ -19,6 +19,7 @@ import pytest
 from app.services.content_classifier import (
     _speaker_stats,
     classify_content,
+    count_numbered_sections,
     sample_body,
     strip_boilerplate,
 )
@@ -153,6 +154,35 @@ def test_kindle_needs_its_own_header_not_just_a_rule() -> None:
 
 def test_short_documents_are_notes() -> None:
     assert classify_content("a few quick thoughts about today", [], 40, "txt") == "notes"
+
+
+def test_plot_ticks_are_not_numbered_sections() -> None:
+    """A PDF extracts bare numbers onto their own lines, sections and data alike.
+
+    Measured on the stored papers: "Attention Is All You Need" produced 199
+    matches, whose most common distinct values were 0.0, 0.1, 0.2, 0.3 -- axis
+    ticks, not sections. A section number never starts with zero, and that is
+    the only thing separating the two by pattern.
+    """
+    ticks = "\n".join(f"0.{n}" for n in range(10))
+    assert count_numbered_sections(ticks) == 0
+
+    real = "3.1\nAttention\n3.2\nMulti-Head\n3.2.1\nScaled Dot-Product\n"
+    assert count_numbered_sections(real) == 3
+
+    # A measurement cannot pose as a section number.
+    assert count_numbered_sections("2931529.5\n1234.56\n") == 0
+
+
+def test_duplicated_extraction_does_not_multiply_the_section_count() -> None:
+    """The parser can repeat a section body (issue #97).
+
+    Counting raw matches let one skeleton of 3 sections read as 9 and cross the
+    >= 8 threshold that awards the technical score its largest structural bonus.
+    """
+    skeleton = "3.1\nOne\n3.2\nTwo\n3.3\nThree\n"
+    assert count_numbered_sections(skeleton) == 3
+    assert count_numbered_sections(skeleton * 3) == 3
 
 
 def test_chapter_headings_do_not_decide_prose() -> None:

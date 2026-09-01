@@ -17,7 +17,6 @@ existing test imports.
 
 import asyncio
 import logging
-import re
 from typing import Any, TypedDict
 
 from app.database import get_session_factory
@@ -120,16 +119,39 @@ class IngestionState(TypedDict):
     _audio_chunks: list[dict[str, Any]] | None
 
 
-def resolve_technical_variant(raw_text: str) -> str:
+def resolve_technical_variant(raw_text: str, word_count: int | None = None) -> str:
     """Resolve the merged 'technical' upload choice into the sizing variant
-    the chunker expects. Dense numbered sections or fenced code blocks early
-    in the text read as a structured technical book; anything else chunks as
-    a technical article. The two variants share every other pipeline branch.
+    the chunker expects. The two variants share every other pipeline branch.
+
+    Length decides it, because the choice is a chunk size and nothing else.
+    Structure overrides length only for a short document that is plainly a
+    manual. Each threshold is bracketed by the two library documents that
+    decide it:
+
+    - 5,000 words: `luminary_conceptual_foundations` at 5,312 is a book,
+      `radiology_chexnet_cxr` at 3,764 is a paper.
+    - 8 sections: below the length gate, `radiology_chexnet_cxr` is the only
+      document with any numbered sections at all, at 6 -- and it must stay an
+      article, so a threshold of 3 would misfile it.
+    - 6 fence lines (3 blocks): keeps the previous rule's fence intent.
+      `retrieval-and-memory-tutorial` at 4,920 words and 26 fences is a book;
+      `Introducing Contextual Retrieval` at 4 fences is not.
+
+    The previous rule read the first 5,000 characters and never looked at
+    length. On a book that window is the title page and the table of contents,
+    which is the same defect `classify_content` was rewritten to remove: it put
+    a 120,000-word IAEA manual and `d2l_dive_into_deep_learning` in the article
+    bucket, and a 3,764-word paper in the book one.
     """
-    first_5k = raw_text[:5000]
-    code_fence_count = len(re.findall(r"```", first_5k))
-    numbered_section_count = len(re.findall(r"\b\d+\.\d+\b", first_5k))
-    if code_fence_count >= 6 or numbered_section_count >= 2:
+    from app.services.content_classifier import (  # noqa: PLC0415
+        _CODE_FENCE,
+        count_numbered_sections,
+        strip_boilerplate,
+    )
+
+    body = strip_boilerplate(raw_text)
+    words = word_count if word_count is not None else len(body.split())
+    if words >= 5000 or len(_CODE_FENCE.findall(body)) >= 6 or count_numbered_sections(body) >= 8:
         return "tech_book"
     return "tech_article"
 
