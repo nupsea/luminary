@@ -82,8 +82,10 @@ def test_a_technical_talk_is_not_a_meeting() -> None:
     meeting = DocumentProfile(form="dialogue", domain="general")
     assert meeting.card_genre == "conversation"
 
+    # An unmeasured domain yields no strategy at all. Defaulting here is how
+    # "The Odyssey" came to be shown as non-fiction.
     unclassified = DocumentProfile(form="dialogue", domain=None)
-    assert unclassified.card_genre == "conversation"
+    assert unclassified.card_genre is None
 
 
 def test_the_persisted_flag_still_beats_the_content_type() -> None:
@@ -139,16 +141,26 @@ class TestCardGenre:
 
     def test_transcripts_ask_what_was_decided(self) -> None:
         for content_type in ("conversation", "audio", "video"):
-            assert DocumentProfile.from_legacy(content_type).card_genre == "conversation"
+            profile = DocumentProfile(form="dialogue", domain="general")
+            assert profile.card_genre == "conversation"
+            # ...but only once the domain has been measured.
+            assert DocumentProfile.from_legacy(content_type).card_genre is None
 
     def test_plain_prose_is_non_fiction_until_register_says_otherwise(self) -> None:
         """Before the facets a prose book reached the technical prompt only by
         its title matching a keyword list, and 'narrative' was unreachable."""
-        assert DocumentProfile.from_legacy("book").card_genre == "non-fiction"
-        assert DocumentProfile(form="prose", domain="general").card_genre == "non-fiction"
+        # No register measured: no strategy. The Odyssey was displayed as
+        # non-fiction because this returned a default instead of admitting it
+        # could not tell an epic from an essay.
+        assert DocumentProfile.from_legacy("book").card_genre is None
+        assert DocumentProfile(form="prose", domain="general").card_genre is None
         assert (
             DocumentProfile(form="prose", domain="general", register="narrative").card_genre
             == "narrative"
+        )
+        assert (
+            DocumentProfile(form="prose", domain="general", register="expository").card_genre
+            == "non-fiction"
         )
 
     def test_a_technical_prose_book_asks_for_rules(self) -> None:

@@ -24,6 +24,7 @@ from app.workflows.ingestion_nodes._shared import (
     _persist_extraction_report,
     _persist_structure_type,
     _update_stage,
+    detect_register,
     detect_technical_content,
     resolve_technical_variant,
 )
@@ -87,6 +88,19 @@ async def parse_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
+async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | None, str | None]:
+    """Read the domain and the register from the document, in one pass.
+
+    Both are asked of the text rather than derived from the type, because the
+    type carries neither: `book` covers a novel and a deep-learning textbook,
+    and nothing about a content type says whether a work tells or explains.
+    """
+    is_technical = await _measure_domain(content_type, pd)
+    raw_text = (pd or {}).get("raw_text") or ""
+    register = await detect_register(raw_text) if raw_text.strip() else None
+    return is_technical, register
+
+
 async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
     """Whether this document's subject is technical.
 
@@ -124,7 +138,9 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 if pd
                 else "tech_article"
             )
-            await _persist_classification(state["document_id"], resolved, True)
+            # The user asserted the domain; the register still has to be read.
+            register = await detect_register(pd["raw_text"]) if pd else None
+            await _persist_classification(state["document_id"], resolved, True, register)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",
                 extra={"doc_id": state["document_id"], "content_type": resolved},
@@ -142,8 +158,10 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 extra={"doc_id": state["document_id"], "content_type": provided},
             )
             return {**state, "status": "chunking"}
-        is_technical = await _measure_domain(provided, state.get("parsed_document"))
-        await _persist_classification(state["document_id"], provided, is_technical)
+        is_technical, register = await _measure_facets(provided, state.get("parsed_document"))
+        await _persist_classification(
+            state["document_id"], provided, is_technical, register
+        )
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},
@@ -210,7 +228,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
 
             # Media documents are decided in transcribe_node instead — their text
             # does not exist yet at this point.
-            is_technical = await _measure_domain(content_type, pd)
+            is_technical, register = await _measure_facets(content_type, pd)
             # The classified type has to reach the row, not just the state. Chunking
             # and NER read it from the state and were correct, so a document could
             # be chunked and entity-extracted as a tech_book while the library, the
@@ -218,7 +236,9 @@ async def classify_node(state: IngestionState) -> IngestionState:
             # seeded with. Harmless while this branch only ran for documents whose
             # row already held the caller's own value; a silent mislabel now that
             # classification is the normal path.
-            await _persist_classification(state["document_id"], content_type, is_technical)
+            await _persist_classification(
+                state["document_id"], content_type, is_technical, register
+            )
 
             logger.info(
                 "Classified document",

@@ -208,11 +208,23 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     `DocumentProfile` shows it as unclassified rather than as "general".
     Re-runnable by `scripts/remeasure_domain.py`.
 
-    Scores 20/21 on the library's labelled documents, and repeats identically
-    across five runs on the same input. The miss is `art_of_unix`, whose opening
-    is design philosophy rather than engineering -- a genuine borderline, not a
-    tuning failure. Do not chase it with prompt wording: the case that would fix
-    it is the case that makes a meeting transcript technical again.
+    Repeats identically across five runs on the same input. Four framings were
+    measured against hand labels; this one scores 22/23 and the others were
+    rejected on the numbers, not on taste:
+
+        open category + examples + exclusions   22/23   (this one)
+        closed list of fields                   18/19
+        contrast with no examples               17/19
+        naming what the flag gates              14/22
+
+    The last collapsed because it asked for "specific technologies, algorithms,
+    systems" and an opening excerpt rarely names any. The bare contrast read
+    Hegel as technical and a vibe-coding talk as general interest.
+
+    **Do not tune this on the library.** ~20 documents is a sample, not an
+    accuracy figure. The one miss is `art_of_unix`, whose opening is design
+    philosophy rather than engineering -- a genuine borderline. Chasing it with
+    wording is how a prompt starts fitting the corpus in front of it.
     """
     from app.services.content_classifier import strip_boilerplate  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
@@ -226,10 +238,16 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     snippet = strip_boilerplate(raw_text)[:2000].strip()
     if not snippet:
         return None
+    # The fields are examples and the category is left open. A closed list is a
+    # taxonomy smuggled into a prompt -- it decides against every discipline the
+    # list omits, and the omission is invisible until a document from one
+    # arrives. Naming what the category excludes does the separating work that
+    # an exhaustive list would otherwise have to do.
     prompt = (
-        "Does this document's subject matter belong to a technical or scientific "
-        "field — software, engineering, mathematics, physics, medicine, or a "
-        "natural science?\n\n"
+        "Is this text's subject matter technical or scientific in nature — for "
+        "example software, engineering, mathematics, medicine, or any other "
+        "technical or scientific discipline — rather than literary, historical, "
+        "philosophical, or general interest?\n\n"
         f"Excerpt:\n{snippet}\n\n"
         "Reply with exactly one word: yes or no."
     )
@@ -248,6 +266,51 @@ async def detect_technical_content(raw_text: str) -> bool | None:
 
 # Kept: transcribe_node imported this name before the probe was generalised.
 detect_technical_transcript = detect_technical_content
+
+
+async def detect_register(raw_text: str) -> str | None:
+    """Whether the text tells a story or explains a subject. None when undecided.
+
+    The axis two hacks were reaching for. Without it `card_genre` cannot tell an
+    epic from an essay, and both fall to the same fallback: "The Odyssey" was
+    shown to the reader as non-fiction, which is a default wearing a
+    classification's clothes.
+
+    Read from the text, like the domain probe, and for the same reason -- no
+    word list and no threshold can carry it. A story and an essay share their
+    vocabulary; what differs is what the sentences are doing.
+
+    **Sampled from the body, where the domain probe reads the opening.** The two
+    axes want different windows and the reason is mechanical: a work states its
+    subject early, but it opens with front matter. After the licence is stripped
+    a Gutenberg novel still begins with a preface or a translator's note, which
+    is expository however the book reads. Measured on 19 hand-labelled
+    documents: sampling the body scores 18/19 against 15/19 for the opening, and
+    the four it recovers are "The Odyssey", "Sherlock Holmes", "The Time
+    Machine" and "The Gita" -- every one a narrative behind an essay.
+    """
+    from app.services.content_classifier import sample_body  # noqa: PLC0415
+    from app.services.llm import get_llm_service  # noqa: PLC0415
+
+    snippet = sample_body(raw_text, window=2000).strip()
+    if not snippet:
+        return None
+    prompt = (
+        "Does this text mainly tell a story, or mainly explain a subject?\n\n"
+        f"Excerpt:\n{snippet}\n\n"
+        "Reply with exactly one word: story or explain."
+    )
+    try:
+        raw = await get_llm_service().generate(prompt, background=True)
+    except Exception as exc:
+        logger.warning("register detection failed (non-fatal): %s", exc)
+        return None
+    answer = str(raw).strip().lower()
+    if answer.startswith("story"):
+        return "narrative"
+    if answer.startswith("explain"):
+        return "expository"
+    return None
 
 
 async def _persist_extraction_report(document_id: str, report: dict | None) -> None:
@@ -288,13 +351,20 @@ async def _persist_structure_type(document_id: str, structure_type: str) -> None
 
 
 async def _persist_classification(
-    document_id: str, content_type: str, is_technical: bool | None
+    document_id: str,
+    content_type: str,
+    is_technical: bool | None,
+    register: str | None = None,
 ) -> None:
     """Write the content type, the technical flag and the facets they imply.
 
-    One statement rather than three: `form` and `domain` are a function of the
-    other two columns, so writing them separately leaves a window in which the
-    row disagrees with itself. `register` is untouched -- nothing classifies it.
+    One statement rather than several: `form` and `domain` are a function of the
+    other columns, so writing them separately leaves a window in which the row
+    disagrees with itself.
+
+    `register` is only written when it was measured. Passing None leaves the
+    stored value alone rather than clearing it, so a later pass that measures
+    only the domain cannot wipe a register somebody already established.
     """
     from sqlalchemy import update  # noqa: PLC0415
 
@@ -302,15 +372,16 @@ async def _persist_classification(
     from app.types import DocumentProfile  # noqa: PLC0415
 
     profile = DocumentProfile.from_legacy(content_type, is_technical)
+    values: dict[str, object] = {
+        "content_type": content_type,
+        "is_technical": is_technical,
+        "form": profile.form,
+        "domain": profile.domain,
+    }
+    if register is not None:
+        values["register"] = register
     async with get_session_factory()() as session:
         await session.execute(
-            update(DocumentModel)
-            .where(DocumentModel.id == document_id)
-            .values(
-                content_type=content_type,
-                is_technical=is_technical,
-                form=profile.form,
-                domain=profile.domain,
-            )
+            update(DocumentModel).where(DocumentModel.id == document_id).values(**values)
         )
         await session.commit()

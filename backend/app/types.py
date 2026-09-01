@@ -148,14 +148,21 @@ class DocumentProfile:
         return ("CONCEPT",)
 
     @property
-    def card_genre(self) -> CardGenre:
+    def card_genre(self) -> CardGenre | None:
         """What to ask of this material when writing flashcards.
 
+        None when the facets do not determine it. Returning a default here is
+        how "The Odyssey" came to be shown as non-fiction: prose with no
+        measured register fell through to the safe fallback, and the fallback
+        was then displayed to the reader as a decision.
+
+        A caller that must have a strategy picks one and says so -- see
+        `flashcard_prompts._infer_genre`. This property reports only what the
+        facets establish.
+
         `paper` is tested before `domain` because a paper is technical and
-        still wants the academic prompt. `narrative` is unreachable until
-        something populates `register`; before facets it was unreachable
-        outright, and a prose book reached the technical prompt only by its
-        title matching a keyword list.
+        still wants the academic prompt, which asks what was measured rather
+        than what the rule is.
         """
         if self.form == "source_code":
             return "technical"
@@ -164,14 +171,17 @@ class DocumentProfile:
         if self.form == "dialogue":
             # A recorded technical talk is not a meeting. The conversation
             # strategy asks what was decided and who owns it, which a talk has
-            # none of; its value is the technique. Only a measured technical
-            # domain flips this -- an unknown one keeps the previous answer.
-            return "technical" if self.domain == "technical" else "conversation"
+            # none of; its value is the technique.
+            if self.domain == "technical":
+                return "technical"
+            return "conversation" if self.domain == "general" else None
         if self.domain == "technical":
             return "technical"
         if self.register == "narrative":
             return "narrative"
-        return "non-fiction"
+        if self.register == "expository":
+            return "non-fiction"
+        return None
 
     @classmethod
     def from_legacy(

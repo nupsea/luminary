@@ -58,15 +58,19 @@ export function FacetChips({
       <Facet label="form" value={facets.form} />
       <Facet label="domain" value={facets.domain} />
       <Facet label="register" value={facets.register} />
-      {facets.card_genre && (
+      <span className="inline-flex items-baseline gap-1" title={FACET_HELP.card_genre}>
+        <span className="text-muted-foreground/60">cards</span>
         <span
-          className="inline-flex items-baseline gap-1"
-          title={FACET_HELP.card_genre}
+          className={cn(
+            "font-medium",
+            facets.card_genre ? "text-primary/80" : "italic text-muted-foreground/50",
+          )}
         >
-          <span className="text-muted-foreground/60">cards</span>
-          <span className="font-medium text-primary/80">{facets.card_genre}</span>
+          {/* Blank rather than a strategy name: the facets did not determine
+              one. A default shown here is what made The Odyssey non-fiction. */}
+          {facets.card_genre ?? "unclassified"}
         </span>
-      )}
+      </span>
     </div>
   )
 }

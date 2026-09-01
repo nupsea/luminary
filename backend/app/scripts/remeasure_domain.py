@@ -1,4 +1,4 @@
-"""Measure `domain` for documents whose subject was never read from the text.
+"""Measure `domain` and `register` for documents that were never read for them.
 
 Two populations need this:
 
@@ -36,7 +36,10 @@ from app.database import get_session_factory
 from app.models import DocumentModel
 from app.services.universal_parser import read_document_text
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile
-from app.workflows.ingestion_nodes._shared import detect_technical_content
+from app.workflows.ingestion_nodes._shared import (
+    detect_register,
+    detect_technical_content,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("remeasure_domain")
@@ -74,26 +77,40 @@ async def main(apply: bool) -> int:
 
         for doc in docs:
             before = DocumentProfile.from_legacy(doc.content_type, doc.is_technical).domain
-            # A type that names the subject needs no probe.
+            text = await _text_for(doc, session)
+            has_text = bool(text.strip())
+
+            # A type that names the subject needs no probe; the register never
+            # follows from the type, so it is always read.
             if doc.content_type in TECHNICAL_CONTENT_TYPES:
                 measured: bool | None = True
             else:
-                text = await _text_for(doc, session)
-                measured = await detect_technical_content(text) if text.strip() else None
+                measured = await detect_technical_content(text) if has_text else None
+            register = (
+                doc.register or (await detect_register(text) if has_text else None)
+            )
 
             after = DocumentProfile.from_legacy(doc.content_type, measured).domain
-            if after == before:
-                if after is None:
+            if after == before and register == doc.register:
+                if after is None or register is None:
                     undecided.append(doc.title)
                 continue
 
             changed.append((doc.id, doc.title, before, after))
-            logger.info("  %-44s %s -> %s", doc.title[:43], before or "null", after or "null")
+            logger.info(
+                "  %-42s domain %s -> %s   register %s -> %s",
+                doc.title[:41],
+                before or "null",
+                after or "null",
+                doc.register or "null",
+                register or "null",
+            )
             if apply:
+                values: dict[str, object] = {"is_technical": measured, "domain": after}
+                if register is not None:
+                    values["register"] = register
                 await session.execute(
-                    update(DocumentModel)
-                    .where(DocumentModel.id == doc.id)
-                    .values(is_technical=measured, domain=after)
+                    update(DocumentModel).where(DocumentModel.id == doc.id).values(**values)
                 )
         if apply:
             await session.commit()
