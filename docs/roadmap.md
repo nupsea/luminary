@@ -65,7 +65,7 @@ Rung numbers are ordering, not commitments. Several will split once scoped.
 
 | Rung | Theme | Exit gate |
 |---|---|---|
-| 0.9.0 | Model alignment | Per-axis classifier accuracy on a relabelled fixture; zero API diff |
+| 0.9.0 | Model alignment | Every stored row's facets agree with the profile; the reader can see what was classified and what was not |
 | 0.10.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
 | 0.11.0 | Stores that agree | A reprocess killed midway leaves no divergence between stores |
 | 0.12.0 | Ingest you can measure | Every ingest path reports a measured fidelity number |
@@ -102,10 +102,23 @@ object gives five rival definitions three fields to disagree over instead of one
 **Why this rung is first**: every other entry here gets harder with users. This one gets
 foreclosed. After 1.0 the document model is what the compatibility promise is about.
 
-**It spans three rungs by construction.** Phase 4 retires the legacy `content_type` projection, and
-a projection can only be retired after a shipped release stopped depending on it — so 0.9.0 takes
-the additive migration, the profile and the classifier (all internal, no wire change), 0.10.0 puts
-facets on the wire once `make smoke` is a gate again, and 0.11.0 retires the projection.
+**It spans three rungs by construction.** Retiring the legacy `content_type` projection can only
+happen after a shipped release stopped depending on it — so 0.9.0 takes the additive migration, the
+profile, and the facets as a read-only addition to the document API; 0.10.0 classifies on the new
+axes and moves the write path; 0.11.0 retires the projection.
+
+**The read path is in 0.9.0 deliberately.** A classifier nobody can inspect cannot be trusted, and
+0.10.0 tunes the classifier — reviewing that without being able to see what it decided would be
+reviewing it blind. `GET /documents` and `GET /documents/{id}` carry a `facets` object (form,
+domain, register, and the derived `card_genre`), and the library card renders it. Adding response
+fields does not break a client, which is why this could come forward while `make smoke` is still
+red (#62); moving the *write* path could not.
+
+**A null facet is not a default.** `domain` is null unless something measured it or the content type
+names it outright — 4 of the library's 8 talks carry a null `is_technical` because
+`detect_technical_transcript` returned None and nothing retries. Recording those as `general` would
+show the reader a decision that never happened. `DocumentProfile.is_technical` reads false for a
+null domain, so nothing downstream moved when this changed.
 
 The migration is additive only. `batch_alter_table` emits a plain `ALTER TABLE ADD COLUMN` for
 `add_column` but rebuilds the table — `DROP TABLE documents` included — for `alter_column`, so

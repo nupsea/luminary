@@ -4398,7 +4398,7 @@ export interface paths {
         put?: never;
         /**
          * Ask Grounded
-         * @description GraphRAG answer over the concept graph (docs/okf.md).
+         * @description GraphRAG answer over the concept graph (docs/concepts.md).
          *
          *     Resolve scope -> concepts -> expand the graph + evidence -> one OKF grounding block -> LiteLLM.
          *     Self-contained (does not touch the streaming chat graph). Degrades: no concepts -> an honest
@@ -7243,6 +7243,7 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            facets?: components["schemas"]["DocumentFacets"] | null;
             /** Structure Type */
             structure_type?: string | null;
             /** Extraction Report */
@@ -7303,6 +7304,24 @@ export interface components {
             vector_count: number;
         };
         /**
+         * DocumentFacets
+         * @description What the document is, and the card strategy that follows from it.
+         *
+         *     `domain` and `register` are null when nothing has classified them, which is
+         *     not the same as "general" or "expository" -- a null is shown to the reader
+         *     as unclassified rather than as a decision nobody made.
+         */
+        DocumentFacets: {
+            /** Form */
+            form?: string | null;
+            /** Domain */
+            domain?: string | null;
+            /** Register */
+            register?: string | null;
+            /** Card Genre */
+            card_genre?: string | null;
+        };
+        /**
          * DocumentFacetsResponse
          * @description How many documents each filter would match, over the whole library.
          *
@@ -7343,6 +7362,7 @@ export interface components {
             format: string;
             /** Content Type */
             content_type: string;
+            facets?: components["schemas"]["DocumentFacets"] | null;
             /** Word Count */
             word_count: number;
             /** Page Count */

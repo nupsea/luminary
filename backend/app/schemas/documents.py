@@ -14,11 +14,27 @@ from app.schemas.membership import CollectionRef
 from app.types import ContentType
 
 
+class DocumentFacets(BaseModel):
+    """What the document is, and the card strategy that follows from it.
+
+    `domain` and `register` are null when nothing has classified them, which is
+    not the same as "general" or "expository" -- a null is shown to the reader
+    as unclassified rather than as a decision nobody made.
+    """
+
+    form: str | None = None
+    domain: str | None = None
+    register: str | None = None
+    # Derived, never stored: which flashcard strategy this document gets.
+    card_genre: str | None = None
+
+
 class DocumentListItem(BaseModel):
     id: str
     title: str
     format: str
     content_type: str
+    facets: DocumentFacets | None = None
     word_count: int
     page_count: int
     stage: str
@@ -108,6 +124,7 @@ class DocumentDetail(BaseModel):
     title: str
     format: str
     content_type: str
+    facets: DocumentFacets | None = None
     # Layout discovered while parsing: book|paper|script|chat.
     structure_type: str | None = None
     # What the importer captured and what it could not. Null means fidelity was

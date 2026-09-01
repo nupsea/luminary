@@ -40,6 +40,16 @@ Form = Literal[
     "source_code",  # a program file
 ]
 
+# Nullable everywhere, and null is not "general". Only two things establish a
+# domain: a measurement (the persisted `is_technical` flag, or the transcript
+# probe behind it) and a content type that names it outright (`tech_book`).
+# Nothing else does -- `d2l_dive_into_deep_learning` is stored as a plain book.
+#
+# Four of the library's eight talks carry a null flag because
+# `detect_technical_transcript` returned None: the probe failed or gave a
+# non-yes/no answer, and nothing retries. Calling those "general" would report a
+# default as a finding, and the document would then be shown to the user as
+# classified when it never was.
 Domain = Literal["general", "technical"]
 
 # Whether the text tells a story or explains a subject. Nullable everywhere:
@@ -109,12 +119,18 @@ class DocumentProfile:
     """
 
     form: Form
-    domain: Domain
+    domain: Domain | None = None
     register: Register | None = None
 
     @property
     def is_technical(self) -> bool:
-        """Whether technical NER types and technical relation extraction apply."""
+        """Whether technical NER types and technical relation extraction apply.
+
+        An unknown domain is not technical, which is what `is_technical_content`
+        already returned for these documents -- so nothing downstream changes.
+        What changes is that the UI can tell "we decided general" apart from
+        "nothing ever decided", instead of showing a default as a finding.
+        """
         return self.domain == "technical"
 
     @property
@@ -146,7 +162,11 @@ class DocumentProfile:
         if self.form == "paper":
             return "academic"
         if self.form == "dialogue":
-            return "conversation"
+            # A recorded technical talk is not a meeting. The conversation
+            # strategy asks what was decided and who owns it, which a talk has
+            # none of; its value is the technique. Only a measured technical
+            # domain flips this -- an unknown one keeps the previous answer.
+            return "technical" if self.domain == "technical" else "conversation"
         if self.domain == "technical":
             return "technical"
         if self.register == "narrative":
@@ -170,8 +190,16 @@ class DocumentProfile:
         # size and matches what the generic chunker fell back to. Guessing a
         # larger one costs recall on a document nobody has classified.
         form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "entries")
-        technical = is_technical_content(content_type, is_technical)
-        domain: Domain = "technical" if technical else "general"
+        domain: Domain | None
+        if is_technical is not None:
+            domain = "technical" if is_technical else "general"
+        elif content_type in TECHNICAL_CONTENT_TYPES:
+            # The content type names the subject outright.
+            domain = "technical"
+        else:
+            # Nothing measured it and the content type does not carry it: a
+            # plain `book` may be a novel or a deep-learning textbook.
+            domain = None
         return cls(form=form, domain=domain, register=register)
 
 

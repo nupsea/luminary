@@ -48,6 +48,44 @@ def test_domain_agrees_with_is_technical_content(content_type: str) -> None:
         assert profile.is_technical == is_technical_content(content_type, flag)
 
 
+def test_an_unmeasured_domain_is_null_not_general() -> None:
+    """`detect_technical_transcript` returns None when the probe fails, and
+    nothing retries. Recording that as "general" would report a default as a
+    finding and show the reader a classification that never happened.
+
+    Four of the library's eight talks are in exactly this state.
+    """
+    unmeasured = DocumentProfile.from_legacy("audio", None)
+    assert unmeasured.domain is None
+    assert unmeasured.is_technical is False  # unchanged downstream
+
+    measured_general = DocumentProfile.from_legacy("audio", False)
+    assert measured_general.domain == "general"
+    assert measured_general.is_technical is False
+
+    # A plain book carries no subject either -- d2l is stored as one.
+    assert DocumentProfile.from_legacy("book", None).domain is None
+    # ...but a content type that names the subject does establish it.
+    assert DocumentProfile.from_legacy("tech_book", None).domain == "technical"
+
+
+def test_a_technical_talk_is_not_a_meeting() -> None:
+    """The conversation strategy asks what was decided and who owns it. A
+    recorded talk has neither; its value is the technique.
+
+    Only a measured technical domain flips this, so a talk whose probe never
+    answered keeps the previous answer rather than being guessed into a new one.
+    """
+    talk = DocumentProfile(form="dialogue", domain="technical")
+    assert talk.card_genre == "technical"
+
+    meeting = DocumentProfile(form="dialogue", domain="general")
+    assert meeting.card_genre == "conversation"
+
+    unclassified = DocumentProfile(form="dialogue", domain=None)
+    assert unclassified.card_genre == "conversation"
+
+
 def test_the_persisted_flag_still_beats_the_content_type() -> None:
     """A technical talk keeps content_type 'audio' and carries the flag instead.
 

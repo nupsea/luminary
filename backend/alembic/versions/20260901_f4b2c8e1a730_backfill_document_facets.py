@@ -64,19 +64,26 @@ def upgrade() -> None:
             {"form": form, "ct": content_type},
         )
 
-    # Exactly what `is_technical_content` resolves: the persisted flag wins when
-    # set, and rows predating it fall back to the content type. Reproducing it
-    # here rather than improving on it is the point -- NER has to see the same
-    # answer after this revision that it saw before.
+    # Only two things establish a domain: the persisted flag (a measurement),
+    # and a content type that names the subject outright. Everything else is
+    # left null.
+    #
+    # Null is not "general". Four of this library's eight talks carry a null
+    # flag because `detect_technical_transcript` returned None -- the probe
+    # failed or gave a non-yes/no answer, and nothing retries. Writing "general"
+    # there would record a default as a finding, and the reader would then be
+    # shown a classification that never happened. `is_technical` on the profile
+    # still reads false for a null domain, so nothing downstream moves.
     bind.execute(
         sa.text(
             "UPDATE documents SET domain = CASE "
             "  WHEN is_technical IS NOT NULL THEN "
             "    CASE WHEN is_technical THEN 'technical' ELSE 'general' END "
-            "  WHEN content_type IN ('code', 'tech_book', 'tech_article') THEN 'technical' "
-            "  ELSE 'general' "
+            "  ELSE 'technical' "
             "END "
-            "WHERE domain IS NULL AND content_type IS NOT NULL"
+            "WHERE domain IS NULL "
+            "  AND (is_technical IS NOT NULL "
+            "       OR content_type IN ('code', 'tech_book', 'tech_article'))"
         )
     )
 

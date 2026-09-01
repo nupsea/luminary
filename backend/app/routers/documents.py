@@ -43,6 +43,7 @@ from app.schemas.documents import (
     CodeSnippetItem,
     DocumentDetail,
     DocumentDiagnostics,
+    DocumentFacets,
     DocumentFacetsResponse,
     DocumentListItem,
     DocumentListResponse,
@@ -116,6 +117,7 @@ from app.services.remote_source import (
 from app.services.summarizer import PREGENERATE_MODES
 from app.services.vector_store import get_lancedb_service
 from app.services.youtube_downloader import is_youtube_url
+from app.types import DocumentProfile
 from app.workflows import ingestion as _ingestion_module  # indirect: _run_pregenerate is patched
 from app.workflows.ingestion import (
     STAGE_PROGRESS,
@@ -190,6 +192,29 @@ __all__ = [
     "_section_to_dict",
     "router",
 ]
+
+
+def _facets(doc: DocumentModel) -> DocumentFacets:
+    """The document's stored facets, plus the card strategy they imply.
+
+    Read from the row rather than re-derived from `content_type`: the row holds
+    what a classifier actually decided, and a derivation would paper over the
+    documents nothing has classified yet. A null `domain` reaches the client as
+    null so it can be shown as unclassified rather than as "general".
+    """
+    if not doc.form:
+        return DocumentFacets()
+    profile = DocumentProfile(
+        form=doc.form,  # type: ignore[arg-type]
+        domain=doc.domain,  # type: ignore[arg-type]
+        register=doc.register,  # type: ignore[arg-type]
+    )
+    return DocumentFacets(
+        form=doc.form,
+        domain=doc.domain,
+        register=doc.register,
+        card_genre=profile.card_genre,
+    )
 
 
 @router.get("", response_model=DocumentListResponse)
@@ -472,6 +497,7 @@ async def list_documents(
                 title=doc.title,
                 format=doc.format,
                 content_type=doc.content_type,
+                facets=_facets(doc),
                 word_count=doc.word_count,
                 page_count=doc.page_count,
                 stage=doc.stage,
@@ -1235,6 +1261,7 @@ async def get_document(document_id: str):
         title=doc.title,
         format=doc.format,
         content_type=doc.content_type,
+        facets=_facets(doc),
         structure_type=doc.structure_type,
         extraction_report=doc.extraction_report,
         word_count=doc.word_count,
