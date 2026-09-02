@@ -194,12 +194,26 @@ def subject_excerpt(raw_text: str, window: int = 2000) -> str:
 
     The fallback fires only where the head is demonstrably front matter, so a
     document with a clean opening is judged exactly as before.
+
+    Returns "" when both windows are listings -- a document that is nothing but
+    a contents page. The caller reports that as unclassified, which is the
+    honest answer; answering about a list of chapter titles is not.
+
+    **Known limit.** This finds contents listings, which is what it claims. It
+    does not find an illustration list, a publisher's note, or an editorial
+    preface sitting after the licence marker: measured on five public-domain
+    texts, the excerpt for the US Constitution was a Gutenberg note about etext
+    production and the excerpt for a cookbook was its frontispiece caption. Both
+    happened to yield the right subject, which is luck rather than a mechanism.
     """
     body = strip_boilerplate(raw_text)
     head = body[:window].strip()
     if head and not looks_like_front_matter(head):
         return head
-    return sample_body(raw_text, window=window).strip()
+    fallback = sample_body(raw_text, window=window).strip()
+    if fallback and looks_like_front_matter(fallback):
+        return ""
+    return fallback
 
 
 def count_numbered_sections(text: str) -> int:

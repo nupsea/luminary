@@ -226,6 +226,16 @@ class TestFrontMatter:
         )
         assert looks_like_front_matter(prose) is False
 
+    def test_a_document_that_is_only_a_contents_page_stays_unclassified(self) -> None:
+        """Both windows are the listing, so there is nothing to judge.
+
+        Returning the listing anyway would have the probe answer about a set of
+        chapter titles and record it as a finding. Empty reaches the caller as
+        None, which is shown to the reader as unclassified.
+        """
+        only_toc = "Table of Contents\n" + "".join(f"Chapter {i}\n{i * 7}\n" for i in range(1, 40))
+        assert subject_excerpt(only_toc) == ""
+
     def test_the_excerpt_falls_back_only_when_the_opening_is_unusable(self) -> None:
         """A clean opening must be read exactly as before, so a document that
         never had this problem cannot be disturbed by the fix."""
