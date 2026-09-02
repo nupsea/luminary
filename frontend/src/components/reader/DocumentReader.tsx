@@ -1523,6 +1523,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           <SummaryPanel
             documentId={documentId}
             contentType={doc.content_type}
+            form={doc.facets?.form}
           />
         </div>
         )}

@@ -48,7 +48,7 @@ if [ "$STATUS" != "200" ]; then
   echo "  SKIP: no documents endpoint or no documents available ($STATUS)"
   echo "  Testing with 404 paths only"
 else
-  DOC_ID=$(echo "$BODY" | python3 -c "import sys,json; docs=json.load(sys.stdin); print(docs[0]['id'] if docs else '')" 2>/dev/null || true)
+  DOC_ID=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('items', []) if isinstance(d, dict) else d; print(items[0]['id'] if items else '')" 2>/dev/null || true)
   if [ -n "$DOC_ID" ]; then
     echo "  Found document: $DOC_ID"
 

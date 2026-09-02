@@ -124,8 +124,7 @@ import sys, json
 d = json.load(sys.stdin)
 node = next((n for n in d['nodes'] if n['id'] == '$SHARED_TAG_A'), None)
 if node:
-  # `note_count` became `usage_count`: a tag is used by documents as well as
-  # notes, so the count is not notes-only.
+  # usage_count, not note_count: documents use tags too.
   ok = all(k in node for k in ['id', 'display_name', 'usage_count'])
   print(str(ok).lower())
 else:

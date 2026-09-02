@@ -290,3 +290,77 @@ def test_the_prompts_own_example_can_never_be_a_cards_evidence():
         )
         is None
     )
+
+
+def test_notes_prompt_does_not_ask_for_what_the_gate_rejects() -> None:
+    """The notes contract and the gate must agree on the shape of a card.
+
+    They did not: the prompt asked for "short markdown bullets ('- ...')" while
+    `_MAX_ENUMERATED_ITEMS = 1` rejects a two-bullet answer, and its output
+    template carried `"source_excerpt": ""` while the gate requires a verbatim
+    quote. Notes returned empty decks until both were aligned (#108).
+
+    Asserting the prompt text is the point: the gate was never wrong, so a test
+    of the gate alone would have stayed green through the whole outage.
+    """
+    from app.services.flashcard_prompts import NOTES_CARD_FROM_CONCEPTS_SYSTEM
+
+    assert "markdown bullets" not in NOTES_CARD_FROM_CONCEPTS_SYSTEM
+    assert '"source_excerpt": ""' not in NOTES_CARD_FROM_CONCEPTS_SYSTEM
+    assert "word for word" in NOTES_CARD_FROM_CONCEPTS_SYSTEM
+
+
+def test_notes_excerpt_placeholder_is_refused() -> None:
+    """The notes template shows the shape of a quote, and it clears the length
+    floor -- so a model that echoes it must be refused explicitly rather than by
+    the luck of it not appearing in the notes."""
+    from app.services.flashcard_parsers import REJECT_UNGROUNDED, card_rejection
+    from app.services.flashcard_prompts import NOTES_EXCERPT_PLACEHOLDER
+
+    notes = f"The learner wrote: {NOTES_EXCERPT_PLACEHOLDER} appears here verbatim."
+
+    verdict = card_rejection(
+        "What does the note record?",
+        "It records a placeholder rather than a measured quote.",
+        NOTES_EXCERPT_PLACEHOLDER,
+        notes,
+    )
+
+    assert verdict is not None
+    assert verdict[0] == REJECT_UNGROUNDED
+
+
+def test_markdown_emphasis_is_formatting_not_fabrication() -> None:
+    """A model quoting a bolded sentence returns what a reader sees.
+
+    A quote whose only difference from the note is its `**` markers was rejected
+    as not in the text. Notes are written in markdown, so this was the most
+    repeated rejection on that path (#108).
+
+    The cases that bracket it: the same sentence minus its `**` must pass, and a
+    sentence that changes what is claimed must still fail even though it opens
+    with the same words.
+    """
+    from app.services.flashcard_parsers import excerpt_is_verbatim
+
+    note = (
+        "## TF-IDF\n"
+        "**TF-IDF**, which stands for **Term Frequency-Inverse Document Frequency**, "
+        "is a numerical statistic used to measure how important a word is.\n"
+        "It uses `read_source_text` to decode the bytes."
+    )
+
+    assert excerpt_is_verbatim(
+        "TF-IDF, which stands for Term Frequency-Inverse Document Frequency, "
+        "is a numerical statistic used to measure how important a word is.",
+        note,
+    )
+    assert not excerpt_is_verbatim(
+        "TF-IDF, which stands for Term Frequency, is a ranking function that "
+        "reranks dense vectors after retrieval.",
+        note,
+    )
+    # A code span loses its backticks, but an identifier keeps its underscores:
+    # collapsing those would let two different names compare equal.
+    assert excerpt_is_verbatim("It uses read_source_text to decode the bytes.", note)
+    assert not excerpt_is_verbatim("It uses readsourcetext to decode the bytes.", note)

@@ -41,6 +41,17 @@ whatever retrieval returned.
   as placeholders until `make eval-flashcards` has run enough times to derive floors the way the
   generation floors were derived.
 
+- **`make eval-flashcards` cannot resolve a change smaller than its own noise.** Measured
+  2026-09-02, four runs, same library, two per arm across an unrelated prompt change:
+  `factuality` **0.7396 / 0.6026** on identical code in one arm and 0.7083 / 0.7300 in the other.
+  Run-to-run spread is ~0.14; the between-arm gap was ~0.01. Per content type it is worse — the
+  `book` cell returned 4, 9, 9 and 10 of 21 across those runs, and `conversation` factuality moved
+  0.70 → 0.40 with nothing changed. At 35 rows, one run per arm will report a confident regression
+  that a second run erases. Two runs per arm is the minimum, and a per-content-type cell is not
+  readable at all. `atomicity` is structural (`is_atomic`, sentence and bullet counting), so it
+  does not carry this noise — it reads 1.0000 because the gate already rejects bulleted answers,
+  which leaves only multi-sentence answers able to move it.
+
 - **`make eval` measures scoped retrieval only.** Each row is pinned to its source document, so a
   routing failure is invisible there by construction. `make eval-routing` measures unscoped, and
   `run_eval --unscoped` runs the same rows without the pin. Measured once (52 documents): route@1

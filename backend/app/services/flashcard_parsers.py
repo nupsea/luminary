@@ -228,9 +228,18 @@ _QUOTE_CHARS = str.maketrans({
 })
 
 
+# Markdown emphasis renders away, so a model quoting a bolded sentence returns the
+# sentence a reader sees rather than the source bytes. Notes are written in markdown
+# and are the worst affected. Only `**` and code spans go: a lone `*` or `_` carries
+# content (`snake_case`, `a * b`), and dropping those would let two different strings
+# compare equal.
+_MD_EMPHASIS = re.compile(r"\*\*|`")
+
+
 def _normalise_for_match(text: str) -> str:
-    """Lowercased, whitespace-collapsed, punctuation-unified -- for quote matching."""
-    return re.sub(r"\s+", " ", (text or "").translate(_QUOTE_CHARS)).strip().lower()
+    """Lowercased, whitespace-collapsed, punctuation- and emphasis-unified."""
+    unmarked = _MD_EMPHASIS.sub("", (text or "").translate(_QUOTE_CHARS))
+    return re.sub(r"\s+", " ", unmarked).strip().lower()
 
 
 # A model closes the sentence it quoted. Measured over the 392 checkable cards in
@@ -242,6 +251,14 @@ def _normalise_for_match(text: str) -> str:
 # against a document containing none of it (22 characters of content, must fail).
 _EXCERPT_EDGE = "\"'\u201c\u201d\u2018\u2019"
 _EXCERPT_TAIL = ".,;:!?)]\"'"
+
+
+def _is_prompt_supplied(excerpt: str) -> bool:
+    """Whether the quote is text the prompt itself handed the model."""
+    from app.services.flashcard_prompts import PROMPT_SUPPLIED_EXCERPTS  # noqa: PLC0415
+
+    normalised = _normalise_for_match(excerpt)
+    return any(_normalise_for_match(s) in normalised for s in PROMPT_SUPPLIED_EXCERPTS)
 
 
 def _trim_edges(part: str) -> str:
@@ -313,9 +330,7 @@ def grounding_state(source_excerpt: str | None, source_text: str | None) -> str:
         return GROUNDING_UNVERIFIABLE
     if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
         return GROUNDING_UNVERIFIABLE
-    from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
-
-    if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+    if _is_prompt_supplied(excerpt):
         return GROUNDING_UNSUPPORTED
     if excerpt_is_verbatim(excerpt, source_text):
         return GROUNDING_VERIFIED
@@ -391,9 +406,7 @@ def card_rejection(
         # Text the prompt supplied can never be a card's evidence, even if a
         # passage happens to contain it. A verification the system can satisfy
         # with its own material verifies nothing.
-        from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
-
-        if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+        if _is_prompt_supplied(excerpt):
             return (
                 REJECT_UNGROUNDED,
                 "source quote is the prompt's own example, not the document",
