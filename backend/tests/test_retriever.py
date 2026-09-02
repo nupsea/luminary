@@ -294,6 +294,9 @@ def test_vector_search_returns_scored_chunks(monkeypatch):
     assert abs(results[0].score - 0.8) < 1e-6  # 1.0 - 0.2
 
 
+_DOC_ID = "02acff68-b6bb-4efa-a5af-d6a8d3d9e465"
+
+
 def test_vector_search_filters_by_document_id(monkeypatch):
     """vector_search passes a WHERE filter when document_ids is provided."""
     mock_table = MagicMock()
@@ -314,11 +317,41 @@ def test_vector_search_filters_by_document_id(monkeypatch):
         patch("app.services.embedder.get_embedding_service", return_value=mock_embedder),
     ):
         retriever = HybridRetriever()
-        retriever.vector_search("query", ["doc_abc"], k=5)
+        # A real document id. LanceDB predicates are interpolated, so ids are
+        # shape-checked first (#95) and `doc_abc` no longer reaches one --
+        # verified against the library, where no id of any kind fails the check.
+        retriever.vector_search("query", [_DOC_ID], k=5)
 
     mock_search.where.assert_called_once()
     where_arg = mock_search.where.call_args[0][0]
-    assert "doc_abc" in where_arg
+    assert _DOC_ID in where_arg
+
+
+def test_vector_search_refuses_a_malformed_document_id(monkeypatch):
+    """An unusable scope matches nothing; it must not become an unscoped search.
+
+    Dropping the filter would widen a document-scoped query to the whole
+    library, which is a worse failure than returning nothing.
+    """
+    mock_table = MagicMock()
+    mock_search = MagicMock()
+    mock_search.metric.return_value = mock_search
+    mock_search.limit.return_value = mock_search
+    mock_search.where.return_value = mock_search
+    mock_search.to_list.return_value = []
+    mock_table.search.return_value = mock_search
+
+    mock_lancedb = MagicMock()
+    mock_lancedb._get_table.return_value = mock_table
+
+    with (
+        patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
+        patch("app.services.embedder.get_embedding_service", return_value=_MockEmbeddingService()),
+    ):
+        results = HybridRetriever().vector_search("query", ["x' OR '1'='1"], k=5)
+
+    assert results == []
+    mock_search.where.assert_not_called()
 
 
 # _diversify unit tests

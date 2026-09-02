@@ -215,12 +215,18 @@ class HybridRetriever:
                     logger.debug("vector_search: LanceDB table empty, returning []")
                     return []
 
+            from app.services.vector_store import id_predicate  # noqa: PLC0415
+
             vector = _embedder_module.embed_query(query)
             table = svc._get_table()
             search = table.search(vector).metric("cosine").limit(k)
             if document_ids:
-                id_list = ", ".join(f"'{did}'" for did in document_ids)
-                search = search.where(f"document_id IN ({id_list})", prefilter=True)
+                # None means "match nothing": dropping the filter would widen a
+                # document-scoped search to the whole library.
+                pred = id_predicate("document_id", document_ids, context="vector_search")
+                if pred is None:
+                    return []
+                search = search.where(pred, prefilter=True)
             rows = search.to_list()
 
             results: list[ScoredChunk] = []
