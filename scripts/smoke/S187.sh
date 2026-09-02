@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for S187: Chat document-aware contextual recommendations
+# smoke-expects-absent: /chat/confusion-signals
 set -euo pipefail
 
 BASE="${LUMINARY_BASE_URL:-http://localhost:7820}"
