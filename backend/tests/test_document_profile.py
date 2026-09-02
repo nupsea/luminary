@@ -211,3 +211,69 @@ def test_every_form_has_a_chunk_config() -> None:
         cfg = DocumentProfile(form=form, domain="general").chunk_config
         assert cfg["chunk_size"] > 0
         assert 0 < cfg["chunk_overlap"] < cfg["chunk_size"]
+
+
+class TestGenreWiring:
+    """`_infer_genre` must read the measured facets, not re-derive them.
+
+    `DocumentProfile.card_genre` and `_infer_genre` produce the same five
+    labels from different evidence, and they disagreed: the legacy branches
+    call a book technical from a keyword in its *title* and call every video a
+    meeting. The facets are the measurement; these assert the generator uses it.
+    """
+
+    @staticmethod
+    def _doc(**kwargs):
+        from types import SimpleNamespace
+
+        base = {
+            "content_type": None,
+            "title": None,
+            "form": None,
+            "domain": None,
+            "register": None,
+        }
+        return SimpleNamespace(**{**base, **kwargs})
+
+    def test_a_technical_talk_is_not_asked_what_was_decided(self) -> None:
+        """The bug #105 fixed in the summarizer lived here too: a recorded
+        technical talk is `content_type='video'`, which the legacy branch maps
+        to `conversation` -- the meeting strategy, which asks who owns the
+        action item. A talk's value is the technique."""
+        from app.services.flashcard_prompts import _infer_genre
+
+        talk = self._doc(content_type="video", form="dialogue", domain="technical")
+        assert _infer_genre(talk) == "technical"
+
+        meeting = self._doc(content_type="video", form="dialogue", domain="general")
+        assert _infer_genre(meeting) == "conversation"
+
+    def test_a_measured_novel_is_not_called_technical_by_its_title(self) -> None:
+        from app.services.flashcard_prompts import _infer_genre
+
+        # "Neuromancer" trips no keyword, but the legacy path cannot tell an
+        # epic from an essay at all -- it answers non-fiction for both.
+        novel = self._doc(
+            content_type="book", title="Neuromancer", form="prose",
+            domain="general", register="narrative",
+        )
+        assert _infer_genre(novel) == "narrative"
+
+    def test_unmeasured_rows_still_get_the_legacy_answer(self) -> None:
+        """Documents ingested before the facets have no form, and must keep
+        reaching the same strategy they did before."""
+        from app.services.flashcard_prompts import _infer_genre
+
+        assert _infer_genre(self._doc(content_type="tech_book")) == "technical"
+        assert _infer_genre(self._doc(content_type="paper")) == "academic"
+        assert _infer_genre(self._doc(content_type="conversation")) == "conversation"
+        assert _infer_genre(None) == "non-fiction"
+
+    def test_a_profile_that_determines_nothing_falls_through(self) -> None:
+        """`card_genre` returns None where it cannot tell; that must reach the
+        fallback rather than being read as a genre."""
+        from app.services.flashcard_prompts import _infer_genre
+
+        undetermined = self._doc(content_type="tech_book", form="prose", domain="general")
+        assert DocumentProfile(form="prose", domain="general").card_genre is None
+        assert _infer_genre(undetermined) == "technical"

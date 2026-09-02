@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 ContentType = Literal[
     "book",
@@ -166,6 +166,17 @@ class DocumentProfile:
         if self.register == "expository":
             return "non-fiction"
         return None
+
+    @classmethod
+    def from_row(cls, row: Any) -> "DocumentProfile | None":
+        """The profile a stored document carries, or None if nothing measured it.
+
+        `form` is the axis every other facet hangs off, so a row without one has
+        no profile -- callers fall back rather than reading `domain` alone.
+        """
+        if row is None or not getattr(row, "form", None):
+            return None
+        return cls(form=row.form, domain=row.domain, register=row.register)
 
     @classmethod
     def from_legacy(

@@ -300,13 +300,7 @@ class SummarizationService:
                 extra={"document_id": document_id},
             )
             return None
-        if row is None or not row.form:
-            return None
-        return DocumentProfile(
-            form=row.form,  # type: ignore[arg-type]
-            domain=row.domain,  # type: ignore[arg-type]
-            register=row.register,  # type: ignore[arg-type]
-        )
+        return DocumentProfile.from_row(row)
 
     async def _fetch_chunks(self, document_id: str) -> list[ChunkModel]:
         async with get_session_factory()() as session:

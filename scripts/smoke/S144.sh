@@ -10,8 +10,9 @@ BASE="http://localhost:7820"
 DOC_ID=$(curl -sf "$BASE/documents" | python3 -c "
 import sys, json
 docs = json.load(sys.stdin)
-if docs:
-    print(docs[0]['id'])
+items = docs.get('items', []) if isinstance(docs, dict) else docs
+if items:
+    print(items[0]['id'])
 " 2>/dev/null || echo "")
 
 if [ -z "$DOC_ID" ]; then

@@ -16,6 +16,7 @@ from app.services.prompt_spec import (
     render_for,
     step_decomposition,
 )
+from app.types import DocumentProfile
 
 if TYPE_CHECKING:
     from app.models import DocumentModel
@@ -31,6 +32,14 @@ EXAMPLE_SOURCE_EXCERPT = (
     "hardware faults are random and independent, whereas software faults are "
     "correlated across nodes"
 )
+
+# The notes contract shows the shape of the quote rather than a specimen of one,
+# for the same reason. It is long enough to clear the length floor, so only an
+# explicit refusal stops a model that echoes the template from being credited.
+NOTES_EXCERPT_PLACEHOLDER = "<verbatim sentence from the notes>"
+
+# Every string the prompt hands the model that could be returned as its evidence.
+PROMPT_SUPPLIED_EXCERPTS = (EXAMPLE_SOURCE_EXCERPT, NOTES_EXCERPT_PLACEHOLDER)
 
 
 FLASHCARD_SYSTEM = (
@@ -247,11 +256,17 @@ NOTES_CARD_FROM_CONCEPTS_SYSTEM = (
     "'this case', 'this context', 'this example', 'the author', 'the text', 'these notes', "
     "'the man', 'the person', 'the writer'. "
     "The question must stand alone -- understandable without the notes. "
-    "Answer from the notes: lead with one direct sentence, then add short markdown bullets "
-    "('- ...') only for several distinct points. Never a bare list; never filler. "
+    "ANSWER: one sentence from the notes, the shortest that is still complete. Where the notes "
+    "list several items, write one card per item rather than one card listing them. Never a "
+    "bullet list; never filler. "
     "For process-role: explain what the collective activity achieves or why it matters -- "
     "never enumerate the individual components as the answer. "
-    'Output ONLY a JSON array: [{{"question": "...", "answer": "...", "source_excerpt": ""}}]. '
+    "SOURCE_EXCERPT: copy the sentence from the notes that proves the answer, word for word, at "
+    "least four words long. It must come from the notes and from nowhere else -- not from this "
+    "instruction, and not from memory. A card whose quote is not in the notes is discarded. "
+    "Use '...' to shorten a long sentence. "
+    'Output ONLY a JSON array: [{{"question": "...", "answer": "...", '
+    f'"source_excerpt": "{NOTES_EXCERPT_PLACEHOLDER}"}}}}]. '
     "No explanation, no preamble, no markdown fences."
 )
 
@@ -430,14 +445,21 @@ _GENRE_STRATEGY = {
 
 
 def _infer_genre(doc: DocumentModel | None) -> str:
-    """Infer document genre for system prompt tuning.
+    """What kind of card this document wants.
 
-    Technical content types (tech_book, tech_article, code, paper) MUST map to technical/academic.
-    They previously fell through to 'narrative' (the story prompt), so the model summarised or
-    extracted tables instead of writing recall cards.
+    `DocumentProfile.card_genre` decides it for any measured document. The
+    `content_type` branches are the fallback for rows ingested before the
+    facets, and they are wrong two ways: a book is called technical from a
+    keyword in its *title*, and every video is called a meeting -- so a recorded
+    technical talk was asked who owns the action item instead of for the
+    technique. A profile that determines nothing falls through rather than
+    defaulting; that guess is how "The Odyssey" came to be non-fiction.
     """
     if doc is None:
         return "non-fiction"
+    profile = DocumentProfile.from_row(doc)
+    if profile and profile.card_genre:
+        return profile.card_genre
     content_type = (doc.content_type or "").lower()
     # normalise underscores so slugged titles ("d2l_dive_into_deep_learning") match
     title = (doc.title or "").lower().replace("_", " ")

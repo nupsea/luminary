@@ -244,6 +244,14 @@ _EXCERPT_EDGE = "\"'\u201c\u201d\u2018\u2019"
 _EXCERPT_TAIL = ".,;:!?)]\"'"
 
 
+def _is_prompt_supplied(excerpt: str) -> bool:
+    """Whether the quote is text the prompt itself handed the model."""
+    from app.services.flashcard_prompts import PROMPT_SUPPLIED_EXCERPTS  # noqa: PLC0415
+
+    normalised = _normalise_for_match(excerpt)
+    return any(_normalise_for_match(s) in normalised for s in PROMPT_SUPPLIED_EXCERPTS)
+
+
 def _trim_edges(part: str) -> str:
     """Drop a wrapping quote and one trailing terminal character."""
     trimmed = part.strip().strip(_EXCERPT_EDGE).strip()
@@ -313,9 +321,7 @@ def grounding_state(source_excerpt: str | None, source_text: str | None) -> str:
         return GROUNDING_UNVERIFIABLE
     if len(excerpt) < _MIN_EXCERPT_CHARS or len(excerpt.split()) < _MIN_EXCERPT_TOKENS:
         return GROUNDING_UNVERIFIABLE
-    from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
-
-    if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+    if _is_prompt_supplied(excerpt):
         return GROUNDING_UNSUPPORTED
     if excerpt_is_verbatim(excerpt, source_text):
         return GROUNDING_VERIFIED
@@ -391,9 +397,7 @@ def card_rejection(
         # Text the prompt supplied can never be a card's evidence, even if a
         # passage happens to contain it. A verification the system can satisfy
         # with its own material verifies nothing.
-        from app.services.flashcard_prompts import EXAMPLE_SOURCE_EXCERPT  # noqa: PLC0415
-
-        if _normalise_for_match(EXAMPLE_SOURCE_EXCERPT) in _normalise_for_match(excerpt):
+        if _is_prompt_supplied(excerpt):
             return (
                 REJECT_UNGROUNDED,
                 "source quote is the prompt's own example, not the document",

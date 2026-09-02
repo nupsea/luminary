@@ -202,13 +202,9 @@ def _facets(doc: DocumentModel) -> DocumentFacets:
     documents nothing has classified yet. A null `domain` reaches the client as
     null so it can be shown as unclassified rather than as "general".
     """
-    if not doc.form:
+    profile = DocumentProfile.from_row(doc)
+    if profile is None:
         return DocumentFacets()
-    profile = DocumentProfile(
-        form=doc.form,  # type: ignore[arg-type]
-        domain=doc.domain,  # type: ignore[arg-type]
-        register=doc.register,  # type: ignore[arg-type]
-    )
     return DocumentFacets(
         form=doc.form,
         domain=doc.domain,
