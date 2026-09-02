@@ -89,7 +89,7 @@ class SectionModel(Base):
     __tablename__ = "sections"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     heading: Mapped[str] = mapped_column(String, nullable=False)
     level: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-6
     page_start: Mapped[int] = mapped_column(Integer, default=0)
@@ -110,7 +110,7 @@ class ChunkModel(Base):
     __tablename__ = "chunks"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     section_id: Mapped[str | None] = mapped_column(String, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -151,7 +151,7 @@ class SummaryModel(Base):
     __tablename__ = "summaries"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # one_sentence|executive|detailed|conversation
     mode: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -163,7 +163,7 @@ class FlashcardModel(Base):
     __table_args__ = (Index("idx_flashcards_concept_id", "concept_id"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     chunk_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # 'document' for book-chunk cards, 'note' for note-sourced cards, 'gap' for gap-bridge cards
     source: Mapped[str] = mapped_column(String, nullable=False, default="document")

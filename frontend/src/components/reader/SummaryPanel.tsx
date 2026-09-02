@@ -7,6 +7,7 @@ import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
+import { ConversationNotes } from "./ConversationNotes"
 import { ReferencesPanel } from "./ReferencesPanel"
 import { TagsPanel } from "./TagsPanel"
 import { CONVERSATION_TAB, SUMMARY_TABS, type SummaryMode, type SummaryTabDef } from "./types"
@@ -186,7 +187,11 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
         ) : currentSummary ? (
           <div className="space-y-2">
             <div>
-              <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
+              {activeTab === "conversation" && !isStreaming ? (
+                <ConversationNotes content={currentSummary} />
+              ) : (
+                <MarkdownRenderer>{currentSummary}</MarkdownRenderer>
+              )}
               {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
             </div>
             {!isStreaming && (

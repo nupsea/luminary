@@ -331,3 +331,73 @@ async def test_scan_survives_a_pair_already_suggested_in_both_orientations(test_
     async with factory() as session:
         rows = (await session.execute(select(TagMergeSuggestionModel))).scalars().all()
         assert len(rows) == 2, "the scan must not add a third row for the same pair"
+
+
+@pytest.mark.anyio
+async def test_scan_queries_do_not_scale_with_the_pair_count(test_db):
+    """The scan reads what it needs up front, and writes once at the end.
+
+    #88: `POST /notes` failed with "database is locked" while a scan ran. The
+    scan issued a SELECT per candidate pair, and autoflush turned the first
+    `session.add` into a write on the next iteration's SELECT -- so the write
+    transaction stayed open for the rest of an O(n^2) loop. Measured on
+    synthetic tag sets: 300 tags held the write lock 2.17s, 600 held it 13.9s,
+    900 held it 48.5s, against a 5s busy_timeout.
+
+    Asserted structurally rather than by timing: a per-pair query is what
+    reintroduces the hold, so the query count must not grow with the pairs.
+    """
+    from sqlalchemy import event
+
+    _engine, factory, _ = test_db
+
+    n = 12
+    async with factory() as session:
+        for i in range(n):
+            session.add(_make_tag(f"tag-{i}", f"machine learning {i}", usage_count=i + 1))
+        await session.commit()
+
+    # Near-identical vectors: every one of the n*(n-1)/2 pairs clears the threshold.
+    base = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    mock_embeddings = []
+    for i in range(n):
+        v = base + np.array([0.0, 0.001 * i, 0.0], dtype=np.float32)
+        mock_embeddings.append((v / np.linalg.norm(v)).tolist())
+
+    statements: list[str] = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        head = statement.strip().split()[0].upper()
+        if head in ("SELECT", "INSERT"):
+            statements.append(head)
+
+    service = SmartTagNormalizerService()
+    sync_engine = _engine.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", _record)
+    try:
+        with patch(
+            "app.services.tag_normalizer.asyncio.to_thread",
+            AsyncMock(return_value=mock_embeddings),
+        ):
+            async with factory() as session:
+                count = await service.scan(session)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", _record)
+
+    pairs = n * (n - 1) // 2
+    assert count == pairs, "every pair should have produced a suggestion"
+
+    selects = statements.count("SELECT")
+    assert selects <= 5, (
+        f"{selects} SELECTs for {pairs} pairs -- the scan is querying inside the loop again, "
+        "which is what held the write lock across it (#88)"
+    )
+
+    # No read may follow the first write: a read after it is the autoflush that
+    # opened the write transaction early and kept it open.
+    assert "INSERT" in statements
+    first_write = statements.index("INSERT")
+    assert "SELECT" not in statements[first_write:], (
+        "the scan read again after its first write, so the write transaction "
+        "stayed open across the remaining pairs (#88)"
+    )
