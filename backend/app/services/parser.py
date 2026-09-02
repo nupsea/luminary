@@ -182,6 +182,10 @@ def _printed_page_labels(doc) -> dict[int, str]:
 # footer. A page number lives there; a number three lines in is content.
 _PAGE_NUMBER_BAND = 2
 
+# Digits a bare number may have and still read as a page number rather than a
+# year. Read by the folio scan and by heading detection, which must agree.
+_PAGE_NUMBER_MAX_DIGITS = 3
+
 # The share of a document's pages that must agree on one sheet-minus-printed
 # offset before the reading is trusted. Bracketing cases: a scanned book prints
 # its number on nearly every body page, so agreement is high; a slide deck with
@@ -214,7 +218,7 @@ def _printed_numbers_from_text(doc) -> dict[int, str]:
             band = lines[:_PAGE_NUMBER_BAND] + lines[-_PAGE_NUMBER_BAND:]
             for line in band:
                 # Four digits is a year in a header far more often than a page.
-                if line.isdigit() and 1 <= len(line) <= 3:
+                if line.isdigit() and 1 <= len(line) <= _PAGE_NUMBER_MAX_DIGITS:
                     sheet = index + 1
                     detected[sheet] = int(line)
                     offsets[sheet - int(line)] += 1
@@ -257,6 +261,19 @@ def _block_start_offsets(blocks: list[str]) -> list[int]:
         offsets.append(running)
         running += len(block) + 2  # the "\n\n" the blocks are joined with
     return offsets
+
+
+def _is_folio(text: str) -> bool:
+    """A line that is only a number is a page number, not a heading.
+
+    The no-TOC scan promotes any large short line to a heading, and a book that
+    sets its chapter-opening folio in display type therefore gets sections
+    titled after the page number. Bounded at three digits for the reason
+    `_printed_numbers_from_text` uses the same bound: `265` is a page, `1984` is
+    a year and a legitimate heading.
+    """
+    stripped = text.strip().rstrip(".")
+    return stripped.isdigit() and 1 <= len(stripped) <= _PAGE_NUMBER_MAX_DIGITS
 
 
 def _is_page_furniture(block: dict, page_height: float) -> bool:
@@ -558,7 +575,11 @@ class DocumentParser:
                     line_text = _join_spans(spans).strip()
                     if not line_text:
                         continue
-                    if max_size >= heading_threshold and len(line_text) < 120:
+                    if (
+                        max_size >= heading_threshold
+                        and len(line_text) < 120
+                        and not _is_folio(line_text)
+                    ):
                         level = 1 if max_size >= h1_min else 2
                         flush_section(line_text, level, page_num + 1)
                     else:
