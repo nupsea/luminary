@@ -34,7 +34,7 @@ from sqlalchemy import select, update
 
 from app.database import get_session_factory
 from app.models import DocumentModel
-from app.services.universal_parser import read_document_text
+from app.services.content_classifier import classify_form
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile
 from app.workflows.ingestion_nodes._shared import (
     detect_register,
@@ -49,7 +49,13 @@ logger = logging.getLogger("remeasure_domain")
 _MEDIA = ("audio", "video")
 
 
-async def _text_for(doc: DocumentModel, session) -> str:
+async def _read(doc: DocumentModel, session) -> tuple[str, list[dict], int, str]:
+    """(text, sections, word_count, extension) -- everything the measurements need.
+
+    Media text lives in chunks: the transcript is produced during ingestion and
+    the .wav on disk cannot be read back as text. Everything else is parsed the
+    way ingestion parses it, because `classify_form` reads the section headings.
+    """
     if doc.content_type in _MEDIA:
         from app.models import ChunkModel  # noqa: PLC0415
 
@@ -59,12 +65,20 @@ async def _text_for(doc: DocumentModel, session) -> str:
             .order_by(ChunkModel.chunk_index)
             .limit(200)
         )
-        return " ".join(r[0] for r in rows.all())
+        text = " ".join(r[0] for r in rows.all())
+        return text, [], len(text.split()), Path(doc.file_path).suffix.lstrip(".")
     try:
-        return await asyncio.to_thread(read_document_text, Path(doc.file_path))
+        from app.services.parser import DocumentParser  # noqa: PLC0415
+
+        path = Path(doc.file_path)
+        parsed = await asyncio.to_thread(
+            DocumentParser().parse, path, path.suffix.lstrip(".")
+        )
+        sections = [{"heading": s.heading} for s in parsed.sections]
+        return parsed.raw_text, sections, parsed.word_count, path.suffix.lstrip(".")
     except Exception as exc:  # noqa: BLE001
         logger.warning("  could not read %s: %s", doc.title, type(exc).__name__)
-        return ""
+        return "", [], doc.word_count or 0, ""
 
 
 async def main(apply: bool) -> int:
@@ -77,8 +91,17 @@ async def main(apply: bool) -> int:
 
         for doc in docs:
             before = DocumentProfile.from_legacy(doc.content_type, doc.is_technical).domain
-            text = await _text_for(doc, session)
+            text, sections, word_count, ext = await _read(doc, session)
             has_text = bool(text.strip())
+
+            # Measured from structure, never mapped from content_type: the map
+            # reaches `reference` only through `tech_book`, so a non-technical
+            # manual could not be one.
+            form = (
+                classify_form(text, sections, word_count, ext, Path(doc.file_path).name)
+                if has_text
+                else doc.form
+            )
 
             # A type that names the subject needs no probe; the register never
             # follows from the type, so it is always read.
@@ -91,15 +114,17 @@ async def main(apply: bool) -> int:
             )
 
             after = DocumentProfile.from_legacy(doc.content_type, measured).domain
-            if after == before and register == doc.register:
+            if after == before and register == doc.register and form == doc.form:
                 if after is None or register is None:
                     undecided.append(doc.title)
                 continue
 
             changed.append((doc.id, doc.title, before, after))
             logger.info(
-                "  %-42s domain %s -> %s   register %s -> %s",
-                doc.title[:41],
+                "  %-38s form %s -> %s   domain %s -> %s   register %s -> %s",
+                doc.title[:37],
+                doc.form or "null",
+                form or "null",
                 before or "null",
                 after or "null",
                 doc.register or "null",
@@ -109,6 +134,8 @@ async def main(apply: bool) -> int:
                 values: dict[str, object] = {"is_technical": measured, "domain": after}
                 if register is not None:
                     values["register"] = register
+                if form is not None:
+                    values["form"] = form
                 await session.execute(
                     update(DocumentModel).where(DocumentModel.id == doc.id).values(**values)
                 )

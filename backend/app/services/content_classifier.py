@@ -242,22 +242,43 @@ _DATED_ENTRY = re.compile(
 )
 
 
-def section_marker_rate(text: str, word_count: int) -> float:
-    """Section markers per 1,000 words, narrative divisions excluded.
+# Past this length a document's marker *density* stops saying what kind of
+# document it is and starts saying how long it is. `ibm-sdm-vol-2` carries 1,391
+# section markers -- as unambiguous a reference work as the library holds -- and
+# rates 0.47 against its 2.9 million words, below every threshold that admits a
+# rule book. Capping the denominator measures its structure against a normal
+# document instead. Only documents past the cap are affected, and of those only
+# a heavily sectioned one moves: Moby-Dick has 2 markers, Hegel 12.
+_MARKER_RATE_WORD_CAP = 200_000
 
-    Rate rather than count, because a marker count only says how long the
-    document is. Measured across 20 documents, the two that bracket the
-    threshold are `federalist_papers` at 0.43 -- the most sectioned prose in the
-    library -- and `art_of_unix` at 2.68, the least sectioned reference work.
-    """
-    if word_count <= 0:
-        return 0.0
-    markers = (
+# Below this many markers outright, a rate means very little: five numbered
+# lines in a 2,600-word release note rate 1.91 and are not a reference skeleton.
+# No true reference measured comes near it -- `art_of_unix`, the smallest, has 41.
+_MIN_SECTION_MARKERS = 8
+
+
+def count_section_markers(text: str) -> int:
+    """Section markers, narrative divisions excluded."""
+    return (
         len(_FLAT_MARKER.findall(text))
         + len(_NUMBERED_SECTION.findall(text))
         + len(_NAMED_MARKER.findall(text))
     )
-    return markers / (word_count / 1000)
+
+
+def section_marker_rate(text: str, word_count: int) -> float:
+    """Section markers per 1,000 words, against a capped length.
+
+    Rate rather than raw count, because a count on its own only says how long
+    the document is. Measured across 20 documents, the two that bracket the
+    threshold are `federalist_papers` at 0.43 -- the most heavily sectioned prose
+    in the library -- and `art_of_unix` at 2.68, the least heavily sectioned
+    reference work.
+    """
+    if word_count <= 0:
+        return 0.0
+    denominator = min(word_count, _MARKER_RATE_WORD_CAP) / 1000
+    return count_section_markers(text) / denominator
 
 
 def count_numbered_sections(text: str) -> int:
@@ -490,7 +511,10 @@ def classify_form(
     if paper_headings >= 3:
         return "paper"
 
-    if section_marker_rate(full, word_count) >= _REFERENCE_MARKER_RATE:
+    if (
+        count_section_markers(full) >= _MIN_SECTION_MARKERS
+        and section_marker_rate(full, word_count) >= _REFERENCE_MARKER_RATE
+    ):
         return "reference"
 
     # Entries are dated or delimited units, not merely a short document.

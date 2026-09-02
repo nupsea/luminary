@@ -305,6 +305,26 @@ class TestFormIsStructuralOnly:
                           for d in range(1, 9))
         assert classify_form(journal, [], 600, "txt") == "entries"
 
+    def test_a_very_long_manual_is_still_a_reference(self) -> None:
+        """Density stops describing the document and starts describing its
+        length. `ibm-sdm-vol-2` carries 1,391 section markers across 2.9 million
+        words and rates 0.47 -- below every threshold that admits a rule book --
+        so the denominator is capped."""
+        manual = "".join(
+            f"{i}. Configure the subsystem parameters\n" + ("filler words here. " * 60) + "\n"
+            for i in range(1, 700)
+        )
+        # 699 markers against the 200k cap rates 3.5, in the same band as the
+        # real manual's 6.96. Uncapped it would rate 0.70 and read as prose.
+        assert classify_form(manual, [], 1_000_000, "txt") == "reference"
+
+    def test_a_handful_of_numbered_lines_is_not_a_reference(self) -> None:
+        """Five numbered lines in a 2,600-word release note rate 1.91 on density
+        alone. No true reference measured comes near the floor -- art_of_unix,
+        the smallest, carries 41 markers."""
+        post = "".join(f"{i}. A change we shipped\n" for i in range(1, 6)) + ("word " * 2600)
+        assert classify_form(post, [], 2600, "md") == "article"
+
     def test_a_file_extension_decides_code_and_media(self) -> None:
         assert classify_form("def f(): pass", [], 50, "py") == "source_code"
         assert classify_form("anything", [], 5000, "wav") == "dialogue"
