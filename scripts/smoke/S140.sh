@@ -15,6 +15,7 @@
 #      as still-removed
 #
 # Requires a running backend at localhost:7820.
+# smoke-expects-absent: /code/execute
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:7820}"
