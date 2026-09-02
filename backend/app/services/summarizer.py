@@ -30,6 +30,7 @@ from app.models import (
 )
 from app.services.llm import LLMAuthenticationError, get_llm_service
 from app.services.section_summarizer import _is_metadata_section
+from app.types import DocumentProfile
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,9 @@ _MARKDOWN_INSTRUCTION = (
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
     "executive": (
-        "Identify the 3 to 5 most important overarching themes, arguments, or narrative ideas "
-        "that run through the entire work. Write each as a concise bullet point. "
+        "Identify the 3 to 5 most important ideas that run through the entire work. "
+        "Write each as a concise bullet point. "
         "Do NOT list individual chapter or passage summaries — synthesise across them. "
-        "Focus on ideas, arguments, character arcs, and findings. "
         "Ignore copyright notices, licensing terms, and distribution metadata. "
         f"{_MARKDOWN_INSTRUCTION}"
     ),
@@ -193,8 +193,80 @@ def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) ->
     return batches
 
 
-def _build_system_prompt(mode: str) -> str:
-    return f"{GROUNDING_PREFIX}\n\n{MODE_INSTRUCTIONS[mode]}"
+# What to say about each kind of document, appended to the mode instruction.
+#
+# `MODE_INSTRUCTIONS` used to carry this itself, and carried exactly one answer:
+# the executive instruction asked for "narrative ideas" and "character arcs" of
+# every document alike. A 38-minute conference talk was summarised under it and
+# lost `agents.md`, slash commands, agent skills and the benchmark site it named
+# -- 10 mentions of one, 3 of another, none surviving (issue #105). The
+# instruction was working: it asked for overarching themes, and a named tool is
+# not one.
+#
+# Keyed on the facets rather than content_type, because the distinction that
+# matters here is shape and subject: a manual and a novel are both "book".
+_FORM_GUIDANCE: dict[str, str] = {
+    "prose": (
+        "Focus on what the work argues or recounts, and name the people, places "
+        "and specific subjects it is about."
+    ),
+    "article": "Focus on the claim being made and the specific things it is about.",
+    "reference": (
+        "Name the specific rules, components, commands and parameters the work "
+        "defines. A reader uses this to decide what to look up, so a named thing "
+        "is worth more than a description of it."
+    ),
+    "paper": (
+        "Name what was measured, the method, the finding, and the limitation the "
+        "work states. Keep figures and named methods exactly as written."
+    ),
+    "dialogue": (
+        "Name the specific systems, tools and decisions discussed, and who owns "
+        "them. Anything that will go stale -- a version, a date, a number -- "
+        "carries its date."
+    ),
+    "entries": "Name the recurring subjects across entries rather than retelling each one.",
+    "script": "Focus on what happens and what the characters want.",
+    "source_code": "Name the functions, types and responsibilities the file defines.",
+}
+
+_NARRATIVE_GUIDANCE = (
+    "Focus on what happens, what the characters want, and what their choices "
+    "cost. Name the people and places that carry the story."
+)
+
+# The instruction the talk needed. Abstracting a named thing into its category
+# is the specific failure: "configuration files" in place of `agents.md`.
+_TECHNICAL_GUIDANCE = (
+    "Preserve exact names: files, commands, libraries, parameters, metrics and "
+    "tools. Never replace a named thing with the category it belongs to."
+)
+
+
+def _kind_guidance(profile: "DocumentProfile | None") -> str:
+    """The sentence that tells the model what this kind of document is for."""
+    if profile is None:
+        return ""
+    if profile.form in ("prose", "article") and profile.register == "narrative":
+        parts = [_NARRATIVE_GUIDANCE]
+    else:
+        parts = [_FORM_GUIDANCE.get(profile.form, "")]
+    if profile.is_technical:
+        parts.append(_TECHNICAL_GUIDANCE)
+    return " ".join(p for p in parts if p)
+
+
+def _build_system_prompt(mode: str, profile: "DocumentProfile | None" = None) -> str:
+    """The grounding prefix, the mode instruction, and what this kind wants.
+
+    `conversation` mode asks for a JSON object, so guidance written for prose
+    would only invite the model to add commentary around it.
+    """
+    prompt = f"{GROUNDING_PREFIX}\n\n{MODE_INSTRUCTIONS[mode]}"
+    if mode == "conversation":
+        return prompt
+    guidance = _kind_guidance(profile)
+    return f"{prompt} {guidance}" if guidance else prompt
 
 
 class SummarizationService:
@@ -203,6 +275,40 @@ class SummarizationService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _fetch_profile(self, document_id: str) -> "DocumentProfile | None":
+        """What kind of document this is, for the prompt to adapt to.
+
+        None when the row carries no form yet -- the prompt then falls back to
+        the kind-neutral instruction rather than guessing a kind.
+
+        Never raises. Adapting the prompt is an improvement on the summary, not
+        a precondition for having one, so a lookup that fails costs the
+        adaptation and nothing else.
+        """
+        try:
+            async with get_session_factory()() as session:
+                row = (
+                    await session.execute(
+                        select(
+                            DocumentModel.form, DocumentModel.domain, DocumentModel.register
+                        ).where(DocumentModel.id == document_id)
+                    )
+                ).first()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "summary profile lookup failed, using the neutral prompt: %s",
+                type(exc).__name__,
+                extra={"document_id": document_id},
+            )
+            return None
+        if row is None or not row.form:
+            return None
+        return DocumentProfile(
+            form=row.form,  # type: ignore[arg-type]
+            domain=row.domain,  # type: ignore[arg-type]
+            register=row.register,  # type: ignore[arg-type]
+        )
 
     async def _fetch_chunks(self, document_id: str) -> list[ChunkModel]:
         async with get_session_factory()() as session:
@@ -343,14 +449,16 @@ class SummarizationService:
         await self._store_summary(document_id, "_map_reduce", result)
         return result
 
-    async def _generate_detailed(self, input_text: str, model: str | None) -> str:
+    async def _generate_detailed(
+        self, input_text: str, model: str | None, profile: "DocumentProfile | None" = None
+    ) -> str:
         """Generate the per-section summary as one bounded call per batch.
 
         Only reached when no section summaries exist. The batches are joined in
         document order, so the whole input is covered by exactly one call each.
         """
         llm = get_llm_service()
-        system = _build_system_prompt("detailed")
+        system = _build_system_prompt("detailed", profile)
         parts: list[str] = []
         for batch in _split_for_detail(input_text):
             text = await llm.generate(
@@ -450,7 +558,11 @@ class SummarizationService:
                 text = (
                     section_input
                     if section_input is not None
-                    else await self._generate_detailed(_truncate_to_budget(input_text), model)
+                    else await self._generate_detailed(
+                        _truncate_to_budget(input_text),
+                        model,
+                        await self._fetch_profile(document_id),
+                    )
                 )
                 summary_id = await self._store_summary(document_id, mode, text)
                 yield f"data: {json.dumps({'token': text})}\n\n"
@@ -459,7 +571,7 @@ class SummarizationService:
                 return
 
             llm = get_llm_service()
-            system = _build_system_prompt(mode)
+            system = _build_system_prompt(mode, await self._fetch_profile(document_id))
             token_stream = await llm.generate(
                 _truncate_to_budget(input_text),
                 system=system,
@@ -519,6 +631,8 @@ class SummarizationService:
         map passes.
         """
         try:
+            # Fetched once: every mode in this call summarises the same document.
+            profile = await self._fetch_profile(document_id)
             # Determine which modes still need generation
             modes_needed = []
             for mode in PREGENERATE_MODES:
@@ -586,11 +700,13 @@ class SummarizationService:
                     if mode in _ASSEMBLED_MODES and section_input is not None:
                         text = section_input
                     elif mode in _ASSEMBLED_MODES:
-                        text = await self._generate_detailed(_truncate_to_budget(input_text), model)
+                        text = await self._generate_detailed(
+                            _truncate_to_budget(input_text), model, profile
+                        )
                     else:
                         text = await llm.generate(
                             _truncate_to_budget(input_text),
-                            system=_build_system_prompt(mode),
+                            system=_build_system_prompt(mode, profile),
                             model=model,
                             background=True,
                             num_ctx=_summary_num_ctx(model),

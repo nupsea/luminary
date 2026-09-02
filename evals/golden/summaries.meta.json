@@ -1,0 +1,33 @@
+{
+  "dataset": "summaries",
+  "description": "Summary quality: theme coverage, conciseness, hallucination.",
+  "modes": [
+    "one_sentence",
+    "executive",
+    "detailed"
+  ],
+  "provenance": {
+    "themes": "Authored by hand from the text ingestion reads, via app.services.universal_parser.read_document_text. Every keyword was verified to occur in the source before the row was written.",
+    "extended": "2026-09-02 -- the set was three Victorian novels, so it could not see issue #105: the executive prompt asks for 'character arcs' and discards named artifacts, and every document in the set was a narrative where that is the right instruction. Four rows added covering a technical dialogue, a reference work, expository non-narrative prose, and short technical notes."
+  },
+  "kinds_covered": {
+    "prose/narrative": [
+      "alice_in_wonderland",
+      "time_machine",
+      "the_odyssey"
+    ],
+    "prose/expository": [
+      "federalist_papers"
+    ],
+    "reference/technical": [
+      "art_of_unix"
+    ],
+    "dialogue/technical": [
+      "engineering_sync"
+    ],
+    "article/technical": [
+      "ml_notes"
+    ]
+  },
+  "not_covered": "No paper, no source_code, no entries. Media documents cannot appear: rows resolve through a DATA/ path that ensure_ingested can re-ingest, and a transcript is produced during ingestion."
+}
