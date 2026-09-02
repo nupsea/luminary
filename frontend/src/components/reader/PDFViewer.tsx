@@ -21,7 +21,7 @@ import {
 import { usableSections } from "./sectionTitle"
 import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
-import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel, stepZoom } from "./pdfSearchUtils"
+import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
 import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
 
 // Set worker once at module load
@@ -661,9 +661,26 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setPageInput(String(clamped))
     }
 
+    /** The sheet a typed entry names, or null if it names nothing.
+     *
+     * A `p`-prefixed entry that matches no printed label returns null rather
+     * than falling back to a sheet: silently landing on sheet 19 when the
+     * reader asked for the page printed 19 is the confusion this exists to fix.
+     */
+    function resolvePageEntry(raw: string): number | null {
+      const entry = parsePageEntry(raw)
+      if (!entry) return null
+      if (entry.kind === "sheet") return entry.sheet
+      return sheetForPrintedLabel(declaredLabels, pageLabels, entry.label)
+    }
+
     function commitPageInput() {
-      const n = parseInt(pageInput, 10)
-      if (!isNaN(n)) goToPage(n)
+      const sheet = resolvePageEntry(pageInput)
+      if (sheet === null) {
+        setPageInput(String(currentPage))
+        return
+      }
+      goToPage(sheet)
     }
 
     // The page field only committed on blur/Enter, so the spinner arrows (and any
@@ -672,10 +689,10 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     function handlePageInputChange(value: string) {
       setPageInput(value)
       if (pageCommitTimer.current) window.clearTimeout(pageCommitTimer.current)
-      const n = parseInt(value, 10)
-      if (isNaN(n)) return
+      const sheet = resolvePageEntry(value)
+      if (sheet === null) return
       pageCommitTimer.current = window.setTimeout(() => {
-        setCurrentPage(Math.max(1, Math.min(n, totalPages)))
+        setCurrentPage(Math.max(1, Math.min(sheet, totalPages)))
       }, 250)
     }
     function commitPageInputNow() {
@@ -1091,16 +1108,18 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               <ChevronLeft className="h-4 w-4" />
             </button>
             <input
-              type="number"
+              // Text, not number: a printed page can be `xiv`, which a numeric
+              // field cannot hold. The spinner arrows go with it; the prev/next
+              // chevrons on either side already do that job.
+              type="text"
               // w-12 clipped a three-digit sheet: a 386-page book showed "34".
               className="w-16 text-center text-sm tabular-nums border rounded px-1 py-0.5"
               value={pageInput}
-              min={1}
-              max={totalPages}
               onChange={(e) => handlePageInputChange(e.target.value)}
               onBlur={commitPageInputNow}
               onKeyDown={(e) => { if (e.key === "Enter") commitPageInputNow() }}
-              aria-label="Current page"
+              title="Sheet number, or p19 for the page printed 19"
+              aria-label="Current page: a sheet number, or p19 for the page printed 19"
             />
             <span className="text-xs text-muted-foreground tabular-nums">/ {totalPages}</span>
             {printedLabel && (

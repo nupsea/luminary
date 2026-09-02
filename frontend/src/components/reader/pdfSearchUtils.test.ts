@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, printedPageLabel, stepZoom } from "./pdfSearchUtils"
+import { activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
 
 describe("findMatchIndices", () => {
   it("returns empty for empty query", () => {
@@ -177,5 +177,53 @@ describe("zoom stepping", () => {
   it("steps down from a value above every stop", () => {
     // The old control capped at 200% and could not represent 287% at all.
     expect(stepZoom(9, -1)).toBe(4)
+  })
+})
+
+describe("parsePageEntry", () => {
+  it("reads a bare number as a sheet, unchanged", () => {
+    expect(parsePageEntry("19")).toEqual({ kind: "sheet", sheet: 19 })
+    expect(parsePageEntry("  386 ")).toEqual({ kind: "sheet", sheet: 386 })
+  })
+
+  it("reads a p-prefix as a printed page", () => {
+    // The prefix mirrors the `p.19` chip beside the field.
+    expect(parsePageEntry("p19")).toEqual({ kind: "printed", label: "19" })
+    expect(parsePageEntry("p.19")).toEqual({ kind: "printed", label: "19" })
+    expect(parsePageEntry("P. xiv")).toEqual({ kind: "printed", label: "xiv" })
+  })
+
+  it("rejects what names no page", () => {
+    expect(parsePageEntry("")).toBeNull()
+    expect(parsePageEntry("   ")).toBeNull()
+    expect(parsePageEntry("p")).toBeNull()
+    expect(parsePageEntry("12a")).toBeNull()
+  })
+})
+
+describe("sheetForPrintedLabel", () => {
+  // Measured on one 613-page book: sheet 41 is printed "19", sheet 6 is "iv".
+  const declared = ["i", "ii", "iii", "iv", "v", "1", "2", "3"]
+  const derived = { "41": "19", "42": "20" }
+
+  it("finds the sheet from the ingestion-derived map", () => {
+    expect(sheetForPrintedLabel(null, derived, "19")).toBe(41)
+  })
+
+  it("finds the sheet from the PDF's own declared labels", () => {
+    expect(sheetForPrintedLabel(declared, null, "iv")).toBe(4)
+    expect(sheetForPrintedLabel(declared, null, "1")).toBe(6)
+  })
+
+  it("matches case-insensitively so p.XIV finds a page printed xiv", () => {
+    expect(sheetForPrintedLabel(["xiv"], null, "XIV")).toBe(1)
+  })
+
+  it("returns null when no page carries that label", () => {
+    // The caller must not fall back to treating it as a sheet: landing on
+    // sheet 19 when the reader asked for the page printed 19 is the confusion
+    // this whole path exists to remove.
+    expect(sheetForPrintedLabel(declared, derived, "999")).toBeNull()
+    expect(sheetForPrintedLabel(null, null, "19")).toBeNull()
   })
 })
