@@ -16,7 +16,7 @@ from pathlib import Path
 
 from app.services.content_classifier import classify_content
 from app.telemetry import trace_ingestion_node
-from app.types import TECHNICAL_CONTENT_TYPES
+from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
@@ -97,6 +97,17 @@ async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | No
     """
     is_technical = await _measure_domain(content_type, pd)
     raw_text = (pd or {}).get("raw_text") or ""
+
+    # A paper reports and a manual instructs; neither narrates, so the shape
+    # settles it and the probe is a call spent on a known answer. Measured on
+    # this host at ~2.6s a call, and 11 of the library's 53 documents take this
+    # path. Combining the two probes into one call was tried instead and is
+    # worse on every axis -- 17/21 against 20/21 on subject, 18/21 against 21/21
+    # on register, and 0.84x the speed, because the cost is prompt tokens rather
+    # than call overhead.
+    settled = register_for_form(DocumentProfile.from_legacy(content_type).form)
+    if settled is not None:
+        return is_technical, settled
     register = await detect_register(raw_text) if raw_text.strip() else None
     return is_technical, register
 
@@ -138,8 +149,13 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 if pd
                 else "tech_article"
             )
-            # The user asserted the domain; the register still has to be read.
-            register = await detect_register(pd["raw_text"]) if pd else None
+            # The user asserted the domain; the register is settled by the
+            # resolved shape when that shape is a manual, and read otherwise.
+            settled = register_for_form(DocumentProfile.from_legacy(resolved).form)
+            if settled is not None:
+                register = settled
+            else:
+                register = await detect_register(pd["raw_text"]) if pd else None
             await _persist_classification(state["document_id"], resolved, True, register)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",

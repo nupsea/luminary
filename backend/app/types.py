@@ -101,6 +101,26 @@ _EXPANDING_FORMS: frozenset[str] = frozenset({"prose", "dialogue", "entries"})
 _NARRATIVE_FORMS: frozenset[str] = frozenset({"prose", "entries", "script"})
 
 
+# Forms whose register follows from the shape, so asking a model is spending a
+# call on a settled question. A research paper reports and a manual instructs;
+# neither narrates. `dialogue` is deliberately absent -- a meeting explains but
+# an audiobook narrates, and both arrive as speaker turns.
+_REGISTER_BY_FORM: dict[str, Register] = {
+    "paper": "expository",
+    "reference": "expository",
+}
+
+
+def register_for_form(form: Form) -> "Register | None":
+    """The register a form settles on its own, or None when it must be measured.
+
+    Saves the probe on every paper and manual, and -- more to the point -- gives
+    those documents a real value instead of the "unclassified" they showed
+    before, which was the axis reporting that nobody had asked.
+    """
+    return _REGISTER_BY_FORM.get(form)
+
+
 def chunk_config_for_form(form: Form) -> dict[str, int]:
     """Chunker settings for a form, for the specialised chunkers that already
     know which form they are handling and have no profile to hand."""

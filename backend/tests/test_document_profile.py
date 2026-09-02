@@ -176,6 +176,21 @@ def test_tag_entity_types_follow_the_form() -> None:
         assert DocumentProfile.from_legacy(content_type).tag_entity_types == ("CONCEPT",)
 
 
+def test_a_shape_that_settles_its_register_is_not_probed() -> None:
+    """A research paper reports and a manual instructs; neither narrates.
+
+    Asking a model costs ~2.6s a document on the dev host and can only agree.
+    Every other form must still be measured -- `dialogue` above all, because a
+    meeting explains and an audiobook narrates, and both arrive as speaker turns.
+    """
+    from app.types import register_for_form
+
+    assert register_for_form("paper") == "expository"
+    assert register_for_form("reference") == "expository"
+    for form in ("prose", "article", "dialogue", "entries", "script", "source_code"):
+        assert register_for_form(form) is None, f"{form} must still be measured"
+
+
 def test_profiles_are_frozen() -> None:
     """A policy object that can be mutated in place is a rival definition
     waiting to happen."""
