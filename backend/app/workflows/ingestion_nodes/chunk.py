@@ -33,8 +33,8 @@ from app.services.tech_section_parser import (
     is_objective_candidate,
 )
 from app.telemetry import trace_ingestion_node
+from app.types import DocumentProfile, chunk_config_for_form
 from app.workflows.ingestion_nodes._shared import (
-    CHUNK_CONFIGS,
     IngestionState,
     _background_tasks,
     _update_stage,
@@ -146,7 +146,7 @@ async def _chunk_book(state: IngestionState, pd: dict | None, doc_id: str) -> In
     2. Context Injection: Prepend [Book Title > Chapter] to every chunk text.
     3. Cross-Boundary Protection: No chunk crosses a section (chapter) boundary.
     """
-    cfg = CHUNK_CONFIGS["book"]
+    cfg = chunk_config_for_form("prose")
     # Smart splitting: try paragraphs, then sentences, then words.
     splitter = _splitter_cls()(
         chunk_size=cfg["chunk_size"],
@@ -349,7 +349,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
 
 
     content_type = state.get("content_type") or "tech_book"
-    cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["tech_book"])
+    cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
 
     async with get_session_factory()() as session:
         doc_result = await session.execute(
@@ -611,7 +611,7 @@ async def _chunk_conversation(
             conversation_metadata = {**roster, **timeline}
         else:
             # Fallback: plain text splitter (no speaker detection)
-            cfg = CHUNK_CONFIGS["conversation"]
+            cfg = chunk_config_for_form("dialogue")
             splitter = _splitter_cls()(
                 chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
             )
@@ -816,7 +816,7 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
         return await _chunk_generic(state, pd, doc_id, "paper")
 
     try:
-        cfg = CHUNK_CONFIGS["paper"]
+        cfg = chunk_config_for_form("paper")
         chunks: list[dict] = []
         async with get_session_factory()() as session:
             doc_result = await session.execute(
@@ -928,7 +928,7 @@ async def _chunk_generic(
     Also the fallback for content types with a specialised chunker, so an
     unrecognised or malformed document still ingests instead of failing.
     """
-    cfg = CHUNK_CONFIGS.get(content_type, CHUNK_CONFIGS["notes"])
+    cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
     splitter = _splitter_cls()(
         chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
     )

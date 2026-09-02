@@ -51,6 +51,7 @@ import {
   isYouTubeDoc,
   relativeDate,
 } from "./utils"
+import { FacetChips } from "./FacetChips"
 
 import { apiPatch } from "@/lib/apiClient"
 import { toast } from "sonner"
@@ -602,6 +603,8 @@ export function DocumentCard({
           </>
         )}
       </div>
+
+      <FacetChips facets={doc.facets} className="mt-1.5" />
 
       {doc.enrichment_status && (
         <span className={cn(

@@ -19,8 +19,12 @@ import pytest
 from app.services.content_classifier import (
     _speaker_stats,
     classify_content,
+    classify_form,
+    count_numbered_sections,
+    looks_like_front_matter,
     sample_body,
     strip_boilerplate,
+    subject_excerpt,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -155,6 +159,95 @@ def test_short_documents_are_notes() -> None:
     assert classify_content("a few quick thoughts about today", [], 40, "txt") == "notes"
 
 
+def test_plot_ticks_are_not_numbered_sections() -> None:
+    """A PDF extracts bare numbers onto their own lines, sections and data alike.
+
+    Measured on the stored papers: "Attention Is All You Need" produced 199
+    matches, whose most common distinct values were 0.0, 0.1, 0.2, 0.3 -- axis
+    ticks, not sections. A section number never starts with zero, and that is
+    the only thing separating the two by pattern.
+    """
+    ticks = "\n".join(f"0.{n}" for n in range(10))
+    assert count_numbered_sections(ticks) == 0
+
+    real = "3.1\nAttention\n3.2\nMulti-Head\n3.2.1\nScaled Dot-Product\n"
+    assert count_numbered_sections(real) == 3
+
+    # A measurement cannot pose as a section number.
+    assert count_numbered_sections("2931529.5\n1234.56\n") == 0
+
+
+def test_duplicated_extraction_does_not_multiply_the_section_count() -> None:
+    """The parser can repeat a section body (issue #97).
+
+    Counting raw matches let one skeleton of 3 sections read as 9 and cross the
+    >= 8 threshold that awards the technical score its largest structural bonus.
+    """
+    skeleton = "3.1\nOne\n3.2\nTwo\n3.3\nThree\n"
+    assert count_numbered_sections(skeleton) == 3
+    assert count_numbered_sections(skeleton * 3) == 3
+
+
+class TestFrontMatter:
+    """A contents listing must not decide what a document is about.
+
+    `art_of_unix` was classified as non-technical because the opening 2,000
+    characters were its chapter contents, whose entries are headed "Philosophy".
+    The subject probe read a navigation aid and answered about that.
+    """
+
+    def test_a_run_on_contents_list_is_front_matter(self) -> None:
+        """Sentence density cannot catch this one.
+
+        Every entry ends in a full stop and starts with a capital, so the block
+        scores as prose. What gives it away is that it says so.
+        """
+        toc = (
+            "Chapter 4. Modularity\nTable of ContentsEncapsulation and Optimal Module Size."
+            "Compactness and Orthogonality. The SPOT Rule. Libraries. Unix and Object-"
+            "Oriented Languages. Coding for Modularity."
+        )
+        assert looks_like_front_matter(toc) is True
+
+    def test_a_paginated_contents_is_front_matter(self) -> None:
+        leaders = (
+            "Contents\n1 Introduction . . . . . . . . . . . . 9\n"
+            "2 Methods . . . . . . . . 14\n"
+        )
+        assert looks_like_front_matter(leaders) is True
+
+        column = "Introduction\n1\nBackground\n7\nMethod\n12\nResults\n19\nDiscussion\n24\n"
+        assert looks_like_front_matter(column) is True
+
+    def test_ordinary_prose_is_not_front_matter(self) -> None:
+        prose = (
+            "Those who do not understand Unix are condemned to reinvent it, poorly. "
+            "The design of an operating system reflects the assumptions of the people "
+            "who wrote it, and those assumptions outlive the hardware they were made for."
+        )
+        assert looks_like_front_matter(prose) is False
+
+    def test_a_document_that_is_only_a_contents_page_stays_unclassified(self) -> None:
+        """Both windows are the listing, so there is nothing to judge.
+
+        Returning the listing anyway would have the probe answer about a set of
+        chapter titles and record it as a finding. Empty reaches the caller as
+        None, which is shown to the reader as unclassified.
+        """
+        only_toc = "Table of Contents\n" + "".join(f"Chapter {i}\n{i * 7}\n" for i in range(1, 40))
+        assert subject_excerpt(only_toc) == ""
+
+    def test_the_excerpt_falls_back_only_when_the_opening_is_unusable(self) -> None:
+        """A clean opening must be read exactly as before, so a document that
+        never had this problem cannot be disturbed by the fix."""
+        body = "The engine converts fuel into motion. " * 200
+        assert subject_excerpt(body).startswith("The engine converts fuel")
+
+        contented = "Table of Contents\nOne\nTwo\nThree\n" + ("x" * 1900) + body
+        excerpt = subject_excerpt(contented)
+        assert "Table of Contents" not in excerpt
+
+
 def test_chapter_headings_do_not_decide_prose() -> None:
     """Chapter headings look like the obvious prose signal and are not one.
 
@@ -169,3 +262,69 @@ def test_chapter_headings_do_not_decide_prose() -> None:
         "the protocol between client and server is specified as a sequence of packets. "
     ) * 200
     assert _FAMILIES[classify_content(technical, sections, 30000, "txt")] == "technical"
+
+
+class TestFormIsStructuralOnly:
+    """`form` must not inherit the domain's bias.
+
+    It used to be derived from `content_type`, where `reference` was reachable
+    only through `tech_book` and `tech_book` needs technical vocabulary. Held
+    out on seven unseen documents, every miss was the same shape: The Elements
+    of Style, the US Constitution and a cookbook all read as prose, while a
+    MySQL manual and a data-science textbook were found. Structure decides it
+    now, and no vocabulary signal takes part.
+    """
+
+    def test_a_non_technical_reference_is_a_reference(self) -> None:
+        rules = "".join(
+            f"{i}. Enclose parenthetic expressions between commas\n" for i in range(1, 40)
+        )
+        assert classify_form(rules, [], 4000, "txt") == "reference"
+
+        articles = "".join(f"Section {i}.\nAll legislative powers herein granted\n"
+                           for i in range(1, 30))
+        assert classify_form(articles, [], 3000, "txt") == "reference"
+
+    def test_chapters_do_not_make_a_novel_a_reference(self) -> None:
+        """Chapter, Part and Canto are how a NARRATIVE divides itself. Counting
+        them would make every novel a reference: Hamlet carries 1.63 markers per
+        1,000 words on that pattern alone, Alice 0.90."""
+        novel = "".join(
+            f"Chapter {i}\n\nIt was a bright cold day and the clocks were striking.\n\n"
+            for i in range(1, 40)
+        )
+        assert classify_form(novel, [], 30000, "txt") == "prose"
+
+    def test_a_short_structured_piece_is_an_article_not_a_journal(self) -> None:
+        """Keying entries on length alone made a 1,704-word blog post a journal."""
+        post = "## Heading\n\n" + ("An explanation of how the thing works. " * 300)
+        assert classify_form(post, [], 1700, "md") == "article"
+
+    def test_entries_are_dated_units(self) -> None:
+        journal = "".join(f"Date: 2026-06-{d:02d}\nWoke before the alarm again.\n\n"
+                          for d in range(1, 9))
+        assert classify_form(journal, [], 600, "txt") == "entries"
+
+    def test_a_very_long_manual_is_still_a_reference(self) -> None:
+        """Density stops describing the document and starts describing its
+        length. `ibm-sdm-vol-2` carries 1,391 section markers across 2.9 million
+        words and rates 0.47 -- below every threshold that admits a rule book --
+        so the denominator is capped."""
+        manual = "".join(
+            f"{i}. Configure the subsystem parameters\n" + ("filler words here. " * 60) + "\n"
+            for i in range(1, 700)
+        )
+        # 699 markers against the 200k cap rates 3.5, in the same band as the
+        # real manual's 6.96. Uncapped it would rate 0.70 and read as prose.
+        assert classify_form(manual, [], 1_000_000, "txt") == "reference"
+
+    def test_a_handful_of_numbered_lines_is_not_a_reference(self) -> None:
+        """Five numbered lines in a 2,600-word release note rate 1.91 on density
+        alone. No true reference measured comes near the floor -- art_of_unix,
+        the smallest, carries 41 markers."""
+        post = "".join(f"{i}. A change we shipped\n" for i in range(1, 6)) + ("word " * 2600)
+        assert classify_form(post, [], 2600, "md") == "article"
+
+    def test_a_file_extension_decides_code_and_media(self) -> None:
+        assert classify_form("def f(): pass", [], 50, "py") == "source_code"
+        assert classify_form("anything", [], 5000, "wav") == "dialogue"

@@ -14,17 +14,18 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.services.content_classifier import classify_content
+from app.services.content_classifier import classify_content, classify_form
 from app.telemetry import trace_ingestion_node
-from app.types import TECHNICAL_CONTENT_TYPES
+from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
 from app.workflows.ingestion_nodes._shared import (
     IngestionState,
     _parser,
-    _persist_content_type,
+    _persist_classification,
     _persist_extraction_report,
-    _persist_is_technical,
     _persist_structure_type,
     _update_stage,
+    detect_register,
+    detect_technical_content,
     resolve_technical_variant,
 )
 
@@ -87,6 +88,46 @@ async def parse_node(state: IngestionState) -> IngestionState:
             return {**state, "status": "error", "error": str(exc)}
 
 
+async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | None, str | None]:
+    """Read the domain and the register from the document, in one pass.
+
+    Both are asked of the text rather than derived from the type, because the
+    type carries neither: `book` covers a novel and a deep-learning textbook,
+    and nothing about a content type says whether a work tells or explains.
+    """
+    is_technical = await _measure_domain(content_type, pd)
+    raw_text = (pd or {}).get("raw_text") or ""
+
+    # A paper reports and a manual instructs, so the shape settles it and the
+    # probe would spend ~2.6s on a known answer. Combining the two probes into
+    # one call was measured instead and is worse on both axes and 0.84x the
+    # speed -- the cost is prompt tokens, not call overhead.
+    settled = register_for_form(DocumentProfile.from_legacy(content_type).form)
+    if settled is not None:
+        return is_technical, settled
+    register = await detect_register(raw_text) if raw_text.strip() else None
+    return is_technical, register
+
+
+async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
+    """Whether this document's subject is technical.
+
+    Read from the document unless the content type names the subject outright:
+    `paper` says a work has an abstract, not what field it is in. The type list
+    this replaced answered for every type, writing a hard False for every paper
+    and book -- which stripped the technical entity types from "Attention Is All
+    You Need" (70 entities, 0 technical).
+
+    None when the probe cannot answer, never False; `remeasure_domain` retries.
+    """
+    if content_type in TECHNICAL_CONTENT_TYPES:
+        return True
+    raw_text = (pd or {}).get("raw_text") or ""
+    if not raw_text.strip():
+        return None
+    return await detect_technical_content(raw_text)
+
+
 async def classify_node(state: IngestionState) -> IngestionState:
     logger.debug("node_start", extra={"node": "classify", "doc_id": state["document_id"]})
     # Fast-path: content_type was provided by the user — skip all heuristics and LLM.
@@ -95,9 +136,19 @@ async def classify_node(state: IngestionState) -> IngestionState:
     if provided is not None:
         if provided == "technical":
             pd = state.get("parsed_document")
-            resolved = resolve_technical_variant(pd["raw_text"]) if pd else "tech_article"
-            await _persist_content_type(state["document_id"], resolved)
-            await _persist_is_technical(state["document_id"], True)
+            resolved = (
+                resolve_technical_variant(pd["raw_text"], pd["word_count"])
+                if pd
+                else "tech_article"
+            )
+            # The user asserted the domain; the register is settled by the
+            # resolved shape when that shape is a manual, and read otherwise.
+            settled = register_for_form(DocumentProfile.from_legacy(resolved).form)
+            if settled is not None:
+                register = settled
+            else:
+                register = await detect_register(pd["raw_text"]) if pd else None
+            await _persist_classification(state["document_id"], resolved, True, register)
             logger.info(
                 "classify_node: resolved user-provided 'technical'",
                 extra={"doc_id": state["document_id"], "content_type": resolved},
@@ -115,8 +166,21 @@ async def classify_node(state: IngestionState) -> IngestionState:
                 extra={"doc_id": state["document_id"], "content_type": provided},
             )
             return {**state, "status": "chunking"}
-        is_technical = provided in TECHNICAL_CONTENT_TYPES
-        await _persist_is_technical(state["document_id"], is_technical)
+        is_technical, register = await _measure_facets(provided, state.get("parsed_document"))
+        pd_provided = state.get("parsed_document")
+        form = (
+            classify_form(
+                pd_provided["raw_text"], pd_provided["sections"],
+                pd_provided["word_count"],
+                Path(state["file_path"]).suffix.lstrip("."),
+                Path(state["file_path"]).name,
+            )
+            if pd_provided
+            else None
+        )
+        await _persist_classification(
+            state["document_id"], provided, is_technical, register, form
+        )
         logger.info(
             "classify_node: skipping (user-provided content_type)",
             extra={"doc_id": state["document_id"], "content_type": provided},
@@ -183,7 +247,7 @@ async def classify_node(state: IngestionState) -> IngestionState:
 
             # Media documents are decided in transcribe_node instead — their text
             # does not exist yet at this point.
-            is_technical = content_type in TECHNICAL_CONTENT_TYPES
+            is_technical, register = await _measure_facets(content_type, pd)
             # The classified type has to reach the row, not just the state. Chunking
             # and NER read it from the state and were correct, so a document could
             # be chunked and entity-extracted as a tech_book while the library, the
@@ -191,8 +255,15 @@ async def classify_node(state: IngestionState) -> IngestionState:
             # seeded with. Harmless while this branch only ran for documents whose
             # row already held the caller's own value; a silent mislabel now that
             # classification is the normal path.
-            await _persist_content_type(state["document_id"], content_type)
-            await _persist_is_technical(state["document_id"], is_technical)
+            # Measured from structure, not derived from content_type: the
+            # legacy map reaches `reference` only through `tech_book`, so a
+            # non-technical manual could never be one.
+            form = classify_form(
+                pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
+            )
+            await _persist_classification(
+                state["document_id"], content_type, is_technical, register, form
+            )
 
             logger.info(
                 "Classified document",

@@ -13,6 +13,20 @@ export type ContentType =
   // Transient: uploads may carry this until ingestion resolves it to a
   // tech_* variant; rows can render mid-ingest, so display maps cover it.
   | "technical"
+/** What the document is, on the three axes the pipeline records.
+ *
+ *  `domain` and `register` are null when nothing has classified them, which is
+ *  not the same as "general" — show a null as unclassified rather than as a
+ *  decision nobody made. `card_genre` is derived server-side from the other
+ *  three and says which flashcard strategy the document will get.
+ */
+export interface DocumentFacets {
+  form: string | null
+  domain: string | null
+  register: string | null
+  card_genre: string | null
+}
+
 export type LearningStatus = "not_started" | "summarized" | "flashcards_generated" | "studied"
 export type SortOption = "newest" | "oldest" | "alphabetical" | "most-studied" | "last_accessed" | "weakest-first"
 export type ViewMode = "grid" | "list"
@@ -28,6 +42,7 @@ export interface DocumentListItem {
   title: string
   format: string
   content_type: ContentType
+  facets?: DocumentFacets | null
   word_count: number
   page_count: number
   stage: string

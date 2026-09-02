@@ -18,6 +18,181 @@ ContentType = Literal[
 ]
 
 
+# Document facets. `ContentType` above answers four questions with one value --
+# container, shape, subject, size -- so it enumerates eleven cells of a cross
+# product. These separate the questions; `format` carries the container.
+# Written alongside content_type, which stays authoritative until the wire moves.
+
+Form = Literal[
+    "prose",        # continuous long-form read start to finish
+    "article",      # one self-contained piece, shallow headings
+    "reference",    # manual or textbook: numbered sections, admonitions, code
+    "paper",        # abstract, method, results, references
+    "dialogue",     # speaker turns: chat, interview, meeting, talk transcript
+    "script",       # play or screenplay: scenes and stage directions
+    "entries",      # independent delimited units: clippings, journal, notes
+    "source_code",  # a program file
+]
+
+# Null is not "general". Only a measurement or a content type that names the
+# subject outright establishes a domain; a failed probe leaves null, and calling
+# that "general" would show the reader a decision nobody made.
+Domain = Literal["general", "technical"]
+
+# Whether the text tells a story or explains a subject.
+Register = Literal["narrative", "expository"]
+
+CardGenre = Literal["narrative", "non-fiction", "technical", "academic", "conversation"]
+
+_FORM_BY_CONTENT_TYPE: dict[str, Form] = {
+    "book": "prose",
+    "epub": "prose",
+    "paper": "paper",
+    "tech_book": "reference",
+    "tech_article": "article",
+    "conversation": "dialogue",
+    "audio": "dialogue",
+    "video": "dialogue",
+    "notes": "entries",
+    "kindle_clippings": "entries",
+    "code": "source_code",
+    # Transient upload choice. classify_node resolves it to a tech_* variant
+    # before persisting, so this only covers a row read mid-ingest.
+    "technical": "article",
+}
+
+# The values CHUNK_CONFIGS carried for the content type each form replaces, so
+# sizing does not move. tests/test_document_profile.py asserts they still match.
+_CHUNK_BY_FORM: dict[Form, tuple[int, int]] = {
+    "paper": (900, 150),
+    "prose": (600, 120),
+    "reference": (500, 80),
+    "dialogue": (450, 90),
+    "article": (350, 60),
+    "entries": (300, 75),
+    "source_code": (300, 75),
+    "script": (600, 120),
+}
+
+# Forms whose neighbouring chunks continue the same thought.
+_EXPANDING_FORMS: frozenset[str] = frozenset({"prose", "dialogue", "entries"})
+
+# Forms whose topics are their people and places. Elsewhere a PERSON is a
+# speaker or a cited author -- noise as a browseable tag.
+_NARRATIVE_FORMS: frozenset[str] = frozenset({"prose", "entries", "script"})
+
+
+# Forms whose register follows from the shape. `dialogue` is deliberately
+# absent: a meeting explains but an audiobook narrates, and both are turns.
+_REGISTER_BY_FORM: dict[str, Register] = {
+    "paper": "expository",
+    "reference": "expository",
+}
+
+
+def register_for_form(form: Form) -> "Register | None":
+    """The register a form settles on its own, or None when it must be measured."""
+    return _REGISTER_BY_FORM.get(form)
+
+
+def chunk_config_for_form(form: Form) -> dict[str, int]:
+    """Chunker settings for a form, for the specialised chunkers that already
+    know which form they are handling and have no profile to hand."""
+    size, overlap = _CHUNK_BY_FORM[form]
+    return {"chunk_size": size, "chunk_overlap": overlap}
+
+
+@dataclass(frozen=True)
+class DocumentProfile:
+    """What a document is, and every policy derived from it.
+
+    One definition per policy. Consumers ask this object rather than testing
+    `content_type`: five sites did that for "is this technical" and disagreed,
+    two of them by matching the document title against a keyword list.
+    """
+
+    form: Form
+    domain: Domain | None = None
+    register: Register | None = None
+
+    @property
+    def is_technical(self) -> bool:
+        """Whether technical NER types and relation extraction apply.
+
+        An unknown domain is not technical, matching `is_technical_content`, so
+        nothing downstream moved when null became distinguishable from general.
+        """
+        return self.domain == "technical"
+
+    @property
+    def chunk_config(self) -> dict[str, int]:
+        return chunk_config_for_form(self.form)
+
+    @property
+    def expands_context(self) -> bool:
+        return self.form in _EXPANDING_FORMS
+
+    @property
+    def tag_entity_types(self) -> tuple[str, ...]:
+        if self.form in _NARRATIVE_FORMS:
+            return ("PERSON", "PLACE", "CONCEPT")
+        return ("CONCEPT",)
+
+    @property
+    def card_genre(self) -> CardGenre | None:
+        """What to ask of this material when writing flashcards.
+
+        None when the facets do not determine it: a default here is how "The
+        Odyssey" came to be shown as non-fiction. A caller that must have a
+        strategy picks one itself.
+
+        `paper` is tested before `domain` -- a paper is technical and still
+        wants the academic prompt.
+        """
+        if self.form == "source_code":
+            return "technical"
+        if self.form == "paper":
+            return "academic"
+        if self.form == "dialogue":
+            # A talk is not a meeting: "what was decided, who owns it" is a
+            # meeting's question, and a talk's value is the technique.
+            if self.domain == "technical":
+                return "technical"
+            return "conversation" if self.domain == "general" else None
+        if self.domain == "technical":
+            return "technical"
+        if self.register == "narrative":
+            return "narrative"
+        if self.register == "expository":
+            return "non-fiction"
+        return None
+
+    @classmethod
+    def from_legacy(
+        cls,
+        content_type: str | None,
+        is_technical: bool | None = None,
+        register: Register | None = None,
+    ) -> "DocumentProfile":
+        """Build a profile from the columns that predate the facets.
+
+        `is_technical` resolves exactly as `is_technical_content` does, so NER
+        sees the answer it saw before.
+        """
+        # `entries` for an unmapped type: smallest chunk size, and what the
+        # generic chunker fell back to.
+        form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "entries")
+        domain: Domain | None
+        if is_technical is not None:
+            domain = "technical" if is_technical else "general"
+        elif content_type in TECHNICAL_CONTENT_TYPES:
+            domain = "technical"
+        else:
+            # A plain `book` may be a novel or a deep-learning textbook.
+            domain = None
+        return cls(form=form, domain=domain, register=register)
+
+
 @dataclass
 class Section:
     heading: str
@@ -25,8 +200,8 @@ class Section:
     text: str
     page_start: int
     page_end: int
-    admonition_type: str | None = None  # 'note'|'warning'|'tip'|'caution'|'important' or None
-    parent_heading: str | None = None  # heading string of the logical parent section
+    admonition_type: str | None = None  # 'note' | 'warning' | 'tip' | 'caution' | 'important'
+    parent_heading: str | None = None
     # Character offsets in `text` where a new page begins, excluding the first
     # page (whose number is `page_start`). Without this a chunk can only report
     # the page its *section* began on: measured on one library, every section of
@@ -49,8 +224,7 @@ class ParsedDocument:
     # their front matter separately. Only entries that differ from the sheet
     # number are kept, so an empty map means counting sheets is already right.
     page_labels: dict[int, str] = field(default_factory=dict)
-    # Non-fatal extraction notices surfaced to the user (e.g. visuals that a
-    # static fetch could not capture). Empty when extraction was clean.
+    # Non-fatal extraction notices surfaced to the user; empty when extraction was clean.
     warnings: list[str] = field(default_factory=list)
     # Layout discovered from the document's own markers: book|paper|script|chat.
     # None when the parser that ran does not discover structure.
@@ -120,9 +294,8 @@ class ChatState(TypedDict):
     confidence: str  # 'high' | 'medium' | 'low'
     not_found: bool
 
-    # Internal streaming fields — set by synthesize_node, consumed by stream_answer().
-    # synthesize_node prepares the LLM prompt but does NOT call the LLM; stream_answer()
-    # calls the LLM streaming to yield tokens progressively as they are generated.
+    # Internal streaming fields: synthesize_node prepares the LLM prompt but does not
+    # call the LLM; stream_answer() calls it and streams tokens as they are generated.
     _llm_prompt: str | None
     _system_prompt: str | None
 
@@ -141,14 +314,13 @@ class ChatState(TypedDict):
     image_ids: list[str]
 
     # Web augmentation: optional per-conversation web search.
-    # web_snippets is transient per graph invocation -- never written to DB (privacy invariant).
+    # web_snippets is transient per graph invocation — never written to DB (privacy invariant).
     web_enabled: bool
     web_calls_used: int
     web_snippets: list[dict]
 
-    # chunk-derived source citations (SourceCitation dicts) collected by synthesize_node.
+    # Chunk-derived citations (SourceCitation shape) collected by synthesize_node.
     # Separate from 'citations' (LLM-extracted prose citations) to avoid field collision.
-    # Keys: chunk_id, document_id, document_title, section_id, section_heading, pdf_page_number
     source_citations: list[dict]
 
     # chunks actually emitted into the prompt, in [S<n>] marker order, set by
@@ -156,12 +328,12 @@ class ChatState(TypedDict):
     # excerpt is filled from that chunk instead of retyped by the model (I-33).
     cited_chunks: list[dict]
 
-    # retrieval transparency metadata set by synthesize_node.
-    # Emitted as a 'transparency' SSE event by stream_answer() after token streaming.
+    # Retrieval transparency metadata; emitted as a 'transparency' SSE event by
+    # stream_answer() after token streaming.
     transparency: "TransparencyInfo | None"
 
-    # flag set by augment_node to indicate context was augmented after low confidence.
-    # Checked by synthesize_node to set transparency.augmented = True.
+    # Set by augment_node when context was augmented after low confidence;
+    # synthesize_node reads it to set transparency.augmented.
     transparency_augmented: bool
 
 
@@ -169,16 +341,16 @@ class ChatState(TypedDict):
 
 
 class TransparencyInfo(TypedDict):
-    """Retrieval transparency metadata emitted as SSE event after answer streaming.
+    """Retrieval transparency metadata emitted as a 'transparency' SSE event.
 
     strategy_used values: 'executive_summary' | 'hybrid_retrieval' |
         'graph_traversal' | 'comparative' | 'augmented_hybrid'
     """
 
-    strategy_used: str  # how context was retrieved
-    chunk_count: int  # number of unique chunks used as context
-    section_count: int  # number of unique sections those chunks span
-    augmented: bool  # True if augment_node ran (context extended after low confidence)
+    strategy_used: str
+    chunk_count: int  # unique chunks
+    section_count: int  # unique sections spanned
+    augmented: bool  # True when augment_node extended context after low confidence
 
 
 # Notes search
@@ -249,7 +421,7 @@ class LearningPathNode:
 class LearningPathResponse(TypedDict):
     start_entity: str
     document_id: str
-    # nodes: topologically sorted LearningPathNode dataclasses (serialized to dicts on wire)
+    # topologically sorted; serialized to dicts on the wire
     nodes: list[LearningPathNode]
     edges: list[dict]  # list of {from_entity, to_entity, confidence}
 
@@ -260,7 +432,7 @@ class LearningPathResponse(TypedDict):
 @dataclass
 class StudyPathItem:
     concept: str
-    mastery: float  # 0.0 to 1.0 -- avg(fsrs_stability / 21.0) capped at 1.0
+    mastery: float  # 0.0 to 1.0 — avg(fsrs_stability / 21.0) capped at 1.0
     skip: bool  # True when avg_stability_days >= 14
     reason: str  # e.g. "avg_stability=18d" or "no flashcards"
     avg_stability_days: float

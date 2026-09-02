@@ -72,6 +72,7 @@ from app.services.flashcard_prompts import (
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.llm import LLMAPIConnectionError, LLMServiceUnavailableError
 from app.telemetry import trace_chain
+from app.types import DocumentProfile
 
 logger = logging.getLogger(__name__)
 
@@ -758,7 +759,13 @@ async def generate(
                 "Reference these names directly in questions when relevant.\n"
             )
 
-    is_tech = content_type in ("code", "tech_book", "tech_article")
+    # The persisted flag counts too, so a technical talk qualifies. In practice
+    # that adds nothing for media -- the excerpts below come from has_code
+    # chunks, which a transcript has none of -- but it removes a fourth private
+    # definition of "technical" rather than leaving it to drift.
+    is_tech = DocumentProfile.from_legacy(
+        content_type, doc.is_technical if doc else None
+    ).is_technical
     has_context = context and context.strip()
     if is_tech and not has_context:
         code_chunks = [c for c in eligible_chunks if c.has_code]

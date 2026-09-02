@@ -65,7 +65,12 @@ _TRANSCRIPT_HEADER = re.compile(
 )
 
 _CODE_FENCE = re.compile(r"^\s*```", re.M)
-_NUMBERED_SECTION = re.compile(r"^\s{0,4}\d+\.\d+[\s.]", re.M)
+# A PDF puts "3.2" on its own line, so a title cannot be required alongside it
+# -- which admits every bare decimal. The leading-zero and two-digit guards
+# exclude plot ticks and measurements; data at or above 1.0 is still
+# indistinguishable from a section number. Capture group so callers count
+# distinct values: duplicated extraction (#97) otherwise multiplies one skeleton.
+_NUMBERED_SECTION = re.compile(r"^[ \t]{0,4}([1-9]\d?(?:\.\d{1,2}){1,2})\.?(?=[ \t]|$)", re.M)
 _PAPER_HEADING = re.compile(
     r"^\s{0,4}(?:\d+\.?\s*)?(abstract|introduction|related work|methodology|methods|"
     r"experimental setup|results|discussion|conclusion|references|bibliography)\s*$",
@@ -130,6 +135,110 @@ def sample_body(raw_text: str, window: int = 6000) -> str:
     return "\n".join(
         body[int(len(body) * frac) : int(len(body) * frac) + third] for frac in (0.10, 0.45, 0.75)
     )
+
+
+_CONTENTS_MARKER = re.compile(r"table of contents|^\s*contents\s*$", re.I | re.M)
+_DOTTED_LEADER = re.compile(r"\.{4,}")
+_NUMERIC_LINE = re.compile(r"^\s*[\d.]+\s*$", re.M)
+
+# Bracketed on the library: contents pages run 0.24-0.64, prose windows 0.0.
+_NUMERIC_LINE_SHARE = 0.15
+
+
+def looks_like_front_matter(window: str) -> bool:
+    """Whether this window is a contents listing rather than the work.
+
+    Not sentence density: `art_of_unix` opens with a chapter contents whose
+    entries each end in a full stop, so it scores as prose. A listing is caught
+    by saying so, by dotted leaders, or by a column of page numbers.
+    """
+    if _CONTENTS_MARKER.search(window) or _DOTTED_LEADER.search(window):
+        return True
+    lines = [ln for ln in window.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    numeric = sum(1 for ln in lines if _NUMERIC_LINE.match(ln))
+    return numeric / len(lines) > _NUMERIC_LINE_SHARE
+
+
+def subject_excerpt(raw_text: str, window: int = 2000) -> str:
+    """The excerpt to judge a document's subject from.
+
+    The opening, which measured 20/21 against 17/21 for a body sample: a work
+    states its subject early. Falls back to the body only when the opening is a
+    contents listing, so a clean opening is read exactly as before, and returns
+    "" when both are listings -- the caller reports that as unclassified.
+
+    Finds contents listings and nothing else. An illustration list or a
+    publisher's note after the licence marker still reaches the probe.
+    """
+    body = strip_boilerplate(raw_text)
+    head = body[:window].strip()
+    if head and not looks_like_front_matter(head):
+        return head
+    fallback = sample_body(raw_text, window=window).strip()
+    if fallback and looks_like_front_matter(fallback):
+        return ""
+    return fallback
+
+
+# Section markers by convention. `_FLAT_MARKER` is the gap that made The
+# Elements of Style read as prose: `_NUMBERED_SECTION` only ever matched
+# dot-decimals, so its 60 numbered rules were invisible.
+_FLAT_MARKER = re.compile(r"^[ \t]{0,6}\d{1,3}\.[ \t]+[A-Z]", re.M)
+_NAMED_MARKER = re.compile(
+    r"^[ \t]{0,6}(?:Article|Section|Rule|Clause|Item|Appendix)\b", re.I | re.M
+)
+# Chapter, Part, Book, Canto, Act, Scene are how a NARRATIVE divides itself.
+# Counting them makes every novel a reference: Hamlet rates 1.63 on them alone.
+_NARRATIVE_DIVISION = re.compile(
+    r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M
+)
+
+# Three dated units is a habit rather than a mention.
+_DATED_ENTRY = re.compile(
+    r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)",
+    re.I | re.M,
+)
+
+# Past this length, marker density describes how long a document is rather than
+# what it is: `ibm-sdm-vol-2` carries 1,391 markers and rates 0.47 uncapped.
+_MARKER_RATE_WORD_CAP = 200_000
+
+# Below this, a rate means little: five numbered lines in a 2,600-word release
+# note rate 1.91. The smallest true reference measured, `art_of_unix`, has 41.
+_MIN_SECTION_MARKERS = 8
+
+
+def count_section_markers(text: str) -> int:
+    """Section markers, narrative divisions excluded."""
+    return (
+        len(_FLAT_MARKER.findall(text))
+        + len(_NUMBERED_SECTION.findall(text))
+        + len(_NAMED_MARKER.findall(text))
+    )
+
+
+def section_marker_rate(text: str, word_count: int) -> float:
+    """Section markers per 1,000 words, against a capped length.
+
+    Bracketed across 20 documents: `federalist_papers` at 0.43 is the most
+    sectioned prose, `art_of_unix` at 2.68 the least sectioned reference.
+    """
+    if word_count <= 0:
+        return 0.0
+    denominator = min(word_count, _MARKER_RATE_WORD_CAP) / 1000
+    return count_section_markers(text) / denominator
+
+
+def count_numbered_sections(text: str) -> int:
+    """How many distinct numbered sections the text appears to carry.
+
+    Distinct rather than total: extraction that repeats a section body would
+    otherwise multiply one skeleton into a structural score it did not earn.
+    """
+    return len(set(_NUMBERED_SECTION.findall(text)))
 
 
 def _speaker_stats(text: str) -> tuple[int, int, float]:
@@ -209,7 +318,7 @@ def classify_content(
     # sample. A 375 KB markdown textbook showed 0 fences in a 6 KB window and
     # dozens in the file.
     fences = len(_CODE_FENCE.findall(full_body))
-    numbered = len(_NUMBERED_SECTION.findall(full_body))
+    numbered = count_numbered_sections(full_body)
     tech_hits = len(_TECH_VOCAB.findall(body))
     tech_density = tech_hits / max(len(body.split()), 1) * 1000
     if fences >= 4:
@@ -289,3 +398,72 @@ def classify_content(
     if best == "tech_book" and word_count < 5000 and fences < 2 and numbered < 3:
         return "tech_article"
     return best
+
+
+# Bracketed by `federalist_papers` at 0.43 (prose) and `art_of_unix` at 2.68.
+_REFERENCE_MARKER_RATE = 1.5
+
+# `Introducing Contextual Retrieval` at 1,704 words is an article;
+# `luminary_conceptual_foundations` at 5,312 is a reference.
+_ARTICLE_MAX_WORDS = 5000
+
+
+def classify_form(
+    raw_text: str,
+    sections: list[dict],
+    word_count: int,
+    file_ext: str,
+    filename: str = "",
+) -> str:
+    """The document's shape, from structure alone.
+
+    **No vocabulary signal takes part.** Deriving `form` from `content_type` put
+    `reference` behind `tech_book`, which needs technical vocabulary, so a
+    non-technical manual could not be one -- held out, The Elements of Style,
+    the US Constitution and a cookbook all read as prose.
+
+    Order matters: a paper is numbered too, so its skeleton is looked for first,
+    and speaker turns before length so a short transcript is not a note.
+    """
+    ext = (file_ext or "").lower().lstrip(".")
+    if ext in _CODE_EXTENSIONS:
+        return "source_code"
+    if ext in ("mp3", "m4a", "wav", "mp4"):
+        return "dialogue"
+
+    head = raw_text[:20000]
+    if re.search(r"clippings", filename, re.I) or (
+        _KINDLE_DIVIDER.search(head) and _KINDLE_ENTRY.search(head)
+    ):
+        return "entries"
+
+    body = sample_body(raw_text)
+    full = strip_boilerplate(raw_text)
+    headings = " \n".join(str(s.get("heading") or "") for s in sections)
+    distinct_speakers, _, speaker_share = _speaker_stats(body)
+
+    # A play carries stage directions and scene headings between its turns, so
+    # they dilute; a transcript is turns and almost nothing else.
+    if distinct_speakers >= 2 and speaker_share >= _SPEAKER_SHARE_FLOOR:
+        if word_count < 20000 or speaker_share >= 0.5:
+            return "dialogue"
+        return "script"
+
+    paper_headings = len({m.lower() for m in _PAPER_HEADING.findall(body + "\n" + headings)})
+    if paper_headings >= 3:
+        return "paper"
+
+    if (
+        count_section_markers(full) >= _MIN_SECTION_MARKERS
+        and section_marker_rate(full, word_count) >= _REFERENCE_MARKER_RATE
+    ):
+        return "reference"
+
+    # Dated or delimited units, not merely short: keying on length alone made a
+    # 1,704-word blog post a journal.
+    if len(_DATED_ENTRY.findall(full)) >= 3:
+        return "entries"
+
+    if word_count < _ARTICLE_MAX_WORDS:
+        return "article"
+    return "prose"

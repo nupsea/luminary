@@ -344,12 +344,37 @@ async def test_ingest_small_txt_classified_as_notes(test_db, tmp_path):
 
 
 def test_resolve_technical_variant():
+    """Length decides the sizing; structure only overrides it for short manuals.
+
+    The previous rule counted decimals in the first 5,000 characters, which on a
+    book is the title page: it filed a 120,000-word IAEA manual as an article and
+    a 3,764-word paper as a book. Two numbered headings in an eight-word snippet
+    no longer make a book, because that was never evidence of length.
+    """
     from app.workflows.ingestion_nodes._shared import resolve_technical_variant
 
-    numbered = "1.1 Storage engines\nprose here\n2.3 Indexes\nmore prose"
-    assert resolve_technical_variant(numbered) == "tech_book"
-    fenced = "intro\n```\nprint(1)\n```\n```\nprint(2)\n```\n```\nprint(3)\n```"
+    short_but_numbered = "1.1 Storage engines\nprose here\n2.3 Indexes\nmore prose"
+    assert resolve_technical_variant(short_but_numbered) == "tech_article"
+
+    # Length alone, with no structural signal at all.
+    assert resolve_technical_variant("word " * 5000) == "tech_book"
+    assert resolve_technical_variant("word " * 400) == "tech_article"
+
+    # An explicit word_count wins over counting the text, because the parser's
+    # count is the one the rest of the pipeline uses.
+    assert resolve_technical_variant("short text", word_count=60000) == "tech_book"
+
+    # Structure overrides length: three code blocks, or a real section skeleton.
+    fenced = "intro\n" + "```\nprint(1)\n```\n" * 3
     assert resolve_technical_variant(fenced) == "tech_book"
+    skeleton = "".join(f"{n}.1\nSection {n}\nprose\n" for n in range(1, 10))
+    assert resolve_technical_variant(skeleton) == "tech_book"
+
+    # Six sections is the measured near-miss: radiology_chexnet_cxr at 3,764
+    # words has exactly that many and is a paper, not a manual.
+    near_miss = "".join(f"{n}.1\nSection {n}\nprose\n" for n in range(1, 7))
+    assert resolve_technical_variant(near_miss) == "tech_article"
+
     assert resolve_technical_variant("a short post about developer tooling") == "tech_article"
 
 
@@ -383,7 +408,9 @@ async def test_classify_node_resolves_merged_technical_choice(test_db):
             "title": "Tech Upload",
             "format": "md",
             "pages": 1,
-            "word_count": 300,
+            # Past the 5,000-word gate, so this resolves on length rather than
+            # on a structural signal a fixture this small cannot honestly carry.
+            "word_count": 6000,
             "sections": [],
             "raw_text": "1.1 Overview\ntext\n2.4 Internals\ntext",
         },
