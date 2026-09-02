@@ -19,6 +19,7 @@ import pytest
 from app.services.content_classifier import (
     _speaker_stats,
     classify_content,
+    classify_form,
     count_numbered_sections,
     looks_like_front_matter,
     sample_body,
@@ -261,3 +262,49 @@ def test_chapter_headings_do_not_decide_prose() -> None:
         "the protocol between client and server is specified as a sequence of packets. "
     ) * 200
     assert _FAMILIES[classify_content(technical, sections, 30000, "txt")] == "technical"
+
+
+class TestFormIsStructuralOnly:
+    """`form` must not inherit the domain's bias.
+
+    It used to be derived from `content_type`, where `reference` was reachable
+    only through `tech_book` and `tech_book` needs technical vocabulary. Held
+    out on seven unseen documents, every miss was the same shape: The Elements
+    of Style, the US Constitution and a cookbook all read as prose, while a
+    MySQL manual and a data-science textbook were found. Structure decides it
+    now, and no vocabulary signal takes part.
+    """
+
+    def test_a_non_technical_reference_is_a_reference(self) -> None:
+        rules = "".join(
+            f"{i}. Enclose parenthetic expressions between commas\n" for i in range(1, 40)
+        )
+        assert classify_form(rules, [], 4000, "txt") == "reference"
+
+        articles = "".join(f"Section {i}.\nAll legislative powers herein granted\n"
+                           for i in range(1, 30))
+        assert classify_form(articles, [], 3000, "txt") == "reference"
+
+    def test_chapters_do_not_make_a_novel_a_reference(self) -> None:
+        """Chapter, Part and Canto are how a NARRATIVE divides itself. Counting
+        them would make every novel a reference: Hamlet carries 1.63 markers per
+        1,000 words on that pattern alone, Alice 0.90."""
+        novel = "".join(
+            f"Chapter {i}\n\nIt was a bright cold day and the clocks were striking.\n\n"
+            for i in range(1, 40)
+        )
+        assert classify_form(novel, [], 30000, "txt") == "prose"
+
+    def test_a_short_structured_piece_is_an_article_not_a_journal(self) -> None:
+        """Keying entries on length alone made a 1,704-word blog post a journal."""
+        post = "## Heading\n\n" + ("An explanation of how the thing works. " * 300)
+        assert classify_form(post, [], 1700, "md") == "article"
+
+    def test_entries_are_dated_units(self) -> None:
+        journal = "".join(f"Date: 2026-06-{d:02d}\nWoke before the alarm again.\n\n"
+                          for d in range(1, 9))
+        assert classify_form(journal, [], 600, "txt") == "entries"
+
+    def test_a_file_extension_decides_code_and_media(self) -> None:
+        assert classify_form("def f(): pass", [], 50, "py") == "source_code"
+        assert classify_form("anything", [], 5000, "wav") == "dialogue"

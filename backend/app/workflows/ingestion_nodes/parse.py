@@ -14,7 +14,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.services.content_classifier import classify_content
+from app.services.content_classifier import classify_content, classify_form
 from app.telemetry import trace_ingestion_node
 from app.types import TECHNICAL_CONTENT_TYPES, DocumentProfile, register_for_form
 from app.workflows.ingestion_nodes._shared import (
@@ -175,8 +175,19 @@ async def classify_node(state: IngestionState) -> IngestionState:
             )
             return {**state, "status": "chunking"}
         is_technical, register = await _measure_facets(provided, state.get("parsed_document"))
+        pd_provided = state.get("parsed_document")
+        form = (
+            classify_form(
+                pd_provided["raw_text"], pd_provided["sections"],
+                pd_provided["word_count"],
+                Path(state["file_path"]).suffix.lstrip("."),
+                Path(state["file_path"]).name,
+            )
+            if pd_provided
+            else None
+        )
         await _persist_classification(
-            state["document_id"], provided, is_technical, register
+            state["document_id"], provided, is_technical, register, form
         )
         logger.info(
             "classify_node: skipping (user-provided content_type)",
@@ -252,8 +263,14 @@ async def classify_node(state: IngestionState) -> IngestionState:
             # seeded with. Harmless while this branch only ran for documents whose
             # row already held the caller's own value; a silent mislabel now that
             # classification is the normal path.
+            # Measured from structure, not derived from content_type: the
+            # legacy map reaches `reference` only through `tech_book`, so a
+            # non-technical manual could never be one.
+            form = classify_form(
+                pd["raw_text"], pd["sections"], pd["word_count"], file_ext, filename
+            )
             await _persist_classification(
-                state["document_id"], content_type, is_technical, register
+                state["document_id"], content_type, is_technical, register, form
             )
 
             logger.info(

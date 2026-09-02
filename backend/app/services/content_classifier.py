@@ -216,6 +216,50 @@ def subject_excerpt(raw_text: str, window: int = 2000) -> str:
     return fallback
 
 
+# Section markers, by convention. A reference work is entered at a section
+# rather than read through, and it says where those entries are.
+#
+# `_FLAT_MARKER` is the gap this closes: `_NUMBERED_SECTION` only ever matched
+# dot-decimals, so "1. Form the possessive singular" -- 60 of them in The
+# Elements of Style -- was invisible, and the book read as prose.
+_FLAT_MARKER = re.compile(r"^[ \t]{0,6}\d{1,3}\.[ \t]+[A-Z]", re.M)
+_NAMED_MARKER = re.compile(
+    r"^[ \t]{0,6}(?:Article|Section|Rule|Clause|Item|Appendix)\b", re.I | re.M
+)
+# Chapter, Part, Book, Canto, Act, Scene are how a NARRATIVE divides itself.
+# Counting them would make every novel a reference work: Hamlet carries 1.63
+# per 1,000 words, Alice 0.90, Moby-Dick 0.79.
+_NARRATIVE_DIVISION = re.compile(
+    r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M
+)
+
+# A journal or a clipping file starts its units with a date. Three is enough to
+# be a habit rather than a mention: `daily_thoughts_2026` carries six.
+_DATED_ENTRY = re.compile(
+    r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)",
+    re.I | re.M,
+)
+
+
+def section_marker_rate(text: str, word_count: int) -> float:
+    """Section markers per 1,000 words, narrative divisions excluded.
+
+    Rate rather than count, because a marker count only says how long the
+    document is. Measured across 20 documents, the two that bracket the
+    threshold are `federalist_papers` at 0.43 -- the most sectioned prose in the
+    library -- and `art_of_unix` at 2.68, the least sectioned reference work.
+    """
+    if word_count <= 0:
+        return 0.0
+    markers = (
+        len(_FLAT_MARKER.findall(text))
+        + len(_NUMBERED_SECTION.findall(text))
+        + len(_NAMED_MARKER.findall(text))
+    )
+    return markers / (word_count / 1000)
+
+
 def count_numbered_sections(text: str) -> int:
     """How many distinct numbered sections the text appears to carry.
 
@@ -382,3 +426,80 @@ def classify_content(
     if best == "tech_book" and word_count < 5000 and fences < 2 and numbered < 3:
         return "tech_article"
     return best
+
+
+# Above this many section markers per 1,000 words, a document is entered rather
+# than read through. Bracketed by the two documents either side of it:
+# `federalist_papers` at 0.43 is the most heavily sectioned prose measured, and
+# `art_of_unix` at 2.68 the least heavily sectioned reference work.
+_REFERENCE_MARKER_RATE = 1.5
+
+# Below this, a structured document is one piece rather than a work you return
+# to. `Introducing Contextual Retrieval` at 1,704 words is an article;
+# `luminary_conceptual_foundations` at 5,312 is a reference.
+_ARTICLE_MAX_WORDS = 5000
+
+
+def classify_form(
+    raw_text: str,
+    sections: list[dict],
+    word_count: int,
+    file_ext: str,
+    filename: str = "",
+) -> str:
+    """The document's shape, from structure alone.
+
+    **No vocabulary signal takes part in this.** `form` used to be derived from
+    `content_type`, where `reference` was reachable only through `tech_book` and
+    `tech_book` requires technical vocabulary density -- so a non-technical
+    reference work could not be classified as one. Held out on seven documents
+    the classifier had never seen, every miss was that shape: The Elements of
+    Style, the US Constitution and a cookbook all read as prose, while a MySQL
+    manual and a data-science textbook were found. The axis was inheriting the
+    domain's bias.
+
+    Order matters. A paper is numbered too, so its own skeleton is looked for
+    first; speaker turns are checked before length so a short transcript is not
+    mistaken for a note.
+    """
+    ext = (file_ext or "").lower().lstrip(".")
+    if ext in _CODE_EXTENSIONS:
+        return "source_code"
+    if ext in ("mp3", "m4a", "wav", "mp4"):
+        return "dialogue"
+
+    head = raw_text[:20000]
+    if re.search(r"clippings", filename, re.I) or (
+        _KINDLE_DIVIDER.search(head) and _KINDLE_ENTRY.search(head)
+    ):
+        return "entries"
+
+    body = sample_body(raw_text)
+    full = strip_boilerplate(raw_text)
+    headings = " \n".join(str(s.get("heading") or "") for s in sections)
+    distinct_speakers, _, speaker_share = _speaker_stats(body)
+
+    # A play carries stage directions and scene headings between its turns, so
+    # they dilute; a transcript is turns and almost nothing else.
+    if distinct_speakers >= 2 and speaker_share >= _SPEAKER_SHARE_FLOOR:
+        if word_count < 20000 or speaker_share >= 0.5:
+            return "dialogue"
+        return "script"
+
+    paper_headings = len({m.lower() for m in _PAPER_HEADING.findall(body + "\n" + headings)})
+    if paper_headings >= 3:
+        return "paper"
+
+    if section_marker_rate(full, word_count) >= _REFERENCE_MARKER_RATE:
+        return "reference"
+
+    # Entries are dated or delimited units, not merely a short document.
+    # Keying this on length alone made a 1,704-word blog post a journal:
+    # `Micrograd` and `Introducing Contextual Retrieval` both carry 22 headings
+    # and no dates, while `daily_thoughts_2026` carries six dates and none.
+    if len(_DATED_ENTRY.findall(full)) >= 3:
+        return "entries"
+
+    if word_count < _ARTICLE_MAX_WORDS:
+        return "article"
+    return "prose"

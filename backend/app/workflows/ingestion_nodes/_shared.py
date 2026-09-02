@@ -353,6 +353,7 @@ async def _persist_classification(
     content_type: str,
     is_technical: bool | None,
     register: str | None = None,
+    form: str | None = None,
 ) -> None:
     """Write the content type, the technical flag and the facets they imply.
 
@@ -370,10 +371,14 @@ async def _persist_classification(
     from app.types import DocumentProfile  # noqa: PLC0415
 
     profile = DocumentProfile.from_legacy(content_type, is_technical)
+    # `form` measured structurally when the caller has it. Falling back to the
+    # content_type mapping keeps a non-technical reference work unreachable --
+    # `reference` is only in that map behind `tech_book` -- which is the bias
+    # `classify_form` exists to remove.
     values: dict[str, object] = {
         "content_type": content_type,
         "is_technical": is_technical,
-        "form": profile.form,
+        "form": form or profile.form,
         "domain": profile.domain,
     }
     if register is not None:
