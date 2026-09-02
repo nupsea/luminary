@@ -281,15 +281,27 @@ class SummarizationService:
 
         None when the row carries no form yet -- the prompt then falls back to
         the kind-neutral instruction rather than guessing a kind.
+
+        Never raises. Adapting the prompt is an improvement on the summary, not
+        a precondition for having one, so a lookup that fails costs the
+        adaptation and nothing else.
         """
-        async with get_session_factory()() as session:
-            row = (
-                await session.execute(
-                    select(
-                        DocumentModel.form, DocumentModel.domain, DocumentModel.register
-                    ).where(DocumentModel.id == document_id)
-                )
-            ).first()
+        try:
+            async with get_session_factory()() as session:
+                row = (
+                    await session.execute(
+                        select(
+                            DocumentModel.form, DocumentModel.domain, DocumentModel.register
+                        ).where(DocumentModel.id == document_id)
+                    )
+                ).first()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "summary profile lookup failed, using the neutral prompt: %s",
+                type(exc).__name__,
+                extra={"document_id": document_id},
+            )
+            return None
         if row is None or not row.form:
             return None
         return DocumentProfile(

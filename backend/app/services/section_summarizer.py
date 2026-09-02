@@ -25,6 +25,29 @@ _SYSTEM_PROMPT = (
     "Output only the summary."
 )
 
+# Same passage, told what is worth keeping when it cannot keep everything.
+#
+# This stage compresses about 4:1 -- 30 units of 2 to 3 sentences each, from a
+# document of any length -- so something is always dropped, and what gets
+# dropped is whatever the prompt did not ask for. A named tool is the first
+# casualty of "summarize this passage": measured on a 38-minute technical talk,
+# `agents.md` went 3 mentions in the transcript to 0 in the section summaries,
+# and a benchmark site 10 to 0, both gone before the executive summary ever ran
+# (issue #105). Truncation was ruled out for that document -- every character of
+# its 40,220 reached this stage.
+_TECHNICAL_SYSTEM_PROMPT = (
+    "Summarize the following passage in 2 to 3 sentences. "
+    "Keep exact names: files, commands, libraries, parameters, metrics and "
+    "tools. Where you must choose, a named thing is worth more than a "
+    "description of it. "
+    "Output only the summary."
+)
+
+
+def _system_prompt_for(is_technical: bool) -> str:
+    return _TECHNICAL_SYSTEM_PROMPT if is_technical else _SYSTEM_PROMPT
+
+
 MIN_PREVIEW_LEN = 200
 # 30 units per document: enough thematic coverage while keeping Ollama call count
 # manageable (100 was causing >30 min ingestion times on local hardware).
@@ -140,7 +163,7 @@ class SectionSummarizerService:
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
 
-        # Fetch qualifying sections
+        # Fetch qualifying sections, and what kind of document they belong to.
         async with get_session_factory()() as session:
             result = await session.execute(
                 select(SectionModel)
@@ -148,6 +171,25 @@ class SectionSummarizerService:
                 .order_by(SectionModel.section_order)
             )
             all_sections = list(result.scalars().all())
+
+            from app.models import DocumentModel  # noqa: PLC0415
+
+            # Never fatal: knowing the kind improves what a summary keeps, but
+            # a lookup that fails must cost the adaptation and not the summary.
+            try:
+                domain = (
+                    await session.execute(
+                        select(DocumentModel.domain).where(DocumentModel.id == document_id)
+                    )
+                ).scalar_one_or_none()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "section domain lookup failed, using the neutral prompt: %s",
+                    type(exc).__name__,
+                    extra={"doc_id": document_id},
+                )
+                domain = None
+        system_prompt = _system_prompt_for(domain == "technical")
 
         # Filter metadata/legal sections before preview length check
         non_metadata: list[SectionModel] = []
@@ -192,7 +234,7 @@ class SectionSummarizerService:
                 try:
                     summary_text = await get_llm_service().complete(
                         messages=[
-                            {"role": "system", "content": _SYSTEM_PROMPT},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": unit["text"][:text_cap]},
                         ],
                         temperature=0.0,
