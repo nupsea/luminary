@@ -61,6 +61,15 @@ MODE_INSTRUCTIONS: dict[str, str] = {
         '"decisions" (list of strings), '
         '"action_items" (list of objects with "owner" and "task" keys).'
     ),
+    # A recorded talk has no decisions and no owners. Asking for them returns
+    # empty lists, which is why this mode was hidden from anything but a
+    # meeting rather than adapted (#104).
+    "conversation_talk": (
+        'Output a JSON object with keys: "timeline" (list of strings), '
+        '"points" (list of strings: the techniques, tools and claims covered), '
+        '"references" (list of strings: anything named that a listener would '
+        "look up afterwards)."
+    ),
 }
 
 # Tokens reserved inside the context window for the system prompt and the
@@ -253,8 +262,10 @@ def _build_system_prompt(mode: str, profile: "DocumentProfile | None" = None) ->
     `conversation` asks for a JSON object; prose guidance would invite
     commentary around it.
     """
+    if mode == "conversation" and profile is not None and profile.is_technical:
+        mode = "conversation_talk"
     prompt = f"{GROUNDING_PREFIX}\n\n{MODE_INSTRUCTIONS[mode]}"
-    if mode == "conversation":
+    if mode.startswith("conversation"):
         return prompt
     guidance = _kind_guidance(profile)
     return f"{prompt} {guidance}" if guidance else prompt
