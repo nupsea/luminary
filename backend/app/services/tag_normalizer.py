@@ -66,6 +66,24 @@ class SmartTagNormalizerService:
             frozenset([a.alias, a.canonical_tag_id]) for a in aliases
         }
 
+        # Every existing suggestion, read once, in both orientations.
+        #
+        # This was a SELECT per candidate pair, and that is what made the scan
+        # hold the write lock: autoflush is on, so the first `session.add` below
+        # was flushed by the next iteration's SELECT, and the write transaction
+        # then stayed open for the rest of an O(n^2) loop. Measured on synthetic
+        # tag sets -- 300 tags held it 2.17s, 600 held it 13.9s, 900 held it
+        # 48.5s, against a 5s busy_timeout -- which is why an ordinary
+        # `POST /notes` failed with "database is locked" whenever a scan was
+        # running (#88). Both orientations are reachable: (a-mouse, mouse) and
+        # (mouse, a-mouse) were both present in a real library.
+        suggestion_rows = await session.execute(
+            select(TagMergeSuggestionModel.tag_a_id, TagMergeSuggestionModel.tag_b_id)
+        )
+        suggested_pairs: set[frozenset[str]] = {
+            frozenset([a, b]) for a, b in suggestion_rows.all()
+        }
+
         # Embed display_names using the synchronous EmbeddingService in a thread
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
@@ -79,7 +97,7 @@ class SmartTagNormalizerService:
         sims = embeddings @ embeddings.T  # (N, N)
 
         n = len(tags)
-        created = 0
+        pending: list[TagMergeSuggestionModel] = []
 
         for i in range(n):
             for j in range(i + 1, n):
@@ -100,30 +118,7 @@ class SmartTagNormalizerService:
                     continue
 
                 # Skip if a suggestion already exists for this pair (any status).
-                # `.first()`, not `.scalar_one_or_none()`: this asks whether a row
-                # exists, and the query deliberately matches the pair in both
-                # orientations, so two rows are reachable -- (a-mouse, mouse) and
-                # (mouse, a-mouse) were both present in a real library. Asserting
-                # at most one raised MultipleResultsFound out of the whole scan,
-                # which the caller logged as "Background tag normalization scan
-                # failed" and swallowed, so the scan produced nothing from then on.
-                existing = (
-                    await session.execute(
-                        select(TagMergeSuggestionModel.id)
-                        .where(
-                            (
-                                (TagMergeSuggestionModel.tag_a_id == tag_a.id)
-                                & (TagMergeSuggestionModel.tag_b_id == tag_b.id)
-                            )
-                            | (
-                                (TagMergeSuggestionModel.tag_a_id == tag_b.id)
-                                & (TagMergeSuggestionModel.tag_b_id == tag_a.id)
-                            )
-                        )
-                        .limit(1)
-                    )
-                ).first()
-                if existing is not None:
+                if frozenset([tag_a.id, tag_b.id]) in suggested_pairs:
                     continue
 
                 # Suggested canonical = whichever has higher usage_count
@@ -131,19 +126,24 @@ class SmartTagNormalizerService:
                     tag_a.id if tag_a.usage_count >= tag_b.usage_count else tag_b.id
                 )
 
-                suggestion = TagMergeSuggestionModel(
-                    id=str(uuid.uuid4()),
-                    tag_a_id=tag_a.id,
-                    tag_b_id=tag_b.id,
-                    similarity=round(sim, 4),
-                    suggested_canonical_id=suggested_canonical_id,
-                    status="pending",
-                    created_at=datetime.now(UTC),
+                pending.append(
+                    TagMergeSuggestionModel(
+                        id=str(uuid.uuid4()),
+                        tag_a_id=tag_a.id,
+                        tag_b_id=tag_b.id,
+                        similarity=round(sim, 4),
+                        suggested_canonical_id=suggested_canonical_id,
+                        status="pending",
+                        created_at=datetime.now(UTC),
+                    )
                 )
-                session.add(suggestion)
-                created += 1
 
+        # Held until the loop is done on purpose. Adding inside it puts the
+        # write in the same transaction as the remaining iterations, and the
+        # writer then owns the SQLite write lock for the whole scan (#88).
+        created = len(pending)
         if created > 0:
+            session.add_all(pending)
             await session.commit()
 
         logger.info("Tag normalization scan complete: %d new suggestions", created)
