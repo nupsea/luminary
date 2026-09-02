@@ -228,9 +228,18 @@ _QUOTE_CHARS = str.maketrans({
 })
 
 
+# Markdown emphasis renders away, so a model quoting a bolded sentence returns the
+# sentence a reader sees rather than the source bytes. Notes are written in markdown
+# and are the worst affected. Only `**` and code spans go: a lone `*` or `_` carries
+# content (`snake_case`, `a * b`), and dropping those would let two different strings
+# compare equal.
+_MD_EMPHASIS = re.compile(r"\*\*|`")
+
+
 def _normalise_for_match(text: str) -> str:
-    """Lowercased, whitespace-collapsed, punctuation-unified -- for quote matching."""
-    return re.sub(r"\s+", " ", (text or "").translate(_QUOTE_CHARS)).strip().lower()
+    """Lowercased, whitespace-collapsed, punctuation- and emphasis-unified."""
+    unmarked = _MD_EMPHASIS.sub("", (text or "").translate(_QUOTE_CHARS))
+    return re.sub(r"\s+", " ", unmarked).strip().lower()
 
 
 # A model closes the sentence it quoted. Measured over the 392 checkable cards in

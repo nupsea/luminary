@@ -33,12 +33,12 @@ EXAMPLE_SOURCE_EXCERPT = (
     "correlated across nodes"
 )
 
-# The notes contract shows the shape of the quote rather than a specimen of one,
-# for the same reason. It is long enough to clear the length floor, so only an
-# explicit refusal stops a model that echoes the template from being credited.
+# The notes contract shows the shape of a quote rather than a specimen of one, for
+# the same reason. It clears the length floor, so only an explicit refusal stops a
+# model that echoes the template from being credited.
 NOTES_EXCERPT_PLACEHOLDER = "<verbatim sentence from the notes>"
 
-# Every string the prompt hands the model that could be returned as its evidence.
+# Every string the prompt hands the model that could come back as its evidence.
 PROMPT_SUPPLIED_EXCERPTS = (EXAMPLE_SOURCE_EXCERPT, NOTES_EXCERPT_PLACEHOLDER)
 
 

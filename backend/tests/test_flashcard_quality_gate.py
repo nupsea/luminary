@@ -298,8 +298,7 @@ def test_notes_prompt_does_not_ask_for_what_the_gate_rejects() -> None:
     They did not: the prompt asked for "short markdown bullets ('- ...')" while
     `_MAX_ENUMERATED_ITEMS = 1` rejects a two-bullet answer, and its output
     template carried `"source_excerpt": ""` while the gate requires a verbatim
-    quote. Measured on 2026-09-02, five real notes returned 0 usable cards of 5
-    requested, every drop logged as `enumerated` or `ungrounded` (#108).
+    quote. Notes returned empty decks until both were aligned (#108).
 
     Asserting the prompt text is the point: the gate was never wrong, so a test
     of the gate alone would have stayed green through the whole outage.
@@ -329,3 +328,39 @@ def test_notes_excerpt_placeholder_is_refused() -> None:
 
     assert verdict is not None
     assert verdict[0] == REJECT_UNGROUNDED
+
+
+def test_markdown_emphasis_is_formatting_not_fabrication() -> None:
+    """A model quoting a bolded sentence returns what a reader sees.
+
+    A quote whose only difference from the note is its `**` markers was rejected
+    as not in the text. Notes are written in markdown, so this was the most
+    repeated rejection on that path (#108).
+
+    The cases that bracket it: the same sentence minus its `**` must pass, and a
+    sentence that changes what is claimed must still fail even though it opens
+    with the same words.
+    """
+    from app.services.flashcard_parsers import excerpt_is_verbatim
+
+    note = (
+        "## TF-IDF\n"
+        "**TF-IDF**, which stands for **Term Frequency-Inverse Document Frequency**, "
+        "is a numerical statistic used to measure how important a word is.\n"
+        "It uses `read_source_text` to decode the bytes."
+    )
+
+    assert excerpt_is_verbatim(
+        "TF-IDF, which stands for Term Frequency-Inverse Document Frequency, "
+        "is a numerical statistic used to measure how important a word is.",
+        note,
+    )
+    assert not excerpt_is_verbatim(
+        "TF-IDF, which stands for Term Frequency, is a ranking function that "
+        "reranks dense vectors after retrieval.",
+        note,
+    )
+    # A code span loses its backticks, but an identifier keeps its underscores:
+    # collapsing those would let two different names compare equal.
+    assert excerpt_is_verbatim("It uses read_source_text to decode the bytes.", note)
+    assert not excerpt_is_verbatim("It uses readsourcetext to decode the bytes.", note)
