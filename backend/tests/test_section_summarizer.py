@@ -240,3 +240,81 @@ class TestSummarizationBudget:
         from app.services.section_summarizer import MIN_UNIT_CHARS, unit_text_cap
 
         assert unit_text_cap(10_000) == MIN_UNIT_CHARS
+
+
+# Defects found while measuring issue #105
+
+
+@pytest.mark.asyncio
+async def test_generate_replaces_rather_than_appends(test_db):
+    """`finalize` reaches generate() from two paths and neither cleared the other.
+
+    A document that took both -- the inline grouped run and the deferred
+    per-section run -- ended up with one set of summaries per path. `ml_notes`
+    carried 20 rows with 20 distinct section_ids for a document with 10
+    sections, and the extra 6,751 characters went into the executive summary's
+    input, moving theme coverage by about 0.08.
+    """
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+    await _insert_sections(factory, doc_id, count=4, preview_len=300)
+
+    mock_response = AsyncMock()
+    mock_response.choices = [AsyncMock()]
+    mock_response.choices[0].message.content = "Summary."
+
+    with patch("litellm.acompletion", return_value=mock_response):
+        svc = SectionSummarizerService()
+        await svc.generate(doc_id, concurrency=2)
+        await svc.generate(doc_id, concurrency=2, per_section=True)
+
+    async with factory() as session:
+        rows = (
+            await session.execute(
+                select(SectionSummaryModel).where(
+                    SectionSummaryModel.document_id == doc_id
+                )
+            )
+        ).scalars().all()
+    assert len(rows) == 4, f"second run must replace the first, got {len(rows)} rows"
+
+
+@pytest.mark.asyncio
+async def test_summarises_the_whole_section_not_the_snippet(test_db):
+    """`preview` is a 10,000-character snippet; `body` is uncapped (I-29).
+
+    Reading `preview` silently dropped everything past the cap -- measured on
+    `art_of_unix`, 96,745 characters of body against 50,799 of preview, so 47.5%
+    of the book never reached summarisation.
+    """
+    from app.services.section_summarizer import section_text
+
+    long_body = "B" * 40000
+    section = SectionModel(
+        id=str(uuid.uuid4()),
+        document_id="d",
+        heading="Long",
+        level=1,
+        page_start=0,
+        page_end=0,
+        section_order=0,
+        body=long_body,
+        preview=long_body[:10000],
+    )
+    assert len(section_text(section)) == 40000
+
+    # Rows written before `body` existed carry only the snippet, and reading it
+    # is the honest interim -- a re-ingest is what restores the rest.
+    legacy = SectionModel(
+        id=str(uuid.uuid4()),
+        document_id="d",
+        heading="Legacy",
+        level=1,
+        page_start=0,
+        page_end=0,
+        section_order=1,
+        body="",
+        preview="C" * 900,
+    )
+    assert section_text(legacy) == "C" * 900

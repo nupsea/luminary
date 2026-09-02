@@ -11,7 +11,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.database import get_session_factory
 from app.models import EnrichmentJobModel, SectionModel, SectionSummaryModel
@@ -100,6 +100,26 @@ def _is_metadata_section(heading: str, text: str) -> bool:
     return any(signal in combined for signal in _METADATA_SIGNALS)
 
 
+def section_text(section: SectionModel) -> str:
+    """The section's reading text.
+
+    `body` is uncapped (I-29); `preview` is a 10,000-character snippet of it.
+    Summarising from `preview` silently drops everything past that cap --
+    measured on `art_of_unix`, 96,745 characters of body against 50,799 of
+    preview, so 47.5% of the book never reached summarisation at all.
+
+    The fallback is for rows written before `body` existed, where the snippet
+    is the only text there is: `sutton_barto_rl`, `engineering_sync` and
+    `IAEA_medical` all carry an empty body. Re-ingesting is what restores them;
+    reading `preview` is the honest interim, not a repair.
+
+    `unit_text_cap` still bounds what any one call sends. That bound is the
+    intended one -- `preview`'s cap was never meant to be a second, invisible
+    one underneath it.
+    """
+    return section.body or section.preview
+
+
 class SectionSummarizerService:
     async def qualifying_section_count(self, document_id: str) -> int:
         """How many sections `generate` would summarise, without calling an LLM.
@@ -115,7 +135,8 @@ class SectionSummarizerService:
         return sum(
             1
             for s in sections
-            if len(s.preview) >= MIN_PREVIEW_LEN and not _is_metadata_section(s.heading, s.preview)
+            if len(section_text(s)) >= MIN_PREVIEW_LEN
+            and not _is_metadata_section(s.heading, s.preview)
         )
 
     async def generate(
@@ -140,6 +161,31 @@ class SectionSummarizerService:
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
 
+        # Replace, never append. `finalize` reaches this from two paths -- the
+        # inline grouped run and the deferred per-section run -- and neither
+        # cleared what the other wrote, so a document that took both ended up
+        # with one set of summaries per path. `ml_notes` carried 20 rows with 20
+        # distinct section_ids for a document with 10 sections, and the extra
+        # 6,751 characters went into the executive summary's input. That moved
+        # theme coverage by about 0.08, which is larger than the effects this
+        # pipeline is measured for.
+        #
+        # Invalidating the reduce cache above and leaving the rows would be half
+        # the job: the cache is rebuilt from exactly these rows.
+        async with get_session_factory()() as session:
+            stale = await session.execute(
+                delete(SectionSummaryModel).where(
+                    SectionSummaryModel.document_id == document_id
+                )
+            )
+            await session.commit()
+        if stale.rowcount:
+            logger.info(
+                "section_summarizer: replacing %d existing summaries",
+                stale.rowcount,
+                extra={"doc_id": document_id},
+            )
+
         # Fetch qualifying sections
         async with get_session_factory()() as session:
             result = await session.execute(
@@ -161,7 +207,7 @@ class SectionSummarizerService:
             else:
                 non_metadata.append(s)
 
-        qualifying = [s for s in non_metadata if len(s.preview) >= MIN_PREVIEW_LEN]
+        qualifying = [s for s in non_metadata if len(section_text(s)) >= MIN_PREVIEW_LEN]
 
         if not qualifying:
             logger.info(
@@ -288,10 +334,16 @@ class SectionSummarizerService:
                 exc,
             )
 
+
+
+
+
+
     def _as_units(self, sections: list[SectionModel]) -> list[dict]:
         """One unit per section, so every section gets its own summary."""
         return [
-            {"heading": s.heading, "text": s.preview, "section_id": s.id} for s in sections
+            {"heading": s.heading, "text": section_text(s), "section_id": s.id}
+            for s in sections
         ]
 
     def _group_sections(self, sections: list[SectionModel]) -> list[dict]:
@@ -301,7 +353,7 @@ class SectionSummarizerService:
             return [
                 {
                     "heading": s.heading,
-                    "text": s.preview,
+                    "text": section_text(s),
                     "section_id": s.id,
                 }
                 for s in sections
@@ -312,7 +364,7 @@ class SectionSummarizerService:
         for start in range(0, count, group_size):
             group = sections[start : start + group_size]
             heading = group[0].heading
-            text = "\n\n".join(s.preview for s in group)
+            text = "\n\n".join(section_text(s) for s in group)
             units.append({"heading": heading, "text": text, "section_id": None})
 
         return units
