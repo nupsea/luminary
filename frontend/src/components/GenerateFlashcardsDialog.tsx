@@ -157,16 +157,19 @@ export function GenerateFlashcardsDialog({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  // Fetch notes when dialog opens; pre-select initialNoteIds when provided
+  // Fetch notes when dialog opens; pre-select initialNoteIds when provided.
+  // Keyed on the ids as a string, not the array: this effect sets state, so a
+  // caller passing a fresh literal (`initialNoteIds={[id]}`) would re-run it on
+  // every render and never settle.
+  const initialKey = (initialNoteIds ?? []).join(",")
   useEffect(() => {
-    if (open) {
-      void fetchNoteStubs().then(setAvailableNotes)
-      if (initialNoteIds && initialNoteIds.length > 0) {
-        setMode("notes")
-        setSelectedNoteIds(initialNoteIds)
-      }
+    if (!open) return
+    void fetchNoteStubs().then(setAvailableNotes)
+    if (initialKey) {
+      setMode("notes")
+      setSelectedNoteIds(initialKey.split(","))
     }
-  }, [open, initialNoteIds])
+  }, [open, initialKey])
 
   const { data: collectionTree } = useQuery({
     queryKey: ["collections-tree"],
@@ -518,9 +521,24 @@ export function GenerateFlashcardsDialog({
               </div>
             )}
 
+            {/* Not "broaden your selection": the selection is never the cause.
+                A card is dropped when its answer does not quote the note, and
+                that varies run to run on identical input -- so retrying the
+                same scope is the action that works. */}
             {success && !collectionResult && generatedCards.length === 0 && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-center dark:border-amber-900 dark:bg-amber-950/40">
-                <p className="text-sm text-amber-800 italic">No flashcards were generated. Try broadening your selection.</p>
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  The model didn&apos;t produce a card that quotes these notes. This varies between
+                  runs — generating again on the same notes usually works.
+                </p>
+                <button
+                  onClick={() => void handleGenerate()}
+                  disabled={isGenerating || !canGenerate}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-50 dark:border-amber-800"
+                >
+                  {isGenerating ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Try again
+                </button>
               </div>
             )}
           </div>
