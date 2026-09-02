@@ -194,17 +194,9 @@ def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) ->
 
 
 # What to say about each kind of document, appended to the mode instruction.
-#
-# `MODE_INSTRUCTIONS` used to carry this itself, and carried exactly one answer:
-# the executive instruction asked for "narrative ideas" and "character arcs" of
-# every document alike. A 38-minute conference talk was summarised under it and
-# lost `agents.md`, slash commands, agent skills and the benchmark site it named
-# -- 10 mentions of one, 3 of another, none surviving (issue #105). The
-# instruction was working: it asked for overarching themes, and a named tool is
-# not one.
-#
-# Keyed on the facets rather than content_type, because the distinction that
-# matters here is shape and subject: a manual and a novel are both "book".
+# One instruction for all of them asked a conference talk for "character arcs"
+# and lost every tool it named (#105). Keyed on the facets, not content_type:
+# a manual and a novel are both "book".
 _FORM_GUIDANCE: dict[str, str] = {
     "prose": (
         "Focus on what the work argues or recounts, and name the people, places "
@@ -235,8 +227,7 @@ _NARRATIVE_GUIDANCE = (
     "cost. Name the people and places that carry the story."
 )
 
-# The instruction the talk needed. Abstracting a named thing into its category
-# is the specific failure: "configuration files" in place of `agents.md`.
+# The specific failure was abstraction: "configuration files" for `agents.md`.
 _TECHNICAL_GUIDANCE = (
     "Preserve exact names: files, commands, libraries, parameters, metrics and "
     "tools. Never replace a named thing with the category it belongs to."
@@ -259,8 +250,8 @@ def _kind_guidance(profile: "DocumentProfile | None") -> str:
 def _build_system_prompt(mode: str, profile: "DocumentProfile | None" = None) -> str:
     """The grounding prefix, the mode instruction, and what this kind wants.
 
-    `conversation` mode asks for a JSON object, so guidance written for prose
-    would only invite the model to add commentary around it.
+    `conversation` asks for a JSON object; prose guidance would invite
+    commentary around it.
     """
     prompt = f"{GROUNDING_PREFIX}\n\n{MODE_INSTRUCTIONS[mode]}"
     if mode == "conversation":
@@ -279,12 +270,8 @@ class SummarizationService:
     async def _fetch_profile(self, document_id: str) -> "DocumentProfile | None":
         """What kind of document this is, for the prompt to adapt to.
 
-        None when the row carries no form yet -- the prompt then falls back to
-        the kind-neutral instruction rather than guessing a kind.
-
-        Never raises. Adapting the prompt is an improvement on the summary, not
-        a precondition for having one, so a lookup that fails costs the
-        adaptation and nothing else.
+        None when the row carries no form, and never raises: adapting the prompt
+        improves a summary but is not a precondition for having one.
         """
         try:
             async with get_session_factory()() as session:

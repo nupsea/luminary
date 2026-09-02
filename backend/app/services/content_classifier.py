@@ -65,24 +65,11 @@ _TRANSCRIPT_HEADER = re.compile(
 )
 
 _CODE_FENCE = re.compile(r"^\s*```", re.M)
-# Captures the section number so callers can count DISTINCT ones.
-#
-# A PDF extracts "3.2" onto its own line with the title on the next, so a title
-# cannot be required on the same line -- the number has to be allowed to stand
-# alone. That admits every bare numeric literal in the document, which on a
-# quantitative paper is most of its tables and axis labels: the raw matches for
-# "Attention Is All You Need" were 199, and the distinct values were led by
-# 0.0, 0.1, 0.2, 0.3 -- plot ticks, not sections.
-#
-# Two guards, both measured on the stored papers. A section number never starts
-# with zero, which removes the whole 0.x family a chess paper's probabilities
-# live in (0.11, 0.21, 0.33, ...). Neither part exceeds two digits, so 2931529.5
-# cannot pose as a section. Counting distinct values then stops duplicated
-# extraction (issue #97) from multiplying one skeleton into a score it did not
-# earn.
-#
-# This narrows the signal; it does not make it exact. Data at or above 1.0 is
-# still indistinguishable from a section number by pattern alone.
+# A PDF puts "3.2" on its own line, so a title cannot be required alongside it
+# -- which admits every bare decimal. The leading-zero and two-digit guards
+# exclude plot ticks and measurements; data at or above 1.0 is still
+# indistinguishable from a section number. Capture group so callers count
+# distinct values: duplicated extraction (#97) otherwise multiplies one skeleton.
 _NUMBERED_SECTION = re.compile(r"^[ \t]{0,4}([1-9]\d?(?:\.\d{1,2}){1,2})\.?(?=[ \t]|$)", re.M)
 _PAPER_HEADING = re.compile(
     r"^\s{0,4}(?:\d+\.?\s*)?(abstract|introduction|related work|methodology|methods|"
@@ -150,29 +137,20 @@ def sample_body(raw_text: str, window: int = 6000) -> str:
     )
 
 
-# A contents listing announces itself, one way or another. `art_of_unix` opens
-# with a literal "Table of Contents"; a PDF textbook opens with dotted leaders
-# and a column of page numbers.
 _CONTENTS_MARKER = re.compile(r"table of contents|^\s*contents\s*$", re.I | re.M)
 _DOTTED_LEADER = re.compile(r"\.{4,}")
 _NUMERIC_LINE = re.compile(r"^\s*[\d.]+\s*$", re.M)
 
-# Above this share of lines being nothing but a number, the window is a listing
-# rather than text. Measured on the library: `sutton_barto_rl`'s contents pages
-# run 0.24 to 0.64, and the highest any prose window reaches is 0.0 -- the
-# floor sits in a gap wide enough that its exact value does not matter.
+# Bracketed on the library: contents pages run 0.24-0.64, prose windows 0.0.
 _NUMERIC_LINE_SHARE = 0.15
 
 
 def looks_like_front_matter(window: str) -> bool:
     """Whether this window is a contents listing rather than the work.
 
-    Sentence density cannot answer this. `art_of_unix` opens with a run-on
-    chapter contents whose every entry is a rule ending in a full stop --
-    "Rule of Clarity: Clarity is better than cleverness." -- so it reads as five
-    sentences per 1000 characters, indistinguishable from prose. What separates
-    it is that it says "Table of Contents"; what separates a PDF's contents is
-    the leaders and the column of page numbers.
+    Not sentence density: `art_of_unix` opens with a chapter contents whose
+    entries each end in a full stop, so it scores as prose. A listing is caught
+    by saying so, by dotted leaders, or by a column of page numbers.
     """
     if _CONTENTS_MARKER.search(window) or _DOTTED_LEADER.search(window):
         return True
@@ -186,25 +164,13 @@ def looks_like_front_matter(window: str) -> bool:
 def subject_excerpt(raw_text: str, window: int = 2000) -> str:
     """The excerpt to judge a document's subject from.
 
-    The opening, because a work states its subject early and a talk states it in
-    the first minute -- measured at 20/21 against 17/21 for a body sample. But
-    the opening is only usable when it is the work: when it is a contents
-    listing, the sample comes from the body instead, where 24 of 24 documents in
-    the library have text.
+    The opening, which measured 20/21 against 17/21 for a body sample: a work
+    states its subject early. Falls back to the body only when the opening is a
+    contents listing, so a clean opening is read exactly as before, and returns
+    "" when both are listings -- the caller reports that as unclassified.
 
-    The fallback fires only where the head is demonstrably front matter, so a
-    document with a clean opening is judged exactly as before.
-
-    Returns "" when both windows are listings -- a document that is nothing but
-    a contents page. The caller reports that as unclassified, which is the
-    honest answer; answering about a list of chapter titles is not.
-
-    **Known limit.** This finds contents listings, which is what it claims. It
-    does not find an illustration list, a publisher's note, or an editorial
-    preface sitting after the licence marker: measured on five public-domain
-    texts, the excerpt for the US Constitution was a Gutenberg note about etext
-    production and the excerpt for a cookbook was its frontispiece caption. Both
-    happened to yield the right subject, which is luck rather than a mechanism.
+    Finds contents listings and nothing else. An illustration list or a
+    publisher's note after the licence marker still reaches the probe.
     """
     body = strip_boilerplate(raw_text)
     head = body[:window].strip()
@@ -216,44 +182,32 @@ def subject_excerpt(raw_text: str, window: int = 2000) -> str:
     return fallback
 
 
-# Section markers, by convention. A reference work is entered at a section
-# rather than read through, and it says where those entries are.
-#
-# `_FLAT_MARKER` is the gap this closes: `_NUMBERED_SECTION` only ever matched
-# dot-decimals, so "1. Form the possessive singular" -- 60 of them in The
-# Elements of Style -- was invisible, and the book read as prose.
+# Section markers by convention. `_FLAT_MARKER` is the gap that made The
+# Elements of Style read as prose: `_NUMBERED_SECTION` only ever matched
+# dot-decimals, so its 60 numbered rules were invisible.
 _FLAT_MARKER = re.compile(r"^[ \t]{0,6}\d{1,3}\.[ \t]+[A-Z]", re.M)
 _NAMED_MARKER = re.compile(
     r"^[ \t]{0,6}(?:Article|Section|Rule|Clause|Item|Appendix)\b", re.I | re.M
 )
 # Chapter, Part, Book, Canto, Act, Scene are how a NARRATIVE divides itself.
-# Counting them would make every novel a reference work: Hamlet carries 1.63
-# per 1,000 words, Alice 0.90, Moby-Dick 0.79.
+# Counting them makes every novel a reference: Hamlet rates 1.63 on them alone.
 _NARRATIVE_DIVISION = re.compile(
     r"^[ \t]{0,6}(?:Chapter|Part|Book|Canto|Act|Scene)\b", re.I | re.M
 )
 
-# A journal or a clipping file starts its units with a date. Three is enough to
-# be a habit rather than a mention: `daily_thoughts_2026` carries six.
+# Three dated units is a habit rather than a mention.
 _DATED_ENTRY = re.compile(
     r"^[ \t]{0,6}(?:Date\s*:|\d{4}-\d{2}-\d{2}\b|"
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b)",
     re.I | re.M,
 )
 
-
-# Past this length a document's marker *density* stops saying what kind of
-# document it is and starts saying how long it is. `ibm-sdm-vol-2` carries 1,391
-# section markers -- as unambiguous a reference work as the library holds -- and
-# rates 0.47 against its 2.9 million words, below every threshold that admits a
-# rule book. Capping the denominator measures its structure against a normal
-# document instead. Only documents past the cap are affected, and of those only
-# a heavily sectioned one moves: Moby-Dick has 2 markers, Hegel 12.
+# Past this length, marker density describes how long a document is rather than
+# what it is: `ibm-sdm-vol-2` carries 1,391 markers and rates 0.47 uncapped.
 _MARKER_RATE_WORD_CAP = 200_000
 
-# Below this many markers outright, a rate means very little: five numbered
-# lines in a 2,600-word release note rate 1.91 and are not a reference skeleton.
-# No true reference measured comes near it -- `art_of_unix`, the smallest, has 41.
+# Below this, a rate means little: five numbered lines in a 2,600-word release
+# note rate 1.91. The smallest true reference measured, `art_of_unix`, has 41.
 _MIN_SECTION_MARKERS = 8
 
 
@@ -269,11 +223,8 @@ def count_section_markers(text: str) -> int:
 def section_marker_rate(text: str, word_count: int) -> float:
     """Section markers per 1,000 words, against a capped length.
 
-    Rate rather than raw count, because a count on its own only says how long
-    the document is. Measured across 20 documents, the two that bracket the
-    threshold are `federalist_papers` at 0.43 -- the most heavily sectioned prose
-    in the library -- and `art_of_unix` at 2.68, the least heavily sectioned
-    reference work.
+    Bracketed across 20 documents: `federalist_papers` at 0.43 is the most
+    sectioned prose, `art_of_unix` at 2.68 the least sectioned reference.
     """
     if word_count <= 0:
         return 0.0
@@ -449,14 +400,10 @@ def classify_content(
     return best
 
 
-# Above this many section markers per 1,000 words, a document is entered rather
-# than read through. Bracketed by the two documents either side of it:
-# `federalist_papers` at 0.43 is the most heavily sectioned prose measured, and
-# `art_of_unix` at 2.68 the least heavily sectioned reference work.
+# Bracketed by `federalist_papers` at 0.43 (prose) and `art_of_unix` at 2.68.
 _REFERENCE_MARKER_RATE = 1.5
 
-# Below this, a structured document is one piece rather than a work you return
-# to. `Introducing Contextual Retrieval` at 1,704 words is an article;
+# `Introducing Contextual Retrieval` at 1,704 words is an article;
 # `luminary_conceptual_foundations` at 5,312 is a reference.
 _ARTICLE_MAX_WORDS = 5000
 
@@ -470,18 +417,13 @@ def classify_form(
 ) -> str:
     """The document's shape, from structure alone.
 
-    **No vocabulary signal takes part in this.** `form` used to be derived from
-    `content_type`, where `reference` was reachable only through `tech_book` and
-    `tech_book` requires technical vocabulary density -- so a non-technical
-    reference work could not be classified as one. Held out on seven documents
-    the classifier had never seen, every miss was that shape: The Elements of
-    Style, the US Constitution and a cookbook all read as prose, while a MySQL
-    manual and a data-science textbook were found. The axis was inheriting the
-    domain's bias.
+    **No vocabulary signal takes part.** Deriving `form` from `content_type` put
+    `reference` behind `tech_book`, which needs technical vocabulary, so a
+    non-technical manual could not be one -- held out, The Elements of Style,
+    the US Constitution and a cookbook all read as prose.
 
-    Order matters. A paper is numbered too, so its own skeleton is looked for
-    first; speaker turns are checked before length so a short transcript is not
-    mistaken for a note.
+    Order matters: a paper is numbered too, so its skeleton is looked for first,
+    and speaker turns before length so a short transcript is not a note.
     """
     ext = (file_ext or "").lower().lstrip(".")
     if ext in _CODE_EXTENSIONS:
@@ -517,10 +459,8 @@ def classify_form(
     ):
         return "reference"
 
-    # Entries are dated or delimited units, not merely a short document.
-    # Keying this on length alone made a 1,704-word blog post a journal:
-    # `Micrograd` and `Introducing Contextual Retrieval` both carry 22 headings
-    # and no dates, while `daily_thoughts_2026` carries six dates and none.
+    # Dated or delimited units, not merely short: keying on length alone made a
+    # 1,704-word blog post a journal.
     if len(_DATED_ENTRY.findall(full)) >= 3:
         return "entries"
 

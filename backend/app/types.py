@@ -18,16 +18,10 @@ ContentType = Literal[
 ]
 
 
-# Document facets
-#
-# `ContentType` above answers four questions with one value -- a container
-# (audio, epub, kindle_clippings), a shape (book, paper, conversation), a
-# subject (the tech_ prefix) and a size -- so it has to enumerate a cross
-# product and enumerates eleven of its cells. The facets below separate the
-# questions, and `format` on the row already carries the container.
-#
-# Being written alongside `content_type`, which stays authoritative until the
-# wire moves. See docs/roadmap.md rung 0.9.0.
+# Document facets. `ContentType` above answers four questions with one value --
+# container, shape, subject, size -- so it enumerates eleven cells of a cross
+# product. These separate the questions; `format` carries the container.
+# Written alongside content_type, which stays authoritative until the wire moves.
 
 Form = Literal[
     "prose",        # continuous long-form read start to finish
@@ -40,21 +34,12 @@ Form = Literal[
     "source_code",  # a program file
 ]
 
-# Nullable everywhere, and null is not "general". Only two things establish a
-# domain: a measurement (the persisted `is_technical` flag, or the transcript
-# probe behind it) and a content type that names it outright (`tech_book`).
-# Nothing else does -- `d2l_dive_into_deep_learning` is stored as a plain book.
-#
-# Four of the library's eight talks carry a null flag because
-# `detect_technical_transcript` returned None: the probe failed or gave a
-# non-yes/no answer, and nothing retries. Calling those "general" would report a
-# default as a finding, and the document would then be shown to the user as
-# classified when it never was.
+# Null is not "general". Only a measurement or a content type that names the
+# subject outright establishes a domain; a failed probe leaves null, and calling
+# that "general" would show the reader a decision nobody made.
 Domain = Literal["general", "technical"]
 
-# Whether the text tells a story or explains a subject. Nullable everywhere:
-# nothing populates it yet, and `card_genre` falls back to the behaviour that
-# shipped before it existed.
+# Whether the text tells a story or explains a subject.
 Register = Literal["narrative", "expository"]
 
 CardGenre = Literal["narrative", "non-fiction", "technical", "academic", "conversation"]
@@ -76,10 +61,8 @@ _FORM_BY_CONTENT_TYPE: dict[str, Form] = {
     "technical": "article",
 }
 
-# Chunker settings per form. The values are the ones CHUNK_CONFIGS carried for
-# the content type each form replaces, so sizing does not move in this rung.
-# `reference` is 500/80 (tech_book) and `article` 350/60 (tech_article): what
-# used to be a length decision made at ingest is now carried by the form itself.
+# The values CHUNK_CONFIGS carried for the content type each form replaces, so
+# sizing does not move. tests/test_document_profile.py asserts they still match.
 _CHUNK_BY_FORM: dict[Form, tuple[int, int]] = {
     "paper": (900, 150),
     "prose": (600, 120),
@@ -91,20 +74,16 @@ _CHUNK_BY_FORM: dict[Form, tuple[int, int]] = {
     "script": (600, 120),
 }
 
-# Forms whose neighbouring chunks continue the same thought, so fetching them
-# adds context rather than noise. Replaces `_EXPANSION_TYPES`.
+# Forms whose neighbouring chunks continue the same thought.
 _EXPANDING_FORMS: frozenset[str] = frozenset({"prose", "dialogue", "entries"})
 
-# Forms whose topics are the people and places in them. Everything else gets
-# concepts only: in a transcript or a manual, a PERSON is a speaker or a cited
-# author, which is noise as a browseable tag.
+# Forms whose topics are their people and places. Elsewhere a PERSON is a
+# speaker or a cited author -- noise as a browseable tag.
 _NARRATIVE_FORMS: frozenset[str] = frozenset({"prose", "entries", "script"})
 
 
-# Forms whose register follows from the shape, so asking a model is spending a
-# call on a settled question. A research paper reports and a manual instructs;
-# neither narrates. `dialogue` is deliberately absent -- a meeting explains but
-# an audiobook narrates, and both arrive as speaker turns.
+# Forms whose register follows from the shape. `dialogue` is deliberately
+# absent: a meeting explains but an audiobook narrates, and both are turns.
 _REGISTER_BY_FORM: dict[str, Register] = {
     "paper": "expository",
     "reference": "expository",
@@ -112,12 +91,7 @@ _REGISTER_BY_FORM: dict[str, Register] = {
 
 
 def register_for_form(form: Form) -> "Register | None":
-    """The register a form settles on its own, or None when it must be measured.
-
-    Saves the probe on every paper and manual, and -- more to the point -- gives
-    those documents a real value instead of the "unclassified" they showed
-    before, which was the axis reporting that nobody had asked.
-    """
+    """The register a form settles on its own, or None when it must be measured."""
     return _REGISTER_BY_FORM.get(form)
 
 
@@ -133,9 +107,8 @@ class DocumentProfile:
     """What a document is, and every policy derived from it.
 
     One definition per policy. Consumers ask this object rather than testing
-    `content_type` themselves -- five sites did the latter for "is this
-    technical" and disagreed with each other, two of them by matching the
-    document's title against a keyword list.
+    `content_type`: five sites did that for "is this technical" and disagreed,
+    two of them by matching the document title against a keyword list.
     """
 
     form: Form
@@ -144,12 +117,10 @@ class DocumentProfile:
 
     @property
     def is_technical(self) -> bool:
-        """Whether technical NER types and technical relation extraction apply.
+        """Whether technical NER types and relation extraction apply.
 
-        An unknown domain is not technical, which is what `is_technical_content`
-        already returned for these documents -- so nothing downstream changes.
-        What changes is that the UI can tell "we decided general" apart from
-        "nothing ever decided", instead of showing a default as a finding.
+        An unknown domain is not technical, matching `is_technical_content`, so
+        nothing downstream moved when null became distinguishable from general.
         """
         return self.domain == "technical"
 
@@ -171,27 +142,20 @@ class DocumentProfile:
     def card_genre(self) -> CardGenre | None:
         """What to ask of this material when writing flashcards.
 
-        None when the facets do not determine it. Returning a default here is
-        how "The Odyssey" came to be shown as non-fiction: prose with no
-        measured register fell through to the safe fallback, and the fallback
-        was then displayed to the reader as a decision.
+        None when the facets do not determine it: a default here is how "The
+        Odyssey" came to be shown as non-fiction. A caller that must have a
+        strategy picks one itself.
 
-        A caller that must have a strategy picks one and says so -- see
-        `flashcard_prompts._infer_genre`. This property reports only what the
-        facets establish.
-
-        `paper` is tested before `domain` because a paper is technical and
-        still wants the academic prompt, which asks what was measured rather
-        than what the rule is.
+        `paper` is tested before `domain` -- a paper is technical and still
+        wants the academic prompt.
         """
         if self.form == "source_code":
             return "technical"
         if self.form == "paper":
             return "academic"
         if self.form == "dialogue":
-            # A recorded technical talk is not a meeting. The conversation
-            # strategy asks what was decided and who owns it, which a talk has
-            # none of; its value is the technique.
+            # A talk is not a meeting: "what was decided, who owns it" is a
+            # meeting's question, and a talk's value is the technique.
             if self.domain == "technical":
                 return "technical"
             return "conversation" if self.domain == "general" else None
@@ -212,23 +176,19 @@ class DocumentProfile:
     ) -> "DocumentProfile":
         """Build a profile from the columns that predate the facets.
 
-        Used to dual-write during ingest and to backfill. `is_technical`
-        resolves exactly as `is_technical_content` does, so NER sees the same
-        answer it saw before.
+        `is_technical` resolves exactly as `is_technical_content` does, so NER
+        sees the answer it saw before.
         """
-        # `entries` for an unmapped type, because that is the smallest chunk
-        # size and matches what the generic chunker fell back to. Guessing a
-        # larger one costs recall on a document nobody has classified.
+        # `entries` for an unmapped type: smallest chunk size, and what the
+        # generic chunker fell back to.
         form = _FORM_BY_CONTENT_TYPE.get(content_type or "", "entries")
         domain: Domain | None
         if is_technical is not None:
             domain = "technical" if is_technical else "general"
         elif content_type in TECHNICAL_CONTENT_TYPES:
-            # The content type names the subject outright.
             domain = "technical"
         else:
-            # Nothing measured it and the content type does not carry it: a
-            # plain `book` may be a novel or a deep-learning textbook.
+            # A plain `book` may be a novel or a deep-learning textbook.
             domain = None
         return cls(form=form, domain=domain, register=register)
 

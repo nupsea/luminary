@@ -103,19 +103,12 @@ def _is_metadata_section(heading: str, text: str) -> bool:
 def section_text(section: SectionModel) -> str:
     """The section's reading text.
 
-    `body` is uncapped (I-29); `preview` is a 10,000-character snippet of it.
-    Summarising from `preview` silently drops everything past that cap --
-    measured on `art_of_unix`, 96,745 characters of body against 50,799 of
-    preview, so 47.5% of the book never reached summarisation at all.
+    `body` is uncapped (I-29); `preview` is a 10,000-character snippet, and
+    summarising from it dropped 47.5% of `art_of_unix`. `unit_text_cap` is the
+    intended bound; preview's cap was a second, invisible one underneath it.
 
-    The fallback is for rows written before `body` existed, where the snippet
-    is the only text there is: `sutton_barto_rl`, `engineering_sync` and
-    `IAEA_medical` all carry an empty body. Re-ingesting is what restores them;
-    reading `preview` is the honest interim, not a repair.
-
-    `unit_text_cap` still bounds what any one call sends. That bound is the
-    intended one -- `preview`'s cap was never meant to be a second, invisible
-    one underneath it.
+    The fallback covers rows written before `body` existed, where the snippet is
+    the only text there is. Re-ingesting restores them; this is not a repair.
     """
     return section.body or section.preview
 
@@ -161,17 +154,11 @@ class SectionSummarizerService:
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
 
-        # Replace, never append. `finalize` reaches this from two paths -- the
-        # inline grouped run and the deferred per-section run -- and neither
-        # cleared what the other wrote, so a document that took both ended up
-        # with one set of summaries per path. `ml_notes` carried 20 rows with 20
-        # distinct section_ids for a document with 10 sections, and the extra
-        # 6,751 characters went into the executive summary's input. That moved
-        # theme coverage by about 0.08, which is larger than the effects this
-        # pipeline is measured for.
-        #
-        # Invalidating the reduce cache above and leaving the rows would be half
-        # the job: the cache is rebuilt from exactly these rows.
+        # Replace, never append. `finalize` reaches this from two paths and
+        # neither cleared the other, so `ml_notes` held 20 rows for 10 sections
+        # and the surplus inflated the executive summary's input by ~0.08 theme
+        # coverage. Invalidating the reduce cache above without this is half the
+        # job -- the cache is rebuilt from exactly these rows.
         async with get_session_factory()() as session:
             stale = await session.execute(
                 delete(SectionSummaryModel).where(

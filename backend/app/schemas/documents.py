@@ -24,10 +24,8 @@ class DocumentFacets(BaseModel):
 
     form: str | None = None
     domain: str | None = None
-    # Pydantic warns that this shadows `BaseModel.register` -- that attribute is
-    # `ModelMetaclass.register`, the ABC registration hook, which nothing calls
-    # on a response model. Dump, JSON and validation round-trip were checked
-    # with the field populated. The warning is the cost of the accurate word.
+    # Pydantic warns this shadows `ModelMetaclass.register`, the ABC hook, which
+    # nothing calls on a response model. Round-trip verified.
     register: str | None = None
     # Derived, never stored: which flashcard strategy this document gets.
     card_genre: str | None = None

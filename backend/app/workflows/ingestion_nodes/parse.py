@@ -98,13 +98,10 @@ async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | No
     is_technical = await _measure_domain(content_type, pd)
     raw_text = (pd or {}).get("raw_text") or ""
 
-    # A paper reports and a manual instructs; neither narrates, so the shape
-    # settles it and the probe is a call spent on a known answer. Measured on
-    # this host at ~2.6s a call, and 11 of the library's 53 documents take this
-    # path. Combining the two probes into one call was tried instead and is
-    # worse on every axis -- 17/21 against 20/21 on subject, 18/21 against 21/21
-    # on register, and 0.84x the speed, because the cost is prompt tokens rather
-    # than call overhead.
+    # A paper reports and a manual instructs, so the shape settles it and the
+    # probe would spend ~2.6s on a known answer. Combining the two probes into
+    # one call was measured instead and is worse on both axes and 0.84x the
+    # speed -- the cost is prompt tokens, not call overhead.
     settled = register_for_form(DocumentProfile.from_legacy(content_type).form)
     if settled is not None:
         return is_technical, settled
@@ -115,18 +112,13 @@ async def _measure_facets(content_type: str, pd: dict | None) -> tuple[bool | No
 async def _measure_domain(content_type: str, pd: dict | None) -> bool | None:
     """Whether this document's subject is technical.
 
-    A content type only settles this when it names the subject outright.
-    Everything else is read from the document, because the type does not carry
-    it: `paper` says a work has an abstract and a method, not what field it is
-    in, and `book` covers both a novel and a deep-learning textbook.
+    Read from the document unless the content type names the subject outright:
+    `paper` says a work has an abstract, not what field it is in. The type list
+    this replaced answered for every type, writing a hard False for every paper
+    and book -- which stripped the technical entity types from "Attention Is All
+    You Need" (70 entities, 0 technical).
 
-    The list this replaced answered for every type, which meant writing a hard
-    False for every paper and book. That is what stripped the technical entity
-    types from "Attention Is All You Need" (70 entities, 0 technical) and from
-    `d2l_dive_into_deep_learning` (165, 0).
-
-    None when the probe cannot answer -- never False. `scripts/remeasure_domain.py`
-    retries those.
+    None when the probe cannot answer, never False; `remeasure_domain` retries.
     """
     if content_type in TECHNICAL_CONTENT_TYPES:
         return True

@@ -128,25 +128,20 @@ def resolve_technical_variant(raw_text: str, word_count: int | None = None) -> s
     """Resolve the merged 'technical' upload choice into the sizing variant
     the chunker expects. The two variants share every other pipeline branch.
 
-    Length decides it, because the choice is a chunk size and nothing else.
-    Structure overrides length only for a short document that is plainly a
-    manual. Each threshold is bracketed by the two library documents that
-    decide it:
+    Length decides it -- the choice is a chunk size and nothing else -- and
+    structure overrides only for a short document that is plainly a manual.
+    Each threshold is bracketed by the two documents either side:
 
     - 5,000 words: `luminary_conceptual_foundations` at 5,312 is a book,
       `radiology_chexnet_cxr` at 3,764 is a paper.
-    - 8 sections: below the length gate, `radiology_chexnet_cxr` is the only
-      document with any numbered sections at all, at 6 -- and it must stay an
-      article, so a threshold of 3 would misfile it.
-    - 6 fence lines (3 blocks): keeps the previous rule's fence intent.
-      `retrieval-and-memory-tutorial` at 4,920 words and 26 fences is a book;
-      `Introducing Contextual Retrieval` at 4 fences is not.
+    - 8 sections: `radiology_chexnet_cxr` has 6 and must stay an article, so 3
+      would misfile it.
+    - 6 fence lines: `retrieval-and-memory-tutorial` at 26 is a book,
+      `Introducing Contextual Retrieval` at 4 is not.
 
-    The previous rule read the first 5,000 characters and never looked at
-    length. On a book that window is the title page and the table of contents,
-    which is the same defect `classify_content` was rewritten to remove: it put
-    a 120,000-word IAEA manual and `d2l_dive_into_deep_learning` in the article
-    bucket, and a 3,764-word paper in the book one.
+    The previous rule read the first 5,000 characters -- on a book, the title
+    page -- and never looked at length, filing a 120,000-word IAEA manual as an
+    article and a 3,764-word paper as a book.
     """
     from app.services.content_classifier import (  # noqa: PLC0415
         _CODE_FENCE,
@@ -192,39 +187,21 @@ async def _update_stage(document_id: str, stage: str) -> None:
 async def detect_technical_content(raw_text: str) -> bool | None:
     """Ask the LLM whether a document's subject is technical. None when undecided.
 
-    **The domain has to be read from the document, not inferred from its type.**
-    The type list this replaced (`content_type in TECHNICAL_CONTENT_TYPES`) wrote
-    a hard False for every paper and book, so "Attention Is All You Need" was
-    recorded as non-technical and lost every ALGORITHM, TECHNOLOGY and PROTOCOL
-    entity it should have had -- 70 entities extracted, 0 technical. So did
-    `d2l_dive_into_deep_learning`, at 165 and 0.
+    Read from the document, never inferred from its type: the list this replaced
+    wrote a hard False for every paper and book, which stripped the technical
+    entity types from "Attention Is All You Need" (70 entities, 0 technical).
 
-    A vocabulary-density heuristic cannot stand in for this. `_TECH_VOCAB` is
-    ordinary computing vocabulary, so it reads an astronomy paper at 1.91 and a
-    LaTeX symbol table at 0.89 -- below a threshold that a CS blog post clears at
-    2.20. Any density floor that admits the blog post excludes the physics.
+    Vocabulary density cannot stand in for it. `_TECH_VOCAB` is ordinary
+    computing vocabulary, so it reads an astronomy paper at 1.91 and a LaTeX
+    symbol table at 0.89, below a CS blog post at 2.20.
 
-    None on failure, never False: an unanswered probe is not a finding, and
-    `DocumentProfile` shows it as unclassified rather than as "general".
-    Re-runnable by `scripts/remeasure_domain.py`.
+    None on failure, never False -- an unanswered probe is not a finding.
+    `scripts/remeasure_domain.py` retries those.
 
-    Repeats identically across five runs on the same input. Four framings were
-    measured against hand labels; this one scores 22/23 and the others were
-    rejected on the numbers, not on taste:
-
-        open category + examples + exclusions   22/23   (this one)
-        closed list of fields                   18/19
-        contrast with no examples               17/19
-        naming what the flag gates              14/22
-
-    The last collapsed because it asked for "specific technologies, algorithms,
-    systems" and an opening excerpt rarely names any. The bare contrast read
-    Hegel as technical and a vibe-coding talk as general interest.
-
-    **Do not tune this on the library.** ~20 documents is a sample, not an
-    accuracy figure. The one miss is `art_of_unix`, whose opening is design
-    philosophy rather than engineering -- a genuine borderline. Chasing it with
-    wording is how a prompt starts fitting the corpus in front of it.
+    Four framings were measured against hand labels; this one scored 22/23
+    against 18/19 for a closed list of fields, 17/19 for a bare contrast, and
+    14/22 for naming what the flag gates. **Do not tune it on the library** --
+    ~20 documents is a sample. The one miss is `art_of_unix`.
     """
     from app.services.content_classifier import subject_excerpt  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
@@ -236,11 +213,8 @@ async def detect_technical_content(raw_text: str) -> bool | None:
     snippet = subject_excerpt(raw_text)
     if not snippet:
         return None
-    # The fields are examples and the category is left open. A closed list is a
-    # taxonomy smuggled into a prompt -- it decides against every discipline the
-    # list omits, and the omission is invisible until a document from one
-    # arrives. Naming what the category excludes does the separating work that
-    # an exhaustive list would otherwise have to do.
+    # Examples, not a closed list: a closed list decides against every
+    # discipline it omits, invisibly, until a document from one arrives.
     prompt = (
         "Is this text's subject matter technical or scientific in nature — for "
         "example software, engineering, mathematics, medicine, or any other "
@@ -269,23 +243,14 @@ detect_technical_transcript = detect_technical_content
 async def detect_register(raw_text: str) -> str | None:
     """Whether the text tells a story or explains a subject. None when undecided.
 
-    The axis two hacks were reaching for. Without it `card_genre` cannot tell an
-    epic from an essay, and both fall to the same fallback: "The Odyssey" was
-    shown to the reader as non-fiction, which is a default wearing a
-    classification's clothes.
+    Read from the text: a story and an essay share their vocabulary, and what
+    differs is what the sentences are doing, so no word list can carry it.
 
-    Read from the text, like the domain probe, and for the same reason -- no
-    word list and no threshold can carry it. A story and an essay share their
-    vocabulary; what differs is what the sentences are doing.
-
-    **Sampled from the body, where the domain probe reads the opening.** The two
-    axes want different windows and the reason is mechanical: a work states its
-    subject early, but it opens with front matter. After the licence is stripped
-    a Gutenberg novel still begins with a preface or a translator's note, which
-    is expository however the book reads. Measured on 19 hand-labelled
-    documents: sampling the body scores 18/19 against 15/19 for the opening, and
-    the four it recovers are "The Odyssey", "Sherlock Holmes", "The Time
-    Machine" and "The Gita" -- every one a narrative behind an essay.
+    **Sampled from the body, where the domain probe reads the opening.** A work
+    states its subject early but opens with front matter -- after the licence is
+    stripped a Gutenberg novel still begins with a preface, which is expository
+    however the book reads. Body sampling scored 18/19 against 15/19, recovering
+    The Odyssey, Sherlock Holmes, The Time Machine and The Gita.
     """
     from app.services.content_classifier import sample_body  # noqa: PLC0415
     from app.services.llm import get_llm_service  # noqa: PLC0415
@@ -357,13 +322,10 @@ async def _persist_classification(
 ) -> None:
     """Write the content type, the technical flag and the facets they imply.
 
-    One statement rather than several: `form` and `domain` are a function of the
-    other columns, so writing them separately leaves a window in which the row
-    disagrees with itself.
-
-    `register` is only written when it was measured. Passing None leaves the
-    stored value alone rather than clearing it, so a later pass that measures
-    only the domain cannot wipe a register somebody already established.
+    One statement: the facets are a function of the other columns, so writing
+    them separately leaves a window where the row disagrees with itself.
+    `register` and `form` are only written when supplied, so a pass that
+    measures one cannot wipe the other.
     """
     from sqlalchemy import update  # noqa: PLC0415
 
@@ -371,10 +333,8 @@ async def _persist_classification(
     from app.types import DocumentProfile  # noqa: PLC0415
 
     profile = DocumentProfile.from_legacy(content_type, is_technical)
-    # `form` measured structurally when the caller has it. Falling back to the
-    # content_type mapping keeps a non-technical reference work unreachable --
-    # `reference` is only in that map behind `tech_book` -- which is the bias
-    # `classify_form` exists to remove.
+    # The content_type mapping is a fallback only: it puts `reference` behind
+    # `tech_book`, the bias `classify_form` exists to remove.
     values: dict[str, object] = {
         "content_type": content_type,
         "is_technical": is_technical,
