@@ -1,5 +1,6 @@
 import logging
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,13 @@ _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 
+# LanceDB takes predicates as SQL strings and offers no parameter binding, so a
+# quoted id is the only way to filter and shape-checking is the only defence.
+# Both forms are real: `uuid.uuid4()` for documents, chunks, notes and images,
+# and `uuid.uuid4().hex` for concepts and study events. Accepting only the dashed
+# form would silently make every concept-vector predicate match nothing.
+_SAFE_ID_RE = re.compile(r"[0-9a-fA-F]{32}|" + _UUID_RE.pattern)
+
 IMAGE_SCHEMA = pa.schema(
     [
         pa.field("image_id", pa.string()),
@@ -76,6 +84,38 @@ CONCEPT_SCHEMA = pa.schema(
         pa.field("vector", pa.list_(pa.float32(), CONCEPT_VECTOR_DIM)),
     ]
 )
+
+
+def safe_id(value: str) -> str | None:
+    """*value* if it is an id this process generates, else None."""
+    return value if value and _SAFE_ID_RE.fullmatch(value) else None
+
+
+def id_predicate(column: str, ids: Sequence[str], *, context: str) -> str | None:
+    """`column IN ('a','b')` over the ids that pass the shape check.
+
+    None when nothing survives, which callers must treat as "match nothing"
+    rather than falling through to an unfiltered predicate -- an `IN ()` that
+    silently became `WHERE true` would delete a whole table.
+    """
+    kept = [i for i in ids if safe_id(i)]
+    if len(kept) != len(ids):
+        logger.warning(
+            "%s: refused %d id(s) that are not the shape this process generates",
+            context,
+            len(ids) - len(kept),
+        )
+    if not kept:
+        return None
+    return f"{column} IN ({', '.join(chr(39) + i + chr(39) for i in kept)})"
+
+
+def eq_predicate(column: str, value: str, *, context: str) -> str | None:
+    """`column = 'value'`, or None when the id fails the shape check."""
+    if safe_id(value) is None:
+        logger.warning("%s: refused an id that is not the shape this process generates", context)
+        return None
+    return f"{column} = '{value}'"
 
 
 class LanceDBService:
@@ -114,15 +154,19 @@ class LanceDBService:
         """Return the number of vector rows stored for the given document_id."""
         try:
             table = self._get_table()
-            return table.count_rows(f"document_id = '{document_id}'")
+            pred = eq_predicate("document_id", document_id, context="count_for_document")
+            return table.count_rows(pred) if pred else 0
         except Exception:
             logger.warning("row count failed for %s; reporting 0", document_id, exc_info=True)
             return 0
 
     def delete_document(self, document_id: str) -> None:
         """Delete all vectors for the given document_id."""
+        pred = eq_predicate("document_id", document_id, context="delete_document")
+        if pred is None:
+            return
         table = self._get_table()
-        table.delete(f"document_id = '{document_id}'")
+        table.delete(pred)
         logger.info("Deleted vectors for document %s from LanceDB", document_id)
 
     def _get_or_create_note_table(self) -> Any:
@@ -189,8 +233,11 @@ class LanceDBService:
         "deletes that did not happen" is how the ghost went unnoticed.
         """
         try:
+            pred = eq_predicate("note_id", note_id, context="delete_note_vector")
+            if pred is None:
+                return
             table = self._get_or_create_note_table()
-            table.delete(f"note_id = '{note_id}'")
+            table.delete(pred)
             logger.debug("Deleted note vector note_id=%s", note_id)
         except Exception:
             logger.exception("delete_note_vector failed for note_id=%s", note_id)
@@ -233,8 +280,12 @@ class LanceDBService:
             table = self._get_image_table()
             search = table.search(query_vector).metric("cosine").limit(k)
             if document_ids:
-                id_list = ", ".join(f"'{did}'" for did in document_ids)
-                search = search.where(f"document_id IN ({id_list})", prefilter=True)
+                # No usable id means "match nothing". Skipping the filter would
+                # widen an explicitly scoped search to the whole library.
+                pred = id_predicate("document_id", document_ids, context="search_image_vectors")
+                if pred is None:
+                    return []
+                search = search.where(pred, prefilter=True)
             rows = search.to_list()
             return [row for row in rows if 1.0 - float(row.get("_distance", 1.0)) >= threshold]
         except Exception as exc:
@@ -244,8 +295,13 @@ class LanceDBService:
     def delete_image_vectors_for_document(self, document_id: str) -> None:
         """Delete all image vectors for the given document_id."""
         try:
+            pred = eq_predicate(
+                "document_id", document_id, context="delete_image_vectors_for_document"
+            )
+            if pred is None:
+                return
             table = self._get_image_table()
-            table.delete(f"document_id = '{document_id}'")
+            table.delete(pred)
             logger.info("Deleted image vectors for document %s", document_id)
         except Exception as exc:
             logger.warning("delete_image_vectors_for_document failed doc=%s: %s", document_id, exc)
@@ -270,9 +326,11 @@ class LanceDBService:
         if not safe:
             return
         try:
+            pred = id_predicate("image_id", safe, context="delete_image_vectors")
+            if pred is None:
+                return
             table = self._get_image_table()
-            quoted = ", ".join(f"'{i}'" for i in safe)
-            table.delete(f"image_id IN ({quoted})")
+            table.delete(pred)
             logger.info("Deleted %d image vector(s)", len(safe))
         except Exception as exc:
             logger.warning("delete_image_vectors failed: %s", exc)
@@ -303,10 +361,12 @@ class LanceDBService:
             ids = list(dict.fromkeys(chunk_ids))
             for i in range(0, len(ids), 800):
                 batch = ids[i : i + 800]
-                id_list = ", ".join(f"'{c}'" for c in batch)
+                pred = id_predicate("chunk_id", batch, context="vectors_for_chunks")
+                if pred is None:
+                    continue
                 rows = (
                     table.search()
-                    .where(f"chunk_id IN ({id_list})")
+                    .where(pred)
                     .select(["chunk_id", "vector"])
                     .limit(len(batch))
                     .to_list()
@@ -330,13 +390,18 @@ class LanceDBService:
         try:
             import numpy as np  # noqa: PLC0415
 
+            # None, not []: the caller writes the centroid when it is not None,
+            # and an empty vector reaches LanceDB as a zero-length list, which
+            # fails the fixed-size schema at write time rather than here.
+            pred = id_predicate("chunk_id", chunk_ids, context="compute_centroid")
+            if pred is None:
+                return None
             table = self._get_table()
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
             # search() with no query vector is a plain filtered scan; limit must be
             # explicit (default is 10) so we don't truncate the evidence set.
             rows = (
                 table.search()
-                .where(f"chunk_id IN ({id_list})")
+                .where(pred)
                 .select(["vector"])
                 .limit(len(chunk_ids))
                 .to_list()
@@ -363,8 +428,11 @@ class LanceDBService:
     def delete_concept_vector(self, concept_id: str) -> None:
         """Delete the vector for the given concept_id."""
         try:
+            pred = eq_predicate("concept_id", concept_id, context="delete_concept_vector")
+            if pred is None:
+                return
             table = self._get_or_create_concept_table()
-            table.delete(f"concept_id = '{concept_id}'")
+            table.delete(pred)
             logger.debug("Deleted concept vector concept_id=%s", concept_id)
         except Exception as exc:
             logger.warning("delete_concept_vector failed for concept_id=%s: %s", concept_id, exc)

@@ -39,22 +39,30 @@ async def test_db(tmp_path, monkeypatch):
     graph_module._graph_service = orig_graph
 
 
+# LanceDB predicates are interpolated, so ids are shape-checked before they reach
+# one (#95). These were "ch1"/"d1", which no ingest produces -- the check refused
+# them and the centroid came back empty, which is the right answer for an id the
+# process could not have generated.
+_CH1 = "3f1c2b7a-8d94-4e2b-9c31-5a7e6b0d4f28"
+_D1 = "c4a91e05-7b23-4d68-8f1a-2e9c3b5d7a64"
+
+
 async def test_create_concept_spans_three_stores_and_resolves(test_db):
     _engine, factory = test_db
     get_lancedb_service().upsert_chunks(
-        [{"chunk_id": "ch1", "document_id": "d1", "content_type": "text",
+        [{"chunk_id": _CH1, "document_id": _D1, "content_type": "text",
           "section_heading": "", "page": 0, "chunk_index": 0, "speaker": "",
           "text": "iceberg", "vector": [2.0] * 384}]
     )
     g = get_graph_service()
-    g.upsert_document("d1", "Doc", "book")
+    g.upsert_document(_D1, "Doc", "book")
     g.upsert_entity("e1", "Iceberg", "concept")
     svc = get_concept_service()
     async with factory() as s:
         c = await svc.create_concept(
             s, label="Iceberg Manifests", origin="document", status="proposed",
-            evidence=[{"document_id": "d1", "chunk_id": "ch1", "quote": "an iceberg"}],
-            document_ids=["d1"], entity_ids=["e1"],
+            evidence=[{"document_id": _D1, "chunk_id": _CH1, "quote": "an iceberg"}],
+            document_ids=[_D1], entity_ids=["e1"],
         )
         await svc.set_learning_state(s, c.id, mastery=42.0, stability=5.0)
         await s.commit()
@@ -62,14 +70,14 @@ async def test_create_concept_spans_three_stores_and_resolves(test_db):
 
     assert slug == "iceberg-manifests"
     # Kuzu topology
-    assert g.get_concept_ids_for_documents(["d1"]) == [cid]
+    assert g.get_concept_ids_for_documents([_D1]) == [cid]
     # LanceDB derived centroid
     assert get_lancedb_service().search_concepts([2.0] * 384, k=3)[0]["concept_id"] == cid
     # SQLite state + scope resolution
     async with factory() as s:
         row = await s.get(ConceptModel, cid)
         assert row.mastery == 42.0 and row.status == "proposed"
-        assert await resolve_scope(s, "doc", "d1") == [cid]
+        assert await resolve_scope(s, "doc", _D1) == [cid]
         assert await resolve_daily(s) == [cid]
         assert await resolve_scope(s, "tag", "x") == []  # not-yet-wired scope
 

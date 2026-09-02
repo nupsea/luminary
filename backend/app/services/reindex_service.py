@@ -30,7 +30,10 @@ class ReindexService:
         Exceptions per note are caught and counted in `failed`.
         """
         from app.services.embedder import get_embedding_service  # noqa: PLC0415
-        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+        from app.services.vector_store import (  # noqa: PLC0415
+            eq_predicate,
+            get_lancedb_service,
+        )
 
         result = await db.execute(select(NoteModel.id, NoteModel.content, NoteModel.document_id))
         rows = result.all()
@@ -48,7 +51,8 @@ class ReindexService:
                     tbl = svc._get_or_create_note_table()
                     # Use count_rows with filter for presence check
                     try:
-                        count = tbl.count_rows(f"note_id = '{nid}'")
+                        pred = eq_predicate("note_id", nid, context="reindex_notes")
+                        count = tbl.count_rows(pred) if pred else 0
                         return count > 0
                     except Exception:
                         return False

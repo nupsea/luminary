@@ -86,7 +86,10 @@ async def _fetch_cohesion_score(note_ids: list[str]) -> float | None:
         return None
 
     def _sync_fetch(ids: list[str]) -> list[list[float]]:
-        from app.services.vector_store import get_lancedb_service  # noqa: PLC0415
+        from app.services.vector_store import (  # noqa: PLC0415
+            get_lancedb_service,
+            id_predicate,
+        )
 
         svc = get_lancedb_service()
         try:
@@ -95,9 +98,11 @@ async def _fetch_cohesion_score(note_ids: list[str]) -> float | None:
             logger.warning("Could not open note_vectors_v2 for cohesion: %s", exc)
             return []
 
-        id_filter = ", ".join(f"'{nid}'" for nid in ids)
+        pred = id_predicate("note_id", ids, context="collection_cohesion")
+        if pred is None:
+            return []
         try:
-            df = tbl.to_pandas(filter=f"note_id IN ({id_filter})")
+            df = tbl.to_pandas(filter=pred)
             vectors: list[list[float]] = []
             for row in df.itertuples():
                 v = row.vector
