@@ -137,6 +137,60 @@ export function printedPageLabel(
   return label
 }
 
+/** What the reader typed into the page field.
+ *
+ * `19` is sheet 19, unchanged. `p19` and `p.xiv` name the number *printed* on
+ * the page, which is what the footer chip, the contents list and every citation
+ * report -- the field was the only surface with no way to accept one.
+ *
+ * The prefix is required rather than inferred: on a book with front matter,
+ * `19` is a valid sheet and a valid printed page at once, and guessing would
+ * silently move where a typed number lands.
+ */
+export function parsePageEntry(
+  raw: string,
+): { kind: "sheet"; sheet: number } | { kind: "printed"; label: string } | null {
+  const text = (raw ?? "").trim()
+  if (!text) return null
+  const printed = /^p\.?\s*(.+)$/i.exec(text)
+  if (printed) {
+    const label = printed[1].trim()
+    return label ? { kind: "printed", label } : null
+  }
+  if (!/^\d+$/.test(text)) return null
+  return { kind: "sheet", sheet: parseInt(text, 10) }
+}
+
+/** The sheet carrying this printed label, or null if no page is printed with it.
+ *
+ * Both label sources are consulted because they disagree in coverage: the PDF's
+ * own declared labels are absent from many files, and the ingestion-derived map
+ * only covers documents where enough pages agreed on one offset.
+ *
+ * Case-insensitive so `p.XIV` finds a page printed `xiv`.
+ */
+export function sheetForPrintedLabel(
+  declared: string[] | null | undefined,
+  derived: Record<string, string> | null | undefined,
+  label: string,
+): number | null {
+  const wanted = label.trim().toLowerCase()
+  if (!wanted) return null
+
+  for (const [sheet, value] of Object.entries(derived ?? {})) {
+    if (String(value).trim().toLowerCase() === wanted) {
+      const n = parseInt(sheet, 10)
+      if (!isNaN(n)) return n
+    }
+  }
+  if (declared) {
+    for (let i = 0; i < declared.length; i++) {
+      if ((declared[i] ?? "").trim().toLowerCase() === wanted) return i + 1
+    }
+  }
+  return null
+}
+
 // The ladder the +/- buttons walk. Steps rather than a linear slider because a
 // fixed increment is coarse at 50% and useless at 300%; these are the stops
 // every PDF reader offers. Auto-fit can land between or above them, which is
