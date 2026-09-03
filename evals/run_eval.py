@@ -43,8 +43,12 @@ from evals.lib.citation_metrics import (  # noqa: E402
     pair_answer_with_citations,
 )
 from evals.lib.environment import capture as capture_environment  # noqa: E402
-from evals.lib.environment import output_stats, self_judging, stats_delta  # noqa: E402
-from evals.lib.environment import shipped_rerank  # noqa: E402
+from evals.lib.environment import (  # noqa: E402
+    output_stats,
+    self_judging,
+    shipped_rerank,  # noqa: E402
+    stats_delta,
+)
 from evals.lib.loader import GoldenValidationError  # noqa: E402
 from evals.lib.loader import load_golden as _lib_load_golden  # noqa: E402
 from evals.lib.manifest import (  # noqa: E402
@@ -74,8 +78,8 @@ from evals.lib.retrieval_metrics import (  # noqa: E402
 from evals.lib.runners import GenerationEval, NliFaithfulnessEval  # noqa: E402
 from evals.lib.schemas import RetrievalGoldenEntry  # noqa: E402
 from evals.lib.scoring_history import SCORES_HISTORY_PATH  # noqa: E402
-from evals.lib.split import refuse_if_holdout, split_of  # noqa: E402
 from evals.lib.scoring_history import append_history as _lib_append_history  # noqa: E402
+from evals.lib.split import refuse_if_holdout, split_of  # noqa: E402
 from evals.lib.store import store_results as _lib_store_results  # noqa: E402
 
 # Backwards-compat alias: tests and audit_golden.py import GoldenEntry from run_eval.
@@ -1063,6 +1067,10 @@ def main() -> None:
         **ragas_scores,
         "citation_support_rate": citation_support_rate,
         "rerank": args.rerank,
+        # A different question, and a lower score: book reads 0.6750 scoped and
+        # 0.5750 unscoped on one corpus. Unrecorded, a diagnostic run reads as a
+        # gated one here and the next reader sees a regression that never was.
+        "unscoped": args.unscoped,
     }
     if args.rerank and args.rerank_depth is not None:
         metrics["rerank_depth"] = args.rerank_depth

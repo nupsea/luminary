@@ -84,7 +84,12 @@ def judge_citation(claim: str, chunk: str, judge_model: str) -> Verdict:
     content = response.choices[0].message.content or "{}"
     verdict = str(json.loads(content).get("verdict", "")).lower()
     if verdict not in {"yes", "no", "partial"}:
-        return "no"
+        # Raise rather than return "no". A judge that answered in a shape we do
+        # not recognise has told us nothing, and scoring it 0 records a judge
+        # failure as a product failure -- silently, since the caller's failure
+        # counter never sees a value that was returned normally. The caller
+        # already excludes raised calls and reports how many there were (I-32).
+        raise ValueError(f"citation judge returned an unusable verdict: {verdict!r}")
     return verdict  # type: ignore[return-value]
 
 

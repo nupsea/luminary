@@ -100,28 +100,47 @@ def score_flashcards(
     judge: Callable[[dict, str], dict],
 ) -> dict[str, float | None]:
     """Score generated flashcards with an injected judge function."""
+    import sys  # noqa: PLC0415
+
     factuality: list[Verdict] = []
     atomicity: list[bool] = []
     clarity: list[int] = []
-    judged_atomic: list[bool] = []
+    # Only for cards the judge actually scored, so the disagreement rate stays
+    # aligned with its own pairs rather than being padded with invented ones.
+    judged_pairs: list[tuple[bool, bool]] = []
+    failures = 0
     for card in cards:
-        result = judge(card, source_chunk)
-        factuality.append(result.get("factuality", "no"))
-        clarity.append(int(result.get("clarity", 0)))
-        # Structural, so it cannot be rubber-stamped. The judge's own opinion is
-        # kept only to report how far it drifts from what the text plainly says.
-        atomicity.append(is_atomic(card.get("answer", "")))
-        judged_atomic.append(bool(result.get("atomic", False)))
+        # Structural, so it cannot be rubber-stamped, and it needs no judge --
+        # it is kept even for a card the judge could not score.
+        structural_atomic = is_atomic(card.get("answer", ""))
+        atomicity.append(structural_atomic)
+        try:
+            result = judge(card, source_chunk)
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(
+                f"WARNING: flashcard judge call failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        factuality.append(result["factuality"])
+        clarity.append(int(result["clarity"]))
+        judged_pairs.append((structural_atomic, bool(result["atomic"])))
+    if failures:
+        print(
+            f"WARNING: {failures}/{len(cards)} flashcard judge calls failed; "
+            "those cards are excluded from factuality and clarity.",
+            file=sys.stderr,
+        )
     disagreement = (
-        sum(1 for a, b in zip(atomicity, judged_atomic, strict=False) if a != b) / len(cards)
-        if cards
-        else None
+        sum(1 for a, b in judged_pairs if a != b) / len(judged_pairs) if judged_pairs else None
     )
     return {
         "factuality": compute_factuality(factuality),
         "atomicity": compute_atomicity(atomicity),
         "clarity_avg": compute_clarity_avg(clarity),
         "judge_atomicity_disagreement": disagreement,
+        "judge_failures": failures,
     }
 
 
@@ -161,10 +180,17 @@ def judge_flashcard(card: dict, source_chunk: str, judge_model: str) -> dict:
         temperature=0,
     )
     parsed = json.loads(response.choices[0].message.content or "{}")
-    factuality = str(parsed.get("factuality", "no")).lower()
+    # Missing or unrecognised fields raise rather than defaulting. The defaults
+    # here were "no" and clarity 1 -- the worst score on both axes -- so a judge
+    # that answered in an unexpected shape reported the model as producing false,
+    # unclear cards. `_mean` already excludes rows the judge could not score
+    # (I-32); it cannot exclude a verdict that was invented for it.
+    factuality = str(parsed.get("factuality", "")).lower()
     if factuality not in {"yes", "partial", "no"}:
-        factuality = "no"
-    clarity = max(1, min(5, int(parsed.get("clarity", 1))))
+        raise ValueError(f"flashcard judge returned an unusable factuality: {factuality!r}")
+    if "clarity" not in parsed or "atomic" not in parsed:
+        raise ValueError(f"flashcard judge omitted a required field: {sorted(parsed)}")
+    clarity = max(1, min(5, int(parsed["clarity"])))
     return {
         "factuality": factuality,
         "atomic": bool(parsed.get("atomic", False)),

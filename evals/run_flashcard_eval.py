@@ -157,10 +157,21 @@ def main() -> None:
     }
     metrics["atomicity"] = _mean("atomicity", per_row)
     if not args.skip_judge:
+        # Cards the judge could not score are excluded from the two rates above.
+        # Reported so the exclusion is visible: silently averaging over fewer
+        # cards makes a degrading judge look like a steady model.
+        judge_failures = sum(int(r.get("judge_failures") or 0) for r in per_row)
         metrics |= {
             "factuality": _mean("factuality", per_row),
             "clarity_avg": _mean("clarity_avg", per_row),
+            "judge_failures": judge_failures,
         }
+        if judge_failures:
+            print(
+                f"WARNING: {judge_failures} card(s) went unjudged; factuality and "
+                "clarity_avg describe the rest.",
+                file=sys.stderr,
+            )
 
     moved = stats_delta(stats_before, output_stats(args.backend_url))
     if moved and moved["counts"]:
