@@ -25,19 +25,22 @@ def _default_for(var: str) -> str:
     return match.group(1)
 
 
-def test_compose_defaults_match_the_standard_profile():
-    """Compose cannot measure the host, so it must ship the floor the product is
-    tuned for. It shipped 1 -- the retired one-model sizing -- so every container
-    kept ONE model resident whatever the host had, and thrashed between the chat
-    model and the reader."""
-    from app.memory_profile import max_resident_models
+def test_compose_ships_one_resident_model():
+    """One model, because two do not fit the 16GB floor -- measured.
 
-    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == str(max_resident_models("standard"))
+    `qwen3.5:4b` at 3.29GB plus `qwen2.5vl:7b` at 8.77GB is 12.06GB, and with the
+    backend's measured 3.27GB ingest peak that is 15.33GB of 16GB. One multimodal
+    model serving chat AND figures is 3.45GB, making 6.72GB against the same peak.
+
+    Deliberately NOT tied to `max_resident_models("standard")`: that is a
+    permission the resolver reads, not a target for a container that cannot
+    measure its host."""
+    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == "1"
 
 
 def test_the_serving_width_default_matches_the_same_profile():
     """The two knobs are sized by the same reasoning and must not drift apart."""
-    assert _default_for("OLLAMA_NUM_PARALLEL") == "2"
+    assert _default_for("OLLAMA_NUM_PARALLEL") == "1"
 
 
 def test_python_output_is_unbuffered_in_the_container():
