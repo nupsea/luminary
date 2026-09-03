@@ -121,12 +121,16 @@ def test_the_performance_pair_fits_the_band_it_targets(sh):
 
 
 def test_the_bands_agree_across_platforms(sh, ps1):
-    """Three bands, two scripts, one boundary set."""
-    assert '[ "$_gb" -lt 16 ]; then echo "public"' in sh
-    assert '[ "$_gb" -le 24 ]; then echo "standard"' in sh
-    assert 'echo "performance"' in sh
+    """Two bands, two scripts, one boundary. `low` is retired: 16GB is the floor,
+    and a smaller machine gets `standard` plus a warning rather than a narrowed
+    profile. Two detectors disagreeing about the machine is worse than one that
+    is occasionally wrong -- this catches exactly that, and did."""
+    assert '[ "$_gb" -gt 24 ]; then echo "performance"' in sh
+    assert 'echo "standard"' in sh
+    assert '"$_gb" -lt 16 ]' in sh, "install.sh must warn under the floor"
     assert "$MemGB -gt 24" in ps1
-    assert "$MemGB -ge 16" in ps1
+    assert "$MemGB -lt 16" in ps1, "install.ps1 must warn under the floor"
+    assert 'public' not in sh.split("_default_profile")[1][:400]
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
@@ -195,15 +199,11 @@ def test_bootstrap_resolves_its_model_from_the_profile():
 
 def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
     """Two installers that band differently give the same laptop two setups."""
-    boot = _BOOTSTRAP.read_text()
-    sh_text = _SH.read_text()
-    for band in ("16", "24"):
-        assert re.search(rf"MEM_GB.*-lt {band}|MEM_GB.*-le {band}", boot), (
-            f"bootstrap.sh has no {band}GB band"
-        )
-    for source, name in ((boot, "bootstrap.sh"), (sh_text, "install.sh")):
+    boot = (_SCRIPTS / "bootstrap.sh").read_text()
+    assert re.search(r"MEM_GB.*-gt 24", boot), "bootstrap.sh lost the performance band"
+    assert re.search(r"MEM_GB.*-lt 16", boot), "bootstrap.sh lost the 16GB floor warning"
+    for name, source in (("install.sh", _SH.read_text()), ("bootstrap.sh", boot)):
         assert "performance" in source and "standard" in source, f"{name} lost a profile"
-
 
 def test_start_sh_does_not_assert_a_model_name():
     """A pre-flight warning that names the wrong model sends the user to pull it."""
@@ -265,7 +265,7 @@ def test_compose_file_actually_loads():
 
 
 def test_no_installer_writes_the_legacy_profile_alias():
-    """`public` is the installers' word; the backend's is `low`.
+    """Neither name may be written to .env any more: both are retired.
 
     They collide on a different axis -- `LUMINARY_MODE=public` curates surfaces
     and has nothing to do with memory -- so `public` survives only as a legacy
@@ -315,7 +315,7 @@ def test_the_profile_comment_states_the_bands_the_code_uses():
     """
     text = _SH.read_text()
     banner = next(
-        (line for line in text.splitlines() if "public=" in line and "standard=" in line),
+        (line for line in text.splitlines() if "standard=" in line and "performance=" in line),
         None,
     )
     assert banner, "the profile banner comment is gone"
@@ -343,7 +343,7 @@ def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
 def test_an_unknown_profile_is_refused_rather_than_written_to_env():
     """The backend rejects it and re-sizes, so the two silently disagreed."""
     text = _SH.read_text()
-    assert re.search(r"public\|standard\|performance\)\s*;;", text), (
+    assert re.search(r"standard\|performance\)\s*;;", text), (
         "install.sh no longer validates LUMINARY_PROFILE against the known set"
     )
 
@@ -393,7 +393,7 @@ def test_ps1_refuses_an_unknown_profile():
     macOS -- the same input, two different products."""
     text = _PS1.read_text()
     assert "-cin @(" in text, "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
-    assert 'public", "standard", "performance"' in text
+    assert '"standard", "performance"' in text
 
 
 def test_ps1_guards_the_vision_pull_on_ollama_being_present():
@@ -489,10 +489,11 @@ def test_install_ps1_records_the_models_it_pulled(ps1):
 
 @pytest.mark.parametrize("script", ["sh", "ps1", "bootstrap"])
 def test_every_installer_accepts_the_backends_name_for_the_small_profile(script):
-    """`low` is what the backend calls it and what it logs; `public` is the
-    installers' word. Refusing `low` sent anyone reading the backend to exit 1."""
+    """`low` and `public` named the retired one-model profile. Both must still be
+    ACCEPTED -- an installed .env carries one, and refusing it fails the upgrade --
+    and both now resolve to `standard`."""
     text = {"sh": _SH, "ps1": _PS1, "bootstrap": _SCRIPTS / "bootstrap.sh"}[script].read_text()
-    assert "low" in text and re.search(r'(-ceq "low"|= "low" \])', text), (
+    assert "low" in text and re.search(r'(-ceq "low"|low\|public\))', text), (
         f"{script} does not accept `low` as a name for the small profile"
     )
 

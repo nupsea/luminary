@@ -298,21 +298,26 @@ $LumProfile = $env:LUMINARY_PROFILE
 # written verbatim to backend/.env, where the backend rejects it and re-sizes
 # from host RAM -- installer and app disagreeing with nothing said. Matched
 # case-sensitively so this agrees with install.sh, whose `case` is exact.
-# `low` is the backend's canonical name for the small profile and the one it
-# logs; `public` is the installers'. Accept both, then normalise to the name the
-# bands below are written in -- refusing `low` sent anyone following the
-# backend's own vocabulary to an exit 1.
-if ($LumProfile -ceq "low") { $LumProfile = "public" }
-if ($LumProfile -and -not ($LumProfile -cin @("public", "standard", "performance"))) {
-    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: low, public, standard, performance." -ForegroundColor Red
+# `low` and `public` named the one-model profile, retired when 16GB became the
+# supported floor. Both are still accepted and resolve to `standard`, matching
+# `memory_profile._LEGACY_ALIASES`, so an installed .env keeps working.
+if ($LumProfile -ceq "low" -or $LumProfile -ceq "public") { $LumProfile = "standard" }
+if ($LumProfile -and -not ($LumProfile -cin @("standard", "performance"))) {
+    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: standard, performance (low/public map to standard)." -ForegroundColor Red
     Write-Host "[install] It would be written to backend/.env, where the backend rejects it and" -ForegroundColor Red
     Write-Host "[install] re-sizes from host RAM -- so the installer and the app would disagree." -ForegroundColor Red
     exit 1
 }
+# 16GB is the supported floor. A smaller machine gets `standard` too and is told
+# it is under the floor, rather than silently narrowed to one resident model --
+# which is what made the experience fall flat off macOS.
 if (-not $LumProfile) {
     if ($MemGB -gt 24)      { $LumProfile = "performance" }
-    elseif ($MemGB -ge 16)  { $LumProfile = "standard" }
-    else                    { $LumProfile = "public" }
+    else                    { $LumProfile = "standard" }
+}
+if ($MemGB -gt 0 -and $MemGB -lt 16) {
+    Write-Host "[install] This machine reports ${MemGB}GB. Luminary is tuned for 16GB and up:" -ForegroundColor Yellow
+    Write-Host "[install] ingestion, chat and flashcard generation will be slower here." -ForegroundColor Yellow
 }
 
 switch ($LumProfile) {

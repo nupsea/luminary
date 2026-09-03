@@ -328,13 +328,10 @@ _upsert_env OLLAMA_NUM_PARALLEL "$OLLAMA_NUM_PARALLEL"
 # The profile itself, in the backend's vocabulary. Without it the backend sized
 # its own profile from host RAM and could disagree with the one chosen here: pick
 # `public` on a 32GB machine and the backend would resolve chat and vision to two
-# models this install never pulled. `low` is the canonical name; `public` is read
-# as a legacy alias, so writing the canonical one keeps old .env files working
-# without adding a second spelling.
-case "$PROFILE" in
-    public) _upsert_env LUMINARY_MEMORY_PROFILE "low" ;;
-    *)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE" ;;
-esac
+# models this install never pulled. `low` and `public` are both retired now and
+# normalised to `standard` above, so the value written here is always one the
+# backend still has a band for.
+_upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE"
 # The models this installer actually pulled. Leaving them unset let the backend
 # resolve a model that is not on disk, which fails at the first question instead
 # of here; it also left `start.sh` with nothing to read, so its "model isn't

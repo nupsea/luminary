@@ -52,7 +52,7 @@ def _feasible(ram_gb: int, profile: str) -> list[dict]:
 
 
 @pytest.mark.parametrize(
-    ("ram_gb", "profile"), [(8, "low"), (16, "standard"), (32, "performance")]
+    ("ram_gb", "profile"), [(16, "standard"), (32, "performance")]
 )
 def test_every_profile_can_fill_every_role(ram_gb, profile):
     assert _feasible(ram_gb, profile), (
@@ -61,11 +61,15 @@ def test_every_profile_can_fill_every_role(ram_gb, profile):
     )
 
 
-def test_the_low_profile_is_satisfiable_by_a_single_model():
-    """`max_resident_models` is 1 there, so a second model is not a cost -- it is
-    the reason nothing fits."""
-    single = [a for a in _feasible(8, "low") if len({m.id for m in a.values()}) == 1]
-    assert single, "the low profile needs one model that can do all four roles"
+def test_the_floor_is_satisfiable_by_a_single_model():
+    """`low` is retired, but a single-model assignment must still exist at 16GB.
+
+    `MAX_RESIDENT` is a bound, not a promise: a host that holds one model at a
+    time -- someone overriding OLLAMA_MAX_LOADED_MODELS, or a machine under the
+    floor -- still needs a model that can fill every role.
+    """
+    single = [a for a in _feasible(16, "standard") if len({m.id for m in a.values()}) == 1]
+    assert single, "no single model can fill all four roles at the 16GB floor"
 
 
 class TestVisionCandidates:
@@ -287,9 +291,12 @@ class TestOneModelServesEveryRole:
         assert default_chat_model() == "ollama/qwen3.5:4b"
 
 
-def test_max_resident_never_promises_more_than_one_on_the_low_profile():
-    """If this rises, the single-model requirement above stops being the point."""
-    assert MAX_RESIDENT["low"] == 1
+def test_the_retired_profile_has_no_residency_entry():
+    """`low` kept ONE model resident, which forced an evict-and-reload on every
+    switch between the chat model and the reader -- 9.6s to 155s each on an
+    Intel i7-8850H. It is gone; an entry here would let code branch on it again."""
+    assert "low" not in MAX_RESIDENT
+    assert MAX_RESIDENT["standard"] == 2
 
 
 # --- narrowing must be visible, not just correct -----------------------------
@@ -299,15 +306,19 @@ def test_a_configured_model_the_host_cannot_use_is_reported(monkeypatch):
     """Overruling the user silently is the failure this reports.
 
     `oversized_models` is built from the models actually in play, so a model
-    narrowed *away* is absent from it: configuring a 14B on a single-resident
-    profile produced a clean report describing a 4B nobody chose.
+    narrowed *away* is absent from it: configuring a 14B on a host that cannot
+    hold it produced a clean report describing a 4B nobody chose.
+
+    16GB is the case now that `low` is retired -- the 14B is 10.38GB, over the
+    half-the-machine budget there, so it is genuinely narrowed. At 36GB it fits
+    and nothing is overruled, which would make this assert nothing.
     """
     from app import memory_profile
 
     # Pinned: this asks whether the host overruled a choice, so leaving the host
     # to whatever ran the suite makes the answer a property of the machine.
-    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 36)
-    monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "low")
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 16)
+    monkeypatch.setenv("LUMINARY_MEMORY_PROFILE", "standard")
     monkeypatch.setenv("LITELLM_DEFAULT_MODEL", "ollama/qwen2.5:14b-instruct")
     from app.config import get_settings
 

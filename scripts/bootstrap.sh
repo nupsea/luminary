@@ -270,24 +270,27 @@ MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 # script's. Accept both, then validate -- an unrecognised value used to fall into
 # the `*)` arm, take standard knobs, and be written to .env verbatim, where the
 # backend rejects it and re-sizes. Installer and app disagreeing, silently.
-[ "$PROFILE" = "low" ] && PROFILE="public"
-case "${PROFILE:-public}" in
-    public|standard|performance) ;;
+case "$PROFILE" in
+    low|public) PROFILE="standard" ;;
+esac
+case "${PROFILE:-standard}" in
+    standard|performance) ;;
     *)
-        _die "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
+        _die "LUMINARY_PROFILE='$PROFILE' is not one of: standard, performance (low/public map to standard)."
         ;;
 esac
+# 16GB is the supported floor; below it the profile is unchanged and the
+# mismatch is said out loud instead.
 if [ -z "$PROFILE" ]; then
-    if   [ "$MEM_GB" -lt 16 ]; then PROFILE="public"
-    elif [ "$MEM_GB" -le 24 ]; then PROFILE="standard"
-    else                            PROFILE="performance"
+    if [ "$MEM_GB" -gt 24 ]; then PROFILE="performance"
+    else                          PROFILE="standard"
     fi
 fi
+if [ "$MEM_GB" -gt 0 ] && [ "$MEM_GB" -lt 16 ]; then
+    _warn "This machine reports ${MEM_GB}GB. Luminary is tuned for 16GB and up:"
+    _warn "ingestion, chat and flashcard generation will be slower here."
+fi
 case "$PROFILE" in
-    public)
-        MAX_LOADED=1; NUM_PARALLEL=1; VISION_CONCURRENCY=1
-        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$PUBLIC_GENERALIST"
-        ;;
     performance)
         MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4
         if [ -z "$CHAT_MODEL" ]; then
