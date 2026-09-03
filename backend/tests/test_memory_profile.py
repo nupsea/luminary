@@ -37,17 +37,18 @@ def host_ram(monkeypatch):
 # Detection and defaulting
 
 
-def test_a_small_machine_gets_the_low_profile():
-    """16GB moved to `standard` on 2026-08-18.
+def test_every_machine_gets_at_least_the_standard_profile():
+    """`low` is retired: 16GB is the supported floor.
 
-    It had been `low`, which gave a 16GB laptop one serving slot. That machine
-    cannot carry two models -- the text model plus the 6.81GB reader is 10.02GB,
-    92% of RAM once the backend's 4.7GB ingest peak is counted -- but it can
-    comfortably carry more parallelism, which is what the larger profile buys it.
+    A one-model profile is what made the experience fall flat off macOS -- a
+    12GB box, and every Docker container regardless of host, kept ONE model
+    resident and thrashed between the chat model and the reader. A smaller
+    machine now gets the same behaviour and a reported mismatch instead.
     """
-    assert memory_profile.profile_for_ram(8) == "low"
-    assert memory_profile.profile_for_ram(12) == "low"
+    assert memory_profile.profile_for_ram(8) == "standard"
+    assert memory_profile.profile_for_ram(12) == "standard"
     assert memory_profile.profile_for_ram(16) == "standard"
+    assert memory_profile.profile_for_ram(36) == "performance"
 
 
 def test_a_large_machine_gets_standard():
@@ -68,10 +69,10 @@ def test_performance_is_reachable_above_24gb():
     assert memory_profile.profile_for_ram(64) == "performance"
 
 
-def test_an_unreadable_ram_figure_is_treated_as_a_small_machine():
-    """An unknown box must never be guessed into `standard` -- the installer
-    makes the same call, and being wrong downward only costs throughput."""
-    assert memory_profile.profile_for_ram(0) == "low"
+def test_an_unreadable_ram_figure_still_gets_standard():
+    """There is nothing smaller to fall back to now, and `standard` is the floor
+    the product is tuned for. The installer makes the same call."""
+    assert memory_profile.profile_for_ram(0) == "standard"
 
 
 def test_an_explicit_profile_wins_over_the_detected_one(profile_settings, host_ram):
@@ -83,19 +84,20 @@ def test_an_explicit_profile_wins_over_the_detected_one(profile_settings, host_r
 
 
 def test_the_installers_legacy_name_still_reads(profile_settings, host_ram):
-    """`install.sh` shipped `public` for the small profile before this existed;
-    an installed .env must keep working."""
+    """`install.sh` shipped `public`, and the backend later called it `low`.
+    Both named the retired one-model profile; an installed .env carries one, so
+    both must still read -- as `standard`, which is what that machine now gets."""
     profile_settings(LUMINARY_MEMORY_PROFILE="public")
     host_ram(64)
 
-    assert memory_profile.active_profile() == "low"
+    assert memory_profile.active_profile() == "standard"
 
 
 def test_an_unknown_profile_name_falls_back_to_the_detected_one(profile_settings, host_ram):
     profile_settings(LUMINARY_MEMORY_PROFILE="enormous")
     host_ram(8)
 
-    assert memory_profile.active_profile() == "low"
+    assert memory_profile.active_profile() == "standard"
     assert memory_profile.profile_is_explicit() is False
 
 
@@ -109,8 +111,14 @@ def test_a_profile_larger_than_the_hardware_is_reported(profile_settings, host_r
 
 
 def test_residency_limit_follows_the_profile():
-    assert memory_profile.max_resident_models("low") == 1
     assert memory_profile.max_resident_models("standard") == 2
+    assert memory_profile.max_resident_models("performance") == 2
+
+
+def test_the_retired_profile_is_gone_rather_than_hidden():
+    """A name that still resolves invites code that branches on it again."""
+    assert "low" not in memory_profile.PROFILES
+    assert "low" not in memory_profile.MAX_RESIDENT
 
 
 # The registry fields, now that something reads them
@@ -291,3 +299,11 @@ def test_a_thinking_model_is_recorded_as_one():
     thinkers = [p.id for p in REGISTRY.values() if p.thinking_default]
 
     assert "ollama/qwen3.5:4b" in thinkers
+
+
+def test_the_backends_own_legacy_name_reads_too(profile_settings, host_ram):
+    """`low` was the backend's canonical name for the retired profile."""
+    profile_settings(LUMINARY_MEMORY_PROFILE="low")
+    host_ram(16)
+
+    assert memory_profile.active_profile() == "standard"

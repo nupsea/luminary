@@ -13,10 +13,14 @@ semaphore. So nothing here overrides those. What this adds is the half that was
 missing: reporting the profile, and answering whether the models a user has
 actually selected fit the machine they are on.
 
-Three profiles, one vocabulary. `install.sh` called the small one `public`,
-which collides with `LUMINARY_MODE=public` — a surface-curation concept on a
-different axis entirely. `low` is the name here and `public` is accepted as a
-legacy alias, so an installed `.env` keeps working.
+Two profiles. **16GB is the supported floor.** A smaller machine still starts --
+`profile_suits_host` reports the mismatch and nothing refuses to run -- but it is
+not a size the product is tuned for, and pretending otherwise by shipping a
+one-model profile produced an experience that fell flat on every OS but the
+maintainer's own.
+
+`low` and `public` are accepted as legacy aliases so an installed `.env` keeps
+working; both resolve to `standard`.
 
 The RAM thresholds match `install.sh:_default_profile` deliberately: two
 detectors that disagree about what machine this is would be worse than one that
@@ -33,19 +37,19 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-MemoryProfile = Literal["low", "standard", "performance"]
+MemoryProfile = Literal["standard", "performance"]
 
-PROFILES: tuple[MemoryProfile, ...] = ("low", "standard", "performance")
+PROFILES: tuple[MemoryProfile, ...] = ("standard", "performance")
 
-# `install.sh` shipped these names first. Keep reading them.
-_LEGACY_ALIASES = {"public": "low"}
+# Names that shipped before the floor moved to 16GB. Keep reading them: an
+# installed .env carries one, and failing to start on it would be worse than
+# quietly giving that machine the profile it now gets anyway.
+_LEGACY_ALIASES = {"public": "standard", "low": "standard"}
 
-# Matches `install.sh:_default_profile`. Below this, one runner and nothing else.
-# 16GB since 2026-08-18: 24 put every 16GB laptop on the low profile, which is a
-# machine class that can comfortably carry more serving width than one slot. It
-# still cannot carry two models -- `qwen3.5:4b` plus the 6.81GB reader is
-# 10.02GB, 63% of 16GB before the backend's 4.7GB ingest peak -- so what the
-# larger profile buys at this size is parallelism, not a second model.
+# The supported floor, and what `install.sh:_default_profile` sizes against.
+# `qwen3.5:4b` plus the 6.81GB reader is 10.02GB, 63% of 16GB before the
+# backend's 4.7GB ingest peak -- tight, but it is the size the product is tuned
+# for. Below it the profile is unchanged and the mismatch is reported instead.
 _STANDARD_MIN_RAM_GB = 16
 
 # Above this, not at it: a 24GB machine stays `standard`. The 9.67GB text model
@@ -56,16 +60,15 @@ _PERFORMANCE_MIN_RAM_GB = 24
 # How many models may stay resident at once. Mirrors OLLAMA_MAX_LOADED_MODELS as
 # the installer sets it; each loaded model gets its own runner and its own KV
 # cache (I-31), so this is a memory bound, not a concurrency one.
-MAX_RESIDENT: dict[MemoryProfile, int] = {"low": 1, "standard": 2, "performance": 2}
+MAX_RESIDENT: dict[MemoryProfile, int] = {"standard": 2, "performance": 2}
 
 # What a host must have before a profile is a sensible default for it. Used to
 # report a mismatch, never to refuse to start: someone who sets a profile by
 # hand has a reason, and a refusing backend is worse than a warning.
 PROFILE_MIN_RAM_GB: dict[MemoryProfile, int] = {
-    "low": 0,
-    # Tracks `_STANDARD_MIN_RAM_GB`. Left at 24 when that moved to 16, which
-    # made `profile_suits_host` report every auto-assigned 16GB machine as
-    # running a profile larger than its hardware.
+    # Tracks `_STANDARD_MIN_RAM_GB`. A 12GB machine now reports a mismatch rather
+    # than being silently narrowed to one model, which is the honest signal: it
+    # runs, and it is below what this is tuned for.
     "standard": _STANDARD_MIN_RAM_GB,
     # Two models AND wider serving, and where the strongest text model and a
     # reader fit together under the half-the-machine budget.
@@ -105,7 +108,9 @@ def profile_for_ram(ram_gb: int) -> MemoryProfile:
     """
     if ram_gb > _PERFORMANCE_MIN_RAM_GB:
         return "performance"
-    return "standard" if ram_gb >= _STANDARD_MIN_RAM_GB else "low"
+    # Never below `standard`: 16GB is the floor, and a smaller machine gets the
+    # same behaviour plus the mismatch warning rather than a narrowed one.
+    return "standard"
 
 
 def active_profile() -> MemoryProfile:

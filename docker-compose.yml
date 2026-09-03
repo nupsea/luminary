@@ -58,7 +58,7 @@ services:
       # in. A raw `docker compose --profile ai up` in such a shell still can.
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       # Must match the ollama service: the backend sizes its semaphore from it.
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
       # Without these the app never learned which model `ollama-pull` below
       # actually pulled -- it fell back to its own hardcoded default, silently
       # correct only while that happens to match ollama-pull's default too.
@@ -112,17 +112,18 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # A floor, not a guess -- the same reasoning as OLLAMA_NUM_PARALLEL below.
-      # Two resident models let enrichment keep a reader loaded beside the chat
-      # model instead of thrashing between them, and that is right on a host
-      # with the memory for it. Compose cannot measure the host, and the backend
-      # on a small one resolves to `low`, which keeps ONE model resident -- so
-      # the default here disagreed with the profile the app had already chosen.
-      # Raise it to 2 on a host with 16GB+ available to the container.
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
-      # A floor, not a guess: compose cannot measure the host and each slot
-      # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      # Matches `standard`, the profile the backend now resolves to everywhere
+      # (16GB is the supported floor). These read 1/1 while the backend resolved
+      # small hosts to a one-model profile that has since been retired -- so a
+      # container on a 16GB host kept ONE model resident and served ONE request
+      # at a time, thrashing between the chat model and the reader on exactly the
+      # workloads that made Docker feel slower than a native install.
+      # Give the container 16GB+; lower it only if you have deliberately given
+      # it less.
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      # Sized with the same reasoning: each slot costs a full KV cache (I-31),
+      # so this is a memory bound, not a concurrency dial. 4 on a 24GB+ host.
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
       # Residency has to be set here. The backend cannot: LiteLLM's `ollama/`
       # completion path folds keep_alive into `options`, where Ollama rejects
       # it, so a per-call value never applied and the model unloaded on

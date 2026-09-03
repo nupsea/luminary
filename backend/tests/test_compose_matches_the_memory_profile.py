@@ -25,15 +25,19 @@ def _default_for(var: str) -> str:
     return match.group(1)
 
 
-def test_compose_defaults_to_one_resident_model():
+def test_compose_defaults_match_the_standard_profile():
+    """Compose cannot measure the host, so it must ship the floor the product is
+    tuned for. It shipped 1 -- the retired one-model sizing -- so every container
+    kept ONE model resident whatever the host had, and thrashed between the chat
+    model and the reader."""
     from app.memory_profile import max_resident_models
 
-    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == str(max_resident_models("low"))
+    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == str(max_resident_models("standard"))
 
 
 def test_the_serving_width_default_matches_the_same_profile():
     """The two knobs are sized by the same reasoning and must not drift apart."""
-    assert _default_for("OLLAMA_NUM_PARALLEL") == "1"
+    assert _default_for("OLLAMA_NUM_PARALLEL") == "2"
 
 
 def test_python_output_is_unbuffered_in_the_container():

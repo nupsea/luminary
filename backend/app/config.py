@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     # overrides those, because a backend disagreeing with the runtime about slot
     # count leaves the extra slots idle (I-31). `public` is read as `low`.
     LUMINARY_MEMORY_PROFILE: str = ""
+    # Give GLiNER's memory back when nothing has used it for this long. It is
+    # the largest single thing the backend holds -- measured 1,417MB resident,
+    # 6.29s to reload -- and only INGESTION uses it: the chat graph's
+    # `_extract_entities_from_question` is a regex, so no interactive path pays
+    # the reload. That is what makes the trade a good one; do not extend this to
+    # the reranker, which serves live retrieval for a tenth of the memory.
+    # 0 disables.
+    NER_IDLE_RELEASE_SECONDS: int = 180
     LLM_ADMISSION_ENABLED: bool = True
     # Hold the reserve this long after an interactive call ends, so a background
     # call is not admitted between two turns of the same conversation.

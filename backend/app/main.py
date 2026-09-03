@@ -183,6 +183,25 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ffmpeg found at startup", extra={"path": _ffmpeg_path})
 
+    # Said once, at startup, because it is the single biggest thing shaping how
+    # this install will feel and the README is not where most people meet it.
+    # The compose stack reserves no GPU device, so inference here is CPU-only
+    # whatever the host has: measured on an Intel i7-8850H in a 12GB Docker VM,
+    # loading qwen3.5:4b took 9.6s to 155s and one question took 261s, 87.5s of
+    # it a model load -- against seconds on the hosts this is tuned on.
+    if running_in_container():
+        logger.warning(
+            "Running in a container: inference is CPU-only here (no GPU device is "
+            "reserved), so answers and ingestion are slower than a native install. "
+            "Prefer the .dmg on macOS, install.ps1 on Windows, or a source install."
+        )
+
+    # Hand back the entity model when ingestion stops using it. See
+    # services/model_reaper: 1,417MB, and only background work pays the reload.
+    from app.services.model_reaper import reap_idle_models  # noqa: PLC0415
+
+    _background_tasks.add(asyncio.create_task(reap_idle_models()))
+
     # Register enrichment handlers and start the background worker
     # Must be done before yielding so jobs enqueued during first request are dispatched.
 

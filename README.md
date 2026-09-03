@@ -161,10 +161,27 @@ build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64)
 </details>
 
 <details>
-<summary><b>Windows — Docker, or native</b></summary>
+<summary><b>Windows — native (recommended), or Docker</b></summary>
 
-Docker (needs [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-running — check [Running under Docker](#running-under-docker) first):
+**Use the native install.** It installs Ollama for Windows, which uses your GPU
+(CUDA on NVIDIA, ROCm on AMD) with no configuration. The Docker image cannot:
+the compose stack reserves no GPU device, so inference there is **CPU-only on
+every machine**.
+
+In a normal PowerShell window (no admin):
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time; creates start.ps1
+.\start.ps1                                                              # each time after
+```
+
+Open http://localhost:7820 when the log settles. The native install covers everything except audio and video. For those, install
+ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
+to text** from Settings — Luminary fetches that one itself.
+
+**Docker, only if something blocks the native install** (a proxy or VPN, or a
+managed machine). Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+running — check [Running under Docker](#running-under-docker) first:
 
 ```powershell
 docker compose --profile ai up --build
@@ -177,17 +194,6 @@ inline `VAR=value` form, so opt in by setting it first:
 $env:WITH_MEDIA=1
 docker compose --profile ai up --build
 ```
-
-Native, for a proxy or VPN that blocks Docker. In a normal PowerShell window (no admin):
-
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-time; creates start.ps1
-.\start.ps1                                                              # each time after
-```
-
-Open http://localhost:7820 when the log settles. The native install covers everything except audio and video. For those, install
-ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
-to text** from Settings — Luminary fetches that one itself.
 </details>
 
 <details>
@@ -370,6 +376,17 @@ sits around 6.5 GB.
 </details>
 
 ### Running under Docker
+
+> **Docker is the slowest way to run Luminary, and the last one to reach for.**
+> The compose stack reserves no GPU device, so inference is CPU-only whatever
+> the host has. Measured on an Intel i7-8850H in a 12GB Docker VM: loading
+> `qwen3.5:4b` took anywhere from 9.6s to 155s, and a single question took 261s
+> of which 87.5s was a model load — against seconds on the Apple Silicon hosts
+> this app is tuned on. Vision calls on that machine ran 278–305s each.
+>
+> Use it when a native install is blocked, for a headless Linux box, or to try
+> the app quickly. On macOS use the `.dmg` or the one-command install; on Windows
+> use `install.ps1`; on Linux install from source.
 
 > **Run the model outside the container.** Docker on a Mac is CPU-only — no GPU
 > passes through — and the container is already sharing that CPU with the
