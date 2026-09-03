@@ -48,9 +48,89 @@ _warn()  { printf '\033[0;33m[install]\033[0m %s\n' "$*"; }
 _err()   { printf '\033[0;31m[install]\033[0m %s\n' "$*" >&2; }
 _have()  { command -v "$1" >/dev/null 2>&1; }
 
+INSTALL_START_TIME="$(date +%s)"
+TELEMETRY_APP_ID="${LUMINARY_TELEMETRY_APP_ID:-}"
+
+_lower() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'; }
+
+_opted_out() {
+    case "$(_lower "${DO_NOT_TRACK:-}")" in 1|true|yes) return 0 ;; esac
+    case "$(_lower "${LUMINARY_TELEMETRY_DISABLED:-}")" in 1|true|yes) return 0 ;; esac
+    case "$(_lower "${LUMINARY_TELEMETRY:-}")" in 0|false|no) return 0 ;; esac
+    return 1
+}
+
+_send_telemetry() {
+    local signal_type="$1"
+    local status="${2:-unknown}"
+    local duration="${3:-0}"
+
+    # Values match `anonymous_telemetry.is_telemetry_opted_out`: the backend
+    # accepts 1/true/yes, and accepting only "1" here meant DO_NOT_TRACK=true
+    # opted a user out of the app while the installer still reported.
+    if _opted_out; then
+        return 0
+    fi
+    _have curl || return 0
+
+    local telemetry_id_file="$REPO_ROOT/.luminary/.telemetry_id"
+    local client_id=""
+    if [ -f "$telemetry_id_file" ]; then
+        client_id="$(cat "$telemetry_id_file" 2>/dev/null || true)"
+    fi
+    if [ -z "$client_id" ]; then
+        if _have uuidgen; then
+            client_id="$(uuidgen 2>/dev/null || true)"
+        fi
+        [ -n "$client_id" ] || client_id="$(date +%s)-$$-$RANDOM"
+    fi
+
+    local distro="unknown"
+    if [ -f /etc/os-release ]; then
+        distro="$(. /etc/os-release && echo "${ID:-linux}_${VERSION_ID:-}")"
+    elif [ "$OS" = "Darwin" ]; then
+        distro="macos"
+    fi
+
+    local is_wsl="false"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        is_wsl="true"
+    fi
+
+    local payload="{\"os\":\"$OS\",\"arch\":\"$ARCH\",\"distro\":\"$distro\",\"is_wsl\":$is_wsl,\"status\":\"$status\",\"duration_seconds\":$duration,\"install_source\":\"linux_script\"}"
+
+    # Forward to TelemetryDeck if configured
+    if [ -n "$TELEMETRY_APP_ID" ]; then
+        (curl -s -m 3 -X POST "https://nom.telemetrydeck.com/v2/" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "[{\"appID\":\"$TELEMETRY_APP_ID\",\"clientUser\":\"$client_id\",\"type\":\"$signal_type\",\"payload\":$payload}]" >/dev/null 2>&1 &) || true
+    fi
+
+    # Forward to a local Luminary backend if one is running. Both paths are
+    # tried because the prefix depends on the mode the backend was started in:
+    # `_API_PREFIX` in main.py is "/api" only under LUMINARY_MODE=public (the
+    # Docker image). A normal install runs `full`, where the route is unprefixed
+    # -- so the /api path alone 404s on every non-Docker install, silently,
+    # because this call discards its output.
+    local body="{\"signal_type\":\"$signal_type\",\"payload\":$payload}"
+    for _path in "/monitoring/telemetry/event" "/api/monitoring/telemetry/event"; do
+        (curl -s -m 1 -X POST "http://127.0.0.1:7820${_path}" \
+            -H "Content-Type: application/json" \
+            -d "$body" >/dev/null 2>&1 &) || true
+    done
+}
+
+_on_install_error() {
+    local exit_code=$?
+    local duration=$(( $(date +%s) - INSTALL_START_TIME ))
+    _send_telemetry "install.linux.failed" "failed_${exit_code}" "$duration"
+}
+trap _on_install_error ERR
+
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 _info "Platform: $OS/$ARCH"
+_send_telemetry "install.linux.started" "started" 0
 
 case "$OS" in
     Darwin) ;;
@@ -415,3 +495,6 @@ cat <<EOF
 
 EOF
 fi
+
+INSTALL_DURATION=$(( $(date +%s) - INSTALL_START_TIME ))
+_send_telemetry "install.linux.completed" "success" "$INSTALL_DURATION"

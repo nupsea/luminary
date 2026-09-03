@@ -132,6 +132,10 @@ async def lifespan(app: FastAPI):
         setup_tracing(phoenix_enabled=True, data_dir=settings.DATA_DIR)
         FastAPIInstrumentor.instrument_app(app)
 
+    # Anonymous product telemetry (TelemetryDeck v2)
+    from app.services.anonymous_telemetry import record_startup_telemetry  # noqa: PLC0415
+    _background_tasks.add(asyncio.create_task(record_startup_telemetry()))
+
     data_dir = Path(settings.DATA_DIR).expanduser()
     data_dir.mkdir(parents=True, exist_ok=True)
     # The library holds the user's documents, notes and (when no keyring is

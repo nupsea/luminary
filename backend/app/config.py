@@ -311,6 +311,12 @@ class Settings(BaseSettings):
     # shouldn't pay that cost or its serializer noise by default — set
     # PHOENIX_ENABLED=true in .env when you want tracing.
     PHOENIX_ENABLED: bool = False
+    # Anonymous install & product telemetry (TelemetryDeck v2 compatible).
+    # Collects zero PII: non-identifying random UUID, no user paths, no document data, no IPs.
+    # Respects DO_NOT_TRACK, LUMINARY_TELEMETRY_DISABLED, and LUMINARY_TELEMETRY=0.
+    TELEMETRY_ENABLED: bool = True
+    TELEMETRY_APP_ID: str = ""
+    TELEMETRY_ENDPOINT: str = "https://nom.telemetrydeck.com/v2/"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""

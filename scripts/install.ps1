@@ -37,6 +37,94 @@ function Test-CommandExists($Command) {
     return (Get-Command $Command -ErrorAction SilentlyContinue) -ne $null
 }
 
+$RepoRoot = (Get-Item -Path $PSScriptRoot).Parent.FullName
+
+# ---------------------------------------------------------------------------
+# Anonymous Telemetry (TelemetryDeck v2)
+# ---------------------------------------------------------------------------
+$InstallStartTime = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$TelemetryAppId = if ($env:LUMINARY_TELEMETRY_APP_ID) { $env:LUMINARY_TELEMETRY_APP_ID } else { "" }
+
+function Send-AnonymousTelemetry {
+    param(
+        [string]$SignalType,
+        [string]$Status = "unknown",
+        [int64]$Duration = 0
+    )
+    if ($env:DO_NOT_TRACK -eq "1" -or $env:LUMINARY_TELEMETRY_DISABLED -eq "1" -or $env:LUMINARY_TELEMETRY -eq "0") {
+        return
+    }
+
+    try {
+        $dataDir = Join-Path $RepoRoot ".luminary"
+        $telemetryFile = Join-Path $dataDir ".telemetry_id"
+        $clientId = $null
+        if (Test-Path $telemetryFile) {
+            $clientId = (Get-Content $telemetryFile -Raw -ErrorAction SilentlyContinue).Trim()
+        }
+        if (-not $clientId) {
+            $clientId = [guid]::NewGuid().ToString()
+        }
+
+        $winVer = [System.Environment]::OSVersion.VersionString
+        $psVer = $PSVersionTable.PSVersion.ToString()
+        $arch = if ([System.Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+
+        $payloadObj = @{
+            os = "Windows"
+            os_version = $winVer
+            powershell_version = $psVer
+            arch = $arch
+            status = $Status
+            duration_seconds = $Duration
+            install_source = "windows_script"
+        }
+
+        # Forward to TelemetryDeck if configured
+        if ($TelemetryAppId) {
+            $eventObj = @(
+                @{
+                    appID = $TelemetryAppId
+                    clientUser = $clientId
+                    type = $SignalType
+                    payload = $payloadObj
+                }
+            )
+            $jsonPayload = $eventObj | ConvertTo-Json -Depth 5 -Compress
+            $endpoint = "https://nom.telemetrydeck.com/v2/"
+            Invoke-RestMethod -Uri $endpoint -Method Post -ContentType "application/json; charset=utf-8" -Body $jsonPayload -TimeoutSec 3 -ErrorAction SilentlyContinue | Out-Null
+        }
+
+        # Forward to local Luminary backend if running
+        $localEvent = @{
+            signal_type = $SignalType
+            payload = $payloadObj
+            float_value = [double]$Duration
+        }
+        $localJson = $localEvent | ConvertTo-Json -Depth 5 -Compress
+        # Both paths: the prefix depends on the backend's mode. `_API_PREFIX` in
+        # main.py is "/api" only under LUMINARY_MODE=public (Docker). A normal
+        # install runs `full`, where the route is unprefixed, so the /api path
+        # alone 404s there -- silently, since errors are suppressed here.
+        foreach ($path in @("/monitoring/telemetry/event", "/api/monitoring/telemetry/event")) {
+            try {
+                Invoke-RestMethod -Uri "http://127.0.0.1:7820$path" -Method Post -ContentType "application/json" -Body $localJson -TimeoutSec 1 -ErrorAction SilentlyContinue | Out-Null
+            } catch {
+                # A backend in the other mode; the sibling path covers it.
+            }
+        }
+    } catch {
+        # Never fail the install on telemetry issues
+    }
+}
+
+trap {
+    $errDuration = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $InstallStartTime
+    Send-AnonymousTelemetry -SignalType "install.windows.failed" -Status "failed" -Duration $errDuration
+}
+
+Send-AnonymousTelemetry -SignalType "install.windows.started" -Status "started" -Duration 0
+
 # Persist a directory onto the *user* PATH (no admin needed) and the live session.
 function Add-UserPath($Dir) {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -568,3 +656,7 @@ if ($visionModel) {
     Write-Host "A second model would evict it rather than adding to it on this machine." -ForegroundColor Gray
 }
 Write-Host "=========================================" -ForegroundColor Green
+
+$installDuration = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $InstallStartTime
+Send-AnonymousTelemetry -SignalType "install.windows.completed" -Status "success" -Duration $installDuration
+

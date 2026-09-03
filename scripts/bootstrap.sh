@@ -41,9 +41,75 @@ STEP=0
 _step()  { STEP=$((STEP + 1)); printf '\n\033[0;36m[%d/10]\033[0m \033[1m%s\033[0m\n' "$STEP" "$*"; }
 _info()  { printf '       %s\n' "$*"; }
 _warn()  { printf '\033[0;33m  warn\033[0m %s\n' "$*"; }
-_die()   { printf '\n\033[0;31m  error\033[0m %s\n\n' "$*" >&2; exit 1; }
+_die()   {
+    local duration=$(( $(date +%s) - INSTALL_START_TIME ))
+    _send_telemetry "install.macos_bootstrap.failed" "failed" "$duration"
+    printf '\n\033[0;31m  error\033[0m %s\n\n' "$*" >&2
+    exit 1
+}
 _have()  { command -v "$1" >/dev/null 2>&1; }
 _quote() { sed 's/^/       | /'; }
+
+INSTALL_START_TIME="$(date +%s)"
+TELEMETRY_APP_ID="${LUMINARY_TELEMETRY_APP_ID:-}"
+
+_lower() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'; }
+
+_opted_out() {
+    case "$(_lower "${DO_NOT_TRACK:-}")" in 1|true|yes) return 0 ;; esac
+    case "$(_lower "${LUMINARY_TELEMETRY_DISABLED:-}")" in 1|true|yes) return 0 ;; esac
+    case "$(_lower "${LUMINARY_TELEMETRY:-}")" in 0|false|no) return 0 ;; esac
+    return 1
+}
+
+_send_telemetry() {
+    local signal_type="$1"
+    local status="${2:-unknown}"
+    local duration="${3:-0}"
+
+    # Values match `anonymous_telemetry.is_telemetry_opted_out`: the backend
+    # accepts 1/true/yes, and accepting only "1" here meant DO_NOT_TRACK=true
+    # opted a user out of the app while the installer still reported.
+    if _opted_out; then
+        return 0
+    fi
+    _have curl || return 0
+
+    local telemetry_id_file="$DATA_DIR/.telemetry_id"
+    local client_id=""
+    if [ -f "$telemetry_id_file" ]; then
+        client_id="$(cat "$telemetry_id_file" 2>/dev/null || true)"
+    fi
+    if [ -z "$client_id" ]; then
+        if _have uuidgen; then
+            client_id="$(uuidgen 2>/dev/null || true)"
+        fi
+        [ -n "$client_id" ] || client_id="$(date +%s)-$$-$RANDOM"
+    fi
+
+    local arch="$(uname -m)"
+    local payload="{\"os\":\"macOS\",\"arch\":\"$arch\",\"status\":\"$status\",\"duration_seconds\":$duration,\"install_source\":\"macos_bootstrap\",\"version\":\"$VERSION\"}"
+
+    # Forward to TelemetryDeck if configured
+    if [ -n "$TELEMETRY_APP_ID" ]; then
+        (curl -s -m 3 -X POST "https://nom.telemetrydeck.com/v2/" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "[{\"appID\":\"$TELEMETRY_APP_ID\",\"clientUser\":\"$client_id\",\"type\":\"$signal_type\",\"payload\":$payload}]" >/dev/null 2>&1 &) || true
+    fi
+
+    # Both paths: the prefix depends on the backend's mode. `_API_PREFIX` is
+    # "/api" only under LUMINARY_MODE=public (Docker); a normal install runs
+    # `full`, where the route is unprefixed. The /api path alone 404s there,
+    # silently, because this call discards its output.
+    local body="{\"signal_type\":\"$signal_type\",\"payload\":$payload}"
+    for _path in "/monitoring/telemetry/event" "/api/monitoring/telemetry/event"; do
+        (curl -s -m 1 -X POST "http://127.0.0.1:$PORT${_path}" \
+            -H "Content-Type: application/json" \
+            -d "$body" >/dev/null 2>&1 &) || true
+    done
+}
+
+_send_telemetry "install.macos_bootstrap.started" "started" 0
 
 # Run a command with a wall-clock bound. macOS ships no `timeout`, and an
 # unbounded diagnostic that hangs is worse than the failure it is diagnosing.
@@ -109,7 +175,11 @@ cat <<'BANNER'
   Luminary — local-first learning assistant
 
   This installs into ~/.luminary and downloads about 5GB of models.
-  Expect 15-25 minutes on a first install. Nothing is sent anywhere.
+  Expect 15-25 minutes on a first install.
+
+  Your documents, notes and questions never leave this machine. The installer
+  reports an anonymous platform and success/failure signal so we know which
+  systems to support. Set DO_NOT_TRACK=1 to send nothing at all.
 
 BANNER
 
@@ -557,3 +627,7 @@ cat <<EOF
   The application:  $PREFIX
 
 EOF
+
+INSTALL_DURATION=$(( $(date +%s) - INSTALL_START_TIME ))
+_send_telemetry "install.macos_bootstrap.completed" "success" "$INSTALL_DURATION"
+

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react"
 import { MasteryPanel } from "./Monitoring/MasteryPanel"
 import { OverviewTab } from "./Monitoring/OverviewTab"
 import { PanelErrorBoundary } from "./Monitoring/SharedUI"
+import { TelemetryTab } from "./Monitoring/TelemetryTab"
 import { TracesTab } from "./Monitoring/TracesTab"
 import { fetchDocuments } from "./Monitoring/api"
 import type { Document } from "./Monitoring/types"
@@ -17,6 +18,7 @@ const TABS = [
   { id: "overview", label: "Overview" },
   { id: "traces", label: "Traces" },
   { id: "mastery", label: "Mastery" },
+  { id: "telemetry", label: "Telemetry" },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -70,6 +72,11 @@ export default function Monitoring() {
       {activeTab === "mastery" && (
         <PanelErrorBoundary name="Mastery">
           <MasteryTab />
+        </PanelErrorBoundary>
+      )}
+      {activeTab === "telemetry" && (
+        <PanelErrorBoundary name="Telemetry">
+          <TelemetryTab />
         </PanelErrorBoundary>
       )}
     </div>

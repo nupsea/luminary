@@ -318,6 +318,16 @@ async def set_rerank_enabled(db: AsyncSession, enabled: bool) -> None:
     await db.commit()
 
 
+def get_llm_mode() -> str:
+    """The active privacy mode: private, hybrid or cloud.
+
+    Synchronous because callers that must not send anything in private mode --
+    telemetry among them -- decide before they reach an event loop. Defaults to
+    `private`, so a cache that has not loaded yet fails closed.
+    """
+    return _cache.get("llm_mode", "private")
+
+
 def get_llm_error_message() -> str:
     """Return a descriptive error message based on the active LLM mode."""
     mode = _cache.get("llm_mode", "private")

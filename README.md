@@ -84,6 +84,12 @@ Prefer a frontier model? Add an OpenAI, Anthropic or Google key in Settings and
 switch to Cloud or Hybrid mode. **Private mode never sends anything off the
 machine**, and it will not even offer you a cloud model.
 
+To help maintain platform support across macOS (.dmg), Windows, Linux, and Docker,
+Luminary collects minimal, anonymous install and platform metrics via TelemetryDeck.
+It collects **zero** personal data, no document content, no queries, and no IP addresses.
+Opt out anytime in Settings or by setting `DO_NOT_TRACK=1` or `LUMINARY_TELEMETRY=0`.
+See [docs/telemetry.md](docs/telemetry.md) for full details.
+
 ---
 
 ## What else is in it

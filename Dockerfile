@@ -28,6 +28,7 @@ RUN VITE_LUMINARY_MODE=public VITE_API_BASE=/api npm run build
 FROM python:3.13-slim AS backend
 
 WORKDIR /app
+ENV LUMINARY_CONTAINER=1
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv

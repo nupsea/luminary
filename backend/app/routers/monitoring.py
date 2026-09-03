@@ -9,6 +9,7 @@ import logging
 import math
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -333,5 +334,77 @@ async def get_model_usage(
     )
     rows = result.all()
     return [ModelUsageItem(model=row.model_used, call_count=row.call_count) for row in rows]
+
+
+class TelemetryOverviewResponse(BaseModel):
+    enabled: bool
+    client_id: str
+    app_id: str
+    telemetrydeck_configured: bool
+    distribution: str
+    platform_metadata: dict[str, Any]
+    local_stats: dict[str, Any]
+    github_dmg_downloads: int | None = None
+    github_dmg_assets: list[dict[str, Any]] = []
+
+
+class TelemetryEventRequest(BaseModel):
+    signal_type: str
+    payload: dict[str, Any] | None = None
+    float_value: float | None = None
+
+
+@router.get("/telemetry", response_model=TelemetryOverviewResponse)
+async def get_telemetry_overview() -> TelemetryOverviewResponse:
+    """Return telemetry overview, anonymous client ID, and GitHub DMG download metrics."""
+    from app.services.anonymous_telemetry import (  # noqa: PLC0415
+        detect_distribution,
+        fetch_github_release_dmg_downloads,
+        get_local_telemetry_stats,
+        get_platform_metadata,
+        get_telemetry_app_id,
+        get_telemetry_client_id,
+        is_telemetry_opted_out,
+    )
+
+    app_id = get_telemetry_app_id()
+    dmg_info = await fetch_github_release_dmg_downloads()
+
+    return TelemetryOverviewResponse(
+        enabled=not is_telemetry_opted_out(),
+        client_id=get_telemetry_client_id(),
+        app_id=app_id,
+        telemetrydeck_configured=bool(app_id),
+        distribution=detect_distribution(),
+        platform_metadata=get_platform_metadata(),
+        local_stats=get_local_telemetry_stats(),
+        github_dmg_downloads=dmg_info.get("total_dmg_downloads"),
+        github_dmg_assets=dmg_info.get("dmg_assets", []),
+    )
+
+
+@router.post("/telemetry/event")
+async def ingest_telemetry_event(event: TelemetryEventRequest) -> dict[str, Any]:
+    """Record an anonymous installation or runtime event in the backend store."""
+    from app.services.anonymous_telemetry import send_signal  # noqa: PLC0415
+
+    success = await send_signal(event.signal_type, event.payload, event.float_value)
+    return {"status": "recorded" if success else "dropped", "signal_type": event.signal_type}
+
+
+@router.post("/telemetry/sync-downloads")
+async def sync_github_dmg_downloads() -> dict[str, Any]:
+    """Sync latest GitHub Release DMG download counts and optionally forward metrics signal."""
+    from app.services.anonymous_telemetry import (  # noqa: PLC0415
+        fetch_github_release_dmg_downloads,
+        send_signal,
+    )
+
+    res = await fetch_github_release_dmg_downloads()
+    total = res.get("total_dmg_downloads", 0)
+    if total > 0:
+        await send_signal("metrics.github_dmg_downloads", float_value=float(total))
+    return res
+
 
 

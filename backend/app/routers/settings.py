@@ -546,3 +546,66 @@ async def patch_retrieval_settings(
     return RetrievalSettingsResponse(rerank_enabled=await get_rerank_enabled(db))
 
 
+# Telemetry settings
+
+
+class TelemetrySettingsResponse(BaseModel):
+    enabled: bool
+    client_id: str
+    app_id: str
+    telemetrydeck_configured: bool
+    distribution: str
+
+
+class TelemetrySettingsPatch(BaseModel):
+    enabled: bool | None = None
+    app_id: str | None = None
+
+
+@router.get("/telemetry", response_model=TelemetrySettingsResponse)
+async def get_telemetry_settings() -> TelemetrySettingsResponse:
+    """Return current anonymous telemetry status and pseudonymized identifier."""
+    from app.services.anonymous_telemetry import (  # noqa: PLC0415
+        detect_distribution,
+        get_telemetry_app_id,
+        get_telemetry_client_id,
+        is_telemetry_opted_out,
+    )
+
+    app_id = get_telemetry_app_id()
+    return TelemetrySettingsResponse(
+        enabled=not is_telemetry_opted_out(),
+        client_id=get_telemetry_client_id(),
+        app_id=app_id,
+        telemetrydeck_configured=bool(app_id),
+        distribution=detect_distribution(),
+    )
+
+
+@router.patch("/telemetry", response_model=TelemetrySettingsResponse)
+async def patch_telemetry_settings(body: TelemetrySettingsPatch) -> TelemetrySettingsResponse:
+    """Update anonymous telemetry opt-in/opt-out status and TelemetryDeck App ID."""
+    from app.services.anonymous_telemetry import (  # noqa: PLC0415
+        detect_distribution,
+        get_telemetry_app_id,
+        get_telemetry_client_id,
+        is_telemetry_opted_out,
+        set_telemetry_app_id,
+        set_telemetry_enabled,
+    )
+
+    if body.enabled is not None:
+        set_telemetry_enabled(body.enabled)
+    if body.app_id is not None:
+        set_telemetry_app_id(body.app_id)
+
+    app_id = get_telemetry_app_id()
+    return TelemetrySettingsResponse(
+        enabled=not is_telemetry_opted_out(),
+        client_id=get_telemetry_client_id(),
+        app_id=app_id,
+        telemetrydeck_configured=bool(app_id),
+        distribution=detect_distribution(),
+    )
+
+
