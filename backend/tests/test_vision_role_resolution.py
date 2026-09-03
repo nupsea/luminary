@@ -296,7 +296,7 @@ def test_the_retired_profile_has_no_residency_entry():
     switch between the chat model and the reader -- 9.6s to 155s each on an
     Intel i7-8850H. It is gone; an entry here would let code branch on it again."""
     assert "low" not in MAX_RESIDENT
-    assert MAX_RESIDENT["standard"] == 2
+    assert MAX_RESIDENT["standard"] == 1
 
 
 # --- narrowing must be visible, not just correct -----------------------------

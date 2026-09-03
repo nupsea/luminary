@@ -111,7 +111,14 @@ def test_a_profile_larger_than_the_hardware_is_reported(profile_settings, host_r
 
 
 def test_residency_limit_follows_the_profile():
-    assert memory_profile.max_resident_models("standard") == 2
+    """One at the 16GB floor, two above 24GB -- both measured.
+
+    Two resident models are 13.07GB (`qwen3.5:4b` 4.31 + `qwen2.5vl:7b` 8.77),
+    and with the backend's 3.27GB ingest peak that is 102% of 16GB. One slot also
+    forces a multimodal chat model, so one model fills both roles and there is
+    nothing to evict: 7.58GB, 47%.
+    """
+    assert memory_profile.max_resident_models("standard") == 1
     assert memory_profile.max_resident_models("performance") == 2
 
 

@@ -60,7 +60,22 @@ _PERFORMANCE_MIN_RAM_GB = 24
 # How many models may stay resident at once. Mirrors OLLAMA_MAX_LOADED_MODELS as
 # the installer sets it; each loaded model gets its own runner and its own KV
 # cache (I-31), so this is a memory bound, not a concurrency one.
-MAX_RESIDENT: dict[MemoryProfile, int] = {"standard": 2, "performance": 2}
+#
+# `standard` is ONE, measured. Two resident models are `qwen3.5:4b` at 4.31GB
+# plus `qwen2.5vl:7b` at 8.77GB = 13.07GB, and with the backend's measured 3.27GB
+# ingest peak that is 16.34GB -- 102% of a 16GB machine. One slot also makes
+# `_resolve_chat_model` require a multimodal chat model, which is the point: with
+# one model filling both roles there is no second model to evict, so the eviction
+# this setting exists to prevent cannot arise. That configuration is 7.58GB, 47%.
+#
+# Two is right at `performance` (24GB+), where it is 16.34GB of 24GB = 68% and
+# buys a real 9x: chat time-to-first-token while the vision model works measured
+# 15.52s at one slot against 1.75s at two.
+#
+# Raising `standard` to 2 does NOT buy responsiveness on its own. Measured with a
+# single model in play, more slots changed nothing -- 11.15s at one, 11.01s at
+# two -- which is I-31's point restated: a slot is a memory bound, not a lane.
+MAX_RESIDENT: dict[MemoryProfile, int] = {"standard": 1, "performance": 2}
 
 # What a host must have before a profile is a sensible default for it. Used to
 # report a mismatch, never to refuse to start: someone who sets a profile by
