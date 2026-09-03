@@ -402,13 +402,12 @@ class DocumentParser:
             raw_parts: list[str] = []
 
             for i, (lv, ti, pg) in enumerate(toc):
-                # End page = start of the next entry at the same or higher level,
-                # minus 1. This correctly handles nested entries.
-                next_page = total_pages + 1
-                for j in range(i + 1, len(toc)):
-                    if toc[j][0] <= lv:
-                        next_page = toc[j][2]
-                        break
+                # Up to the NEXT entry, whatever its level. Ending at the next
+                # same-or-higher level made a chapter span all its children and
+                # store their text as well as its own (#97). A parent whose
+                # first child opens on its own page therefore owns no whole page
+                # and gets empty text; that prose goes to the child.
+                next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
                 page_end = min(next_page - 1, total_pages)
 
                 texts: list[str] = []
@@ -463,7 +462,9 @@ class DocumentParser:
                         level=lv,
                         text=text,
                         page_start=pg,
-                        page_end=page_end,
+                        # An owns-nothing parent still sits on a page; an end
+                        # before its start is a range no client can read.
+                        page_end=max(pg, page_end),
                         page_breaks=page_breaks,
                     )
                 )
