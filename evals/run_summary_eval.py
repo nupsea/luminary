@@ -226,10 +226,19 @@ def main() -> None:
     # the one summary number a single-model machine still gets honestly, and it
     # cannot be inflated by a judge scoring its own writing.
     nli = NliFaithfulnessEval().run(graded)
+    def _mean_over_measured(key: str) -> float | None:
+        """Average the rows that produced a value, and None when none did.
+
+        `sum(s[key] or 0.0 ...) / len(scored)` counted an unmeasurable row as a
+        zero, which reports a hole in the measurement as a bad result (I-32).
+        """
+        vals = [s[key] for s in scored if s.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+
     metrics = {
-        "theme_coverage": sum(s["theme_coverage"] for s in scored) / len(scored),
+        "theme_coverage": _mean_over_measured("theme_coverage"),
         "no_hallucination": sum(judged) / len(judged) if judged else None,
-        "conciseness_pct": sum(s["conciseness_pct"] or 0.0 for s in scored) / len(scored),
+        "conciseness_pct": _mean_over_measured("conciseness_pct"),
         "rows_failed": len(failed_docs),
         "summary_grounding": nli.get("faithfulness"),
         "grounding_model": nli.get("faithfulness_model"),
@@ -246,7 +255,11 @@ def main() -> None:
         violations.append(
             f"{len(failed_docs)} document(s) could not be summarised: {failed_docs[:2]}"
         )
-    if metrics["theme_coverage"] < THRESHOLDS["theme_coverage"]:
+    # A gated metric that could not be computed fails; it does not pass, and it
+    # does not raise on the comparison (I-32).
+    if metrics["theme_coverage"] is None:
+        violations.append("theme_coverage could not be computed on any row")
+    elif metrics["theme_coverage"] < THRESHOLDS["theme_coverage"]:
         violations.append("theme_coverage below threshold")
     if not args.skip_judge and metrics["no_hallucination"] is None:
         violations.append("no_hallucination judge produced no scores")
@@ -256,7 +269,9 @@ def main() -> None:
     ):
         violations.append("no_hallucination below threshold")
     concision = metrics["conciseness_pct"]
-    if concision < 0.5 or concision > 1.5:
+    if concision is None:
+        violations.append("conciseness_pct could not be computed on any row")
+    elif concision < 0.5 or concision > 1.5:
         violations.append("conciseness_pct outside [0.5, 1.5]")
 
     passed = len(violations) == 0

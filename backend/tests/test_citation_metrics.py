@@ -64,3 +64,60 @@ def test_compute_citation_support_rate_weights_partial_verdicts():
 
 def test_compute_citation_support_rate_returns_none_without_pairs():
     assert compute_citation_support_rate([], judge=lambda claim, chunk: "yes") is None
+
+
+def test_an_unusable_verdict_is_a_judge_failure_not_a_zero(monkeypatch):
+    """A judge that answers in an unrecognised shape has told us nothing.
+
+    `judge_citation` used to return "no" for it, which scores 0 -- recording a
+    judge failure as a product failure, and silently, because the caller's
+    failure counter never sees a value that was returned normally.
+    """
+    import evals.lib.citation_metrics as cm
+
+    class _Msg:
+        content = '{"verdict": "maybe"}'
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+
+    monkeypatch.setattr(
+        cm, "judge_citation", cm.judge_citation
+    )  # keep the real function under test
+    monkeypatch.setitem(
+        sys.modules, "litellm", type("L", (), {"completion": staticmethod(lambda **kw: _Resp())})
+    )
+
+    with pytest.raises(ValueError, match="unusable verdict"):
+        cm.judge_citation("an answer", "a chunk", "some/model")
+
+
+def test_a_failing_judge_lowers_nothing_and_is_counted():
+    """The rate is computed over successful judgements only.
+
+    One unusable verdict among two must not drag the rate to 0.5; it must leave
+    the rate at the one judgement that worked.
+    """
+    calls = {"n": 0}
+
+    def _judge(_claim, _chunk):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("citation judge returned an unusable verdict: 'maybe'")
+        return "yes"
+
+    rate = compute_citation_support_rate(
+        [("a", "x"), ("a", "y")],
+        judge=_judge,
+    )
+    assert rate == 1.0, "a failed judge call must be excluded, not scored zero"
+
+
+def test_every_judge_failing_yields_none_rather_than_zero():
+    def _judge(_claim, _chunk):
+        raise ValueError("unusable")
+
+    assert compute_citation_support_rate([("a", "x")], judge=_judge) is None
