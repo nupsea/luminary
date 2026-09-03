@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 from sqlalchemy import event
@@ -49,6 +50,49 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
     cursor.close()
 
 
+# A write transaction held longer than this is reported with the statement that
+# opened it. `busy_timeout` is 5s, so every other writer fails at ~5.2s while one
+# is held open; measured on synthetic writers, a 4.5s hold blocks nobody and a
+# 6.0s hold blocks all six. Nothing measured this before, which is why
+# "database is locked" could name only its victims and never its cause.
+_WRITE_HOLD_WARN_S = 3.0
+
+_WRITE_SQL = ("INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER")
+
+
+def _track_write_holds(engine) -> None:
+    """Report which statement held the SQLite write lock, and for how long."""
+    open_writes: dict[int, tuple[float, str]] = {}
+
+    def _before(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001
+        head = statement.lstrip()[:6].upper()
+        if head.startswith(_WRITE_SQL) and id(conn) not in open_writes:
+            open_writes[id(conn)] = (time.perf_counter(), " ".join(statement.split())[:120])
+
+    def _finish(conn, *, held_lock: bool) -> None:
+        started = open_writes.pop(id(conn), None)
+        if started is None:
+            return
+        elapsed = time.perf_counter() - started[0]
+        if elapsed < _WRITE_HOLD_WARN_S:
+            return
+        # Only a transaction that COMMITTED actually held the lock. One that
+        # rolled back spent that time waiting for it and then failing, and
+        # reporting it as a holder inverts cause and effect: a first version of
+        # this logged 29 "holders", every one of them 5.2-5.4s -- busy_timeout
+        # to the decimal -- which is the signature of victims, not a holder.
+        logger.warning(
+            "sqlite write %s %.2fs: %s",
+            "lock HELD for" if held_lock else "BLOCKED for",
+            elapsed,
+            started[1],
+        )
+
+    event.listen(engine, "before_cursor_execute", _before)
+    event.listen(engine, "commit", lambda conn: _finish(conn, held_lock=True))
+    event.listen(engine, "rollback", lambda conn: _finish(conn, held_lock=False))
+
+
 def make_engine(db_url: str | None = None):
     url = db_url or get_db_url()
     kwargs: dict = {}
@@ -66,6 +110,7 @@ def make_engine(db_url: str | None = None):
         **kwargs,
     )
     event.listen(engine.sync_engine, "connect", _enable_sqlite_pragmas)
+    _track_write_holds(engine.sync_engine)
     return engine
 
 
