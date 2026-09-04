@@ -13,7 +13,12 @@ from httpx import ASGITransport, AsyncClient
 import app.config as config_module
 from app import memory_profile
 from app.main import app
-from app.model_registry import REGISTRY, fits_host, models_for_host, oversized_for_host
+from app.model_registry import (
+    REGISTRY,
+    fits_host,
+    models_for_host,
+    oversized_for_host,
+)
 
 
 @pytest.fixture
@@ -111,15 +116,22 @@ def test_a_profile_larger_than_the_hardware_is_reported(profile_settings, host_r
 
 
 def test_residency_limit_follows_the_profile():
-    """One at the 16GB floor, two above 24GB -- both measured.
+    """Two everywhere, because the `standard` band runs to 24GB.
 
-    Two resident models are 13.07GB (`qwen3.5:4b` 4.31 + `qwen2.5vl:7b` 8.77),
-    and with the backend's 3.27GB ingest peak that is 102% of 16GB. One slot also
-    forces a multimodal chat model, so one model fills both roles and there is
-    nothing to evict: 7.58GB, 47%.
+    The count is a permission, not a budget: `fits_together` weighs the set at
+    half the machine and is what protects a small desktop. At the 16GB floor the
+    two settings resolve identically -- the pair is refused either way -- so one
+    slot bought the floor nothing and cost a 24GB host its configured reader.
+    `test_a_standard_host_with_room_keeps_its_reader` is the case that moves.
+
+    This asserted 1 for two commits, on a model figure derived from ollama's
+    process RSS rather than from Ollama's own accounting -- ~30% high, and enough
+    to make the pair read as 102%. Residency is `/api/ps`; RSS on unified memory
+    double-counts mapped weights (`scripts/mem_profile.py`).
     """
-    assert memory_profile.max_resident_models("standard") == 1
+    assert memory_profile.max_resident_models("standard") == 2
     assert memory_profile.max_resident_models("performance") == 2
+
 
 
 def test_the_retired_profile_is_gone_rather_than_hidden():

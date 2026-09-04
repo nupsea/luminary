@@ -150,6 +150,41 @@ def test_a_host_with_room_keeps_its_dedicated_reader(monkeypatch):
     assert model_router.resolve("vision").model == "ollama/qwen2.5vl:7b"
 
 
+def test_a_standard_host_with_room_keeps_its_reader(monkeypatch):
+    """24GB is `standard`, and `standard` must not narrow a host that can afford both.
+
+    This is the case the residency count actually decides. At the 16GB floor it
+    decides nothing -- `fits_together` budgets the resident set at half the
+    machine, so the 10.02GB pair is refused whether the count is one or two. The
+    band runs to 24GB, where half is 12GB and the pair fits, and there one slot
+    silently retargeted vision onto the chat model and reported "this profile
+    keeps one model resident" about a machine with room for two.
+
+    `test_a_host_with_room_keeps_its_dedicated_reader` covers 32GB, which is
+    `performance` and has always been two -- so it passes at either setting and
+    could not see this.
+    """
+    from app import memory_profile
+    from app.services import model_router, settings_service
+
+    monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 24)
+    monkeypatch.setattr(settings_service, "configured_vision_override", lambda: None)
+    monkeypatch.setattr(settings_service, "get_vision_model", lambda: "ollama/qwen2.5vl:7b")
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
+    monkeypatch.setattr(
+        settings_service,
+        "get_effective_routing",
+        lambda background=False: ("ollama/qwen3.5:4b", None),
+    )
+    assert memory_profile.profile_for_ram(24) == "standard", "24GB must be standard"
+
+    choice = model_router.resolve("vision")
+    assert choice.model == "ollama/qwen2.5vl:7b", (
+        f"a 24GB host was narrowed to {choice.model}: {choice.fallback_reason}"
+    )
+    assert choice.fallback_reason is None
+
+
 def test_a_host_too_small_for_both_falls_back_to_one(monkeypatch):
     """16GB is the case this exists for: the pair is 10.02GB, 63% of RAM before
     the backend's 4.7GB ingest peak, which is when both models are in use."""
@@ -296,7 +331,7 @@ def test_the_retired_profile_has_no_residency_entry():
     switch between the chat model and the reader -- 9.6s to 155s each on an
     Intel i7-8850H. It is gone; an entry here would let code branch on it again."""
     assert "low" not in MAX_RESIDENT
-    assert MAX_RESIDENT["standard"] == 1
+    assert MAX_RESIDENT["standard"] == 2
 
 
 # --- narrowing must be visible, not just correct -----------------------------

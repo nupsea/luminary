@@ -18,11 +18,15 @@ from pathlib import Path
 
 import pytest
 
+from app import memory_profile
 from app.model_registry import GENERALIST_PREFERENCE, REGISTRY, profile_for
 
-_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+_REPO = Path(__file__).resolve().parents[2]
+_SCRIPTS = _REPO / "scripts"
 _SH = _SCRIPTS / "install.sh"
 _PS1 = _SCRIPTS / "install.ps1"
+# The fourth sizing site, and the only one with no install step to ask in.
+_SUPERVISOR = _REPO / "src-tauri" / "src" / "supervisor.rs"
 
 
 def _assign(text: str, pattern: str) -> str:
@@ -131,6 +135,90 @@ def test_the_bands_agree_across_platforms(sh, ps1):
     assert "$MemGB -gt 24" in ps1
     assert "$MemGB -lt 16" in ps1, "install.ps1 must warn under the floor"
     assert 'public' not in sh.split("_default_profile")[1][:400]
+
+
+def test_the_desktop_shell_agrees_about_the_residency_band():
+    """Four sites size the machine, not three -- and the fourth is Rust.
+
+    `install.sh`, `install.ps1` and `bootstrap.sh` are shell and are read above.
+    `supervisor.rs` is the sizing path for the drag-installed DMG, which has no
+    install step, and it is invisible to every other test in this file. When the
+    floor moved to 16GB the three shell sites followed and this one did not: it
+    kept `gb >= 24 => 2, _ => 1`, so a 24GB Mac running the bundled app gave
+    Ollama one slot while the backend resolved a text model plus a reader against
+    it -- the pair chosen, then evicted on every switch between them.
+
+    Read as text for the same reason the installers are: nothing here can call
+    Rust. The band is what matters, so the band is what is asserted.
+    """
+    rust = _SUPERVISOR.read_text()
+    start = rust.index("fn ollama_max_loaded_models")
+    # To the function's own closing brace at column 0, not to the next `fn`:
+    # the following item is `pub fn`, so a `\nfn ` split runs past this body and
+    # into the test module, where a different knob's 24GB band would satisfy the
+    # assertions below and this check would read the wrong span.
+    body = rust[start : rust.index("\n}\n", start)]
+    assert "total_memory_gb()" in body, "the residency band no longer reads host RAM"
+
+    assert "gb >= 16 => 2" in body, (
+        "the desktop shell must permit two resident models at the 16GB floor, "
+        "matching memory_profile.MAX_RESIDENT -- it sized from 24GB while the "
+        "backend resolved pairs at 16"
+    )
+    assert "gb >= 24" not in body, "the retired 24GB residency band is back"
+
+    floor = memory_profile.PROFILE_MIN_RAM_GB["standard"]
+    assert f"gb >= {floor} => 2" in body, (
+        f"the shell's band and the profile floor ({floor}GB) have drifted apart"
+    )
+    assert memory_profile.MAX_RESIDENT["standard"] == 2, (
+        "the shell permits two at the floor; the backend must agree or the "
+        "extra slot sits idle behind a narrower semaphore (I-31)"
+    )
+
+
+def test_the_serving_width_band_agrees_across_every_install_path(sh, ps1):
+    """One RAM boundary for `OLLAMA_NUM_PARALLEL`, in four languages.
+
+    I-31, measured on an M3 Pro: a second slot costs a full `OLLAMA_NUM_CTX` KV
+    cache and buys 55.5 -> 97.7 tok/s only once there are two callers, so the
+    band is RAM (<24GB one slot) and the auto path never exceeds 2 -- 4 is opt-in
+    through `.env`.
+
+    **Sized from RAM, never from the profile name.** That is the whole point of
+    this test. These values were keyed to the profile when `public` meant "under
+    24GB" and took one slot, so the catch-all meant 24GB+ and took two. Retiring
+    `public` left the 24GB+ line catching 16GB laptops, which silently began
+    taking two slots -- the value never changed, the band under it did.
+    `supervisor.rs` sized from RAM and was the only path that did not drift.
+    """
+    rust = _SUPERVISOR.read_text()
+    start = rust.index("fn ollama_num_parallel")
+    shell_of_rust = rust[start : rust.index("\n}\n", start)]
+    bootstrap = _BOOTSTRAP.read_text()
+
+    for name, text, pattern in (
+        ("supervisor.rs", shell_of_rust, "gb >= 24 => 2"),
+        ("install.sh", sh, '"$(_mem_gb)" -ge 24 ]'),
+        ("install.ps1", ps1, "$MemGB -ge 24"),
+        ("bootstrap.sh", bootstrap, '"$MEM_GB" -ge 24 ]'),
+    ):
+        assert pattern in text, (
+            f"{name} must size OLLAMA_NUM_PARALLEL from RAM at the 24GB boundary "
+            f"(I-31), not from the profile name -- {pattern!r} is missing"
+        )
+
+    # 4 is opt-in. `performance` is sized from RAM now, so a 4 keyed to it would
+    # hand every 32GB machine a width the measured table never reached.
+    for name, text in (("install.sh", sh), ("install.ps1", ps1), ("bootstrap.sh", bootstrap)):
+        assert "NUM_PARALLEL=4" not in text.replace(" ", ""), (
+            f"{name} sets a serving width of 4 automatically; I-31 caps the auto "
+            f"path at 2 and makes 4 opt-in through .env"
+        )
+        assert "VISION_CONCURRENCY=4" not in text.replace(" ", ""), (
+            f"{name} sets a vision concurrency of 4; I-31 sizes every semaphore "
+            f"at the slot count, and the slot count never exceeds 2 automatically"
+        )
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):

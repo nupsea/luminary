@@ -30,7 +30,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 38 hard invariants | `invariants.md` |
+| The 39 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |

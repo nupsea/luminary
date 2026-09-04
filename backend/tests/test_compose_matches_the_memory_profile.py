@@ -26,11 +26,12 @@ def _default_for(var: str) -> str:
 
 
 def test_compose_ships_one_resident_model():
-    """One model, because two do not fit the 16GB floor -- measured.
+    """One model, because the VM is not the host.
 
-    `qwen3.5:4b` at 3.29GB plus `qwen2.5vl:7b` at 8.77GB is 12.06GB, and with the
-    backend's measured 3.27GB ingest peak that is 15.33GB of 16GB. One multimodal
-    model serving chat AND figures is 3.45GB, making 6.72GB against the same peak.
+    `standard` permits two because its band runs to 24GB, where the 10.02GB pair
+    fits the half-machine budget. A container gets no such guarantee: Docker
+    Desktop hands the VM a fraction of the machine, so a 16GB Mac presents as
+    roughly 7.7GB, where not even the floor's single model is comfortable.
 
     Deliberately NOT tied to `max_resident_models("standard")`: that is a
     permission the resolver reads, not a target for a container that cannot

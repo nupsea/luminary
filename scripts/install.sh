@@ -261,10 +261,29 @@ if [ -z "$PROFILE" ]; then
         PROFILE="$_suggested"
     fi
 fi
-case "$PROFILE" in
-    performance) OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
-    *)           OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=2; VISION_CONCURRENCY=2 ;;
-esac
+# Residency follows the profile; serving width follows RAM directly, the way
+# `supervisor.rs` does. They are different questions and their 24GB boundaries
+# are not the same boundary: the profile's is exclusive (a 24GB host stays
+# `standard`, because the 9.67GB text model plus a reader is over half of 24GB),
+# while I-31's is inclusive (<24GB gets one slot; at 24 a second is affordable).
+#
+# Keying width to the profile name is what broke it. These values were written
+# when `public` meant "under 24GB" and took one slot, so `*)` meant 24GB+ and
+# took two. Retiring `public` left the 24GB+ line as the catch-all and a 16GB
+# laptop silently began taking two, each costing a full `OLLAMA_NUM_CTX` KV
+# cache. `supervisor.rs` sized from RAM and never drifted; this now matches it,
+# so no future band change can orphan the value again.
+OLLAMA_MAX_LOADED_MODELS=2   # both profiles; `fits_together` is what weighs the pair
+if [ "$(_mem_gb)" -ge 24 ]; then
+    OLLAMA_NUM_PARALLEL=2
+else
+    OLLAMA_NUM_PARALLEL=1
+fi
+# I-31: the auto path never exceeds 2, and 4 is opt-in through .env. That stayed
+# true only while `performance` had to be chosen by hand -- it is sized from RAM
+# now, so keying 4 to it would hand every 32GB machine an unmeasured width. The
+# measured table stops at 2 (55.5 tok/s at one caller, 97.7 at two).
+VISION_CONCURRENCY="$OLLAMA_NUM_PARALLEL"   # I-31: size every semaphore at the slot count
 # Ollama's own defaults are not sized for a laptop: the prompt cache is allowed
 # 8192MB (more than a small machine has in total) and models unload after 5
 # minutes, paying a full reload on the next question. The backend cannot set

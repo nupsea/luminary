@@ -292,7 +292,7 @@ if [ "$MEM_GB" -gt 0 ] && [ "$MEM_GB" -lt 16 ]; then
 fi
 case "$PROFILE" in
     performance)
-        MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4
+        MAX_LOADED=2
         if [ -z "$CHAT_MODEL" ]; then
             if [ "$MEM_GB" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
                 CHAT_MODEL="$LARGE_TEXT_MODEL"
@@ -304,7 +304,7 @@ case "$PROFILE" in
             && VISION_MODEL="$PUBLIC_GENERALIST"
         ;;
     *)
-        MAX_LOADED=2; NUM_PARALLEL=2; VISION_CONCURRENCY=2
+        MAX_LOADED=2
         [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$DEFAULT_CHAT_MODEL"
         ;;
 esac
@@ -320,6 +320,17 @@ esac
 
 # Ollama.app is launched by launchd and does not inherit this shell's env, so
 # the knobs go into the GUI session before it starts. Set BEFORE launching.
+# Serving width follows RAM, not the profile name (I-31: <24GB one slot, and the
+# auto path never exceeds 2 -- 4 is opt-in through .env). Keyed to the profile
+# these drifted the moment `public` was retired and its 24GB+ values became the
+# catch-all for a 16GB laptop. `supervisor.rs` sizes from RAM and never drifted.
+if [ "$MEM_GB" -ge 24 ]; then
+    NUM_PARALLEL=2
+else
+    NUM_PARALLEL=1
+fi
+VISION_CONCURRENCY="$NUM_PARALLEL"   # I-31: size every semaphore at the slot count
+
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "$MAX_LOADED" 2>/dev/null || true
 launchctl setenv OLLAMA_NUM_PARALLEL "$NUM_PARALLEL" 2>/dev/null || true
 

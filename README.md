@@ -363,16 +363,31 @@ Measured, not estimated — every figure below was read off a running instance.
 
 | what is resident | GB |
 |---|---|
-| Ollama serving `qwen3.5:4b` | 4.2 |
-| PyTorch + the embedder | 0.8 |
-| Cross-encoder reranker | 0.2 |
-| Entity model (GLiNER) | 1.3 |
-| Peak while a document is ingesting | +1.1 |
-| **total while ingesting** | **~7.6** |
+| Ollama serving `qwen3.5:4b` — chat *and* figures | 3.2 |
+| Backend at rest: embedder 0.5, reranker 0.3, entity model 1.4 | 2.4 |
+| Peak while a document is ingesting | +0.8 |
+| **total while ingesting** | **6.4** |
 
-**Give Luminary 12 GB to work with, and treat 8 GB as the floor where it runs
-but will swap under load.** Ingestion is the peak; answering questions afterwards
-sits around 6.5 GB.
+**16 GB is the supported floor**, and the default configuration uses 40% of it —
+one model reads figures and answers questions, so nothing is evicted to do either.
+
+Luminary will not spend the rest on a second model. A resident set is budgeted at
+half the machine, so pointing **Settings → Vision** at the dedicated 6.8 GB reader
+on a 16 GB machine is declined with a reason rather than accepted into swap: the
+pair is 10.0 GB against an 8 GB budget. From 24 GB up it is accepted. The limit is
+deliberate — a desktop app that swaps degrades every other window on the machine,
+not just its own.
+
+A smaller machine still starts and is told it is under the floor, rather than
+being quietly narrowed.
+
+Answering questions afterwards sits lower still: the entity model is released
+after 180 seconds idle, returning 1.4 GB, and only ingestion and the reindex
+script ever need it back.
+
+Model sizes are Ollama's own `/api/ps` figures at the deployed context window.
+A process RSS is not comparable — on unified memory it double-counts weights the
+runner maps — so `scripts/model_footprint.py` is what these come from.
 </details>
 
 ### Running under Docker
@@ -569,7 +584,7 @@ All settings are environment variables in `backend/.env` (gitignored).
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server address |
 | `VISION_MODEL` | `ollama/qwen3.5:4b` | Image and figure analysis; must be a model with vision |
 | `FLASHCARD_FACTUALITY_MODEL` | *(empty)* | Checks a generated card's answer against its passage; off by default |
-| `LUMINARY_MEMORY_PROFILE` | *(from RAM)* | `low` / `standard` / `performance`; forces a smaller footprint |
+| `LUMINARY_MEMORY_PROFILE` | *(from RAM)* | `standard` / `performance`; overrides what host RAM would choose. `low` and `public` are read as `standard` so an older `.env` keeps working |
 | `PDF_VECTOR_FIGURES` | `true` | Rasterize vector-drawn PDF figures (LaTeX papers embed no images) |
 | `LUMINARY_MODE` | `full` | `full` = every feature; `public` = curated learner surfaces, SPA + API on one port |
 | `GLINER_ENABLED` | `true` | Entity extraction (disable on <8 GB RAM) |

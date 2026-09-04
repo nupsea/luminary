@@ -112,15 +112,15 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # ONE model, and that is the right answer at the 16GB floor -- measured,
-      # after a first attempt at 2 that does not fit. Two resident models are
-      # `qwen3.5:4b` at 3.29GB plus `qwen2.5vl:7b` at 8.77GB = 12.06GB, and with
-      # the backend's measured 3.27GB ingest peak that is 15.33GB of 16GB: 96%,
-      # i.e. swapping. One multimodal model serving chat AND figures is 3.45GB,
-      # and the same ingest peak makes 6.72GB -- 42%.
-      # `_resolve_chat_model` already does exactly this at one slot: "one model
-      # has to do everything, so it has to be able to read a figure".
-      # Raise to 2 only where there is room, which is 24GB+.
+      # ONE model here, unlike the `standard` profile's two. A container cannot
+      # measure its host and rarely gets it: Docker Desktop hands the VM a
+      # fraction of the machine, so a 16GB Mac presents as roughly 7.7GB. The
+      # backend would reach the same answer on its own -- `fits_together` budgets
+      # a resident set at half of what it can see -- but the backend reads the
+      # VM's allowance and this file is what Ollama gets, so it is set here too.
+      # `_resolve_chat_model` does the right thing at one slot: "one model has
+      # to do everything, so it has to be able to read a figure".
+      # Raise it wherever the VM's own allowance has room.
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
       # A floor, not a guess: compose cannot measure the host and each slot costs
       # a full KV cache (I-31). Set 2 on a 24GB+ host.

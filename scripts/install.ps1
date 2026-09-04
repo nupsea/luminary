@@ -320,11 +320,16 @@ if ($MemGB -gt 0 -and $MemGB -lt 16) {
     Write-Host "[install] ingestion, chat and flashcard generation will be slower here." -ForegroundColor Yellow
 }
 
-switch ($LumProfile) {
-    "performance" { $MaxLoaded = 2; $NumParallel = 4; $VisionConcurrency = 4 }
-    "standard"    { $MaxLoaded = 2; $NumParallel = 2; $VisionConcurrency = 2 }
-    default       { $MaxLoaded = 1; $NumParallel = 1; $VisionConcurrency = 1 }
-}
+# Residency follows the profile; serving width follows RAM directly, the way
+# supervisor.rs does. Keyed to the profile name the width drifted silently when
+# `public` was retired: its 24GB+ values became the catch-all and a 16GB laptop
+# began taking two slots, each costing a full OLLAMA_NUM_CTX KV cache (I-31).
+$MaxLoaded = 2
+if ($MemGB -ge 24) { $NumParallel = 2 } else { $NumParallel = 1 }
+# I-31: size every semaphore at the slot count. 4 is opt-in through .env; the
+# auto path never exceeds 2, and `performance` is sized from RAM now, so keying
+# 4 to it would make an unmeasured width automatic.
+$VisionConcurrency = $NumParallel
 Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALLEL=$NumParallel)" -ForegroundColor Yellow
 
 # Pull the chat model, chosen from the memory profile.

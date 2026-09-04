@@ -47,9 +47,11 @@ PROFILES: tuple[MemoryProfile, ...] = ("standard", "performance")
 _LEGACY_ALIASES = {"public": "standard", "low": "standard"}
 
 # The supported floor, and what `install.sh:_default_profile` sizes against.
-# `qwen3.5:4b` plus the 6.81GB reader is 10.02GB, 63% of 16GB before the
-# backend's 4.7GB ingest peak -- tight, but it is the size the product is tuned
-# for. Below it the profile is unchanged and the mismatch is reported instead.
+# A floor machine runs ONE model -- `qwen3.5:4b` at 3.21GB serving chat and
+# figures alike -- plus the backend's measured 3.19GB ingest peak: 6.40GB, 40%.
+# It is not sized for a pair, and does not get one: `fits_together` budgets a
+# resident set at half the machine, and the 10.02GB pair exceeds 8GB. Below the
+# floor the profile is unchanged and the mismatch is reported instead.
 _STANDARD_MIN_RAM_GB = 16
 
 # Above this, not at it: a 24GB machine stays `standard`. The 9.67GB text model
@@ -61,21 +63,31 @@ _PERFORMANCE_MIN_RAM_GB = 24
 # the installer sets it; each loaded model gets its own runner and its own KV
 # cache (I-31), so this is a memory bound, not a concurrency one.
 #
-# `standard` is ONE, measured. Two resident models are `qwen3.5:4b` at 4.31GB
-# plus `qwen2.5vl:7b` at 8.77GB = 13.07GB, and with the backend's measured 3.27GB
-# ingest peak that is 16.34GB -- 102% of a 16GB machine. One slot also makes
-# `_resolve_chat_model` require a multimodal chat model, which is the point: with
-# one model filling both roles there is no second model to evict, so the eviction
-# this setting exists to prevent cannot arise. That configuration is 7.58GB, 47%.
+# Two, and the case that decides it is at the top of the band, not at the floor.
+# `standard` runs to 24GB, where `fits_together` budgets a resident set at half
+# the machine -- 12GB against the 10.02GB pair (`qwen3.5:4b` 3.21GB plus
+# `qwen2.5vl:7b` 6.81GB, from Ollama's `/api/ps` with both loaded), so the pair
+# fits and a configured reader is kept. At one slot that host was narrowed to a
+# shared model and told "this profile keeps one model resident", which is false
+# about a machine with room for two.
 #
-# Two is right at `performance` (24GB+), where it is 16.34GB of 24GB = 68% and
-# buys a real 9x: chat time-to-first-token while the vision model works measured
-# 15.52s at one slot against 1.75s at two.
+# **At the 16GB floor this count decides nothing.** Half of 16GB is 8GB, the pair
+# is 10.02GB, and `model_router` refuses it at either setting -- verified by
+# resolving both ways. The budget is what protects a small desktop; the runner
+# count is a permission, and a permission is not a bound.
 #
-# Raising `standard` to 2 does NOT buy responsiveness on its own. Measured with a
-# single model in play, more slots changed nothing -- 11.15s at one, 11.01s at
-# two -- which is I-31's point restated: a slot is a memory bound, not a lane.
-MAX_RESIDENT: dict[MemoryProfile, int] = {"standard": 1, "performance": 2}
+# **Residency is what Ollama reports, never a process RSS.** One slot shipped
+# here briefly on figures ~30% high, built by subtracting the backend's RSS from
+# the run's peak RSS and calling the remainder a model. `mem_profile.py`'s
+# docstring names that trap: on unified memory the runner's RSS double-counts
+# weights it maps, so RSS and Ollama's accounting disagree and only the latter is
+# residency. The same pass read `peak_ollama_reported_mb` -- an MB field -- as GB.
+#
+# Whatever this says, `supervisor.rs` must say too: it sizes the bundled DMG,
+# which has no install step, and a backend resolving a pair against a runtime
+# permitted one model evicts on every switch between them (I-31, I-39).
+MAX_RESIDENT: dict[MemoryProfile, int] = {"standard": 2, "performance": 2}
+
 
 # What a host must have before a profile is a sensible default for it. Used to
 # report a mismatch, never to refuse to start: someone who sets a profile by
@@ -110,16 +122,17 @@ def host_ram_gb() -> int:
 def profile_for_ram(ram_gb: int) -> MemoryProfile:
     """The profile a host of this size gets by default.
 
-    Three bands since 2026-08-18: below 16GB one model, 16-24GB two models with
-    the small text model, above 24GB two models with the large one.
+    Two bands. 16GB is the floor and gets two resident models with the small
+    text model; above 24GB, two with the large one. A machine under the floor
+    gets `standard` too -- the same behaviour plus a reported mismatch, rather
+    than a narrowed profile nobody tuned.
 
     `performance` used to be unreachable automatically, on the grounds that it
     raises parallelism past what a single GPU serves well (I-31). It is reachable
     now because above 24GB the memory it unlocks is real -- the 9.67GB text model
-    and a reader fit together -- but the parallelism half of that profile is still
-    the part I-31 warns about: each slot costs a full window of KV cache and buys
-    nothing past the runtime's serving width. What the band is for is the model
-    map; the slot count rides along and is worth revisiting separately.
+    and a reader fit together -- and the parallelism no longer rides along with
+    it: every install path sizes `OLLAMA_NUM_PARALLEL` from RAM rather than from
+    the profile name, so this band decides the model map and nothing else.
     """
     if ram_gb > _PERFORMANCE_MIN_RAM_GB:
         return "performance"
