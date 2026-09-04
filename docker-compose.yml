@@ -112,16 +112,18 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # A floor, not a guess -- the same reasoning as OLLAMA_NUM_PARALLEL below.
-      # Two resident models let enrichment keep a reader loaded beside the chat
-      # model instead of thrashing between them, and that is right on a host
-      # with the memory for it. Compose cannot measure the host, and the backend
-      # on a small one resolves to `low`, which keeps ONE model resident -- so
-      # the default here disagreed with the profile the app had already chosen.
-      # Raise it to 2 on a host with 16GB+ available to the container.
+      # ONE model here, unlike the `standard` profile's two. A container cannot
+      # measure its host and rarely gets it: Docker Desktop hands the VM a
+      # fraction of the machine, so a 16GB Mac presents as roughly 7.7GB. The
+      # backend would reach the same answer on its own -- `fits_together` budgets
+      # a resident set at half of what it can see -- but the backend reads the
+      # VM's allowance and this file is what Ollama gets, so it is set here too.
+      # `_resolve_chat_model` does the right thing at one slot: "one model has
+      # to do everything, so it has to be able to read a figure".
+      # Raise it wherever the VM's own allowance has room.
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
-      # A floor, not a guess: compose cannot measure the host and each slot
-      # costs a full KV cache. Set OLLAMA_NUM_PARALLEL=2 on a 24GB+ host.
+      # A floor, not a guess: compose cannot measure the host and each slot costs
+      # a full KV cache (I-31). Set 2 on a 24GB+ host.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
       # Residency has to be set here. The backend cannot: LiteLLM's `ollama/`
       # completion path folds keep_alive into `options`, where Ollama rejects

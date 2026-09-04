@@ -25,10 +25,18 @@ def _default_for(var: str) -> str:
     return match.group(1)
 
 
-def test_compose_defaults_to_one_resident_model():
-    from app.memory_profile import max_resident_models
+def test_compose_ships_one_resident_model():
+    """One model, because the VM is not the host.
 
-    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == str(max_resident_models("low"))
+    `standard` permits two because its band runs to 24GB, where the 10.02GB pair
+    fits the half-machine budget. A container gets no such guarantee: Docker
+    Desktop hands the VM a fraction of the machine, so a 16GB Mac presents as
+    roughly 7.7GB, where not even the floor's single model is comfortable.
+
+    Deliberately NOT tied to `max_resident_models("standard")`: that is a
+    permission the resolver reads, not a target for a container that cannot
+    measure its host."""
+    assert _default_for("OLLAMA_MAX_LOADED_MODELS") == "1"
 
 
 def test_the_serving_width_default_matches_the_same_profile():

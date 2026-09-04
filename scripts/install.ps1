@@ -298,28 +298,38 @@ $LumProfile = $env:LUMINARY_PROFILE
 # written verbatim to backend/.env, where the backend rejects it and re-sizes
 # from host RAM -- installer and app disagreeing with nothing said. Matched
 # case-sensitively so this agrees with install.sh, whose `case` is exact.
-# `low` is the backend's canonical name for the small profile and the one it
-# logs; `public` is the installers'. Accept both, then normalise to the name the
-# bands below are written in -- refusing `low` sent anyone following the
-# backend's own vocabulary to an exit 1.
-if ($LumProfile -ceq "low") { $LumProfile = "public" }
-if ($LumProfile -and -not ($LumProfile -cin @("public", "standard", "performance"))) {
-    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: low, public, standard, performance." -ForegroundColor Red
+# `low` and `public` named the one-model profile, retired when 16GB became the
+# supported floor. Both are still accepted and resolve to `standard`, matching
+# `memory_profile._LEGACY_ALIASES`, so an installed .env keeps working.
+if ($LumProfile -ceq "low" -or $LumProfile -ceq "public") { $LumProfile = "standard" }
+if ($LumProfile -and -not ($LumProfile -cin @("standard", "performance"))) {
+    Write-Host "[install] LUMINARY_PROFILE='$LumProfile' is not one of: standard, performance (low/public map to standard)." -ForegroundColor Red
     Write-Host "[install] It would be written to backend/.env, where the backend rejects it and" -ForegroundColor Red
     Write-Host "[install] re-sizes from host RAM -- so the installer and the app would disagree." -ForegroundColor Red
     exit 1
 }
+# 16GB is the supported floor. A smaller machine gets `standard` too and is told
+# it is under the floor, rather than silently narrowed to one resident model --
+# which is what made the experience fall flat off macOS.
 if (-not $LumProfile) {
     if ($MemGB -gt 24)      { $LumProfile = "performance" }
-    elseif ($MemGB -ge 16)  { $LumProfile = "standard" }
-    else                    { $LumProfile = "public" }
+    else                    { $LumProfile = "standard" }
+}
+if ($MemGB -gt 0 -and $MemGB -lt 16) {
+    Write-Host "[install] This machine reports ${MemGB}GB. Luminary is tuned for 16GB and up:" -ForegroundColor Yellow
+    Write-Host "[install] ingestion, chat and flashcard generation will be slower here." -ForegroundColor Yellow
 }
 
-switch ($LumProfile) {
-    "performance" { $MaxLoaded = 2; $NumParallel = 4; $VisionConcurrency = 4 }
-    "standard"    { $MaxLoaded = 2; $NumParallel = 2; $VisionConcurrency = 2 }
-    default       { $MaxLoaded = 1; $NumParallel = 1; $VisionConcurrency = 1 }
-}
+# Residency follows the profile; serving width follows RAM directly, the way
+# supervisor.rs does. Keyed to the profile name the width drifted silently when
+# `public` was retired: its 24GB+ values became the catch-all and a 16GB laptop
+# began taking two slots, each costing a full OLLAMA_NUM_CTX KV cache (I-31).
+$MaxLoaded = 2
+if ($MemGB -ge 24) { $NumParallel = 2 } else { $NumParallel = 1 }
+# I-31: size every semaphore at the slot count. 4 is opt-in through .env; the
+# auto path never exceeds 2, and `performance` is sized from RAM now, so keying
+# 4 to it would make an unmeasured width automatic.
+$VisionConcurrency = $NumParallel
 Write-Host "[install] ${MemGB}GB RAM -> '$LumProfile' profile (OLLAMA_NUM_PARALLEL=$NumParallel)" -ForegroundColor Yellow
 
 # Pull the chat model, chosen from the memory profile.

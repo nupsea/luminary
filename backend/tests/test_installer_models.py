@@ -18,11 +18,15 @@ from pathlib import Path
 
 import pytest
 
+from app import memory_profile
 from app.model_registry import GENERALIST_PREFERENCE, REGISTRY, profile_for
 
-_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+_REPO = Path(__file__).resolve().parents[2]
+_SCRIPTS = _REPO / "scripts"
 _SH = _SCRIPTS / "install.sh"
 _PS1 = _SCRIPTS / "install.ps1"
+# The fourth sizing site, and the only one with no install step to ask in.
+_SUPERVISOR = _REPO / "src-tauri" / "src" / "supervisor.rs"
 
 
 def _assign(text: str, pattern: str) -> str:
@@ -121,12 +125,100 @@ def test_the_performance_pair_fits_the_band_it_targets(sh):
 
 
 def test_the_bands_agree_across_platforms(sh, ps1):
-    """Three bands, two scripts, one boundary set."""
-    assert '[ "$_gb" -lt 16 ]; then echo "public"' in sh
-    assert '[ "$_gb" -le 24 ]; then echo "standard"' in sh
-    assert 'echo "performance"' in sh
+    """Two bands, two scripts, one boundary. `low` is retired: 16GB is the floor,
+    and a smaller machine gets `standard` plus a warning rather than a narrowed
+    profile. Two detectors disagreeing about the machine is worse than one that
+    is occasionally wrong -- this catches exactly that, and did."""
+    assert '[ "$_gb" -gt 24 ]; then echo "performance"' in sh
+    assert 'echo "standard"' in sh
+    assert '"$_gb" -lt 16 ]' in sh, "install.sh must warn under the floor"
     assert "$MemGB -gt 24" in ps1
-    assert "$MemGB -ge 16" in ps1
+    assert "$MemGB -lt 16" in ps1, "install.ps1 must warn under the floor"
+    assert 'public' not in sh.split("_default_profile")[1][:400]
+
+
+def test_the_desktop_shell_agrees_about_the_residency_band():
+    """Four sites size the machine, not three -- and the fourth is Rust.
+
+    `install.sh`, `install.ps1` and `bootstrap.sh` are shell and are read above.
+    `supervisor.rs` is the sizing path for the drag-installed DMG, which has no
+    install step, and it is invisible to every other test in this file. When the
+    floor moved to 16GB the three shell sites followed and this one did not: it
+    kept `gb >= 24 => 2, _ => 1`, so a 24GB Mac running the bundled app gave
+    Ollama one slot while the backend resolved a text model plus a reader against
+    it -- the pair chosen, then evicted on every switch between them.
+
+    Read as text for the same reason the installers are: nothing here can call
+    Rust. The band is what matters, so the band is what is asserted.
+    """
+    rust = _SUPERVISOR.read_text()
+    start = rust.index("fn ollama_max_loaded_models")
+    # To the function's own closing brace at column 0, not to the next `fn`:
+    # the following item is `pub fn`, so a `\nfn ` split runs past this body and
+    # into the test module, where a different knob's 24GB band would satisfy the
+    # assertions below and this check would read the wrong span.
+    body = rust[start : rust.index("\n}\n", start)]
+    assert "total_memory_gb()" in body, "the residency band no longer reads host RAM"
+
+    assert "gb >= 16 => 2" in body, (
+        "the desktop shell must permit two resident models at the 16GB floor, "
+        "matching memory_profile.MAX_RESIDENT -- it sized from 24GB while the "
+        "backend resolved pairs at 16"
+    )
+    assert "gb >= 24" not in body, "the retired 24GB residency band is back"
+
+    floor = memory_profile.PROFILE_MIN_RAM_GB["standard"]
+    assert f"gb >= {floor} => 2" in body, (
+        f"the shell's band and the profile floor ({floor}GB) have drifted apart"
+    )
+    assert memory_profile.MAX_RESIDENT["standard"] == 2, (
+        "the shell permits two at the floor; the backend must agree or the "
+        "extra slot sits idle behind a narrower semaphore (I-31)"
+    )
+
+
+def test_the_serving_width_band_agrees_across_every_install_path(sh, ps1):
+    """One RAM boundary for `OLLAMA_NUM_PARALLEL`, in four languages.
+
+    I-31, measured on an M3 Pro: a second slot costs a full `OLLAMA_NUM_CTX` KV
+    cache and buys 55.5 -> 97.7 tok/s only once there are two callers, so the
+    band is RAM (<24GB one slot) and the auto path never exceeds 2 -- 4 is opt-in
+    through `.env`.
+
+    **Sized from RAM, never from the profile name.** That is the whole point of
+    this test. These values were keyed to the profile when `public` meant "under
+    24GB" and took one slot, so the catch-all meant 24GB+ and took two. Retiring
+    `public` left the 24GB+ line catching 16GB laptops, which silently began
+    taking two slots -- the value never changed, the band under it did.
+    `supervisor.rs` sized from RAM and was the only path that did not drift.
+    """
+    rust = _SUPERVISOR.read_text()
+    start = rust.index("fn ollama_num_parallel")
+    shell_of_rust = rust[start : rust.index("\n}\n", start)]
+    bootstrap = _BOOTSTRAP.read_text()
+
+    for name, text, pattern in (
+        ("supervisor.rs", shell_of_rust, "gb >= 24 => 2"),
+        ("install.sh", sh, '"$(_mem_gb)" -ge 24 ]'),
+        ("install.ps1", ps1, "$MemGB -ge 24"),
+        ("bootstrap.sh", bootstrap, '"$MEM_GB" -ge 24 ]'),
+    ):
+        assert pattern in text, (
+            f"{name} must size OLLAMA_NUM_PARALLEL from RAM at the 24GB boundary "
+            f"(I-31), not from the profile name -- {pattern!r} is missing"
+        )
+
+    # 4 is opt-in. `performance` is sized from RAM now, so a 4 keyed to it would
+    # hand every 32GB machine a width the measured table never reached.
+    for name, text in (("install.sh", sh), ("install.ps1", ps1), ("bootstrap.sh", bootstrap)):
+        assert "NUM_PARALLEL=4" not in text.replace(" ", ""), (
+            f"{name} sets a serving width of 4 automatically; I-31 caps the auto "
+            f"path at 2 and makes 4 opt-in through .env"
+        )
+        assert "VISION_CONCURRENCY=4" not in text.replace(" ", ""), (
+            f"{name} sets a vision concurrency of 4; I-31 sizes every semaphore "
+            f"at the slot count, and the slot count never exceeds 2 automatically"
+        )
 
 
 def test_the_chat_model_is_chosen_after_the_profile_is_known(ps1):
@@ -195,15 +287,11 @@ def test_bootstrap_resolves_its_model_from_the_profile():
 
 def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
     """Two installers that band differently give the same laptop two setups."""
-    boot = _BOOTSTRAP.read_text()
-    sh_text = _SH.read_text()
-    for band in ("16", "24"):
-        assert re.search(rf"MEM_GB.*-lt {band}|MEM_GB.*-le {band}", boot), (
-            f"bootstrap.sh has no {band}GB band"
-        )
-    for source, name in ((boot, "bootstrap.sh"), (sh_text, "install.sh")):
+    boot = (_SCRIPTS / "bootstrap.sh").read_text()
+    assert re.search(r"MEM_GB.*-gt 24", boot), "bootstrap.sh lost the performance band"
+    assert re.search(r"MEM_GB.*-lt 16", boot), "bootstrap.sh lost the 16GB floor warning"
+    for name, source in (("install.sh", _SH.read_text()), ("bootstrap.sh", boot)):
         assert "performance" in source and "standard" in source, f"{name} lost a profile"
-
 
 def test_start_sh_does_not_assert_a_model_name():
     """A pre-flight warning that names the wrong model sends the user to pull it."""
@@ -265,7 +353,7 @@ def test_compose_file_actually_loads():
 
 
 def test_no_installer_writes_the_legacy_profile_alias():
-    """`public` is the installers' word; the backend's is `low`.
+    """Neither name may be written to .env any more: both are retired.
 
     They collide on a different axis -- `LUMINARY_MODE=public` curates surfaces
     and has nothing to do with memory -- so `public` survives only as a legacy
@@ -315,7 +403,7 @@ def test_the_profile_comment_states_the_bands_the_code_uses():
     """
     text = _SH.read_text()
     banner = next(
-        (line for line in text.splitlines() if "public=" in line and "standard=" in line),
+        (line for line in text.splitlines() if "standard=" in line and "performance=" in line),
         None,
     )
     assert banner, "the profile banner comment is gone"
@@ -343,7 +431,7 @@ def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
 def test_an_unknown_profile_is_refused_rather_than_written_to_env():
     """The backend rejects it and re-sizes, so the two silently disagreed."""
     text = _SH.read_text()
-    assert re.search(r"public\|standard\|performance\)\s*;;", text), (
+    assert re.search(r"standard\|performance\)\s*;;", text), (
         "install.sh no longer validates LUMINARY_PROFILE against the known set"
     )
 
@@ -393,7 +481,7 @@ def test_ps1_refuses_an_unknown_profile():
     macOS -- the same input, two different products."""
     text = _PS1.read_text()
     assert "-cin @(" in text, "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
-    assert 'public", "standard", "performance"' in text
+    assert '"standard", "performance"' in text
 
 
 def test_ps1_guards_the_vision_pull_on_ollama_being_present():
@@ -489,10 +577,11 @@ def test_install_ps1_records_the_models_it_pulled(ps1):
 
 @pytest.mark.parametrize("script", ["sh", "ps1", "bootstrap"])
 def test_every_installer_accepts_the_backends_name_for_the_small_profile(script):
-    """`low` is what the backend calls it and what it logs; `public` is the
-    installers' word. Refusing `low` sent anyone reading the backend to exit 1."""
+    """`low` and `public` named the retired one-model profile. Both must still be
+    ACCEPTED -- an installed .env carries one, and refusing it fails the upgrade --
+    and both now resolve to `standard`."""
     text = {"sh": _SH, "ps1": _PS1, "bootstrap": _SCRIPTS / "bootstrap.sh"}[script].read_text()
-    assert "low" in text and re.search(r'(-ceq "low"|= "low" \])', text), (
+    assert "low" in text and re.search(r'(-ceq "low"|low\|public\))', text), (
         f"{script} does not accept `low` as a name for the small profile"
     )
 

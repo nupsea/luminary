@@ -193,7 +193,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Performance profile — sizes Ollama residency/parallelism + vision concurrency.
-# public=1/1/1 (under 16GB), standard=2/2/2 (16-24GB), performance=2/4/4 (over 24GB).
+# standard=2/2/2 (16GB floor, up to 24GB), performance=2/4/4 (over 24GB).
 # ---------------------------------------------------------------------------
 # Physical RAM in GB, 0 when unreadable. The profile is a memory decision, so
 # an unknown box must not be guessed into "standard".
@@ -209,25 +209,38 @@ _mem_gb() {
     fi
 }
 
+# 16GB is the supported floor. A smaller machine still installs and runs on
+# `standard`; the backend reports the mismatch rather than narrowing itself to a
+# one-model profile, which is what made the experience fall flat off macOS.
+# Must stay in step with `memory_profile.profile_for_ram`: two detectors that
+# disagree about what machine this is are worse than one that is occasionally
+# wrong.
 _default_profile() {
     _gb="$(_mem_gb)"
-    if   [ "$_gb" -eq 0 ];  then echo "public"      # unknown: assume small
-    elif [ "$_gb" -lt 16 ]; then echo "public"
-    elif [ "$_gb" -le 24 ]; then echo "standard"
-    else                         echo "performance"
+    if [ "$_gb" -gt 24 ]; then echo "performance"
+    else                       echo "standard"
+    fi
+}
+
+_warn_if_under_floor() {
+    _gb="$(_mem_gb)"
+    if [ "$_gb" -ne 0 ] && [ "$_gb" -lt 16 ]; then
+        _warn "This machine reports ${_gb}GB. Luminary is tuned for 16GB and up:"
+        _warn "ingestion, chat and flashcard generation will be slower here."
     fi
 }
 
 PROFILE="${LUMINARY_PROFILE:-}"
-# `low` is the backend's canonical name for the small profile and the one it
-# logs, so refusing it sent anyone following the backend's own vocabulary to an
-# exit 1. Normalised to `public` here because that is what the bands below and
-# the pull logic are written in; the .env write converts it back.
-[ "$PROFILE" = "low" ] && PROFILE="public"
-case "${PROFILE:-public}" in
-    public|standard|performance) ;;
+# `low` and `public` named the retired one-model profile. Both are accepted and
+# resolve to `standard`, matching `memory_profile._LEGACY_ALIASES`, so an
+# existing .env and any script passing the old name keep working.
+case "$PROFILE" in
+    low|public) PROFILE="standard" ;;
+esac
+case "${PROFILE:-standard}" in
+    standard|performance) ;;
     *)
-        _err "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
+        _err "LUMINARY_PROFILE='$PROFILE' is not one of: standard, performance (low/public map to standard)."
         _err "It would be written to backend/.env, where the backend rejects it and"
         _err "re-sizes from host RAM -- so the installer and the app would disagree."
         exit 1
@@ -236,12 +249,11 @@ esac
 if [ -z "$PROFILE" ]; then
     _suggested="$(_default_profile)"
     if [ -t 0 ]; then
-        printf '\033[0;36m[install]\033[0m Performance profile? [1] public/under 16GB  [2] standard/16-24GB  [3] performance/over 24GB  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
+        printf '\033[0;36m[install]\033[0m Performance profile? [1] standard/16-24GB  [2] performance/over 24GB  (default: %s, sized from %sGB RAM) : ' "$_suggested" "$(_mem_gb)"
         read -r _p || _p=""
         case "$_p" in
-            1|public)      PROFILE="public" ;;
-            2|standard)    PROFILE="standard" ;;
-            3|performance) PROFILE="performance" ;;
+            1|standard)    PROFILE="standard" ;;
+            2|performance) PROFILE="performance" ;;
             *)             PROFILE="$_suggested" ;;
         esac
     else
@@ -249,11 +261,29 @@ if [ -z "$PROFILE" ]; then
         PROFILE="$_suggested"
     fi
 fi
-case "$PROFILE" in
-    public)      OLLAMA_MAX_LOADED_MODELS=1; OLLAMA_NUM_PARALLEL=1; VISION_CONCURRENCY=1 ;;
-    performance) OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=4; VISION_CONCURRENCY=4 ;;
-    *)           OLLAMA_MAX_LOADED_MODELS=2; OLLAMA_NUM_PARALLEL=2; VISION_CONCURRENCY=2 ;;
-esac
+# Residency follows the profile; serving width follows RAM directly, the way
+# `supervisor.rs` does. They are different questions and their 24GB boundaries
+# are not the same boundary: the profile's is exclusive (a 24GB host stays
+# `standard`, because the 9.67GB text model plus a reader is over half of 24GB),
+# while I-31's is inclusive (<24GB gets one slot; at 24 a second is affordable).
+#
+# Keying width to the profile name is what broke it. These values were written
+# when `public` meant "under 24GB" and took one slot, so `*)` meant 24GB+ and
+# took two. Retiring `public` left the 24GB+ line as the catch-all and a 16GB
+# laptop silently began taking two, each costing a full `OLLAMA_NUM_CTX` KV
+# cache. `supervisor.rs` sized from RAM and never drifted; this now matches it,
+# so no future band change can orphan the value again.
+OLLAMA_MAX_LOADED_MODELS=2   # both profiles; `fits_together` is what weighs the pair
+if [ "$(_mem_gb)" -ge 24 ]; then
+    OLLAMA_NUM_PARALLEL=2
+else
+    OLLAMA_NUM_PARALLEL=1
+fi
+# I-31: the auto path never exceeds 2, and 4 is opt-in through .env. That stayed
+# true only while `performance` had to be chosen by hand -- it is sized from RAM
+# now, so keying 4 to it would hand every 32GB machine an unmeasured width. The
+# measured table stops at 2 (55.5 tok/s at one caller, 97.7 at two).
+VISION_CONCURRENCY="$OLLAMA_NUM_PARALLEL"   # I-31: size every semaphore at the slot count
 # Ollama's own defaults are not sized for a laptop: the prompt cache is allowed
 # 8192MB (more than a small machine has in total) and models unload after 5
 # minutes, paying a full reload on the next question. The backend cannot set
@@ -262,9 +292,13 @@ esac
 OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 LLAMA_ARG_CACHE_RAM="${LLAMA_ARG_CACHE_RAM:-512}"
 export OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL OLLAMA_KEEP_ALIVE LLAMA_ARG_CACHE_RAM
+_warn_if_under_floor
 _info "Profile '$PROFILE': OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL ENRICHMENT_VISION_CONCURRENCY=$VISION_CONCURRENCY"
 
-# The chat model follows the profile, because on `public` the runtime keeps one
+# The chat model follows the profile. The one-model band is retired, but the
+# branch stays: OLLAMA_MAX_LOADED_MODELS is overridable, and a machine held to
+# one slot still needs a model that can read a figure. Formerly, on `public`,
+# the runtime kept one
 # model loaded. Pulling a text-only model there left the vision role with nothing
 # the machine could hold: the backend would resolve it to a second model, and
 # OLLAMA_MAX_LOADED_MODELS=1 means loading it evicts the one answering questions.
@@ -313,13 +347,10 @@ _upsert_env OLLAMA_NUM_PARALLEL "$OLLAMA_NUM_PARALLEL"
 # The profile itself, in the backend's vocabulary. Without it the backend sized
 # its own profile from host RAM and could disagree with the one chosen here: pick
 # `public` on a 32GB machine and the backend would resolve chat and vision to two
-# models this install never pulled. `low` is the canonical name; `public` is read
-# as a legacy alias, so writing the canonical one keeps old .env files working
-# without adding a second spelling.
-case "$PROFILE" in
-    public) _upsert_env LUMINARY_MEMORY_PROFILE "low" ;;
-    *)      _upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE" ;;
-esac
+# models this install never pulled. `low` and `public` are both retired now and
+# normalised to `standard` above, so the value written here is always one the
+# backend still has a band for.
+_upsert_env LUMINARY_MEMORY_PROFILE "$PROFILE"
 # The models this installer actually pulled. Leaving them unset let the backend
 # resolve a model that is not on disk, which fails at the first question instead
 # of here; it also left `start.sh` with nothing to read, so its "model isn't

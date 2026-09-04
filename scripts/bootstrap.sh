@@ -270,26 +270,29 @@ MEM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 # script's. Accept both, then validate -- an unrecognised value used to fall into
 # the `*)` arm, take standard knobs, and be written to .env verbatim, where the
 # backend rejects it and re-sizes. Installer and app disagreeing, silently.
-[ "$PROFILE" = "low" ] && PROFILE="public"
-case "${PROFILE:-public}" in
-    public|standard|performance) ;;
+case "$PROFILE" in
+    low|public) PROFILE="standard" ;;
+esac
+case "${PROFILE:-standard}" in
+    standard|performance) ;;
     *)
-        _die "LUMINARY_PROFILE='$PROFILE' is not one of: low, public, standard, performance."
+        _die "LUMINARY_PROFILE='$PROFILE' is not one of: standard, performance (low/public map to standard)."
         ;;
 esac
+# 16GB is the supported floor; below it the profile is unchanged and the
+# mismatch is said out loud instead.
 if [ -z "$PROFILE" ]; then
-    if   [ "$MEM_GB" -lt 16 ]; then PROFILE="public"
-    elif [ "$MEM_GB" -le 24 ]; then PROFILE="standard"
-    else                            PROFILE="performance"
+    if [ "$MEM_GB" -gt 24 ]; then PROFILE="performance"
+    else                          PROFILE="standard"
     fi
 fi
+if [ "$MEM_GB" -gt 0 ] && [ "$MEM_GB" -lt 16 ]; then
+    _warn "This machine reports ${MEM_GB}GB. Luminary is tuned for 16GB and up:"
+    _warn "ingestion, chat and flashcard generation will be slower here."
+fi
 case "$PROFILE" in
-    public)
-        MAX_LOADED=1; NUM_PARALLEL=1; VISION_CONCURRENCY=1
-        [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$PUBLIC_GENERALIST"
-        ;;
     performance)
-        MAX_LOADED=2; NUM_PARALLEL=4; VISION_CONCURRENCY=4
+        MAX_LOADED=2
         if [ -z "$CHAT_MODEL" ]; then
             if [ "$MEM_GB" -ge "$LARGE_TEXT_MIN_RAM_GB" ]; then
                 CHAT_MODEL="$LARGE_TEXT_MODEL"
@@ -301,7 +304,7 @@ case "$PROFILE" in
             && VISION_MODEL="$PUBLIC_GENERALIST"
         ;;
     *)
-        MAX_LOADED=2; NUM_PARALLEL=2; VISION_CONCURRENCY=2
+        MAX_LOADED=2
         [ -z "$CHAT_MODEL" ] && CHAT_MODEL="$DEFAULT_CHAT_MODEL"
         ;;
 esac
@@ -317,6 +320,17 @@ esac
 
 # Ollama.app is launched by launchd and does not inherit this shell's env, so
 # the knobs go into the GUI session before it starts. Set BEFORE launching.
+# Serving width follows RAM, not the profile name (I-31: <24GB one slot, and the
+# auto path never exceeds 2 -- 4 is opt-in through .env). Keyed to the profile
+# these drifted the moment `public` was retired and its 24GB+ values became the
+# catch-all for a 16GB laptop. `supervisor.rs` sizes from RAM and never drifted.
+if [ "$MEM_GB" -ge 24 ]; then
+    NUM_PARALLEL=2
+else
+    NUM_PARALLEL=1
+fi
+VISION_CONCURRENCY="$NUM_PARALLEL"   # I-31: size every semaphore at the slot count
+
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "$MAX_LOADED" 2>/dev/null || true
 launchctl setenv OLLAMA_NUM_PARALLEL "$NUM_PARALLEL" 2>/dev/null || true
 

@@ -366,8 +366,22 @@ fn ollama_num_parallel(data_dir: &Path) -> u32 {
 /// this; the drag-installed DMG had no install step to do it in, so it inherited
 /// the default and was the only path that could reach that state.
 ///
-/// Sized like `ollama_num_parallel`, from the same `.env`-then-sysctl source, so
-/// the two knobs cannot disagree about how large the machine is.
+/// **The band is 16GB, matching `memory_profile.MAX_RESIDENT`.** This is the
+/// fourth site that sizes a machine, after the two installers and `bootstrap.sh`,
+/// and it is the only one with no install step to ask in -- so when the floor
+/// moved to 16GB and the other three followed, this one was left on the old
+/// 24GB split and no test could see it. A backend that resolves a text model
+/// plus a reader against a runtime permitted only one is the I-31 disagreement
+/// in its worst direction: the pair is chosen, and then evicted on every switch.
+/// `backend/tests/test_installer_models.py` reads this file and fails if the
+/// band drifts from the profile again.
+///
+/// Under the floor this stays at one. The app will not ask for two there --
+/// `fits_together` budgets a resident set at half the machine, so a 12GB host
+/// resolves a single shared model whatever this says -- but this is the one
+/// sizing site that runs on a machine nobody configured, and holding two models
+/// for a 30-minute keep-alive window is a cost paid by the user's whole desktop,
+/// not just by Luminary.
 fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
     if let Some(n) =
         env_file_value(data_dir, "OLLAMA_MAX_LOADED_MODELS").and_then(|v| v.parse().ok())
@@ -378,7 +392,7 @@ fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
         return u32::clamp(n, 1, 4);
     }
     match total_memory_gb() {
-        Some(gb) if gb >= 24 => 2,
+        Some(gb) if gb >= 16 => 2,
         _ => 1,
     }
 }
@@ -605,8 +619,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         // The whole point: never Ollama's default of 3 on an unknown machine.
+        // 16GB is the supported floor and the band `MAX_RESIDENT` uses; this
+        // sat at 24 after the floor moved, so a 24GB DMG got one slot while the
+        // backend resolved a pair against it.
         let gb = total_memory_gb().expect("macOS always reports hw.memsize");
-        assert_eq!(ollama_max_loaded_models(&dir), if gb >= 24 { 2 } else { 1 });
+        assert_eq!(ollama_max_loaded_models(&dir), if gb >= 16 { 2 } else { 1 });
 
         std::fs::write(dir.join(".env"), b"OLLAMA_MAX_LOADED_MODELS=2\n").unwrap();
         assert_eq!(ollama_max_loaded_models(&dir), 2);
@@ -623,7 +640,7 @@ mod tests {
             &b"OLLAMA_MAX_LOADED_MODELS=-2\n"[..],
         ] {
             std::fs::write(dir.join(".env"), bad).unwrap();
-            assert_eq!(ollama_max_loaded_models(&dir), if gb >= 24 { 2 } else { 1 });
+            assert_eq!(ollama_max_loaded_models(&dir), if gb >= 16 { 2 } else { 1 });
         }
 
         std::fs::remove_dir_all(&dir).unwrap();
