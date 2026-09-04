@@ -212,7 +212,15 @@ minor.
 
 ## Deferred — decided, not scheduled
 
-Nothing currently deferred.
+- **A serving width of 4, for a machine that asks for it.** Every install path sizes
+  `OLLAMA_NUM_PARALLEL` from physical RAM and caps the automatic value at 2 (I-31): `performance`
+  is reachable from RAM now, so a 4 keyed to that profile would hand every 32GB machine a width
+  the measured table never reached — it stops at two callers, 97.7 tok/s. Four is still reachable
+  by writing `OLLAMA_NUM_PARALLEL=4` into `.env`. What does not exist is the path that tells a
+  profile a human chose from one sized from RAM: `memory_profile.profile_is_explicit()` answers it
+  for the backend and no installer reads it, so an explicit `LUMINARY_PROFILE=performance` cannot
+  re-enable 4 on its own. Worth building only together with a measurement at four slots, which
+  nobody has taken.
 
 ## Abandoned — do not restore
 

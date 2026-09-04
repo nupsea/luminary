@@ -6,7 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-04
+
+### Added
+- **Documents carry three facets — form, domain and register — and the library
+  shows them.** `content_type` was four questions in one enum, and the
+  `is_technical` column existed because the enum could not carry technicality;
+  seven consumers re-derived it and disagreed. The facets sit behind one derived
+  `DocumentProfile`, `GET /documents` and `GET /documents/{id}` return them, and
+  the library filters on them. A null facet stays null: recording an unmeasured
+  document as `general` would show a decision that never happened.
+- **The entity model is released after 180 seconds idle**, returning 1.4 GB.
+  Only ingestion and the reindex script need it, so the reload is paid by a job
+  that already takes minutes rather than by someone waiting for an answer.
+
 ### Changed
+- **16 GB is the supported floor, and the one-model profile is retired.** It
+  kept a single model resident, so every switch between the chat model and the
+  reader was an eviction — 9.6 s to 155 s per reload on an Intel i7-8850H. A
+  smaller machine now runs the same profile and is told it is under the floor
+  rather than being silently narrowed.
+- **Every path that sizes the machine reads the same band.** `install.sh`,
+  `install.ps1`, `bootstrap.sh` and `supervisor.rs` size `OLLAMA_NUM_PARALLEL`
+  from physical RAM rather than from the profile name, and residency from the
+  profile. Keying width to the name is what let a 16 GB laptop silently take two
+  serving slots when the `public` profile was retired.
+
 - **`docs/roadmap.md` is a roadmap again.** It had drifted into a defect log
   against its own rule; the nine remaining defects moved to the issue tracker
   (#95-#103) with their evidence, and the file now carries four upcoming
@@ -14,6 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and multi-language support. 297 lines to 167.
 
 ### Fixed
+- **A 24 GB Mac running the bundled app gave Ollama one model slot while the
+  backend resolved two models against it**, so the pair was chosen and then
+  evicted on every switch. `supervisor.rs` sizes the drag-installed DMG, which
+  has no install step, and it had kept the retired 24 GB band.
+- **Model footprints were read from a process RSS, not from the runtime.** On
+  unified memory the runner's RSS double-counts weights it maps, so the reader
+  measured 8.77 GB against the 6.81 GB Ollama reports. Residency is now
+  `/api/ps` only (I-39).
+- **A parent section stored its children's text**, so a PDF's parent sections
+  duplicated everything beneath them.
+- **The page field could reach a printed page number**, and a page number set in
+  display type was read as a section heading.
+- **Notes could not generate their own flashcards**, and a run that produced
+  zero cards did not say why.
+- **Eval metrics recorded the unscoped arm and stopped inventing verdicts.**
+
 - **`DEEP_DIVE.md` described a version of Luminary that no longer exists.** It
   named `mistral` as the default model and port 8000 as the backend, said the
   OS-keychain migration was "planned" and that a Tauri desktop wrapper was "not
