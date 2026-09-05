@@ -17,6 +17,34 @@ Both are synchronous. Calling either directly in an async function blocks the ev
 **I-3. Always guard Kuzu `get_next()` with `has_next()`.**
 `get_next()` raises if no rows exist. Every Kuzu result iteration must call `has_next()` first.
 
+**I-40. What decides shutdown time is the work inside the loop's default executor, not the tasks
+awaiting it.**
+The whole backend suite hung on `master` at `8634011`, ending in `+++ Timeout +++` with no summary
+line, surfacing in a different test on each run and passing outright on the runs where the leaked
+work happened to finish quickly. Measured: a 30s `run_in_executor` call held
+`TestClient.__exit__` for **30.3s with no pending task at all**, which is what separates this from
+the task-leak class and explains why two rounds of task-draining fixes left it standing.
+
+`asyncio.Runner.close()` ends in `loop.shutdown_default_executor(constants.THREAD_JOIN_TIMEOUT)`,
+and that constant is **300 seconds**. Every `asyncio.to_thread` call runs in that executor -- I-2
+puts LanceDB and Kuzu there, and the embedder and GLiNER loads land there too -- so the join waits
+out whatever is still inside one. `with TestClient(app)` runs the app on anyio's blocking portal,
+whose thread ends in exactly that call, so one fire-and-forget task still embedding a note parks
+teardown until it returns: past the 120s per-test timeout, which kills the session and names
+whichever test owned the client rather than the one that leaked. Nothing awaits those threads
+through a task, so there is nothing to cancel or detach and `_drain_leaked_tasks` cannot see them.
+
+**The same call is on the real shutdown path.** uvicorn closes its loop the same way, and the
+lifespan bounds only the task registries it maintains (`_background_tasks`,
+`_ingestion_background_tasks`), so in-flight `to_thread` work can still hold a desktop quit for up
+to 300s -- against that block's own stated requirement that quitting be quick.
+
+`tests/conftest.py` bounds the join at 30s -- above a ~6s GLiNER load, far below the 120s per-test
+timeout -- and reports every test whose background work outlived it, so a leak stays visible
+instead of silently costing the wait. `tests/test_testclient_teardown_is_bounded.py` fails CI if
+the bound is removed, and its second test fails if the work it measures was not actually in flight,
+which is what stops the first from passing against work that had already finished.
+
 ## FTS5 / SQLite
 
 **I-4. Do not use `WHERE unindexed_col = :val` on FTS5 virtual tables.**
