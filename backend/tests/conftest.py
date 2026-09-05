@@ -17,6 +17,7 @@ import asyncio.base_events
 import os
 import time
 import warnings
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -35,6 +36,24 @@ def isolated_data_dir(tmp_path_factory):
     """
     data_dir = str(tmp_path_factory.mktemp("luminary_test_data"))
     os.environ["DATA_DIR"] = data_dir
+
+    # Model weights are the one thing a fresh DATA_DIR must not re-fetch. They are
+    # content-addressed downloads rather than library state, and every model cache
+    # hangs off `DATA_DIR/models/<slug>` -- the embedder, the cross-encoder, GLiNER
+    # and `model_prefetch` all read it. A per-session temp dir therefore made every
+    # suite run re-download them: bge-small alone costs a measured 22.8s on first
+    # encode against 0.01s warm, and `POST /notes` pays it inside a fire-and-forget
+    # `run_in_executor`, which is where it became the I-40 teardown wedge.
+    #
+    # Only the cache is shared; every other path stays isolated, so a live dev
+    # backend is still safe to run alongside the suite. Nothing in the app deletes
+    # this directory -- component uninstall removes a tool binary, not a model.
+    shared_models = Path(
+        os.environ.get("LUMINARY_TEST_MODEL_CACHE")
+        or Path.home() / ".cache" / "luminary" / "test-models"
+    ).expanduser()
+    shared_models.mkdir(parents=True, exist_ok=True)
+    Path(data_dir, "models").symlink_to(shared_models, target_is_directory=True)
     # Disable Phoenix tracing so tests do not try to bind port 4317/6006.
     # This prevents conflicts when a live dev backend is running concurrently.
     os.environ["PHOENIX_ENABLED"] = "false"
