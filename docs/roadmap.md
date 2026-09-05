@@ -49,6 +49,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Model footprint measured rather than estimated, three RAM bands, and a registry that refuses a model the host cannot hold | `model_registry.py`, `metrics.md` |
 | Interactive work outranks background work for the Ollama slot | `services/llm_admission.py`, `tests/test_background_yields_the_slot_to_a_waiting_question.py` |
 | Eval runs carry their own provenance (model, embedder, corpus fingerprint, library state) and a repair/first-pass tier | `evals/run_eval.py` `capture_environment`, `GET /evals/output-stats` |
+| Documents carry three facets (form, domain, register) behind one derived profile, written at ingest and readable per document | `types.py` `DocumentProfile`, `workflows/ingestion_nodes/parse.py` `_persist_classification` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on
@@ -63,152 +64,195 @@ planning unit.
 
 Rung numbers are ordering, not commitments. Several will split once scoped.
 
+The ladder was re-cut on 2026-09-05. The four rungs that lead are experience rungs, and the integrity
+rungs that used to be 0.10.0–0.12.0 sit behind them. The whole cost of that trade is that four
+feature rungs land on a suite with a live quarantine, so **a rung ships its smoke scripts with its
+endpoints (I-14) and adds nothing to the quarantine**. If the quarantine grows once, 0.14.0 moves
+back up the ladder.
+
 | Rung | Theme | Exit gate |
 |---|---|---|
-| 0.9.0 | Model alignment | Every stored row's facets agree with the profile; the reader can see what was classified and what was not |
-| 0.10.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
-| 0.11.0 | Stores that agree | A reprocess killed midway leaves no divergence between stores |
-| 0.12.0 | Ingest you can measure | Every ingest path reports a measured fidelity number |
-| 0.13.0 | Anki import | A real deck imports with an honest grounding state per card |
-| 0.14.0 | Windows | First-run setup completes on a machine that has never seen Luminary |
-| 0.15.0 | Snapshot and sync | Two machines that studied offline converge without losing a review |
-| 0.16.0 | Mobile capture and review | Capture and review from a phone with the laptop asleep |
-| 0.17.0 | Multi-language | A re-embed runs to completion on a real library, resumable |
+| 0.10.0 | Smart Hybrid, and the privacy receipt | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
+| 0.11.0 | The docked reader | A citation survives selection → note → resolution back to the exact locus for page, video, code and web; no modal opens from the reader |
+| 0.12.0 | The Brief | Every claim in a Brief resolves to a chunk of that document, measured on the golden corpus against a floor that can come out red |
+| 0.13.0 | Capture | Three source types round-trip from the browser to a readable document; an unpaired origin is refused |
+| 0.14.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
+| 0.15.0 | Stores that agree, ingest you can measure | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number |
+| 0.16.0 | Windows | First-run setup completes on a machine that has never seen Luminary |
+| 0.17.0 | The re-embed rail | A full re-embed of a real library runs to completion, survives being killed, and resumes |
 | 1.0.0 | The public release | Every rung's exit gate green together, on one build |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
 
 Startup only ever runs `upgrade head`, so a newer library cannot be opened by an older build
-(`releasing.md`). Every migration is a one-way door, which is why the migration-heavy rungs come
-first: walk through them while the room is nearly empty.
+(`releasing.md`). Every migration is a one-way door, which is why what remains of the document-model
+work and the re-embed rail both stay inside 0.x.
 
-### 1. The document model expresses what documents actually are — 0.9.0
+### 1. Smart Hybrid, and the privacy receipt — 0.10.0
 
-**`content_type` is four questions in one enum**: a container (`audio`, `epub`,
-`kindle_clippings`), a shape (`book`, `paper`, `conversation`), a subject (the `tech_` prefix) and
-a size — `content_classifier.py` says outright that `tech_book` vs `tech_article` is "a sizing
-choice, not a category". Eleven values enumerate eleven cells of a cross product, so most documents
-have nowhere to land, and `technical` is a transient upload state living in a persisted enum.
+**The routing already exists and nobody is ever offered it.** `settings_service.get_effective_routing`
+sends interactive work to the cloud and background work to Ollama under `llm_mode="hybrid"`; the
+default is `private` and no first-run question changes it. A stranger evaluating Luminary meets a
+40–90s first answer, which is a verdict rather than a wait.
 
-The `is_technical` column exists because the enum could not carry technicality. Two of seven
-consumers read it; the rest re-derive it and disagree — `document_tagger.py` counts `paper` and
-`conversation` as technical, `types.py` does not, and `flashcard_prompts.py` and `chat_meta.py`
-fall back to matching the document **title** against a keyword regex.
+What ships is the offer, the perceived latency, and the receipt.
 
-The replacement is three facets — form, domain, register — behind one derived `DocumentProfile`
-that owns every policy currently re-derived at each call site. Splitting the enum without that
-object gives five rival definitions three fields to disagree over instead of one.
+- First run asks one question — fast or private — each stated with its own measured latency, key
+  pasted inline. **No key still means a fully working local app.** I-16 is what makes hybrid an offer
+  rather than a default, and it is not negotiable by a growth argument.
+- Retrieval renders before generation: source chips paint when retrieval returns, the answer streams
+  after. On the local arm this is the difference between "thinking" and "dead".
+- Every answer carries engine, latency, cost, and what left the machine — N passages, M tokens, which
+  provider. The routing table is a Settings surface, not a sentence in a doc.
 
-**Why this rung is first**: every other entry here gets harder with users. This one gets
-foreclosed. After 1.0 the document model is what the compatibility promise is about.
+**Only synthesis is routable.** Embedding is not: one 384-dim space holds every stored vector, so a
+hosted embedder is a migration and never a setting (I-9). Retrieval, transcription, entity extraction
+and the learner record stay local in every mode, which is what makes the privacy claim checkable
+rather than promised.
 
-**It spans three rungs by construction.** Retiring the legacy `content_type` projection can only
-happen after a shipped release stopped depending on it — so 0.9.0 takes the additive migration, the
-profile, and the facets as a read-only addition to the document API; 0.10.0 classifies on the new
-axes and moves the write path; 0.11.0 retires the projection.
+**What a number from this rung may be compared against.** The retrieval arm defaults `--rerank` to the
+backend's `rerank_enabled` and exits rather than guessing when it cannot read it (`shipped_rerank`,
+`run_eval.py`), so the arm measures the funnel a user gets — `--no-rerank` is the ablation and says so.
+Retrieval baselines recorded before 2026-08-26 are the unreranked funnel and are not comparable to
+anything this rung produces.
 
-**The read path is in 0.9.0 deliberately.** A classifier nobody can inspect cannot be trusted, and
-0.10.0 tunes the classifier — reviewing that without being able to see what it decided would be
-reviewing it blind. `GET /documents` and `GET /documents/{id}` carry a `facets` object (form,
-domain, register, and the derived `card_genre`), and the library card renders it. Adding response
-fields does not break a client, which is why this could come forward while `make smoke` is still
-red (#62); moving the *write* path could not.
+**The number that must not be bought.** `resolve_context_budget()` already narrows the synthesis budget
+from 1500 to 750 tokens on a slow host with the answer-quality cost unmeasured (#100). A second latency
+win taken out of content is the failure this rung is most likely to produce.
 
-**A null facet is not a default.** `domain` is null unless something measured it or the content type
-names it outright — 4 of the library's 8 talks carry a null `is_technical` because
-`detect_technical_transcript` returned None and nothing retries. Recording those as `general` would
-show the reader a decision that never happened. `DocumentProfile.is_technical` reads false for a
-null domain, so nothing downstream moved when this changed.
+### 2. The docked reader — 0.11.0
 
-The migration is additive only. `batch_alter_table` emits a plain `ALTER TABLE ADD COLUMN` for
-`add_column` but rebuilds the table — `DROP TABLE documents` included — for `alter_column`, so
-`domain` is a new column backfilled from `is_technical`, never a widening of it. The backfill reads
-only columns already on the row, so it needs no document text and no model, and re-running it is
-always safe. **No failure mode in this work requires a user to re-ingest.**
+**Three modals cover the text the reader is reading.** `QuickNoteComposer` is a dialog, `Chat` is a
+global slide-over owned by `App.tsx`, `FeynmanDialog` is a third dialog. The resizable right panel
+that would hold all three already exists and shows only summaries and chapter goals.
 
-Split the DDL and the backfill into separate revisions, and guard the backfill on data
-(`WHERE form IS NULL`) rather than on column existence: SQLite DDL escapes the surrounding
-transaction, so a crash mid-revision leaves the column committed and the backfill rolled back, and
-the existing `if _has_column(...): return` guard would then skip the backfill permanently.
+The panel becomes the assistant: `Notes · Key Points · Detailed · Glossary · References · Ask AI ·
+Practice`. Selection actions dock into it instead of opening anything, and the citation travels with
+the action. `SelectionActionBar` already emits `onAddToNote`, `onAskInChat`, `onExplain` and `onClip`
+with a `SourceRef` — the wiring exists and lands in modals.
 
-### 2. Anki import, and a real round-trip — 0.13.0
+The centre pane re-skins by type while the docked workflows stay constant. **The citation format is
+the part that is per-type and load-bearing**: `p.151 · §5.2`, `VIDEO 14:22`, `raft.go · L214`,
+`domain · ¶4`. A clip from a transcript carries a seekable timestamp or the note has lost the thing
+that made it checkable.
 
-**Export already ships**: `export_service.py` writes a `.apkg` through genanki, one card per
-`FlashcardModel` in a collection's deck (`GET /collections/{id}/export?format=anki`). There is
-no import path at all.
+**The one real refactor is `Chat.tsx`** — 1518 lines, a page-level default export with no props. A
+`ChatConversation` component has to come out of it reading scope from the store rather than the render
+closure; the comment at its send handler records the shipped bug that happens otherwise (a library
+question scoped to a PDF 40 seconds into ingestion).
 
-The point is not symmetry for its own sake — it is that a learner arrives with a deck they have
-already invested in, and today Luminary cannot read it. Import is the adoption path.
+The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
+lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output
+is what gets shared. All four are `surface-manifest.json` edits.
 
-The hard part is not the file format. A Luminary card carries `source_chunk_ids` and a
-per-card grounding verdict (I-34, I-35); an imported card has no passage in the library to
-point at. So importing has to answer what grounding means for a card whose source is elsewhere
-— shown as ungrounded, allowed to bind to a document later, or held in a separate lane. Decide
-that before writing a parser, or the invariant quietly stops meaning anything.
+**A rate of 1.0000 on the citation round-trip is a rubber stamp unless a deliberately unresolvable ref
+is in the same test and fails.** See `.claude/rules/common/verify-before-reporting.md`.
 
-FSRS state is the other question: an Anki deck carries SM-2 scheduling, and `fsrs` v6 state is
-not the same shape. Importing intervals naively would produce a schedule that looks continuous
-and is not.
+### 3. The Brief — 0.12.0
 
-### 3. Sync the library through a file-sync service — 0.15.0
+Ingest finishes and the document has already said what it contains: a one-sentence thesis, five claims
+it makes with a marker-resolved verbatim quote and locus each, three questions it answers, and what it
+does not cover. It renders in the existing Key Points tab and on the library card — no new surface.
 
-iCloud Drive, OneDrive, Dropbox, Google Drive — the services people already pay for, rather
-than a server Luminary would have to run. This keeps the local-first promise: no account, no
-backend, no data leaving except into storage the user already controls.
+**The claims are safe by construction and the questions are not.** A claim's quote comes from
+`_resolve_marker_citations`, so it is verbatim because the excerpt is sliced from the chunk the marker
+names (I-33). The questions are the feature described in **#66**: `SuggestionService.get_grounding_passages`
+prefers `SectionSummaryModel.content`, so questions are generated from a paraphrase, presuppose framings
+the document never makes, and the answer that follows renders with a confidence chip and five source
+chips while being ungrounded. Moving that to first-run puts it where it does the most damage.
 
-**The live stores cannot be the thing that syncs.** SQLite (with WAL), LanceDB and Kuzu are all
-mid-write-sensitive; a sync daemon copying a `-wal` or a Kuzu directory mid-write produces a
-corrupt library on the other machine, and Kuzu holds a lock besides. So the design is a
-snapshot/restore format that syncs, with the live stores rebuilt from it — never the stores
-themselves in a synced folder.
+Three things have to be true before the questions ship: generation reads chunk text, each question is
+validated by running retrieval and dropped when nothing scores, and the general-knowledge fallback in
+`QA_FACTUAL_SYSTEM_PROMPT` is suppressed for a question the product itself suggested.
 
-That makes this the same work as the **OKF file projection**: a folder of Markdown, one file
-per concept plus an index and a log, that a user can read and edit outside the app. Only the
-grounding half of OKF exists today (`services/okf_context.py`, documented in `concepts.md`);
-the projection does not. I-21 governs it — OKF is a projection, never a transport and never a
-source of truth — which is exactly the property a sync format needs.
+**"What it does not cover" is a claim about absence**, so it is only worth shipping if it can be wrong:
+test it against questions the document demonstrably does answer.
 
-Conflict resolution is the open question, and it is the reason this is a feature rather than a
-script: two machines that both studied offline have divergent FSRS state, and last-writer-wins
-would silently discard a review session.
+Paired with the Brief, the first-run reward stops being a flashcard. `feynman_service` already grades an
+explanation against the chapter and returns a critique naming the page; that is the payoff, and the cards
+come after it as the consequence of being measured.
 
-### 4. A mobile client for capture and review — 0.16.0
+### 4. Capture — 0.13.0
 
-Note taking and flashcard review — the two things you do away from a desk. Reading and ingest
-stay on the machine that has the models.
+**A library stays empty when filling it means opening the app and finding the file.** This is not the
+mobile rung and is much cheaper than it: the backend is already HTTP on :7820, so an extension needs a
+POST rather than an architecture. One click for a page, a PDF, a YouTube video or a selection with its
+source; a watch-folder for the desktop app; Markdown export shaped for Obsidian and a Zotero read path.
 
-The backend is already HTTP, so the surface exists. Two things do not. **There is no
-authentication** — Luminary is single-user and local by design, and every store is a local file
-opened by one process; a phone reaching a laptop backend needs an answer to who is asking.
-And a phone that only works while the laptop is awake is not much of a client, so the honest
-version needs local storage on the device and a sync path back — which is feature 2, and why
-it comes second.
+**Pairing ships with it, not after it.** The backend is unauthenticated on localhost and CSRF is
+deliberately open, so any page in any tab can already POST to :7820 — an extension turns a latent hole
+into a documented invitation. The gate is that an unpaired origin is refused, proven by a test that
+fails when pairing is removed.
 
-`surface-manifest.json` already declares each surface's mode, so a mobile build can be a
-third mode rather than a fork.
+### 5. Gates you can believe — 0.14.0
 
-### 5. Multi-language and cross-language support — 0.17.0
+`make ci` and `make smoke` green together with nothing quarantined to keep them so: 22 `pytest.mark.unstable`
+markers across 14 files today (#50). Local green is necessary and not sufficient — GLiNER memory pressure
+has produced GitHub-only failures no local run reproduces.
 
-Two separate pieces of work that get confused with each other.
+This rung exists to shrink as the ladder runs. It grows only if a rung above it breaks the no-new-quarantine
+rule, and that is the signal to move it back up.
 
-**Interface localisation** is seamed but unbuilt: every surface in `surface-manifest.json`
-carries `labels: {"en": ...}`, so the shape is there and nothing else is.
+### 6. Stores that agree, ingest you can measure — 0.15.0
 
-**Cross-language retrieval** is the harder and more valuable one — asking a question in English
-about a German paper, or vice versa. The blocker is concrete: embeddings are
-`BAAI/bge-small-en-v1.5`, 384-dim and English-only, and every stored chunk, note, image and
-concept vector lives in that one space. Moving to a multilingual embedder changes the space, so
-**every vector in every library has to be regenerated** — which is a migration with a re-embed
-cost proportional to the library, not a config change. GLiNER is already multilingual
-(`gliner_multi_pii-v1`), so entity extraction would survive the move; retrieval would not.
+A failed graph write is lost and SQLite and Kuzu diverge with nothing reconciling them (#65). Entity ingest
+samples 2.4% of a long book and reindex disagrees with ingest (#63). The md/epub/docx/txt paths are
+unmeasured and a parent section can store its descendants' text (#97).
 
-Worth measuring before committing: how far the current stack degrades on non-English text, so
-the re-embed is justified by a number rather than by an assumption.
+**The last of the document-model work belongs here.** `form`, `domain` and `register` are written at ingest
+by `_persist_classification` and `DocumentProfile` owns the policy, so what remains is retiring the legacy
+`content_type` projection and `is_technical` now that 0.9.0 has shipped without them being the source of
+truth. It is a migration, and migrations get more expensive with every user.
 
-**This is the last rung before 1.0.0 deliberately.** It is the one migration that cannot be
-additive, and 0.x is the last point at which the compatibility promise is weak enough to absorb
-it. A 1.0 whose first significant act is a full re-embed has broken its own promise in its first
-minor.
+### 7. Windows — 0.16.0
+
+A public 1.0 that runs on one operating system is a beta with a version number. The macOS bundle is signed
+and notarized; Windows is #24. The gate is a first run that completes with no terminal on a machine that has
+never seen Luminary.
+
+### 8. The re-embed rail — 0.17.0
+
+**Build the migration, not the model swap.** Moving to a multilingual embedder regenerates every vector in
+every library, and 0.x is the last point at which the compatibility promise is weak enough to absorb that —
+but the argument is about the machinery, not about the model. A resumable, restartable re-embed path plus
+the snapshot/restore format is the same work sync needs and the same work the OKF projection is (I-21).
+
+Proven against the current 384-dim embedder, where a wrong answer costs nothing. The multilingual swap then
+becomes a 1.x decision backed by the measurement nobody has taken: how far the current stack actually
+degrades on non-English text.
+
+## After 1.0
+
+Each of these needs a decision before it needs code, and none of them blocks a launch.
+
+**Anki import.** Export already ships — `export_service.py` writes a `.apkg` through genanki for a
+collection's deck. There is no import path. The hard part is not the file format: a Luminary card carries
+`source_chunk_ids` and a per-card grounding verdict (I-34, I-35), and an imported card has no passage in the
+library to point at. Decide what grounding means for a card whose source is elsewhere — shown as ungrounded,
+bindable to a document later, or held in a separate lane — before writing a parser, or the invariant quietly
+stops meaning anything. FSRS state is the second question: an Anki deck carries SM-2 scheduling, and `fsrs`
+v6 state is not the same shape, so importing intervals naively produces a schedule that looks continuous and
+is not.
+
+**Sync through a file-sync service.** iCloud Drive, OneDrive, Dropbox, Google Drive — storage the user already
+controls, so no account and no server. **The live stores cannot be the thing that syncs**: SQLite with WAL,
+LanceDB and Kuzu are all mid-write-sensitive, and a daemon copying a `-wal` or a Kuzu directory mid-write
+produces a corrupt library on the other machine. What syncs is the snapshot format from 0.17.0, with the live
+stores rebuilt from it. Conflict resolution is the open question and the reason this is a feature rather than
+a script: two machines that both studied offline have divergent FSRS state, and last-writer-wins silently
+discards a review session.
+
+**A mobile client for capture and review.** Note taking and flashcard review — the two things done away from
+a desk. Reading and ingest stay on the machine with the models. The backend is already HTTP, so the surface
+exists; **there is no authentication**, and a phone reaching a laptop needs an answer to who is asking. A
+phone that only works while the laptop is awake is not a client, so the honest version needs on-device storage
+and a sync path, which is the entry above. `surface-manifest.json` already declares each surface's mode, so a
+mobile build is a third mode rather than a fork.
+
+**The multilingual embedder swap.** Embeddings are `BAAI/bge-small-en-v1.5`, 384-dim and English-only, and
+every stored chunk, note, image and concept vector lives in that space. GLiNER is already multilingual
+(`gliner_multi_pii-v1`), so entity extraction survives the move and retrieval does not. Interface localisation
+is separate and seamed but unbuilt: every surface in `surface-manifest.json` carries `labels: {"en": ...}`.
 
 ## Deferred — decided, not scheduled
 
