@@ -345,6 +345,28 @@ _PROVIDER_KEY_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 
+def cloud_provider_prefixes() -> frozenset[str]:
+    """The prefixes `get_effective_routing` prepends to send a call off-device.
+
+    Exposed so nothing else has to keep its own copy: a report deciding whether
+    work runs on this machine has to read the same set routing writes, or the two
+    disagree the moment a provider is added.
+    """
+    return frozenset(_PROVIDER_KEY_FIELDS)
+
+
+def active_routing() -> tuple[str, str | None]:
+    """The stored mode, and the cloud provider when one is in play.
+
+    Reads the same cache `get_effective_routing` reads. The provider is None in
+    `private` mode because no provider is selected there, which is different from
+    a provider being configured and unused.
+    """
+    mode = _cache.get("llm_mode", "private")
+    provider = _cache.get("cloud_provider") if mode in ("hybrid", "cloud") else None
+    return mode, provider
+
+
 def resolve_provider_api_key(provider: str) -> str:
     """The key that will actually be sent for *provider*: DB/keychain first,
     then the same-named environment variable. Empty when neither is set.

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { apiGet, apiPatch, apiPost } from "@/lib/apiClient"
+import { RoutingTable } from "@/components/settings/RoutingTable"
 import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
@@ -304,6 +305,8 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       void queryClient.invalidateQueries({ queryKey: ["llm-models"] })
       void queryClient.invalidateQueries({ queryKey: ["chat-cloud-models"] })
       void queryClient.invalidateQueries({ queryKey: ["study-cloud-models"] })
+      // The routing table reads the saved mode, so it is stale until this fires.
+      void queryClient.invalidateQueries({ queryKey: ["llm-routing"] })
     } catch {
       toast.error("Failed to save settings")
     } finally {
@@ -760,15 +763,18 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           <div className="border-t border-border" />
 
-          {/* Section 4: Privacy notice */}
+          {/* Section 4: where the work runs.
+              This replaced three hardcoded sentences, one of which was wrong: it
+              told the reader flashcards stayed local in hybrid mode, while card
+              generation resolves the `generation` role and takes the interactive
+              route. Prose describing routing drifts from routing; the table is
+              read from the router itself. */}
           <section>
-            <p className="text-xs text-muted-foreground">
-              {localMode === "private"
-                ? "No content leaves your machine. All processing happens on-device using Ollama and local embedding models."
-                : localMode === "hybrid"
-                  ? "Chat and explanations use the cloud provider. Background ingestion tasks (summaries, flashcards, enrichment) use local Ollama to preserve your quota."
-                  : "API calls are sent to the configured cloud provider. Your documents are included in requests."}
+            <h3 className="mb-1 text-sm font-semibold text-foreground">Where your work runs</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Saved settings, not the option selected above. Save to see this change.
             </p>
+            <RoutingTable />
           </section>
         </div>
       </div>

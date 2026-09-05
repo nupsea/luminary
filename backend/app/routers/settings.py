@@ -184,6 +184,43 @@ class InstallableModel(BaseModel):
     fits_host: bool
 
 
+class WorkRoutingItem(BaseModel):
+    id: str
+    label: str
+    model: str | None
+    on_device: bool
+    routable: bool
+    why: str
+    fallback_reason: str | None = None
+
+
+class RoutingResponse(BaseModel):
+    """Where each unit of work runs under the current mode.
+
+    `leaves_device` is derived from the rows rather than stated beside them, so a
+    row and the summary cannot disagree.
+    """
+
+    mode: str
+    provider: str | None
+    work: list[WorkRoutingItem]
+    leaves_device: list[str]
+
+
+@router.get("/llm/routing", response_model=RoutingResponse)
+async def get_llm_routing() -> RoutingResponse:
+    """Which engine serves each unit of work, and what that means leaves the machine."""
+    from app.services.llm_routing import routing_report  # noqa: PLC0415
+
+    report = routing_report()
+    return RoutingResponse(
+        mode=report.mode,
+        provider=report.provider,
+        work=[WorkRoutingItem(**vars(w)) for w in report.work],
+        leaves_device=report.leaves_device,
+    )
+
+
 @router.get("/models", response_model=ModelResidencyResponse)
 async def get_model_residency() -> ModelResidencyResponse:
     """The active memory profile, what each role resolves to, and the footprint."""

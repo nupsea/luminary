@@ -4680,6 +4680,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/llm/routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Llm Routing
+         * @description Which engine serves each unit of work, and what that means leaves the machine.
+         */
+        get: operations["get_llm_routing_settings_llm_routing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/models": {
         parameters: {
             query?: never;
@@ -9835,6 +9855,23 @@ export interface components {
             /** Fallback Reason */
             fallback_reason?: string | null;
         };
+        /**
+         * RoutingResponse
+         * @description Where each unit of work runs under the current mode.
+         *
+         *     `leaves_device` is derived from the rows rather than stated beside them, so a
+         *     row and the summary cannot disagree.
+         */
+        RoutingResponse: {
+            /** Mode */
+            mode: string;
+            /** Provider */
+            provider: string | null;
+            /** Work */
+            work: components["schemas"]["WorkRoutingItem"][];
+            /** Leaves Device */
+            leaves_device: string[];
+        };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {
             /** Score */
@@ -10921,6 +10958,23 @@ export interface components {
             seconds_by_activity: {
                 [key: string]: number;
             };
+        };
+        /** WorkRoutingItem */
+        WorkRoutingItem: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Model */
+            model: string | null;
+            /** On Device */
+            on_device: boolean;
+            /** Routable */
+            routable: boolean;
+            /** Why */
+            why: string;
+            /** Fallback Reason */
+            fallback_reason?: string | null;
         };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
@@ -18791,6 +18845,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_llm_routing_settings_llm_routing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingResponse"];
                 };
             };
         };
