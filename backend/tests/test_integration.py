@@ -29,7 +29,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from task_drain import drain_background_tasks
+from task_drain import dispose_engine, drain_background_tasks
 
 import app.database as db_module
 import app.services.embedder as embedder_module
@@ -161,7 +161,7 @@ async def integration_db(tmp_path, monkeypatch):
     summarizer_module._summarization_service = orig_summarizer
     enrichment_worker_module._worker = orig_enrichment_worker
     get_settings.cache_clear()
-    await engine.dispose()
+    await dispose_engine(engine)
 
 
 # Helper: run ingestion directly (bypassing HTTP for speed)

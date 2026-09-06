@@ -20,6 +20,9 @@ neighbour.
 """
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Long enough for an in-flight DB write or a short embed to finish on its own,
 # short enough that five of them cannot approach the 120s per-test timeout.
@@ -45,3 +48,28 @@ async def drain_background_tasks(registry: set, timeout: float = DRAIN_TIMEOUT_S
                 # retrieved" against whatever test happens to be running.
                 task.exception()
     registry.clear()
+
+
+# Disposing an engine awaits each pooled connection's close, and aiosqlite hands
+# that result back on the loop that OPENED the connection. Across per-test loops
+# that loop may be gone, so the future never completes and the fixture finalizer
+# waits for it forever -- the 120s timeout then kills the session and blames the
+# test that owned the fixture.
+#
+# Observed as a recurring `test_e2e_upload` timeout whose thread dump showed every
+# aiosqlite worker idle: nothing was slow, something was simply never going to be
+# answered. Bounded here so a stranded connection costs one fixture a few seconds
+# instead of costing the run.
+DISPOSE_TIMEOUT_S = 10.0
+
+
+async def dispose_engine(engine, timeout: float = DISPOSE_TIMEOUT_S) -> None:
+    """Dispose *engine*, giving up rather than waiting on a stranded connection."""
+    try:
+        await asyncio.wait_for(engine.dispose(), timeout=timeout)
+    except TimeoutError:
+        logger.warning(
+            "engine.dispose() did not finish within %.0fs; abandoning its pool. A "
+            "pooled connection is waiting on a loop that is already gone.",
+            timeout,
+        )
