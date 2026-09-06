@@ -406,6 +406,36 @@ async def lifespan(app: FastAPI):
     clear_registries()
 
     shutdown_model_executor()
+    await _release_default_executor()
+
+
+# The stdlib joins the loop's default executor for `THREAD_JOIN_TIMEOUT` -- 300
+# seconds -- on the way out of `asyncio.Runner.close()`, and every
+# `asyncio.to_thread` call runs there (I-40). A quit can therefore sit for five
+# minutes behind one embed or one model load.
+#
+# 20s is chosen against the two cases that bracket it. A Kuzu or LanceDB write is
+# sub-second to a few seconds, so a real write finishes inside it and is never
+# abandoned mid-flight; a model load is tens of seconds and is abandoned, which is
+# the trade `shutdown_model_executor` already makes for the same reason.
+#
+# **Bounding this is safer than not bounding it.** Unbounded, the desktop shell's
+# supervisor gives up and SIGKILLs -- killing whatever is mid-write with no grace
+# at all, and leaving the Kuzu lock held against the next launch. A bounded,
+# orderly abandon is the better of the two, not a free one.
+_EXECUTOR_RELEASE_GRACE_S = 20.0
+
+
+async def _release_default_executor() -> None:
+    """Join the loop's default executor briefly, then stop waiting for it."""
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.shutdown_default_executor(_EXECUTOR_RELEASE_GRACE_S)
+    except Exception:  # noqa: BLE001 - a slow quit must never become a failed one
+        logger.warning("Default executor did not shut down cleanly", exc_info=True)
+    # Detached so `Runner.close()` does not join it a second time for its own 300s.
+    # Whatever is still running holds no lock we can release by waiting longer.
+    loop._default_executor = None  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 def _resolve_chat_model() -> str:
