@@ -30,6 +30,7 @@ import {
   locateCitationPage,
   longestPresentRun,
 } from "@/lib/citation"
+import { bodyTextHeight, readableScale } from "@/lib/pdf/readableScale"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
@@ -324,6 +325,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const annotationLayerRef = useRef<HTMLDivElement>(null)
     const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
+    // Fit-width is a mode, not a one-off calculation.
+    //
+    // It used to be computed once, from `clientWidth` at load. The pane is not
+    // its final size then -- the insights panel and the contents list are still
+    // settling -- so the page fitted a narrower box than it ended up in and
+    // stayed there: a PDF that opened noticeably zoomed out, with text too small
+    // to read, and no way back except the zoom menu. Staying in the mode means
+    // the fit follows the pane until the reader picks a zoom themselves.
+    const [zoomMode, setZoomMode] = useState<"readable" | "manual">("readable")
     // Bumped after each text layer render to trigger highlight application
     const [textLayerVersion, setTextLayerVersion] = useState(0)
     // PDF built-in outline (bookmarks) -- preferred over backend sections when available
@@ -886,22 +896,37 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => { cancelled = true }
     }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
 
-    // Fit the page to the window, the two zooms a reader actually reaches for.
-    // Measured from the page itself rather than a remembered number, so they
-    // stay correct after the panel is resized.
+    // Size the page to the pane. Measured from the page itself rather than a
+    // remembered number, so every mode stays correct after the panel is resized.
+    //
+    // "readable" is the default and the only one that looks at the type rather
+    // than the paper: fit-width is a ceiling there, not the target. See
+    // `lib/pdf/readableScale`.
     const fitTo = useCallback(
-      async (mode: "width" | "page") => {
+      async (mode: "readable" | "width" | "page") => {
         if (!pdfDoc || !scrollAreaRef.current) return
         try {
           const page = await pdfDoc.getPage(currentPage)
           const viewport = page.getViewport({ scale: 1.0 })
-          page.cleanup()
           const availableWidth = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
           const availableHeight = scrollAreaRef.current.clientHeight - 32
-          if (viewport.width <= 0 || availableWidth <= 0) return
+          if (viewport.width <= 0 || availableWidth <= 0) {
+            page.cleanup()
+            return
+          }
           const byWidth = availableWidth / viewport.width
           const byHeight = viewport.height > 0 ? availableHeight / viewport.height : byWidth
-          setZoom(mode === "width" ? byWidth : Math.min(byWidth, byHeight))
+          if (mode !== "readable") {
+            page.cleanup()
+            setZoom(mode === "width" ? byWidth : Math.min(byWidth, byHeight))
+            return
+          }
+          const text = await page.getTextContent()
+          page.cleanup()
+          const extents = text.items.flatMap((item) =>
+            "str" in item ? [{ str: item.str, height: item.height }] : [],
+          )
+          setZoom(readableScale({ bodyHeight: bodyTextHeight(extents), fitWidthScale: byWidth }))
         } catch {
           // Non-fatal: the zoom simply stays where it is.
         }
@@ -909,6 +934,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       [pdfDoc, currentPage],
     )
     const fitToWidth = useCallback(() => void fitTo("width"), [fitTo])
+
+    // Refit on resize: opening the insights panel, dragging its divider, or the
+    // window changing all alter the room the page has to be legible in.
+    useEffect(() => {
+      const el = scrollAreaRef.current
+      if (!el || zoomMode !== "readable" || !pdfDoc) return
+      const observer = new ResizeObserver(() => void fitTo("readable"))
+      observer.observe(el)
+      return () => observer.disconnect()
+    }, [zoomMode, pdfDoc, fitTo])
     const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
     // Which match on this page is the active one. Derived here so the effect
@@ -1261,7 +1296,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             <div className="ml-auto flex items-center gap-0.5" ref={zoomPopoverRef}>
               <button
                 className="p-1 rounded hover:bg-accent disabled:opacity-40"
-                onClick={() => setZoom(stepZoom(zoom, -1))}
+                onClick={() => { setZoomMode("manual"); setZoom(stepZoom(zoom, -1)) }}
                 disabled={zoom <= ZOOM_STOPS[0]}
                 title="Zoom out (Ctrl -)"
                 aria-label="Zoom out"
@@ -1282,13 +1317,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   <div className="absolute right-0 bottom-full mb-2 z-30 min-w-[9rem] overflow-hidden rounded-md border bg-background py-1 shadow-md">
                     <button
                       className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
-                      onClick={() => { fitToWidth(); setZoomOpen(false) }}
+                      onClick={() => { setZoomMode("readable"); void fitTo("readable"); setZoomOpen(false) }}
+                    >
+                      Readable
+                    </button>
+                    <button
+                      className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
+                      onClick={() => { setZoomMode("manual"); fitToWidth(); setZoomOpen(false) }}
                     >
                       Fit width
                     </button>
                     <button
                       className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
-                      onClick={() => { fitToPage(); setZoomOpen(false) }}
+                      onClick={() => { setZoomMode("manual"); fitToPage(); setZoomOpen(false) }}
                     >
                       Fit page
                     </button>
@@ -1297,7 +1338,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                       <button
                         key={preset}
                         className="block w-full px-3 py-1.5 text-left text-xs tabular-nums hover:bg-accent"
-                        onClick={() => { setZoom(preset); setZoomOpen(false) }}
+                        onClick={() => { setZoomMode("manual"); setZoom(preset); setZoomOpen(false) }}
                       >
                         {Math.round(preset * 100)}%
                       </button>
@@ -1307,7 +1348,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               </div>
               <button
                 className="p-1 rounded hover:bg-accent disabled:opacity-40"
-                onClick={() => setZoom(stepZoom(zoom, 1))}
+                onClick={() => { setZoomMode("manual"); setZoom(stepZoom(zoom, 1)) }}
                 disabled={zoom >= ZOOM_STOPS[ZOOM_STOPS.length - 1]}
                 title="Zoom in (Ctrl +)"
                 aria-label="Zoom in"

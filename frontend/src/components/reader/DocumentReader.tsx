@@ -174,6 +174,28 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // the Read view, so only a named section or chunk overrides the format.
   const hasPassageLink = Boolean(initialSectionId || initialChunkId)
 
+  // Arriving from a citation, the source gets the room.
+  //
+  // The insights panel takes roughly a third of the width, and the page is fitted
+  // to what is left -- so a cited PDF opened at about 118%, which on a paper is
+  // text too small to read, and widening it would only have traded that for
+  // sideways scrolling. Collapsing the panel gives the page the width instead, and
+  // fit-width follows it.
+  //
+  // Transient, and deliberately not written to the panel's stored state: the
+  // reader did not ask for their layout to change, so reopening it once puts
+  // everything back and it stays back.
+  const [insightsRestored, setInsightsRestored] = useState(false)
+  const citationOwnsScroll = initialCitationWords.length > 0
+  const focusOnCitation = citationOwnsScroll && !insightsRestored
+  const insightsCollapsed = insights.collapsed || focusOnCitation
+  const toggleInsights = useCallback(() => {
+    setInsightsRestored(true)
+    // Only actually toggle when the panel is where the reader last left it;
+    // otherwise this click is undoing the citation focus, not collapsing.
+    if (!focusOnCitation) insights.toggle()
+  }, [focusOnCitation, insights])
+
   const {
     leftTab,
     setLeftTab,
@@ -344,9 +366,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     void el.play()
   }
 
-  // Scroll to initialSectionId once document sections are loaded
+  // Scroll to initialSectionId once document sections are loaded.
+  //
+  // A citation owns the scroll instead. Both this and the Read-tab effect below
+  // put the section *heading* at the top of the port, which for a chapter-length
+  // section leaves the cited passage off screen -- and being armed by the same
+  // navigation, they fire last and undo the centring. The passage is inside this
+  // section anyway, so landing on it lands here.
   useEffect(() => {
-    if (!initialSectionId || !doc) return
+    if (!initialSectionId || !doc || citationOwnsScroll) return
     // Wait a tick for DOM to update after doc is available
     const timer = setTimeout(() => {
       const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
@@ -355,11 +383,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }
     }, 100)
     return () => clearTimeout(timer)
-  }, [initialSectionId, doc])
+  }, [initialSectionId, doc, citationOwnsScroll])
 
-  // Explicit scroll when switching to Read tab via citation link
+  // Explicit scroll when switching to the Read tab from a section.
+  //
+  // Suppressed only for the section the reader arrived at with a citation; any
+  // section they pick afterwards scrolls normally.
   useEffect(() => {
-    if (leftTab === "read" && readSectionId) {
+    if (leftTab === "read" && readSectionId && !(citationOwnsScroll && readSectionId === initialSectionId)) {
       const timer = setTimeout(() => {
         const el = document.getElementById(`read-sec-${readSectionId}`)
         if (el) {
@@ -368,7 +399,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [leftTab, readSectionId])
+  }, [leftTab, readSectionId, initialSectionId, citationOwnsScroll])
 
   // Keep activeSectionId in sync with whichever per-action state was most
   // recently touched. Priority: Feynman > Read > Goals > Note editor.
@@ -1496,10 +1527,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           label="Resize insights panel"
         />
 
-        {insights.collapsed ? (
+        {insightsCollapsed ? (
           <button
             type="button"
-            onClick={insights.toggle}
+            onClick={toggleInsights}
             aria-label="Show insights"
             title="Show insights"
             className="flex w-8 shrink-0 items-start justify-center border-l border-border pt-4 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -1511,7 +1542,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           <div className="mb-2 flex justify-end">
             <button
               type="button"
-              onClick={insights.toggle}
+              onClick={toggleInsights}
               aria-label="Hide insights"
               title="Hide insights"
               className="text-muted-foreground hover:text-foreground"

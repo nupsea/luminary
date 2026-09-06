@@ -30,7 +30,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 39 hard invariants | `invariants.md` |
+| The 41 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -50,6 +50,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 | Interactive work outranks background work for the Ollama slot | `services/llm_admission.py`, `tests/test_background_yields_the_slot_to_a_waiting_question.py` |
 | Eval runs carry their own provenance (model, embedder, corpus fingerprint, library state) and a repair/first-pass tier | `evals/run_eval.py` `capture_environment`, `GET /evals/output-stats` |
 | Documents carry three facets (form, domain, register) behind one derived profile, written at ingest and readable per document | `types.py` `DocumentProfile`, `workflows/ingestion_nodes/parse.py` `_persist_classification` |
+| A citation lands on its passage -- marked, centred and held there -- in prose, transcripts and as an overlay on the PDF page itself | `invariants.md` I-41, `frontend/src/lib/citation/`, `make verify-citation` |
 
 Notes and the recommender shipped without a surviving contract doc because their behaviour is
 adequately described by `architecture.md` plus the code. Their specs were deleted on

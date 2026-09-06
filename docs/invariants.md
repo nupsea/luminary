@@ -275,6 +275,15 @@ Never use URL hacks or React Router state for cross-tab navigation. Dispatch `ne
 **I-12. Never use MarkdownRenderer inline in list/table cells.**
 Block-level elements (h1, ul) inside a `<td>` break layout. Use `stripMarkdown()` from `src/lib/utils.ts` for single-line text previews.
 
+**I-41. A citation owns the arrival scroll alone, and a scroll inside a `scroll-smooth` container reaches its target only with `behavior: "instant"`.**
+Clicking a source chip for a passage in a 23K-word book marked the passage and left it off screen, which reads to the reader as no highlight at all. Two separate causes, neither visible in any one file.
+
+**Three effects scroll on the same navigation**, all `block: "start"`: `DocumentReader`'s `initialSectionId` effect at 100ms, its Read-tab effect at 150ms, and `ReadView`'s own at 200ms. Each is armed by the arrival that also carries the citation, so they fire *after* the mark has been centred and put the section heading at the top of the port with the passage thousands of pixels below it. The passage is inside that section, so nothing is lost by standing them down: when citation words are present the citation scrolls, and only for the section arrived at -- a section the reader picks afterwards scrolls normally.
+
+**CSS wins over `behavior: "auto"`.** The reader's scroller carries Tailwind's `scroll-smooth`, so every programmatic scroll animates at a fixed speed, and a correction issued while one is running restarts it. Measured on that book: the mark closed from 7027px to centred over 8.1s of continuous animation, walking `scrollTop` to 40216 and mounting every section it passed; a 3s retry bound stopped 3535px short and shipped the reported defect. `behavior: "instant"` lands in one frame -- 0.5s from the click, `scrollTop` 9522, nothing in between rendered.
+
+The reason one scroll is never enough is that sections mount lazily: rendering the ones the jump passes changes the height *above* the target, so a citation is a moving target and the scroll must be re-issued until it stops moving. `lib/citation/settleIntoView` is that loop -- arrive, drift, stall and late-render are its four exits -- and `settleIntoView.test.ts` fails CI on the policy. What it delivers is only measurable in a browser: `make verify-citation` reports each chip as marked **and** in view and exits non-zero otherwise. It needs a live model, so it is a manual gate; the unit suite has twice said this feature worked while the app showed nothing.
+
 ## Quality Gates
 
 **I-13. `make ci` is the gate, and it runs in order: ruff -> layer_linter -> boundary_checker -> pytest -> frontend build -> tsc.**

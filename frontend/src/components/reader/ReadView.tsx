@@ -27,9 +27,29 @@ import {
   CITATION_MARK_TOKEN,
   longestPresentRun,
   markWords,
+  settleIntoView,
 } from "@/lib/citation"
 
 type DocumentImage = components["schemas"]["ImageItem"]
+
+/**
+ * The box a citation is centred within.
+ *
+ * `scrollIntoView({ block: "center" })` centres inside whichever ancestor
+ * scrolls, which in the reader is a panel occupying part of the window -- so
+ * measuring against the window would report a passage as off-centre while it sat
+ * exactly where it was asked to sit, and the settle loop would scroll forever.
+ */
+function scrollPortOf(el: Element): { top: number; height: number } {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) {
+      const rect = node.getBoundingClientRect()
+      return { top: rect.top, height: rect.height }
+    }
+  }
+  return { top: 0, height: window.innerHeight }
+}
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
   yellow: "bg-yellow-200/60 dark:bg-yellow-500/30",
@@ -495,23 +515,29 @@ export function ReadView({
   // this, and opening any document without a citation captures an empty snippet.
   const activeCitation = citationWords
 
-  // Scroll to the mark once it has rendered. Sections mount lazily, so the mark
-  // may not exist on the first pass; a short retry covers that without polling
-  // forever. `block: "center"` because a citation landing under the header reads
-  // as not having landed at all.
+  // Bring the mark to the centre and keep it there. Sections mount lazily, so
+  // the mark may not exist on the first pass and, worse, the ones that mount
+  // while scrolling change the height of everything above it -- scrolling once
+  // lands the passage off screen again. `settleIntoView` re-centres until it
+  // stops moving. `block: "center"` because a citation landing under the header
+  // reads as not having landed at all.
   useEffect(() => {
     if (activeCitation.length === 0) return
-    let attempts = 0
-    const tick = () => {
-      const el = document.querySelector(`.${CITATION_MARK_TOKEN}`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-        return
-      }
-      if (++attempts < 20) timer = window.setTimeout(tick, 150)
-    }
-    let timer = window.setTimeout(tick, 150)
-    return () => clearTimeout(timer)
+    return settleIntoView<Element>({
+      find: () => document.querySelector(`.${CITATION_MARK_TOKEN}`),
+      distance: (el) => {
+        const mark = el.getBoundingClientRect()
+        const port = scrollPortOf(el)
+        return mark.top + mark.height / 2 - (port.top + port.height / 2)
+      },
+      // "instant", not "auto": the scroller carries `scroll-smooth`, and CSS wins
+      // over "auto", so every correction animated across up to forty thousand
+      // pixels at a fixed speed and the passage took eight seconds to arrive.
+      // Clicking a source is a jump, not a scroll.
+      centre: (el) => el.scrollIntoView({ behavior: "instant", block: "center" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+    })
   }, [activeCitation])
 
   const profile = useMemo(
@@ -613,9 +639,15 @@ export function ReadView({
     return map
   }, [sections, docImages])
 
-  // Scroll to initial section
+  // Scroll to the initial section -- but never on top of a citation.
+  //
+  // Both scrolls are armed by the same navigation, this one fires last, and
+  // `block: "start"` puts the section heading at the top of the port: for a
+  // chapter-length section that leaves the cited passage somewhere off screen,
+  // which is exactly the "I have to scroll to find the highlight" report. The
+  // mark is inside this section anyway, so centring it lands here too.
   useEffect(() => {
-    if (!initialSectionId || !sections) return
+    if (!initialSectionId || !sections || activeCitation.length > 0) return
     const timer = setTimeout(() => {
       const el = document.getElementById(`read-sec-${initialSectionId}`)
       if (el) {
@@ -623,7 +655,7 @@ export function ReadView({
       }
     }, 200) // Slightly longer to ensure layout calculation is done
     return () => clearTimeout(timer)
-  }, [initialSectionId, sections])
+  }, [initialSectionId, sections, activeCitation])
 
   // Set initial active section once data loads
   useEffect(() => {

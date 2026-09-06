@@ -72,6 +72,7 @@ if (found.length === 0) {
 
 const titles = found.map((f) => f.t)
 let marked = 0
+let inView = 0
 for (let i = 0; i < titles.length; i++) {
   // Re-open the chat between clicks: clicking navigates away, and the persisted
   // session rehydrates its chips.
@@ -91,19 +92,33 @@ for (let i = 0; i < titles.length; i++) {
   await page.waitForTimeout(7000)
   // Two ways a passage can be marked: wrapped in the prose and transcript views,
   // drawn as an overlay on the PDF page. Either counts.
-  const shown = await page.evaluate(() => ({
-    inText: document.querySelectorAll(".luminary-citation-mark").length,
-    onPage: document.querySelectorAll("[data-citation-highlight]").length,
-  }))
+  const shown = await page.evaluate(() => {
+    const mark = document.querySelector(".luminary-citation-mark, [data-citation-highlight]")
+    const rect = mark?.getBoundingClientRect()
+    // Marked is not the same as delivered: a highlight the reader has to hunt
+    // for reads as no highlight at all, so measure how much of it is on screen.
+    const onScreen = rect
+      ? Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)
+      : 0
+    const zoom = document.querySelector('button[aria-label="Zoom presets"]')
+    return {
+      inText: document.querySelectorAll(".luminary-citation-mark").length,
+      onPage: document.querySelectorAll("[data-citation-highlight]").length,
+      inView: Boolean(rect) && onScreen >= Math.min(rect.height, 40),
+      zoom: zoom ? zoom.textContent.trim() : null,
+    }
+  })
   const total = shown.inText + shown.onPage
   if (total > 0) marked++
+  if (shown.inView) inView++
   const how = shown.onPage > 0 ? "on the page" : shown.inText > 0 ? "in the text" : "NOT MARKED"
   await page.screenshot({ path: path.join(OUT, `chip-${i}.png`) })
   const label = titles[i].split("\n")[0].slice(0, 44)
-  console.log(`  chip ${i} [${label}] ${how}`)
+  const where = shown.inView ? "in view" : total > 0 ? "OFF SCREEN" : "-"
+  console.log(`  chip ${i} [${label}] ${how}, ${where}${shown.zoom ? `, zoom ${shown.zoom}` : ""}`)
 }
 
-console.log(`\nmarked ${marked}/${titles.length}`)
+console.log(`\nmarked ${marked}/${titles.length}, in view ${inView}/${titles.length}`)
 console.log(`screenshots in ${OUT}`)
 await browser.close()
-process.exit(marked === titles.length ? 0 : 1)
+process.exit(marked === titles.length && inView === titles.length ? 0 : 1)
