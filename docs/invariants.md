@@ -34,16 +34,28 @@ teardown until it returns: past the 120s per-test timeout, which kills the sessi
 whichever test owned the client rather than the one that leaked. Nothing awaits those threads
 through a task, so there is nothing to cancel or detach and `_drain_leaked_tasks` cannot see them.
 
-**The same call is on the real shutdown path.** uvicorn closes its loop the same way, and the
-lifespan bounds only the task registries it maintains (`_background_tasks`,
-`_ingestion_background_tasks`), so in-flight `to_thread` work can still hold a desktop quit for up
-to 300s -- against that block's own stated requirement that quitting be quick.
+**The same call is on the real shutdown path.** uvicorn closes its loop the same way, so in-flight
+`to_thread` work could hold a desktop quit for 300s. `lifespan` therefore ends in
+`_release_default_executor`, which joins for 20s and then detaches the executor: a Kuzu or LanceDB
+write finishes inside that, a model load is abandoned as `shutdown_model_executor` already abandons
+one. Bounding is the safer half of the trade, not a free one -- unbounded, the desktop supervisor
+gives up and SIGKILLs, which kills a mid-write thread with no grace at all and leaves the Kuzu lock
+held against the next launch. `tests/test_quit_is_bounded.py` restores the stdlib join before
+measuring, because the suite's own bound would otherwise satisfy the test whether or not the
+product had one.
 
 `tests/conftest.py` bounds the join at 30s -- above a ~6s GLiNER load, far below the 120s per-test
 timeout -- and reports every test whose background work outlived it, so a leak stays visible
 instead of silently costing the wait. `tests/test_testclient_teardown_is_bounded.py` fails CI if
 the bound is removed, and its second test fails if the work it measures was not actually in flight,
 which is what stops the first from passing against work that had already finished.
+
+**A fixture that gathers cancelled tasks is the same trap in test clothing.** Five teardowns
+cancelled a router's registry and then awaited `gather(*pending)` with no timeout; `POST /notes`
+schedules an embed through `run_in_executor`, so the gather waited out whatever the executor was
+doing and the 120s timeout killed the session, naming the fixture's owner rather than the leaker.
+`tests/task_drain.py` bounds it in one place so the next fixture cannot copy an unbounded
+neighbour.
 
 ## FTS5 / SQLite
 
