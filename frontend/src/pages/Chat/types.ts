@@ -58,6 +58,21 @@ export interface QuizCardData {
 
 export type AnyCardData = GapCardData | QuizCardData | TeachBackCardData
 
+// What the answer cost and what left the machine. The Settings routing table says
+// where work runs in general; this says what happened for this answer, which is the
+// version a reader can check. `engine` comes from the backend's `is_on_device`, the
+// same one the table uses, so the two cannot disagree.
+export interface AnswerReceipt {
+  engine: "local" | "cloud"
+  model: string
+  ttft_seconds: number | null
+  total_seconds: number
+  passages_sent: number | null
+  context_chars: number | null
+  context_budget_tokens: number | null
+  context_budget_reason: string | null
+}
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
@@ -72,6 +87,8 @@ export interface ChatMessage {
   web_sources?: WebSource[]
   source_citations?: SourceCitation[]
   transparency?: TransparencyInfo
+  // What this answer cost and what was sent for it.
+  receipt?: AnswerReceipt
   // Non-fatal routing notice, e.g. answered locally because the cloud provider
   // was unreachable. Shown inline above the answer.
   notice?: string
