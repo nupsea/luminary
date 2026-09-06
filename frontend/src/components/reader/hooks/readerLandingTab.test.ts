@@ -17,11 +17,13 @@ describe("readerLandingTab", () => {
     expect(readerLandingTab("pdf", true)).toBe("pdfview")
   })
 
-  it("sends a named passage to the Read view even for a PDF", () => {
-    // The reported bug: a citation opened the PDF viewer while the Read view
-    // scrolled to the passage behind it, hidden. Sections render only when
-    // visible, so the cited text never reached the DOM and nothing was marked.
-    expect(readerLandingTab("pdf", true, true)).toBe("read")
+  it("keeps a cited PDF in the PDF viewer, which draws the passage itself", () => {
+    // Sending it to the extracted text would show a transcription of the thing
+    // the reader asked to see. The overlay marks the real page instead.
+    expect(readerLandingTab("pdf", true, true)).toBe("pdfview")
+  })
+
+  it("sends a cited EPUB to the Read view, which has no such overlay", () => {
     expect(readerLandingTab("epub", true, true)).toBe("read")
   })
 

@@ -5,7 +5,7 @@ import { apiGet } from "@/lib/apiClient"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 import { cn } from "@/lib/utils"
-import { CITATION_MARK_TOKEN } from "@/lib/citationHighlight"
+import { CITATION_MARK_TOKEN } from "@/lib/citation"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
   apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)

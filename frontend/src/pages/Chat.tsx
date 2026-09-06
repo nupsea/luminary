@@ -34,7 +34,7 @@ import { buildModelOptions, buildScopeComboboxLabel, cloudOverrideAllowed, effec
 
 import { API_BASE } from "@/lib/config"
 import { apiGet, apiPost } from "@/lib/apiClient"
-import { citationNeedle } from "@/lib/citationHighlight"
+import { buildCitationTarget, targetToStateValue } from "@/lib/citation"
 
 // ---------------------------------------------------------------------------
 // SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
@@ -1112,7 +1112,7 @@ export default function Chat() {
     // It is already in hand here; fetching the chunk again in the reader would cost
     // a request that returns every chunk in the document to use one of them.
     navigate(`/library?${params.toString()}`, {
-      state: { from: "/chat", citationSnippet: citationNeedle(c) },
+      state: { from: "/chat", citationWords: targetToStateValue(buildCitationTarget(c)) },
     })
   }
 

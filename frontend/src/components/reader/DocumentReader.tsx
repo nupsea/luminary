@@ -129,8 +129,8 @@ interface DocumentReaderProps {
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
-  /** Text from the citation that opened this reader, marked briefly in the prose. */
-  initialCitationSnippet?: string
+  /** The cited passage as words, marked in whichever view renders this document. */
+  initialCitationWords?: string[]
   initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
   initialSearch?: string  // opens the in-doc search bar prefilled (from Map entity deep-link)
 }
@@ -143,7 +143,9 @@ export function DocumentReader(props: DocumentReaderProps) {
   )
 }
 
-function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialCitationSnippet, initialPage, initialSearch }: DocumentReaderProps) {
+const EMPTY_WORDS: string[] = []
+
+function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialCitationWords = EMPTY_WORDS, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
   // Reading time exists nowhere else: opening a document and reading it for
@@ -1342,7 +1344,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={initialCitationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
@@ -1375,7 +1377,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
-                citationSnippet={initialCitationSnippet}
+                citationWords={initialCitationWords}
                 citedSectionId={initialSectionId}
               />
             )}

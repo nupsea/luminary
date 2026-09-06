@@ -45,6 +45,7 @@ import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
 import { libraryRefetchInterval } from "@/lib/libraryPolling"
 import { shouldCaptureDeepLink } from "@/lib/deepLinkCapture"
+import { stateValueToWords } from "@/lib/citation"
 
 const PAGE_SIZE = 20
 
@@ -110,7 +111,7 @@ export default function Learning() {
   )
   // Not a URL param: a display hint for one arrival, not something a shared link
   // should reproduce.
-  const [savedCitationSnippet, setSavedCitationSnippet] = useState<string | undefined>()
+  const [savedCitationWords, setSavedCitationWords] = useState<string[]>([])
   const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
     if (!raw) return undefined
@@ -337,8 +338,8 @@ export default function Learning() {
     setSavedSearch(searchParams.get("search") ?? undefined)
     // Carried in route state rather than the URL: it is a display hint for one
     // arrival, not something a shared link should reproduce.
-    setSavedCitationSnippet(
-      (routeLocation.state as { citationSnippet?: string } | null)?.citationSnippet,
+    setSavedCitationWords(
+      stateValueToWords((routeLocation.state as { citationWords?: string } | null)?.citationWords),
     )
 
     setActiveDocument(docParam)
@@ -430,7 +431,7 @@ export default function Learning() {
             onBack={returnToLibrary}
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
-            initialCitationSnippet={savedCitationSnippet}
+            initialCitationWords={savedCitationWords}
             initialPage={savedPage}
             initialSearch={savedSearch}
           />

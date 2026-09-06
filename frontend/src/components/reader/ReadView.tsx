@@ -27,7 +27,7 @@ import {
   CITATION_MARK_TOKEN,
   longestPresentRun,
   markWords,
-} from "@/lib/citationHighlight"
+} from "@/lib/citation"
 
 type DocumentImage = components["schemas"]["ImageItem"]
 
@@ -85,7 +85,7 @@ interface LazySectionProps {
   /** In-document search term to mark in the body. Empty when search is closed. */
   searchTerm?: string
   /** Text from the citation that opened the reader, marked until it times out. */
-  citationSnippet?: string
+  citationWords?: string[]
   /** True when this is the section the citation names. */
   isCitedSection?: boolean
 }
@@ -152,7 +152,9 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationSnippet = "", isCitedSection = false }: LazySectionProps) => {
+const EMPTY_WORDS: string[] = []
+
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -200,8 +202,8 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   // The citation run is computed whether or not this section is in view, because
   // it decides whether the section must render at all.
   const citationRun = useMemo(
-    () => (citationSnippet ? longestPresentRun(citationSnippet, body) : []),
-    [citationSnippet, body],
+    () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
+    [citationWords, body],
   )
   // One decision, used by the memo and the JSX alike. They were separate, so the
   // cited section computed its marked HTML and then rendered null anyway.
@@ -462,8 +464,8 @@ interface ReadViewProps {
   sourceUrl?: string | null
   /** In-document search term, marked in the body. Empty when search is closed. */
   searchTerm?: string
-  /** Text of the citation that opened this reader. Marked briefly, then dropped. */
-  citationSnippet?: string
+  /** The cited passage as words, marked where this document's prose holds them. */
+  citationWords?: string[]
   /** The section the citation names. Distinct from `initialSectionId`, which the
    *  reader also uses for search hits and history restores. */
   citedSectionId?: string | null
@@ -479,7 +481,7 @@ export function ReadView({
   extractionReport,
   sourceUrl,
   searchTerm = "",
-  citationSnippet,
+  citationWords = EMPTY_WORDS,
   citedSectionId,
 }: ReadViewProps) {
   // The mark is transient by design: it answers "which words were the source"
@@ -491,14 +493,14 @@ export function ReadView({
   // and a highlight that vanishes mid-read is a worse answer to "which words were
   // the source" than none. It clears by going away -- leaving the reader unmounts
   // this, and opening any document without a citation captures an empty snippet.
-  const activeCitation = citationSnippet
+  const activeCitation = citationWords
 
   // Scroll to the mark once it has rendered. Sections mount lazily, so the mark
   // may not exist on the first pass; a short retry covers that without polling
   // forever. `block: "center"` because a citation landing under the header reads
   // as not having landed at all.
   useEffect(() => {
-    if (!activeCitation) return
+    if (activeCitation.length === 0) return
     let attempts = 0
     const tick = () => {
       const el = document.querySelector(`.${CITATION_MARK_TOKEN}`)
@@ -822,7 +824,7 @@ export function ReadView({
               spec={spec}
               isLast={i === sections.length - 1}
               searchTerm={searchTerm}
-              citationSnippet={activeCitation}
+              citationWords={activeCitation}
               isCitedSection={Boolean(citedSectionId) && section.section_id === citedSectionId}
             />
           ))}

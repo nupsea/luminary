@@ -18,8 +18,14 @@
  * it is a manual check rather than a CI gate. Exits non-zero if any chip fails.
  */
 import { chromium } from "playwright-core"
+import fs from "node:fs"
+import path from "node:path"
 
 const APP = process.env.LUMINARY_URL ?? "http://localhost:5173"
+// Screenshots beside the run: a citation that "marked" can still have landed
+// somewhere useless, and the picture is the only way to see that.
+const OUT = path.resolve(import.meta.dirname, "../.citation-verify")
+fs.mkdirSync(OUT, { recursive: true })
 const QUESTION =
   process.env.LUMINARY_QUESTION ??
   "What are the main ideas across my documents about optimisation and retrieval?"
@@ -83,14 +89,21 @@ for (let i = 0; i < titles.length; i++) {
   }
   await current[i].h.click()
   await page.waitForTimeout(7000)
-  const marks = await page.evaluate(
-    () => document.querySelectorAll(".luminary-citation-mark").length,
-  )
-  if (marks > 0) marked++
+  // Two ways a passage can be marked: wrapped in the prose and transcript views,
+  // drawn as an overlay on the PDF page. Either counts.
+  const shown = await page.evaluate(() => ({
+    inText: document.querySelectorAll(".luminary-citation-mark").length,
+    onPage: document.querySelectorAll("[data-citation-highlight]").length,
+  }))
+  const total = shown.inText + shown.onPage
+  if (total > 0) marked++
+  const how = shown.onPage > 0 ? "on the page" : shown.inText > 0 ? "in the text" : "NOT MARKED"
+  await page.screenshot({ path: path.join(OUT, `chip-${i}.png`) })
   const label = titles[i].split("\n")[0].slice(0, 44)
-  console.log(`  chip ${i} [${label}] ${marks > 0 ? "marked" : "NOT MARKED"}`)
+  console.log(`  chip ${i} [${label}] ${how}`)
 }
 
 console.log(`\nmarked ${marked}/${titles.length}`)
+console.log(`screenshots in ${OUT}`)
 await browser.close()
 process.exit(marked === titles.length ? 0 : 1)
