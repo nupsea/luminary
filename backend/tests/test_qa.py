@@ -1484,3 +1484,69 @@ async def test_no_context_reason_names_a_deleted_document(test_db):
 
     assert code == "document_missing"
     assert "no longer in your library" in msg
+
+
+# Retrieval-first rendering — sources reach the client before the first token
+
+
+@pytest.mark.asyncio
+async def test_sources_are_emitted_before_the_first_token(test_db, monkeypatch):
+    """The chips paint while the answer is still generating, not after it.
+
+    Retrieval has finished by the time `stream_answer` starts streaming -- the
+    graph ran to completion and left `_llm_prompt` behind -- so holding the source
+    citations back until the `done` payload showed an empty panel for the whole of
+    time-to-first-token, which is tens of seconds on the local arm.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    source_citations = [
+        {"chunk_id": "c1", "document_id": doc_id, "snippet": "A real passage."},
+    ]
+    result = {
+        "answer": "",
+        "citations": [],
+        "confidence": "high",
+        "not_found": False,
+        "chunks": [],
+        "source_citations": source_citations,
+        "_llm_prompt": "Answer the question.",
+        "_system_prompt": "",
+        "intent": "factual",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result)
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_async_iter(["The ", "answer."]))
+
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        events = [
+            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
+        ]
+
+    payloads = [json.loads(e[len("data: ") :]) for e in events if e.startswith("data: ")]
+    kinds = [
+        "sources" if p.get("type") == "sources" else
+        "token" if "token" in p else
+        "done" if p.get("done") else "other"
+        for p in payloads
+    ]
+    assert "sources" in kinds, f"no sources event was emitted; got {kinds}"
+    assert "token" in kinds, f"no tokens were emitted; got {kinds}"
+    assert kinds.index("sources") < kinds.index("token"), (
+        f"sources arrived after the first token, so the panel stayed empty for the "
+        f"whole wait: {kinds}"
+    )
+
+    early = next(p for p in payloads if p.get("type") == "sources")
+    assert early["source_citations"] == source_citations
+    # `done` still carries them, so a client ignoring the new event is unaffected
+    # and a stale early set cannot survive the turn (I-8 keeps done authoritative).
+    final = next(p for p in payloads if p.get("done"))
+    assert final["source_citations"] == source_citations

@@ -868,6 +868,22 @@ export default function Chat() {
             }
 
             // S158: transparency event arrives before 'done' — silently omit if malformed
+            // Sources arrive before the first token, so the chips paint while the
+            // answer is still generating instead of appearing with it. On the local
+            // arm time-to-first-token is tens of seconds, and every one of them
+            // used to show an empty panel. The `done` payload sends these again and
+            // overwrites this, so a stale set cannot survive the turn.
+            if (payload["type"] === "sources") {
+              const early = (payload["source_citations"] as SourceCitation[] | undefined) ?? []
+              if (early.length > 0) {
+                setMessages((m) =>
+                  m.map((msg) =>
+                    msg.id === assistantId ? { ...msg, source_citations: early } : msg,
+                  ),
+                )
+              }
+            }
+
             if (payload["type"] === "transparency") {
               try {
                 const raw = payload as Record<string, unknown>

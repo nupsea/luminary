@@ -984,6 +984,21 @@ class QAService:
                         "[Full answer with citations below]\\n\\n"
                         + system_prompt
                     )
+                # Retrieval is already finished here -- the graph ran to completion
+                # and left `_llm_prompt` behind -- so the source chips can be on
+                # screen before the first token instead of after the last one. On
+                # the local arm that is the difference between "thinking" and
+                # "dead": time to first token is tens of seconds there, and all of
+                # it currently shows an empty panel.
+                #
+                # The `done` payload still carries `source_citations` (I-8 keeps it
+                # authoritative), so a client that ignores this event renders
+                # exactly as before.
+                early_sources = result.get("source_citations") or []
+                if early_sources:
+                    sources_event = {"type": "sources", "source_citations": early_sources}
+                    yield f"data: {json.dumps(sources_event)}\n\n"
+
                 llm = get_llm_service()
                 collected: list[str] = []
                 try:
