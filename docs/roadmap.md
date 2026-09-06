@@ -156,10 +156,16 @@ the part that is per-type and load-bearing**: `p.151 · §5.2`, `VIDEO 14:22`, `
 `domain · ¶4`. A clip from a transcript carries a seekable timestamp or the note has lost the thing
 that made it checkable.
 
-**The one real refactor is `Chat.tsx`** — 1518 lines, a page-level default export with no props. A
-`ChatConversation` component has to come out of it reading scope from the store rather than the render
-closure; the comment at its send handler records the shipped bug that happens otherwise (a library
-question scoped to a PDF 40 seconds into ingestion).
+**The conversation is a component.** `ChatConversation` holds the thread, the composer and the session
+list; `variant="docked"` drops the session list, the back button and the `?q=` prefill, and `Chat.tsx`
+is now the route around it. Scope has come from the store rather than the render closure since
+`957b5be` (a library question scoped to a PDF 40 seconds into ingestion).
+
+**What a docked conversation is scoped to is still open.** `chatScope` and `chatSelectedDocId` are
+global, so a conversation docked in the reader and the Ask page would share one scope: docking as-is
+would silently re-scope the other. Either the store grows a per-mount scope or the dock pins its
+document and the page keeps the global one — decide before the dock ships, because the bug this
+creates is the one `957b5be` already fixed once.
 
 The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
 lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output
