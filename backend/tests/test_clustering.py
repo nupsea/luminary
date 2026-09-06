@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
@@ -547,3 +547,91 @@ async def test_batch_accept_endpoint(test_db):
             )
         ).scalar_one()
         assert col.name == "RENAMED"  # S201: normalize_collection_name applied
+
+
+@pytest.mark.asyncio
+async def test_no_insert_is_flushed_before_the_naming_calls_finish(test_db):
+    """No row may reach the database while the LLM is still naming clusters.
+
+    `db.add` used to happen inside the loop, so the next iteration's
+    `select(NoteModel...)` autoflushed it -- taking SQLite's single write lock --
+    and the loop then held that lock across an LLM call per cluster. Measured on a
+    real library: 11.2s before commit against a 5.0s busy_timeout, so concurrent
+    writers failed with "database is locked" (#88).
+
+    Counting flushed INSERTs is what makes this catch the defect. Asserting on
+    `session.new` does not: the autoflush has already emptied it by the time the
+    await happens, so the session looks clean at exactly the moment the lock is
+    held. That version passed against the unfixed code.
+    """
+    engine, factory, _ = test_db
+
+    ids = [str(uuid.uuid4()) for _ in range(6)]
+    vecs = [
+        np.array([1.0, 0.01, 0.0], dtype=np.float32),
+        np.array([0.999, 0.012, 0.001], dtype=np.float32),
+        np.array([0.998, 0.009, 0.002], dtype=np.float32),
+        np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        np.array([0.01, 0.999, 0.002], dtype=np.float32),
+        np.array([0.02, 0.998, 0.001], dtype=np.float32),
+    ]
+    async with factory() as session:
+        for nid in ids:
+            session.add(_make_note("Some note content for clustering", nid))
+        await session.commit()
+
+    inserts: list[str] = []
+
+    def _record_insert(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001, PLR0913
+        if "INSERT INTO cluster_suggestions" in statement:
+            inserts.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _record_insert)
+
+    import pandas as pd
+
+    mock_table = MagicMock()
+    mock_table.to_pandas.return_value = pd.DataFrame({"note_id": ids, "vector": vecs})
+
+    # Two clusters, so a second naming call follows the first suggestion -- the
+    # iteration the defect needed.
+    mock_hdbscan_instance = MagicMock()
+    mock_hdbscan_instance.fit_predict.return_value = np.array([0, 0, 0, 1, 1, 1])
+
+    inserts_seen_at_naming: list[int] = []
+    svc = ClusteringService()
+    real_name = svc._generate_cluster_name
+
+    try:
+        with (
+            patch("app.services.vector_store.get_lancedb_service") as mock_lancedb,
+            patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm,
+            patch("sklearn.cluster.HDBSCAN", return_value=mock_hdbscan_instance),
+        ):
+            mock_lancedb.return_value._get_or_create_note_table.return_value = mock_table
+            mock_response = MagicMock()
+            mock_response.choices[0].message.content = "A Name"
+            mock_llm.return_value = mock_response
+
+            async def _watching_name(excerpts):
+                inserts_seen_at_naming.append(len(inserts))
+                return await real_name(excerpts)
+
+            svc._generate_cluster_name = _watching_name  # type: ignore[method-assign]
+            async with factory() as session:
+                count = await svc.cluster_notes(session)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _record_insert)
+
+    assert count == 2, f"fixture should produce two clusters, got {count}"
+    assert len(inserts_seen_at_naming) == 2, "expected one naming call per cluster"
+    assert inserts_seen_at_naming == [0, 0], (
+        f"a suggestion was written to the database before the naming calls "
+        f"finished ({inserts_seen_at_naming}); that write holds SQLite's single "
+        "write lock across every remaining LLM call"
+    )
+    # Statements, not rows: SQLAlchemy batches both suggestions into one
+    # executemany, so the row count is the honest check that they still land.
+    async with factory() as session:
+        stored = (await session.execute(select(ClusterSuggestionModel))).scalars().all()
+    assert len(stored) == 2, "deferring the adds must not lose a suggestion"

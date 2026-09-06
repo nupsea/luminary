@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 from sqlalchemy import event
@@ -49,6 +50,57 @@ def _enable_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ARG001
     cursor.close()
 
 
+# SQLite has one writer. `busy_timeout=5000` above means a second writer waits up
+# to five seconds and then fails with "database is locked" -- which is what
+# `POST /notes` did whenever something else held the write lock for longer (#88).
+# The victim's traceback names the write that failed and says nothing about the
+# transaction responsible, so the holder has to report itself.
+#
+# Warn at 2s: comfortably below the 5s at which somebody else's write is already
+# failing, and above the ordinary case -- a full ingest commits in single-digit
+# milliseconds (measured: 0.960ms per commit at synchronous=FULL, 400 commits).
+_WRITE_HOLD_WARN_S = 2.0
+
+# id(connection) -> (monotonic start, first write statement). Entries are removed
+# on commit/rollback and reset on begin, so the map is bounded by the pool.
+_write_holds: dict[int, tuple[float, str]] = {}
+
+
+def _note_write(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001, PLR0913
+    """Record when a connection's first write *completed*, i.e. when it got the lock.
+
+    Timed after the statement rather than before it on purpose: before it, the
+    clock would include any time spent waiting on `busy_timeout` for somebody
+    else's lock, and a victim that waited and then succeeded would be reported as
+    a holder. What this measures is the hold.
+    """
+    head = statement.lstrip()[:7].upper()
+    if head.startswith(("INSERT", "UPDATE", "DELETE", "REPLACE")):
+        _write_holds.setdefault(
+            id(conn), (time.monotonic(), " ".join(statement.split())[:90])
+        )
+
+
+def _clear_write_hold(conn):
+    _write_holds.pop(id(conn), None)
+
+
+def _report_write_hold(conn, outcome: str) -> None:
+    record = _write_holds.pop(id(conn), None)
+    if record is None:
+        return
+    started, first_write = record
+    held = time.monotonic() - started
+    if held >= _WRITE_HOLD_WARN_S:
+        logger.warning(
+            "SQLite write lock held %.1fs before %s (busy_timeout is 5.0s, so "
+            "another writer was failing after that). First write: %s",
+            held,
+            outcome,
+            first_write,
+        )
+
+
 def make_engine(db_url: str | None = None):
     url = db_url or get_db_url()
     kwargs: dict = {}
@@ -66,6 +118,10 @@ def make_engine(db_url: str | None = None):
         **kwargs,
     )
     event.listen(engine.sync_engine, "connect", _enable_sqlite_pragmas)
+    event.listen(engine.sync_engine, "begin", _clear_write_hold)
+    event.listen(engine.sync_engine, "after_cursor_execute", _note_write)
+    event.listen(engine.sync_engine, "commit", lambda c: _report_write_hold(c, "commit"))
+    event.listen(engine.sync_engine, "rollback", lambda c: _report_write_hold(c, "rollback"))
     return engine
 
 
