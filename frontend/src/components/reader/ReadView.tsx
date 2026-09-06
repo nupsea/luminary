@@ -25,7 +25,8 @@ import type { AnnotationItem, SectionContentItem } from "./types"
 import {
   CITATION_MARK_CLASS,
   CITATION_MARK_TOKEN,
-  longestPresentPrefix,
+  longestPresentRun,
+  markWords,
 } from "@/lib/citationHighlight"
 
 type DocumentImage = components["schemas"]["ImageItem"]
@@ -85,6 +86,8 @@ interface LazySectionProps {
   searchTerm?: string
   /** Text from the citation that opened the reader, marked until it times out. */
   citationSnippet?: string
+  /** True when this is the section the citation names. */
+  isCitedSection?: boolean
 }
 
 
@@ -149,7 +152,7 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationSnippet = "" }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationSnippet = "", isCitedSection = false }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -158,6 +161,23 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const [loadingWhole, setLoadingWhole] = useState(false)
   const body = whole ?? section.content
   const stillShort = section.truncated && whole === null
+
+  // A shortened section can hold the cited passage in the part that did not
+  // arrive: a 47-section PDF cited text 11k characters into a section whose
+  // inline copy stopped well before it, so nothing matched and nothing marked.
+  // The rest is one call away and this is the one section worth spending it on.
+  useEffect(() => {
+    if (!isCitedSection || !section.truncated || whole !== null) return
+    // No loading flag and no "already requested" ref: setting state synchronously
+    // in an effect body cascades renders, and a ref latch would survive
+    // StrictMode's second run and turn it into a no-op in dev only. `whole`
+    // stopping the repeat is enough, and a duplicate fetch is harmless.
+    let cancelled = false
+    void fetchWholeSection(documentId, section.section_id)
+      .then((s) => { if (!cancelled) setWhole(s.content) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [isCitedSection, section.truncated, section.section_id, documentId, whole])
 
   useEffect(() => {
     const el = containerRef.current
@@ -177,19 +197,27 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
 
   const Tag = HeadingTag(section.level)
   const showHeading = hasAuthoredHeading(section)
+  // The citation run is computed whether or not this section is in view, because
+  // it decides whether the section must render at all.
+  const citationRun = useMemo(
+    () => (citationSnippet ? longestPresentRun(citationSnippet, body) : []),
+    [citationSnippet, body],
+  )
   const highlighted = useMemo(() => {
-    if (!isVisible) return "" // defer processing
+    // Sections defer their body until scrolled into view. A citation is an
+    // explicit request to see *this* passage, so the section holding it renders
+    // regardless: waiting for the scroll is circular, since the scroll targets a
+    // mark that only exists once the section has rendered. A 47-section PDF
+    // landed with the cited section showing its heading and 11 characters of
+    // nothing, and nothing was ever marked.
+    if (!isVisible && citationRun.length === 0 && !isCitedSection) return ""
     let marked = applyHighlights(body, highlightsVisible ? annotations : [])
     if (searchTerm) marked = applySearchTerm(marked, searchTerm)
-    // The citation snippet is shortened to the part this section actually
-    // contains, so a chunk that straddles a boundary still marks what is here and
-    // a section that holds none of it marks nothing.
-    if (citationSnippet) {
-      const present = longestPresentPrefix(citationSnippet, body)
-      if (present) marked = applySearchTerm(marked, present, CITATION_MARK_CLASS)
-    }
+    // Matched against the normalised body but marked in the raw one, so the
+    // marker tolerates the paragraph breaks the chunk text collapsed.
+    if (citationRun.length > 0) marked = markWords(marked, citationRun, CITATION_MARK_CLASS)
     return marked
-  }, [isVisible, body, annotations, highlightsVisible, searchTerm, citationSnippet])
+  }, [isVisible, body, annotations, highlightsVisible, searchTerm, citationRun, isCitedSection])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
@@ -433,6 +461,9 @@ interface ReadViewProps {
   searchTerm?: string
   /** Text of the citation that opened this reader. Marked briefly, then dropped. */
   citationSnippet?: string
+  /** The section the citation names. Distinct from `initialSectionId`, which the
+   *  reader also uses for search hits and history restores. */
+  citedSectionId?: string | null
 }
 
 export function ReadView({
@@ -446,6 +477,7 @@ export function ReadView({
   sourceUrl,
   searchTerm = "",
   citationSnippet,
+  citedSectionId,
 }: ReadViewProps) {
   // The mark is transient by design: it answers "which words were the source"
   // on arrival and then gets out of the way. Kept in state rather than read
@@ -788,6 +820,7 @@ export function ReadView({
               isLast={i === sections.length - 1}
               searchTerm={searchTerm}
               citationSnippet={activeCitation}
+              isCitedSection={Boolean(citedSectionId) && section.section_id === citedSectionId}
             />
           ))}
           

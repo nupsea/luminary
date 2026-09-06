@@ -168,6 +168,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // A deep link names a passage, which only the Read view can scroll to.
   const hasDeepLink = Boolean(initialSectionId || initialChunkId || initialPage)
+  // A page is not a passage: it means something in the PDF viewer and nothing in
+  // the Read view, so only a named section or chunk overrides the format.
+  const hasPassageLink = Boolean(initialSectionId || initialChunkId)
 
   const {
     leftTab,
@@ -176,7 +179,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setPdfViewVisited,
     bookViewVisited,
     setBookViewVisited,
-  } = useReaderTabs({ format: doc?.format, hasDeepLink })
+  } = useReaderTabs({ format: doc?.format, hasDeepLink, hasPassageLink })
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetText, setSheetText] = useState("")
@@ -1373,6 +1376,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
                 citationSnippet={initialCitationSnippet}
+                citedSectionId={initialSectionId}
               />
             )}
           </div>

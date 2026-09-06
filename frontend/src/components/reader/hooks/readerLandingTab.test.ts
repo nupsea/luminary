@@ -11,9 +11,18 @@ describe("readerLandingTab", () => {
     }
   })
 
-  it("opens a PDF in the PDF viewer, deep link or not", () => {
+  it("opens a PDF in the PDF viewer, including for a page-only deep link", () => {
     expect(readerLandingTab("pdf", false)).toBe("pdfview")
+    // A page means something in the PDF viewer and nothing in the Read view.
     expect(readerLandingTab("pdf", true)).toBe("pdfview")
+  })
+
+  it("sends a named passage to the Read view even for a PDF", () => {
+    // The reported bug: a citation opened the PDF viewer while the Read view
+    // scrolled to the passage behind it, hidden. Sections render only when
+    // visible, so the cited text never reached the DOM and nothing was marked.
+    expect(readerLandingTab("pdf", true, true)).toBe("read")
+    expect(readerLandingTab("epub", true, true)).toBe("read")
   })
 
   it("opens an EPUB in the book viewer", () => {

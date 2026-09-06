@@ -45,21 +45,35 @@ export function stripCitationPrefixes(
 }
 
 /**
- * The longest leading run of `needle` that occurs in `haystack`, or "".
+ * The longest contiguous run of snippet words present in `haystack`, as words.
  *
- * Trimmed back to a word boundary so a highlight never ends mid-word, and
- * shortened a word at a time rather than a character at a time — a citation that
- * matches for 80 of its 150 characters should highlight those 80.
+ * Both ends slide. The end must, because the snippet is cut at a fixed length and
+ * can run past the passage. The **start** must too, and that is not obvious: a
+ * chunk's stored text is prefixed with material the prose does not contain -- a
+ * breadcrumb like `[Doc > Section]`, or speaker labels -- so a matcher that only
+ * trims the tail keeps that prefix and finds nothing. Measured against a real
+ * citation: prefix-only found no match where sliding found 53 characters.
+ *
+ * Returns the words, not a string, because the caller has to match them against
+ * raw text whose whitespace differs (see `markWords`).
  */
-export function longestPresentPrefix(needle: string, haystack: string): string {
+export function longestPresentRun(needle: string, haystack: string): string[] {
   const words = normalise(needle).split(" ").filter(Boolean)
   const hay = normalise(haystack).toLowerCase()
-  for (let count = words.length; count > 0; count--) {
-    const candidate = words.slice(0, count).join(" ")
-    if (candidate.length < MIN_NEEDLE_LENGTH) return ""
-    if (endsOnWordBoundary(candidate.toLowerCase(), hay)) return candidate
+  let best: string[] = []
+  for (let start = 0; start < words.length; start++) {
+    if (words.slice(start).join(" ").length < MIN_NEEDLE_LENGTH) break
+    for (let end = words.length; end > start; end--) {
+      const candidate = words.slice(start, end)
+      const text = candidate.join(" ")
+      if (text.length < MIN_NEEDLE_LENGTH) break
+      if (endsOnWordBoundary(text.toLowerCase(), hay)) {
+        if (text.length > best.join(" ").length) best = candidate
+        break
+      }
+    }
   }
-  return ""
+  return best
 }
 
 /**
@@ -80,6 +94,33 @@ function endsOnWordBoundary(candidate: string, hay: string): boolean {
     if (after === undefined || /\W/.test(after)) return true
     from = at + 1
   }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/**
+ * Wrap `words` where they occur in `content`, tolerating any whitespace between.
+ *
+ * The stored chunk text collapses the paragraph breaks the prose actually
+ * contains: a snippet reads "traps? GUEST: Two big ones" where the section holds
+ * "traps?\n\nGUEST: Two big ones". Matching the normalised string against the raw
+ * body therefore finds nothing, which is why the mark silently never appeared on
+ * any document whose passage crossed a paragraph.
+ *
+ * A match containing a tag is skipped rather than wrapped -- `applyHighlights` may
+ * already have inserted `<mark>` for a saved annotation, and splitting one would
+ * corrupt the markup.
+ */
+export function markWords(content: string, words: string[], className: string): string {
+  if (words.length === 0 || !content) return content
+  const pattern = new RegExp(words.map(escapeRegExp).join("\\s+"), "gi")
+  return content.replace(pattern, (match) =>
+    match.includes("<") || match.includes(">")
+      ? match
+      : `<mark class="${className}">${match}</mark>`,
+  )
 }
 
 export interface CitationLike {
