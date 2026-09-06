@@ -513,4 +513,13 @@ async def synthesize_node(state: ChatState) -> dict:
         "source_citations": source_citations_out,
         "cited_chunks": cited_chunks,
         "transparency": transparency_info,
+        # What the answer cost and what was sent for it, carried out so the stream
+        # can put it under the answer. The budget and its reason travel with it
+        # because `resolve_context_budget` halves the context on a host it measured
+        # slow (#100): that changes what the reader receives, and until now said so
+        # only in a log line nobody sees.
+        "_context_budget": token_budget,
+        "_budget_reason": budget_reason,
+        "_passages_sent": len(cited_chunks),
+        "_context_chars": len(chunks_context),
     }

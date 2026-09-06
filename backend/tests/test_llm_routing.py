@@ -132,12 +132,12 @@ def test_a_huggingface_id_is_not_mistaken_for_a_provider(private_routing):
     Reading "contains a slash" as "remote" would report the embedder, the
     reranker and the entity extractor as cloud services in every mode.
     """
-    assert llm_routing._on_device("BAAI/bge-small-en-v1.5")
-    assert llm_routing._on_device("cross-encoder/ms-marco-MiniLM-L-12-v2")
-    assert llm_routing._on_device("urchade/gliner_multi_pii-v1")
-    assert llm_routing._on_device("ollama/qwen3.5:4b")
-    assert not llm_routing._on_device("openai/gpt-5-mini")
-    assert not llm_routing._on_device("anthropic/claude-sonnet-5")
+    assert llm_routing.is_on_device("BAAI/bge-small-en-v1.5")
+    assert llm_routing.is_on_device("cross-encoder/ms-marco-MiniLM-L-12-v2")
+    assert llm_routing.is_on_device("urchade/gliner_multi_pii-v1")
+    assert llm_routing.is_on_device("ollama/qwen3.5:4b")
+    assert not llm_routing.is_on_device("openai/gpt-5-mini")
+    assert not llm_routing.is_on_device("anthropic/claude-sonnet-5")
 
 
 def test_cloud_without_a_key_reports_the_local_model_it_will_really_use(

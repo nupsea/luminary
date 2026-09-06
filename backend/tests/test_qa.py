@@ -1550,3 +1550,84 @@ async def test_sources_are_emitted_before_the_first_token(test_db, monkeypatch):
     # and a stale early set cannot survive the turn (I-8 keeps done authoritative).
     final = next(p for p in payloads if p.get("done"))
     assert final["source_citations"] == source_citations
+
+
+# The answer receipt — what it cost and what was sent for it
+
+
+@pytest.mark.asyncio
+async def test_receipt_reports_engine_latency_and_what_was_sent(test_db):
+    """The receipt is the privacy and latency claim in checkable form.
+
+    `engine` comes from the same `is_on_device` the Settings routing table uses, so
+    the line under an answer and the table in Settings cannot disagree about what
+    counts as local.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    result = {
+        "answer": "",
+        "citations": [],
+        "confidence": "high",
+        "not_found": False,
+        "chunks": [],
+        "source_citations": [],
+        "_llm_prompt": "Answer.",
+        "_system_prompt": "",
+        "intent": "factual",
+        "_passages_sent": 4,
+        "_context_chars": 3614,
+        "_context_budget": 750,
+        "_budget_reason": "slow host (probe 21.3s)",
+    }
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=result)
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value=_async_iter(["Answer."]))
+
+    with (
+        patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph),
+        patch("app.services.qa.get_llm_service", return_value=mock_llm),
+    ):
+        events = [
+            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
+        ]
+
+    final = json.loads(events[-1][len("data: ") :])
+    receipt = final["receipt"]
+
+    assert receipt["engine"] in ("local", "cloud")
+    assert receipt["passages_sent"] == 4
+    assert receipt["context_chars"] == 3614
+    # The halved budget and its reason travel with the answer. It changes what the
+    # reader receives (#100) and used to be visible only in a log line.
+    assert receipt["context_budget_tokens"] == 750
+    assert "slow host" in receipt["context_budget_reason"]
+    assert receipt["ttft_seconds"] is not None
+    assert receipt["total_seconds"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_receipt_ttft_is_null_when_no_model_was_called(test_db):
+    """A pass-through answer has no time-to-first-token, and says so.
+
+    Zero would read as "instant" and be averaged into a latency number that never
+    happened. The distinction is the whole point of reporting the field.
+    """
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, tmp_path, doc_id)
+
+    # No _llm_prompt: the strategy node already produced the answer.
+    result = _make_graph_result(answer="A cached summary.", citations=[])
+    mock_graph = _make_mock_graph(result)
+
+    with patch("app.runtime.chat_graph.get_chat_graph", return_value=mock_graph):
+        events = [
+            e async for e in QAService().stream_answer("q?", [doc_id], "single", None)
+        ]
+
+    final = json.loads(events[-1][len("data: ") :])
+    assert final["receipt"]["ttft_seconds"] is None

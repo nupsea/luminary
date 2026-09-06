@@ -58,8 +58,12 @@ class RoutingReport:
         return [w.id for w in self.work if not w.on_device]
 
 
-def _on_device(model_id: str | None) -> bool:
+def is_on_device(model_id: str | None) -> bool:
     """Whether *model_id* names something that runs on this machine.
+
+    Public because the answer receipt reports the same fact under the answer. Two
+    derivations of "local" would eventually disagree, and the one a user reads
+    under an answer is the one that has to be right.
 
     Off-device is decided by the provider prefix routing itself prepends, not by
     a list kept here: `get_effective_routing` builds `"{provider}/{model}"` from
@@ -81,7 +85,7 @@ def _routed(work_id: str, label: str, role: str, why: str) -> WorkRouting:
         id=work_id,
         label=label,
         model=choice.model,
-        on_device=_on_device(choice.model),
+        on_device=is_on_device(choice.model),
         routable=True,
         why=why,
         fallback_reason=choice.fallback_reason,
@@ -93,7 +97,7 @@ def _fixed(work_id: str, label: str, model: str | None, why: str) -> WorkRouting
         id=work_id,
         label=label,
         model=model,
-        on_device=_on_device(model),
+        on_device=is_on_device(model),
         routable=False,
         why=why,
     )

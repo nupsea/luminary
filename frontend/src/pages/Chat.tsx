@@ -199,6 +199,7 @@ interface ChatMessage {
   web_sources?: WebSource[]  // S142: web augmentation sources
   source_citations?: SourceCitation[]  // S148: chunk-derived deep-link citations
   transparency?: TransparencyInfo       // S158: retrieval transparency panel
+  receipt?: AnswerReceipt               // what this answer cost and what was sent for it
   notice?: string                       // offline/routing notice, shown above the answer
   error?: string                        // this turn failed; message shown with a Retry button
   failedQuestion?: string               // question to re-send on Retry
@@ -252,6 +253,66 @@ const STRATEGY_LABEL: Record<string, string> = {
   graph_traversal: "Graph traversal",
   comparative: "Comparative search",
   augmented_hybrid: "Augmented hybrid retrieval",
+}
+
+// What the answer cost and what left the machine. The Settings routing table says
+// where work runs in general; this says what happened for this answer, which is the
+// version a reader can check. `engine` comes from the backend's `is_on_device`, the
+// same one the table uses, so the two cannot disagree.
+interface AnswerReceipt {
+  engine: "local" | "cloud"
+  model: string
+  ttft_seconds: number | null
+  total_seconds: number
+  passages_sent: number | null
+  context_chars: number | null
+  context_budget_tokens: number | null
+  context_budget_reason: string | null
+}
+
+function AnswerReceiptLine({ receipt }: { receipt: AnswerReceipt }) {
+  const local = receipt.engine === "local"
+  // A null ttft means no model was called (a cached or pass-through answer). Showing
+  // 0s there would read as "instant" for work that never happened.
+  const timing =
+    receipt.ttft_seconds !== null
+      ? `first token ${receipt.ttft_seconds.toFixed(1)}s · ${receipt.total_seconds.toFixed(1)}s total`
+      : `${receipt.total_seconds.toFixed(1)}s total · no model call`
+  // The budget reason is only worth surfacing when something narrowed it; the
+  // default carries no decision the reader needs to know about.
+  const narrowed =
+    receipt.context_budget_reason && !receipt.context_budget_reason.startsWith("default")
+      ? receipt.context_budget_reason
+      : null
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+      <span className={local ? "text-green-700 dark:text-green-400" : "text-blue-700 dark:text-blue-400"}>
+        {local ? "Ran on this machine" : "Sent to the cloud"}
+      </span>
+      <span>·</span>
+      <span className="font-mono">{receipt.model}</span>
+      <span>·</span>
+      <span>{timing}</span>
+      {receipt.passages_sent !== null && (
+        <>
+          <span>·</span>
+          <span>
+            {local
+              ? `${receipt.passages_sent} passage${receipt.passages_sent === 1 ? "" : "s"} used`
+              : `${receipt.passages_sent} passage${receipt.passages_sent === 1 ? "" : "s"} sent`}
+          </span>
+        </>
+      )}
+      {narrowed && (
+        <>
+          <span>·</span>
+          <span className="text-amber-700 dark:text-amber-400">
+            context narrowed: {narrowed}
+          </span>
+        </>
+      )}
+    </div>
+  )
 }
 
 // S158: per-message transparency panel with collapsible "How I Answered" section
@@ -936,6 +997,7 @@ export default function Chat() {
               const image_ids = (payload["image_ids"] as string[] | undefined) ?? []
               const web_sources = (payload["web_sources"] as WebSource[] | undefined) ?? []
               const source_citations = (payload["source_citations"] as SourceCitation[] | undefined) ?? []
+              const receipt = payload["receipt"] as AnswerReceipt | undefined
               const newWebCallsUsed = (payload["web_calls_used"] as number | undefined) ?? webCallsUsed
               setWebCallsUsed(newWebCallsUsed)
               setMessages((m) =>
@@ -953,6 +1015,7 @@ export default function Chat() {
                       image_ids,
                       web_sources,
                       source_citations,
+                      receipt,
                     }
                     : msg,
                 ),
@@ -1379,6 +1442,11 @@ export default function Chat() {
                           </a>
                         ))}
                       </div>
+                    )}
+
+                    {/* What this answer cost, and whether it left the machine */}
+                    {!msg.isStreaming && msg.receipt && (
+                      <AnswerReceiptLine receipt={msg.receipt} />
                     )}
 
                     {/* Retrieval transparency panel: confidence badge + How I Answered (S158) */}
