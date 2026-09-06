@@ -151,3 +151,19 @@ def test_cloud_without_a_key_reports_the_local_model_it_will_really_use(
         "a fallback with no reason is indistinguishable from a working cloud "
         "route that happens to name a local model"
     )
+
+
+def test_the_local_probe_is_null_when_nothing_measured_it(private_routing, monkeypatch):
+    """A missing measurement is null, never a number.
+
+    First run quotes this to say what a local answer costs on *this* machine. A
+    default would put an invented figure in front of a stranger deciding whether
+    to keep the product, which is the shortcut `product-integrity.md` exists for.
+    """
+    from app.services import model_keepwarm
+
+    monkeypatch.setattr(model_keepwarm, "measured_probe_seconds", lambda: None)
+    assert llm_routing.routing_report().local_probe_seconds is None
+
+    monkeypatch.setattr(model_keepwarm, "measured_probe_seconds", lambda: 21.3)
+    assert llm_routing.routing_report().local_probe_seconds == 21.3

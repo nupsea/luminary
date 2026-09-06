@@ -9871,6 +9871,8 @@ export interface components {
             work: components["schemas"]["WorkRoutingItem"][];
             /** Leaves Device */
             leaves_device: string[];
+            /** Local Probe Seconds */
+            local_probe_seconds?: number | null;
         };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {

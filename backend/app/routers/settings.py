@@ -205,6 +205,9 @@ class RoutingResponse(BaseModel):
     provider: str | None
     work: list[WorkRoutingItem]
     leaves_device: list[str]
+    # Null when nothing measured local inference on this host. Kept nullable rather
+    # than defaulted so a screen quoting it cannot quote a number nobody took.
+    local_probe_seconds: float | None = None
 
 
 @router.get("/llm/routing", response_model=RoutingResponse)
@@ -218,6 +221,7 @@ async def get_llm_routing() -> RoutingResponse:
         provider=report.provider,
         work=[WorkRoutingItem(**vars(w)) for w in report.work],
         leaves_device=report.leaves_device,
+        local_probe_seconds=report.local_probe_seconds,
     )
 
 

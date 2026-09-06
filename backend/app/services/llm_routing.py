@@ -52,6 +52,11 @@ class RoutingReport:
     mode: str
     provider: str | None
     work: list[WorkRouting] = field(default_factory=list)
+    # What a local answer actually cost on this machine, from the start-up probe.
+    # None when nothing measured it -- Ollama was down at start-up, or keep-warm is
+    # off. None is not "fast": a first-run screen may state this number and must not
+    # invent one, so the absence has to stay distinguishable from a low value.
+    local_probe_seconds: float | None = None
 
     @property
     def leaves_device(self) -> list[str]:
@@ -173,4 +178,11 @@ def routing_report() -> RoutingReport:
         ),
     ]
 
-    return RoutingReport(mode=mode, provider=provider, work=work)
+    from app.services import model_keepwarm  # noqa: PLC0415
+
+    return RoutingReport(
+        mode=mode,
+        provider=provider,
+        work=work,
+        local_probe_seconds=model_keepwarm.measured_probe_seconds(),
+    )

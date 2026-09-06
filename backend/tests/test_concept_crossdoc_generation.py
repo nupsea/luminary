@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import dispose_engine
 
 import app.database as db_module
 from app.database import make_engine
@@ -35,6 +36,7 @@ async def test_db(tmp_path, monkeypatch):
     db_module._engine, db_module._session_factory = engine, factory
     yield factory
     db_module._engine, db_module._session_factory = orig_e, orig_f
+    await dispose_engine(engine)
 
 
 async def _seed_two_books_one_concept(factory):

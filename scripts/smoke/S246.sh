@@ -44,7 +44,7 @@ REQUIRED = {
 STRUCTURAL = {'indexing', 'retrieval', 'transcription', 'extraction', 'learner_record'}
 
 d = json.load(sys.stdin)
-for key in ('mode', 'provider', 'work', 'leaves_device'):
+for key in ('mode', 'provider', 'work', 'leaves_device', 'local_probe_seconds'):
     if key not in d:
         sys.exit(f'FAIL: response missing {key!r}')
 
@@ -74,7 +74,11 @@ if off_structural:
 if rows['learner_record']['model'] is not None:
     sys.exit('FAIL: learner_record names a model; nothing there runs a model')
 
-print(f'OK: mode={d[\"mode\"]} rows={len(d[\"work\"])} leaves_device={d[\"leaves_device\"] or \"[]\"}')
+probe = d['local_probe_seconds']
+if probe is not None and not isinstance(probe, (int, float)):
+    sys.exit(f'FAIL: local_probe_seconds is neither null nor a number: {probe!r}')
+
+print(f'OK: mode={d[\"mode\"]} rows={len(d[\"work\"])} leaves_device={d[\"leaves_device\"] or \"[]\"} probe={probe}')
 "
 
 echo "=== S246 smoke: PASSED ==="

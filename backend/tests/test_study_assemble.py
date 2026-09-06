@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import dispose_engine
 
 import app.database as db_module
 import app.services.graph as graph_module
@@ -36,6 +37,7 @@ async def test_db(tmp_path, monkeypatch):
     yield factory
     db_module._engine, db_module._session_factory = orig_engine, orig_factory
     graph_module._graph_service = orig_graph
+    await dispose_engine(engine)
 
 
 async def test_assemble_concept_scope_yields_event_and_due_card(test_db):
