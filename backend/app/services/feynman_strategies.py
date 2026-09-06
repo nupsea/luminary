@@ -5,12 +5,11 @@ session orchestration. These are the swappable bits -- parsers and prompts can b
 tuned without touching the session state-machine logic.
 """
 
-import asyncio
 import json
 import logging
 import re
 
-from app.services.background import fire_and_forget
+from app.services.background import fire_and_forget, task_registry
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ _MODEL_EXPLANATION_USER_TMPL = (
 _SECTION_CONTEXT_CHAR_LIMIT = 3000
 
 # Strong reference set for fire-and-forget background tasks
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks = task_registry(__name__)
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]

@@ -15,11 +15,11 @@ Re-exported from `app.workflows.ingestion` for back-compat with
 existing test imports.
 """
 
-import asyncio
 import logging
 from typing import Any, TypedDict
 
 from app.database import get_session_factory
+from app.services.background import task_registry
 from app.services.parser import DocumentParser
 from app.types import ContentType  # noqa: F401  re-exported via app.workflows.ingestion
 
@@ -28,7 +28,8 @@ from app.types import ContentType  # noqa: F401  re-exported via app.workflows.i
 # tasks aren't garbage-collected mid-execution. Each task should add
 # `_background_tasks.discard` as a done-callback so finished tasks don't
 # accumulate.
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 
 logger = logging.getLogger(__name__)
 

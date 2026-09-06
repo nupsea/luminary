@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
-from app.services.background import fire_and_forget
+from app.services.background import fire_and_forget, task_registry
 from app.services.golden_quality import (
     build_generation_prompt,
     extract_json_object,
@@ -32,7 +31,7 @@ SIZE_CONFIG: dict[str, tuple[int, int]] = {
 MAX_QUESTIONS_PER_DATASET = 1000
 DEFAULT_GENERATOR_MODEL = "openai/gpt-4.1"
 
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks = task_registry(__name__)
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]

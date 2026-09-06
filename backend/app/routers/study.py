@@ -94,7 +94,7 @@ from app.schemas.study import (
     TopicItem,
 )
 from app.services import study_assembler
-from app.services.background import fire_and_forget
+from app.services.background import fire_and_forget, task_registry
 from app.services.flashcard_search import _sync_flashcard_fts
 from app.services.fsrs_service import get_fsrs_service
 from app.services.llm import get_llm_service
@@ -136,7 +136,7 @@ router = APIRouter(prefix="/study", tags=["study"])
 # Gap-detection thresholds live in repos/study_repo.py.
 
 # Background task set -- strong refs prevent GC (same pattern as feynman_service.py)
-_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+_background_tasks = task_registry(__name__)
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]

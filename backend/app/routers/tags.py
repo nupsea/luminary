@@ -26,6 +26,7 @@ from app.models import CanonicalTagModel, NoteModel, NoteTagIndexModel
 from app.repos._helpers import get_or_404
 from app.repos.tag_repo import TagRepo, get_tag_repo
 from app.routers.notes import _sync_tag_index
+from app.services.background import task_registry
 from app.services.naming import normalize_tag_slug
 from app.services.tag_graph import build_tag_graph, invalidate_tag_graph_cache
 from app.services.tag_merge_service import get_tag_merge_service
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
-_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+_background_tasks = task_registry(__name__)
 
 
 class TagResponse(BaseModel):

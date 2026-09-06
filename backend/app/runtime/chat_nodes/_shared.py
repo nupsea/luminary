@@ -8,8 +8,7 @@ the per-node modules in this package.
 
 from __future__ import annotations
 
-import asyncio
-
+from app.services.background import task_registry
 from app.services.qa import (
     CITATION_RULE,
     NOT_FOUND_SENTINEL,
@@ -20,7 +19,8 @@ from app.types import ScoredChunk
 
 # Strong references for fire-and-forget background tasks (asyncio holds weak refs only).
 # Shared across all chat-graph nodes that spawn background work.
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 
 
 # Intent-specific system prompts (used by synthesize_node)

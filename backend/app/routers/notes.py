@@ -61,6 +61,7 @@ from app.schemas.notes import (
 # indirect: tests patch `app.services.note_tagger.get_note_tagger`
 from app.services import note_tagger as _note_tagger_module
 from app.services.activity_service import ActivityService
+from app.services.background import task_registry
 
 # Promoted from inline lazy imports — all import cleanly without back-importing `app.routers.notes`;
 # the original noqa: PLC0415 markers were leftovers from earlier circular
@@ -110,7 +111,7 @@ from app.services.vector_store import get_lancedb_service
 
 logger = logging.getLogger(__name__)
 
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks = task_registry(__name__)
 
 
 def _schedule_description(note_id: str, content: str) -> None:

@@ -56,6 +56,7 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.services.background import all_pending, clear_registries, task_registry
 from app.services.components import (
     activate_extras,
     install_ollama_model,
@@ -97,7 +98,8 @@ _APP_VERSION = app_version()
 
 # Warmup and the description backfill were fire-and-forget, so nothing cancelled
 # them at shutdown and nothing held a reference against garbage collection.
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 _SHUTDOWN_GRACE_S = 5.0
 
 
@@ -382,27 +384,26 @@ async def lifespan(app: FastAPI):
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 
-    # Both sets, not just this module's. The ingestion nodes keep their own
-    # (`ingestion_nodes._shared._background_tasks`) and shutdown never touched
-    # it, so post-ingest work -- deferred section summaries, pregeneration --
-    # kept running against a database that was closing underneath it:
+    # Every registry, not a list maintained here. Naming them one at a time is how
+    # this came to drain two of ten: post-ingest work -- deferred section
+    # summaries, pregeneration -- kept running against a database that was closing
+    # underneath it,
     #
     #   deferred section summaries failed (non-fatal):
     #   (sqlite3.ProgrammingError) Cannot operate on a closed database.
     #
-    # It was survivable while deferral only happened above 40 sections. It is
-    # now the path every local-model ingest takes, so the leak is on every one.
-    from app.workflows.ingestion_nodes._shared import (  # noqa: PLC0415
-        _background_tasks as _ingestion_background_tasks,
-    )
-
-    pending = set(_background_tasks) | set(_ingestion_background_tasks)
+    # and note, flashcard and tag work was doing the same thing unnoticed. A
+    # registry declared through `task_registry` is drained here whether or not
+    # anyone remembered to mention it.
+    #
+    # Cancelling bounds the tasks, not the threads they may be sitting in: work
+    # inside `asyncio.to_thread` runs on to completion regardless (I-40).
+    pending = all_pending()
     for task in pending:
         task.cancel()
     if pending:
         await asyncio.wait(pending, timeout=_SHUTDOWN_GRACE_S)
-    _background_tasks.clear()
-    _ingestion_background_tasks.clear()
+    clear_registries()
 
     shutdown_model_executor()
 

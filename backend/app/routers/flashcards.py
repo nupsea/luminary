@@ -76,6 +76,7 @@ from app.schemas.flashcards import (
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.activity_service import ActivityService
+from app.services.background import task_registry
 from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
@@ -103,7 +104,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
 # Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 
 # Back-compat re-exports for routers/study.py and tests that import these
 # private aliases from this module.
