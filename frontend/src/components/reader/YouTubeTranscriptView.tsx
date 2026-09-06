@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiGet } from "@/lib/apiClient"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
+import { cn } from "@/lib/utils"
+import { CITATION_MARK_TOKEN } from "@/lib/citationHighlight"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
   apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)
@@ -227,7 +229,19 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
                     key={chunk.id}
                     id={`chunk-${chunk.id}`}
                     data-section-id={chunk.section_id || ""}
-                    className="text-sm leading-relaxed text-foreground"
+                    className={cn(
+                      "text-sm leading-relaxed text-foreground",
+                      // A transcript renders one element per chunk, and a citation
+                      // names its chunk exactly -- so the cited passage is marked by
+                      // id here rather than by matching its text, which is what the
+                      // Read view has to do because prose has no chunk boundaries.
+                      // Stays until the reader leaves: they are still reading around
+                      // the passage, and a mark that vanishes answers "which words
+                      // were the source" worse than not marking at all.
+                      chunk.id === initialChunkId &&
+                        `${CITATION_MARK_TOKEN} -mx-2 rounded-md bg-amber-200/70 px-2 py-1 ` +
+                          "ring-1 ring-amber-400/60 dark:bg-amber-500/25 dark:ring-amber-400/40",
+                    )}
                   >
                     {chunk.start_time != null && (
                       <span className="mr-2 font-mono text-xs text-muted-foreground">
