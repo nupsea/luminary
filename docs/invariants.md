@@ -52,10 +52,16 @@ which is what stops the first from passing against work that had already finishe
 
 **A fixture that gathers cancelled tasks is the same trap in test clothing.** Five teardowns
 cancelled a router's registry and then awaited `gather(*pending)` with no timeout; `POST /notes`
-schedules an embed through `run_in_executor`, so the gather waited out whatever the executor was
-doing and the 120s timeout killed the session, naming the fixture's owner rather than the leaker.
-`tests/task_drain.py` bounds it in one place so the next fixture cannot copy an unbounded
-neighbour.
+schedules an embed through `run_in_executor`, so the gather could wait out whatever the executor
+was doing. `tests/task_drain.py` bounds that, and engine disposal beside it, in one place so the
+next fixture cannot copy an unbounded neighbour.
+
+**That is not the whole of the recurring `test_e2e_upload` timeout.** It returned after both
+bounds landed, parked in the same place: a pytest-asyncio fixture finalizer, loop idle on the
+selector, with every aiosqlite worker thread waiting on an empty queue. Nothing is slow there --
+something is never going to be answered, which points at a future belonging to a loop that is
+already gone rather than at any wait that can be shortened. Open; do not read a green run as
+evidence, since it passes on the runs where nothing strands.
 
 ## FTS5 / SQLite
 
