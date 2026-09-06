@@ -22,6 +22,12 @@ import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
 import type { AnnotationItem, SectionContentItem } from "./types"
+import {
+  CITATION_HIGHLIGHT_MS,
+  CITATION_MARK_CLASS,
+  CITATION_MARK_TOKEN,
+  longestPresentPrefix,
+} from "@/lib/citationHighlight"
 
 type DocumentImage = components["schemas"]["ImageItem"]
 
@@ -78,6 +84,8 @@ interface LazySectionProps {
   isLast: boolean
   /** In-document search term to mark in the body. Empty when search is closed. */
   searchTerm?: string
+  /** Text from the citation that opened the reader, marked until it times out. */
+  citationSnippet?: string
 }
 
 
@@ -142,7 +150,7 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "" }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationSnippet = "" }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -172,9 +180,17 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const showHeading = hasAuthoredHeading(section)
   const highlighted = useMemo(() => {
     if (!isVisible) return "" // defer processing
-    const marked = applyHighlights(body, highlightsVisible ? annotations : [])
-    return searchTerm ? applySearchTerm(marked, searchTerm) : marked
-  }, [isVisible, body, annotations, highlightsVisible, searchTerm])
+    let marked = applyHighlights(body, highlightsVisible ? annotations : [])
+    if (searchTerm) marked = applySearchTerm(marked, searchTerm)
+    // The citation snippet is shortened to the part this section actually
+    // contains, so a chunk that straddles a boundary still marks what is here and
+    // a section that holds none of it marks nothing.
+    if (citationSnippet) {
+      const present = longestPresentPrefix(citationSnippet, body)
+      if (present) marked = applySearchTerm(marked, present, CITATION_MARK_CLASS)
+    }
+    return marked
+  }, [isVisible, body, annotations, highlightsVisible, searchTerm, citationSnippet])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
@@ -416,6 +432,8 @@ interface ReadViewProps {
   sourceUrl?: string | null
   /** In-document search term, marked in the body. Empty when search is closed. */
   searchTerm?: string
+  /** Text of the citation that opened this reader. Marked briefly, then dropped. */
+  citationSnippet?: string
 }
 
 export function ReadView({
@@ -428,7 +446,43 @@ export function ReadView({
   extractionReport,
   sourceUrl,
   searchTerm = "",
+  citationSnippet,
 }: ReadViewProps) {
+  // The mark is transient by design: it answers "which words were the source"
+  // on arrival and then gets out of the way. Kept in state rather than read
+  // straight from the prop so it can expire without the caller re-rendering,
+  // and re-armed whenever a different citation arrives.
+  // Derived rather than synced: recording which snippet has expired means a new
+  // citation is live again without an effect writing state during render, which
+  // is the cascade the lint rule is about and the double-run StrictMode causes.
+  const [expiredCitation, setExpiredCitation] = useState<string | undefined>()
+  const activeCitation =
+    citationSnippet && expiredCitation !== citationSnippet ? citationSnippet : undefined
+  useEffect(() => {
+    if (!citationSnippet) return
+    const timer = setTimeout(() => setExpiredCitation(citationSnippet), CITATION_HIGHLIGHT_MS)
+    return () => clearTimeout(timer)
+  }, [citationSnippet])
+
+  // Scroll to the mark once it has rendered. Sections mount lazily, so the mark
+  // may not exist on the first pass; a short retry covers that without polling
+  // forever. `block: "center"` because a citation landing under the header reads
+  // as not having landed at all.
+  useEffect(() => {
+    if (!activeCitation) return
+    let attempts = 0
+    const tick = () => {
+      const el = document.querySelector(`.${CITATION_MARK_TOKEN}`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        return
+      }
+      if (++attempts < 20) timer = window.setTimeout(tick, 150)
+    }
+    let timer = window.setTimeout(tick, 150)
+    return () => clearTimeout(timer)
+  }, [activeCitation])
+
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
     [contentType, structureType],
@@ -739,6 +793,7 @@ export function ReadView({
               spec={spec}
               isLast={i === sections.length - 1}
               searchTerm={searchTerm}
+              citationSnippet={activeCitation}
             />
           ))}
           

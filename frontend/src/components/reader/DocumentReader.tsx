@@ -129,6 +129,8 @@ interface DocumentReaderProps {
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
+  /** Text from the citation that opened this reader, marked briefly in the prose. */
+  initialCitationSnippet?: string
   initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
   initialSearch?: string  // opens the in-doc search bar prefilled (from Map entity deep-link)
 }
@@ -141,7 +143,7 @@ export function DocumentReader(props: DocumentReaderProps) {
   )
 }
 
-function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage, initialSearch }: DocumentReaderProps) {
+function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialCitationSnippet, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
   // Reading time exists nowhere else: opening a document and reading it for
@@ -1370,6 +1372,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
+                citationSnippet={initialCitationSnippet}
               />
             )}
           </div>

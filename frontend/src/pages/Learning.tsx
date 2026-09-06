@@ -107,6 +107,9 @@ export default function Learning() {
   const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
     searchParams.get("chunk_id") ?? undefined,
   )
+  // Not a URL param: a display hint for one arrival, not something a shared link
+  // should reproduce.
+  const [savedCitationSnippet, setSavedCitationSnippet] = useState<string | undefined>()
   const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
     if (!raw) return undefined
@@ -327,6 +330,11 @@ export default function Learning() {
     setSavedChunkId(searchParams.get("chunk_id") ?? undefined)
     setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
     setSavedSearch(searchParams.get("search") ?? undefined)
+    // Carried in route state rather than the URL: it is a display hint for one
+    // arrival, not something a shared link should reproduce.
+    setSavedCitationSnippet(
+      (routeLocation.state as { citationSnippet?: string } | null)?.citationSnippet,
+    )
 
     setActiveDocument(docParam)
     setSearchParams((prev) => {
@@ -414,6 +422,7 @@ export default function Learning() {
             onBack={returnToLibrary}
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
+            initialCitationSnippet={savedCitationSnippet}
             initialPage={savedPage}
             initialSearch={savedSearch}
           />

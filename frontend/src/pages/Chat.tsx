@@ -34,6 +34,7 @@ import { buildModelOptions, buildScopeComboboxLabel, cloudOverrideAllowed, effec
 
 import { API_BASE } from "@/lib/config"
 import { apiGet, apiPost } from "@/lib/apiClient"
+import { citationNeedle } from "@/lib/citationHighlight"
 
 // ---------------------------------------------------------------------------
 // SuggestionPills — two-phase: show cached instantly, refresh with LLM in background
@@ -1107,7 +1108,12 @@ export default function Chat() {
     if (c.section_id) params.set("section_id", c.section_id)
     if (c.chunk_id) params.set("chunk_id", c.chunk_id)
     if (c.pdf_page_number) params.set("page", String(c.pdf_page_number))
-    navigate(`/library?${params.toString()}`, { state: { from: "/chat" } })
+    // The snippet rides along so the reader can mark the exact words in the prose.
+    // It is already in hand here; fetching the chunk again in the reader would cost
+    // a request that returns every chunk in the document to use one of them.
+    navigate(`/library?${params.toString()}`, {
+      state: { from: "/chat", citationSnippet: citationNeedle(c) },
+    })
   }
 
   const effectiveDocId = selectedDocId ?? activeDocumentId
