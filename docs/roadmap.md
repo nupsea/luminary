@@ -161,11 +161,18 @@ list; `variant="docked"` drops the session list, the back button and the `?q=` p
 is now the route around it. Scope has come from the store rather than the render closure since
 `957b5be` (a library question scoped to a PDF 40 seconds into ingestion).
 
-**What a docked conversation is scoped to is still open.** `chatScope` and `chatSelectedDocId` are
-global, so a conversation docked in the reader and the Ask page would share one scope: docking as-is
-would silently re-scope the other. Either the store grows a per-mount scope or the dock pins its
-document and the page keeps the global one — decide before the dock ships, because the bug this
-creates is the one `957b5be` already fixed once.
+**A conversation belongs to the surface holding it.** `chatThreads` is keyed — `page` for Ask, and
+`doc:<id>` for a conversation docked in a reader — because one global thread meant the dock would
+re-scope the Ask page, which is the defect `957b5be` fixed once already. A docked conversation is
+pinned to its document and offers no scope picker. Preloaded questions are addressed the same way
+(`preloadIsFor`), so an `autoSubmit` question cannot send itself into the wrong conversation.
+
+`make verify-dock` measures the two properties no unit test can see: asking about a passage keeps the
+reader on the passage, and the reader's conversation leaves the Ask page's thread and scope untouched.
+Pointing the dock at the page thread turns four of its checks red, which is what makes them checks.
+
+**Still modal, still to dock:** `QuickNoteComposer` and `FeynmanDialog`. The panel carries two tabs
+(Insights, Ask AI) of the seven the rung names, and the nav cut to five rail items is untouched.
 
 The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
 lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output

@@ -29,6 +29,7 @@ import type { DocAction } from "@/lib/docActionUtils"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import { apiGet } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
+import { PAGE_THREAD } from "@/store/chatThreads"
 
 import {
   bulkDelete,
@@ -81,8 +82,7 @@ export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const selectDocument = useSelectDocument()
-  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
-  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setChatThread = useAppStore((s) => s.setChatThread)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const libraryView = useAppStore((s) => s.libraryView)
   const setLibraryView = useAppStore((s) => s.setLibraryView)
@@ -254,8 +254,9 @@ export default function Learning() {
       return
     }
     if (action === "chat") {
-      setChatSelectedDocId(docId)
-      setChatScope("single")
+      // The document action opens the Ask page on this document, so it is the
+      // page's own conversation that gets re-scoped -- never a docked one.
+      setChatThread(PAGE_THREAD, { selectedDocId: docId, scope: "single" })
     } else if (action === "notes") {
       setNotesDocumentId(docId)
     } else {

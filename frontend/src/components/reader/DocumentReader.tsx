@@ -64,6 +64,8 @@ import { SelectionActionBar } from "./SelectionActionBar"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
+import { ChatConversation } from "@/pages/Chat/ChatConversation"
+import { docThreadKey } from "@/store/chatThreads"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
@@ -319,7 +321,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docSections])
 
-  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload })
+  // Which face of the docked panel is showing. Insights is what the panel has
+  // always held; Ask is this document's own conversation, mounted beside the
+  // text instead of on another tab.
+  const [insightsTab, setInsightsTab] = useState<"insights" | "ask">("insights")
+  const openAsk = useCallback(() => {
+    setInsightsRestored(true)
+    setInsightsTab("ask")
+  }, [setInsightsRestored, setInsightsTab])
+  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload, openAsk })
 
   const {
     sectionTree,
@@ -1111,16 +1121,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Generate questions
           </button>
           <button
-            onClick={() => {
-              // Open the full Chat page scoped to THIS document. Route through
-              // chatPreload (empty prompt, no auto-submit) so it starts a fresh,
-              // document-scoped conversation and the mount-time session hydration
-              // can't clobber the scope back to the last thread.
-              setChatPreload({ text: "", documentId, autoSubmit: false })
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }),
-              )
-            }}
+            // The conversation about this document is docked beside it, already
+            // scoped to it, so this shows the panel rather than leaving the page.
+            onClick={openAsk}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Chat about this document"
           >
@@ -1182,10 +1185,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           {(docNotes?.length ?? 0) >= 3 && (
             <button
               onClick={() => {
-                setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
-                window.dispatchEvent(
-                  new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
-                )
+                setChatPreload({
+                  text: "compare my notes with this book",
+                  documentId,
+                  autoSubmit: true,
+                  threadKey: docThreadKey(documentId),
+                })
+                openAsk()
               }}
               className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             >
@@ -1538,18 +1544,43 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             <PanelRightOpen size={16} />
           </button>
         ) : (
-        <div className="shrink-0 overflow-auto p-6" style={{ width: insights.width }}>
-          <div className="mb-2 flex justify-end">
+        <div className="flex shrink-0 flex-col overflow-hidden" style={{ width: insights.width }}>
+          <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+            {(["insights", "ask"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setInsightsTab(tab)}
+                aria-pressed={insightsTab === tab}
+                className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                  insightsTab === tab
+                    ? "bg-accent font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                }`}
+              >
+                {tab === "insights" ? "Insights" : "Ask AI"}
+              </button>
+            ))}
             <button
               type="button"
               onClick={toggleInsights}
               aria-label="Hide insights"
               title="Hide insights"
-              className="text-muted-foreground hover:text-foreground"
+              className="ml-auto text-muted-foreground hover:text-foreground"
             >
               <PanelRightClose size={16} />
             </button>
           </div>
+          {/* Both stay mounted: a docked conversation that unmounted on every tab
+              switch would drop a streaming answer. */}
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "ask" ? "" : "hidden"}`}>
+            <ChatConversation
+              variant="docked"
+              threadKey={docThreadKey(documentId)}
+              pinnedDocumentId={documentId}
+            />
+          </div>
+          <div className={`min-h-0 flex-1 overflow-auto p-6 ${insightsTab === "insights" ? "" : "hidden"}`}>
           {/* Video player for video documents */}
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
@@ -1565,6 +1596,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             contentType={doc.content_type}
             form={doc.facets?.form}
           />
+          </div>
         </div>
         )}
 

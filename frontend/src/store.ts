@@ -1,3 +1,4 @@
+import { EMPTY_THREAD, migrateChatThreads, withThread, type ChatPreload, type ChatThread } from "./store/chatThreads"
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 
@@ -27,10 +28,7 @@ interface AppState {
   studySectionFilter: StudySectionFilter | null
   // Pre-populate Chat input when user selects "Ask in Chat" from SelectionActionBar.
   // autoSubmit flag triggers immediate send on preload consumption.
-  chatPreload: { text: string; documentId: string | null; autoSubmit?: boolean } | null
-  // Global sliding chat panel state
-  chatPanelOpen: boolean
-  setChatPanelOpen: (open: boolean) => void
+  chatPreload: ChatPreload | null
   // Active collection filter for Notes tab.
   activeCollectionId: string | null
   // Active tag filter for Notes tab (hierarchical prefix match).
@@ -44,24 +42,15 @@ interface AppState {
   // Document filter for Notes tab (set by doc action menu).
   notesDocumentId: string | null
   setNotesDocumentId: (id: string | null) => void
-  // Chat persistence
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  chatMessages: any[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setChatMessages: (msgs: any[]) => void
-  chatScope: "single" | "all"
-  setChatScope: (scope: "single" | "all") => void
-  chatSelectedDocId: string | null
-  setChatSelectedDocId: (id: string | null) => void
-  chatQaError: string | null
-  setChatQaError: (err: string | null) => void
-  // Persisted chat session id; null means "no session yet, will be created on first send".
-  activeChatSessionId: string | null
-  setActiveChatSessionId: (id: string | null) => void
+  // Conversations, keyed by the surface holding them: the Ask page is
+  // PAGE_THREAD, a conversation docked in a reader is docThreadKey(documentId).
+  // One global thread would mean docking a second one re-scoped the first.
+  chatThreads: Record<string, ChatThread>
+  setChatThread: (key: string, patch: Partial<ChatThread>) => void
+  clearChatThread: (key: string) => void
   // Sidebar visibility (persisted across reloads).
   chatSidebarOpen: boolean
   setChatSidebarOpen: (open: boolean) => void
-  clearChat: () => void
   setActiveDocument: (id: string | null) => void
   setLastReadyDocumentId: (id: string | null) => void
   setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
@@ -70,7 +59,7 @@ interface AppState {
   setNotesView: (view: "grid" | "list") => void
   setReviewRemindersEnabled: (enabled: boolean) => void
   setStudySectionFilter: (filter: StudySectionFilter | null) => void
-  setChatPreload: (preload: { text: string; documentId: string | null; autoSubmit?: boolean }) => void
+  setChatPreload: (preload: ChatPreload) => void
   clearChatPreload: () => void
   // The Add Content dialog is app-wide state, not the library page's, because a
   // file can be dropped on any surface. Transient: a File cannot be persisted.
@@ -107,8 +96,6 @@ export const useAppStore = create<AppState>()(
       reviewRemindersEnabled: localStorage.getItem("luminary:reviewReminders") !== "false",
       studySectionFilter: null,
       chatPreload: null,
-      chatPanelOpen: false,
-      setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
       activeCollectionId: null,
       activeTag: null,
       studySessionId: null,
@@ -117,19 +104,13 @@ export const useAppStore = create<AppState>()(
       setNotePreload: (preload) => set({ notePreload: preload }),
       notesDocumentId: null,
       setNotesDocumentId: (id) => set({ notesDocumentId: id }),
-      chatMessages: [],
-      setChatMessages: (msgs) => set({ chatMessages: msgs }),
-      chatScope: "all",
-      setChatScope: (scope) => set({ chatScope: scope }),
-      chatSelectedDocId: null,
-      setChatSelectedDocId: (id) => set({ chatSelectedDocId: id }),
-      chatQaError: null,
-      setChatQaError: (err) => set({ chatQaError: err }),
-      activeChatSessionId: null,
-      setActiveChatSessionId: (id) => set({ activeChatSessionId: id }),
+      chatThreads: {},
+      setChatThread: (key, patch) =>
+        set((state) => ({ chatThreads: withThread(state.chatThreads, key, patch) })),
+      clearChatThread: (key) =>
+        set((state) => ({ chatThreads: withThread(state.chatThreads, key, EMPTY_THREAD) })),
       chatSidebarOpen: true,
       setChatSidebarOpen: (open) => set({ chatSidebarOpen: open }),
-      clearChat: () => set({ chatMessages: [], chatQaError: null, chatSelectedDocId: null, chatScope: "all", activeChatSessionId: null }),
       setActiveDocument: (id) => set({ activeDocumentId: id }),
       setLastReadyDocumentId: (id) => set({ lastReadyDocumentId: id }),
       setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
@@ -158,23 +139,23 @@ export const useAppStore = create<AppState>()(
     {
       name: "luminary-app-store",
       storage: createJSONStorage(() => localStorage),
-      version: 1,
+      version: 2,
       // v0 persisted libraryFiltersOpen; hydrating it re-hides the rails.
+      // v1 held one conversation in four flat keys; migrateChatThreads folds it
+      // into the page thread so an open conversation survives the upgrade.
       migrate: (persisted) => {
         if (persisted && typeof persisted === "object") {
           delete (persisted as Record<string, unknown>).libraryFiltersOpen
+          return migrateChatThreads(persisted as Record<string, unknown>) as unknown as AppState
         }
         return persisted as AppState
       },
       partialize: (state) => ({
-        chatMessages: state.chatMessages,
-        chatScope: state.chatScope,
-        chatSelectedDocId: state.chatSelectedDocId,
+        chatThreads: state.chatThreads,
         libraryView: state.libraryView,
         notesView: state.notesView,
         reviewRemindersEnabled: state.reviewRemindersEnabled,
         studySessionId: state.studySessionId,
-        activeChatSessionId: state.activeChatSessionId,
         chatSidebarOpen: state.chatSidebarOpen,
         lastReadyDocumentId: state.lastReadyDocumentId,
       }),

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -29,6 +29,7 @@ import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
 import { useAppStore } from "@/store"
+import { PAGE_THREAD, preloadIsFor, threadOf } from "@/store/chatThreads"
 import { buildModelOptions, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride } from "@/lib/chatSettingsUtils"
 
 import { API_BASE } from "@/lib/config"
@@ -68,7 +69,16 @@ import type {
  * (`957b5be`): a question sent from here must be scoped to what the chip says,
  * not to whatever document the reader happened to open while it was streaming.
  */
-export function ChatConversation({ variant = "page" }: { variant?: "page" | "docked" } = {}) {
+export function ChatConversation({
+  variant = "page",
+  threadKey = PAGE_THREAD,
+  pinnedDocumentId,
+}: {
+  variant?: "page" | "docked"
+  threadKey?: string
+  /** Docked beside a document: its scope, and not the reader's to change. */
+  pinnedDocumentId?: string
+} = {}) {
   const isPage = variant === "page"
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
@@ -78,27 +88,49 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
   const { canGoBack, backLabel, goBack } = useBackNavigation()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
-  const messages = useAppStore((s) => s.chatMessages) as ChatMessage[]
-  const setMessagesRaw = useAppStore((s) => s.setChatMessages)
-  const setMessages = (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    if (typeof updater === "function") {
-      setMessagesRaw(updater(useAppStore.getState().chatMessages as ChatMessage[]))
-    } else {
-      setMessagesRaw(updater)
-    }
-  }
+  // Every piece of conversation state is read out of this surface's own thread,
+  // so a conversation docked in a reader neither reads nor rewrites the Ask
+  // page's. `here()` is the same read outside render, for the streaming path,
+  // which must never work from a closure (957b5be).
+  const thread = useAppStore((s) => threadOf(s.chatThreads, threadKey))
+  const patchThread = useAppStore((s) => s.setChatThread)
+  const here = useCallback(
+    () => threadOf(useAppStore.getState().chatThreads, threadKey),
+    [threadKey],
+  )
+  const messages = thread.messages as ChatMessage[]
+  const setMessages = useCallback(
+    (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+      patchThread(threadKey, {
+        messages: typeof updater === "function" ? updater(here().messages as ChatMessage[]) : updater,
+      })
+    },
+    [patchThread, threadKey, here],
+  )
   const [input, setInput] = useState("")
-  const scope = useAppStore((s) => s.chatScope)
-  const setScope = useAppStore((s) => s.setChatScope)
+  const scope = thread.scope
+  const setScope = useCallback(
+    (next: "single" | "all") => patchThread(threadKey, { scope: next }),
+    [patchThread, threadKey],
+  )
   // selectedDocId: explicit in-tab selection; falls back to global activeDocumentId
-  const selectedDocId = useAppStore((s) => s.chatSelectedDocId)
-  const setSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
+  const selectedDocId = thread.selectedDocId
+  const setSelectedDocId = useCallback(
+    (id: string | null) => patchThread(threadKey, { selectedDocId: id }),
+    [patchThread, threadKey],
+  )
   const [model, setModel] = useState<string>("")
   const [isStreaming, setIsStreaming] = useState(false)
-  const qaError = useAppStore((s) => s.chatQaError)
-  const setQaError = useAppStore((s) => s.setChatQaError)
-  const activeSessionId = useAppStore((s) => s.activeChatSessionId)
-  const setActiveSessionId = useAppStore((s) => s.setActiveChatSessionId)
+  const qaError = thread.error
+  const setQaError = useCallback(
+    (err: string | null) => patchThread(threadKey, { error: err }),
+    [patchThread, threadKey],
+  )
+  const activeSessionId = thread.sessionId
+  const setActiveSessionId = useCallback(
+    (id: string | null) => patchThread(threadKey, { sessionId: id }),
+    [patchThread, threadKey],
+  )
   const sidebarOpen = useAppStore((s) => s.chatSidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setChatSidebarOpen)
   const llmMode = useAppStore((s) => s.llmMode)
@@ -137,12 +169,23 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
   // Use a ref to avoid re-populating after the user explicitly clears
   // the document selection (clicking the X button).
   const docSelectorTouched = useRef(false)
+
+  // A pinned conversation is about one document and cannot be re-scoped: it is
+  // docked beside that document, and the reader asking about the page in front
+  // of them means this document, whatever the Ask page is scoped to.
   useEffect(() => {
+    if (!pinnedDocumentId) return
+    if (thread.selectedDocId === pinnedDocumentId && thread.scope === "single") return
+    patchThread(threadKey, { selectedDocId: pinnedDocumentId, scope: "single" })
+  }, [pinnedDocumentId, thread.selectedDocId, thread.scope, patchThread, threadKey])
+
+  useEffect(() => {
+    if (pinnedDocumentId) return
     if (activeDocumentId && !selectedDocId && !docSelectorTouched.current) {
       setSelectedDocId(activeDocumentId)
       setScope("single")
     }
-  }, [activeDocumentId, selectedDocId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeDocumentId, selectedDocId, pinnedDocumentId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // S147: Pre-fill input from chatPreload set by SelectionActionBar "Ask in Chat" action
   // S197: autoSubmit flag triggers immediate send
@@ -150,7 +193,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
     // Guard against StrictMode's double effect invocation (both share this
     // render's closure, so the chatPreload check alone would fire the send
     // twice). Key on the preload object identity so a later "Ask" still runs.
-    if (chatPreload && handledPreloadRef.current !== chatPreload) {
+    if (chatPreload && preloadIsFor(chatPreload, threadKey) && handledPreloadRef.current !== chatPreload) {
       handledPreloadRef.current = chatPreload
       const shouldAutoSubmit = chatPreload.autoSubmit
       // "Ask" from the reader always starts a fresh conversation rather than
@@ -266,7 +309,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
     try {
       const sess = await getChatSession(id)
       const hydrated: ChatMessage[] = sess.messages.map(persistedToChatMessage)
-      setMessagesRaw(hydrated)
+      setMessages(hydrated)
       setScope(sess.scope)
       setSelectedDocId(sess.document_ids[0] ?? null)
       // The hydrated session owns the doc context now. Without this, restoring
@@ -278,7 +321,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
     } catch {
       // Session disappeared (deleted in another tab) -- start fresh.
       setActiveSessionId(null)
-      setMessagesRaw([])
+      setMessages([])
     } finally {
       setHydratingSession(false)
     }
@@ -288,7 +331,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
   useEffect(() => {
     if (didInitialHydrate.current) return
     didInitialHydrate.current = true
-    const persistedId = useAppStore.getState().activeChatSessionId
+    const persistedId = here().sessionId
     if (persistedId) {
       void hydrateSession(persistedId)
     }
@@ -296,7 +339,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
 
   function startNewChat() {
     setActiveSessionId(null)
-    setMessagesRaw([])
+    setMessages([])
     setQaError(null)
     setWebCallsUsed(0)
     docSelectorTouched.current = false
@@ -325,8 +368,8 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
     nextDocId: string | null,
   ) {
     // Snapshot for undo
-    const prevSessionId = useAppStore.getState().activeChatSessionId
-    const prevMessages = useAppStore.getState().chatMessages as ChatMessage[]
+    const prevSessionId = here().sessionId
+    const prevMessages = here().messages as ChatMessage[]
     const prevScope = scope
     const prevDocId = selectedDocId
     const labelDoc =
@@ -348,7 +391,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
         model: activeModel || null,
       })
       setActiveSessionId(created.id)
-      setMessagesRaw([])
+      setMessages([])
       setScope(nextScope)
       setSelectedDocId(nextDocId)
       void qc.invalidateQueries({ queryKey: ["chat-sessions"] })
@@ -360,7 +403,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
             // Discard the empty session and restore the prior conversation.
             void deleteChatSession(created.id).catch(() => {})
             setActiveSessionId(prevSessionId)
-            setMessagesRaw(prevMessages)
+            setMessages(prevMessages)
             setScope(prevScope)
             setSelectedDocId(prevDocId)
             void qc.invalidateQueries({ queryKey: ["chat-sessions"] })
@@ -401,18 +444,18 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
     // on a PDF 40 seconds into ingestion and came back empty. If the scope says
     // single but this chat has no document, the chip is right and the scope is
     // stale -- ask the whole library, which is what the user is being shown.
-    const st = useAppStore.getState()
-    const effSelectedDocId = st.chatSelectedDocId
-    const effScope = st.chatScope === "single" && !effSelectedDocId ? "all" : st.chatScope
+    const st = here()
+    const effSelectedDocId = st.selectedDocId
+    const effScope = st.scope === "single" && !effSelectedDocId ? "all" : st.scope
 
     // Resolve / create the persisted session before we start streaming, so we have
     // a stable id to attach both the user turn and the assistant turn to.
     const sessionDocIds =
       effScope === "single" && effSelectedDocId ? [effSelectedDocId] : []
-    let sessionId = useAppStore.getState().activeChatSessionId
+    let sessionId = here().sessionId
     const isFirstTurn =
       !sessionId ||
-      (useAppStore.getState().chatMessages as ChatMessage[]).length === 0
+      (here().messages as ChatMessage[]).length === 0
     if (!sessionId) {
       try {
         const created = await createChatSession({
@@ -624,10 +667,10 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
                 const finalText =
                   finalAnswer !== undefined
                     ? finalAnswer
-                    : (useAppStore.getState().chatMessages as ChatMessage[]).find(
+                    : (here().messages as ChatMessage[]).find(
                       (mm) => mm.id === assistantId,
                     )?.text ?? ""
-                const transparencyAtDone = (useAppStore.getState().chatMessages as ChatMessage[]).find(
+                const transparencyAtDone = (here().messages as ChatMessage[]).find(
                   (mm) => mm.id === assistantId,
                 )?.transparency
                 void appendChatMessage(sessionId, {
@@ -694,7 +737,6 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
   function navigateToCitation(c: SourceCitation) {
     setActiveDocument(c.document_id)
     // Close the chat side-panel if open, so user sees the document
-    useAppStore.getState().setChatPanelOpen(false)
     const params = new URLSearchParams()
     params.set("doc", c.document_id)
     if (c.section_id) params.set("section_id", c.section_id)
@@ -755,6 +797,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
           <span className="text-xs text-muted-foreground">Loading chat...</span>
         )}
         {/* S186: Inline document scope combobox */}
+        {!pinnedDocumentId && (
         <DocumentScopeCombobox
           docList={docList}
           selectedDocId={selectedDocId}
@@ -771,6 +814,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
             }
           }}
         />
+        )}
 
         {/* Inline model indicator + per-conversation override */}
         {!llmLoading && llmSettings && (
@@ -778,7 +822,7 @@ export function ChatConversation({ variant = "page" }: { variant?: "page" | "doc
             value={activeModel}
             onChange={(m) => {
               setModel(m)
-              const sid = useAppStore.getState().activeChatSessionId
+              const sid = here().sessionId
               if (sid) void updateChatSessionModel(sid, m || null).catch(() => {})
             }}
             localModels={localModelChoices}

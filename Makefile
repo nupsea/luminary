@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean measure-ttft verify-citation luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -407,6 +407,15 @@ verify-citation:
 	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
 		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
 	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-citation.mjs
+
+# The docked assistant in a real browser: asking about a passage must not leave
+# the passage, and the reader's conversation must not reach the Ask page's. Both
+# are properties of two components sharing one store, which no unit test sees.
+# Needs a live model, so it is a manual check rather than a CI gate.
+verify-dock:
+	@cd frontend && (node -e "require.resolve('playwright-core')" 2>/dev/null \
+		|| (echo "Installing playwright-core (not saved to package.json)..." && npm install --no-save playwright-core))
+	cd frontend && LUMINARY_URL=$${LUMINARY_URL:-http://localhost:5173} node scripts/verify-dock.mjs
 
 measure-ttft:
 	@echo "Measuring time to first token (requires backend on :7820)..."

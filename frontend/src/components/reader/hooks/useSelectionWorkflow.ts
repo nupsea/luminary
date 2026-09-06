@@ -3,6 +3,7 @@ import { useCallback, useState } from "react"
 import { toast } from "sonner"
 
 import { apiPost } from "@/lib/apiClient"
+import { docThreadKey, type ChatPreload } from "@/store/chatThreads"
 
 import type { SourceRef } from "../SelectionActionBar"
 import type { AnnotationItem, SectionItem } from "../types"
@@ -10,7 +11,9 @@ import type { AnnotationItem, SectionItem } from "../types"
 interface UseSelectionWorkflowOpts {
   documentId: string
   sectionMap: Map<string, SectionItem>
-  setChatPreload: (preload: { text: string; documentId: string | null; autoSubmit?: boolean }) => void
+  setChatPreload: (preload: ChatPreload) => void
+  /** Bring the docked conversation into view; it is already mounted. */
+  openAsk: () => void
 }
 
 // Owns the selection -> {note, flashcard, ask-in-chat, highlight, clip} workflow:
@@ -20,6 +23,7 @@ export function useSelectionWorkflow({
   documentId,
   sectionMap,
   setChatPreload,
+  openAsk,
 }: UseSelectionWorkflowOpts) {
   const qc = useQueryClient()
 
@@ -49,10 +53,18 @@ export function useSelectionWorkflow({
     setFlashcardOpen(true)
   }, [sectionMap])
 
+  // Asking about a passage no longer leaves the passage. The question is
+  // addressed to this document's own conversation, which is docked beside the
+  // text rather than on another tab.
   const handleAskInChat = useCallback((text: string) => {
-    setChatPreload({ text: `Explain this excerpt:\n\n> ${text}`, documentId, autoSubmit: true })
-    window.dispatchEvent(new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }))
-  }, [documentId, setChatPreload])
+    setChatPreload({
+      text: `Explain this excerpt:\n\n> ${text}`,
+      documentId,
+      autoSubmit: true,
+      threadKey: docThreadKey(documentId),
+    })
+    openAsk()
+  }, [documentId, setChatPreload, openAsk])
 
   const handleHighlight = useCallback(async (
     text: string,

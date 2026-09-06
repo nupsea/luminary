@@ -411,8 +411,6 @@ function AppShell() {
   const [ollamaWarningDismissed, setOllamaWarningDismissed] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const chatPanelOpen = useAppStore(s => s.chatPanelOpen)
-  const setChatPanelOpen = useAppStore(s => s.setChatPanelOpen)
   const setActiveTag = useAppStore((s) => s.setActiveTag)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const setNotePreload = useAppStore((s) => s.setNotePreload)
@@ -618,30 +616,6 @@ function AppShell() {
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </main>
-
-      {/* Global Sliding Chat Panel Overlay */}
-      <div
-        className={cn(
-           "fixed top-0 right-0 h-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] border-l border-border bg-background shadow-2xl z-50 transform flex flex-col",
-           chatPanelOpen ? "w-[450px] translate-x-0 opacity-100" : "w-0 translate-x-[200px] opacity-0 pointer-events-none"
-        )}
-      >
-        {chatPanelOpen && (
-           <>
-             <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
-               <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <MessageSquare size={16} className="text-primary"/> Luminary AI
-               </h2>
-               <button onClick={() => setChatPanelOpen(false)} className="rounded-md p-1.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                  <X size={15}/>
-               </button>
-             </div>
-             <div className="flex-1 overflow-hidden relative">
-               <Suspense fallback={<PageSkeleton />}><Chat /></Suspense>
-             </div>
-           </>
-        )}
-      </div>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
       <StudyLauncher />
