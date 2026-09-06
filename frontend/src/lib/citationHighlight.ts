@@ -95,9 +95,6 @@ export function citationNeedle(citation: CitationLike): string {
   return stripCitationPrefixes(snippet, [citation.document_title, citation.section_heading])
 }
 
-/** How long the mark stays up. Long enough to find by eye, short enough not to persist. */
-export const CITATION_HIGHLIGHT_MS = 6_000
-
 // Deliberately not the search mark's colour: a reader who arrived from a citation
 // and a reader who is searching are looking for different things, and the two can
 // be on screen at once.

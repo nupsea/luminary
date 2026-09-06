@@ -23,7 +23,6 @@ import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
 import type { AnnotationItem, SectionContentItem } from "./types"
 import {
-  CITATION_HIGHLIGHT_MS,
   CITATION_MARK_CLASS,
   CITATION_MARK_TOKEN,
   longestPresentPrefix,
@@ -452,17 +451,12 @@ export function ReadView({
   // on arrival and then gets out of the way. Kept in state rather than read
   // straight from the prop so it can expire without the caller re-rendering,
   // and re-armed whenever a different citation arrives.
-  // Derived rather than synced: recording which snippet has expired means a new
-  // citation is live again without an effect writing state during render, which
-  // is the cascade the lint rule is about and the double-run StrictMode causes.
-  const [expiredCitation, setExpiredCitation] = useState<string | undefined>()
-  const activeCitation =
-    citationSnippet && expiredCitation !== citationSnippet ? citationSnippet : undefined
-  useEffect(() => {
-    if (!citationSnippet) return
-    const timer = setTimeout(() => setExpiredCitation(citationSnippet), CITATION_HIGHLIGHT_MS)
-    return () => clearTimeout(timer)
-  }, [citationSnippet])
+  // The mark stays for as long as the reader is open on this citation. A timer was
+  // wrong: the reader is still reading around the passage well after six seconds,
+  // and a highlight that vanishes mid-read is a worse answer to "which words were
+  // the source" than none. It clears by going away -- leaving the reader unmounts
+  // this, and opening any document without a citation captures an empty snippet.
+  const activeCitation = citationSnippet
 
   // Scroll to the mark once it has rendered. Sections mount lazily, so the mark
   // may not exist on the first pass; a short retry covers that without polling

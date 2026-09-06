@@ -44,6 +44,7 @@ import { SearchPanel } from "./Learning/SearchPanel"
 import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
 import { libraryRefetchInterval } from "@/lib/libraryPolling"
+import { shouldCaptureDeepLink } from "@/lib/deepLinkCapture"
 
 const PAGE_SIZE = 20
 
@@ -323,7 +324,11 @@ export default function Learning() {
   // `doc` stays in the URL while the document is open so a reload returns to
   // it. The other params are one-shot: snapshotted into state, then dropped.
   useEffect(() => {
-    if (!docParam || docParam === activeDocumentId) return
+    // Not "did the document change" but "were we handed somewhere to go": see
+    // lib/deepLinkCapture. The old guard was false at exactly the moment it
+    // mattered, because navigateToCitation sets the active document before it
+    // navigates.
+    if (!shouldCaptureDeepLink(docParam, activeDocumentId, searchParams)) return
     const rawPage = searchParams.get("page")
     const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
     setSavedSectionId(searchParams.get("section_id") ?? undefined)
@@ -345,8 +350,11 @@ export default function Learning() {
       next.delete("search")
       return next
     }, { replace: true, state: routeLocation.state })
+  // searchParams is a dep so a citation clicked while already reading that
+  // document still re-targets. It terminates because the effect clears the params
+  // it consumed, and the next run finds nothing to act on.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docParam])
+  }, [docParam, searchParams])
 
   // Mirror the open document into the URL, however it was opened. `replace`:
   // the in-reader Back control, not history, returns to the list.
