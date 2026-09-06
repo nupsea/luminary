@@ -203,6 +203,9 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
     () => (citationSnippet ? longestPresentRun(citationSnippet, body) : []),
     [citationSnippet, body],
   )
+  // One decision, used by the memo and the JSX alike. They were separate, so the
+  // cited section computed its marked HTML and then rendered null anyway.
+  const shouldRender = isVisible || isCitedSection
   const highlighted = useMemo(() => {
     // Sections defer their body until scrolled into view. A citation is an
     // explicit request to see *this* passage, so the section holding it renders
@@ -210,21 +213,21 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
     // mark that only exists once the section has rendered. A 47-section PDF
     // landed with the cited section showing its heading and 11 characters of
     // nothing, and nothing was ever marked.
-    if (!isVisible && citationRun.length === 0 && !isCitedSection) return ""
+    if (!shouldRender && citationRun.length === 0) return ""
     let marked = applyHighlights(body, highlightsVisible ? annotations : [])
     if (searchTerm) marked = applySearchTerm(marked, searchTerm)
     // Matched against the normalised body but marked in the raw one, so the
     // marker tolerates the paragraph breaks the chunk text collapsed.
     if (citationRun.length > 0) marked = markWords(marked, citationRun, CITATION_MARK_CLASS)
     return marked
-  }, [isVisible, body, annotations, highlightsVisible, searchTerm, citationRun, isCitedSection])
+  }, [shouldRender, body, annotations, highlightsVisible, searchTerm, citationRun])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
-    if (!isVisible || !spec.speakerTurns) return null
+    if (!shouldRender || !spec.speakerTurns) return null
     if (highlighted !== body) return null
     return parseSpeakerTurns(body)
-  }, [isVisible, spec.speakerTurns, highlighted, body])
+  }, [shouldRender, spec.speakerTurns, highlighted, body])
 
   return (
     <div
@@ -241,7 +244,7 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
           {section.heading}
         </Tag>
       )}
-      {isVisible ? (
+      {shouldRender ? (
         <div className="leading-relaxed anim-fade-in">
           {turns ? (
             <SpeakerTurns turns={turns} />
