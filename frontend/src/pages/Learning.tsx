@@ -43,6 +43,7 @@ import { LibraryTable } from "./Learning/LibraryTable"
 import { SearchPanel } from "./Learning/SearchPanel"
 import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
+import { libraryRefetchInterval } from "@/lib/libraryPolling"
 
 const PAGE_SIZE = 20
 
@@ -185,6 +186,9 @@ export default function Learning() {
       }),
     staleTime: 10_000,
     gcTime: 60_000,
+    // Poll while anything on this page is still being worked on; see
+    // lib/libraryPolling for why this is decided from the rows themselves.
+    refetchInterval: (query) => libraryRefetchInterval(query.state.data?.items),
   })
 
   const { data: recentItems } = useQuery({

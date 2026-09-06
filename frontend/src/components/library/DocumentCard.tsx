@@ -614,10 +614,14 @@ export function DocumentCard({
           doc.enrichment_status === "failed" && "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
           doc.enrichment_status === "skipped" && "bg-muted text-muted-foreground",
         )}>
-          {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching..."}
-          {doc.enrichment_status === "done" && (
-            (doc.format === "pdf" || doc.format === "epub" || doc.format === "md" || doc.format === "markdown") ? "Images ready" : "Analysis complete"
-          )}
+          {/* "Enriching" names the work, "Ready" names the state the reader cares
+              about. The old pair did neither: "Images ready" described one of six
+              job types as though it were the document's state, and "Analysis
+              complete" named a step nobody outside the code knows the shape of.
+              One label for done, because the reader's question is only ever
+              "is this finished". */}
+          {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && "Enriching\u2026"}
+          {doc.enrichment_status === "done" && "Ready"}
           {doc.enrichment_status === "failed" && "Enrichment failed"}
           {/* An uninstalled optional component. Nothing failed, so this must
               not wear the failure colour. */}

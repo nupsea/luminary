@@ -39,12 +39,10 @@ export function DocumentRow({ doc, onClick }: DocumentRowProps) {
         </span>
       )}
       {(doc.enrichment_status === "pending" || doc.enrichment_status === "running") && (
-        <span className="hidden text-xs text-blue-600 sm:block">Enriching...</span>
+        <span className="hidden animate-pulse text-xs text-blue-600 sm:block">Enriching\u2026</span>
       )}
       {doc.enrichment_status === "done" && (
-        <span className="hidden text-xs text-green-700 sm:block">
-          {(doc.format === "pdf" || doc.format === "epub" || doc.format === "md" || doc.format === "markdown") ? "Images ready" : "Analysis complete"}
-        </span>
+        <span className="hidden text-xs text-green-700 sm:block">Ready</span>
       )}
       {doc.enrichment_status === "failed" && (
         <span className="hidden text-xs text-orange-600 sm:block">Enrichment failed</span>
