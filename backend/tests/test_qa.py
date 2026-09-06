@@ -1631,3 +1631,24 @@ async def test_receipt_ttft_is_null_when_no_model_was_called(test_db):
 
     final = json.loads(events[-1][len("data: ") :])
     assert final["receipt"]["ttft_seconds"] is None
+
+
+def test_chatstate_declares_every_field_the_receipt_reads():
+    """A key a node returns but ChatState does not declare is dropped by the graph.
+
+    The receipt shipped with `passages_sent`, `context_chars` and both budget
+    fields reading null in the real app while every unit test passed, because the
+    tests hand `stream_answer` a result dict directly and never cross the graph's
+    state schema. Caught by reading one live answer; pinned here so the next field
+    added to the receipt cannot be silently discarded the same way.
+    """
+    from app.types import ChatState
+
+    declared = set(ChatState.__annotations__)
+    required = {"_passages_sent", "_context_chars", "_context_budget", "_budget_reason"}
+    missing = required - declared
+    assert not missing, (
+        f"{sorted(missing)} are returned by synthesize_node and read by the answer "
+        "receipt, but ChatState does not declare them, so the graph drops them and "
+        "the receipt reports null in the running app"
+    )

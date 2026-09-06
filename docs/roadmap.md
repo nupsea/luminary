@@ -116,6 +116,25 @@ backend's `rerank_enabled` and exits rather than guessing when it cannot read it
 Retrieval baselines recorded before 2026-08-26 are the unreranked funnel and are not comparable to
 anything this rung produces.
 
+**Exit gate, half taken.** `make measure-ttft` reads the figure each answer's receipt reports rather
+than timing from outside, so a quoted number is the one a user sees. Measured 2026-09-06, local arm,
+`ollama/qwen3.5:4b`, 5 runs scoped to one document, 5–6 passages, default 1500-token budget:
+
+| | |
+|---|---|
+| first visible content (source chips) | median 1.85s |
+| first token | median 3.22s (1.89–3.37) |
+| complete answer | 18.9–40.7s |
+
+**The pair is not complete**: the cloud arm needs a provider key and has not been measured, and a
+mean across arms would describe no system that exists — `measure_ttft.py` refuses to compute one.
+
+**This corrects a premise stated earlier in this plan.** "A stranger meets a 40–90s first answer"
+conflated time-to-first-token with total answer time. On a host the probe does not call slow, first
+token is ~3s; it is the *complete* answer that takes 19–41s. That is what retrieval-first rendering
+is worth: source chips at 1.85s in place of a blank panel for the whole of it. A genuinely slow host
+is still the case the hybrid offer exists for, and it remains unmeasured here.
+
 **The number that must not be bought.** `resolve_context_budget()` already narrows the synthesis budget
 from 1500 to 750 tokens on a slow host with the answer-quality cost unmeasured (#100). A second latency
 win taken out of content is the failure this rung is most likely to produce.

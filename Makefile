@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean measure-ttft luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -395,6 +395,14 @@ smoke:
 # the run that died before it got there -- and for SMOKE_KEEP_FIXTURES=1 runs,
 # where the fixtures were kept on purpose. Deletes only rows created since the
 # last recorded run; pass SINCE= to widen it, DRY_RUN=1 to see the list first.
+# Rung 0.10.0's exit gate is a PAIR of numbers, local and cloud. This takes one
+# arm — whichever the machine is configured for — reading the figure the product
+# reports in each answer's receipt rather than timing from outside, so a number
+# in a release note is the one a user sees. Never averages across arms.
+measure-ttft:
+	@echo "Measuring time to first token (requires backend on :7820)..."
+	python3 scripts/measure_ttft.py --runs $(if $(RUNS),$(RUNS),5) $(if $(Q),--question "$(Q)",) $(if $(DOC),--document-id $(DOC),)
+
 smoke-clean:
 	@echo "Removing smoke fixtures from the library (requires backend on :7820)..."
 	bash scripts/smoke/clean.sh $(if $(SINCE),--since $(SINCE),) $(if $(DRY_RUN),--dry-run,)

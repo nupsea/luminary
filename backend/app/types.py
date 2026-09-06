@@ -310,6 +310,15 @@ class ChatState(TypedDict):
     _llm_prompt: str | None
     _system_prompt: str | None
 
+    # What the answer cost to assemble, carried out for the receipt under it. A key
+    # a node returns but ChatState does not declare is dropped by the graph, so
+    # these read null in the receipt until they are listed here -- which is exactly
+    # how they shipped null the first time.
+    _passages_sent: int | None
+    _context_chars: int | None
+    _context_budget: int | None
+    _budget_reason: str | None
+
     # Sliding-window conversation history (last N turns, role/content dicts)
     conversation_history: list[dict]
 
