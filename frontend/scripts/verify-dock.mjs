@@ -11,6 +11,10 @@
  *   make verify-dock
  *
  * Needs a live model. Exits non-zero if any check fails.
+ *
+ * It drives the running dev server, so give an edit a moment to land: a run
+ * started before HMR applies measures the previous bundle and reports failures
+ * that belong to code you have already changed.
  */
 import { chromium } from "playwright-core"
 
@@ -204,6 +208,22 @@ if (!recording) {
         if (saved) {
           check("the note keeps the chunk it came from", Boolean(saved.chunk_id), String(saved.chunk_id))
           check("the note keeps the section it came from", Boolean(saved.section_id), String(saved.section_id))
+          // The round trip: the note's own back-link must land on the passage.
+          await page.goto(`${APP}/notes`, { waitUntil: "domcontentloaded" })
+          await page.waitForTimeout(3000)
+          const back = page.getByRole("button", { name: "Go to source" })
+          check("the note offers a way back", (await back.count()) > 0)
+          if (await back.count()) {
+            await back.first().click()
+            await page.waitForTimeout(5000)
+            const landed = await page.evaluate(() => ({
+              url: location.href,
+              marks: document.querySelectorAll(".luminary-citation-mark, [data-citation-highlight]").length,
+            }))
+            check("the back-link opens the reader on the document", landed.url.includes("doc="), landed.url)
+            check("the passage is marked when the reader arrives", landed.marks > 0, `${landed.marks} marks`)
+          }
+
           // The check cleans up after itself rather than leaving a note per run.
           await page.evaluate(async ({ api, id }) => {
             await fetch(`${api}/notes/${id}`, { method: "DELETE" })

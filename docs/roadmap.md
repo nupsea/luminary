@@ -197,7 +197,13 @@ It now carries the selection's section and, where the view renders chunk by chun
 `make verify-dock` takes a note from a recording and reads back its `chunk_id` and `section_id`;
 removing the two props turns both checks red with `null`.
 
-What remains of the gate is resolution: opening a note back at its locus.
+The round trip closes: the note's own back-link carries both ids, and `make verify-dock` follows
+selection -> note -> back-link -> reader and counts the marks that arrive. Removing the chunk from
+the link drops it to zero.
+
+**Marked, for a view that renders chunk by chunk.** A note from prose carries its section and no
+chunk (I-29), so the reader scrolls to the section and marks nothing -- the quoted words live only
+in the note's own text, and parsing them back out of markdown is not a locus.
 
 The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
 lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output

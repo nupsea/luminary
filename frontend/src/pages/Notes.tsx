@@ -622,7 +622,12 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           onClick={(e) => {
             e.stopPropagation()
             const params = new URLSearchParams({ doc: note.document_id! })
+            // Both, when both were captured: the chunk marks the passage in a
+            // view that renders chunk by chunk, and the section is what a prose
+            // reader can be scrolled to. Sending only the chunk left a note
+            // taken from prose opening at the top of the document.
             if (note.chunk_id) params.set("chunk_id", note.chunk_id)
+            if (note.section_id) params.set("section_id", note.section_id)
             navigate(`/?${params.toString()}`)
           }}
           className="flex items-center gap-1.5 self-start rounded-md border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-primary hover:bg-accent hover:text-foreground transition-colors"
