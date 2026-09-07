@@ -24,6 +24,8 @@ export interface SourceRef {
   documentId: string
   documentTitle: string
   pageNumber?: number
+  /** The chunk the selection sits in, where the view renders chunk by chunk. */
+  chunkId?: string
 }
 
 /** Maximum character count for highlights. Longer selections can still use other actions. */

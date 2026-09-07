@@ -161,6 +161,60 @@ if (paraCount) {
   }
 }
 
+// A note taken from a passage keeps where the passage was.
+//
+// The rung's gate is that a citation survives selection -> note -> resolution,
+// and the note is where it was being lost: the composer received a section only
+// when a section's own note button was pressed, so a note taken from a
+// selection stored the quoted text and no locus at all.
+const recording = await page.evaluate(async (api) => {
+  const res = await fetch(`${api}/documents?page=1&page_size=50&sort=last_accessed`)
+  const data = await res.json()
+  return (data.items ?? []).find((d) => ["audio", "video"].includes(d.content_type)) ?? null
+}, API)
+if (!recording) {
+  console.log("  SKIP the note-locus checks: the library holds no recording")
+} else {
+  console.log(`recording: ${recording.title} (${recording.content_type})`)
+  await page.goto(`${APP}/library?doc=${recording.id}`, { waitUntil: "domcontentloaded" })
+  await page.waitForTimeout(4000)
+  const turn = page.locator("[data-chunk-id]").first()
+  const turnCount = await turn.count()
+  check("the transcript names its chunks", turnCount > 0)
+  if (turnCount) {
+    const rect = await turn.boundingBox()
+    if (rect) {
+      await page.mouse.move(rect.x + 5, rect.y + Math.min(rect.height / 2, 20))
+      await page.mouse.down()
+      await page.mouse.move(rect.x + Math.min(rect.width - 5, 300), rect.y + Math.min(rect.height / 2, 20), { steps: 12 })
+      await page.mouse.up()
+      await page.waitForTimeout(800)
+      const noteAction = page.getByRole("button", { name: "Note", exact: true })
+      check("the selection offers Note", (await noteAction.count()) > 0)
+      if (await noteAction.count()) {
+        await noteAction.first().click()
+        // The composer autosaves on a debounce; give it room to create.
+        await page.waitForTimeout(9000)
+        const saved = await page.evaluate(async ({ api, docId }) => {
+          const res = await fetch(`${api}/notes?page=1&page_size=5`)
+          const notes = await res.json()
+          return notes.find((n) => n.document_id === docId) ?? null
+        }, { api: API, docId: recording.id })
+        check("the note was created", Boolean(saved))
+        if (saved) {
+          check("the note keeps the chunk it came from", Boolean(saved.chunk_id), String(saved.chunk_id))
+          check("the note keeps the section it came from", Boolean(saved.section_id), String(saved.section_id))
+          // The check cleans up after itself rather than leaving a note per run.
+          await page.evaluate(async ({ api, id }) => {
+            await fetch(`${api}/notes/${id}`, { method: "DELETE" })
+          }, { api: API, id: saved.id })
+          console.log(`  (removed the note this check created: ${saved.id})`)
+        }
+      }
+    }
+  }
+}
+
 await page.screenshot({ path: ".citation-verify/dock.png" })
 console.log(failures.length ? `\n${failures.length} failed` : "\nall checks passed")
 await browser.close()

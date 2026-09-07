@@ -57,7 +57,7 @@ import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
 import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
-import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
@@ -845,8 +845,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const resolveSourceRef = useCallback(
     (node: Node) => {
+      // The chunk, when the view has one: a transcript renders chunk by chunk,
+      // and the moment a note came from lives on that row.
+      const chunkId = resolveChunkFromDom(node)
       const fromDom = resolveFromDom(node)
-      if (fromDom) return { sectionId: fromDom, documentId, documentTitle: doc?.title ?? "" }
+      if (fromDom) return { sectionId: fromDom, documentId, documentTitle: doc?.title ?? "", chunkId }
       if (doc?.format === "pdf" && doc.sections.length > 0) {
         const fromPdf = resolvePdfFallback(doc.sections, pdfCurrentPage)
         if (fromPdf) return { sectionId: fromPdf, documentId, documentTitle: doc?.title ?? "", pageNumber: pdfCurrentPage }
@@ -1621,7 +1624,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           initialSourceDocIds={[documentId]}
           lockedCollectionId={autoCollection?.id ?? null}
           documentId={documentId}
-          sectionId={openNoteEditor}
+          // Where the note came from, structured rather than only quoted in its
+          // text: a selection's own section, or the section whose note button
+          // was pressed. Without the first of these a note taken from a passage
+          // stored no section at all, and nothing could resolve it back.
+          sectionId={selection.noteSourceRef?.sectionId ?? openNoteEditor}
+          chunkId={selection.noteSourceRef?.chunkId}
         />
       </div>
 

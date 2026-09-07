@@ -220,6 +220,7 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
                   <div
                     key={chunk.id}
                     id={`chunk-${chunk.id}`}
+                    data-chunk-id={chunk.id}
                     data-section-id={chunk.section_id || ""}
                     className={cn(
                       "text-sm leading-relaxed text-foreground",

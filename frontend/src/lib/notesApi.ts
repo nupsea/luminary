@@ -11,6 +11,8 @@ export interface CreateNotePayload {
   tags: string[]
   document_id: string | null
   section_id?: string | null
+  /** The chunk the note was taken from, when the view had one. */
+  chunk_id?: string | null
   source_document_ids?: string[]
   /** Optional manual title; when set the note is flagged manual-title. */
   title?: string

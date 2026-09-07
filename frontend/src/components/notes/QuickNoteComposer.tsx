@@ -57,6 +57,8 @@ export interface QuickNoteComposerProps {
   /** Reader section capture: stamped onto the created note. */
   documentId?: string
   sectionId?: string | null
+  /** The chunk the note was taken from, where the view had one. */
+  chunkId?: string | null
 }
 
 export function QuickNoteComposer({
@@ -69,6 +71,7 @@ export function QuickNoteComposer({
   lockedCollectionId,
   documentId,
   sectionId,
+  chunkId,
 }: QuickNoteComposerProps) {
   const [editContent, setEditContent] = useState("")
   const [editTitle, setEditTitle] = useState("")
@@ -113,7 +116,11 @@ export function QuickNoteComposer({
       sourceDocIds: initialSourceDocIds ?? [],
     },
     enabled: open && !appendTarget,
-    createExtras: { documentId: documentId ?? null, sectionId: sectionId ?? null },
+    createExtras: {
+      documentId: documentId ?? null,
+      sectionId: sectionId ?? null,
+      chunkId: chunkId ?? null,
+    },
     onCreated: handleDraftCreated,
   })
 

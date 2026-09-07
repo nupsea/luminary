@@ -118,7 +118,11 @@ export interface UseNoteAutosaveOptions {
   enabled: boolean
   debounceMs?: number
   /** Fixed context stamped onto the created row (reader section capture). */
-  createExtras?: { documentId?: string | null; sectionId?: string | null }
+  createExtras?: {
+    documentId?: string | null
+    sectionId?: string | null
+    chunkId?: string | null
+  }
   onCreated?: (note: Note) => void
   onSaved?: (note: Note) => void
 }
@@ -140,6 +144,7 @@ export function useNoteAutosave(options: UseNoteAutosaveOptions) {
           document_id:
             latest.current.createExtras?.documentId ?? (d.sourceDocIds[0] || null),
           section_id: latest.current.createExtras?.sectionId ?? null,
+          chunk_id: latest.current.createExtras?.chunkId ?? null,
           source_document_ids: d.sourceDocIds,
         }),
       patch: (noteId, d) =>

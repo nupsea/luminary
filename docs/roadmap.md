@@ -190,8 +190,14 @@ kind until something can supply one.
 
 **Still modal, still to dock:** `QuickNoteComposer` and `FeynmanDialog`. The panel carries two tabs
 (Insights, Ask AI) of the seven the rung names, and the nav cut to five rail items is untouched.
-A note still stores only `documentId` + `sectionId`, so a note taken from a recording cannot resolve
-back to its moment — the gate's "selection → note → resolution" half is not met.
+A note keeps where it came from: the composer received a section only when a section's own note
+button was pressed, so a note taken from a *selection* stored the quoted text and no locus at all.
+It now carries the selection's section and, where the view renders chunk by chunk, its chunk —
+`resolveChunkFromDom` finds it in a transcript, and prose has no chunk boundaries to find (I-29).
+`make verify-dock` takes a note from a recording and reads back its `chunk_id` and `section_id`;
+removing the two props turns both checks red with `null`.
+
+What remains of the gate is resolution: opening a note back at its locus.
 
 The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
 lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output
