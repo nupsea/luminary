@@ -102,13 +102,13 @@ async def _fill_citation_locations(citations: list[dict]) -> None:
         return
     locations = await fetch_chunk_locations(chunk_ids)
     for c in citations:
-        _section_id, pdf_page, _label, heading = locations.get(
-            c.get("chunk_id") or "", (None, None, None, None)
-        )
-        if heading and not (c.get("section_heading") or "").strip():
-            c["section_heading"] = heading
-        if pdf_page and not c.get("page"):
-            c["page"] = pdf_page
+        loc = locations.get(c.get("chunk_id") or "")
+        if loc is None:
+            continue
+        if loc.heading and not (c.get("section_heading") or "").strip():
+            c["section_heading"] = loc.heading
+        if loc.pdf_page and not c.get("page"):
+            c["page"] = loc.pdf_page
 
 
 def _enrich_citation_titles(

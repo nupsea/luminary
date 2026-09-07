@@ -3,6 +3,8 @@
  * file exports only components (fast refresh).
  */
 
+import { formatLocus, locusOf } from "./citation/locus"
+
 export interface SourceCitation {
   chunk_id: string
   document_id: string
@@ -13,20 +15,28 @@ export interface SourceCitation {
   /** What the sheet is printed as, when the book numbers front matter apart. */
   pdf_page_label?: string | null
   section_preview_snippet: string // first 150 chars of chunk text
+  /** Seconds into a recording. Null for everything that is not one. */
+  start_time?: number | null
 }
 
 /**
- * How a citation's page should read to someone holding the book.
+ * Where the citation points, as its chip shows it.
  *
- * A PDF's sheet position is not the page printed on it: measured on a 613-page
- * book, sheet 41 is printed "19", so a chip naming the sheet disagreed with the
- * reader's own eyes by twenty for the whole body. The label is display only --
- * the chip still navigates by sheet, which is what the viewer scrolls to.
+ * A page is only one of the answers: a recording points at a moment and a source
+ * file at a line, and naming a page for those is a claim the source cannot
+ * support. `locusOf` picks the one this source has and returns null when it has
+ * none -- see `lib/citation/locus`.
  */
-export function citationPageText(citation: SourceCitation): string {
-  const label = (citation.pdf_page_label ?? "").trim()
-  if (label) return ` p.${label}`
-  return Number(citation.pdf_page_number) > 0 ? ` p.${citation.pdf_page_number}` : ""
+export function citationLocusText(citation: SourceCitation): string {
+  const text = formatLocus(
+    locusOf({
+      startTime: citation.start_time,
+      page: citation.pdf_page_number,
+      pageLabel: citation.pdf_page_label,
+      heading: null,
+    }),
+  )
+  return text ? ` ${text}` : ""
 }
 
 /**

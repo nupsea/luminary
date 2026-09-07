@@ -1022,13 +1022,14 @@ async def test_fill_citation_locations_reads_section_and_page_from_the_chunk_row
     and the keyword path hardcodes the same, so the chip rendered with no
     section and "page 0" while the section row held the real heading.
     """
+    from app.repos.document_repo import ChunkLocation
     from app.services import qa as qa_module
 
     async def fake_locations(chunk_ids):
         assert chunk_ids == ["c1", "c2"]
         return {
-            "c1": ("sec-1", 4, "iv", "Multi-Head Attention"),
-            "c2": (None, None, None, None),
+            "c1": ChunkLocation("sec-1", 4, "iv", "Multi-Head Attention", None),
+            "c2": ChunkLocation(None, None, None, None, None),
         }
 
     monkeypatch.setattr(
@@ -1049,10 +1050,11 @@ async def test_fill_citation_locations_reads_section_and_page_from_the_chunk_row
 
 @pytest.mark.asyncio
 async def test_fill_citation_locations_never_overwrites_a_real_value(monkeypatch):
+    from app.repos.document_repo import ChunkLocation
     from app.services import qa as qa_module
 
     async def fake_locations(chunk_ids):
-        return {"c1": ("sec-1", 9, "ix", "Wrong Heading")}
+        return {"c1": ChunkLocation("sec-1", 9, "ix", "Wrong Heading", None)}
 
     monkeypatch.setattr("app.repos.document_repo.fetch_chunk_locations", fake_locations)
     citations = [{"chunk_id": "c1", "section_heading": "Already Known", "page": 3}]

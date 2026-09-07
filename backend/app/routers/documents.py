@@ -1362,7 +1362,7 @@ async def get_document_chunks(document_id: str) -> list[ChunkItem]:
             text=c.text,
             section_id=c.section_id,
             speaker=c.speaker,
-            start_time=None,  # ChunkModel has no start_time; reserved for future use
+            start_time=c.start_time,
         )
         for c in chunks
     ]

@@ -718,6 +718,8 @@ async def chunk_node(state: IngestionState) -> IngestionState:
                                 page_number=0,
                                 speaker=None,
                                 chunk_index=c["index"],
+                                start_time=c["start_time"],
+                                end_time=c["end_time"],
                             )
                         )
                         chunks.append(

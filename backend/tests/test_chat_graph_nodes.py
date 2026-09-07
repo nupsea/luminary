@@ -934,3 +934,63 @@ async def test_augment_node_sets_transparency_augmented(test_db):
         f"Expected transparency_augmented=True in augment_node result, got: {result}"
     )
     assert result.get("retry_attempted") is True
+
+
+@pytest.mark.asyncio
+async def test_a_citation_into_a_recording_carries_its_moment(test_db):
+    """A source chip for a lecture points at a time, not a page.
+
+    The chunk row is the only place the window lives -- a retrieved chunk carries
+    neither -- so the citation resolves it alongside the section and the page.
+    Before chunks stored their window this was hardcoded null for every document.
+    """
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+    section_id = str(uuid.uuid4())
+    _engine, factory, _tmp = test_db
+    await _insert_doc(factory, doc_id, title="Lecture")
+
+    async with factory() as session:
+        session.add(
+            SectionModel(
+                id=section_id,
+                document_id=doc_id,
+                heading="",
+                level=1,
+                section_order=0,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text="the main argument",
+                chunk_index=0,
+                start_time=862.5,
+                end_time=925.0,
+            )
+        )
+        await session.commit()
+
+    chunks = [
+        {
+            "chunk_id": chunk_id,
+            "document_id": doc_id,
+            "text": "the main argument",
+            "section_heading": "",
+            "page": 0,
+            "score": 0.9,
+            "source": "vector",
+        }
+    ]
+    result = await synthesize_node(
+        _make_state(question="What is the argument?", chunks=chunks, intent="factual")
+    )
+
+    cites = result["source_citations"]
+    assert len(cites) == 1
+    assert cites[0]["start_time"] == 862.5
+    # A page would be the wrong locus for a recording, and inventing one is the
+    # failure this guards against.
+    assert cites[0]["pdf_page_number"] is None

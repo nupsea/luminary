@@ -171,8 +171,27 @@ pinned to its document and offers no scope picker. Preloaded questions are addre
 reader on the passage, and the reader's conversation leaves the Ask page's thread and scope untouched.
 Pointing the dock at the page thread turns four of its checks red, which is what makes them checks.
 
+**A citation points in the terms its source has.** `lib/citation/locus` picks one locus per source —
+a moment for a recording, a page for a paginated document, otherwise the section — and returns null
+when the source has none, which is what stops a chip claiming "p.0". Its tests carry a deliberately
+unresolvable ref that must format to nothing.
+
+The moment is new data. Transcription groups Whisper segments into ~60s windows carrying both bounds
+and the write dropped them, so `ChunkItem.start_time` was served hardcoded null for every document
+(`routers/documents.py`) and the transcript view's timestamp span never rendered. `chunks.start_time`
+and `end_time` now persist it, and `ChunkLocation` is a NamedTuple so the next field added to a
+citation's location cannot silently shift the three call sites that unpack it.
+**Recordings ingested before this carry no timings; only a re-ingest fills them.**
+
+**`raft.go · L214` has no substrate.** The code chunker stores its start line in `chunks.page_number`
+(`chunk.py`) and sets nothing else — no `code_language`, no flag — so a citation cannot tell a line
+from a page, and `end_line` is computed and discarded. The locus module deliberately has no `line`
+kind until something can supply one.
+
 **Still modal, still to dock:** `QuickNoteComposer` and `FeynmanDialog`. The panel carries two tabs
 (Insights, Ask AI) of the seven the rung names, and the nav cut to five rail items is untouched.
+A note still stores only `documentId` + `sectionId`, so a note taken from a recording cannot resolve
+back to its moment — the gate's "selection → note → resolution" half is not met.
 
 The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
 lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output

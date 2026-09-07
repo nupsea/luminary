@@ -11,14 +11,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app  # noqa: F401 (used via ASGITransport)
-from app.models import DocumentModel
+from app.models import ChunkModel, DocumentModel
 from app.workflows.ingestion import IngestionState, _classify, transcribe_node
+from app.workflows.ingestion_nodes.chunk import chunk_node
 
 # Shared DB fixture
 
@@ -302,3 +304,62 @@ async def test_video_endpoint_returns_400_for_non_video_doc(test_db, tmp_path, m
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{doc_id}/video")
     assert resp.status_code == 400
+
+
+async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
+    """A transcript chunk stores its window, so a citation can name a time.
+
+    Transcription already knows both bounds -- `_chunk_audio` groups Whisper
+    segments into ~60s windows carrying start_time/end_time -- and the write
+    dropped them, so every `ChunkItem.start_time` the API served was null and a
+    citation into a lecture could point at no moment in it.
+    """
+    doc_id = str(uuid.uuid4())
+    _, factory, _ = test_db
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="Lecture",
+                format="mp3",
+                content_type="audio",
+                word_count=0,
+                page_count=0,
+                file_path="/tmp/lecture.mp3",
+                stage="chunking",
+                tags=[],
+            )
+        )
+        await session.commit()
+
+    state: IngestionState = {
+        "document_id": doc_id,
+        "file_path": "/tmp/lecture.mp3",
+        "format": "mp3",
+        "parsed_document": None,
+        "content_type": "audio",
+        "chunks": None,
+        "status": "chunking",
+        "error": None,
+        "section_summary_count": None,
+        "audio_duration_seconds": 130.0,
+        "_audio_chunks": [
+            {"id": str(uuid.uuid4()), "document_id": doc_id, "text": "opening remarks",
+             "index": 0, "start_time": 0.0, "end_time": 62.5},
+            {"id": str(uuid.uuid4()), "document_id": doc_id, "text": "the main argument",
+             "index": 1, "start_time": 62.5, "end_time": 130.0},
+        ],
+    }
+
+    result = await chunk_node(state)
+    assert result["status"] == "embedding", result.get("error")
+
+    async with factory() as session:
+        rows = (
+            await session.execute(
+                select(ChunkModel)
+                .where(ChunkModel.document_id == doc_id)
+                .order_by(ChunkModel.chunk_index)
+            )
+        ).scalars().all()
+    assert [(r.start_time, r.end_time) for r in rows] == [(0.0, 62.5), (62.5, 130.0)]

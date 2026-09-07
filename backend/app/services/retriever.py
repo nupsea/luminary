@@ -177,13 +177,13 @@ async def _fill_chunk_locations(results: list[ScoredChunk]) -> list[ScoredChunk]
     if not locations:
         return results
     for r in results:
-        _section_id, pdf_page, _label, heading = locations.get(
-            r.chunk_id, (None, None, None, None)
-        )
-        if heading and not r.section_heading:
-            r.section_heading = heading
-        if pdf_page and not r.page:
-            r.page = pdf_page
+        loc = locations.get(r.chunk_id)
+        if loc is None:
+            continue
+        if loc.heading and not r.section_heading:
+            r.section_heading = loc.heading
+        if loc.pdf_page and not r.page:
+            r.page = loc.pdf_page
     return results
 
 

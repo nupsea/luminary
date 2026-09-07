@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import DocumentModel, ImageModel
-from app.repos.document_repo import fetch_chunk_locations
+from app.repos.document_repo import ChunkLocation, fetch_chunk_locations
 from app.runtime.chat_nodes._shared import _get_system_prompt
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.context_packer import pack_context_indexed, resolve_context_budget
@@ -416,8 +416,13 @@ async def synthesize_node(state: ChatState) -> dict:
             if source_citations_out and c.get("score", 0.0) < floor:
                 continue
             cid = c.get("chunk_id", "")
-            meta = chunk_meta.get(cid, (None, None, None, None))
-            section_id, pdf_page, pdf_page_label, db_heading = meta
+            meta = chunk_meta.get(cid) or ChunkLocation(None, None, None, None, None)
+            section_id, pdf_page, pdf_page_label, db_heading = (
+                meta.section_id,
+                meta.pdf_page,
+                meta.pdf_page_label,
+                meta.heading,
+            )
             doc_id = c.get("document_id", "")
             doc_title = doc_titles_map.get(doc_id, "")
             # The retrieved chunk's heading is always empty: embed_node writes
@@ -454,6 +459,9 @@ async def synthesize_node(state: ChatState) -> dict:
                     # navigates by pdf_page_number, which is what the viewer
                     # scrolls to.
                     "pdf_page_label": pdf_page_label,
+                    # Seconds into a recording, null for everything else: what a
+                    # citation into a lecture points at is a moment, not a page.
+                    "start_time": meta.start_time,
                     "section_preview_snippet": chunk_text[:150],  # hover tooltip preview
                 }
             )

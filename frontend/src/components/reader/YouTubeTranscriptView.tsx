@@ -5,7 +5,7 @@ import { apiGet } from "@/lib/apiClient"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
 import { cn } from "@/lib/utils"
-import { CITATION_MARK_TOKEN } from "@/lib/citation"
+import { CITATION_MARK_TOKEN, formatTimestamp } from "@/lib/citation"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
   apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)
@@ -19,14 +19,6 @@ function formatDuration(seconds: number | null): string | null {
   return `${m}:${String(s).padStart(2, "0")}`
 }
 
-function formatStartTime(seconds: number | null): string | null {
-  if (seconds == null) return null
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-  return `${m}:${String(s).padStart(2, "0")}`
-}
 
 /** Highlight all occurrences of `term` in `text` with <mark> wrapper. */
 function highlightText(text: string, term: string): React.ReactNode {
@@ -245,7 +237,7 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
                   >
                     {chunk.start_time != null && (
                       <span className="mr-2 font-mono text-xs text-muted-foreground">
-                        [{formatStartTime(chunk.start_time)}]
+                        [{formatTimestamp(chunk.start_time)}]
                       </span>
                     )}
                     {chunk.speaker && (
