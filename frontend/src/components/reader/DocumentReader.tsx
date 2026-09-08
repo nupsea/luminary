@@ -13,7 +13,7 @@ import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from 
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
-import { cn } from "@/lib/utils"
+import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
@@ -54,7 +54,7 @@ import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
 import { orderHitsByDocument } from "./searchHighlight"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
-import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
+import { NoteComposer } from "@/components/notes/NoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
 import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
@@ -119,11 +119,17 @@ class DocumentReaderErrorBoundary extends React.Component<
 const fetchDocument = (id: string): Promise<DocumentDetail> =>
   apiGet<DocumentDetail>(`/documents/${id}`)
 
-// Minimal note shape used for the section indicator (section_id only)
+// Minimal note shape: the section indicator needs the location, the docked
+// Notes tab needs enough to show a row.
 interface NoteEntry {
   id: string
   section_id: string | null
+  content: string
+  title?: string | null
 }
+
+// Which face of the docked panel is showing.
+type PanelTab = "insights" | "ask" | "note"
 
 
 interface DocumentReaderProps {
@@ -211,6 +217,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [sheetText, setSheetText] = useState("")
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
+  const [docNoteOpen, setDocNoteOpen] = useState(false) // note on the document, no section
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -269,7 +276,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const backLabel = canGoBack ? hookBackLabel : "Back to library"
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
-  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
 
@@ -304,6 +310,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const isYouTube = isYouTubeDoc(doc ?? {})
 
   // Pre-calculate section map for O(1) lookups in highlight loops
+  const docFormat = doc?.format
   const docSections = doc?.sections
   const sectionMap = useMemo(() => {
     const m = new Map<string, SectionItem>()
@@ -321,15 +328,53 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docSections])
 
-  // Which face of the docked panel is showing. Insights is what the panel has
-  // always held; Ask is this document's own conversation, mounted beside the
-  // text instead of on another tab.
-  const [insightsTab, setInsightsTab] = useState<"insights" | "ask">("insights")
+  // Insights is what the panel has always held; Ask is this document's own
+  // conversation and Notes its composer, both mounted beside the text instead
+  // of on another tab or over the passage they are about.
+  const [insightsTab, setInsightsTab] = useState<PanelTab>("insights")
+  const tabBeforeNote = useRef<PanelTab>("insights")
   const openAsk = useCallback(() => {
     setInsightsRestored(true)
     setInsightsTab("ask")
   }, [setInsightsRestored, setInsightsTab])
-  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload, openAsk })
+  const openNotes = useCallback(() => {
+    setInsightsRestored(true)
+    if (insightsTab !== "note") tabBeforeNote.current = insightsTab
+    setInsightsTab("note")
+  }, [insightsTab, setInsightsRestored, setInsightsTab])
+  const selection = useSelectionWorkflow({
+    documentId,
+    sectionMap,
+    setChatPreload,
+    openAsk,
+    openNote: openNotes,
+  })
+
+  // What the docked composer is holding: a selected passage, a section's own
+  // note button, or a blank note on the document. The selection comes first --
+  // it is the only one of the three that carries text, and a capture that
+  // arrives while the composer is open appends rather than being dropped.
+  const noteCaptureOpen = selection.noteOpen || openNoteEditor !== null || docNoteOpen
+  const noteCaptureKey = selection.noteOpen
+    ? `sel-${selection.noteCaptureId}`
+    : openNoteEditor
+      ? `sec-${openNoteEditor}`
+      : docNoteOpen
+        ? "doc"
+        : null
+  const { noteOpen, noteText, noteHeading, noteSourceRef, closeNote } = selection
+  const noteCaptureContent = useMemo(() => {
+    if (!noteOpen) return ""
+    const parts = [noteSourceRef?.documentTitle, noteHeading].filter(Boolean)
+    const attribution = parts.length > 0 ? parts.join(", ") : ""
+    return `> "${noteText}"\n>\n> -- ${attribution}`
+  }, [noteOpen, noteText, noteHeading, noteSourceRef])
+  const closeNoteCapture = useCallback(() => {
+    closeNote()
+    setOpenNoteEditor(null)
+    setDocNoteOpen(false)
+    setInsightsTab(tabBeforeNote.current)
+  }, [closeNote, setOpenNoteEditor, setDocNoteOpen, setInsightsTab])
 
   const {
     sectionTree,
@@ -506,6 +551,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     navigateTo: navigateToPlace,
   })
 
+  // Reading a section: from its row in the list, or from a note that was taken
+  // there. Pushes "Sections tab focused on this section" as the
+  // place-to-return-to, so Back scrolls back to that exact row.
+  const goToSection = useCallback((sid: string) => {
+    const sec = sectionMap.get(sid)
+    pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
+    setReadSectionId(sid)
+    if (docFormat === "pdf" && sec && sec.page_start > 0) {
+      setPdfViewVisited(true)
+      setLeftTab("pdfview")
+      pdfViewerRef.current?.goToPage(sec.page_start)
+      return
+    }
+    setLeftTab("read")
+  }, [sectionMap, pushHistory, setLeftTab, setPdfViewVisited, docFormat])
+
   // Fire the pending scroll once the Sections tab has actually rendered.
   // scrollActiveSectionIntoView itself retries with RAF until the row exists
   // in the DOM, so no setTimeout is required here.
@@ -529,7 +590,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads
-  const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
+  const { data: docNotes, isError: notesError, isLoading: notesLoading } = useQuery<NoteEntry[]>({
     queryKey: ["notes-for-doc", documentId],
     queryFn: () => apiGet<NoteEntry[]>("/notes", { document_id: documentId }),
     staleTime: 30_000,
@@ -935,22 +996,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           childCount={sectionTree.descendantCount.get(section.id) ?? 0}
           isCollapsed={collapsedParents.has(section.id)}
           onToggleCollapsed={toggleCollapsed}
-          onRead={(sid) => {
-            // Push "Sections tab focused on the clicked section" as the
-            // place-to-return-to, so Back scrolls back to that exact row.
-            const sec = sectionMap.get(sid)
-            if (doc.format === "pdf" && sec && sec.page_start > 0) {
-              pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
-              setReadSectionId(sid)
-              setPdfViewVisited(true)
-              setLeftTab("pdfview")
-              pdfViewerRef.current?.goToPage(sec.page_start)
-              return
-            }
-            pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
-            setReadSectionId(sid)
-            setLeftTab("read")
-          }}
+          onRead={goToSection}
           onPdfJump={(p) => {
             // The page anchor lives on a specific section — return to it.
             pushHistory({ tab: "sections", sectionId: section.id, pdfPage: null })
@@ -959,7 +1005,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             pdfViewerRef.current?.goToPage(p)
           }}
           onMediaJump={(t) => isAudio ? seekAndPlay(t) : seekAndPlayVideo(t)}
-          onToggleNote={(sid) => setOpenNoteEditor(openNoteEditor === sid ? null : sid)}
+          onToggleNote={(sid) => {
+            setOpenNoteEditor(openNoteEditor === sid ? null : sid)
+            if (openNoteEditor !== sid) openNotes()
+          }}
           onFeynman={setFeynmanSection}
           onPrefetchFeynman={(sid) => prefetchFeynmanSummary(doc.id, sid)}
           onShowGoals={(sid) => setActiveSectionGoals(activeSectionGoals === sid ? null : sid)}
@@ -987,6 +1036,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     toggleCollapsed,
     isSectionHidden,
     listLimit,
+    goToSection,
+    openNotes,
   ])
 
   if (isLoading) {
@@ -1174,12 +1225,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </div>
           {(docNotes?.length ?? 0) > 0 && (
             <button
-              onClick={() => {
-                setNotesDocumentId(documentId)
-                navigate("/notes", { state: { from: "/library" } })
-              }}
+              // The notes on this document are in the panel beside it, not on
+              // another page.
+              onClick={openNotes}
               className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground/80 hover:bg-muted transition-colors"
-              title="Open notes for this document"
+              title="Notes on this document"
             >
               <StickyNote size={12} />
               {docNotes?.length ?? 0} note{(docNotes?.length ?? 0) === 1 ? "" : "s"}
@@ -1205,7 +1255,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
       </div>
 
-      {/* Two-panel layout (QuickNoteComposer overlays from the right when capturing) */}
+      {/* Two-panel layout; capturing a note docks into the panel, over nothing */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1536,7 +1586,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           label="Resize insights panel"
         />
 
-        {insightsCollapsed ? (
+        {insightsCollapsed && (
           <button
             type="button"
             onClick={toggleInsights}
@@ -1546,10 +1596,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           >
             <PanelRightOpen size={16} />
           </button>
-        ) : (
-        <div className="flex shrink-0 flex-col overflow-hidden" style={{ width: insights.width }}>
+        )}
+        {/* Hidden rather than unmounted: collapsing the panel is a layout
+            change, and it may not cost a streaming answer or an unsaved note
+            draft. */}
+        <div
+          className={`flex shrink-0 flex-col overflow-hidden ${insightsCollapsed ? "hidden" : ""}`}
+          style={{ width: insights.width }}
+        >
           <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-            {(["insights", "ask"] as const).map((tab) => (
+            {(["insights", "ask", "note"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -1561,7 +1617,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                     : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 }`}
               >
-                {tab === "insights" ? "Insights" : "Ask AI"}
+                {tab === "insights" ? "Insights" : tab === "ask" ? "Ask AI" : "Notes"}
               </button>
             ))}
             <button
@@ -1583,6 +1639,85 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
               pinnedDocumentId={documentId}
             />
           </div>
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "note" ? "" : "hidden"}`}>
+            {noteCaptureOpen ? (
+              <NoteComposer
+                variant="docked"
+                open
+                captureKey={noteCaptureKey}
+                onClose={closeNoteCapture}
+                onSaved={() => {
+                  void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+                  void qc.invalidateQueries({ queryKey: ["notes"] })
+                  void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+                }}
+                initialContent={noteCaptureContent}
+                initialSourceDocIds={[documentId]}
+                lockedCollectionId={autoCollection?.id ?? null}
+                documentId={documentId}
+                // Where the note came from, structured rather than only quoted
+                // in its text: a selection's own section, or the section whose
+                // note button was pressed. Without the first of these a note
+                // taken from a passage stored no section at all, and nothing
+                // could resolve it back.
+                sectionId={selection.noteSourceRef?.sectionId ?? openNoteEditor}
+                chunkId={selection.noteSourceRef?.chunkId}
+              />
+            ) : (
+              <div className="flex h-full min-h-0 flex-col overflow-auto p-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    tabBeforeNote.current = "note"
+                    setDocNoteOpen(true)
+                  }}
+                  className="mb-3 flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+                >
+                  <StickyNote size={13} />
+                  New note
+                </button>
+                {notesLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+                    ))}
+                  </div>
+                ) : notesError ? (
+                  <p className="text-xs text-destructive">Could not load notes for this document.</p>
+                ) : (docNotes?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No notes on this document yet. Select a passage and choose Note, or start one
+                    above.
+                  </p>
+                ) : (
+                  <ul data-testid="docked-notes-list" className="space-y-2">
+                    {docNotes?.map((n) => (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (n.section_id) goToSection(n.section_id)
+                            else navigate(`/notes/${n.id}`, { state: { from: window.location.pathname } })
+                          }}
+                          className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-muted-foreground/30 hover:bg-muted/50"
+                        >
+                          <p className="truncate text-xs text-foreground">
+                            {n.title?.trim() || stripMarkdown(n.content).slice(0, 90) || "Untitled note"}
+                          </p>
+                          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                            {n.section_id
+                              ? sectionMap.get(n.section_id)?.heading ?? "In this document"
+                              : "Open in the notes page"}
+                          </p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
           <div className={`min-h-0 flex-1 overflow-auto p-6 ${insightsTab === "insights" ? "" : "hidden"}`}>
           {/* Video player for video documents */}
           {isVideo && videoUrl && (
@@ -1601,36 +1736,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           />
           </div>
         </div>
-        )}
 
-        <QuickNoteComposer
-          open={selection.noteOpen || openNoteEditor !== null}
-          onClose={() => {
-            selection.closeNote()
-            setOpenNoteEditor(null)
-          }}
-          onSaved={() => {
-            void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-            void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            void qc.invalidateQueries({ queryKey: ["notes"] })
-            void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-          }}
-          initialContent={(() => {
-            if (!selection.noteOpen) return ""
-            const parts = [selection.noteSourceRef?.documentTitle, selection.noteHeading].filter(Boolean)
-            const attribution = parts.length > 0 ? parts.join(", ") : ""
-            return `> "${selection.noteText}"\n>\n> -- ${attribution}`
-          })()}
-          initialSourceDocIds={[documentId]}
-          lockedCollectionId={autoCollection?.id ?? null}
-          documentId={documentId}
-          // Where the note came from, structured rather than only quoted in its
-          // text: a selection's own section, or the section whose note button
-          // was pressed. Without the first of these a note taken from a passage
-          // stored no section at all, and nothing could resolve it back.
-          sectionId={selection.noteSourceRef?.sectionId ?? openNoteEditor}
-          chunkId={selection.noteSourceRef?.chunkId}
-        />
       </div>
 
       {/* Audio mini-player — sticky bottom bar, audio documents only */}

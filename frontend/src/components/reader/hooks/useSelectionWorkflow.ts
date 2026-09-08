@@ -14,6 +14,8 @@ interface UseSelectionWorkflowOpts {
   setChatPreload: (preload: ChatPreload) => void
   /** Bring the docked conversation into view; it is already mounted. */
   openAsk: () => void
+  /** Bring the docked note composer into view. */
+  openNote: () => void
 }
 
 // Owns the selection -> {note, flashcard, ask-in-chat, highlight, clip} workflow:
@@ -24,6 +26,7 @@ export function useSelectionWorkflow({
   sectionMap,
   setChatPreload,
   openAsk,
+  openNote,
 }: UseSelectionWorkflowOpts) {
   const qc = useQueryClient()
 
@@ -31,6 +34,9 @@ export function useSelectionWorkflow({
   const [noteText, setNoteText] = useState("")
   const [noteSourceRef, setNoteSourceRef] = useState<SourceRef | null>(null)
   const [noteHeading, setNoteHeading] = useState<string | undefined>(undefined)
+  // Distinguishes one capture from the next: the composer is docked, so it is
+  // still open when a second passage is selected.
+  const [noteCaptureId, setNoteCaptureId] = useState(0)
 
   const [flashcardOpen, setFlashcardOpen] = useState(false)
   const [flashcardText, setFlashcardText] = useState("")
@@ -42,8 +48,10 @@ export function useSelectionWorkflow({
     setNoteText(text)
     setNoteSourceRef(sourceRef)
     setNoteHeading(heading)
+    setNoteCaptureId((n) => n + 1)
     setNoteOpen(true)
-  }, [sectionMap])
+    openNote()
+  }, [sectionMap, openNote])
 
   const handleCreateFlashcard = useCallback((text: string, sourceRef: SourceRef) => {
     const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
@@ -106,6 +114,7 @@ export function useSelectionWorkflow({
 
   return {
     noteOpen,
+    noteCaptureId,
     noteText,
     noteSourceRef,
     noteHeading,

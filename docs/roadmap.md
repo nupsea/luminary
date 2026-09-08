@@ -167,9 +167,13 @@ re-scope the Ask page, which is the defect `957b5be` fixed once already. A docke
 pinned to its document and offers no scope picker. Preloaded questions are addressed the same way
 (`preloadIsFor`), so an `autoSubmit` question cannot send itself into the wrong conversation.
 
-`make verify-dock` measures the two properties no unit test can see: asking about a passage keeps the
-reader on the passage, and the reader's conversation leaves the Ask page's thread and scope untouched.
-Pointing the dock at the page thread turns four of its checks red, which is what makes them checks.
+`make verify-dock` measures what no unit test can see, because all of it is about mounted components
+sharing one store: asking about a passage keeps the reader on the passage, the reader's conversation
+leaves the Ask page's thread and scope untouched, and taking a note opens nothing over the text.
+Each of those is fired, not assumed. Pointing the dock at the page thread turns four checks red;
+rendering the composer as a sheet again turns three red — `1 dialogs`, `0 composers`, and the second
+selection cannot be made at all, because the sheet is over the transcript; dropping `captureKey`
+turns the append check red at `3 -> 3 quoted lines`.
 
 **A citation points in the terms its source has.** `lib/citation/locus` picks one locus per source —
 a moment for a recording, a page for a paginated document, otherwise the section — and returns null
@@ -188,8 +192,20 @@ citation's location cannot silently shift the three call sites that unpack it.
 from a page, and `end_line` is computed and discarded. The locus module deliberately has no `line`
 kind until something can supply one.
 
-**Still modal, still to dock:** `QuickNoteComposer` and `FeynmanDialog`. The panel carries two tabs
-(Insights, Ask AI) of the seven the rung names, and the nav cut to five rail items is untouched.
+**The composer is a component too.** `NoteComposer` holds the capture; `variant="sheet"` is what a
+page with no room beside it opens — `QuickNoteComposer` is now that wrapper, and `pages/Notes.tsx`
+still uses it — while `variant="docked"` is the reader's third panel face. A docked composer outlives
+the capture that opened it, so a second selection appends into the draft (`appendCapture`) instead of
+being dropped; a modal could only ever hold a first. When nothing is being captured the tab lists
+this document's notes, and the header's note count opens that list rather than leaving for `/notes`.
+Collapsing the panel now hides it rather than unmounting it: a layout change may not cost a streaming
+answer or an unsaved draft.
+
+**Still modal, still to dock:** `FeynmanDialog`, `DocumentFlashcardDialog` (selection → flashcard, and
+the header's Generate questions) and `ExplanationSheet` (selection → explain). The panel carries three
+faces (Insights, Ask AI, Notes) of the seven the rung names, and the nav cut to five rail items is
+untouched.
+
 A note keeps where it came from: the composer received a section only when a section's own note
 button was pressed, so a note taken from a *selection* stored the quoted text and no locus at all.
 It now carries the selection's section and, where the view renders chunk by chunk, its chunk —

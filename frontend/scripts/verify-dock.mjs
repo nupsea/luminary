@@ -1,11 +1,12 @@
 /**
  * The docked assistant, in a real browser.
  *
- * The rung's rule is that asking about a passage does not leave the passage, and
- * that a conversation docked beside a document is that document's own: neither
- * the question nor the scope may reach the Ask page's conversation. Neither
- * property is visible to `tsc` or to a unit test -- both are about two mounted
- * components sharing one store.
+ * The rung's rule is that working on a passage does not leave the passage: the
+ * conversation and the note composer are both docked beside the document, no
+ * dialog opens over it, and a conversation docked beside a document is that
+ * document's own -- neither the question nor the scope may reach the Ask page's
+ * conversation. None of that is visible to `tsc` or to a unit test; all of it is
+ * about mounted components sharing one store.
  *
  *   make luminary          # app must already be serving
  *   make verify-dock
@@ -197,6 +198,54 @@ if (!recording) {
       check("the selection offers Note", (await noteAction.count()) > 0)
       if (await noteAction.count()) {
         await noteAction.first().click()
+        await page.waitForTimeout(1500)
+
+        // The rung's rule: nothing opens over the document.
+        const capture = await page.evaluate(() => ({
+          dialogs: document.querySelectorAll('[role="dialog"]').length,
+          composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
+          onNotes: [...document.querySelectorAll("button[aria-pressed]")]
+            .some((b) => b.textContent === "Notes" && b.getAttribute("aria-pressed") === "true"),
+          quoted: (document.querySelector(".cm-content")?.innerText.match(/^>/gm) ?? []).length,
+        }))
+        check("taking a note opens no dialog", capture.dialogs === 0, `${capture.dialogs} dialogs`)
+        check("the composer is docked in the panel", capture.composers === 1, `${capture.composers} composers`)
+        check("the dock opens on the note", capture.onNotes)
+        check("the composer holds the captured passage", capture.quoted >= 3, `${capture.quoted} quoted lines`)
+
+        // A docked composer outlives the capture that opened it, so the next
+        // one has to land in the draft rather than be dropped on the floor.
+        const second = page.locator("[data-chunk-id]").nth(1)
+        check("the transcript has a second passage to take", (await second.count()) > 0)
+        if (await second.count()) {
+          // Off screen, boundingBox still answers and the drag happens outside
+          // the window -- which reads as "no selection" rather than as a miss.
+          await second.scrollIntoViewIfNeeded()
+          await page.waitForTimeout(600)
+          const r2 = await second.boundingBox()
+          if (r2) {
+            await page.mouse.move(r2.x + 5, r2.y + Math.min(r2.height / 2, 20))
+            await page.mouse.down()
+            await page.mouse.move(r2.x + Math.min(r2.width - 5, 300), r2.y + Math.min(r2.height / 2, 20), { steps: 12 })
+            await page.mouse.up()
+            await page.waitForTimeout(800)
+            const noteAgain = page.getByRole("button", { name: "Note", exact: true })
+            check("the second selection offers Note", (await noteAgain.count()) > 0)
+            if (await noteAgain.count()) {
+              await noteAgain.first().click()
+              await page.waitForTimeout(1500)
+              const appended = await page.evaluate(() => ({
+                composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
+                quoted: (document.querySelector(".cm-content")?.innerText.match(/^>/gm) ?? []).length,
+              }))
+              check("a second capture appends to the open note", appended.quoted > capture.quoted,
+                `${capture.quoted} -> ${appended.quoted} quoted lines`)
+              check("a second capture opens no second composer", appended.composers === 1,
+                `${appended.composers} composers`)
+            }
+          }
+        }
+
         // The composer autosaves on a debounce; give it room to create.
         await page.waitForTimeout(9000)
         const saved = await page.evaluate(async ({ api, docId }) => {
@@ -208,6 +257,27 @@ if (!recording) {
         if (saved) {
           check("the note keeps the chunk it came from", Boolean(saved.chunk_id), String(saved.chunk_id))
           check("the note keeps the section it came from", Boolean(saved.section_id), String(saved.section_id))
+
+          // Done closes the composer, and the panel's own list is where the
+          // note then is -- the reader never went to the notes page for it.
+          const doneBtn = page.getByRole("button", { name: "Done", exact: true })
+          if (await doneBtn.count()) {
+            await doneBtn.first().click()
+            await page.waitForTimeout(2500)
+          }
+          // The panel's own tab, not the nav rail's Notes link.
+          const notesTab = page.locator("button[aria-pressed]").filter({ hasText: /^Notes$/ })
+          if (await notesTab.count()) {
+            await notesTab.first().click()
+            await page.waitForTimeout(1500)
+          }
+          const listed = await page.evaluate(() => ({
+            composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
+            rows: document.querySelectorAll('[data-testid="docked-notes-list"] li').length,
+          }))
+          check("Done closes the composer", listed.composers === 0, `${listed.composers} composers`)
+          check("the panel lists the note it just took", listed.rows > 0, `${listed.rows} rows`)
+
           // The round trip: the note's own back-link must land on the passage.
           await page.goto(`${APP}/notes`, { waitUntil: "domcontentloaded" })
           await page.waitForTimeout(3000)
