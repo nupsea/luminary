@@ -16,17 +16,20 @@ interface UseSelectionWorkflowOpts {
   openAsk: () => void
   /** Bring the docked note composer into view. */
   openNote: () => void
+  /** Bring the docked flashcard generator into view. */
+  openPractice: () => void
 }
 
 // Owns the selection -> {note, flashcard, ask-in-chat, highlight, clip} workflow:
-// dialog open/closed state, the SelectionActionBar callbacks, and the
-// post-save handoff to NoteEditorDialog.
+// which docked face is holding the capture, the SelectionActionBar callbacks,
+// and what each face is scoped to.
 export function useSelectionWorkflow({
   documentId,
   sectionMap,
   setChatPreload,
   openAsk,
   openNote,
+  openPractice,
 }: UseSelectionWorkflowOpts) {
   const qc = useQueryClient()
 
@@ -40,7 +43,6 @@ export function useSelectionWorkflow({
 
   const [flashcardOpen, setFlashcardOpen] = useState(false)
   const [flashcardText, setFlashcardText] = useState("")
-  const [flashcardSourceRef, setFlashcardSourceRef] = useState<SourceRef | null>(null)
   const [flashcardHeading, setFlashcardHeading] = useState<string | undefined>(undefined)
 
   const handleAddToNote = useCallback((text: string, sourceRef: SourceRef) => {
@@ -56,10 +58,10 @@ export function useSelectionWorkflow({
   const handleCreateFlashcard = useCallback((text: string, sourceRef: SourceRef) => {
     const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
     setFlashcardText(text)
-    setFlashcardSourceRef(sourceRef)
     setFlashcardHeading(heading)
     setFlashcardOpen(true)
-  }, [sectionMap])
+    openPractice()
+  }, [sectionMap, openPractice])
 
   // Asking about a passage no longer leaves the passage. The question is
   // addressed to this document's own conversation, which is docked beside the
@@ -120,7 +122,6 @@ export function useSelectionWorkflow({
     noteHeading,
     flashcardOpen,
     flashcardText,
-    flashcardSourceRef,
     flashcardHeading,
     closeNote,
     closeFlashcard,

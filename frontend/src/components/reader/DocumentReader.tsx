@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
-import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
@@ -17,11 +16,11 @@ import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
-import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
+import { DocumentFlashcardPanel } from "./DocumentFlashcardPanel"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
 
 // Full-mode only, folded at BUILD time. FEYNMAN_VISIBLE below gates rendering,
-// which hid the button but still compiled the dialog and its /feynman/* calls
+// which hid the button but still compiled the panel and its /feynman/* calls
 // into the public Learning chunk. LUMINARY_MODE is a vite `define`, so a public
 // build folds this to null and drops the dynamic import.
 // Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
@@ -36,12 +35,13 @@ const loadLastPracticed =
         import("./feynmanSessions").then((m) => m.lastPracticedBySection(documentId))
     : null
 
-const FeynmanDialog =
+const FeynmanPanel =
   import.meta.env.VITE_LUMINARY_MODE === "full"
-    ? lazy(() => import("./FeynmanDialog").then((m) => ({ default: m.FeynmanDialog })))
+    ? lazy(() => import("./FeynmanPanel").then((m) => ({ default: m.FeynmanPanel })))
     : null
 
 import { EPUBViewer } from "./EPUBViewer"
+import { ExplanationPanel } from "./ExplanationPanel"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
 import { readerLandingTab } from "./hooks/readerLandingTab"
@@ -69,7 +69,7 @@ import { docThreadKey } from "@/store/chatThreads"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
-// The Feynman dialog talks to the `feynman` router, which only full mode mounts.
+// The Feynman session talks to the `feynman` router, which only full mode mounts.
 // Gated on content type alone, the button shipped in public builds and answered 404.
 const FEYNMAN_VISIBLE = isSurfaceVisible("feynman")
 
@@ -129,7 +129,15 @@ interface NoteEntry {
 }
 
 // Which face of the docked panel is showing.
-type PanelTab = "insights" | "ask" | "note"
+type PanelTab = "insights" | "ask" | "note" | "practice" | "explain"
+
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+  { id: "insights", label: "Insights" },
+  { id: "ask", label: "Ask AI" },
+  { id: "note", label: "Notes" },
+  { id: "practice", label: "Practice" },
+  { id: "explain", label: "Explain" },
+]
 
 
 interface DocumentReaderProps {
@@ -215,9 +223,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setBookViewVisited,
   } = useReaderTabs({ format: doc?.format, hasDeepLink, hasPassageLink })
 
-  const [sheetOpen, setSheetOpen] = useState(false)
-  const [sheetText, setSheetText] = useState("")
-  const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
+  // The explanation the panel is holding. Empty means the face is idle, which
+  // is also what unmounts the stream.
+  const [explainText, setExplainText] = useState("")
+  const [explainMode, setExplainMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
   const [docNoteOpen, setDocNoteOpen] = useState(false) // note on the document, no section
   const [openNoteId, setOpenNoteId] = useState<string | null>(initialNoteId ?? null)
@@ -238,7 +247,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
   // tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
-  // Feynman mode — section id to open dialog for; null = closed
+  // Feynman mode — section id the docked session is for; null = no session
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
   // Unified "section the user is currently focused on" — set by every section
   // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
@@ -281,9 +290,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const setChatPreload = useAppStore((s) => s.setChatPreload)
   const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
   const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
-
-  // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
-  const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
 
   // Header "Delete" -> removes the open document without a trip back to the library.
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -331,27 +337,30 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docSections])
 
-  // Insights is what the panel has always held; Ask is this document's own
-  // conversation and Notes its composer, both mounted beside the text instead
-  // of on another tab or over the passage they are about.
+  // Insights is what the panel has always held; every other face is a workflow
+  // that used to open over the passage it is about -- this document's own
+  // conversation, its note composer, its flashcards and Feynman session, and an
+  // explanation of a selection.
   // Arriving with a note is arriving at the note: the panel opens on it.
   const [insightsTab, setInsightsTab] = useState<PanelTab>(initialNoteId ? "note" : "insights")
-  const tabBeforeNote = useRef<PanelTab>("insights")
-  const openAsk = useCallback(() => {
+  // Where a transient face returns the panel when it closes. One ref for all of
+  // them: the last face to take over is the one that has somewhere to go back to.
+  const tabBefore = useRef<PanelTab>("insights")
+  const showPanel = useCallback((tab: PanelTab) => {
     setInsightsRestored(true)
-    setInsightsTab("ask")
-  }, [setInsightsRestored, setInsightsTab])
-  const openNotes = useCallback(() => {
-    setInsightsRestored(true)
-    if (insightsTab !== "note") tabBeforeNote.current = insightsTab
-    setInsightsTab("note")
+    if (insightsTab !== tab) tabBefore.current = insightsTab
+    setInsightsTab(tab)
   }, [insightsTab, setInsightsRestored, setInsightsTab])
+  const openAsk = useCallback(() => { showPanel("ask") }, [showPanel])
+  const openNotes = useCallback(() => { showPanel("note") }, [showPanel])
+  const openPractice = useCallback(() => { showPanel("practice") }, [showPanel])
   const selection = useSelectionWorkflow({
     documentId,
     sectionMap,
     setChatPreload,
     openAsk,
     openNote: openNotes,
+    openPractice,
   })
 
   // What the docked composer is holding: a selected passage, a section's own
@@ -381,7 +390,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setOpenNoteEditor(null)
     setDocNoteOpen(false)
     setOpenNoteId(null)
-    setInsightsTab(tabBeforeNote.current)
+    setInsightsTab(tabBefore.current)
   }, [closeNote, setOpenNoteEditor, setDocNoteOpen, setOpenNoteId, setInsightsTab])
 
   const {
@@ -929,10 +938,34 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   )
 
   const handleExplain = useCallback((text: string, mode: ExplainMode) => {
-    setSheetText(text)
-    setSheetMode(mode)
-    setSheetOpen(true)
-  }, [])
+    setExplainText(text)
+    setExplainMode(mode)
+    showPanel("explain")
+  }, [setExplainText, setExplainMode, showPanel])
+
+  const closeExplain = useCallback(() => {
+    setExplainText("")
+    setInsightsTab(tabBefore.current)
+  }, [setExplainText, setInsightsTab])
+
+  // A section's Practice button opens the session in the panel, not over it.
+  const openFeynman = useCallback((sectionId: string) => {
+    setFeynmanSection(sectionId)
+    showPanel("practice")
+  }, [setFeynmanSection, showPanel])
+
+  const closeFeynman = useCallback(() => {
+    const sid = feynmanSection
+    setFeynmanSection(null)
+    setInsightsTab(tabBefore.current)
+    if (sid) {
+      // Push so Back returns to whatever tab the session was opened from.
+      if (leftTab !== "sections") pushHistory()
+      setLeftTab("sections")
+      scrollActiveSectionIntoView(sid)
+    }
+  }, [feynmanSection, leftTab, pushHistory, setLeftTab, scrollActiveSectionIntoView,
+      setFeynmanSection, setInsightsTab])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
@@ -1017,7 +1050,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             setOpenNoteEditor(openNoteEditor === sid ? null : sid)
             if (openNoteEditor !== sid) openNotes()
           }}
-          onFeynman={setFeynmanSection}
+          onFeynman={openFeynman}
           onPrefetchFeynman={(sid) => prefetchFeynmanSummary(doc.id, sid)}
           onShowGoals={(sid) => setActiveSectionGoals(activeSectionGoals === sid ? null : sid)}
         />
@@ -1175,7 +1208,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Study
           </button>
           <button
-            onClick={() => setGenQuestionsOpen(true)}
+            onClick={() => { selection.closeFlashcard(); openPractice() }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             title="Generate questions from this document"
           >
@@ -1613,27 +1646,29 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           style={{ width: insights.width }}
         >
           <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-            {(["insights", "ask", "note"] as const).map((tab) => (
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {PANEL_TABS.map(({ id, label }) => (
               <button
-                key={tab}
+                key={id}
                 type="button"
-                onClick={() => setInsightsTab(tab)}
-                aria-pressed={insightsTab === tab}
-                className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                  insightsTab === tab
+                onClick={() => setInsightsTab(id)}
+                aria-pressed={insightsTab === id}
+                className={`shrink-0 rounded-md px-2 py-1 text-xs transition-colors ${
+                  insightsTab === id
                     ? "bg-accent font-medium text-foreground"
                     : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 }`}
               >
-                {tab === "insights" ? "Insights" : tab === "ask" ? "Ask AI" : "Notes"}
+                {label}
               </button>
             ))}
+            </div>
             <button
               type="button"
               onClick={toggleInsights}
               aria-label="Hide insights"
               title="Hide insights"
-              className="ml-auto text-muted-foreground hover:text-foreground"
+              className="ml-1 shrink-0 text-muted-foreground hover:text-foreground"
             >
               <PanelRightClose size={16} />
             </button>
@@ -1678,7 +1713,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 <button
                   type="button"
                   onClick={() => {
-                    tabBeforeNote.current = "note"
+                    tabBefore.current = "note"
                     setDocNoteOpen(true)
                   }}
                   className="mb-3 flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
@@ -1707,7 +1742,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                           type="button"
                           // A note opened from a document is edited beside it.
                           onClick={() => {
-                            tabBeforeNote.current = "note"
+                            tabBefore.current = "note"
                             setOpenNoteId(n.id)
                           }}
                           className="w-full rounded-t-md px-3 py-2 text-left hover:bg-muted/50"
@@ -1729,6 +1764,47 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                     ))}
                   </ul>
                 )}
+              </div>
+            )}
+          </div>
+          {/* Practice: this document's flashcards, and the Feynman session that
+              takes the face over while one is running. */}
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "practice" ? "" : "hidden"}`}>
+            {feynmanSection && FeynmanPanel ? (
+              <Suspense fallback={null}>
+                <FeynmanPanel
+                  documentId={documentId}
+                  sectionId={feynmanSection}
+                  concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
+                  onClose={closeFeynman}
+                />
+              </Suspense>
+            ) : (
+              <DocumentFlashcardPanel
+                documentId={documentId}
+                // A selection scopes the generator; with none it is the document.
+                sectionHeading={selection.flashcardOpen ? selection.flashcardHeading : undefined}
+                context={selection.flashcardOpen ? selection.flashcardText : ""}
+                onClearScope={selection.closeFlashcard}
+              />
+            )}
+          </div>
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "explain" ? "" : "hidden"}`}>
+            {explainText ? (
+              <ExplanationPanel
+                // A new passage is a new explanation, not a reset of this one.
+                key={`${explainMode}:${explainText}`}
+                text={explainText}
+                documentId={documentId}
+                mode={explainMode}
+                onClose={closeExplain}
+              />
+            ) : (
+              <div className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  Select a passage and choose Explain. The explanation streams here, beside the
+                  text it is about.
+                </p>
               </div>
             )}
           </div>
@@ -1773,55 +1849,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* Feynman dialog */}
-      {feynmanSection && FeynmanDialog && (
-        <Suspense fallback={null}>
-        <FeynmanDialog
-          documentId={documentId}
-          sectionId={feynmanSection}
-          concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
-          onClose={() => {
-            const sid = feynmanSection
-            setFeynmanSection(null)
-            if (sid) {
-              // Push so Back returns to whatever tab the dialog was opened from.
-              if (leftTab !== "sections") pushHistory()
-              setLeftTab("sections")
-              scrollActiveSectionIntoView(sid)
-            }
-          }}
-        />
-        </Suspense>
-      )}
-
-      {/* Flashcard generation dialog — scoped to selected text context */}
-      <DocumentFlashcardDialog
-        open={selection.flashcardOpen}
-        documentId={documentId}
-        sectionId={selection.flashcardSourceRef?.sectionId}
-        sectionHeading={selection.flashcardHeading}
-        context={selection.flashcardText}
-        onClose={selection.closeFlashcard}
-      />
-
-      {/* Header "Generate questions" — same dialog scoped to the whole document */}
-      <DocumentFlashcardDialog
-        open={genQuestionsOpen}
-        documentId={documentId}
-        sectionId={undefined}
-        sectionHeading={undefined}
-        context=""
-        onClose={() => setGenQuestionsOpen(false)}
-      />
-
-      {/* Explanation sheet */}
-      <ExplanationSheet
-        open={sheetOpen}
-        text={sheetText}
-        documentId={documentId}
-        mode={sheetMode}
-        onClose={() => setSheetOpen(false)}
-      />
     </div>
   )
 }

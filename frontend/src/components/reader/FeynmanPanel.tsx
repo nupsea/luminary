@@ -1,19 +1,18 @@
 /**
- * FeynmanDialog -- split-pane guided explanation session
+ * FeynmanPanel -- guided explanation session, docked in the reader's panel.
  *
- * Left pane (40%): section summary (or fallback preview)
- * Right pane (60%): SSE-streaming Socratic tutor chat
+ * The panel is one column, so the section summary the learner explains from is
+ * a collapsible strip above the tutor chat rather than a pane beside it.
  *
  * Three UI states:
- *   Loading: skeleton rows in left pane while summary loads
+ *   Loading: skeleton rows in the reference strip while the summary loads
  *   Error: inline message when summary fetch fails or Ollama is offline
  *   Empty: "No session history" in history tab
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Brain, Loader2, Send } from "lucide-react"
+import { Brain, ChevronDown, Loader2, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
@@ -39,22 +38,23 @@ import type { components } from "@/types/api"
 
 type SessionHistoryItem = components["schemas"]["FeynmanSessionListItem"]
 
-interface FeynmanDialogProps {
+interface FeynmanPanelProps {
   documentId: string
   sectionId: string
   concept: string
   onClose: () => void
 }
 
-type DialogTab = "chat" | "history"
+type SessionTab = "chat" | "history"
 
-export function FeynmanDialog({
+export function FeynmanPanel({
   documentId,
   sectionId,
   concept,
   onClose,
-}: FeynmanDialogProps) {
-  const [activeTab, setActiveTab] = useState<DialogTab>("chat")
+}: FeynmanPanelProps) {
+  const [activeTab, setActiveTab] = useState<SessionTab>("chat")
+  const [referenceOpen, setReferenceOpen] = useState(true)
   const llmMode = useAppStore((s) => s.llmMode)
 
   // Summary loading state
@@ -442,62 +442,80 @@ export function FeynmanDialog({
   // Render
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="flex max-w-5xl flex-col gap-0 p-0 h-[80vh]">
-        <DialogHeader className="border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Brain size={16} className="text-primary" />
-              <DialogTitle className="text-base font-semibold">
-                Feynman Mode: {concept}
-              </DialogTitle>
-            </div>
-            {/* Tab bar */}
-            <div className="flex gap-1 rounded-md bg-muted p-0.5 text-xs">
-              {(["chat", "history"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "rounded px-3 py-1 font-medium capitalize transition-colors",
-                    activeTab === tab
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+    <div data-testid="docked-feynman" className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Brain size={14} className="text-primary" />
+          <p className="truncate text-sm font-semibold text-foreground">
+            Feynman: {concept}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex gap-0.5 rounded-md bg-muted p-0.5 text-[11px]">
+            {(["chat", "history"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "rounded px-2 py-0.5 font-medium capitalize transition-colors",
+                  activeTab === tab
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
-        </DialogHeader>
+          <button
+            onClick={onClose}
+            aria-label="Close the Feynman session"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      </div>
 
-        {activeTab === "chat" ? (
-          <div className="flex flex-1 overflow-hidden">
-            {/* Left pane: section summary */}
-            <div className="w-2/5 overflow-auto border-r border-border p-4">
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Section Reference
-              </h3>
-              {summaryLoading ? (
-                <div className="flex flex-col gap-2">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <Skeleton key={i} className="h-3 w-full" />
-                  ))}
+      {activeTab === "chat" ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* The reference the learner explains from. One column, so it
+                collapses instead of sitting beside the chat. */}
+            <div className="shrink-0 border-b border-border">
+              <button
+                onClick={() => setReferenceOpen((v) => !v)}
+                aria-expanded={referenceOpen}
+                className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+              >
+                Section reference
+                <ChevronDown size={13} className={referenceOpen ? "" : "-rotate-90"} />
+              </button>
+              {referenceOpen && (
+                <div className="max-h-40 overflow-auto px-3 pb-3">
+                  {summaryLoading ? (
+                    <div className="flex flex-col gap-2">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <Skeleton key={i} className="h-3 w-full" />
+                      ))}
+                    </div>
+                  ) : summaryError ? (
+                    <p className="text-xs text-muted-foreground">{summaryError}</p>
+                  ) : summaryContent ? (
+                    // The reference is a strip, not a column: prose's own scale
+                    // puts an h2 at 24px in a panel a third of the width.
+                    <div className="text-xs leading-relaxed">
+                      <MarkdownRenderer className="[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_h4]:text-xs [&_p]:text-xs [&_li]:text-xs [&_h1]:mt-0 [&_h2]:mt-2 [&_h3]:mt-2">
+                        {summaryContent}
+                      </MarkdownRenderer>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No summary available for this section.</p>
+                  )}
                 </div>
-              ) : summaryError ? (
-                <p className="text-xs text-muted-foreground">{summaryError}</p>
-              ) : summaryContent ? (
-                <div className="text-xs leading-relaxed">
-                  <MarkdownRenderer>{summaryContent}</MarkdownRenderer>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No summary available for this section.</p>
               )}
             </div>
 
-            {/* Right pane: chat */}
-            <div className="flex w-3/5 flex-col overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Error banner */}
               {sessionError && (
                 <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
@@ -689,7 +707,7 @@ export function FeynmanDialog({
           </div>
         ) : (
           /* History tab */
-          <div className="flex-1 overflow-auto p-6">
+          <div className="min-h-0 flex-1 overflow-auto p-4">
             <h3 className="mb-3 text-sm font-semibold text-foreground">Session History</h3>
             {historyLoading ? (
               <div className="flex flex-col gap-2">
@@ -732,7 +750,6 @@ export function FeynmanDialog({
             )}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+    </div>
   )
 }

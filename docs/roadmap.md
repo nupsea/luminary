@@ -142,9 +142,10 @@ win taken out of content is the failure this rung is most likely to produce.
 
 ### 2. The docked reader — 0.11.0
 
-**Three modals cover the text the reader is reading.** `QuickNoteComposer` is a dialog, `Chat` is a
-global slide-over owned by `App.tsx`, `FeynmanDialog` is a third dialog. The resizable right panel
-that would hold all three already exists and shows only summaries and chapter goals.
+**The reader's work used to open over the text it was about.** The note composer was a dialog, the
+conversation a global slide-over owned by `App.tsx`, an explanation a sheet with a backdrop, and the
+flashcard generator and the Feynman session two more dialogs. The resizable right panel that would
+hold all of them already existed and showed only summaries and chapter goals.
 
 The panel becomes the assistant: `Notes · Key Points · Detailed · Glossary · References · Ask AI ·
 Practice`. Selection actions dock into it instead of opening anything, and the citation travels with
@@ -255,10 +256,34 @@ left the excalidraw sidecar on screen beside every diagram.
 `make verify-dock` counts rendered quote lines for the rendering and the draft's own line count for
 everything else, so taking the rendering away turns one check red rather than three.
 
-**Still modal, still to dock:** `FeynmanDialog`, `DocumentFlashcardDialog` (selection → flashcard, and
-the header's Generate questions) and `ExplanationSheet` (selection → explain). The panel carries three
-faces (Insights, Ask AI, Notes) of the seven the rung names, and the nav cut to five rail items is
-untouched.
+**Nothing opens over the document.** The last three modals are panel faces. `ExplanationPanel` streams
+a selection's explanation on its own face. `DocumentFlashcardPanel` is Practice, scoped to the
+selection that opened it or to the document when the header's Generate questions did — and clearing
+the scope is what returns it to the document. `FeynmanPanel` takes the Practice face over while a
+session runs; the panel is one column, so the summary the learner explains from is a collapsible
+strip above the tutor rather than a pane beside it, and prose's own scale is overridden there because
+an `h2` at 24px in a 460px panel is a heading and no reference.
+
+Every face stays mounted and hidden, so switching tabs costs neither a streaming explanation nor a
+half-written one. One ref carries where a transient face returns the panel, so closing an explanation
+or a session lands back on whatever opened it.
+
+**`readerSurfaces.test.ts` is what holds the claim**, because a browser check only ever sees the
+modals a particular run happens to open: no file under `components/reader/` may import a dialog,
+sheet, drawer or alert-dialog primitive, or be named for one, and the reader must mount all five
+faces. The document's own delete confirmation is a popover and needs no exception. `make verify-dock`
+fires the wiring instead — 50 checks, and 54 with the Feynman arm on; dropping the explain hand-off,
+the generator's scope and the header's arm turns four of them red and nothing else.
+
+The Feynman checks are off by default and say so next to the flag: `/feynman` has no delete, so each
+run leaves a practice session in the library it runs against — two in dev, where StrictMode starts
+the effect twice. `LUMINARY_VERIFY_FEYNMAN=1` re-enables them, and that is how the session's wiring
+was measured.
+
+The panel carries Insights, Ask AI, Notes, Practice and Explain. Of the seven faces this rung names,
+Key Points, Detailed, Glossary and References are still folded into Insights; Explain is a face the
+list did not anticipate, because an explanation of a selection has nowhere else to live. The nav cut
+to five rail items is untouched.
 
 A note keeps where it came from: the composer received a section only when a section's own note
 button was pressed, so a note taken from a *selection* stored the quoted text and no locus at all.

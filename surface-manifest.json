@@ -227,7 +227,7 @@
       "frontend": {
         "components": [
           "components/Teachback",
-          "components/reader/FeynmanDialog"
+          "components/reader/FeynmanPanel"
         ]
       },
       "backend": {

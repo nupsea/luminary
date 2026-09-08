@@ -163,6 +163,128 @@ if (paraCount) {
       check("the dock opens on the question", after.askTabActive)
       check("the excerpt reaches this document's conversation", after.asked)
     }
+
+    // The same paragraph, twice more. Explain was a sheet with a backdrop over
+    // the text and Flashcard a dialog in front of it; both are panel faces now.
+    // Drag the paragraph again and wait for the action the caller wants. A
+    // fixed pause is not enough while an answer is streaming into the panel:
+    // one run lost the toolbar to a render and reported a missing button.
+    const selectAgain = async (locator) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await page.mouse.move(boxRect.x + 5, boxRect.y + boxRect.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(boxRect.x + Math.min(boxRect.width - 5, 320), boxRect.y + boxRect.height / 2, { steps: 12 })
+        await page.mouse.up()
+        for (let i = 0; i < 8; i++) {
+          await page.waitForTimeout(400)
+          if (await locator.count()) return true
+        }
+      }
+      return false
+    }
+    const TAB_LABELS = ["Insights", "Ask AI", "Notes", "Practice", "Explain"]
+    const panelState = () => page.evaluate((labels) => ({
+      dialogs: document.querySelectorAll('[role="dialog"]').length,
+      explanations: document.querySelectorAll('[data-testid="docked-explanation"]').length,
+      practice: document.querySelectorAll('[data-testid="docked-practice"]').length,
+      feynman: document.querySelectorAll('[data-testid="docked-feynman"]').length,
+      scope: document.querySelector('[data-testid="practice-scope"]')?.textContent?.trim() ?? "",
+      explained: document.querySelector('[data-testid="explanation-body"]')?.innerText?.trim() ?? "",
+      tab: [...document.querySelectorAll("button[aria-pressed]")]
+        .filter((b) => labels.includes(b.textContent?.trim()))
+        .find((b) => b.getAttribute("aria-pressed") === "true")?.textContent?.trim() ?? null,
+      url: location.href,
+    }), TAB_LABELS)
+
+    // The panel's own tab is also called Explain; only the action bar's button
+    // carries no aria-pressed.
+    const explainAction = page.locator("button:not([aria-pressed])").filter({ hasText: /^Explain$/ })
+    check("the selection offers Explain", await selectAgain(explainAction))
+    if (await explainAction.count()) {
+      await explainAction.first().click()
+      await page.waitForTimeout(1500)
+      const opened = await panelState()
+      check("explaining a passage opens no sheet", opened.dialogs === 0, `${opened.dialogs} dialogs`)
+      check("the explanation is docked in the panel", opened.explanations === 1, `${opened.explanations} panels`)
+      check("the dock opens on the explanation", opened.tab === "Explain", String(opened.tab))
+      check("explaining a passage stays in the reader", opened.url.includes(`doc=${docId}`), opened.url)
+      // The face is only worth docking if it fills: an empty panel and a
+      // covered one are the same thing to the reader.
+      let streamed = opened
+      for (let i = 0; i < 30; i++) {
+        if (streamed.explained.length > 80) break
+        await page.waitForTimeout(3000)
+        streamed = await panelState()
+      }
+      check("the explanation streams into the panel", streamed.explained.length > 80,
+        `${streamed.explained.length} chars`)
+    }
+
+    const cardAction = page.getByRole("button", { name: "Flashcard", exact: true })
+    check("the selection offers Flashcard", await selectAgain(cardAction))
+    if (await cardAction.count()) {
+      await cardAction.first().click()
+      await page.waitForTimeout(1200)
+      const opened = await panelState()
+      check("a flashcard from a passage opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
+      check("the generator is docked in the panel", opened.practice === 1, `${opened.practice} panels`)
+      check("the dock opens on Practice", opened.tab === "Practice", String(opened.tab))
+      // The selection is what the cards would be generated from; losing it is
+      // how a passage silently becomes the whole document.
+      check("the generator is scoped to the selection", /^Selected text/.test(opened.scope), opened.scope)
+    }
+
+    // The header's own button is the document-wide arm of the same face.
+    const genQuestions = page.getByRole("button", { name: "Generate questions" })
+    check("the header offers Generate questions", (await genQuestions.count()) > 0)
+    if (await genQuestions.count()) {
+      await genQuestions.first().click()
+      await page.waitForTimeout(1000)
+      const opened = await panelState()
+      check("Generate questions opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
+      check("Generate questions opens the Practice face", opened.tab === "Practice", String(opened.tab))
+      check("the header's arm is scoped to the document", opened.scope === "This document", opened.scope)
+    }
+
+    // Feynman starts a session on mount and `/feynman` has no delete, so this
+    // one leaves a practice session behind in the library it runs against --
+    // two of them in dev, where StrictMode runs the effect twice.
+    // Re-enable with LUMINARY_VERIFY_FEYNMAN=1 when the dock's wiring changes;
+    // `readerSurfaces.test.ts` is what holds the "no modal" claim otherwise.
+    if (process.env.LUMINARY_VERIFY_FEYNMAN === "1") {
+      // The Practice button is offered on a tech book or article and nowhere
+      // else, so the prose document this check has been driving cannot show it.
+      const tech = await page.evaluate(async (api) => {
+        const res = await fetch(`${api}/documents?page=1&page_size=100`)
+        const data = await res.json()
+        return (data.items ?? []).find((d) => ["tech_book", "tech_article"].includes(d.content_type)) ?? null
+      }, API)
+      if (!tech) {
+        console.log("  SKIP the Feynman checks: the library holds no tech book or article")
+      } else {
+        console.log(`feynman document: ${tech.title} (${tech.content_type})`)
+        await page.goto(`${APP}/library?doc=${tech.id}`, { waitUntil: "domcontentloaded" })
+        await page.waitForTimeout(3500)
+        // The section list is where the button is, and it is not the landing tab.
+        const sectionsTab = page.getByRole("button", { name: "Sections", exact: true })
+        if (await sectionsTab.count()) {
+          await sectionsTab.first().click()
+          await page.waitForTimeout(1500)
+        }
+        const practiceBtn = page.locator('button[title^="Explain this section in your own words"]')
+        check("a section offers Practice", (await practiceBtn.count()) > 0)
+        if (await practiceBtn.count()) {
+          await practiceBtn.first().click()
+          await page.waitForTimeout(6000)
+          const opened = await panelState()
+          check("a Feynman session opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
+          check("the session is docked in the panel", opened.feynman === 1, `${opened.feynman} panels`)
+          check("the dock opens on the session", opened.tab === "Practice", String(opened.tab))
+        }
+      }
+    } else {
+      console.log("  SKIP the Feynman checks: they create a session with no way to remove it (LUMINARY_VERIFY_FEYNMAN=1)")
+    }
   }
 }
 

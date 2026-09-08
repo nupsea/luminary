@@ -1,9 +1,9 @@
 /**
- * Summary prefetch cache for FeynmanDialog.
+ * Summary prefetch cache for FeynmanPanel.
  *
  * Lets the Practice button warm the section summary on hover/focus so the
- * dialog opens with content already in hand instead of a 200-500ms skeleton.
- * Lives in its own module so FeynmanDialog.tsx exports only its component
+ * panel opens with content already in hand instead of a 200-500ms skeleton.
+ * Lives in its own module so FeynmanPanel.tsx exports only its component
  * (required by the react-refresh / fast-refresh rule).
  */
 
