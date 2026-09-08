@@ -291,6 +291,19 @@ coming, with every attempt listed again in the run's summary so moving on early 
 two dimensions that move the score were fetched, stored and dropped. The rubric is a second,
 best-effort LLM call and the panel says so when it comes back empty rather than showing nothing.
 
+**A teach-back can be answered again**, on the card and from the finished summary, with the last
+verdict kept in view to improve on. Retrying in place rather than discarding the attempt is not a
+preference: deleting a session takes its teach-back rows and review events, and leaves the card's
+FSRS state already advanced, so "delete and retry" would silently keep the schedule move it
+appeared to undo. A card reached back out of the summary reopens the run's own session rather than
+opening a second one for one card, and does not count as another card reviewed.
+
+**Start starts; only the resume button resumes.** `prepareStudySession` adopts any open session for
+the scope, which is right for the Study page -- it has no other way back into a run -- and wrong
+here: pressing "Explain it" on a deck with cards due landed the learner in the summary of a run they
+had finished days earlier. The deck names the open run and offers it explicitly, so the two intents
+are separate and the start buttons always begin a fresh run.
+
 **An interrupted run is offered back.** The deck names the most recent open session for the
 document -- not a preferred mode, which offered a teach-back run abandoned days earlier over the
 recall run left a minute ago -- and resuming reattaches by id, so a section run resumes as one. A
@@ -321,7 +334,7 @@ or a session lands back on whatever opened it.
 modals a particular run happens to open: no file under `components/reader/` may import a dialog,
 sheet, drawer or alert-dialog primitive, or be named for one, and the reader must mount all five
 faces. The document's own delete confirmation is a popover and needs no exception. `make verify-dock`
-fires the wiring instead — 63 checks, 68 with the teach-back arm and 67 with Feynman's. Each was fired on purpose: the
+fires the wiring instead — 63 checks, 71 with the teach-back arm and 67 with Feynman's. Each was fired on purpose: the
 recall block goes red when the answer renders before the commit, when the reveal stops moving the
 document, when a prediction is dropped, when committing stops revealing, and when the face leads with
 the generator again.
@@ -329,6 +342,9 @@ the generator again.
 The recall block grades nothing — predicting and revealing mutate no card — and deletes the study
 session it opened, so it leaves the library as it found it. It needs a document with a card due and
 says so when it finds none.
+
+Its verdict check does not require a score: evaluation is a local LLM call that sometimes comes back
+unscored, and a check that reddens on that is noise which would hide a real regression.
 
 The teach-back arm is off by default and carries its reason next to the flag: submitting an
 explanation has it scored, and scoring applies an FSRS review, so a run advances the schedule of

@@ -38,6 +38,7 @@ import {
   type Rating,
   type TeachbackResultItem,
   fetchSourceContext,
+  reopenSession,
   submitReview,
   submitTeachbackAsync,
 } from "@/lib/studyApi"
@@ -81,8 +82,10 @@ export function RecallRunner({
     reviewed,
     total,
     currentCard,
+    setQueue,
     setCurrentIndex,
     setReviewed,
+    setSessionState,
     completeSession,
     exit,
   } = useStudySession({
@@ -108,6 +111,9 @@ export function RecallRunner({
   // Where this card's answer lives in the document. Only some cards arrive
   // carrying it (see reveal).
   const [jumpSection, setJumpSection] = useState<string | null>(null)
+  // Set when a card was pulled back out of the finished summary: advancing from
+  // it returns there, and it is not counted as a second card reviewed.
+  const [reAnswering, setReAnswering] = useState(false)
   const [calibration, setCalibration] = useState<{ text: string; tone: CalibrationTone } | null>(null)
 
   // Run totals.
@@ -117,9 +123,20 @@ export function RecallRunner({
   const [pending, setPending] = useState<PendingTeachback[]>([])
 
   const { results, stats } = useTeachbackPolling(pending)
-  const cardResult = currentCard
-    ? results?.find((r) => r.flashcard_id === currentCard.id)
-    : undefined
+  // The LATEST attempt on this card, not the first. A card can be answered more
+  // than once, and matching on flashcard_id alone showed the verdict of the
+  // attempt the learner had already decided to improve on.
+  const attemptsForCard = currentCard
+    ? pending.filter((p) => p.flashcardId === currentCard.id)
+    : []
+  const latestAttemptId = attemptsForCard[attemptsForCard.length - 1]?.id ?? null
+  const cardResult = results?.find((r) => r.id === latestAttemptId)
+  const completedForCard = currentCard
+    ? (results ?? []).filter(
+        (r) => r.flashcard_id === currentCard.id && r.status === "complete",
+      )
+    : []
+  const previousAttempt = completedForCard[completedForCard.length - 1] ?? null
 
   function reveal(card: Flashcard) {
     setRevealed(true)
@@ -166,7 +183,7 @@ export function RecallRunner({
   }
 
   function advance(countReviewed = false) {
-    if (countReviewed) setReviewed((r) => r + 1)
+    if (countReviewed && !reAnswering) setReviewed((r) => r + 1)
     setPredicted(null)
     setRevealed(false)
     setExplanation("")
@@ -179,6 +196,32 @@ export function RecallRunner({
     } else {
       setCurrentIndex(nextIdx)
     }
+  }
+
+  /** Same card, blank box, with the last verdict kept in view to improve on. */
+  function answerAgain() {
+    setRevealed(false)
+    setExplanation("")
+    setJumpSection(null)
+  }
+
+  /** A card reached back out of the finished summary. */
+  async function reAnswer(cardId: string) {
+    const card = queue.find((c) => c.id === cardId)
+    if (!card || !sessionId) return
+    // The run is over, so its session was ended. Reopening keeps the retry in
+    // the same run rather than opening a second one for one card.
+    await reopenSession(sessionId).catch(() => {})
+    setReAnswering(true)
+    setQueue([card])
+    setCurrentIndex(0)
+    setRevealed(false)
+    setExplanation("")
+    setJumpSection(null)
+    setPredicted(null)
+    setGraded(null)
+    setCalibration(null)
+    setSessionState("studying")
   }
 
   async function handleGrade(rating: Rating) {
@@ -211,6 +254,7 @@ export function RecallRunner({
         mode={mode}
         pending={pending}
         results={results}
+        onReAnswer={(cardId) => void reAnswer(cardId)}
         reviewed={reviewed}
         correct={correct}
         predictionsMade={predictionsMade}
@@ -332,8 +376,21 @@ export function RecallRunner({
 
           {!revealed && mode === "teachback" && (
             <div className="flex flex-col gap-3">
+              {previousAttempt && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                    Your last attempt -- {previousAttempt.score}/100
+                  </p>
+                  <div className="mt-2">
+                    <InlineTeachbackFeedback result={previousAttempt} />
+                  </div>
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+                    Say it again with that in mind.
+                  </p>
+                </div>
+              )}
               <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
-                Explain it in your own words
+                {previousAttempt ? "Explain it again" : "Explain it in your own words"}
               </p>
               <textarea
                 value={explanation}
@@ -432,6 +489,14 @@ export function RecallRunner({
                     Next card
                     <ArrowRight size={14} />
                   </button>
+                  <button
+                    data-testid="teachback-retry"
+                    onClick={answerAgain}
+                    className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                  >
+                    <RotateCcw size={14} />
+                    Answer again
+                  </button>
                   {!cardResult && (
                     <p className="text-xs text-muted-foreground">
                       Still scoring. Move on -- the verdict is waiting for you at the end of the
@@ -505,6 +570,7 @@ function Readout({
   mode,
   pending,
   results,
+  onReAnswer,
   reviewed,
   correct,
   predictionsMade,
@@ -517,6 +583,7 @@ function Readout({
   mode: StudyMode
   pending: PendingTeachback[]
   results: TeachbackResultItem[] | undefined
+  onReAnswer: (cardId: string) => void
   reviewed: number
   correct: number
   predictionsMade: number
@@ -581,7 +648,7 @@ function Readout({
         )}
 
         {mode === "teachback" && pending.length > 0 && (
-          <TeachbackAttempts pending={pending} results={results} />
+          <TeachbackAttempts pending={pending} results={results} onReAnswer={onReAnswer} />
         )}
 
         <button
@@ -612,9 +679,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 function TeachbackAttempts({
   pending,
   results,
+  onReAnswer,
 }: {
   pending: PendingTeachback[]
   results: TeachbackResultItem[] | undefined
+  onReAnswer: (cardId: string) => void
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   return (
@@ -642,13 +711,22 @@ function TeachbackAttempts({
           )
         }
         return (
-          <ExpandableResultRow
-            key={p.id}
-            result={result}
-            fallbackQuestion={p.question}
-            isExpanded={expandedId === p.id}
-            onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
-          />
+          <div key={p.id} className="flex flex-col gap-1.5">
+            <ExpandableResultRow
+              result={result}
+              fallbackQuestion={p.question}
+              isExpanded={expandedId === p.id}
+              onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+            />
+            <button
+              data-testid="readout-retry"
+              onClick={() => onReAnswer(p.flashcardId)}
+              className="flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
+            >
+              <RotateCcw size={11} />
+              Answer this one again
+            </button>
+          </div>
         )
       })}
     </div>

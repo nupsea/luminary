@@ -344,6 +344,7 @@ if (paraCount) {
       // it advances the schedule of every card it touches and no delete undoes
       // that -- deleting the session removes the events, not the card state.
       // LUMINARY_VERIFY_TEACHBACK=1 turns it on; that is how the arm was measured.
+      let explainSessionId = null
       if (process.env.LUMINARY_VERIFY_TEACHBACK === "1") {
         // Back to the deck first: the recall run above is still mounted, and
         // this block skipped in silence when it looked for a start button that
@@ -358,6 +359,10 @@ if (paraCount) {
         if (await startExplain.count()) {
           await startExplain.first().click()
           await page.waitForTimeout(2500)
+          explainSessionId = await page.evaluate(() => {
+            const raw = JSON.parse(localStorage.getItem("luminary-app-store") ?? "{}")
+            return raw.state?.studySessionId ?? null
+          })
           const ta = page.locator('[data-testid="recall-runner"] textarea')
           check("the explain arm asks for an explanation", (await ta.count()) === 1)
           if (await ta.count()) {
@@ -380,6 +385,43 @@ if (paraCount) {
             check("the run can move on while it is still scoring", mid.next === 1)
             check("the reveal shows what the learner said", mid.said)
             check("the reveal names the expected answer", mid.expected)
+
+            // Re-answering the same card. Deleting the session instead would
+            // take its rows and review events but leave the card's FSRS state
+            // already advanced, so the retry has to be in place.
+            // Wait for a verdict, but do not require one: evaluation is a local
+            // LLM call that sometimes comes back unscored, and a check that goes
+            // red on that is noise which would hide a real regression.
+            let scored = false
+            for (let k = 0; k < 25; k++) {
+              await page.waitForTimeout(3000)
+              const t = await page.evaluate(() =>
+                document.querySelector('[data-testid="recall-runner"]')?.innerText ?? "")
+              if (/\d+\/100/.test(t)) { scored = true; break }
+              if (/could not be scored/i.test(t)) break
+            }
+            const retry = page.locator('[data-testid="teachback-retry"]')
+            check("a scored card can be answered again", (await retry.count()) === 1)
+            if (await retry.count()) {
+              await retry.first().click()
+              await page.waitForTimeout(1200)
+              const again = await page.evaluate(() => {
+                const t = document.querySelector('[data-testid="recall-runner"]')
+                const ta = t?.querySelector("textarea")
+                return {
+                  box: t?.querySelectorAll("textarea").length ?? 0,
+                  empty: (ta?.value ?? "x") === "",
+                  keptVerdict: /your last attempt/i.test(t?.innerText ?? ""),
+                }
+              })
+              check("answering again clears the box", again.box === 1 && again.empty,
+                `${again.box} boxes, empty=${again.empty}`)
+              if (scored) {
+                check("the last verdict stays in view to improve on", again.keptVerdict)
+              } else {
+                console.log("  skip  the last verdict stays in view -- this attempt came back unscored")
+              }
+            }
           }
         }
       }
@@ -432,12 +474,18 @@ if (paraCount) {
 
       // Only the session this run opened: one that was already there is someone
       // else's, and the run adopting it is exactly the resume behaviour.
-      const removed = ranSessionId !== null && !sessionsBefore.includes(ranSessionId)
-        ? await page.evaluate(async ([api, sid]) =>
-            (await fetch(`${api}/study/sessions/${sid}`, { method: "DELETE" })).ok, [API, ranSessionId])
-        : false
-      console.log(removed
-        ? `  cleaned up the study session this check opened (${ranSessionId.slice(0, 8)})`
+      const mine = [ranSessionId, explainSessionId].filter(
+        (sid) => sid !== null && !sessionsBefore.includes(sid),
+      )
+      const removed = await page.evaluate(async ([api, ids]) => {
+        const gone = []
+        for (const sid of ids) {
+          if ((await fetch(`${api}/study/sessions/${sid}`, { method: "DELETE" })).ok) gone.push(sid)
+        }
+        return gone
+      }, [API, mine])
+      console.log(removed.length > 0
+        ? `  cleaned up ${removed.length} study session${removed.length === 1 ? "" : "s"} this check opened (${removed.map((x) => x.slice(0, 8)).join(", ")})`
         : "  opened no new study session -- it resumed one that was already there")
       await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
       await page.waitForTimeout(2500)

@@ -117,17 +117,20 @@ export function PracticePanel({
         cardLimit: READER_CARD_LIMIT,
         ...(sectionId ? { filters: { section_id: sectionId } } : {}),
       }
-      // Resuming reattaches by id, so it returns the run's own remaining cards
-      // whatever scope created it -- a section run resumes as a section run.
+      // Start starts; only the resume button resumes.
+      //
+      // prepareStudySession adopts any open session for the scope, so pressing
+      // "Explain it" on a deck with cards due landed the learner in the summary
+      // of a run they had finished days ago. That adoption is right for the
+      // Study page, which has no other way back into a run; here the deck names
+      // the open run and offers it explicitly, so these two intents are separate.
       const outcome = resumeSessionId
         ? await prepareStudySession({ ...scopeForBeginNew, resumeSessionId })
-        : ahead || sectionId
-          ? await prepareSectionStudyFromCards(
-              documentId,
-              (ahead ? (deck ?? []) : dueCards).slice(0, READER_CARD_LIMIT),
-              mode,
-            )
-          : await prepareStudySession(scopeForBeginNew)
+        : await prepareSectionStudyFromCards(
+            documentId,
+            (ahead ? (deck ?? []) : dueCards).slice(0, READER_CARD_LIMIT),
+            mode,
+          )
       if (outcome.kind === "empty") {
         setStartError("Nothing to run here yet. Generate a few cards first.")
         return
