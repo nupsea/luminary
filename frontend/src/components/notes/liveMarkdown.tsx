@@ -15,8 +15,10 @@ import { StateField, type EditorState, type Extension, type Range } from "@codem
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
+import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 
 import {
+  clickedSourceLine,
   hidesBlock,
   hidesMark,
   isImageOnlyParagraph,
@@ -29,14 +31,26 @@ import {
 const hiddenMark = Decoration.replace({})
 const hiddenBlock = Decoration.replace({ block: true })
 const quoteLine = Decoration.line({ class: "cm-md-quote" })
+const codeLine = Decoration.line({ class: "cm-md-code" })
+const fenceLine = Decoration.line({ class: "cm-md-fence" })
+
+/** The sidecar an excalidraw diagram is paired with; the renderer needs both. */
+const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
+
+export interface LiveMarkdownOptions {
+  /** Gives a rendered diagram the same edit button the preview has. */
+  onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+}
 
 class RenderedBlock extends WidgetType {
   private root: Root | null = null
   readonly source: string
+  private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 
-  constructor(source: string) {
+  constructor(source: string, onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void) {
     super()
     this.source = source
+    this.onEditDiagram = onEditDiagram
   }
 
   eq(other: RenderedBlock) {
@@ -47,18 +61,43 @@ class RenderedBlock extends WidgetType {
     const host = document.createElement("div")
     host.className = "cm-md-block"
     this.root = createRoot(host)
-    this.root.render(<MarkdownRenderer reading>{this.source}</MarkdownRenderer>)
+    const edit = this.onEditDiagram
+    this.root.render(
+      <MarkdownRenderer
+        reading
+        onEditExcalidrawDiagram={
+          edit &&
+          ((diagram) => {
+            // The renderer measured the diagram inside this block; the note it
+            // is written back to is the whole document.
+            const base = view.posAtDOM(host)
+            edit({ ...diagram, start: diagram.start + base, end: diagram.end + base })
+          })
+        }
+      >
+        {this.source}
+      </MarkdownRenderer>,
+    )
     // The renderer paints after this returns, and an image finishes later
     // still, so the height CodeMirror measured here is always the wrong one.
     const observer = new ResizeObserver(() => view.requestMeasure())
     observer.observe(host)
-    // Clicking a rendered block is how its source comes back. The editor maps
-    // a click inside a replaced block to nothing on its own, so the position
-    // is asked for and the selection put there.
+    // Clicking a rendered block is how its source comes back, and the caret has
+    // to land on the line that was clicked: at the block's start instead, the
+    // first keystroke goes in front of the block and destroys it.
     host.addEventListener("mousedown", (event) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest("button, a")) return
       event.preventDefault()
-      const pos = view.posAtDOM(host)
-      view.dispatch({ selection: { anchor: pos } })
+      const rows = [...host.querySelectorAll("tr")]
+      const row = target?.closest("tr")
+      const offset = clickedSourceLine(
+        row ? rows.indexOf(row as HTMLTableRowElement) : null,
+        this.source.split("\n").length,
+      )
+      const start = view.state.doc.lineAt(view.posAtDOM(host)).number
+      const line = view.state.doc.line(Math.min(start + offset, view.state.doc.lines))
+      view.dispatch({ selection: { anchor: line.to } })
       view.focus()
     })
     return host
@@ -82,7 +121,7 @@ function blockRange(state: EditorState, from: number, to: number): TextRange {
   return { from: state.doc.lineAt(from).from, to: state.doc.lineAt(to).to }
 }
 
-function decorate(state: EditorState): DecorationSet {
+function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationSet {
   const selection = state.selection.ranges
   const marks: Range<Decoration>[] = []
   const rendered: TextRange[] = []
@@ -94,7 +133,10 @@ function decorate(state: EditorState): DecorationSet {
     marks.push(
       Decoration.replace({
         block: true,
-        widget: new RenderedBlock(state.doc.sliceString(range.from, range.to)),
+        widget: new RenderedBlock(
+          state.doc.sliceString(range.from, range.to),
+          options.onEditDiagram,
+        ),
       }).range(range.from, range.to),
     )
   }
@@ -107,15 +149,33 @@ function decorate(state: EditorState): DecorationSet {
         renderBlock(node.from, node.to)
         return false
       }
+      if (node.name === "FencedCode") {
+        // Styled where it stands rather than replaced, so it can be typed in.
+        const last = state.doc.lineAt(node.to).number
+        for (let n = state.doc.lineAt(node.from).number; n <= last; n++) {
+          const line = state.doc.line(n)
+          marks.push(codeLine.range(line.from))
+          if (n === state.doc.lineAt(node.from).number || n === last) {
+            marks.push(fenceLine.range(line.from))
+          }
+        }
+        return false
+      }
       if (hidesBlock(node.name)) {
         const range = blockRange(state, node.from, node.to)
+        if (rendered.some((r) => range.from >= r.from && range.to <= r.to)) return false
         if (lineIsBeingEdited(selection, range.from, range.to)) return false
         rendered.push(range)
         marks.push(hiddenBlock.range(range.from, range.to))
         return false
       }
       if (node.name === "Paragraph" && isImageOnlyParagraph(state.doc.sliceString(node.from, node.to))) {
-        renderBlock(node.from, node.to)
+        // A diagram is the image plus the sidecar comment beneath it. Rendered
+        // apart, the renderer sees an image and offers no way to edit the scene.
+        const imageLine = state.doc.lineAt(node.to)
+        const next = imageLine.number < state.doc.lines ? state.doc.line(imageLine.number + 1) : null
+        const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : node.to
+        renderBlock(node.from, to)
         return false
       }
       if (node.name === "Blockquote") {
@@ -153,24 +213,32 @@ const liveTheme = EditorView.theme({
     color: "hsl(var(--muted-foreground))",
   },
   ".cm-md-block": { margin: "4px 0" },
+  ".cm-md-code": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.92em",
+    backgroundColor: "hsl(var(--muted) / 0.6)",
+  },
+  ".cm-md-fence": { color: "hsl(var(--muted-foreground))", opacity: "0.55" },
   ".cm-md-block img": { maxWidth: "100%", height: "auto" },
   ".cm-md-block table": { fontSize: "0.9em" },
 })
 
 // A state field, not a view plugin: CodeMirror refuses block decorations from
 // a plugin, and a rendered table is a block.
-const liveField = StateField.define<DecorationSet>({
-  create: (state) => decorate(state),
-  update(value, tr) {
-    if (!tr.docChanged && tr.state.selection.eq(tr.startState.selection)) return value
-    return decorate(tr.state)
-  },
-  provide: (field) => EditorView.decorations.from(field),
-})
+function liveField(options: LiveMarkdownOptions) {
+  return StateField.define<DecorationSet>({
+    create: (state) => decorate(state, options),
+    update(value, tr) {
+      if (!tr.docChanged && tr.state.selection.eq(tr.startState.selection)) return value
+      return decorate(tr.state, options)
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  })
+}
 
-export function liveMarkdown(): Extension {
+export function liveMarkdown(options: LiveMarkdownOptions = {}): Extension {
   return [
-    liveField,
+    liveField(options),
     // Inline, so it beats the base theme's monospace rule whatever order the
     // two style modules are mounted in. Prose is what is being written here.
     EditorView.contentAttributes.of({ style: "font-family: var(--font-sans)" }),

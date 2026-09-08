@@ -47,11 +47,26 @@ export function lineIsBeingEdited(
 
 /**
  * Blocks the editor draws with the app's own renderer rather than as source.
- * An HTML comment is not one of them: it carries the excalidraw sidecar and
- * renders to nothing, so it is hidden outright.
+ *
+ * Fenced code is deliberately not one of them. Code in a note is written and
+ * rewritten, and a rendered block can only be edited by swapping it back for
+ * its source, which puts the caret somewhere the writer did not click -- the
+ * first keystroke landed in front of the opening fence and destroyed the block.
+ * It is styled in place instead.
  */
 export function rendersAsBlock(name: string): boolean {
-  return name === "FencedCode" || name === "Table"
+  return name === "Table"
+}
+
+/**
+ * Which line of a block's source a click inside its rendering belongs to.
+ * A table's rows map to source lines one for one past the delimiter; anything
+ * else answers with its last line, where a keystroke can do no damage.
+ */
+export function clickedSourceLine(rowIndex: number | null, sourceLines: number): number {
+  if (rowIndex === null) return Math.max(0, sourceLines - 1)
+  if (rowIndex === 0) return 0
+  return Math.min(rowIndex + 1, Math.max(0, sourceLines - 1))
 }
 
 /**

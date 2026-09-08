@@ -11,6 +11,7 @@ import {
   offsetToLine,
   type SourceAnchor,
 } from "@/components/notes/scrollSync"
+import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { SOURCE_LINE_ATTR } from "@/lib/rehypeSourceLine"
 
 export type MarkdownSplitLayout = "splitter" | "tabs" | "editor"
@@ -24,6 +25,8 @@ export interface MarkdownSplitEditorProps {
   onPasteImage?: (file: File) => Promise<string>
   linkCompletion?: NoteLinkCompletionConfig
   slashCommands?: SlashCommandConfig
+  /** Live rendering only: the edit button on a drawn diagram. */
+  onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
   placeholder?: string
   autoFocus?: boolean
   editorLabel?: string
@@ -51,6 +54,7 @@ export function MarkdownSplitEditor({
   onPasteImage,
   linkCompletion,
   slashCommands,
+  onEditDiagram,
   placeholder = "Write your note in Markdown...",
   autoFocus,
   editorLabel = "Editor",
@@ -233,6 +237,7 @@ export function MarkdownSplitEditor({
         // The editor-only layout has no preview pane to read the markdown in,
         // so the editor is the rendering.
         live={layout === "editor"}
+        onEditDiagram={onEditDiagram}
         className={editorClassName ?? DEFAULT_EDITOR_CLASS}
       />
     </div>

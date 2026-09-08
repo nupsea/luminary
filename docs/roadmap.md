@@ -210,6 +210,19 @@ back; the HTML comment carrying an excalidraw sidecar is hidden outright, becaus
 nothing. `layout="editor"` is the only layout with no preview pane and is what turns this on — the
 full note page keeps its preview and its raw markdown.
 
+**A rendered block is edited where it was clicked.** Swapping a block back for its source puts the
+caret somewhere, and at the block's start the first keystroke lands in front of the opening fence and
+destroys the block — measured: typing in a rendered code block produced ```` X```python ```` and the
+code, the table and the math below it all fell back to source. Fenced code is therefore not rendered
+at all; it is styled where it stands, so it is always editable. What is still rendered answers a
+click with the line that was clicked — a table's rows map to its source rows past the delimiter, and
+anything else answers with its last line, where a keystroke can do no damage.
+
+A drawn diagram carries the edit button the preview has, wired to the same `NoteDiagramDialog`. The
+diagram is the image *and* the sidecar comment beneath it: rendered apart, the renderer sees an image
+and offers no way into the scene, so the block is extended over both. The offsets it hands back are
+relative to the block and are moved to the document before the note is rewritten.
+
 Three things the grammar will not tell you. Block decorations may not come from a `ViewPlugin`
 (CodeMirror throws), so the decorations are a `StateField`. `$$` blocks are found by scanning the
 text, because the CodeMirror markdown grammar has no math extension. An HTML comment is `HTMLBlock`,

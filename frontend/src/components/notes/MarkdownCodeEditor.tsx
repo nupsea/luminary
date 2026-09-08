@@ -30,6 +30,7 @@ import {
   type NoteLinkCompletionConfig,
 } from "./noteLinkCompletion"
 import { liveMarkdown } from "./liveMarkdown"
+import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 
 export interface MarkdownEditorHandle {
@@ -81,6 +82,8 @@ export interface MarkdownCodeEditorProps {
    * Read once, when the view is built.
    */
   live?: boolean
+  /** Live rendering only: the edit button on a drawn diagram. */
+  onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 }
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
@@ -170,13 +173,13 @@ const mdHighlight = HighlightStyle.define([
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live, onEditDiagram },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
-    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands })
-    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands }
+    const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram })
+    latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram }
 
     useEffect(() => {
       const view = new EditorView({
@@ -190,7 +193,9 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             syntaxHighlighting(mdHighlight),
             editorTheme,
-            ...(live ? [liveMarkdown()] : []),
+            ...(live
+              ? [liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) })]
+              : []),
             cmPlaceholder(placeholder ?? ""),
             autocompletion({
               override: [

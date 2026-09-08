@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  clickedSourceLine,
   hidesBlock,
   hidesMark,
   isImageOnlyParagraph,
@@ -63,8 +64,10 @@ describe("lineIsBeingEdited", () => {
 
 describe("rendersAsBlock", () => {
   it("names the blocks the renderer draws", () => {
-    expect(rendersAsBlock("FencedCode")).toBe(true)
     expect(rendersAsBlock("Table")).toBe(true)
+    // Code is styled in place: a rendered block cannot be typed into where it
+    // was clicked, and the caret landed in front of the fence.
+    expect(rendersAsBlock("FencedCode")).toBe(false)
     expect(rendersAsBlock("Paragraph")).toBe(false)
     expect(rendersAsBlock("HTMLBlock")).toBe(false)
   })
@@ -113,5 +116,29 @@ describe("hidesBlock", () => {
   it("hides nothing else", () => {
     expect(hidesBlock("Paragraph")).toBe(false)
     expect(hidesBlock("Table")).toBe(false)
+  })
+})
+
+describe("clickedSourceLine", () => {
+  // | C1 | C2 |      <- row 0, source line 0
+  // | -- | -- |      <-        source line 1
+  // | 23 | 34 |      <- row 1, source line 2
+  const tableLines = 3
+
+  it("maps a header click to the header line", () => {
+    expect(clickedSourceLine(0, tableLines)).toBe(0)
+  })
+
+  it("maps a body row past the delimiter line", () => {
+    expect(clickedSourceLine(1, tableLines)).toBe(2)
+  })
+
+  it("never runs past the block", () => {
+    expect(clickedSourceLine(9, tableLines)).toBe(2)
+  })
+
+  it("answers with the last line when the click was not on a row", () => {
+    expect(clickedSourceLine(null, 3)).toBe(2)
+    expect(clickedSourceLine(null, 1)).toBe(0)
   })
 })
