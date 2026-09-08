@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  caretInTableRow,
   clickedSourceLine,
+  firstEditableLine,
   hidesBlock,
   isDelimitedBlock,
   hidesMark,
@@ -67,6 +69,7 @@ describe("rendersAsBlock", () => {
   it("names the blocks the renderer draws", () => {
     expect(rendersAsBlock("Table")).toBe(true)
     expect(rendersAsBlock("FencedCode")).toBe(true)
+    expect(rendersAsBlock("HorizontalRule")).toBe(true)
     expect(rendersAsBlock("Paragraph")).toBe(false)
     expect(rendersAsBlock("HTMLBlock")).toBe(false)
   })
@@ -161,5 +164,37 @@ describe("isDelimitedBlock", () => {
     expect(isDelimitedBlock("MathBlock")).toBe(true)
     expect(isDelimitedBlock("Table")).toBe(false)
     expect(isDelimitedBlock("Paragraph")).toBe(false)
+  })
+})
+
+describe("caretInTableRow", () => {
+  const row = "| a | b |"
+
+  it("lands after the text of the clicked cell", () => {
+    expect(caretInTableRow(row, 0)).toBe(3)
+    expect(row.slice(0, 3)).toBe("| a")
+    expect(caretInTableRow(row, 1)).toBe(7)
+    expect(row.slice(0, 7)).toBe("| a | b")
+  })
+
+  it("lands inside an empty cell rather than past its pipe", () => {
+    expect(caretInTableRow("|  |  |", 0)).toBe(2)
+    expect(caretInTableRow("|  |  |", 1)).toBe(5)
+  })
+
+  it("falls back to the row's end for a cell that is not there", () => {
+    expect(caretInTableRow(row, 9)).toBe(row.length)
+  })
+
+  it("handles a row written without padding", () => {
+    expect(caretInTableRow("|a|b|", 0)).toBe(2)
+    expect("|a|b|".slice(0, 2)).toBe("|a")
+  })
+})
+
+describe("firstEditableLine", () => {
+  it("skips the opening fence of a delimited block", () => {
+    expect(firstEditableLine(true)).toBe(1)
+    expect(firstEditableLine(false)).toBe(0)
   })
 })

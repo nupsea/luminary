@@ -12,13 +12,15 @@
 import { createRoot, type Root } from "react-dom/client"
 import { syntaxTree } from "@codemirror/language"
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
-import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view"
+import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from "@codemirror/view"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
 
 import {
+  caretInTableRow,
   clickedSourceLine,
+  firstEditableLine,
   hidesBlock,
   hidesMark,
   isDelimitedBlock,
@@ -139,12 +141,22 @@ class RenderedBlock extends WidgetType {
     }
     const rows = [...host.querySelectorAll("tr")]
     const row = target?.closest("tr")
-    const line = clickedSourceLine(
-      row ? rows.indexOf(row as HTMLTableRowElement) : null,
-      this.source.split("\n").length,
-      this.delimited,
+    const rowIndex = row ? rows.indexOf(row as HTMLTableRowElement) : null
+    const line = view.state.doc.line(
+      Math.min(
+        firstLine.number +
+          clickedSourceLine(rowIndex, this.source.split("\n").length, this.delimited),
+        view.state.doc.lines,
+      ),
     )
-    return view.state.doc.line(Math.min(firstLine.number + line, view.state.doc.lines)).to
+    // Inside a table, the column matters as much as the row: the end of the
+    // line is past the last pipe, which is not any cell.
+    const cell = target?.closest("td, th")
+    if (row && cell) {
+      const index = [...row.children].indexOf(cell)
+      if (index >= 0) return line.from + caretInTableRow(line.text, index)
+    }
+    return line.to
   }
 }
 
@@ -273,6 +285,37 @@ const liveTheme = EditorView.theme({
 
 // A state field, not a view plugin: CodeMirror refuses block decorations from
 // a plugin, and a rendered table is a block.
+/**
+ * A replaced block is one position to CodeMirror, so vertical motion jumps the
+ * whole thing -- a table could only be entered with the mouse. Down and up put
+ * the caret on the block's first or last line of content instead, which is what
+ * reveals it.
+ */
+function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+  const { doc } = view.state
+  const head = view.state.selection.main.head
+  const line = doc.lineAt(head)
+  const target = line.number + dir
+  if (target < 1 || target > doc.lines) return false
+  const edge = doc.line(target)
+  let anchor: number | null = null
+  // Coming down, the line below is the block's first; coming up, it is the
+  // block's last. Either way the decoration covers that point.
+  view.state.field(field).between(edge.from, edge.from, (from, _to, deco) => {
+    const widget = deco.spec.widget
+    if (!(widget instanceof RenderedBlock)) return
+    const lines = widget.source.split("\n").length
+    const offset =
+      dir === 1
+        ? firstEditableLine(widget.delimited)
+        : clickedSourceLine(null, lines, widget.delimited)
+    anchor = doc.line(Math.min(doc.lineAt(from).number + offset, doc.lines)).to
+  })
+  if (anchor === null) return false
+  view.dispatch({ selection: { anchor }, scrollIntoView: true })
+  return true
+}
+
 function liveField(options: LiveMarkdownOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => decorate(state, options),
@@ -285,8 +328,13 @@ function liveField(options: LiveMarkdownOptions) {
 }
 
 export function liveMarkdown(options: LiveMarkdownOptions = {}): Extension {
+  const field = liveField(options)
   return [
-    liveField(options),
+    field,
+    keymap.of([
+      { key: "ArrowDown", run: (view) => stepInto(view, field, 1) },
+      { key: "ArrowUp", run: (view) => stepInto(view, field, -1) },
+    ]),
     // Inline, so it beats the base theme's monospace rule whatever order the
     // two style modules are mounted in. Prose is what is being written here.
     EditorView.contentAttributes.of({ style: "font-family: var(--font-sans)" }),

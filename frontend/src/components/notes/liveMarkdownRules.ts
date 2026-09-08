@@ -47,7 +47,7 @@ export function lineIsBeingEdited(
 
 /** Blocks the editor draws with the app's own renderer rather than as source. */
 export function rendersAsBlock(name: string): boolean {
-  return name === "FencedCode" || name === "Table"
+  return name === "FencedCode" || name === "Table" || name === "HorizontalRule"
 }
 
 /**
@@ -114,4 +114,25 @@ export function mathBlockRanges(text: string): TextRange[] {
     offset += line.length + 1
   }
   return found
+}
+
+/**
+ * Where the caret goes inside a table row when a cell is clicked: the end of
+ * that cell's text, or just inside an empty one. The row's own end is not an
+ * answer -- typing there appends past the last pipe instead of into the column
+ * the writer aimed at.
+ */
+export function caretInTableRow(row: string, cellIndex: number): number {
+  const parts = row.split("|")
+  const target = cellIndex + 1
+  if (target >= parts.length) return row.length
+  const before = parts.slice(0, target).join("|").length + 1
+  const cell = parts[target]
+  if (cell.trim() === "") return before + (cell.length > 0 ? 1 : 0)
+  return before + cell.trimEnd().length
+}
+
+/** The first line of a block a caret may rest on, arriving from above. */
+export function firstEditableLine(delimited: boolean): number {
+  return delimited ? 1 : 0
 }

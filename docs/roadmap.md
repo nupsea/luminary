@@ -217,10 +217,16 @@ and the code, the table and the math below it all fell back to source at once. A
 line it landed on the closing fence, which is what threw the note around while editing an equation.
 
 A click now answers with the character under it: code maps the pointer through the rendering, whose
-text is the source's, to an offset in the block's body. A table's rows map to its source rows past
-the delimiter. A block whose first and last lines are fences — ``` and `$$` — never hands back a
-caret on either of them. Being edited, a code block keeps its own dress, so revealing the source is
-not a change of mode.
+text is the source's, to an offset in the block's body. A table answers with the clicked cell, not
+the clicked row — the row's end is past the last pipe, which is no column at all, and typing there
+was what looked like focus jumping away. A block whose first and last lines are fences — ``` and
+`$$` — never hands back a caret on either of them. Being edited, a code block keeps its own dress,
+so revealing the source is not a change of mode.
+
+**A rendered block is one position to CodeMirror**, so vertical motion jumps the whole thing and a
+table could only be entered with the mouse. Down and up put the caret on the block's first or last
+line of content instead, which is what reveals it. Coming down the line below is the block's first,
+coming up it is the block's last: a test for a decoration *starting* there finds only one of the two.
 
 The preview pane on the full note page is a toggle, and live rendering follows it: hide the pane and
 the same rendering appears there. It is reconfigured on a built view rather than read once at mount,
