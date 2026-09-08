@@ -201,6 +201,15 @@ this document's notes, and the header's note count opens that list rather than l
 Collapsing the panel now hides it rather than unmounting it: a layout change may not cost a streaming
 answer or an unsaved draft.
 
+**A note opened from a document is edited beside it.** The panel's list opens a note in the docked
+composer — the full note page is where *expanding* one goes, not where opening one goes. Editing an
+existing note there binds the autosave to that note; a note that already existed is never discarded
+for being emptied, which is only ever a new draft's fate.
+
+Expanding carries the way back: the note page's `from` names `/library?doc=…&note=…` rather than a
+history step, so Back returns to the reader with the note open in its panel again. A `from` with a
+query is a place, not a step — `goBack()` alone lands on the bare document.
+
 **A composer with no preview renders as it writes.** The panel is a third of the width, so nothing
 can sit beside the editor. `liveMarkdown` hides each inline marker on every line but the one the
 cursor is on, and draws blocks — fenced code, tables, an image on its own, `$$` math — with

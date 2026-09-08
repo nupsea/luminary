@@ -9,8 +9,10 @@ const BACK_LABELS: Record<string, string> = {
 }
 
 function resolveLabel(from: string): string {
-  if (from.startsWith("/collections/")) return "Back to Collection"
-  return BACK_LABELS[from] ?? "Back"
+  // A `from` may carry the query that reproduces where it came from.
+  const path = from.split("?")[0]
+  if (path.startsWith("/collections/")) return "Back to Collection"
+  return BACK_LABELS[path] ?? "Back"
 }
 
 interface BackNavigation {

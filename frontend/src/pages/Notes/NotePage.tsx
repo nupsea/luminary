@@ -100,7 +100,7 @@ export default function NotePage() {
   // for the real id once it exists.
   const isNew = noteId === NEW_NOTE_ROUTE_ID
   const navigate = useNavigate()
-  const { canGoBack, backLabel, goBack } = useBackNavigation()
+  const { canGoBack, backLabel, goBack, fromPath } = useBackNavigation()
   const qc = useQueryClient()
 
   const [readingView, setReadingView] = useState(false)
@@ -364,7 +364,13 @@ export default function NotePage() {
       <div className="shrink-0 border-b border-border px-6 pt-4 pb-3">
         <div className="mb-2 flex items-center gap-2">
           <button
-            onClick={() => (canGoBack ? goBack() : navigate("/notes"))}
+            onClick={() => {
+              // A `from` carrying a query names a place, not a history step:
+              // the reader that expanded this note wants it back in its panel.
+              if (fromPath?.includes("?")) navigate(fromPath)
+              else if (canGoBack) goBack()
+              else navigate("/notes")
+            }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft size={12} />

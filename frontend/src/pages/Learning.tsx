@@ -109,6 +109,11 @@ export default function Learning() {
   const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
     searchParams.get("chunk_id") ?? undefined,
   )
+  // A note to open in the reader's own panel -- how the full note page hands a
+  // note back to the editor it was expanded from.
+  const [savedNoteId, setSavedNoteId] = useState<string | undefined>(
+    searchParams.get("note") ?? undefined,
+  )
   // Not a URL param: a display hint for one arrival, not something a shared link
   // should reproduce.
   const [savedCitationWords, setSavedCitationWords] = useState<string[]>([])
@@ -335,6 +340,7 @@ export default function Learning() {
     const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
     setSavedSectionId(searchParams.get("section_id") ?? undefined)
     setSavedChunkId(searchParams.get("chunk_id") ?? undefined)
+    setSavedNoteId(searchParams.get("note") ?? undefined)
     setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
     setSavedSearch(searchParams.get("search") ?? undefined)
     // Carried in route state rather than the URL: it is a display hint for one
@@ -348,6 +354,7 @@ export default function Learning() {
       const next = new URLSearchParams(prev)
       next.delete("section_id")
       next.delete("chunk_id")
+      next.delete("note")
       next.delete("page")
       next.delete("search")
       return next
@@ -432,6 +439,7 @@ export default function Learning() {
             onBack={returnToLibrary}
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
+            initialNoteId={savedNoteId}
             initialCitationWords={savedCitationWords}
             initialPage={savedPage}
             initialSearch={savedSearch}

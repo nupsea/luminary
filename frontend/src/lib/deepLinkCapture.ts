@@ -17,7 +17,7 @@
 // to go".
 
 /** Params that name a place in the document rather than the document itself. */
-export const DEEP_LINK_PARAMS = ["section_id", "chunk_id", "page", "search"] as const
+export const DEEP_LINK_PARAMS = ["section_id", "chunk_id", "page", "search", "note"] as const
 
 export interface ParamReader {
   has(name: string): boolean

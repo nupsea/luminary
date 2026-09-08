@@ -137,6 +137,8 @@ interface DocumentReaderProps {
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
+  /** A note to open in the panel, handed back by the full note page. */
+  initialNoteId?: string
   /** The cited passage as words, marked in whichever view renders this document. */
   initialCitationWords?: string[]
   initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
@@ -153,7 +155,7 @@ export function DocumentReader(props: DocumentReaderProps) {
 
 const EMPTY_WORDS: string[] = []
 
-function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialCitationWords = EMPTY_WORDS, initialPage, initialSearch }: DocumentReaderProps) {
+function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialNoteId, initialCitationWords = EMPTY_WORDS, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
   // Reading time exists nowhere else: opening a document and reading it for
@@ -218,6 +220,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
   const [docNoteOpen, setDocNoteOpen] = useState(false) // note on the document, no section
+  const [openNoteId, setOpenNoteId] = useState<string | null>(initialNoteId ?? null)
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -331,7 +334,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Insights is what the panel has always held; Ask is this document's own
   // conversation and Notes its composer, both mounted beside the text instead
   // of on another tab or over the passage they are about.
-  const [insightsTab, setInsightsTab] = useState<PanelTab>("insights")
+  // Arriving with a note is arriving at the note: the panel opens on it.
+  const [insightsTab, setInsightsTab] = useState<PanelTab>(initialNoteId ? "note" : "insights")
   const tabBeforeNote = useRef<PanelTab>("insights")
   const openAsk = useCallback(() => {
     setInsightsRestored(true)
@@ -354,14 +358,17 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // note button, or a blank note on the document. The selection comes first --
   // it is the only one of the three that carries text, and a capture that
   // arrives while the composer is open appends rather than being dropped.
-  const noteCaptureOpen = selection.noteOpen || openNoteEditor !== null || docNoteOpen
+  const noteCaptureOpen =
+    selection.noteOpen || openNoteEditor !== null || docNoteOpen || openNoteId !== null
   const noteCaptureKey = selection.noteOpen
     ? `sel-${selection.noteCaptureId}`
     : openNoteEditor
       ? `sec-${openNoteEditor}`
       : docNoteOpen
         ? "doc"
-        : null
+        : openNoteId
+          ? `note-${openNoteId}`
+          : null
   const { noteOpen, noteText, noteHeading, noteSourceRef, closeNote } = selection
   const noteCaptureContent = useMemo(() => {
     if (!noteOpen) return ""
@@ -373,8 +380,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     closeNote()
     setOpenNoteEditor(null)
     setDocNoteOpen(false)
+    setOpenNoteId(null)
     setInsightsTab(tabBeforeNote.current)
-  }, [closeNote, setOpenNoteEditor, setDocNoteOpen, setInsightsTab])
+  }, [closeNote, setOpenNoteEditor, setDocNoteOpen, setOpenNoteId, setInsightsTab])
 
   const {
     sectionTree,
@@ -1645,6 +1653,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 variant="docked"
                 open
                 captureKey={noteCaptureKey}
+                noteId={openNoteId}
                 onClose={closeNoteCapture}
                 onSaved={() => {
                   void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
@@ -1693,24 +1702,29 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 ) : (
                   <ul data-testid="docked-notes-list" className="space-y-2">
                     {docNotes?.map((n) => (
-                      <li key={n.id}>
+                      <li key={n.id} className="rounded-md border border-border transition-colors hover:border-muted-foreground/30">
                         <button
                           type="button"
+                          // A note opened from a document is edited beside it.
                           onClick={() => {
-                            if (n.section_id) goToSection(n.section_id)
-                            else navigate(`/notes/${n.id}`, { state: { from: window.location.pathname } })
+                            tabBeforeNote.current = "note"
+                            setOpenNoteId(n.id)
                           }}
-                          className="w-full rounded-md border border-border px-3 py-2 text-left transition-colors hover:border-muted-foreground/30 hover:bg-muted/50"
+                          className="w-full rounded-t-md px-3 py-2 text-left hover:bg-muted/50"
                         >
                           <p className="truncate text-xs text-foreground">
                             {n.title?.trim() || stripMarkdown(n.content).slice(0, 90) || "Untitled note"}
                           </p>
-                          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                            {n.section_id
-                              ? sectionMap.get(n.section_id)?.heading ?? "In this document"
-                              : "Open in the notes page"}
-                          </p>
                         </button>
+                        {n.section_id && (
+                          <button
+                            type="button"
+                            onClick={() => goToSection(n.section_id!)}
+                            className="w-full truncate rounded-b-md border-t border-border/60 px-3 py-1 text-left text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          >
+                            Go to {sectionMap.get(n.section_id)?.heading ?? "the passage"}
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

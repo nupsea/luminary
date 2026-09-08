@@ -28,6 +28,7 @@ import {
   EMPTY_DRAFT,
   NEW_NOTE_KEY,
   useNoteAutosave,
+  type NoteDraft,
 } from "@/lib/noteAutosave"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import {
@@ -64,6 +65,11 @@ export interface NoteComposerProps {
   sectionId?: string | null
   /** The chunk the note was taken from, where the view had one. */
   chunkId?: string | null
+  /**
+   * Open an existing note for editing rather than starting a new one. The note
+   * a reader opens in the panel is edited there, not on another page.
+   */
+  noteId?: string | null
   variant?: "sheet" | "docked"
   /**
    * Identifies the capture `initialContent` carries. A docked composer outlives
@@ -83,6 +89,7 @@ export function NoteComposer({
   documentId,
   sectionId,
   chunkId,
+  noteId,
   variant = "sheet",
   captureKey,
 }: NoteComposerProps) {
@@ -96,6 +103,11 @@ export function NoteComposer({
   const [notesLoading, setNotesLoading] = useState(false)
   const closingRef = useRef(false)
   const appliedCaptureRef = useRef<string | null>(null)
+  const [loaded, setLoaded] = useState<{ id: string; draft: NoteDraft } | null>(null)
+  const editing = Boolean(noteId)
+  // Derived, not reset: a stale load belongs to a note that is no longer open.
+  const openNote = noteId && loaded?.id === noteId ? loaded : null
+  const ready = !noteId || openNote !== null
   const qc = useQueryClient()
   const navigate = useNavigate()
 
@@ -110,6 +122,32 @@ export function NoteComposer({
     appliedCaptureRef.current = captureKey ?? null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  useEffect(() => {
+    if (!open || !noteId) return
+    let cancelled = false
+    void apiGet<Note>(`/notes/${noteId}`)
+      .then((note) => {
+        if (cancelled) return
+        const draft: NoteDraft = {
+          content: note.content ?? "",
+          title: note.title ?? "",
+          tags: note.tags ?? [],
+          sourceDocIds: note.source_document_ids ?? [],
+        }
+        setEditContent(draft.content)
+        setEditTitle(draft.title)
+        // The baseline is what was loaded, so opening a note is not an edit of
+        // it: bound to EMPTY_DRAFT the autosaver would patch on arrival.
+        setLoaded({ id: noteId, draft })
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Could not open that note")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, noteId])
 
   useEffect(() => {
     if (!open || !captureKey) return
@@ -129,8 +167,8 @@ export function NoteComposer({
   }
 
   const { status: saveStatus, flush, savedNoteId } = useNoteAutosave({
-    bindKey: open ? (appendTarget ? null : NEW_NOTE_KEY) : null,
-    baseline: EMPTY_DRAFT,
+    bindKey: open && ready ? (appendTarget ? null : (noteId ?? NEW_NOTE_KEY)) : null,
+    baseline: openNote?.draft ?? EMPTY_DRAFT,
     draft: {
       content: editContent,
       title: editTitle,
@@ -179,7 +217,9 @@ export function NoteComposer({
       return "stay"
     }
     const id = savedNoteId() ?? draftId
-    if (id && !editContent.trim()) {
+    // Only a draft this composer created is discarded when it is left empty.
+    // Emptying a note that already existed is an edit, never a deletion.
+    if (!editing && id && !editContent.trim()) {
       try {
         await deleteNote(id)
         toast.info("Empty note discarded")
@@ -218,7 +258,13 @@ export function NoteComposer({
     }
     onSaved(result)
     onClose()
-    navigate(`/notes/${result.id}`, { state: { from: window.location.pathname } })
+    // Where Back returns to. From a docked composer that is this document's
+    // reader with the note open in its panel again, not the bare library.
+    const from =
+      variant === "docked" && documentId
+        ? `${window.location.pathname}?doc=${documentId}&note=${result.id}`
+        : `${window.location.pathname}${window.location.search}`
+    navigate(`/notes/${result.id}`, { state: { from } })
   }
 
   useNoteSaveShortcut(() => {
