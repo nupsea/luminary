@@ -206,12 +206,21 @@ if (!recording) {
           composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
           onNotes: [...document.querySelectorAll("button[aria-pressed]")]
             .some((b) => b.textContent === "Notes" && b.getAttribute("aria-pressed") === "true"),
-          quoted: (document.querySelector(".cm-content")?.innerText.match(/^>/gm) ?? []).length,
+          raw: document.querySelector(".cm-content")?.innerText ?? "",
+          // What the draft holds, measured independently of how it is drawn.
+          lines: document.querySelectorAll(".cm-line").length,
+          // The composer renders as it writes: the quote's markers are gone
+          // from the DOM, and its lines carry the rendered class instead.
+          quoted: document.querySelectorAll(".cm-md-quote").length,
         }))
         check("taking a note opens no dialog", capture.dialogs === 0, `${capture.dialogs} dialogs`)
         check("the composer is docked in the panel", capture.composers === 1, `${capture.composers} composers`)
         check("the dock opens on the note", capture.onNotes)
-        check("the composer holds the captured passage", capture.quoted >= 3, `${capture.quoted} quoted lines`)
+        check("the composer holds the captured passage", capture.lines >= 3, `${capture.lines} lines`)
+        // The quoted line renders as a quote and shows no marker. The line the
+        // cursor is on keeps its source, so this reads the passage's own line.
+        check("the composer renders the markdown it holds",
+          capture.quoted >= 3 && !capture.raw.includes('> "'), `${capture.quoted} quote lines`)
 
         // A docked composer outlives the capture that opened it, so the next
         // one has to land in the draft rather than be dropped on the floor.
@@ -236,10 +245,10 @@ if (!recording) {
               await page.waitForTimeout(1500)
               const appended = await page.evaluate(() => ({
                 composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
-                quoted: (document.querySelector(".cm-content")?.innerText.match(/^>/gm) ?? []).length,
+                lines: document.querySelectorAll(".cm-line").length,
               }))
-              check("a second capture appends to the open note", appended.quoted > capture.quoted,
-                `${capture.quoted} -> ${appended.quoted} quoted lines`)
+              check("a second capture appends to the open note", appended.lines > capture.lines,
+                `${capture.lines} -> ${appended.lines} lines`)
               check("a second capture opens no second composer", appended.composers === 1,
                 `${appended.composers} composers`)
             }

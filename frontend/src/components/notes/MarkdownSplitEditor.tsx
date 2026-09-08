@@ -230,6 +230,9 @@ export function MarkdownSplitEditor({
         slashCommands={slashCommands}
         placeholder={placeholder}
         autoFocus={autoFocus}
+        // The editor-only layout has no preview pane to read the markdown in,
+        // so the editor is the rendering.
+        live={layout === "editor"}
         className={editorClassName ?? DEFAULT_EDITOR_CLASS}
       />
     </div>

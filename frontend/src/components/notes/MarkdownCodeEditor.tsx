@@ -29,6 +29,7 @@ import {
   noteLinkCompletionSource,
   type NoteLinkCompletionConfig,
 } from "./noteLinkCompletion"
+import { liveMarkdown } from "./liveMarkdown"
 import { slashCommandSource, type SlashCommandConfig } from "./slashCommands"
 
 export interface MarkdownEditorHandle {
@@ -75,6 +76,11 @@ export interface MarkdownCodeEditorProps {
   linkCompletion?: NoteLinkCompletionConfig
   /** Enables the / block-insert menu at line start. */
   slashCommands?: SlashCommandConfig
+  /**
+   * Render markdown as it is written, for a surface with no preview beside it.
+   * Read once, when the view is built.
+   */
+  live?: boolean
 }
 
 // Colors come from the shadcn CSS variables so dark mode flips for free.
@@ -164,7 +170,7 @@ const mdHighlight = HighlightStyle.define([
 
 export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeEditorProps>(
   function MarkdownCodeEditor(
-    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands },
+    { value, onChange, placeholder, autoFocus, className, onScroll, onPasteImage, linkCompletion, slashCommands, live },
     ref,
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
@@ -184,6 +190,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             syntaxHighlighting(mdHighlight),
             editorTheme,
+            ...(live ? [liveMarkdown()] : []),
             cmPlaceholder(placeholder ?? ""),
             autocompletion({
               override: [

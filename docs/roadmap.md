@@ -201,6 +201,24 @@ this document's notes, and the header's note count opens that list rather than l
 Collapsing the panel now hides it rather than unmounting it: a layout change may not cost a streaming
 answer or an unsaved draft.
 
+**A composer with no preview renders as it writes.** The panel is a third of the width, so nothing
+can sit beside the editor. `liveMarkdown` hides each inline marker on every line but the one the
+cursor is on, and draws blocks — fenced code, tables, an image on its own, `$$` math — with
+`MarkdownRenderer`, the component the preview uses, so the editor and the preview cannot disagree
+about what a note looks like. Clicking a rendered block puts the cursor in it and hands the source
+back; the HTML comment carrying an excalidraw sidecar is hidden outright, because it renders to
+nothing. `layout="editor"` is the only layout with no preview pane and is what turns this on — the
+full note page keeps its preview and its raw markdown.
+
+Three things the grammar will not tell you. Block decorations may not come from a `ViewPlugin`
+(CodeMirror throws), so the decorations are a `StateField`. `$$` blocks are found by scanning the
+text, because the CodeMirror markdown grammar has no math extension. An HTML comment is `HTMLBlock`,
+`CommentBlock` or `Comment` depending on whether it interrupts a paragraph, and hiding only the first
+left the excalidraw sidecar on screen beside every diagram.
+
+`make verify-dock` counts rendered quote lines for the rendering and the draft's own line count for
+everything else, so taking the rendering away turns one check red rather than three.
+
 **Still modal, still to dock:** `FeynmanDialog`, `DocumentFlashcardDialog` (selection → flashcard, and
 the header's Generate questions) and `ExplanationSheet` (selection → explain). The panel carries three
 faces (Insights, Ask AI, Notes) of the seven the rung names, and the nav cut to five rail items is
