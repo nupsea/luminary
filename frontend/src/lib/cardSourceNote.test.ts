@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest"
 
-import { sourceNote } from "./cardSourceNote"
+import { answerCheckNote, sourceNote } from "./cardSourceNote"
 
 describe("sourceNote", () => {
   it("says nothing reassuring about a card nobody checked", () => {
@@ -39,5 +39,25 @@ describe("sourceNote", () => {
   it("does not treat an unverifiable answer as a failed one", () => {
     const note = sourceNote({ grounding: "verified", factuality: "unverifiable" })
     expect(note.text).not.toMatch(/does not follow/i)
+  })
+})
+
+describe("answerCheckNote", () => {
+  it("says the answer is unchecked on the card sourceNote stays quiet about", () => {
+    // grounding verified + factuality unchecked is the common shipped state, and
+    // "Found in this document" beside it reads as an endorsement of the answer.
+    const card = { grounding: "verified", factuality: "unchecked" }
+    expect(sourceNote(card).text).not.toMatch(/answer/i)
+    expect(answerCheckNote(card)?.text).toMatch(/has not been checked/i)
+  })
+
+  it("says nothing where sourceNote already speaks for the answer", () => {
+    expect(answerCheckNote({ grounding: "verified", factuality: "supported" })).toBeNull()
+    expect(answerCheckNote({ grounding: "verified", factuality: "unsupported" })).toBeNull()
+  })
+
+  it("separates could-not-check from was-not-checked", () => {
+    expect(answerCheckNote({ factuality: "unverifiable" })?.text).toMatch(/could not be checked/i)
+    expect(answerCheckNote({})?.text).toMatch(/has not been checked/i)
   })
 })

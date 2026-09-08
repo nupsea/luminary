@@ -13,12 +13,14 @@
  */
 
 import { useState } from "react"
-import { Check, ChevronsUp, Loader2, Minus, RotateCcw, Send, Text, X } from "lucide-react"
+import { ArrowRight, Check, ChevronsUp, Loader2, Minus, RotateCcw, Send, Text, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
+import { ExpandableResultRow } from "@/components/Teachback/ExpandableResultRow"
 import { InlineTeachbackFeedback } from "@/components/Teachback/InlineTeachbackFeedback"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useTeachbackPolling } from "@/components/Teachback/useTeachbackPolling"
+import { answerCheckNote, sourceNote } from "@/lib/cardSourceNote"
 import { type UseStudySessionInput, useStudySession } from "@/hooks/useStudySession"
 import {
   CALIBRATION_TEXT_CLASS,
@@ -83,7 +85,18 @@ export function RecallRunner({
     setReviewed,
     completeSession,
     exit,
-  } = useStudySession({ initial, scopeForBeginNew })
+  } = useStudySession({
+    initial,
+    scopeForBeginNew,
+    // A resumed run arrives with the explanations it already collected, so the
+    // summary at the end is the whole run and not just what came after the
+    // interruption.
+    onResumeLoaded: (prev) => {
+      setPending(
+        prev.map((r) => ({ id: r.id, flashcardId: r.flashcard_id, question: r.question })),
+      )
+    },
+  })
 
   // Per-card. `revealed` is the one that matters: everything the learner is
   // not supposed to see yet is behind it.
@@ -152,7 +165,8 @@ export function RecallRunner({
     }
   }
 
-  function advance() {
+  function advance(countReviewed = false) {
+    if (countReviewed) setReviewed((r) => r + 1)
     setPredicted(null)
     setRevealed(false)
     setExplanation("")
@@ -195,12 +209,15 @@ export function RecallRunner({
     return (
       <Readout
         mode={mode}
+        pending={pending}
+        results={results}
         reviewed={reviewed}
         correct={correct}
         predictionsMade={predictionsMade}
         predictionsCalibrated={predictionsCalibrated}
         teachbackAvg={stats.avgScore}
         teachbackDone={stats.completedCount}
+        teachbackPassed={stats.passCount}
         onDone={onDone}
       />
     )
@@ -265,10 +282,17 @@ export function RecallRunner({
                   {currentCard.question}
                 </p>
                 <hr className="border-border" />
-                <div data-testid="recall-answer">
-                  <MarkdownRenderer className={ANSWER_PROSE}>
-                    {currentCard.answer}
-                  </MarkdownRenderer>
+                <div>
+                  {mode === "teachback" && (
+                    <p className="mb-1.5 text-xs uppercase tracking-wider text-muted-foreground/70">
+                      Expected answer
+                    </p>
+                  )}
+                  <div data-testid="recall-answer">
+                    <MarkdownRenderer className={ANSWER_PROSE}>
+                      {currentCard.answer}
+                    </MarkdownRenderer>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -332,14 +356,26 @@ export function RecallRunner({
           {revealed && (
             <>
               {mode === "teachback" && (
-                <TeachbackVerdict
-                  result={cardResult}
-                  // Per card, not per run: a single failed submission used to mark
-                  // every card after it unscored, including the ones that scored.
-                  failed={pending.some(
-                    (p) => p.flashcardId === currentCard.id && p.id.startsWith("error-"),
-                  )}
-                />
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                      What you said
+                    </p>
+                    <blockquote className="mt-1.5 whitespace-pre-wrap border-l-2 border-border pl-3 text-sm italic leading-relaxed text-foreground/80">
+                      {/* The API returns user_explanation only once the row is
+                          complete, so until then this is the draft as submitted. */}
+                      {cardResult?.user_explanation ?? explanation}
+                    </blockquote>
+                  </div>
+                  <TeachbackVerdict
+                    result={cardResult}
+                    // Per card, not per run: a single failed submission used to mark
+                    // every card after it unscored, including the ones that scored.
+                    failed={pending.some(
+                      (p) => p.flashcardId === currentCard.id && p.id.startsWith("error-"),
+                    )}
+                  />
+                </div>
               )}
 
               {currentCard.source_excerpt && (
@@ -362,6 +398,17 @@ export function RecallRunner({
                   <p className="mt-2 text-sm italic leading-relaxed text-muted-foreground">
                     {currentCard.source_excerpt}
                   </p>
+                  {/* Silence is a claim: an answer printed as the expected one,
+                      under a quote, reads as verified unless the panel says what
+                      was actually checked. */}
+                  <p className={`mt-2 text-xs ${sourceNote(currentCard).className}`}>
+                    {sourceNote(currentCard).text}
+                  </p>
+                  {answerCheckNote(currentCard) && (
+                    <p className={`mt-0.5 text-xs ${answerCheckNote(currentCard)?.className}`}>
+                      {answerCheckNote(currentCard)?.text}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -371,9 +418,30 @@ export function RecallRunner({
                 </p>
               )}
 
-              {graded ? (
+              {mode === "teachback" ? (
+                // No grade buttons here. The background evaluator applies an FSRS
+                // review of its own once it scores (study.py:1529), so asking for
+                // one as well would review the same card twice -- which is what
+                // the Study page's teach-back avoids by never offering a grade.
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    data-testid="teachback-next"
+                    onClick={() => advance(true)}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    Next card
+                    <ArrowRight size={14} />
+                  </button>
+                  {!cardResult && (
+                    <p className="text-xs text-muted-foreground">
+                      Still scoring. Move on -- the verdict is waiting for you at the end of the
+                      run.
+                    </p>
+                  )}
+                </div>
+              ) : graded ? (
                 <button
-                  onClick={advance}
+                  onClick={() => advance()}
                   className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   Next card
@@ -435,21 +503,27 @@ function TeachbackVerdict({
 }
 function Readout({
   mode,
+  pending,
+  results,
   reviewed,
   correct,
   predictionsMade,
   predictionsCalibrated,
   teachbackAvg,
   teachbackDone,
+  teachbackPassed,
   onDone,
 }: {
   mode: StudyMode
+  pending: PendingTeachback[]
+  results: TeachbackResultItem[] | undefined
   reviewed: number
   correct: number
   predictionsMade: number
   predictionsCalibrated: number
   teachbackAvg: number
   teachbackDone: number
+  teachbackPassed: number
   onDone: () => void
 }) {
   return (
@@ -462,7 +536,17 @@ function Readout({
 
         <div className="grid grid-cols-2 gap-3">
           <Stat label="Reviewed" value={String(reviewed)} />
-          <Stat label="Got right" value={reviewed === 0 ? "--" : `${correct} of ${reviewed}`} />
+          {/* "Got right" counts grades, and a teach-back run gives none -- its
+              cards are scored by the evaluator. Reading the grade tally there
+              printed "0 of 3" beside a 90/100 average. */}
+          {mode === "teachback" ? (
+            <Stat
+              label="Passed"
+              value={teachbackDone === 0 ? "--" : `${teachbackPassed} of ${teachbackDone}`}
+            />
+          ) : (
+            <Stat label="Got right" value={reviewed === 0 ? "--" : `${correct} of ${reviewed}`} />
+          )}
         </div>
 
         {mode === "flashcard" && predictionsMade > 0 && (
@@ -496,6 +580,10 @@ function Readout({
           </p>
         )}
 
+        {mode === "teachback" && pending.length > 0 && (
+          <TeachbackAttempts pending={pending} results={results} />
+        )}
+
         <button
           onClick={onDone}
           className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -512,6 +600,57 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-card p-4">
       <p className="text-xs uppercase tracking-wider text-muted-foreground/70">{label}</p>
       <p className="mt-1.5 text-xl font-semibold text-foreground">{value}</p>
+    </div>
+  )
+}
+
+/**
+ * Every explanation this run submitted, expanded to what was written, what was
+ * expected and how it scored. Moving on while a card is still being evaluated
+ * only works if the verdict is still somewhere afterwards.
+ */
+function TeachbackAttempts({
+  pending,
+  results,
+}: {
+  pending: PendingTeachback[]
+  results: TeachbackResultItem[] | undefined
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+        Every answer you gave
+      </p>
+      {pending.map((p) => {
+        const result = results?.find((r) => r.id === p.id)
+        if (!result || result.status !== "complete") {
+          return (
+            <div
+              key={p.id}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground"
+            >
+              {p.id.startsWith("error-") ? (
+                <span>Not scored -- {p.question}</span>
+              ) : (
+                <>
+                  <Loader2 size={13} className="animate-spin" />
+                  <span className="line-clamp-1">Still scoring -- {p.question}</span>
+                </>
+              )}
+            </div>
+          )
+        }
+        return (
+          <ExpandableResultRow
+            key={p.id}
+            result={result}
+            fallbackQuestion={p.question}
+            isExpanded={expandedId === p.id}
+            onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+          />
+        )
+      })}
     </div>
   )
 }

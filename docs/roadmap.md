@@ -280,6 +280,28 @@ advance. Nothing here is new machinery: `prepareStudySession`, `submitReview`'s 
 them. `recallFeedback.ts` is what the Study page and the panel now share, so calibration — the number
 the learner record is built on — is scored once rather than twice.
 
+**A teach-back run is not graded by hand.** Scoring applies an FSRS review of its own
+(`study.py:1529`), so the four grade buttons appear on recall cards and nowhere else -- offering
+them on a scored card reviewed it twice. The reveal shows what the learner wrote, the expected
+answer, the score and the rubric behind it, and `Next card` is available while the score is still
+coming, with every attempt listed again in the run's summary so moving on early costs nothing.
+
+`InlineTeachbackFeedback` renders all three rubric dimensions, each scored 0-100 as
+`_RUBRIC_USER_TMPL` asks for (`study.py:284`) -- it used to show clarity's evidence alone, so the
+two dimensions that move the score were fetched, stored and dropped. The rubric is a second,
+best-effort LLM call and the panel says so when it comes back empty rather than showing nothing.
+
+**An interrupted run is offered back.** The deck names the most recent open session for the
+document -- not a preferred mode, which offered a teach-back run abandoned days earlier over the
+recall run left a minute ago -- and resuming reattaches by id, so a section run resumes as one. A
+resume that lands on a different session is refused and said out loud, because
+`prepareStudySession` otherwise falls through to creating a fresh run under a button that promised
+the old one.
+
+The source block says what was checked. `sourceNote` speaks for the quote and `answerCheckNote` for
+the answer: the shipped state of most cards is `grounding=verified, factuality=unchecked`, and
+"Found in this document" printed beside an unverified answer reads as an endorsement of it.
+
 Only `GET /study/due` joins a section onto the cards it returns. A resumed session's remaining cards
 (`study.py:1333`) and a deck run that was not due both arrive without one, so revealing resolves the
 locus through `GET /flashcards/{id}/source-context` when the card does not carry it — otherwise the
@@ -299,14 +321,19 @@ or a session lands back on whatever opened it.
 modals a particular run happens to open: no file under `components/reader/` may import a dialog,
 sheet, drawer or alert-dialog primitive, or be named for one, and the reader must mount all five
 faces. The document's own delete confirmation is a popover and needs no exception. `make verify-dock`
-fires the wiring instead — 60 checks, and 64 with the Feynman arm on. Each was fired on purpose: the
+fires the wiring instead — 63 checks, 68 with the teach-back arm and 67 with Feynman's. Each was fired on purpose: the
 recall block goes red when the answer renders before the commit, when the reveal stops moving the
 document, when a prediction is dropped, when committing stops revealing, and when the face leads with
 the generator again.
 
-That block grades nothing — predicting and revealing mutate no card — and deletes the study session
-it opened, so it leaves the library as it found it. It needs a document with a card due and says so
-when it finds none.
+The recall block grades nothing — predicting and revealing mutate no card — and deletes the study
+session it opened, so it leaves the library as it found it. It needs a document with a card due and
+says so when it finds none.
+
+The teach-back arm is off by default and carries its reason next to the flag: submitting an
+explanation has it scored, and scoring applies an FSRS review, so a run advances the schedule of
+every card it touches. Deleting the session removes the review events and not the card state, so
+nothing undoes it. `LUMINARY_VERIFY_TEACHBACK=1` is how that arm was measured.
 
 The Feynman checks are off by default and say so next to the flag: `/feynman` has no delete, so each
 run leaves a practice session in the library it runs against — two in dev, where StrictMode starts

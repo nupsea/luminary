@@ -13,10 +13,11 @@
 
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Brain, Loader2, MessageSquareQuote, X } from "lucide-react"
+import { Brain, History, Loader2, MessageSquareQuote, X } from "lucide-react"
 
 import { apiGet } from "@/lib/apiClient"
 import type { Flashcard } from "@/lib/studyApi"
+import { fetchSessions } from "@/lib/studyApi"
 import {
   type PreparedStudySessionOutcome,
   type StudyMode,
@@ -76,9 +77,31 @@ export function PracticePanel({
       ),
   })
 
+  // A run that was interrupted -- the tab closed, the reader navigated away --
+  // is still open on the server, and starting a new one silently adopts it. The
+  // learner is then dropped mid-run with no idea why, so the deck says so and
+  // offers to go back to it.
+  //
+  // The MOST RECENT open session, not a preferred mode: asking
+  // /sessions/open per mode and picking one offered back a teach-back run the
+  // learner had abandoned days ago over the recall run they left a minute ago.
+  const { data: openRun } = useQuery({
+    queryKey: ["reader-open-run", documentId],
+    queryFn: async () => {
+      const list = await fetchSessions(1, 5, { documentId, status: "incomplete" })
+      const latest = list.items[0]
+      if (!latest) return null
+      return {
+        id: latest.id,
+        mode: (latest.mode === "teachback" ? "teachback" : "flashcard") as StudyMode,
+        answered: latest.cards_reviewed,
+      }
+    },
+  })
+
   const { total: deckTotal, due: dueCards } = summariseDeck(deck ?? [])
 
-  async function start(mode: StudyMode, ahead: boolean) {
+  async function start(mode: StudyMode, ahead: boolean, resumeSessionId?: string) {
     setStarting(mode)
     setStartError(null)
     try {
@@ -94,8 +117,11 @@ export function PracticePanel({
         cardLimit: READER_CARD_LIMIT,
         ...(sectionId ? { filters: { section_id: sectionId } } : {}),
       }
-      const outcome =
-        ahead || sectionId
+      // Resuming reattaches by id, so it returns the run's own remaining cards
+      // whatever scope created it -- a section run resumes as a section run.
+      const outcome = resumeSessionId
+        ? await prepareStudySession({ ...scopeForBeginNew, resumeSessionId })
+        : ahead || sectionId
           ? await prepareSectionStudyFromCards(
               documentId,
               (ahead ? (deck ?? []) : dueCards).slice(0, READER_CARD_LIMIT),
@@ -104,6 +130,14 @@ export function PracticePanel({
           : await prepareStudySession(scopeForBeginNew)
       if (outcome.kind === "empty") {
         setStartError("Nothing to run here yet. Generate a few cards first.")
+        return
+      }
+      // prepareStudySession falls through to creating a fresh session when the
+      // one it was asked to resume has gone. Dropping the learner into a new run
+      // under a button that said "pick it back up" is worse than saying so.
+      if (resumeSessionId && outcome.session.id !== resumeSessionId) {
+        setStartError("That run is no longer there. Start a new one below.")
+        void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
         return
       }
       setRun({ mode, initial: outcome, scopeForBeginNew })
@@ -117,6 +151,7 @@ export function PracticePanel({
   function endRun() {
     setRun(null)
     void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
+    void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
     void qc.invalidateQueries({ queryKey: ["section-heatmap", documentId] })
   }
 
@@ -183,12 +218,40 @@ export function PracticePanel({
                 </button>
               </div>
             ) : (
-              <DeckState
-                total={deckTotal}
-                due={dueCards.length}
-                starting={starting}
-                onStart={start}
-              />
+              <>
+                {openRun && (
+                  <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
+                    <p
+                      data-testid="open-run"
+                      className="flex items-center gap-2 text-base font-medium text-foreground"
+                    >
+                      <History size={15} className="text-primary" />
+                      You left a {openRun.mode === "teachback" ? "teach-back" : "recall"} run open
+                      here.
+                    </p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                      {openRun.answered > 0
+                        ? `${openRun.answered} answered so far. Picking it up returns the cards it had left, and the explanations it already collected.`
+                        : "Picking it up returns the cards it had left, and the explanations it already collected."}
+                    </p>
+                    <button
+                      data-testid="resume-run"
+                      onClick={() => void start(openRun.mode, false, openRun.id)}
+                      disabled={starting !== null}
+                      className="mt-4 flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {starting !== null && <Loader2 size={14} className="animate-spin" />}
+                      Pick it back up
+                    </button>
+                  </div>
+                )}
+                <DeckState
+                  total={deckTotal}
+                  due={dueCards.length}
+                  starting={starting}
+                  onStart={start}
+                />
+              </>
             )}
 
             {startError && (

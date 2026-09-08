@@ -339,6 +339,97 @@ if (paraCount) {
         }
       }
 
+      // The teach-back arm is off by default: each submission is scored, and
+      // scoring applies an FSRS review of its own (study.py:1529), so a run of
+      // it advances the schedule of every card it touches and no delete undoes
+      // that -- deleting the session removes the events, not the card state.
+      // LUMINARY_VERIFY_TEACHBACK=1 turns it on; that is how the arm was measured.
+      if (process.env.LUMINARY_VERIFY_TEACHBACK === "1") {
+        // Back to the deck first: the recall run above is still mounted, and
+        // this block skipped in silence when it looked for a start button that
+        // the running card had replaced.
+        await page.goto(`${APP}/library?doc=${practicable.id}`, { waitUntil: "domcontentloaded" })
+        await page.waitForTimeout(3000)
+        const toPractice = page.getByRole("button", { name: "Practice", exact: true })
+        if (await toPractice.count()) await toPractice.first().click()
+        await page.waitForTimeout(2000)
+        const startExplain = page.locator('[data-testid="start-explain"]')
+        check("the deck offers an explain run", (await startExplain.count()) > 0)
+        if (await startExplain.count()) {
+          await startExplain.first().click()
+          await page.waitForTimeout(2500)
+          const ta = page.locator('[data-testid="recall-runner"] textarea')
+          check("the explain arm asks for an explanation", (await ta.count()) === 1)
+          if (await ta.count()) {
+            await ta.fill("The maximum of a linear objective sits at a vertex, so interior points can be skipped.")
+            await page.getByRole("button", { name: /Submit and compare/ }).click()
+            await page.waitForTimeout(1500)
+            const mid = await page.evaluate(() => {
+              const t = document.querySelector('[data-testid="recall-runner"]')?.innerText ?? ""
+              return {
+                grades: document.querySelectorAll('[data-testid^="grade-"]').length,
+                next: document.querySelectorAll('[data-testid="teachback-next"]').length,
+                said: /what you said/i.test(t),
+                expected: /expected answer/i.test(t),
+              }
+            })
+            // Grading here would review the card twice: the evaluator already
+            // applies one when it scores.
+            check("a scored card is not graded by hand as well", mid.grades === 0,
+              `${mid.grades} grade buttons`)
+            check("the run can move on while it is still scoring", mid.next === 1)
+            check("the reveal shows what the learner said", mid.said)
+            check("the reveal names the expected answer", mid.expected)
+          }
+        }
+      }
+
+      // Leaving a run open and coming back to it. The panel used to offer only
+      // "start", while starting silently adopted the open session -- so the
+      // learner was dropped mid-run with no explanation. Grades nothing.
+      if (ranSessionId !== null) {
+        await page.goto(`${APP}/library?doc=${practicable.id}`, { waitUntil: "domcontentloaded" })
+        await page.waitForTimeout(3000)
+        const backToPractice = page.getByRole("button", { name: "Practice", exact: true })
+        if (await backToPractice.count()) await backToPractice.first().click()
+        await page.waitForTimeout(2000)
+        const openRun = await page.locator('[data-testid="open-run"]').first()
+          .textContent().catch(() => null)
+        check("an abandoned run is offered back", /left a .* run open/i.test(openRun ?? ""),
+          (openRun ?? "<nothing>").slice(0, 60))
+        // What the panel OWES the learner is the most recent run they left, which
+        // is not necessarily the one this check just abandoned -- any older stale
+        // session in the library would be newer than nothing. Re-derive it rather
+        // than assume, or this check passes only on a clean library.
+        const expectedResume = await page.evaluate(async ([api, id]) => {
+          const res = await fetch(`${api}/study/sessions?page=1&page_size=5&document_id=${id}&status=incomplete`)
+          return ((await res.json()).items ?? [])[0]?.id ?? null
+        }, [API, practicable.id])
+        const resume = page.locator('[data-testid="resume-run"]')
+        if (await resume.count()) {
+          await resume.first().click()
+          await page.waitForTimeout(2500)
+          const resumed = await page.evaluate(() => {
+            const raw = JSON.parse(localStorage.getItem("luminary-app-store") ?? "{}")
+            return {
+              sessionId: raw.state?.studySessionId ?? null,
+              // Either face counts: a run whose cards were all answered resumes
+              // to its summary, which is the run, not the deck.
+              running:
+                document.querySelectorAll('[data-testid="recall-runner"]').length +
+                document.querySelectorAll('[data-testid="recall-readout"]').length,
+            }
+          })
+          // The same session, not merely "a" session: resuming used to fall
+          // through to creating a fresh one when the target had gone, under a
+          // button that said it was picking the old one back up.
+          check("picking it back up returns the run it offered",
+            resumed.sessionId !== null && resumed.sessionId === expectedResume,
+            `${String(resumed.sessionId).slice(0, 8)} vs ${String(expectedResume).slice(0, 8)}`)
+          check("the resumed run is on screen", resumed.running === 1, `${resumed.running} faces`)
+        }
+      }
+
       // Only the session this run opened: one that was already there is someone
       // else's, and the run adopting it is exactly the resume behaviour.
       const removed = ranSessionId !== null && !sessionsBefore.includes(ranSessionId)
