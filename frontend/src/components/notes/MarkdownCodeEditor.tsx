@@ -1,6 +1,6 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react"
 import { autocompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete"
-import { EditorState } from "@codemirror/state"
+import { Compartment, EditorState } from "@codemirror/state"
 import {
   EditorView,
   drawSelection,
@@ -77,10 +77,7 @@ export interface MarkdownCodeEditorProps {
   linkCompletion?: NoteLinkCompletionConfig
   /** Enables the / block-insert menu at line start. */
   slashCommands?: SlashCommandConfig
-  /**
-   * Render markdown as it is written, for a surface with no preview beside it.
-   * Read once, when the view is built.
-   */
+  /** Render markdown as it is written, for a surface with no preview beside it. */
   live?: boolean
   /** Live rendering only: the edit button on a drawn diagram. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
@@ -178,8 +175,15 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
   ) {
     const hostRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
+    // The preview pane is a toggle, so live rendering has to be switchable on a
+    // view that is already built.
+    const liveRoom = useRef(new Compartment()).current
     const latest = useRef({ onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram })
     latest.current = { onChange, onScroll, onPasteImage, linkCompletion, slashCommands, onEditDiagram }
+    const liveExtension = useCallback(
+      () => liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) }),
+      [],
+    )
 
     useEffect(() => {
       const view = new EditorView({
@@ -193,9 +197,7 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             markdown({ base: markdownLanguage, codeLanguages: languages }),
             syntaxHighlighting(mdHighlight),
             editorTheme,
-            ...(live
-              ? [liveMarkdown({ onEditDiagram: (d) => latest.current.onEditDiagram?.(d) })]
-              : []),
+            liveRoom.of(live ? liveExtension() : []),
             cmPlaceholder(placeholder ?? ""),
             autocompletion({
               override: [
@@ -284,6 +286,14 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
       // sync effect below and the latest ref.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    useEffect(() => {
+      viewRef.current?.dispatch({
+        effects: liveRoom.reconfigure(live ? liveExtension() : []),
+      })
+      // liveExtension reads its callback through `latest`, so it never goes stale.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [live])
 
     useLayoutEffect(() => {
       const view = viewRef.current

@@ -21,6 +21,7 @@ import {
   clickedSourceLine,
   hidesBlock,
   hidesMark,
+  isDelimitedBlock,
   isImageOnlyParagraph,
   lineIsBeingEdited,
   mathBlockRanges,
@@ -45,16 +46,22 @@ export interface LiveMarkdownOptions {
 class RenderedBlock extends WidgetType {
   private root: Root | null = null
   readonly source: string
+  readonly delimited: boolean
   private readonly onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
 
-  constructor(source: string, onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void) {
+  constructor(
+    source: string,
+    delimited: boolean,
+    onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void,
+  ) {
     super()
     this.source = source
+    this.delimited = delimited
     this.onEditDiagram = onEditDiagram
   }
 
   eq(other: RenderedBlock) {
-    return other.source === this.source
+    return other.source === this.source && other.delimited === this.delimited
   }
 
   toDOM(view: EditorView) {
@@ -89,15 +96,8 @@ class RenderedBlock extends WidgetType {
       const target = event.target as HTMLElement | null
       if (target?.closest("button, a")) return
       event.preventDefault()
-      const rows = [...host.querySelectorAll("tr")]
-      const row = target?.closest("tr")
-      const offset = clickedSourceLine(
-        row ? rows.indexOf(row as HTMLTableRowElement) : null,
-        this.source.split("\n").length,
-      )
-      const start = view.state.doc.lineAt(view.posAtDOM(host)).number
-      const line = view.state.doc.line(Math.min(start + offset, view.state.doc.lines))
-      view.dispatch({ selection: { anchor: line.to } })
+      const anchor = this.caretFor(view, host, event, target)
+      if (anchor !== null) view.dispatch({ selection: { anchor } })
       view.focus()
     })
     return host
@@ -115,6 +115,52 @@ class RenderedBlock extends WidgetType {
     // The widget handles its own mousedown; the editor stays out of it.
     return true
   }
+
+  /**
+   * Where the caret goes when this block is clicked. Code answers to the
+   * character under the pointer -- the rendering preserves the source text, so
+   * the offset into it is the offset into the block's body. Everything else
+   * answers by line.
+   */
+  private caretFor(
+    view: EditorView,
+    host: HTMLElement,
+    event: MouseEvent,
+    target: HTMLElement | null,
+  ): number | null {
+    const from = view.posAtDOM(host)
+    const firstLine = view.state.doc.lineAt(from)
+    const code = target?.closest("pre")?.querySelector("code")
+    if (code) {
+      const offset = offsetInCode(code, event)
+      if (offset !== null) {
+        return Math.min(firstLine.to + 1 + offset, from + this.source.length)
+      }
+    }
+    const rows = [...host.querySelectorAll("tr")]
+    const row = target?.closest("tr")
+    const line = clickedSourceLine(
+      row ? rows.indexOf(row as HTMLTableRowElement) : null,
+      this.source.split("\n").length,
+      this.delimited,
+    )
+    return view.state.doc.line(Math.min(firstLine.number + line, view.state.doc.lines)).to
+  }
+}
+
+/** Character offset of a click within a rendered code body, or null. */
+function offsetInCode(code: Element, event: MouseEvent): number | null {
+  const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY)
+  if (!caret || !code.contains(caret.startContainer)) return null
+  const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT)
+  let offset = 0
+  let node = walker.nextNode()
+  while (node) {
+    if (node === caret.startContainer) return offset + caret.startOffset
+    offset += node.textContent?.length ?? 0
+    node = walker.nextNode()
+  }
+  return null
 }
 
 function blockRange(state: EditorState, from: number, to: number): TextRange {
@@ -126,38 +172,40 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
   const marks: Range<Decoration>[] = []
   const rendered: TextRange[] = []
 
-  const renderBlock = (from: number, to: number) => {
+  const renderBlock = (from: number, to: number, delimited = false) => {
     const range = blockRange(state, from, to)
-    if (lineIsBeingEdited(selection, range.from, range.to)) return
+    if (lineIsBeingEdited(selection, range.from, range.to)) return false
     rendered.push(range)
     marks.push(
       Decoration.replace({
         block: true,
         widget: new RenderedBlock(
           state.doc.sliceString(range.from, range.to),
+          delimited,
           options.onEditDiagram,
         ),
       }).range(range.from, range.to),
     )
+    return true
   }
 
-  for (const { from, to } of mathBlockRanges(state.doc.toString())) renderBlock(from, to)
+  for (const { from, to } of mathBlockRanges(state.doc.toString())) renderBlock(from, to, true)
 
   syntaxTree(state).iterate({
     enter: (node) => {
       if (rendersAsBlock(node.name)) {
-        renderBlock(node.from, node.to)
+        renderBlock(node.from, node.to, isDelimitedBlock(node.name))
         return false
       }
-      if (node.name === "FencedCode") {
-        // Styled where it stands rather than replaced, so it can be typed in.
+      if (node.name === "FencedCode" && !renderBlock(node.from, node.to, true)) {
+        // Being edited: still dressed as code, so revealing the source is not
+        // a change of mode.
+        const first = state.doc.lineAt(node.from).number
         const last = state.doc.lineAt(node.to).number
-        for (let n = state.doc.lineAt(node.from).number; n <= last; n++) {
+        for (let n = first; n <= last; n++) {
           const line = state.doc.line(n)
           marks.push(codeLine.range(line.from))
-          if (n === state.doc.lineAt(node.from).number || n === last) {
-            marks.push(fenceLine.range(line.from))
-          }
+          if (n === first || n === last) marks.push(fenceLine.range(line.from))
         }
         return false
       }

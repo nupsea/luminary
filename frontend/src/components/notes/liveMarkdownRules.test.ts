@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   clickedSourceLine,
   hidesBlock,
+  isDelimitedBlock,
   hidesMark,
   isImageOnlyParagraph,
   lineIsBeingEdited,
@@ -65,9 +66,7 @@ describe("lineIsBeingEdited", () => {
 describe("rendersAsBlock", () => {
   it("names the blocks the renderer draws", () => {
     expect(rendersAsBlock("Table")).toBe(true)
-    // Code is styled in place: a rendered block cannot be typed into where it
-    // was clicked, and the caret landed in front of the fence.
-    expect(rendersAsBlock("FencedCode")).toBe(false)
+    expect(rendersAsBlock("FencedCode")).toBe(true)
     expect(rendersAsBlock("Paragraph")).toBe(false)
     expect(rendersAsBlock("HTMLBlock")).toBe(false)
   })
@@ -140,5 +139,27 @@ describe("clickedSourceLine", () => {
   it("answers with the last line when the click was not on a row", () => {
     expect(clickedSourceLine(null, 3)).toBe(2)
     expect(clickedSourceLine(null, 1)).toBe(0)
+  })
+
+  // $$ / x = y + z / $$ -- the caret may only land on line 1. On either fence,
+  // one keystroke stops the block being a block and the note below it jumps.
+  it("keeps the caret off a delimited block's fences", () => {
+    expect(clickedSourceLine(null, 3, true)).toBe(1)
+    expect(clickedSourceLine(0, 3, true)).toBe(1)
+    expect(clickedSourceLine(9, 3, true)).toBe(1)
+  })
+
+  it("lands inside a longer delimited block", () => {
+    // ```python / import math / print(1) / ```
+    expect(clickedSourceLine(null, 4, true)).toBe(2)
+  })
+})
+
+describe("isDelimitedBlock", () => {
+  it("names the blocks that open and close with a fence", () => {
+    expect(isDelimitedBlock("FencedCode")).toBe(true)
+    expect(isDelimitedBlock("MathBlock")).toBe(true)
+    expect(isDelimitedBlock("Table")).toBe(false)
+    expect(isDelimitedBlock("Paragraph")).toBe(false)
   })
 })

@@ -45,28 +45,37 @@ export function lineIsBeingEdited(
   return ranges.some((r) => r.from <= lineTo && r.to >= lineFrom)
 }
 
-/**
- * Blocks the editor draws with the app's own renderer rather than as source.
- *
- * Fenced code is deliberately not one of them. Code in a note is written and
- * rewritten, and a rendered block can only be edited by swapping it back for
- * its source, which puts the caret somewhere the writer did not click -- the
- * first keystroke landed in front of the opening fence and destroyed the block.
- * It is styled in place instead.
- */
+/** Blocks the editor draws with the app's own renderer rather than as source. */
 export function rendersAsBlock(name: string): boolean {
-  return name === "Table"
+  return name === "FencedCode" || name === "Table"
+}
+
+/**
+ * Blocks whose first and last source lines are delimiters -- ``` and $$. A
+ * caret placed on one of those and a single keystroke stops the block being a
+ * block, which is what made editing one throw the text below it around.
+ */
+export function isDelimitedBlock(name: string): boolean {
+  return name === "FencedCode" || name === "MathBlock"
 }
 
 /**
  * Which line of a block's source a click inside its rendering belongs to.
- * A table's rows map to source lines one for one past the delimiter; anything
- * else answers with its last line, where a keystroke can do no damage.
+ *
+ * A table's rows map to source lines one for one past the delimiter row.
+ * Anything else answers with its last line -- except a delimited block, where
+ * the last line is a fence and the answer is the last line of content.
  */
-export function clickedSourceLine(rowIndex: number | null, sourceLines: number): number {
-  if (rowIndex === null) return Math.max(0, sourceLines - 1)
-  if (rowIndex === 0) return 0
-  return Math.min(rowIndex + 1, Math.max(0, sourceLines - 1))
+export function clickedSourceLine(
+  rowIndex: number | null,
+  sourceLines: number,
+  delimited = false,
+): number {
+  const last = delimited ? sourceLines - 2 : sourceLines - 1
+  const bounded = (n: number) => Math.min(Math.max(n, delimited ? 1 : 0), Math.max(last, 0))
+  if (rowIndex === null) return bounded(last)
+  if (rowIndex === 0) return bounded(0)
+  return bounded(rowIndex + 1)
 }
 
 /**

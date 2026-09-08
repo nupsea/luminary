@@ -211,12 +211,20 @@ nothing. `layout="editor"` is the only layout with no preview pane and is what t
 full note page keeps its preview and its raw markdown.
 
 **A rendered block is edited where it was clicked.** Swapping a block back for its source puts the
-caret somewhere, and at the block's start the first keystroke lands in front of the opening fence and
-destroys the block — measured: typing in a rendered code block produced ```` X```python ```` and the
-code, the table and the math below it all fell back to source. Fenced code is therefore not rendered
-at all; it is styled where it stands, so it is always editable. What is still rendered answers a
-click with the line that was clicked — a table's rows map to its source rows past the delimiter, and
-anything else answers with its last line, where a keystroke can do no damage.
+caret somewhere, and anywhere but under the pointer is wrong. At the block's start the first
+keystroke landed in front of the opening fence — typing in a code block produced ```` X```python ````
+and the code, the table and the math below it all fell back to source at once. At the block's last
+line it landed on the closing fence, which is what threw the note around while editing an equation.
+
+A click now answers with the character under it: code maps the pointer through the rendering, whose
+text is the source's, to an offset in the block's body. A table's rows map to its source rows past
+the delimiter. A block whose first and last lines are fences — ``` and `$$` — never hands back a
+caret on either of them. Being edited, a code block keeps its own dress, so revealing the source is
+not a change of mode.
+
+The preview pane on the full note page is a toggle, and live rendering follows it: hide the pane and
+the same rendering appears there. It is reconfigured on a built view rather than read once at mount,
+or the toggle would only take effect the next time the editor was rebuilt.
 
 A drawn diagram carries the edit button the preview has, wired to the same `NoteDiagramDialog`. The
 diagram is the image *and* the sidecar comment beneath it: rendered apart, the renderer sees an image
