@@ -43,7 +43,7 @@ describe("the reader's surfaces", () => {
       "ChatConversation",
       "NoteComposer",
       "ExplanationPanel",
-      "DocumentFlashcardPanel",
+      "PracticePanel",
       "FeynmanPanel",
     ]) {
       expect(reader, `${face} is not mounted in the reader`).toContain(`<${face}`)

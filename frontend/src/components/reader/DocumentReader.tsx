@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, StickyNote, Target, Trash2, X } from "lucide-react"
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
@@ -16,7 +15,7 @@ import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
-import { DocumentFlashcardPanel } from "./DocumentFlashcardPanel"
+import { PracticePanel } from "./PracticePanel"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
 
 // Full-mode only, folded at BUILD time. FEYNMAN_VISIBLE below gates rendering,
@@ -253,6 +252,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
+  // A section the learner chose to practise, with no passage selected.
+  const [practiceSection, setPracticeSection] = useState<{ id: string; heading: string } | null>(null)
 
   // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
@@ -280,16 +281,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // throttle timer: one POST per 10 seconds max
   const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
-  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
-  const navigate = useNavigate()
   const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
   // DocumentReader falls back to onBack (library list) when no from state is set
   const backLabel = canGoBack ? hookBackLabel : "Back to library"
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
-  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
-  const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
 
   // Header "Delete" -> removes the open document without a trip back to the library.
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -770,9 +766,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     searchOpen && searchHitSectionId ? searchHitSectionId : readSectionId
 
   function handleStudyClick(sid: string) {
-    setActiveDocument(documentId)
-    setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
-    void navigate("/study", { state: { from: "/library" } })
+    selection.closeFlashcard()
+    setPracticeSection({ id: sid, heading: sectionMap.get(sid)?.heading ?? "" })
+    openPractice()
   }
 
   // Fetch FSRS fragility heatmap for section coloring
@@ -966,6 +962,25 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
   }, [feynmanSection, leftTab, pushHistory, setLeftTab, scrollActiveSectionIntoView,
       setFeynmanSection, setInsightsTab])
+
+  // Revealing a card's answer puts the document on the passage it came from.
+  // This is the whole reason to practise inside the reader: the answer and its
+  // source end up on screen together.
+  const revealCardSource = useCallback((sid: string) => {
+    if (leftTab === "read" && readSectionId === sid) {
+      // Already the read target, so the target effect will not re-fire; the
+      // learner has usually scrolled away by now and is asking to go back.
+      document
+        .getElementById(`read-sec-${sid}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      return
+    }
+    if (leftTab !== "read") {
+      pushHistory()
+      setLeftTab("read")
+    }
+    setReadSectionId(sid)
+  }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
@@ -1190,30 +1205,18 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {/* In-context actions for this document: study, generate questions, chat */}
+          {/* In-context actions for this document: practice, chat */}
           <button
             onClick={() => {
-              // Land directly in a session scoped to this document -- skip the
-              // launcher popup. Study.tsx auto-starts from pendingStudyStart once
-              // the doc scope resolves.
-              setActiveCollectionId(null)
-              setActiveDocument(documentId)
-              setPendingStudyStart({ documentId, mode: "flashcard" })
-              navigate("/study", { state: { from: "/library" } })
+              selection.closeFlashcard()
+              setPracticeSection(null)
+              openPractice()
             }}
             className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Study this document"
+            title="Test yourself on this document"
           >
             <Target size={14} />
-            Study
-          </button>
-          <button
-            onClick={() => { selection.closeFlashcard(); openPractice() }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Generate questions from this document"
-          >
-            <Sparkles size={14} />
-            Generate questions
+            Practice
           </button>
           <button
             // The conversation about this document is docked beside it, already
@@ -1780,12 +1783,21 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 />
               </Suspense>
             ) : (
-              <DocumentFlashcardPanel
+              <PracticePanel
                 documentId={documentId}
-                // A selection scopes the generator; with none it is the document.
-                sectionHeading={selection.flashcardOpen ? selection.flashcardHeading : undefined}
+                // A selected passage scopes it, then a section chosen on its own;
+                // with neither it is the whole document.
+                sectionId={
+                  selection.flashcardOpen
+                    ? selection.flashcardSectionId ?? undefined
+                    : practiceSection?.id
+                }
+                sectionHeading={
+                  selection.flashcardOpen ? selection.flashcardHeading : practiceSection?.heading
+                }
                 context={selection.flashcardOpen ? selection.flashcardText : ""}
-                onClearScope={selection.closeFlashcard}
+                onClearScope={() => { selection.closeFlashcard(); setPracticeSection(null) }}
+                onJumpToSource={revealCardSource}
               />
             )}
           </div>

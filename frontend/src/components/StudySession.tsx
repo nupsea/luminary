@@ -44,6 +44,15 @@ import {
   submitReview,
   fetchSourceContext,
 } from "@/lib/studyApi"
+import {
+  CALIBRATION_TEXT_CLASS,
+  RATING_CLASS,
+  RATING_LABELS,
+  RATING_ORDER,
+  calibrationMessage,
+  getSessionPhase,
+  type CalibrationTone,
+} from "@/lib/recallFeedback"
 import { apiGet } from "@/lib/apiClient"
 import { arrowDelta, isArrowKey, isButtonActivation, isTypingTarget, moveKbnavFocus } from "@/lib/keyboard"
 import { useAppStore } from "@/store"
@@ -256,14 +265,24 @@ function SourcePanel({ card }: { card: Flashcard }) {
 
 // Rating buttons
 
-// Each grade also carries a distinct icon so Again/Good aren't told apart by hue
-// alone (red-green color-vision deficiency is the most common case).
-const RATINGS: { label: string; value: Rating; className: string; icon: LucideIcon }[] = [
-  { label: "Again", value: "again", icon: RotateCcw, className: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900 dark:hover:bg-red-900/50" },
-  { label: "Hard", value: "hard", icon: Minus, className: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900 dark:hover:bg-orange-900/50" },
-  { label: "Good", value: "good", icon: Check, className: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900 dark:hover:bg-green-900/50" },
-  { label: "Easy", value: "easy", icon: ChevronsUp, className: "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-900/50" },
-]
+// Labels and colours come from the shared vocabulary so this page and the
+// reader's Practice face never disagree about what a grade is called. The icon
+// is per-surface: it exists so Again/Good aren't told apart by hue alone
+// (red-green colour-vision deficiency is the common case).
+const RATING_ICONS: Record<Rating, LucideIcon> = {
+  again: RotateCcw,
+  hard: Minus,
+  good: Check,
+  easy: ChevronsUp,
+}
+
+const RATINGS: { label: string; value: Rating; className: string; icon: LucideIcon }[] =
+  RATING_ORDER.map((value) => ({
+    value,
+    label: RATING_LABELS[value],
+    className: RATING_CLASS[value],
+    icon: RATING_ICONS[value],
+  }))
 
 // Progress bar
 
@@ -414,47 +433,6 @@ function SessionComplete({ reviewed, correct, predictionsMade, predictionsCalibr
       <p className="text-[11px] text-muted-foreground">← → to choose · Enter to confirm · Esc to go back</p>
     </div>
   )
-}
-
-function getSessionPhase(index: number, total: number): { label: string; style: string } {
-  if (total <= 3) return { label: "Review", style: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" }
-  const pct = index / total
-  if (pct < 0.25) return { label: "Warm-up", style: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" }
-  if (pct < 0.85) return { label: "Engage", style: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" }
-  return { label: "Reflect", style: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" }
-}
-
-// Calibration feedback -- compares the learner's pre-reveal prediction (3-point:
-// Know it / Unsure / Blank, encoded as good / hard / again) against the grade they
-// actually gave after seeing the answer (4-point FSRS). "calibrated" means the two
-// land in the same confidence bucket; the copy nudges over/under-confidence.
-type CalibrationTone = "positive" | "warn" | "info" | "neutral"
-
-function ratingBucket(r: Rating): "knew" | "unsure" | "blank" {
-  if (r === "good" || r === "easy") return "knew"
-  if (r === "hard") return "unsure"
-  return "blank"
-}
-
-function calibrationMessage(
-  predicted: Rating,
-  actual: Rating,
-): { text: string; tone: CalibrationTone; calibrated: boolean } {
-  const p = ratingBucket(predicted)
-  const a = ratingBucket(actual)
-  if (p === a) return { text: "Well calibrated.", tone: "positive", calibrated: true }
-  const order = { blank: 0, unsure: 1, knew: 2 } as const
-  if (order[p] > order[a]) {
-    return { text: "Overconfident — you predicted you knew it.", tone: "warn", calibrated: false }
-  }
-  return { text: "You knew more than you thought.", tone: "info", calibrated: false }
-}
-
-const CALIBRATION_TEXT_CLASS: Record<CalibrationTone, string> = {
-  positive: "text-emerald-600 dark:text-emerald-400",
-  warn: "text-amber-600 dark:text-amber-400",
-  info: "text-blue-600 dark:text-blue-400",
-  neutral: "text-muted-foreground",
 }
 
 // StudySession -- main component (flashcard-only)

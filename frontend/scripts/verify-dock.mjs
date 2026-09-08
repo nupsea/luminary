@@ -232,18 +232,115 @@ if (paraCount) {
       // The selection is what the cards would be generated from; losing it is
       // how a passage silently becomes the whole document.
       check("the generator is scoped to the selection", /^Selected text/.test(opened.scope), opened.scope)
+      // Three states, no blank panel (I-10): a section with no cards of its own
+      // has to say so rather than render an empty deck.
+      const scopedDeck = await page.locator('[data-testid="deck-summary"]').first()
+        .textContent().catch(() => null)
+      check("a scoped face still says what is practicable", (scopedDeck ?? "").length > 10,
+        (scopedDeck ?? "<nothing>").slice(0, 60))
     }
 
-    // The header's own button is the document-wide arm of the same face.
-    const genQuestions = page.getByRole("button", { name: "Generate questions" })
-    check("the header offers Generate questions", (await genQuestions.count()) > 0)
-    if (await genQuestions.count()) {
-      await genQuestions.first().click()
+    // The header's own button is the document-wide arm of the same face. It used
+    // to leave the reader for /study; the whole rung is that it must not.
+    const headerPractice = page.getByRole("button", { name: "Practice", exact: true })
+    check("the header offers Practice", (await headerPractice.count()) > 0)
+    if (await headerPractice.count()) {
+      await headerPractice.first().click()
       await page.waitForTimeout(1000)
       const opened = await panelState()
-      check("Generate questions opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
-      check("Generate questions opens the Practice face", opened.tab === "Practice", String(opened.tab))
+      check("Practice opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
+      check("Practice opens the Practice face", opened.tab === "Practice", String(opened.tab))
       check("the header's arm is scoped to the document", opened.scope === "This document", opened.scope)
+      check("Practice stays in the reader", opened.url.includes(`doc=${docId}`), opened.url)
+    }
+
+    // The recall loop. Its whole claim is that the answer is not on screen until
+    // the learner has committed to something, so the check is
+    // question-present-and-answer-absent: an absent answer on its own is also
+    // what a runner that failed to start looks like.
+    //
+    // This one needs a document that already has due cards, which is rarely the
+    // prose document the checks above drive. It grades nothing -- predicting and
+    // revealing mutate no card -- and deletes the study session it opened, so a
+    // run leaves the library as it found it.
+    const practicable = await page.evaluate(async (api) => {
+      const res = await fetch(`${api}/documents?page=1&page_size=50&sort=last_accessed`)
+      const items = (await res.json()).items ?? []
+      for (const d of items) {
+        const due = await fetch(`${api}/study/due?document_id=${d.id}&limit=1`)
+        if (due.ok && (await due.json()).length > 0) return d
+      }
+      return null
+    }, API)
+    if (!practicable) {
+      console.log("  skip  the recall loop -- no document in this library has a card due")
+    } else {
+      console.log(`  practising: ${practicable.title}`)
+      const sessionsBefore = await page.evaluate(async ([api, id]) => {
+        const res = await fetch(`${api}/study/sessions?page=1&page_size=100&document_id=${id}`)
+        return ((await res.json()).items ?? []).map((x) => x.id)
+      }, [API, practicable.id])
+
+      await page.goto(`${APP}/library?doc=${practicable.id}`, { waitUntil: "domcontentloaded" })
+      await page.waitForTimeout(3000)
+      const leftTabOf = () => page.evaluate(() =>
+        [...document.querySelectorAll("button")]
+          .filter((b) => ["Sections", "Read"].includes(b.textContent?.trim()))
+          .find((b) => b.className.includes("border-primary"))?.textContent?.trim() ?? null)
+      // Start on Sections, so the jump to the source has somewhere to move from.
+      const sectionsTab = page.getByRole("button", { name: "Sections", exact: true })
+      if (await sectionsTab.count()) await sectionsTab.first().click()
+      const practiceTab = page.getByRole("button", { name: "Practice", exact: true })
+      if (await practiceTab.count()) await practiceTab.first().click()
+      await page.waitForTimeout(2000)
+
+      const deck = await page.locator('[data-testid="deck-summary"]').first().textContent().catch(() => null)
+      check("the face opens on the deck, not the generator", /card|practise/i.test(deck ?? ""), (deck ?? "").slice(0, 60))
+
+      const startRecall = page.locator('[data-testid="start-recall"]')
+      check("the deck offers a recall run", (await startRecall.count()) > 0)
+      if (await startRecall.count()) {
+        await startRecall.first().click()
+        await page.waitForTimeout(2500)
+        const before = await page.evaluate(() => ({
+          question: document.querySelector('[data-testid="recall-question"]')?.textContent?.trim() ?? "",
+          answers: document.querySelectorAll('[data-testid="recall-answer"]').length,
+          predict: document.querySelectorAll('[data-testid^="predict-"]').length,
+        }))
+        check("a run asks a question", before.question.length > 10, `${before.question.length} chars`)
+        check("the answer is not on screen before committing", before.answers === 0, `${before.answers} answers`)
+        check("the run asks for a prediction first", before.predict === 3, `${before.predict} buttons`)
+
+        const tabBefore = await leftTabOf()
+        await page.locator('[data-testid="predict-good"]').first().click()
+        await page.waitForTimeout(1500)
+        const after = await page.evaluate(() => ({
+          answer: document.querySelector('[data-testid="recall-answer"]')?.innerText?.trim() ?? "",
+          grades: document.querySelectorAll('[data-testid^="grade-"]').length,
+          jump: document.querySelectorAll('[data-testid="recall-jump"]').length,
+        }))
+        check("committing reveals the answer", after.answer.length > 0, `${after.answer.length} chars`)
+        check("the revealed card can be graded", after.grades === 4, `${after.grades} grades`)
+        const tabAfter = await leftTabOf()
+        if (after.jump > 0) {
+          check("the reveal puts the document on the source passage",
+            tabAfter === "Read" && tabBefore !== "Read", `${tabBefore} -> ${tabAfter}`)
+        } else {
+          console.log("  skip  the reveal puts the document on the source passage -- this card carries no section")
+        }
+      }
+
+      const removed = await page.evaluate(async ([api, id, before]) => {
+        const res = await fetch(`${api}/study/sessions?page=1&page_size=100&document_id=${id}`)
+        const fresh = ((await res.json()).items ?? []).filter((x) => !before.includes(x.id))
+        for (const s of fresh) {
+          await fetch(`${api}/study/sessions/${s.id}`, { method: "DELETE" })
+        }
+        return fresh.length
+      }, [API, practicable.id, sessionsBefore])
+      console.log(`  cleaned up ${removed} study session${removed === 1 ? "" : "s"} this check opened`)
+      await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
+      await page.waitForTimeout(2500)
     }
 
     // Feynman starts a session on mount and `/feynman` has no delete, so this

@@ -257,12 +257,33 @@ left the excalidraw sidecar on screen beside every diagram.
 everything else, so taking the rendering away turns one check red rather than three.
 
 **Nothing opens over the document.** The last three modals are panel faces. `ExplanationPanel` streams
-a selection's explanation on its own face. `DocumentFlashcardPanel` is Practice, scoped to the
-selection that opened it or to the document when the header's Generate questions did — and clearing
-the scope is what returns it to the document. `FeynmanPanel` takes the Practice face over while a
-session runs; the panel is one column, so the summary the learner explains from is a collapsible
-strip above the tutor rather than a pane beside it, and prose's own scale is overridden there because
-an `h2` at 24px in a 460px panel is a heading and no reference.
+a selection's explanation on its own face. `PracticePanel` is Practice, scoped to the selection that
+opened it, to a section chosen on its own, or to the document — and clearing the scope is what
+returns it to the document. `FeynmanPanel` takes the Practice face over while a session runs; the
+panel is one column, so the summary the learner explains from is a collapsible strip above the tutor
+rather than a pane beside it, and prose's own scale is overridden there because an `h2` at 24px in a
+460px panel is a heading and no reference.
+
+**Practice is a recall loop, not a generator.** The face opens on the deck for what is being read —
+what is here, what is due — and `CardGenerator` sits below it, because a count field and a Generate
+button answer a question the learner did not ask. A run's mode is fixed when it starts (`RecallRunner`
+takes it as a prop) because `POST /study/teachback/async` rewrites its session's mode: offering both
+inside one run would relabel it in the learner's own history.
+
+The rule the loop enforces is that **the answer is not rendered until the learner has committed** —
+a three-point confidence prediction, or an explanation typed out. Behind a `hidden` class it would
+still be a panel you can read ahead in. Revealing puts the reading pane on the section the card came
+from, which is the only reason to practise inside the reader rather than on the Study page. `again`
+and `hard` hold on the revealed card with the source and the calibration line; `good` and `easy`
+advance. Nothing here is new machinery: `prepareStudySession`, `submitReview`'s `predicted_rating`,
+`useTeachbackPolling` and `InlineTeachbackFeedback` all already existed and the reader never called
+them. `recallFeedback.ts` is what the Study page and the panel now share, so calibration — the number
+the learner record is built on — is scored once rather than twice.
+
+A card reached through `/study/due` carries its `section_id` and can be jumped to. Running a deck
+that is *not* due goes through `prepareSectionStudyFromCards`, and for document scope those cards
+come from `GET /flashcards/{id}`, which does not join the section — so the jump is offered per card
+rather than assumed.
 
 Every face stays mounted and hidden, so switching tabs costs neither a streaming explanation nor a
 half-written one. One ref carries where a transient face returns the panel, so closing an explanation
@@ -272,8 +293,14 @@ or a session lands back on whatever opened it.
 modals a particular run happens to open: no file under `components/reader/` may import a dialog,
 sheet, drawer or alert-dialog primitive, or be named for one, and the reader must mount all five
 faces. The document's own delete confirmation is a popover and needs no exception. `make verify-dock`
-fires the wiring instead — 50 checks, and 54 with the Feynman arm on; dropping the explain hand-off,
-the generator's scope and the header's arm turns four of them red and nothing else.
+fires the wiring instead — 60 checks, and 64 with the Feynman arm on. Each was fired on purpose: the
+recall block goes red when the answer renders before the commit, when the reveal stops moving the
+document, when a prediction is dropped, when committing stops revealing, and when the face leads with
+the generator again.
+
+That block grades nothing — predicting and revealing mutate no card — and deletes the study session
+it opened, so it leaves the library as it found it. It needs a document with a card due and says so
+when it finds none.
 
 The Feynman checks are off by default and say so next to the flag: `/feynman` has no delete, so each
 run leaves a practice session in the library it runs against — two in dev, where StrictMode starts
@@ -284,6 +311,11 @@ The panel carries Insights, Ask AI, Notes, Practice and Explain. Of the seven fa
 Key Points, Detailed, Glossary and References are still folded into Insights; Explain is a face the
 list did not anticipate, because an explanation of a selection has nowhere else to live. The nav cut
 to five rail items is untouched.
+
+The reader's header carries one Practice button. It used to carry two doors to the same place: a
+Study button that navigated to `/study`, and Generate questions. A goal's Study button in
+`ChapterGoalsPanel` scopes the face to that goal's section instead of leaving; that path is wired but
+has not been driven in a browser.
 
 A note keeps where it came from: the composer received a section only when a section's own note
 button was pressed, so a note taken from a *selection* stored the quoted text and no locus at all.

@@ -44,6 +44,9 @@ export function useSelectionWorkflow({
   const [flashcardOpen, setFlashcardOpen] = useState(false)
   const [flashcardText, setFlashcardText] = useState("")
   const [flashcardHeading, setFlashcardHeading] = useState<string | undefined>(undefined)
+  // The section the passage sits in. The deck and the run are scoped by id;
+  // the heading only names the scope on screen.
+  const [flashcardSectionId, setFlashcardSectionId] = useState<string | null>(null)
 
   const handleAddToNote = useCallback((text: string, sourceRef: SourceRef) => {
     const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
@@ -59,6 +62,7 @@ export function useSelectionWorkflow({
     const heading = sourceRef.sectionId ? sectionMap.get(sourceRef.sectionId)?.heading : undefined
     setFlashcardText(text)
     setFlashcardHeading(heading)
+    setFlashcardSectionId(sourceRef.sectionId ?? null)
     setFlashcardOpen(true)
     openPractice()
   }, [sectionMap, openPractice])
@@ -123,6 +127,7 @@ export function useSelectionWorkflow({
     flashcardOpen,
     flashcardText,
     flashcardHeading,
+    flashcardSectionId,
     closeNote,
     closeFlashcard,
     handleAddToNote,
