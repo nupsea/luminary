@@ -128,25 +128,32 @@ export function PracticePanel({
 
   return (
     <div data-testid="docked-practice" className="flex h-full min-h-0 flex-col">
-      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">
-            {run ? "Testing yourself on" : "Practice from"}
-          </p>
-          <p data-testid="practice-scope" className="line-clamp-2 text-sm font-medium text-foreground">
-            {scopeLabel}
-          </p>
+      <div className="shrink-0 border-b border-border px-4 py-3">
+        {/* One alignment axis: the header sits over the same column the run and
+            the deck use, so nothing slides left when the panel is dragged wide. */}
+        <div className="mx-auto flex w-full max-w-2xl items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">
+              {run ? "Testing yourself on" : "Practice from"}
+            </p>
+            <p
+              data-testid="practice-scope"
+              className="line-clamp-2 text-sm font-medium text-foreground"
+            >
+              {scopeLabel}
+            </p>
+          </div>
+          {scoped && !run && (
+            <button
+              onClick={() => { setStartError(null); setGeneratedNote(null); onClearScope() }}
+              aria-label="Clear the selected scope"
+              title="Use the whole document"
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
-        {scoped && !run && (
-          <button
-            onClick={() => { setStartError(null); setGeneratedNote(null); onClearScope() }}
-            aria-label="Clear the selected scope"
-            title="Use the whole document"
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-          >
-            <X size={16} />
-          </button>
-        )}
       </div>
 
       {run ? (
@@ -162,50 +169,52 @@ export function PracticePanel({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 size={13} className="animate-spin" />
-              Looking at what you have here...
-            </div>
-          ) : isError ? (
-            <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              Could not load this deck.
-              <button onClick={() => void refetch()} className="ml-2 underline hover:no-underline">
-                Retry
-              </button>
-            </div>
-          ) : (
-            <DeckState
-              total={deckTotal}
-              due={dueCards.length}
-              starting={starting}
-              onStart={start}
-            />
-          )}
-
-          {startError && (
-            <p className="mt-3 rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {startError}
-            </p>
-          )}
-
-          <div className="mt-5 border-t border-border pt-4">
-            <CardGenerator
-              documentId={documentId}
-              sectionHeading={sectionHeading}
-              context={context}
-              onGenerated={(count) => {
-                setGeneratedNote(
-                  count === 0
-                    ? "No cards came back. The passage may be too short to make any from."
-                    : `${count} card${count === 1 ? "" : "s"} added. They are due now.`,
-                )
-                void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
-              }}
-            />
-            {generatedNote && (
-              <p className="mt-2 text-xs text-muted-foreground">{generatedNote}</p>
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                Looking at what you have here...
+              </div>
+            ) : isError ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                Could not load this deck.
+                <button onClick={() => void refetch()} className="ml-2 underline hover:no-underline">
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <DeckState
+                total={deckTotal}
+                due={dueCards.length}
+                starting={starting}
+                onStart={start}
+              />
             )}
+
+            {startError && (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {startError}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2 border-t border-border pt-5">
+              <CardGenerator
+                documentId={documentId}
+                sectionHeading={sectionHeading}
+                context={context}
+                onGenerated={(count) => {
+                  setGeneratedNote(
+                    count === 0
+                      ? "No cards came back. The passage may be too short to make any from."
+                      : `${count} card${count === 1 ? "" : "s"} added. They are due now.`,
+                  )
+                  void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
+                }}
+              />
+              {generatedNote && (
+                <p className="text-sm text-muted-foreground">{generatedNote}</p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -226,11 +235,11 @@ function DeckState({
 }) {
   if (total === 0) {
     return (
-      <div>
-        <p data-testid="deck-summary" className="text-sm text-foreground">
+      <div className="rounded-xl border border-border bg-card p-5">
+        <p data-testid="deck-summary" className="text-base font-medium text-foreground">
           Nothing to practise here yet.
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
           Make a few cards from what you are reading and you can test yourself on them straight
           away.
         </p>
@@ -240,18 +249,18 @@ function DeckState({
 
   const ahead = due === 0
   return (
-    <div>
-      <p data-testid="deck-summary" className="text-sm font-medium text-foreground">
+    <div className="rounded-xl border border-border bg-card p-5">
+      <p data-testid="deck-summary" className="text-base font-medium text-foreground">
         {ahead
           ? `${total} card${total === 1 ? "" : "s"} here, none due right now.`
           : `${due} due now, of ${total} card${total === 1 ? "" : "s"} here.`}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
         {ahead
           ? "They are scheduled further out, which is the point of the schedule. Run them anyway if you want to know where you stand."
           : "The answer stays hidden until you have committed to one."}
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-3">
         <StartButton
           testId="start-recall"
           icon={Brain}
@@ -297,13 +306,13 @@ function StartButton({
       data-testid={testId}
       onClick={onClick}
       disabled={disabled}
-      className="flex flex-col items-start gap-0.5 rounded-md border border-border bg-background px-3 py-2 text-left hover:border-primary hover:bg-muted/50 disabled:opacity-50"
+      className="flex flex-col items-start gap-1 rounded-lg border border-border bg-background px-4 py-3 text-left transition-colors hover:border-primary hover:bg-muted/50 disabled:opacity-50"
     >
-      <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
+      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
         {label}
       </span>
-      <span className="text-[11px] text-muted-foreground">{hint}</span>
+      <span className="text-xs text-muted-foreground">{hint}</span>
     </button>
   )
 }

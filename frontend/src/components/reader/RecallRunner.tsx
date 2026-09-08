@@ -31,9 +31,11 @@ import {
   type CalibrationTone,
 } from "@/lib/recallFeedback"
 import {
+  type Flashcard,
   type PendingTeachback,
   type Rating,
   type TeachbackResultItem,
+  fetchSourceContext,
   submitReview,
   submitTeachbackAsync,
 } from "@/lib/studyApi"
@@ -46,10 +48,11 @@ const RATING_ICONS: Record<Rating, LucideIcon> = {
   easy: ChevronsUp,
 }
 
-// Panel scale: the typography plugin's prose sizes are set for a page, and an
-// h2 at 24px in a 460px column reads as a headline rather than an answer.
-const PANEL_PROSE =
-  "[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_p]:text-xs [&_li]:text-xs [&_code]:text-[11px] [&_h1]:mt-0 [&_h2]:mt-2"
+// The Study page's revealed-answer treatment, so a card reads the same in the
+// dock as on the page. The heading clamps are the panel's own: prose sizes an
+// h2 for a page, not for a column that can be 460px wide.
+const ANSWER_PROSE =
+  "text-base leading-relaxed text-foreground prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_h1]:mt-0 [&_h2]:mt-3"
 
 interface RecallRunnerProps {
   initial: UseStudySessionInput["initial"]
@@ -89,6 +92,9 @@ export function RecallRunner({
   const [explanation, setExplanation] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [graded, setGraded] = useState<Rating | null>(null)
+  // Where this card's answer lives in the document. Only some cards arrive
+  // carrying it (see reveal).
+  const [jumpSection, setJumpSection] = useState<string | null>(null)
   const [calibration, setCalibration] = useState<{ text: string; tone: CalibrationTone } | null>(null)
 
   // Run totals.
@@ -102,14 +108,29 @@ export function RecallRunner({
     ? results?.find((r) => r.flashcard_id === currentCard.id)
     : undefined
 
-  function reveal(sectionId: string | null) {
+  function reveal(card: Flashcard) {
     setRevealed(true)
-    if (sectionId) onJumpToSource(sectionId)
+    if (card.section_id) {
+      setJumpSection(card.section_id)
+      onJumpToSource(card.section_id)
+      return
+    }
+    // Only `GET /study/due` joins the section onto a card. A resumed session's
+    // remaining cards and a deck run that was not due both arrive without it
+    // (study.py:1333), so ask for the locus rather than dropping the jump --
+    // landing on the passage is the reason to practise inside the reader.
+    void (async () => {
+      const ctx = await fetchSourceContext(card.id)
+      if (ctx?.section_id) {
+        setJumpSection(ctx.section_id)
+        onJumpToSource(ctx.section_id)
+      }
+    })()
   }
 
   function handlePredict(rating: Rating) {
     setPredicted(rating)
-    reveal(currentCard?.section_id ?? null)
+    if (currentCard) reveal(currentCard)
   }
 
   async function handleSubmitExplanation() {
@@ -127,7 +148,7 @@ export function RecallRunner({
       ])
     } finally {
       setSubmitting(false)
-      reveal(currentCard.section_id)
+      reveal(currentCard)
     }
   }
 
@@ -137,6 +158,7 @@ export function RecallRunner({
     setExplanation("")
     setGraded(null)
     setCalibration(null)
+    setJumpSection(null)
     const nextIdx = currentIndex + 1
     if (nextIdx >= queue.length) {
       void completeSession()
@@ -200,13 +222,13 @@ export function RecallRunner({
 
   return (
     <div data-testid="recall-runner" className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${phase.style}`}>
+      <div className="shrink-0 border-b border-border px-4 py-2.5">
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className={`rounded px-2 py-0.5 text-xs font-medium ${phase.style}`}>
               {phase.label}
             </span>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {reviewed} of {total} reviewed
             </span>
           </div>
@@ -214,12 +236,12 @@ export function RecallRunner({
             onClick={() => void exit(onDone)}
             aria-label="Leave this run"
             title="Leave this run"
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground transition-colors hover:text-foreground"
           >
-            <X size={15} />
+            <X size={16} />
           </button>
         </div>
-        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-secondary">
+        <div className="mx-auto mt-2 h-1.5 w-full max-w-2xl overflow-hidden rounded-full bg-secondary">
           <div
             className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${pct}%` }}
@@ -227,138 +249,161 @@ export function RecallRunner({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        <p data-testid="recall-question" className="text-sm font-medium leading-snug text-foreground">
-          {currentCard.question}
-        </p>
-
-        {!revealed && mode === "flashcard" && (
-          <div className="mt-4">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Before you look
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Answer it in your head first, then say how that went.
-            </p>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              {PREDICTIONS.map((p) => (
-                <button
-                  key={p.value}
-                  data-testid={`predict-${p.value}`}
-                  onClick={() => handlePredict(p.value)}
-                  className={`rounded border px-2 py-2 text-xs font-medium ${RATING_CLASS[p.value]}`}
+      {/* The column, not a viewport breakpoint, is what handles width here: the
+          panel is dragged between 280 and 900px independently of the window. */}
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+          {/* The card, sized the way the Study page sizes it: the question
+              carries the weight until the answer arrives, then yields to it. */}
+          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            {revealed ? (
+              <div className="flex flex-col gap-4">
+                <p
+                  data-testid="recall-question"
+                  className="text-sm leading-relaxed text-muted-foreground"
                 >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!revealed && mode === "teachback" && (
-          <div className="mt-4">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Explain it in your own words
-            </p>
-            <textarea
-              value={explanation}
-              onChange={(e) => setExplanation(e.target.value)}
-              rows={6}
-              placeholder="Say it the way you would to someone who has not read this."
-              className="mt-1.5 w-full resize-y rounded border border-border bg-background p-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            <button
-              onClick={() => void handleSubmitExplanation()}
-              disabled={submitting || explanation.trim().length === 0}
-              className="mt-2 flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-              Submit and compare
-            </button>
-          </div>
-        )}
-
-        {revealed && (
-          <div className="mt-4 flex flex-col gap-3">
-            {mode === "teachback" && (
-              <TeachbackVerdict
-                result={cardResult}
-                // Per card, not per run: a single failed submission used to mark
-                // every card after it unscored, including the ones that scored.
-                failed={pending.some(
-                  (p) => p.flashcardId === currentCard.id && p.id.startsWith("error-"),
-                )}
-              />
-            )}
-
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Answer</p>
-              <div data-testid="recall-answer" className="mt-1 text-xs leading-relaxed">
-                <MarkdownRenderer className={PANEL_PROSE}>{currentCard.answer}</MarkdownRenderer>
-              </div>
-            </div>
-
-            {currentCard.source_excerpt && (
-              <div className="rounded border border-border bg-muted/30 p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    From the document
-                  </p>
-                  {currentCard.section_id && (
-                    <button
-                      data-testid="recall-jump"
-                      onClick={() => onJumpToSource(currentCard.section_id as string)}
-                      className="flex items-center gap-1 text-[11px] text-primary hover:underline"
-                    >
-                      <Text size={11} />
-                      Show me
-                    </button>
-                  )}
-                </div>
-                <p className="mt-1 text-xs italic leading-relaxed text-muted-foreground">
-                  {currentCard.source_excerpt}
+                  {currentCard.question}
                 </p>
+                <hr className="border-border" />
+                <div data-testid="recall-answer">
+                  <MarkdownRenderer className={ANSWER_PROSE}>
+                    {currentCard.answer}
+                  </MarkdownRenderer>
+                </div>
               </div>
-            )}
-
-            {calibration && (
-              <p className={`text-xs font-medium ${CALIBRATION_TEXT_CLASS[calibration.tone]}`}>
-                {calibration.text}
+            ) : (
+              <p
+                data-testid="recall-question"
+                className="text-lg font-semibold leading-snug text-foreground"
+              >
+                {currentCard.question}
               </p>
             )}
-
-            {graded ? (
-              <button
-                onClick={advance}
-                className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Next card
-              </button>
-            ) : (
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  How did that go?
-                </p>
-                <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-                  {RATING_ORDER.map((r) => {
-                    const Icon = RATING_ICONS[r]
-                    return (
-                      <button
-                        key={r}
-                        data-testid={`grade-${r}`}
-                        onClick={() => void handleGrade(r)}
-                        className={`flex flex-col items-center gap-0.5 rounded border px-1 py-1.5 text-[11px] font-medium ${RATING_CLASS[r]}`}
-                      >
-                        <Icon size={13} />
-                        {RATING_LABELS[r]}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
           </div>
-        )}
+
+          {!revealed && mode === "flashcard" && (
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                  Before you look
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Answer it in your head first, then say how that went.
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {PREDICTIONS.map((p) => (
+                  <button
+                    key={p.value}
+                    data-testid={`predict-${p.value}`}
+                    onClick={() => handlePredict(p.value)}
+                    className={`rounded-lg border px-3 py-3 text-sm font-medium transition-colors ${RATING_CLASS[p.value]}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!revealed && mode === "teachback" && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                Explain it in your own words
+              </p>
+              <textarea
+                value={explanation}
+                onChange={(e) => setExplanation(e.target.value)}
+                rows={7}
+                placeholder="Say it the way you would to someone who has not read this."
+                className="w-full resize-y rounded-lg border border-border bg-background p-3 text-sm leading-relaxed text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <button
+                onClick={() => void handleSubmitExplanation()}
+                disabled={submitting || explanation.trim().length === 0}
+                className="flex items-center gap-2 self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Submit and compare
+              </button>
+            </div>
+          )}
+
+          {revealed && (
+            <>
+              {mode === "teachback" && (
+                <TeachbackVerdict
+                  result={cardResult}
+                  // Per card, not per run: a single failed submission used to mark
+                  // every card after it unscored, including the ones that scored.
+                  failed={pending.some(
+                    (p) => p.flashcardId === currentCard.id && p.id.startsWith("error-"),
+                  )}
+                />
+              )}
+
+              {currentCard.source_excerpt && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                      From the document
+                    </p>
+                    {jumpSection && (
+                      <button
+                        data-testid="recall-jump"
+                        onClick={() => onJumpToSource(jumpSection)}
+                        className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                      >
+                        <Text size={12} />
+                        Show me
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm italic leading-relaxed text-muted-foreground">
+                    {currentCard.source_excerpt}
+                  </p>
+                </div>
+              )}
+
+              {calibration && (
+                <p className={`text-sm font-medium ${CALIBRATION_TEXT_CLASS[calibration.tone]}`}>
+                  {calibration.text}
+                </p>
+              )}
+
+              {graded ? (
+                <button
+                  onClick={advance}
+                  className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Next card
+                </button>
+              ) : (
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                    How did that go?
+                  </p>
+                  <div className="mt-2 grid grid-cols-4 gap-2">
+                    {RATING_ORDER.map((r) => {
+                      const Icon = RATING_ICONS[r]
+                      return (
+                        <button
+                          key={r}
+                          data-testid={`grade-${r}`}
+                          onClick={() => void handleGrade(r)}
+                          className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-2.5 text-sm font-medium transition-colors ${RATING_CLASS[r]}`}
+                        >
+                          <Icon size={15} />
+                          {RATING_LABELS[r]}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -388,7 +433,6 @@ function TeachbackVerdict({
     </p>
   )
 }
-
 function Readout({
   mode,
   reviewed,
@@ -409,59 +453,65 @@ function Readout({
   onDone: () => void
 }) {
   return (
-    <div data-testid="recall-readout" className="flex h-full min-h-0 flex-col overflow-auto p-4">
-      <p className="text-sm font-medium text-foreground">Run finished</p>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Stat label="Reviewed" value={String(reviewed)} />
-        <Stat label="Got right" value={reviewed === 0 ? "--" : `${correct} of ${reviewed}`} />
+    <div
+      data-testid="recall-readout"
+      className="min-h-0 flex-1 overflow-auto p-4"
+    >
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+        <p className="text-lg font-semibold text-foreground">Run finished</p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Reviewed" value={String(reviewed)} />
+          <Stat label="Got right" value={reviewed === 0 ? "--" : `${correct} of ${reviewed}`} />
+        </div>
+
+        {mode === "flashcard" && predictionsMade > 0 && (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+              What you thought you knew
+            </p>
+            <p className="mt-2 text-base leading-relaxed text-foreground">
+              {predictionsCalibrated} of {predictionsMade} predictions matched how the card
+              actually went.
+            </p>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              The gap between those two is the part worth studying.
+            </p>
+          </div>
+        )}
+
+        {mode === "teachback" && teachbackDone > 0 && (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+              Your explanations
+            </p>
+            <p className="mt-2 text-base leading-relaxed text-foreground">
+              {teachbackDone} scored, averaging {teachbackAvg}/100.
+            </p>
+          </div>
+        )}
+        {mode === "teachback" && teachbackDone === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No explanation has finished scoring yet. They keep scoring in the background.
+          </p>
+        )}
+
+        <button
+          onClick={onDone}
+          className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          Back to the deck
+        </button>
       </div>
-
-      {mode === "flashcard" && predictionsMade > 0 && (
-        <div className="mt-4">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            What you thought you knew
-          </p>
-          <p className="mt-1 text-xs text-foreground">
-            {predictionsCalibrated} of {predictionsMade} predictions matched how the card
-            actually went.
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            The gap between those two is the part worth studying.
-          </p>
-        </div>
-      )}
-
-      {mode === "teachback" && teachbackDone > 0 && (
-        <div className="mt-4">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Your explanations
-          </p>
-          <p className="mt-1 text-xs text-foreground">
-            {teachbackDone} scored, averaging {teachbackAvg}/100.
-          </p>
-        </div>
-      )}
-      {mode === "teachback" && teachbackDone === 0 && (
-        <p className="mt-4 text-xs text-muted-foreground">
-          No explanation has finished scoring yet. They keep scoring in the background.
-        </p>
-      )}
-
-      <button
-        onClick={onDone}
-        className="mt-5 self-start rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-      >
-        Back to the deck
-      </button>
     </div>
   )
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-border p-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-foreground">{value}</p>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <p className="text-xs uppercase tracking-wider text-muted-foreground/70">{label}</p>
+      <p className="mt-1.5 text-xl font-semibold text-foreground">{value}</p>
     </div>
   )
 }

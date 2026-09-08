@@ -76,9 +76,9 @@ export function CardGenerator({
   }
 
   return (
-    <div data-testid="card-generator" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <div data-testid="card-generator" className="flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Add
           <input
             type="number"
@@ -89,22 +89,22 @@ export function CardGenerator({
               setCount(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 3)))
             }
             aria-label="How many cards to generate"
-            className="w-14 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-16 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
           cards
         </label>
         <button
           onClick={() => void handleGenerate()}
           disabled={generating}
-          className="flex items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
         >
-          {generating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+          {generating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
           {generating ? "Writing cards..." : "Generate"}
         </button>
       </div>
 
       {error && (
-        <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
           <button
             onClick={() => void handleGenerate()}

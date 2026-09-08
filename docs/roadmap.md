@@ -280,10 +280,16 @@ advance. Nothing here is new machinery: `prepareStudySession`, `submitReview`'s 
 them. `recallFeedback.ts` is what the Study page and the panel now share, so calibration — the number
 the learner record is built on — is scored once rather than twice.
 
-A card reached through `/study/due` carries its `section_id` and can be jumped to. Running a deck
-that is *not* due goes through `prepareSectionStudyFromCards`, and for document scope those cards
-come from `GET /flashcards/{id}`, which does not join the section — so the jump is offered per card
-rather than assumed.
+Only `GET /study/due` joins a section onto the cards it returns. A resumed session's remaining cards
+(`study.py:1333`) and a deck run that was not due both arrive without one, so revealing resolves the
+locus through `GET /flashcards/{id}/source-context` when the card does not carry it — otherwise the
+jump silently disappears on exactly the second run of any deck.
+
+The panel is dragged between 280 and 900px independently of the window, so a viewport breakpoint is
+the wrong instrument: a centred `max-w-2xl` column carries the width, and the header sits over the
+same column so nothing slides left when the panel is widened. Type follows the Study page rather
+than the dock's old one-step-smaller scale — question at `text-lg` until the answer arrives, then
+muted at `text-sm` above a rule with the answer at `text-base`.
 
 Every face stays mounted and hidden, so switching tabs costs neither a streaming explanation nor a
 half-written one. One ref carries where a transient face returns the panel, so closing an explanation

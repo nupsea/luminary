@@ -299,9 +299,18 @@ if (paraCount) {
 
       const startRecall = page.locator('[data-testid="start-recall"]')
       check("the deck offers a recall run", (await startRecall.count()) > 0)
+      let ranSessionId = null
       if (await startRecall.count()) {
         await startRecall.first().click()
         await page.waitForTimeout(2500)
+        // The id of the session this run is actually on, so cleanup removes that
+        // one and nothing else. Diffing the document's sessions instead would
+        // delete any session someone started in the app while this was running,
+        // and take their review events down with it.
+        ranSessionId = await page.evaluate(() => {
+          const raw = JSON.parse(localStorage.getItem("luminary-app-store") ?? "{}")
+          return raw.state?.studySessionId ?? null
+        })
         const before = await page.evaluate(() => ({
           question: document.querySelector('[data-testid="recall-question"]')?.textContent?.trim() ?? "",
           answers: document.querySelectorAll('[data-testid="recall-answer"]').length,
@@ -330,15 +339,15 @@ if (paraCount) {
         }
       }
 
-      const removed = await page.evaluate(async ([api, id, before]) => {
-        const res = await fetch(`${api}/study/sessions?page=1&page_size=100&document_id=${id}`)
-        const fresh = ((await res.json()).items ?? []).filter((x) => !before.includes(x.id))
-        for (const s of fresh) {
-          await fetch(`${api}/study/sessions/${s.id}`, { method: "DELETE" })
-        }
-        return fresh.length
-      }, [API, practicable.id, sessionsBefore])
-      console.log(`  cleaned up ${removed} study session${removed === 1 ? "" : "s"} this check opened`)
+      // Only the session this run opened: one that was already there is someone
+      // else's, and the run adopting it is exactly the resume behaviour.
+      const removed = ranSessionId !== null && !sessionsBefore.includes(ranSessionId)
+        ? await page.evaluate(async ([api, sid]) =>
+            (await fetch(`${api}/study/sessions/${sid}`, { method: "DELETE" })).ok, [API, ranSessionId])
+        : false
+      console.log(removed
+        ? `  cleaned up the study session this check opened (${ranSessionId.slice(0, 8)})`
+        : "  opened no new study session -- it resumed one that was already there")
       await page.goto(`${APP}/library?doc=${docId}`, { waitUntil: "domcontentloaded" })
       await page.waitForTimeout(2500)
     }
