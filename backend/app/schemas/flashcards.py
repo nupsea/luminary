@@ -34,6 +34,12 @@ class FlashcardGenerateRequest(BaseModel):
     count: int = 10
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     context: str | None = None  # selected text from reader; used directly when provided
+    # Read material this document has not been questioned on yet, the way
+    # `regenerate` does. Off by default because a caller asking for cards on a
+    # named passage means that passage; the reader's "add more" turns it on,
+    # because adding to a deck means adding something the deck does not have.
+    # Ignored when `context` is supplied -- the selection IS the passage.
+    avoid_used_material: bool = False
     # None follows the model chosen in Settings, exactly as /qa does when its
     # selector reads "Auto". A concrete id overrides it for this request only.
     model: str | None = None
@@ -59,6 +65,12 @@ class FlashcardRegenerateRequest(BaseModel):
     count: int = Field(default=0, ge=0, le=50)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     model: str | None = None
+    # Narrows the replacement to one section of the document: only that
+    # section's cards are replaced, and the new ones are written from it. A
+    # reader who regenerates the chapter in front of them must not lose the
+    # rest of the book's deck.
+    section_id: str | None = None
+    section_heading: str | None = None
 
     @field_validator("model")
     @classmethod
@@ -119,6 +131,18 @@ class GenerateTechnicalRequest(BaseModel):
     @classmethod
     def _check_model(cls, value: str | None) -> str | None:
         return _validate_model_id(value)
+
+
+class MaterialHeadroomResponse(BaseModel):
+    """Response schema for GET /flashcards/{document_id}/headroom"""
+
+    total_chunks: int
+    used_chunks: int
+    unused_chunks: int
+    cards: int
+    # Cards predating `source_chunk_ids`. They name no passage, so the headroom
+    # above can only over-state what is left, never under-state it.
+    cards_without_sources: int
 
 
 class FlashcardResponse(BaseModel):

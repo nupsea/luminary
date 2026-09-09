@@ -13,9 +13,9 @@ import hashlib
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ from app.services.flashcard_factuality import (
     factuality_model,
     is_self_judging,
 )
+from app.services.flashcard_grounding import contiguous_runs, run_containing
 from app.services.flashcard_parsers import (
     GROUNDING_UNCHECKED,
     _build_cloze_question,
@@ -98,6 +99,34 @@ def _generation_model() -> str | None:
     # loses both -- in cloud mode with the key only in Settings, every
     # generation would fail authentication while chat kept working.
     return choice.model if choice.explicit else None
+
+
+
+def _card_chunk_ids(
+    chunks: Sequence[ChunkModel], passage_chunk_ids: list[str], excerpt: str
+) -> list[str]:
+    """The chunks THIS card was written from, not the whole batch's.
+
+    One call is given several windows sampled from across the document and asked
+    for N cards. Recording the whole sampled list against every card made each
+    card claim material it never used: measured on a real library, a recorded
+    passage was 6.5 chunks against the 3.7 the card was written from, so 38% of
+    the text a teach-back graded against came from elsewhere in the batch -- and
+    completeness was scored against all of it.
+
+    The card's own quote picks its window out. The generation gate has already
+    checked that quote is verbatim in the prompt, so this is a lookup, not a
+    judgment. An ambiguous or absent match keeps the full list -- claiming too
+    much is the safe direction for every reader of this column, since a passage
+    that is too wide can only make a grounding check more permissive.
+    """
+    if len(passage_chunk_ids) < 2 or not excerpt:
+        return passage_chunk_ids
+    recorded = set(passage_chunk_ids)
+    run = run_containing(
+        contiguous_runs([c for c in chunks if c.id in recorded]), excerpt
+    )
+    return passage_chunk_ids if run is None else [c.id for c in run]
 
 
 async def generate_technical(
@@ -208,7 +237,9 @@ async def generate_technical(
             bloom_level=bloom_level,
             grounding=item.get("grounding", GROUNDING_UNCHECKED),
             factuality=item.get("factuality", FACTUALITY_UNCHECKED),
-            source_chunk_ids=passage_chunk_ids,
+            source_chunk_ids=_card_chunk_ids(
+                chunks, passage_chunk_ids, source_excerpt
+            ),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -327,7 +358,9 @@ async def generate_cloze(
                 source_excerpt or _build_cloze_question(cloze_text).replace("[____]", ""),
                 combined_text,
             ),
-            source_chunk_ids=passage_chunk_ids,
+            source_chunk_ids=_card_chunk_ids(
+                chunks, passage_chunk_ids, source_excerpt
+            ),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -495,13 +528,14 @@ async def _drop_near_duplicates(
 
     A note is one short text, so a replacement cannot be steered onto unread
     material the way a document's can (`_passage_not_yet_used`). Rejection is
-    what makes it different instead, and it is the same 0.85 cosine test
-    `generate` applies to document cards -- reused rather than invented, and
-    measured on real note questions before being relied on here. The two cases
-    that bracket it: "In what ways is BM25 an improvement over TF-IDF?" against
-    a deck holding "How does BM25 improve upon TF-IDF?" scores 0.9828 and must
-    go, while "When is a cross-encoder too slow to use as a first-stage
-    retriever?" is new to that same deck at 0.8248 and must stay. Scoped to the
+    what makes it different instead, and it is the same cosine test `generate`
+    applies to document cards (`_is_near_duplicate`) -- reused rather than
+    invented, and measured on real note questions before being relied on here.
+    The two cases that bracket its question bar: "In what ways is BM25 an
+    improvement over TF-IDF?" against a deck holding "How does BM25 improve upon
+    TF-IDF?" scores 0.9828 and must go, while "When is a cross-encoder too slow
+    to use as a first-stage retriever?" is new to that same deck at 0.8248 and
+    must stay. Scoped to the
     one note: a card about a different note is not a duplicate of this one.
 
     Returns (kept, dropped). Embedding failure keeps everything: a duplicate that
@@ -511,42 +545,59 @@ async def _drop_near_duplicates(
     if not note_id or not cards:
         return cards, 0
 
-    import numpy as np  # noqa: PLC0415
-
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
     from app.services.flashcard import (  # noqa: PLC0415
         _fetch_existing_embeddings,
         _is_near_duplicate,
+        _repeats_this_call,
     )
 
-    _existing, existing_vecs = await _fetch_existing_embeddings(
-        "default", session, note_id=note_id
-    )
-    if existing_vecs is None:
-        return cards, 0
+    # An empty deck is not a reason to skip the test. Returning early here left
+    # the FIRST batch on a note unchecked against ITSELF, so the one run with
+    # nothing to compare against was the one run that could deliver the same
+    # question twice.
+    _existing, deck_q = await _fetch_existing_embeddings("default", session, note_id=note_id)
     try:
         embedder = get_embedding_service()
-        vecs = np.array(
-            await asyncio.to_thread(
-                embedder.encode, [str(c.get("question", "")).strip() for c in cards]
-            )
-        )
+        q_vecs, a_vecs = await _encode_card_texts(embedder, cards)
     except Exception:
         logger.warning("Embedding dedup: candidate encode failed; keeping all", exc_info=True)
         return cards, 0
 
     kept: list[dict] = []
-    pool = existing_vecs
+    call_q = call_a = None
     for i, card in enumerate(cards):
-        if _is_near_duplicate(vecs[i], pool):
+        if (deck_q is not None and _is_near_duplicate(q_vecs[i], deck_q)) or (
+            call_q is not None and _repeats_this_call(q_vecs[i], a_vecs[i], call_q, call_a)
+        ):
             logger.info(
                 "flashcard.generate_from_notes: skipping near-duplicate question: %r",
                 str(card.get("question", ""))[:80],
             )
             continue
-        pool = np.vstack([pool, vecs[i : i + 1]])
+        call_q, call_a = _extend_pool(call_q, call_a, q_vecs[i : i + 1], a_vecs[i : i + 1])
         kept.append(card)
     return kept, len(cards) - len(kept)
+
+
+async def _encode_card_texts(embedder: Any, cards: list[dict]) -> tuple[Any, Any]:
+    """Embed candidate questions and answers, in two batches."""
+    import numpy as np  # noqa: PLC0415
+
+    questions = [str(c.get("question", "")).strip() for c in cards]
+    answers = [str(c.get("answer", "")).strip() for c in cards]
+    q_vecs = np.array(await asyncio.to_thread(embedder.encode, questions))
+    a_vecs = np.array(await asyncio.to_thread(embedder.encode, answers))
+    return q_vecs, a_vecs
+
+
+def _extend_pool(pool_q: Any, pool_a: Any, q_row: Any, a_row: Any) -> tuple[Any, Any]:
+    """Add an accepted candidate to this call's pool, which the next one is compared against."""
+    import numpy as np  # noqa: PLC0415
+
+    if pool_q is None:
+        return q_row, a_row
+    return np.vstack([pool_q, q_row]), np.vstack([pool_a, a_row])
 
 
 async def _collect_with_backfill(
@@ -665,6 +716,7 @@ async def generate(
         _get_entity_names_for_document,
         _get_section_context_for_chunks,
         _is_near_duplicate,
+        _repeats_this_call,
         _resolve_section_heading,
     )
 
@@ -676,8 +728,26 @@ async def generate(
     doc = doc_result.scalar_one_or_none()
     content_type = doc.content_type if doc else "unknown"
 
+    # Whether this recording has more than one participant, which is what
+    # separates a meeting from a talk when no profile decided it. Only asked for
+    # the content types where the answer changes the prompt.
+    has_speakers: bool | None = None
+    if (doc.content_type if doc else "") in ("audio", "video"):
+        has_speakers = bool(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(ChunkModel)
+                    .where(
+                        ChunkModel.document_id == document_id,
+                        ChunkModel.speaker.isnot(None),
+                    )
+                )
+            ).scalar()
+        )
+
     # infer genre for genre-aware system prompt
-    genre = _infer_genre(doc)
+    genre = _infer_genre(doc, has_speakers=has_speakers)
     system_prompt = _build_genre_system_prompt(genre)
 
     # When the caller supplies selected text, use it directly (bypass classifier).
@@ -815,11 +885,9 @@ async def generate(
 
     now = datetime.now(UTC)
 
-    import numpy as np  # noqa: PLC0415
-
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    _existing_qs, existing_vecs = await _fetch_existing_embeddings(
+    _existing_qs, deck_q = await _fetch_existing_embeddings(
         "default", session, document_id=document_id
     )
 
@@ -829,36 +897,48 @@ async def generate(
             model or _generation_model() or "default",
         )
 
-    if candidates and existing_vecs is not None:
+    # Encoded whenever there are candidates, not only when a deck exists to
+    # compare them against: an accepted card joins the call's own pool, so this
+    # is also how a batch is checked against ITSELF. Gating the encode on an
+    # existing deck meant the first generation on a document -- the one run with
+    # nothing to compare against -- was the one run that could hand back the same
+    # question twice.
+    if candidates:
         try:
             embedder = get_embedding_service()
-            cand_texts = [str(c.get("question", "")).strip() for c in candidates]
-            cand_vecs = await asyncio.to_thread(embedder.encode, cand_texts)
-            cand_vecs = np.array(cand_vecs)
+            cand_q, cand_a = await _encode_card_texts(embedder, candidates)
         except Exception:
             logger.warning(
                 "Embedding dedup: candidate encode failed; skipping dedup", exc_info=True
             )
-            cand_vecs = None
+            cand_q = cand_a = None
     else:
-        cand_vecs = None
+        cand_q = cand_a = None
 
-    pool_vecs = existing_vecs
+    call_q = call_a = None
     deduped = 0
     flashcards: list[FlashcardModel] = []
     for i, item in enumerate(candidates):
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
-        if cand_vecs is not None and pool_vecs is not None:
-            if _is_near_duplicate(cand_vecs[i], pool_vecs):
+        if cand_q is not None:
+            # Two tests, two scopes: the deck is compared on questions alone,
+            # this call's own accepted cards on question AND answer. See
+            # `_repeats_this_call` for why the second scope is not widened.
+            if (deck_q is not None and _is_near_duplicate(cand_q[i], deck_q)) or (
+                call_q is not None
+                and _repeats_this_call(cand_q[i], cand_a[i], call_q, call_a)
+            ):
                 logger.info(
                     "flashcard.generate: skipping near-duplicate question: %r",
                     question[:80],
                 )
                 deduped += 1
                 continue
-            pool_vecs = np.vstack([pool_vecs, cand_vecs[i : i + 1]])
+            call_q, call_a = _extend_pool(
+                call_q, call_a, cand_q[i : i + 1], cand_a[i : i + 1]
+            )
         # Derived from the card's own type or depth word, not asked for as a
         # number: the prompt no longer names a taxonomy (I-28), and the level a
         # type maps to is a decision this codebase owns rather than the model.
@@ -884,7 +964,9 @@ async def generate(
             section_heading=resolved_section_heading,
             grounding=item.get("grounding", GROUNDING_UNCHECKED),
             factuality=item.get("factuality", FACTUALITY_UNCHECKED),
-            source_chunk_ids=passage_chunk_ids,
+            source_chunk_ids=_card_chunk_ids(
+                eligible_chunks, passage_chunk_ids, source_excerpt
+            ),
         )
         session.add(card)
         await _sync_flashcard_fts(card, session)
@@ -894,7 +976,7 @@ async def generate(
         llm_output_stats.record_items_deduped(deduped)
         logger.info(
             "flashcard.generate: %d of %d candidates removed as near-duplicates of cards "
-            "this document already has",
+            "this document already has, or of each other",
             deduped,
             len(candidates),
         )
