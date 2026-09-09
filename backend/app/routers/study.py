@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,9 +42,12 @@ from app.models import (
     StudySessionModel,
     TeachbackResultModel,
 )
+from app.repos.flashcard_repo import FlashcardRepo
 from app.repos.study_repo import StudyRepo, get_study_repo
 from app.routers.flashcards import FlashcardResponse, _to_response
 from app.schemas.study import (
+    AppendSessionCardsRequest,
+    AppendSessionCardsResponse,
     AssemblePreview,
     AssembleRequest,
     AssembleResponse,
@@ -164,6 +168,23 @@ _teachback_eval_sem = asyncio.Semaphore(1)
 # `atomicity 1.0000` on a set that was two thirds multi-point answers. The bands
 # below say what each score means, and the evaluator has to quote the passage for
 # its accuracy claim, which is the one thing it cannot produce from memory.
+#
+# Two more, found on a real run (2026-09-09):
+#
+# It never saw the question. The template interpolated passage, card answer and
+# explanation, so `completeness` -- "how much of what the passage covers the
+# student said" -- was measured against the whole passage rather than against
+# what was asked. On a card asking why personal context matters, the stored
+# missing_points were "creating a personalized workflow definition (agents.md)"
+# and "demonstrating the iterative checking process with /skeptical": two topics
+# the question did not raise. Completeness 10/100. The question is in the prompt
+# now and both `completeness` and `missing_points` are scoped to it.
+#
+# And `score` was a fourth integer asked for alongside the three dimensions,
+# with nothing relating them. Real rows: score 0 against completeness 50, and
+# score 60 against accuracy 40. The learner reads the headline and the breakdown
+# as one judgment; they were two. The model is no longer asked for a score --
+# `_score_from_dimensions` computes it, so the breakdown always explains it.
 _TEACHBACK_SYSTEM = (
     "You grade a student's explanation against a source passage. "
     "Judge only against the passage: not against what you know about the subject. "
@@ -172,23 +193,47 @@ _TEACHBACK_SYSTEM = (
 
 _TEACHBACK_USER_TMPL = (
     "PASSAGE (the source material):\n{source}\n\n"
+    "The QUESTION the student was asked: {question}\n\n"
     "The card's answer, for reference: {answer}\n\n"
     "The student explained:\n{explanation}\n\n"
-    "Score the explanation 0-100 against the passage:\n"
-    "  90-100  every claim is in the passage, and nothing important is missing\n"
-    "  70-89   accurate, but omits something the passage treats as central\n"
-    "  40-69   partly right, with a gap or a vague claim the passage contradicts\n"
-    "  1-39    mostly wrong, or reverses what the passage says\n"
-    "  0       unrelated to the passage, empty, or unintelligible\n\n"
+    "Judge the explanation against the passage, as an answer to that question.\n\n"
     "correct_points: what the student got right, as short phrases.\n"
-    "missing_points: what the passage covers and the explanation does not.\n"
+    "missing_points: what the passage says IN ANSWER TO THE QUESTION and the "
+    "explanation does not. Empty if the explanation covers it. Never list "
+    "material the question did not ask about.\n"
     "misconceptions: claims that contradict the passage. Empty if there are none "
     "-- do not invent one to seem thorough.\n"
     "evidence: one sentence copied word for word from the PASSAGE that supports "
-    "your score. Copy it exactly; do not paraphrase.\n\n"
-    'Output JSON: {{"score": int, "correct_points": [str], '
-    '"missing_points": [str], "misconceptions": [str], "evidence": str}}'
+    "your accuracy score. Copy it exactly; do not paraphrase.\n"
+    "accuracy -- how much of what the student said the passage supports:\n"
+    "  90-100  every claim is in the passage\n"
+    "  70-89   the substance is in the passage, with one unsupported aside\n"
+    "  40-69   partly supported, with a claim the passage does not back\n"
+    "  1-39    mostly unsupported, or reverses what the passage says\n"
+    "  0       unrelated to the passage, empty, or unintelligible\n"
+    "completeness -- how much of the passage's answer TO THAT QUESTION the "
+    "student gave. Material the passage covers that the question did not ask "
+    "about is not missing:\n"
+    "  90-100  nothing the question asked for is left out\n"
+    "  70-89   the main point is there, a supporting detail is not\n"
+    "  40-69   about half of what the question asked for\n"
+    "  1-39    a fragment of it\n"
+    "  0       nothing the question asked for\n"
+    "clarity: 0-100, how clearly it was put.\n\n"
+    'Output JSON: {{"correct_points": [str], '
+    '"missing_points": [str], "misconceptions": [str], "evidence": str, '
+    '"accuracy": int, "completeness": int, "clarity": int}}'
 )
+
+# The three dimensions above are integers, and deliberately not a fourth free-text
+# field. A `clarity_comment` string asked for after them was measured emitting
+# malformed JSON on the local model in 3 of 6 failures -- the model dropped the
+# opening quote and wrote `"clarity_comment": The explanation is clear...`, which
+# fails the whole parse and costs the learner their score. Numbers after prose are
+# safe; prose after numbers is not. Do not add a free-text field to this call
+# without re-running the parse-rate arm of the measurement -- which is also why
+# the three integers stay last in the output shape even though the score is now
+# derived from two of them.
 
 # A passage for a *prompt*, not for a substring search. `passage_for_card` falls
 # back to the whole document when a card predates `source_chunk_ids`, which is
@@ -197,6 +242,73 @@ _TEACHBACK_USER_TMPL = (
 # and the model returns something unparseable. Measured: 2 of 4 teach-back calls
 # came back HTTP 503 "unreadable evaluation" until this was bounded.
 _TEACHBACK_PASSAGE_CHARS = 6000
+
+
+# A discontinuous passage presented as a continuous one invites the evaluator to
+# read across the join. The generation prompt already marks its seams this way;
+# `passage_for_card` does not, because the grounding audit substring-searches its
+# output and a marker would break a quote spanning a seam. So the marker is added
+# here, where the text is only ever read by a model.
+_PASSAGE_SEAM = "\n\n[...]\n\n"
+
+
+async def _card_scope_passage(card: FlashcardModel, session: AsyncSession) -> str:
+    """The recorded chunks narrowed to the ones this card was written from.
+
+    `source_chunk_ids` is the whole *batch's* passage: every card produced by one
+    generation call records the same list (`flashcard_generators.py`), and over
+    `_CHUNK_CHAR_LIMIT` that list is windows sampled from across the document.
+    Measured on this library on 2026-09-09, over the 171 cards whose quote can be
+    located: a recorded passage is 6.5 chunks and the card's own run of them is
+    3.7, so **38% of the text called "the passage" is material the card was not
+    written from**, and 41% of those passages jump across the document.
+    Completeness is scored against that text, so a learner who answered the
+    question fully was marked down for not also explaining two unrelated topics.
+
+    (81% by a stricter reading that counts only the single chunk holding the
+    quote as the card's. That is not the number this removes: the chunks either
+    side of a quote are its context, and a run keeps them.)
+
+    The card's own quote locates it, and the generation gate has already checked
+    that quote is verbatim: 171 of the 173 cards carrying recorded chunks name a
+    sentence that is really inside one contiguous run of them. Runs rather than
+    single chunks, because a quote spanning a seam is real.
+
+    Returns "" only when the recorded chunks are already one continuous run, in
+    which case the caller's fallback produces the same text. When the quote
+    locates nothing, the whole recorded passage is returned with its seams
+    marked: grading against too much beats grading against nothing, but the
+    evaluator may not read across a gap it cannot see.
+    """
+    from app.services.flashcard_grounding import (  # noqa: PLC0415
+        contiguous_runs,
+        run_containing,
+    )
+
+    ids = [c for c in (card.source_chunk_ids or []) if isinstance(c, str)]
+    # A card with no quote cannot be narrowed, but its recorded chunks are just
+    # as discontinuous, so it still needs its seams marked.
+    excerpt = (card.source_excerpt or "").strip()
+    if len(ids) < 2:
+        return ""
+    rows = await session.execute(
+        select(ChunkModel).where(ChunkModel.id.in_(ids))
+    )
+    runs = contiguous_runs(list(rows.scalars().all()))
+    if len(runs) < 2:
+        return ""
+    matched = run_containing(runs, excerpt)
+    if matched is not None:
+        return _run_text(matched)
+    # The quote is in none of the runs, or in more than one, so there is no
+    # narrowing to do. Keep everything -- grading against too much beats grading
+    # against nothing -- but stop presenting four places in a document as one
+    # continuous passage.
+    return _PASSAGE_SEAM.join(_run_text(run) for run in runs)
+
+
+def _run_text(run: Sequence[ChunkModel]) -> str:
+    return "\n\n".join(c.text for c in run if c.text)
 
 
 async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
@@ -214,7 +326,9 @@ async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
     from app.services.flashcard_parsers import _normalise_for_match  # noqa: PLC0415
 
     try:
-        text = await passage_for_card(card, session)
+        text = await _card_scope_passage(card, session) or await passage_for_card(
+            card, session
+        )
     except Exception:  # noqa: BLE001
         logger.warning("teachback: could not rebuild the passage for card %s", card.id)
         return ""
@@ -250,6 +364,99 @@ def _verified_evidence(parsed: dict, source: str) -> str:
     return evidence if excerpt_is_verbatim(evidence, source) else ""
 
 
+# What the headline score is made of. Accuracy leads because a teach-back that
+# states something the passage does not support is worse than one that stops
+# short: the learner is being asked to say what is true, not to say everything.
+#
+# Clarity carries no weight. It is the one dimension with no passage behind it --
+# nothing grounds it, and it scored 6/100 on an explanation whose own
+# correct_points named two right concepts. A number the evaluator produces out of
+# taste may describe an answer; it may not grade one. It is still shown.
+_SCORE_WEIGHTS: dict[str, float] = {"accuracy": 0.6, "completeness": 0.4}
+
+# Below this, a dimension is not a partial answer but a missing one, and no
+# weighted mean may carry it to a pass. The two cases that bracket the floor:
+# accuracy 100 with completeness 20 -- everything the student said was right and
+# it was a fifth of the answer, which must not pass -- and accuracy 70 with
+# completeness 50, the substance with a supporting detail missing, which must.
+# The mean alone passes both (68 and 62); the floor is what separates them.
+_DIMENSION_FLOOR = 40
+
+
+def _score_from_dimensions(parsed: dict) -> int | None:
+    """The headline score, computed from the dimensions the learner is shown.
+
+    It used to be a fourth integer asked for beside them, and nothing related the
+    four. Across the 90 stored verdicts carrying a breakdown, 24 of them (27%)
+    have a headline **outside the range their own two dimensions bracket** --
+    `score` 85 under 95/90, `score` 75 over 60/50 -- which no weighting of the
+    two can produce, so the disagreement is not a matter of the weights chosen
+    here. Five of those told the learner "Good explanation!" and scheduled the
+    card as known while both dimensions failed. The panel prints the breakdown
+    directly beneath the headline, so a reader takes one for the explanation of
+    the other; they were two opinions.
+
+    None when a dimension is missing or out of range, which fails the parse and
+    costs the reply a retry. A score assembled from numbers nobody produced is a
+    measurement that did not happen; the same rule `_rubric_from_evaluation`
+    follows for the breakdown.
+    """
+    scores: dict[str, int] = {}
+    for key in _SCORE_WEIGHTS:
+        value = parsed.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if not 0 <= value <= 100:
+            return None
+        scores[key] = value
+    weighted = round(sum(scores[k] * w for k, w in _SCORE_WEIGHTS.items()))
+    if min(scores.values()) < _DIMENSION_FLOOR:
+        return min(weighted, PASSING_TEACHBACK_SCORE - 1)
+    return weighted
+
+
+def _rubric_from_evaluation(parsed: dict, evidence: str) -> dict | None:
+    """The three-dimension rubric, read off the one grounded judgment above.
+
+    Two of these three produce the headline score (`_score_from_dimensions`);
+    clarity is shown and does not.
+
+    It used to be a second LLM call, and that call was handed the card's answer
+    as its source material -- so the rubric the learner reads graded them
+    against the card rather than against the document, which is the defect the
+    evaluation prompt was rewritten to fix. Asking one call for both costs one
+    round trip where a teach-back used to cost two, and leaves the learner one
+    judgment to disagree with instead of two that can contradict each other.
+
+    Returns None rather than a filled-in default when a dimension is missing or
+    out of range: a rubric assembled from numbers nobody produced is a
+    measurement that did not happen. The null case already renders
+    (InlineTeachbackFeedback.tsx) and says the rubric is unavailable.
+    """
+    scores: dict[str, int] = {}
+    for key in ("accuracy", "completeness", "clarity"):
+        value = parsed.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if not 0 <= value <= 100:
+            return None
+        scores[key] = value
+    missed = parsed.get("missing_points")
+    return {
+        # The verified quote, never the raw one: an unverifiable sentence is
+        # dropped by _verified_evidence rather than shown as the reason for a score.
+        "accuracy": {"score": scores["accuracy"], "evidence": evidence},
+        "completeness": {
+            "score": scores["completeness"],
+            "missed_points": missed if isinstance(missed, list) else [],
+        },
+        # No comment: the evaluator is asked for a number here and nothing else,
+        # for the reason recorded next to the prompt. An empty string says "no
+        # remark", which is what happened -- never a sentence assembled here.
+        "clarity": {"score": scores["clarity"], "evidence": ""},
+    }
+
+
 _CORRECTION_SYSTEM = (
     "You are a flashcard generator creating a targeted correction card. "
     "Output a JSON object with no markdown."
@@ -270,27 +477,6 @@ _CORRECTION_USER_TMPL = (
     "card.\n"
     'Output JSON: {{"question": str, "answer": str, "source_excerpt": str}}'
 )
-
-# rubric evaluation prompts (duplicated in feynman_service.py -- same layer)
-_RUBRIC_SYSTEM = (
-    "You are an expert tutor evaluating a student explanation. "
-    "Output a JSON object only -- no preamble, no markdown fences."
-)
-
-_RUBRIC_USER_TMPL = (
-    "Source material:\n{source_context}\n\n"
-    "Student explanation:\n{explanation}\n\n"
-    "Evaluate on three dimensions. "
-    "For accuracy: score 0-100 and quote specific evidence from the source. "
-    "For completeness: score 0-100 and list missed_points as short concept phrases. "
-    "For clarity: score 0-100 and give a one-sentence comment. "
-    'Output JSON: {{"accuracy": {{"score": int, "evidence": str}}, '
-    '"completeness": {{"score": int, "missed_points": [str]}}, '
-    '"clarity": {{"score": int, "evidence": str}}}}'
-)
-
-
-
 
 _RATING_INT_MAP: dict[int, str] = {1: "again", 2: "hard", 3: "good", 4: "easy"}
 
@@ -695,22 +881,24 @@ async def end_session(
     # until the last evaluation lands. _evaluate_teachback_bg finalizes the
     # tally when the last pending row flips to "complete".
     tb_rows = await repo.list_teachback_results(session_id)
-    tb_complete = [tb for tb in tb_rows if tb.status == "complete"]
-    tb_pending_count = sum(1 for tb in tb_rows if tb.status == "pending")
+    tb_pending_count = 0
 
     if tb_rows:
-        scores = [tb.score for tb in tb_complete if tb.score is not None]
-        cards_reviewed = len(tb_rows)
-        cards_correct = sum(1 for s in scores if s >= 60)
-        if tb_pending_count > 0:
-            # Provisional: accuracy is unknown until evaluations finish.
-            accuracy_pct: float | None = None
-        else:
-            accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+        # Latest attempt per card, not per submission: see _latest_attempt_per_card.
+        cards_reviewed, cards_correct, accuracy_pct, tb_pending_count = _teachback_tally(
+            tb_rows
+        )
     else:
-        cards_reviewed = len(events)
-        cards_correct = sum(1 for e in events if e.is_correct)
-        accuracy_pct = round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
+        # Latest event per card, for the same reason the teach-back arm reads its
+        # latest attempt: a card graded twice in one sitting is one card
+        # reviewed. `len(events)` counted the grades, which is the defect that
+        # reached a learner as "30 of 15 reviewed" on the other arm (I-46).
+        latest = _latest_event_per_card(events)
+        cards_reviewed = len(latest)
+        cards_correct = sum(1 for e in latest if e.is_correct)
+        accuracy_pct: float | None = (
+            round(cards_correct / cards_reviewed * 100, 1) if cards_reviewed > 0 else 0.0
+        )
 
     ended_at = datetime.now(UTC)
     sess.ended_at = ended_at
@@ -1269,6 +1457,48 @@ async def get_session_cards(
 
 
 
+@router.post(
+    "/sessions/{session_id}/cards",
+    response_model=AppendSessionCardsResponse,
+)
+async def append_session_cards(
+    session_id: str,
+    req: AppendSessionCardsRequest,
+    repo: StudyRepo = Depends(get_study_repo),
+) -> AppendSessionCardsResponse:
+    """Add cards to an open session's planned queue.
+
+    A run is reconstructed from `planned_card_ids` on every resume, so cards
+    generated mid-run have to join the queue here and not only in the client's
+    memory -- otherwise the reader adds five questions, answers two, closes the
+    tab, and comes back to a run that never heard of them.
+
+    Ids that are not real cards are dropped rather than queued: a planned id
+    with no row behind it makes `remaining-cards` return a shorter queue than
+    `planned_count` promises, which reads as a run stuck short of its own total.
+    """
+    sess = await repo.get_session_or_404(session_id)
+    live_ids = set(await FlashcardRepo(repo.session).list_existing_ids_in(req.card_ids))
+    added = repo.append_planned_cards(
+        sess, [cid for cid in req.card_ids if cid in live_ids]
+    )
+    if added:
+        await repo.commit_session(sess)
+    planned_count = len(sess.planned_card_ids or [])
+    logger.info(
+        "Study session cards appended",
+        extra={
+            "session_id": session_id,
+            "requested": len(req.card_ids),
+            "added": added,
+            "planned_count": planned_count,
+        },
+    )
+    return AppendSessionCardsResponse(
+        session_id=session_id, added=added, planned_count=planned_count
+    )
+
+
 @router.get(
     "/sessions/{session_id}/remaining-cards",
     response_model=SessionRemainingResponse,
@@ -1282,6 +1512,10 @@ async def get_session_remaining_cards(
     Used by resume so the queue reflects what was originally planned, not the
     set of cards currently due for the scope. Also returns the count of already-
     answered cards so the hook can restore the progress indicator on resume.
+
+    Both counts are over the planned cards that STILL EXIST: a deck replaced
+    under an open run deletes cards it planned, and those are neither progress
+    nor work outstanding (I-47).
     """
     sess_result = await db.execute(
         select(StudySessionModel).where(StudySessionModel.id == session_id)
@@ -1314,27 +1548,26 @@ async def get_session_remaining_cards(
     )
     answered.update(row[0] for row in rev_result.all())
 
-    # Restrict answered to planned members so the count reflects the planned queue.
-    planned_set = set(planned_ids)
-    answered_in_planned = answered & planned_set
-    remaining_ids = [cid for cid in planned_ids if cid not in answered_in_planned]
-    if not remaining_ids:
-        return SessionRemainingResponse(
-            answered_count=len(answered_in_planned),
-            planned_count=len(planned_ids),
-            cards=[],
-        )
-
+    # Planned means planned AND still there. Replacing a deck deletes the cards
+    # an open run planned, and counting the dead ids made the header read "7 of 8
+    # reviewed" over a deck of three: five of the seven were cards no learner
+    # could be shown again. A deleted card leaves BOTH sides of the ratio -- it is
+    # not progress, and it is not work outstanding either. The client cannot
+    # repair this downstream, because dropping the dead ids from `cards` alone
+    # keeps answered + remaining == planned and the inflation stays invisible.
     cards_result = await db.execute(
-        select(FlashcardModel).where(FlashcardModel.id.in_(remaining_ids))
+        select(FlashcardModel).where(FlashcardModel.id.in_(planned_ids))
     )
-    cards_by_id = {c.id: c for c in cards_result.scalars().all()}
+    live_by_id = {c.id: c for c in cards_result.scalars().all()}
     # Preserve the original planned order.
-    ordered = [_to_response(cards_by_id[cid]) for cid in remaining_ids if cid in cards_by_id]
+    live_planned = [cid for cid in planned_ids if cid in live_by_id]
+
+    answered_in_planned = answered & set(live_planned)
+    remaining_ids = [cid for cid in live_planned if cid not in answered_in_planned]
     return SessionRemainingResponse(
         answered_count=len(answered_in_planned),
-        planned_count=len(planned_ids),
-        cards=ordered,
+        planned_count=len(live_planned),
+        cards=[_to_response(live_by_id[cid]) for cid in remaining_ids],
     )
 
 
@@ -1354,10 +1587,10 @@ async def teachback(
         raise HTTPException(status_code=404, detail="Flashcard not found")
 
     # Call LLM to evaluate explanation
-    llm = get_llm_service()
     source = await _source_passage(card, session)
     prompt = _TEACHBACK_USER_TMPL.format(
         source=source or "(the source passage could not be recovered)",
+        question=card.question,
         answer=card.answer,
         explanation=req.user_explanation,
     )
@@ -1372,18 +1605,9 @@ async def teachback(
     missing_points: list[str] = parsed.get("missing_points", [])
     misconceptions: list[str] = parsed.get("misconceptions", [])
 
-    # rubric evaluation (second LLM call; graceful fallback on failure)
-    rubric_dict: dict | None = None
-    try:
-        rubric_prompt = _RUBRIC_USER_TMPL.format(
-            source_context=card.answer,
-            explanation=req.user_explanation,
-        )
-        raw_rubric = await llm.generate(prompt=rubric_prompt, system=_RUBRIC_SYSTEM)
-        rubric_dict = _parse_rubric(raw_rubric)
-    except Exception:  # noqa: BLE001 -- never raise 500 from rubric call
-        logger.warning("Rubric LLM call failed for flashcard=%s; null rubric", card.id)
-        rubric_dict = None
+    # The rubric comes out of the call above, not a second one of its own. See
+    # _rubric_from_evaluation for what that call was grading against before.
+    rubric_dict = _rubric_from_evaluation(parsed, _verified_evidence(parsed, source))
 
     # Persist all teachback artifacts (result + optional misconceptions) atomically;
     # the correction card is generated mid-session so it must land in the same tx.
@@ -1470,6 +1694,76 @@ def _score_to_rating(score: int) -> str:
     return "again"
 
 
+def _latest_attempt_per_card(
+    rows: Sequence[TeachbackResultModel],
+) -> list[TeachbackResultModel]:
+    """One row per card: the latest attempt, which is the verdict that stands.
+
+    A card can be answered more than once in a run -- that is the whole point of
+    "Answer this one again". Counting every attempt made the same question
+    appear twice in the summary and averaged a score the learner had already
+    replaced into the one they are shown: a 10 improved to a 45 read as two
+    cards averaging 27.5, and the run's card count exceeded the cards in it.
+
+    The earlier attempts are kept, never deleted. They are the record of how the
+    learner got there; they are just not the verdict.
+    """
+    latest: dict[str, TeachbackResultModel] = {}
+    for row in sorted(rows, key=lambda r: (r.created_at, r.id)):
+        latest[row.flashcard_id] = row
+    return list(latest.values())
+
+
+def _latest_event_per_card(
+    events: Sequence[ReviewEventModel],
+) -> list[ReviewEventModel]:
+    """One review event per card: the latest, which is the grade that stands.
+
+    The recall arm's twin of `_latest_attempt_per_card`. A card can be graded
+    more than once in a sitting, and the summary counts cards, not grades.
+    """
+    latest: dict[str, ReviewEventModel] = {}
+    for event in sorted(events, key=lambda e: (e.reviewed_at, e.id)):
+        latest[event.flashcard_id] = event
+    return list(latest.values())
+
+
+def _teachback_tally(
+    rows: Sequence[TeachbackResultModel],
+) -> tuple[int, int, float | None, int]:
+    """(cards_reviewed, cards_correct, accuracy_pct, pending) over latest attempts.
+
+    accuracy_pct is None while any card's standing attempt is still being
+    scored: a mean over the ones that happen to have finished is a number for a
+    run that is not over. It is never defaulted to 0.0 -- an unscored card is
+    unscored, not a zero (see `_parse_teachback_response`).
+    """
+    latest = _latest_attempt_per_card(rows)
+    pending = sum(1 for tb in latest if tb.status == "pending")
+    scores = [tb.score for tb in latest if tb.status == "complete" and tb.score is not None]
+    accuracy = None if pending else (round(sum(scores) / len(scores), 1) if scores else 0.0)
+    return len(latest), sum(1 for sc in scores if sc >= 60), accuracy, pending
+
+
+async def _is_first_attempt(
+    session: AsyncSession,
+    tb_row: TeachbackResultModel,
+) -> bool:
+    """True when no earlier attempt on this card exists in this session."""
+    if tb_row.session_id is None:
+        return True
+    earlier = await session.execute(
+        select(TeachbackResultModel.id)
+        .where(
+            TeachbackResultModel.session_id == tb_row.session_id,
+            TeachbackResultModel.flashcard_id == tb_row.flashcard_id,
+            TeachbackResultModel.created_at < tb_row.created_at,
+        )
+        .limit(1)
+    )
+    return earlier.scalar_one_or_none() is None
+
+
 async def _finalize_session_tally_if_ready(
     session: AsyncSession,
     session_id: str,
@@ -1498,11 +1792,10 @@ async def _finalize_session_tally_if_ready(
     if any(tb.status == "pending" for tb in tb_rows):
         return
 
-    complete = [tb for tb in tb_rows if tb.status == "complete"]
-    scores = [tb.score for tb in complete if tb.score is not None]
-    sess.cards_reviewed = len(tb_rows)
-    sess.cards_correct = sum(1 for s in scores if s >= 60)
-    sess.accuracy_pct = round(sum(scores) / len(scores), 1) if scores else 0.0
+    reviewed, correct, accuracy, _pending = _teachback_tally(tb_rows)
+    sess.cards_reviewed = reviewed
+    sess.cards_correct = correct
+    sess.accuracy_pct = accuracy
     logger.info(
         "Study session tally finalized",
         extra={
@@ -1528,11 +1821,18 @@ async def _evaluate_teachback_bg(
     Uses its own DB session (invariant I-1: no shared AsyncSession across tasks).
     After scoring, creates an FSRS review + ReviewEventModel so teach-back
     results feed into spaced repetition and session progress stats.
+
+    Exactly one LLM call stands between the learner submitting and the verdict
+    appearing. It used to be two, and three on a card scored under 60 -- which
+    is the card a learner most wants an answer on -- all of them serial and all
+    of them finishing before the row flipped to "complete". The rubric is now
+    read off this call (`_rubric_from_evaluation`) and the correction card is
+    written afterwards by `_teachback_correction_bg`, because the learner never
+    sees that card during the run they are waiting in. Ollama yields at the
+    granularity of one completed call (I-31), so the only lever on this wait is
+    how many calls it contains.
     """
     logger.info("Teachback bg task started for %s", tb_id)
-
-    # LLM calls happen outside the semaphore so they don't block other evals.
-    llm = get_llm_service()
 
     # The passage, read in its own short-lived session before the LLM work: this
     # coroutine must not share a session with its caller (I-1), and holding one
@@ -1548,9 +1848,11 @@ async def _evaluate_teachback_bg(
         if card_row is not None:
             source = await _source_passage(card_row, read_session)
 
-    # LLM call 1: evaluation
+    # The one call on the critical path. The rubric comes out of it rather than
+    # out of a second call of its own.
     prompt = _TEACHBACK_USER_TMPL.format(
         source=source or "(the source passage could not be recovered)",
+        question=card_question,
         answer=card_answer,
         explanation=user_explanation,
     )
@@ -1563,54 +1865,14 @@ async def _evaluate_teachback_bg(
     missing_points: list[str] = parsed.get("missing_points", [])
     misconceptions: list[str] = parsed.get("misconceptions", [])
 
-    # LLM call 2: rubric (graceful fallback)
-    rubric_dict: dict | None = None
-    try:
-        rubric_prompt = _RUBRIC_USER_TMPL.format(
-            source_context=card_answer,
-            explanation=user_explanation,
-        )
-        raw_rubric = await llm.generate(
-            prompt=rubric_prompt, system=_RUBRIC_SYSTEM,
-        )
-        rubric_dict = _parse_rubric(raw_rubric)
-    except Exception:  # noqa: BLE001
-        logger.warning("Rubric LLM call failed for teachback=%s", tb_id)
-
-    rating = _score_to_rating(score)
-
-    # LLM call 3: correction flashcard (if any) -- generated BEFORE the write
-    # transaction. Holding the SQLite write lock while an LLM call is in flight
-    # starves concurrent HTTP inserts past busy_timeout.
-    correction_payload: dict | None = None
-    correction_card: FlashcardModel | None = None
     # A correction card asserts the student is wrong about something. The
     # evaluator has to have quoted the passage before the product will say that:
     # if it could not produce a sentence that is really there, its misconception
     # list is not grounded in anything, and the card it seeds would carry an
     # invented quote of its own.
     evidence = _verified_evidence(parsed, source)
-    if score < 60 and misconceptions and not evidence:
-        logger.info(
-            "teachback %s: misconceptions reported without a verifiable quote; "
-            "no correction card",
-            tb_id,
-        )
-    if score < 60 and misconceptions and evidence:
-        session_factory = get_session_factory()
-        # Separate read session so the card fetch does not hold a write lock
-        # during the LLM correction card generation that follows.
-        async with session_factory() as read_session:
-            card_result = await read_session.execute(
-                select(FlashcardModel).where(FlashcardModel.id == card_id)
-            )
-            correction_card = card_result.scalar_one_or_none()
-        if correction_card:
-            correction_payload = await _llm_correction_card_payload(
-                card=correction_card,
-                misconception=misconceptions[0],
-                source=source,
-            )
+    rubric_dict = _rubric_from_evaluation(parsed, evidence)
+    rating = _score_to_rating(score)
 
     # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
     async with _teachback_eval_sem:
@@ -1635,41 +1897,30 @@ async def _evaluate_teachback_bg(
                 tb_row.rubric_json = rubric_dict
                 tb_row.status = "complete"
 
-                # FSRS review: schedule the card
-                fsrs = get_fsrs_service()
-                await fsrs.schedule(card_id, rating, session)
+                # FSRS is scheduled by the FIRST attempt on this card in this
+                # session, and by no later one. A re-answer is written after the
+                # panel has shown the expected answer and the points that were
+                # missed, so what the learner says the second time is partly the
+                # product's own text handed back -- scheduling on it would let
+                # material we supplied set the retention interval. The later
+                # attempt is still stored, still scored, and still what the
+                # summary reads; it just does not move the card's schedule.
+                first_attempt = await _is_first_attempt(session, tb_row)
+                if first_attempt:
+                    fsrs = get_fsrs_service()
+                    await fsrs.schedule(card_id, rating, session)
 
-                # Create ReviewEventModel so end_session tallies include this card
-                if session_id:
-                    event = ReviewEventModel(
-                        id=str(uuid.uuid4()),
-                        session_id=session_id,
-                        flashcard_id=card_id,
-                        rating=rating,
-                        is_correct=rating != "again",
-                    )
-                    session.add(event)
-
-                # Misconceptions + correction flashcard (LLM already resolved above)
-                if score < 60 and misconceptions and correction_card:
-                    if card_document_id:
-                        for m_text in misconceptions:
-                            misconception = MisconceptionModel(
-                                id=str(uuid.uuid4()),
-                                document_id=card_document_id,
-                                flashcard_id=card_id,
-                                user_answer=user_explanation,
-                                error_type="misconception",
-                                correction_note=m_text,
-                            )
-                            session.add(misconception)
-                    if correction_payload is not None:
-                        await _insert_correction_flashcard(
-                            card=correction_card,
-                            payload=correction_payload,
-                            session=session,
-                            source=source,
+                    # ReviewEventModel so end_session tallies include this card.
+                    # One event per card per session, for the same reason.
+                    if session_id:
+                        event = ReviewEventModel(
+                            id=str(uuid.uuid4()),
+                            session_id=session_id,
+                            flashcard_id=card_id,
+                            rating=rating,
+                            is_correct=rating != "again",
                         )
+                        session.add(event)
 
                 # Self-heal session tally: if the parent session has already
                 # been ended by the user (e.g. they navigated away mid-eval)
@@ -1686,6 +1937,8 @@ async def _evaluate_teachback_bg(
                         "teachback_id": tb_id,
                         "score": score,
                         "fsrs_rating": rating,
+                        "rescheduled": first_attempt,
+                        "rubric": rubric_dict is not None,
                     },
                 )
 
@@ -1708,6 +1961,97 @@ async def _evaluate_teachback_bg(
                     logger.exception(
                         "Failed to mark teachback %s as error", tb_id
                     )
+                return
+
+    # The verdict is on screen by here. What follows costs another LLM call and
+    # produces a card the learner meets in a later run, so it is not something
+    # they should wait on.
+    if score < 60 and misconceptions:
+        if evidence:
+            _fire_and_forget(
+                _teachback_correction_bg(
+                    tb_id=tb_id,
+                    card_id=card_id,
+                    card_document_id=card_document_id,
+                    user_explanation=user_explanation,
+                    misconceptions=misconceptions,
+                    source=source,
+                )
+            )
+        else:
+            logger.info(
+                "teachback %s: misconceptions reported without a verifiable quote; "
+                "no correction card",
+                tb_id,
+            )
+
+
+async def _teachback_correction_bg(
+    tb_id: str,
+    card_id: str,
+    card_document_id: str,
+    user_explanation: str,
+    misconceptions: list[str],
+    source: str,
+) -> None:
+    """Record the misconceptions and seed a correction card, after the verdict.
+
+    Split out of `_evaluate_teachback_bg` because it was the third serial LLM
+    call in front of a learner watching a spinner, for a card that only appears
+    in a later run. Failing here costs the correction card and nothing else --
+    the teach-back row is already complete and committed.
+    """
+    factory = get_session_factory()
+    async with factory() as read_session:
+        correction_card = (
+            await read_session.execute(
+                select(FlashcardModel).where(FlashcardModel.id == card_id)
+            )
+        ).scalar_one_or_none()
+    if correction_card is None:
+        return
+
+    # Background: the verdict is already on screen, so nobody is waiting for
+    # this. Unmarked, it held the runtime's only slot after the run ended and
+    # blocked the next interactive call -- saving a note awaits the tagger
+    # (notes.py), so a learner who finished practising and typed a note watched
+    # it hang on "Saving..." behind a card they will not see for days.
+    payload = await _llm_correction_card_payload(
+        card=correction_card,
+        misconception=misconceptions[0],
+        source=source,
+        background=True,
+    )
+
+    # Serialize DB writes to avoid SQLite "database is locked" (invariant I-1)
+    async with _teachback_eval_sem:
+        async with factory() as session:
+            try:
+                if card_document_id:
+                    for m_text in misconceptions:
+                        session.add(
+                            MisconceptionModel(
+                                id=str(uuid.uuid4()),
+                                document_id=card_document_id,
+                                flashcard_id=card_id,
+                                user_answer=user_explanation,
+                                error_type="misconception",
+                                correction_note=m_text,
+                            )
+                        )
+                if payload is not None:
+                    await _insert_correction_flashcard(
+                        card=correction_card,
+                        payload=payload,
+                        session=session,
+                        source=source,
+                    )
+                await session.commit()
+            except Exception:
+                logger.exception(
+                    "Teachback correction card failed for %s", tb_id
+                )
+                await session.rollback()
 
 
 @router.post("/teachback/async", response_model=TeachbackSubmitResponse)
@@ -2295,18 +2639,6 @@ async def get_start_concepts(
     )
 
 
-def _parse_rubric(raw: str) -> dict | None:
-    """Parse rubric JSON from an LLM response. Returns None on failure."""
-    parsed = parse_llm_json_object(raw)
-    if parsed is None:
-        logger.warning("Failed to parse rubric JSON: %r", raw[:200])
-        return None
-    if not {"accuracy", "completeness", "clarity"}.issubset(parsed.keys()):
-        logger.warning("Rubric JSON missing required keys: %s", set(parsed.keys()))
-        return None
-    return parsed
-
-
 async def _mark_teachback_error(tb_id: str) -> None:
     """Flag a teachback row as failed so the UI offers a retry."""
     try:
@@ -2338,17 +2670,65 @@ async def _evaluate_teachback_llm(prompt: str) -> dict | None:
     return None
 
 
+def _string_list(value: object) -> list[str]:
+    """Whatever the model put in a list-of-strings field, as a list of strings.
+
+    Local models nest these: `misconceptions` came back as `[["a", "b"]]` on a
+    real card, and nothing downstream survived it. The row's JSON column stored
+    the nested list, and then `TeachbackResultItem` -- which declares
+    `list[str]` -- failed validation, so GET /teachback/results answered 500.
+    That is not one card losing its verdict: the panel polls every card of the
+    run in one batch, so a single nested list took out the whole run's feedback.
+    The misconception rows failed to insert separately, SQLite refusing to bind
+    a list as `correction_note`.
+
+    One level of nesting is flattened and scalars are stringified, because that
+    is what the model meant. Empty strings are dropped. Nothing is invented: a
+    field that holds nothing usable yields an empty list, which is what an
+    evaluator that named no misconceptions is saying.
+    """
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, list):
+            out.extend(s for s in (str(i).strip() for i in item) if s)
+        elif item is not None and not isinstance(item, dict):
+            text = str(item).strip()
+            if text:
+                out.append(text)
+    return out
+
+
 def _parse_teachback_response(raw: str) -> dict | None:
     """Parse the teachback rubric from an LLM completion. None when unparseable.
 
     Never substitute a zero for a failed parse: the learner reads that as "you
     got nothing right", it drags the session average down, and _score_to_rating
     feeds it to FSRS as a failed card.
+
+    The list fields are normalised here rather than at each use: this is the one
+    place the model's output enters the system, and everything downstream --
+    the response schema, the JSON columns, the misconception rows -- is typed
+    for `list[str]`. See `_string_list`.
     """
     parsed = parse_llm_json_object(raw)
-    if parsed is None or "score" not in parsed:
+    if parsed is None:
         logger.warning("Failed to parse teachback JSON", extra={"raw": raw[:200]})
         return None
+    # Overwrites any `score` the model volunteered unasked, which is the point:
+    # the headline has to be a function of the breakdown printed under it.
+    score = _score_from_dimensions(parsed)
+    if score is None:
+        logger.warning(
+            "Teachback reply carried no usable dimensions", extra={"raw": raw[:200]}
+        )
+        return None
+    parsed["score"] = score
+    for field in ("correct_points", "missing_points", "misconceptions"):
+        parsed[field] = _string_list(parsed.get(field))
     return parsed
 
 
@@ -2356,12 +2736,21 @@ async def _llm_correction_card_payload(
     card: FlashcardModel,
     misconception: str,
     source: str = "",
+    *,
+    background: bool = False,
 ) -> dict | None:
     """Run the LLM call for a correction flashcard -- no DB I/O.
 
     Split out from _generate_correction_flashcard so the LLM round-trip can
     happen OUTSIDE the SQLite write transaction. Holding the write lock during
     an LLM call starves concurrent HTTP inserts past the busy_timeout.
+
+    `background` marks the call as work nobody is waiting for, which is true
+    once the teach-back verdict is already on screen. The runtime serves one
+    call at a time, so an unmarked call here holds the only slot against
+    whatever the learner does next -- and what they do next may itself be
+    waiting on the model. The sync /teachback endpoint passes False, because
+    there the learner is holding an open request for this exact card.
     """
     llm = get_llm_service()
     prompt = _CORRECTION_USER_TMPL.format(
@@ -2370,7 +2759,9 @@ async def _llm_correction_card_payload(
         question=card.question,
         answer=card.answer,
     )
-    raw = await llm.generate(prompt=prompt, system=_CORRECTION_SYSTEM)
+    raw = await llm.generate(
+        prompt=prompt, system=_CORRECTION_SYSTEM, background=background
+    )
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()

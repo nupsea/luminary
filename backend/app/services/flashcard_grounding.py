@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.models import ChunkModel, FlashcardModel
 from app.services.flashcard_parsers import (
     GROUNDING_UNCHECKED,
     GROUNDING_UNVERIFIABLE,
+    excerpt_is_verbatim,
     grounding_state,
 )
 
@@ -38,6 +40,52 @@ logger = logging.getLogger(__name__)
 # Auditing it would report a label as a fabricated quote, which is a worse lie
 # than the one this module exists to catch.
 _PASSAGE_LESS_SOURCES = frozenset({"gap"})
+
+
+def contiguous_runs(chunks: Sequence[ChunkModel]) -> list[list[ChunkModel]]:
+    """Chunks grouped into runs of consecutive `chunk_index`, in reading order.
+
+    One generation call is given several windows sampled from across a document,
+    joined into one prompt. A run is one of those windows: text that really is
+    continuous. The gaps between runs are the rest of the document, and reading
+    across one is reading two places as though they were one.
+    """
+    ordered = sorted(chunks, key=lambda c: c.chunk_index)
+    runs: list[list[ChunkModel]] = []
+    previous: int | None = None
+    for chunk in ordered:
+        if previous is not None and chunk.chunk_index == previous + 1:
+            runs[-1].append(chunk)
+        else:
+            runs.append([chunk])
+        previous = chunk.chunk_index
+    return runs
+
+
+def run_containing(
+    runs: Sequence[Sequence[ChunkModel]], excerpt: str
+) -> list[ChunkModel] | None:
+    """The one run whose text really contains `excerpt`, or None.
+
+    This is what makes a card's own passage recoverable out of the batch's. Every
+    card from one generation call records the same chunk list, so nothing else
+    distinguishes the window a card was written from -- except its quote, which
+    the generation gate has already checked is verbatim somewhere in the prompt.
+
+    None when the quote is in no run, or in more than one: an ambiguous match
+    names no passage, and the caller keeps the whole recorded list rather than
+    picking. Runs are matched joined rather than chunk by chunk, because chunking
+    cuts sentences and a quote spanning a seam is real.
+    """
+    if not excerpt.strip():
+        return None
+    matches = [
+        list(run)
+        for run in runs
+        if (text := "\n\n".join(c.text for c in run if c.text)).strip()
+        and excerpt_is_verbatim(excerpt, text)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 async def passage_for_card(card: FlashcardModel, session: AsyncSession) -> str:
