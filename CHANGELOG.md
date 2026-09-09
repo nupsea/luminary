@@ -6,6 +6,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **First run asks where answers should come from**, fast or private, each stated
+  with its own measured latency. No key still means a fully working local app.
+- **Every answer carries a receipt** — engine, latency, cost, and what left the
+  machine — and source chips paint when retrieval returns rather than after the
+  last token. `make measure-ttft` reads the figure the receipt reports, so a
+  quoted number is the one a user sees.
+- **The reader's work happens beside the document, not over it.** The note
+  composer, the conversation, an explanation, the flashcard generator and the
+  Feynman session were five dialogs; they are five faces of one docked panel.
+  `readerSurfaces.test.ts` forbids a dialog primitive anywhere under
+  `components/reader/`.
+- **Practice is a recall loop.** The face opens on the deck for what is being
+  read, the answer is not rendered until the learner has committed, and revealing
+  puts the reading pane on the section the card came from.
+- **A teach-back is scored, shown against its rubric, and can be answered again**
+  — retried in place, because deleting a session would keep the FSRS move it
+  appeared to undo.
+- **A citation points in the terms its source has** — a moment for a recording, a
+  page for a paginated document, otherwise the section — and lands on its passage
+  marked, centred and held there.
+- **Offline Whisper dictation** across notes, teach-back and Ask.
+
+### Changed
+- **The learner rail is five items** — Home, Library, Notes, Study, Progress. Ask
+  leaves it as a `feature`: `/chat` stays routed and public, because the docked
+  conversation is served by its routers. Blog moves to public, because what a note
+  becomes when it is shared is the point of writing one.
+- **One door per feature in the reader.** Note, Flashcard and Clip left the
+  selection bar and Practice and Chat left the header — five second doors to faces
+  the panel already carries. Highlighting is passage capture now; a highlight
+  resolves to a section or page where a clip carried a chunk.
+- **A citation clicked in the docked conversation is answered beside it.** It
+  routed to `/library` unconditionally, which remounted the reader and took the
+  conversation down with it.
+- **Settings report where each unit of work actually runs**, rather than naming a
+  mode.
+
+### Fixed
+- **An entity is never related to itself.** Co-occurrence paired an entity with
+  its own repeated mentions and the weight grew fastest on the protagonist, so
+  "How are the two mentions of Ulysses connected?" was the top-ranked graph card.
+  8,235 of 74,376 edges were self-pairs.
+- **A question may not point at the page it came from.** The deixis gate held 16
+  literal phrasings; it is keyed on the referent now and refuses 2.8% of existing
+  cards with no false positives.
+- **Teach-back grades the question it asked.** The evaluator never saw it, and
+  "the passage" was the whole generation batch's chunks.
+- **A run counts only cards the deck still holds** — "7 of 8 reviewed" over a
+  three-card deck.
+- **Clustering no longer holds SQLite's write lock across an LLM call** (#88).
+- **Quitting no longer waits five minutes** on background thread work.
+
 ## [0.9.0] - 2026-09-04
 
 ### Added
