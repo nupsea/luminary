@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { Activity, AlertTriangle, BookOpen, Info, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary"
 import { UploadDialog } from "@/components/library/UploadDialog"
@@ -96,7 +96,6 @@ const ICONS: Record<string, IconComponent> = {
   library: BookOpen,
   notes: StickyNote,
   study: BarChart2,
-  ask: MessageSquare,
   map: Network,
   progress: TrendingUp,
   quality_dashboard: ClipboardCheck,

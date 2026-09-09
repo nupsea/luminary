@@ -98,7 +98,7 @@
     {
       "id": "ask",
       "mode": "public",
-      "kind": "nav_tab",
+      "kind": "feature",
       "frontend": {
         "route": "/chat",
         "component": "pages/Chat"
@@ -114,7 +114,8 @@
       },
       "labels": {
         "en": "Ask"
-      }
+      },
+      "description": "A conversation about a scope. Off the rail and still routed: the reader docks one beside the text, and a document's Chat about this opens /chat with that document already scoped. Its routers stay public because the docked conversation is served by them."
     },
     {
       "id": "map",
@@ -200,7 +201,7 @@
     },
     {
       "id": "blog",
-      "mode": "full",
+      "mode": "public",
       "kind": "feature",
       "frontend": {
         "components": [

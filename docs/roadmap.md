@@ -30,7 +30,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 48 hard invariants | `invariants.md` |
+| The 50 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -74,7 +74,7 @@ back up the ladder.
 | Rung | Theme | Exit gate |
 |---|---|---|
 | 0.10.0 | Smart Hybrid, and the privacy receipt | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
-| 0.11.0 | The docked reader | A citation survives selection → note → resolution back to the exact locus for page, video, code and web; no modal opens from the reader |
+| 0.11.0 | The docked reader | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | 0.12.0 | The Brief | Every claim in a Brief resolves to a chunk of that document, measured on the golden corpus against a floor that can come out red |
 | 0.13.0 | Capture | Three source types round-trip from the browser to a readable document; an unpaired origin is refused |
 | 0.14.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
@@ -147,10 +147,17 @@ conversation a global slide-over owned by `App.tsx`, an explanation a sheet with
 flashcard generator and the Feynman session two more dialogs. The resizable right panel that would
 hold all of them already existed and showed only summaries and chapter goals.
 
-The panel becomes the assistant: `Notes · Key Points · Detailed · Glossary · References · Ask AI ·
-Practice`. Selection actions dock into it instead of opening anything, and the citation travels with
-the action. `SelectionActionBar` already emits `onAddToNote`, `onAskInChat`, `onExplain` and `onClip`
-with a `SourceRef` — the wiring exists and lands in modals.
+The panel becomes the assistant: `Insights · Ask AI · Notes · Practice`, with `Explain` joining it
+while there is an explanation to read. Selection actions dock into it instead of opening anything,
+and the citation travels with the action.
+
+**The selection bar ends up narrower than this rung planned.** It offered Note, Flashcard and Clip
+alongside Explain, Ask and the four highlight swatches, and each of the three was a second door to a
+face now docked two inches away: a note is written in the Notes face, a deck is scoped in the
+Practice face, and a passage is kept with a swatch. Removing them leaves highlighting as the whole of
+passage capture, which costs the one thing Clip did that a swatch does not — a clip became a *note*,
+so it was searchable, taggable and in the note graph, and it recorded the passage's `chunk_id` where
+a highlight resolves to a section or a page. That is what the exit gate above now says.
 
 The centre pane re-skins by type while the docked workflows stay constant. **The citation format is
 the part that is per-type and load-bearing**: `p.151 · §5.2`, `VIDEO 14:22`, `raft.go · L214`,
@@ -358,32 +365,46 @@ was measured.
 
 The panel carries Insights, Ask AI, Notes, Practice and Explain. Of the seven faces this rung names,
 Key Points, Detailed, Glossary and References are still folded into Insights; Explain is a face the
-list did not anticipate, because an explanation of a selection has nowhere else to live. The nav cut
-to five rail items is untouched.
+list did not anticipate, because an explanation of a selection has nowhere else to live, and it joins
+the tab bar only while there is one to read.
 
-The reader's header carries one Practice button. It used to carry two doors to the same place: a
-Study button that navigated to `/study`, and Generate questions. A goal's Study button in
-`ChapterGoalsPanel` scopes the face to that goal's section instead of leaving; that path is wired but
-has not been driven in a browser.
+Each face wears the icon its feature wears elsewhere -- `Brain` is the section row's Practice button
+and the Recall arm, `MessageSquare` and `StickyNote` are the nav rail's own Ask and Notes -- so the
+tab and the control that opens it read as one thing. Insights takes `ScrollText` and not `Sparkles`,
+which is the Chat header's Creative toggle. Inside Insights, the speaker-turn summary is `Discussion`:
+it was `Notes`, one row under the Notes face, which holds the reader's own writing instead.
 
-A note keeps where it came from: the composer received a section only when a section's own note
-button was pressed, so a note taken from a *selection* stored the quoted text and no locus at all.
-It now carries the selection's section and, where the view renders chunk by chunk, its chunk —
-`resolveChunkFromDom` finds it in a transcript, and prose has no chunk boundaries to find (I-29).
-`make verify-dock` takes a note from a recording and reads back its `chunk_id` and `section_id`;
-removing the two props turns both checks red with `null`.
+A citation clicked in the docked conversation is answered beside it. `navigateToCitation` routed to
+`/library?doc=...` unconditionally, which remounts the reader from the URL and takes the panel the
+citation was clicked in down with it -- the passage arrives and the conversation is gone. The docked
+conversation hands its citations to the reader first (`onCitationInDocument`), which marks the
+passage and moves the left pane; a citation into a *different* document still routes, because there
+is nothing beside it to show.
 
-The round trip closes: the note's own back-link carries both ids, and `make verify-dock` follows
-selection -> note -> back-link -> reader and counts the marks that arrive. Removing the chunk from
-the link drops it to zero.
+**The reader's header carries no panel tab.** It held a Practice button and a Chat button, each
+opening a face the tab bar was already offering, and Practice's extra trick — arming the whole
+document — is the Practice face's own "Use the whole document" control. `make verify-dock` reads the
+header's own actions rather than the page's, because a section row carries a Practice button too.
 
-**Marked, for a view that renders chunk by chunk.** A note from prose carries its section and no
-chunk (I-29), so the reader scrolls to the section and marks nothing -- the quoted words live only
-in the note's own text, and parsing them back out of markdown is not a locus.
+A goal's Study button in `ChapterGoalsPanel` scopes the face to that goal's section instead of
+leaving, and is now driven in a browser: the check finds a document that actually has an uncovered
+goal rather than assuming the one the other checks read — objectives are extracted only from a tech
+book's chapter openings, so keying it to that document would have skipped in silence forever. Taking
+the section out of `handleStudyClick` turns it red at `This document`.
 
-The same rung cuts the public nav to five rail items — Home, Library, Notes, Study, Progress. Ask
-lives where it has a scope, Map stays in `full`, and `blog` moves `full` → `public` because the output
-is what gets shared. All four are `surface-manifest.json` edits.
+**A capture keeps where it came from.** `make verify-dock` takes a highlight from a recording and
+reads back its `section_id` and the words it was taken from, identifying the new row by what was not
+there before rather than by position — asserting the locus of the wrong row would pass while the new
+one stored nothing. It then reloads, opens the reader's highlight list and finds the passage in it,
+and deletes what it created. A note is still written in the panel, and the check says so.
+
+**The nav is cut to five rail items** — Home, Library, Notes, Study, Progress. Ask leaves the rail as
+a `feature` rather than a mode change: `/chat` stays routed and its routers stay `public`, because the
+docked conversation is served by them, and a document's "Chat about this" still opens the page with
+that document scoped. Map stays `full`; `blog` moves `full` → `public`, because what a note becomes
+when it is shared is the point of writing one — which also retires the build-time fold in
+`pages/Notes.tsx` that kept the publish dialog out of public bundles. `surfaceManifest.test.ts` pins
+the rail to those five ids and goes red on either half of the Ask change.
 
 **A rate of 1.0000 on the citation round-trip is a rubber stamp unless a deliberately unresolvable ref
 is in the same test and fails.** See `.claude/rules/common/verify-before-reporting.md`.

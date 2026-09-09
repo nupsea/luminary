@@ -50,9 +50,36 @@ describe("surfaceManifest", () => {
   it("isSurfaceVisible gates cross-surface entry points per mode", async () => {
     const pub = await loadWithMode("public")
     expect(pub.isSurfaceVisible("map")).toBe(false)
-    expect(pub.isSurfaceVisible("blog")).toBe(false)
+    expect(pub.isSurfaceVisible("feynman")).toBe(false)
     const full = await loadWithMode("full")
     expect(full.isSurfaceVisible("map")).toBe(true)
-    expect(full.isSurfaceVisible("blog")).toBe(true)
+    expect(full.isSurfaceVisible("feynman")).toBe(true)
+  })
+
+  // What a note becomes when it is shared is the point of writing one, so blog
+  // is not a full-mode extra. It stays a `feature`: reached from a note, never
+  // from the rail.
+  it("blog ships in both modes and is not a rail item", async () => {
+    for (const mode of ["public", "full"]) {
+      const m = await loadWithMode(mode)
+      expect(m.isSurfaceVisible("blog")).toBe(true)
+      expect(m.navTabs().map((s) => s.id)).not.toContain("blog")
+    }
+  })
+
+  // The public rail is five items and the count is the claim: Ask left it
+  // because a conversation with no scope is the one nobody asks for, and it is
+  // still routed and still served -- the reader docks one beside the document.
+  it("the public learner rail is exactly five items", async () => {
+    const m = await loadWithMode("public")
+    const rail = m.navTabs().filter((s) => s.rail !== "dev").map((s) => s.id)
+    expect(rail).toEqual(["luminary_hub", "library", "notes", "study", "progress"])
+  })
+
+  it("Ask is off the rail, still routed and still public", async () => {
+    const m = await loadWithMode("public")
+    expect(m.navTabs().map((s) => s.id)).not.toContain("ask")
+    expect(m.routedSurfaces().map((s) => s.id)).toContain("ask")
+    expect(m.isSurfaceVisible("ask")).toBe(true)
   })
 })
