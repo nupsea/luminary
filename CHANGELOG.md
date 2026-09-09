@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-10
+
 ### Added
 - **First run asks where answers should come from**, fast or private, each stated
   with its own measured latency. No key still means a fully working local app.
@@ -1180,7 +1182,14 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/nupsea/luminary/releases/tag/v0.11.0
+[0.9.0]: https://github.com/nupsea/luminary/releases/tag/v0.9.0
+[0.8.28]: https://github.com/nupsea/luminary/releases/tag/v0.8.28
+[0.8.24]: https://github.com/nupsea/luminary/releases/tag/v0.8.24
+[0.8.2]: https://github.com/nupsea/luminary/releases/tag/v0.8.2
+[0.8.0]: https://github.com/nupsea/luminary/releases/tag/v0.8.0
+[0.7.9]: https://github.com/nupsea/luminary/releases/tag/v0.7.9
 [0.7.0]: https://github.com/nupsea/luminary/releases/tag/v0.7.0
 [0.6.1]: https://github.com/nupsea/luminary/releases/tag/v0.6.1
 [0.6.0]: https://github.com/nupsea/luminary/releases/tag/v0.6.0
