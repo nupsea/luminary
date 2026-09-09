@@ -22,6 +22,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { apiGet } from "@/lib/apiClient"
 import { appendCapture } from "@/lib/noteCapture"
 import {
@@ -458,6 +459,14 @@ export function NoteComposer({
             <>Autosaves as you type</>
           )}
         </div>
+        <VoiceRecordButton
+          size="sm"
+          onTranscribed={(text) => {
+            setEditContent((prev) => appendCapture(prev, text))
+            toast.success("Dictation added to note")
+          }}
+          title="Dictate into note (Whisper)"
+        />
         {appendTarget ? (
           <>
             <button

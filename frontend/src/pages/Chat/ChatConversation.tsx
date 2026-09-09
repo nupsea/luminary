@@ -22,6 +22,7 @@ import type { SourceCitation } from "@/components/SourceCitationChips"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
 import { QuizQuestionCard } from "@/components/QuizQuestionCard"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { TeachBackResultCard } from "@/components/TeachBackResultCard"
 import type { TeachBackCardData } from "@/components/TeachBackResultCard"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -1225,6 +1226,20 @@ export function ChatConversation({
               disabled={noDocumentSelected || isStreaming}
               rows={1}
               className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+            />
+            <VoiceRecordButton
+              size="default"
+              className="h-9 w-9 p-0 rounded-xl shrink-0"
+              onTranscribed={(text) => {
+                setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+                setTimeout(() => {
+                  if (textareaRef.current) {
+                    textareaRef.current.style.height = "auto"
+                    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`
+                  }
+                }, 0)
+              }}
+              title="Dictate question with voice (Whisper)"
             />
             <button
               onClick={() => void sendMessage(input)}

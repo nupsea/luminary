@@ -24,6 +24,7 @@ from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
+from app.routers.audio import router as audio_router
 from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
@@ -505,6 +506,7 @@ _API_PREFIX = "/api" if _mode == "public" else ""
 ROUTER_REGISTRY = {
     "admin": admin_router,
     "annotations": annotations_router,
+    "audio": audio_router,
     "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,

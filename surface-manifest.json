@@ -54,7 +54,8 @@
           "notes",
           "annotations",
           "references",
-          "clips"
+          "clips",
+          "audio"
         ]
       },
       "labels": {

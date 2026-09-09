@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react"
 import { Brain, ChevronDown, Loader2, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { RubricCard, type Rubric } from "@/components/RubricCard"
 import { computeExplanationDiff, splitSentences, type DiffSegment } from "@/lib/explanationDiff"
@@ -691,14 +692,23 @@ export function FeynmanPanel({
                         rows={3}
                         className="flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
                       />
-                      <button
-                        onClick={() => void handleSend()}
-                        disabled={sending || !inputText.trim() || sessionLoading || !!sessionError}
-                        className="self-end rounded-md bg-primary p-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                        aria-label="Send message"
-                      >
-                        {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      </button>
+                      <div className="flex flex-col gap-1.5 self-end">
+                        <VoiceRecordButton
+                          size="sm"
+                          onTranscribed={(text) => {
+                            setInputText((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+                          }}
+                          title="Speak your explanation (Whisper)"
+                        />
+                        <button
+                          onClick={() => void handleSend()}
+                          disabled={sending || !inputText.trim() || sessionLoading || !!sessionError}
+                          className="rounded-md bg-primary p-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          aria-label="Send message"
+                        >
+                          {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </>
