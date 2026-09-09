@@ -2,7 +2,7 @@
 // Owns the speech-recognition lifecycle and the submitted/evaluating/result UI states.
 
 import { motion } from "framer-motion"
-import { ArrowRight, BookOpen, Loader2, Mic, MicOff } from "lucide-react"
+import { ArrowRight, BookOpen, Loader2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -10,11 +10,7 @@ import { isButtonActivation, isTypingTarget } from "@/lib/keyboard"
 import { type Flashcard, type TeachbackResultItem } from "@/lib/studyApi"
 
 import { InlineTeachbackFeedback } from "./InlineTeachbackFeedback"
-import {
-  SpeechRecognitionAPI,
-  type SpeechRecognitionEvent,
-  type SpeechRecognitionInstance,
-} from "./speechRecognition"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 
 interface TeachbackPanelProps {
   card: Flashcard
@@ -37,9 +33,6 @@ export function TeachbackPanel({
 }: TeachbackPanelProps) {
   const [explanation, setExplanation] = useState("")
   const [submitted, setSubmitted] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-  const manualStopRef = useRef(false)
   // Latch: the outgoing panel keeps its window listener alive during the exit
   // animation, and onNext increments the reviewed count -- fire it exactly once.
   const advancedRef = useRef(false)
@@ -48,59 +41,6 @@ export function TeachbackPanel({
     if (advancedRef.current) return
     advancedRef.current = true
     onNext()
-  }
-
-  useEffect(() => {
-    return () => {
-      manualStopRef.current = true
-      recognitionRef.current?.stop()
-    }
-  }, [])
-
-  function toggleRecording() {
-    if (isRecording) {
-      manualStopRef.current = true
-      recognitionRef.current?.stop()
-      setIsRecording(false)
-      return
-    }
-    if (!SpeechRecognitionAPI) return
-    const recognition = new SpeechRecognitionAPI()
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.lang = "en-US"
-
-    manualStopRef.current = false
-    let finalTranscript = ""
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
-      let interim = ""
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const segment = e.results[i][0].transcript
-        if (e.results[i].isFinal) {
-          finalTranscript += segment
-        } else {
-          interim += segment
-        }
-      }
-      setExplanation(finalTranscript + interim)
-    }
-
-    recognition.onend = () => {
-      if (!manualStopRef.current) {
-        setExplanation(finalTranscript)
-      }
-      setIsRecording(false)
-      recognitionRef.current = null
-    }
-
-    recognition.onerror = () => {
-      setIsRecording(false)
-      recognitionRef.current = null
-    }
-
-    recognitionRef.current = recognition
-    recognition.start()
-    setIsRecording(true)
   }
 
   function handleSubmit() {
@@ -201,29 +141,15 @@ export function TeachbackPanel({
               className="h-36 w-full resize-none rounded-lg border border-border bg-background p-4 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-400"
               autoFocus
             />
-            <button
-              type="button"
-              onClick={toggleRecording}
-              disabled={!SpeechRecognitionAPI}
-              title={
-                SpeechRecognitionAPI
-                  ? isRecording
-                    ? "Stop recording"
-                    : "Start voice input"
-                  : "Voice input not supported in this browser"
-              }
-              className="absolute right-3 top-3 rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isRecording ? (
-                <MicOff size={16} className="animate-pulse text-destructive" />
-              ) : (
-                <Mic size={16} />
-              )}
-            </button>
+            <VoiceRecordButton
+              size="sm"
+              onTranscribed={(text) => {
+                setExplanation((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+              }}
+              title="Speak your explanation (Whisper)"
+              className="absolute right-3 top-3"
+            />
           </div>
-          {isRecording && (
-            <p className="text-xs text-destructive">Recording... click the mic again to stop.</p>
-          )}
           <div className="flex items-center gap-3">
             <button
               onClick={handleSubmit}

@@ -33,6 +33,7 @@ import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteEditor } from "@/components/notes/NoteEditor"
 import { NotePdfExport } from "@/components/notes/NotePdfExport"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -47,6 +48,7 @@ import {
   type NoteDraft,
 } from "@/lib/noteAutosave"
 import { downloadNoteMarkdown } from "@/lib/noteExport"
+import { appendCapture } from "@/lib/noteCapture"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
@@ -408,6 +410,14 @@ export default function NotePage() {
                 </button>
               </>
             )}
+            <VoiceRecordButton
+              size="sm"
+              onTranscribed={(text) => {
+                setEditContent((prev) => appendCapture(prev, text))
+                toast.success("Dictation added to note")
+              }}
+              title="Dictate into note (Whisper)"
+            />
           </div>
           <div
             role="status"
