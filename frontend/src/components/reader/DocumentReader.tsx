@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, StickyNote, Target, Trash2, X } from "lucide-react"
+import { ArrowLeft, Brain, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, Lightbulb, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, ScrollText, Search, StickyNote, Trash2, X, type LucideIcon } from "lucide-react"
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
@@ -65,6 +65,8 @@ import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
 import { ChatConversation } from "@/pages/Chat/ChatConversation"
 import { docThreadKey } from "@/store/chatThreads"
+import type { SourceCitation } from "@/components/SourceCitationChips"
+import { buildCitationTarget } from "@/lib/citation"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
@@ -130,14 +132,23 @@ interface NoteEntry {
 // Which face of the docked panel is showing.
 type PanelTab = "insights" | "ask" | "note" | "practice" | "explain"
 
-const PANEL_TABS: { id: PanelTab; label: string }[] = [
-  { id: "insights", label: "Insights" },
-  { id: "ask", label: "Ask AI" },
-  { id: "note", label: "Notes" },
-  { id: "practice", label: "Practice" },
-  { id: "explain", label: "Explain" },
+// Each face carries the icon its feature already wears elsewhere, so the tab and
+// the control that opens it read as one thing: Brain is the section row's
+// Practice button and the Recall arm, MessageSquare and StickyNote are the nav
+// rail's own Ask and Notes.
+const PANEL_TABS: { id: PanelTab; label: string; Icon: LucideIcon }[] = [
+  { id: "insights", label: "Insights", Icon: ScrollText },
+  { id: "ask", label: "Ask AI", Icon: MessageSquare },
+  { id: "note", label: "Notes", Icon: StickyNote },
+  { id: "practice", label: "Practice", Icon: Brain },
 ]
 
+// Explain is not a standing face. It holds the explanation of one passage, so a
+// tab offered with nothing behind it opens an empty panel; it joins the bar when
+// there is something to read and leaves when that is closed.
+const EXPLAIN_TAB: { id: PanelTab; label: string; Icon: LucideIcon } = {
+  id: "explain", label: "Explain", Icon: Lightbulb,
+}
 
 interface DocumentReaderProps {
   documentId: string
@@ -204,6 +215,17 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // everything back and it stays back.
   const [insightsRestored, setInsightsRestored] = useState(false)
   const citationOwnsScroll = initialCitationWords.length > 0
+  // A citation named in place carries the arrival it was named against, so a
+  // *new* arrival retires it by identity alone -- no effect syncing one piece
+  // of state to another, and no window where the old mark answers the new
+  // citation. `savedCitationWords` is state in `Learning.tsx`, so its identity
+  // changes only when a citation actually does.
+  const [inPlaceCitation, setInPlaceCitation] =
+    useState<{ against: string[]; words: string[] } | null>(null)
+  const citationWords =
+    inPlaceCitation?.against === initialCitationWords
+      ? inPlaceCitation.words
+      : initialCitationWords
   const focusOnCitation = citationOwnsScroll && !insightsRestored
   const insightsCollapsed = insights.collapsed || focusOnCitation
   const toggleInsights = useCallback(() => {
@@ -352,42 +374,26 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const openPractice = useCallback(() => { showPanel("practice") }, [showPanel])
   const selection = useSelectionWorkflow({
     documentId,
-    sectionMap,
     setChatPreload,
     openAsk,
-    openNote: openNotes,
-    openPractice,
   })
 
-  // What the docked composer is holding: a selected passage, a section's own
-  // note button, or a blank note on the document. The selection comes first --
-  // it is the only one of the three that carries text, and a capture that
-  // arrives while the composer is open appends rather than being dropped.
-  const noteCaptureOpen =
-    selection.noteOpen || openNoteEditor !== null || docNoteOpen || openNoteId !== null
-  const noteCaptureKey = selection.noteOpen
-    ? `sel-${selection.noteCaptureId}`
-    : openNoteEditor
-      ? `sec-${openNoteEditor}`
-      : docNoteOpen
-        ? "doc"
-        : openNoteId
-          ? `note-${openNoteId}`
-          : null
-  const { noteOpen, noteText, noteHeading, noteSourceRef, closeNote } = selection
-  const noteCaptureContent = useMemo(() => {
-    if (!noteOpen) return ""
-    const parts = [noteSourceRef?.documentTitle, noteHeading].filter(Boolean)
-    const attribution = parts.length > 0 ? parts.join(", ") : ""
-    return `> "${noteText}"\n>\n> -- ${attribution}`
-  }, [noteOpen, noteText, noteHeading, noteSourceRef])
+  // What the docked composer is holding: a section's own note button, a blank
+  // note on the document, or one opened from the list.
+  const noteCaptureOpen = openNoteEditor !== null || docNoteOpen || openNoteId !== null
+  const noteCaptureKey = openNoteEditor
+    ? `sec-${openNoteEditor}`
+    : docNoteOpen
+      ? "doc"
+      : openNoteId
+        ? `note-${openNoteId}`
+        : null
   const closeNoteCapture = useCallback(() => {
-    closeNote()
     setOpenNoteEditor(null)
     setDocNoteOpen(false)
     setOpenNoteId(null)
     setInsightsTab(tabBefore.current)
-  }, [closeNote, setOpenNoteEditor, setDocNoteOpen, setOpenNoteId, setInsightsTab])
+  }, [setOpenNoteEditor, setDocNoteOpen, setOpenNoteId, setInsightsTab])
 
   const {
     sectionTree,
@@ -766,7 +772,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     searchOpen && searchHitSectionId ? searchHitSectionId : readSectionId
 
   function handleStudyClick(sid: string) {
-    selection.closeFlashcard()
     setPracticeSection({ id: sid, heading: sectionMap.get(sid)?.heading ?? "" })
     openPractice()
   }
@@ -944,6 +949,21 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setInsightsTab(tabBefore.current)
   }, [setExplainText, setInsightsTab])
 
+  const panelTabs = useMemo(
+    () => (explainText ? [...PANEL_TABS, EXPLAIN_TAB] : PANEL_TABS),
+    [explainText],
+  )
+
+  // `closeExplain` restores the previous face when the panel's own close is
+  // used. This covers every other way the text can go -- a new selection
+  // explained then dismissed, a document swapped underneath -- so the panel is
+  // never left showing a tab the bar no longer offers.
+  useEffect(() => {
+    if (insightsTab === "explain" && !explainText) {
+      setInsightsTab(tabBefore.current === "explain" ? "insights" : tabBefore.current)
+    }
+  }, [insightsTab, explainText])
+
   // A section's Practice button opens the session in the panel, not over it.
   const openFeynman = useCallback((sectionId: string) => {
     setFeynmanSection(sectionId)
@@ -981,6 +1001,26 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     }
     setReadSectionId(sid)
   }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId])
+
+  // A citation clicked in the docked conversation is answered beside it rather
+  // than by routing, so the marked passage is state and not only the arrival
+  // prop. `citationOwnsScroll` stays keyed on arrival: it stands down the three
+  // mount effects, which have long since fired by the time this changes.
+  const revealCitation = useCallback((c: SourceCitation) => {
+    if (c.document_id !== documentId) return false
+    const target = buildCitationTarget(c)
+    pushHistory()
+    setInPlaceCitation({ against: initialCitationWords, words: target.words })
+    if (doc?.format === "pdf" && c.pdf_page_number) {
+      setLeftTab("pdfview")
+      setPdfViewVisited(true)
+      pdfViewerRef.current?.goToPage(c.pdf_page_number)
+    } else {
+      setLeftTab("read")
+      if (c.section_id) setReadSectionId(c.section_id)
+    }
+    return true
+  }, [documentId, doc, initialCitationWords, pushHistory, setLeftTab, setReadSectionId])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
@@ -1204,30 +1244,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Back
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          {/* In-context actions for this document: practice, chat */}
-          <button
-            onClick={() => {
-              selection.closeFlashcard()
-              setPracticeSection(null)
-              openPractice()
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Test yourself on this document"
-          >
-            <Target size={14} />
-            Practice
-          </button>
-          <button
-            // The conversation about this document is docked beside it, already
-            // scoped to it, so this shows the panel rather than leaving the page.
-            onClick={openAsk}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Chat about this document"
-          >
-            <MessageSquare size={14} />
-            Chat
-          </button>
+        <div data-testid="reader-header-actions" className="flex items-center gap-2">
+          {/* Practice and Chat used to sit here and did nothing the panel's own
+              tabs do not: both showed a face already in the tab bar, and
+              Practice's extra trick -- arming the whole document -- is the
+              panel's own "Use the whole document" control. */}
           <div className="relative">
             <button
               onClick={() => setConfirmDelete((open) => !open)}
@@ -1478,7 +1499,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} citationWords={initialCitationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
@@ -1511,7 +1532,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
-                citationWords={initialCitationWords}
+                citationWords={citationWords}
                 citedSectionId={initialSectionId}
               />
             )}
@@ -1522,12 +1543,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             containerRef={readerContainerRef}
             resolveSourceRef={resolveSourceRef}
             onExplain={handleExplain}
-            onAddToNote={selection.handleAddToNote}
-            onCreateFlashcard={selection.handleCreateFlashcard}
             onAskInChat={selection.handleAskInChat}
             onHighlight={(text, sourceRef, color) => void selection.handleHighlight(text, sourceRef, color)}
-            onClip={(text, sourceRef) => void selection.handleClip(text, sourceRef)}
-          />
+              />
 
           {/* Section list */}
           <div
@@ -1650,18 +1668,19 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         >
           <div className="flex items-center gap-1 border-b border-border px-3 py-2">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {PANEL_TABS.map(({ id, label }) => (
+            {panelTabs.map(({ id, label, Icon }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => setInsightsTab(id)}
                 aria-pressed={insightsTab === id}
-                className={`shrink-0 rounded-md px-2 py-1 text-xs transition-colors ${
+                className={`flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
                   insightsTab === id
                     ? "bg-accent font-medium text-foreground"
                     : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 }`}
               >
+                <Icon size={13} />
                 {label}
               </button>
             ))}
@@ -1683,6 +1702,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
               variant="docked"
               threadKey={docThreadKey(documentId)}
               pinnedDocumentId={documentId}
+              onCitationInDocument={revealCitation}
             />
           </div>
           <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "note" ? "" : "hidden"}`}>
@@ -1699,17 +1719,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   void qc.invalidateQueries({ queryKey: ["notes"] })
                   void qc.invalidateQueries({ queryKey: ["notes-groups"] })
                 }}
-                initialContent={noteCaptureContent}
                 initialSourceDocIds={[documentId]}
                 lockedCollectionId={autoCollection?.id ?? null}
                 documentId={documentId}
                 // Where the note came from, structured rather than only quoted
-                // in its text: a selection's own section, or the section whose
-                // note button was pressed. Without the first of these a note
-                // taken from a passage stored no section at all, and nothing
-                // could resolve it back.
-                sectionId={selection.noteSourceRef?.sectionId ?? openNoteEditor}
-                chunkId={selection.noteSourceRef?.chunkId}
+                // in its text: the section whose note button was pressed.
+                // Without it a note stored no section at all and nothing could
+                // resolve it back.
+                sectionId={openNoteEditor}
               />
             ) : (
               <div className="flex h-full min-h-0 flex-col overflow-auto p-4">
@@ -1734,8 +1751,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                   <p className="text-xs text-destructive">Could not load notes for this document.</p>
                 ) : (docNotes?.length ?? 0) === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    No notes on this document yet. Select a passage and choose Note, or start one
-                    above.
+                    No notes on this document yet. Start one above.
                   </p>
                 ) : (
                   <ul data-testid="docked-notes-list" className="space-y-2">
@@ -1785,18 +1801,12 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             ) : (
               <PracticePanel
                 documentId={documentId}
-                // A selected passage scopes it, then a section chosen on its own;
-                // with neither it is the whole document.
-                sectionId={
-                  selection.flashcardOpen
-                    ? selection.flashcardSectionId ?? undefined
-                    : practiceSection?.id
-                }
-                sectionHeading={
-                  selection.flashcardOpen ? selection.flashcardHeading : practiceSection?.heading
-                }
-                context={selection.flashcardOpen ? selection.flashcardText : ""}
-                onClearScope={() => { selection.closeFlashcard(); setPracticeSection(null) }}
+                // A section chosen on its own scopes it; without one it is the
+                // whole document.
+                sectionId={practiceSection?.id}
+                sectionHeading={practiceSection?.heading}
+                context=""
+                onClearScope={() => setPracticeSection(null)}
                 onJumpToSource={revealCardSource}
               />
             )}

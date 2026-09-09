@@ -289,38 +289,91 @@ if (paraCount) {
         `${streamed.explained.length} chars`)
     }
 
-    const cardAction = page.getByRole("button", { name: "Flashcard", exact: true })
-    check("the selection offers Flashcard", await selectAgain(cardAction))
-    if (await cardAction.count()) {
-      await cardAction.first().click()
-      await page.waitForTimeout(1200)
-      const opened = await panelState()
-      check("a flashcard from a passage opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
-      check("the generator is docked in the panel", opened.practice === 1, `${opened.practice} panels`)
-      check("the dock opens on Practice", opened.tab === "Practice", String(opened.tab))
-      // The selection is what the cards would be generated from; losing it is
-      // how a passage silently becomes the whole document.
-      check("the generator is scoped to the selection", /^Selected text/.test(opened.scope), opened.scope)
-      // Three states, no blank panel (I-10): a section with no cards of its own
-      // has to say so rather than render an empty deck.
-      const scopedDeck = await page.locator('[data-testid="deck-summary"]').first()
-        .textContent().catch(() => null)
-      check("a scoped face still says what is practicable", (scopedDeck ?? "").length > 10,
-        (scopedDeck ?? "<nothing>").slice(0, 60))
-    }
+    // The bar is deliberately narrower than it was: Note, Flashcard and Clip
+    // were each a second way to reach a face that is now docked beside the
+    // text. Read the bar's own buttons rather than the page's -- a section row
+    // carries a Note control too, and counting those would pass this check
+    // while the bar still offered one. The swatches carry no text, so a bar
+    // with only them would read as empty here; the count guards that.
+    await selectAgain(page.locator('[data-testid="selection-action-bar"]'))
+    const bar = page.locator('[data-testid="selection-action-bar"]')
+    const barActions = await bar.locator("button")
+      .evaluateAll((els) => els.map((e) => e.textContent?.trim()).filter(Boolean))
+    check("the selection bar is the one the reader asked for",
+      barActions.length > 0 && !["Note", "Flashcard", "Clip"].some((a) => barActions.includes(a)),
+      barActions.join(" | ") || "<no bar>")
+    check("the selection still offers Explain and Ask",
+      ["Explain", "Ask"].every((a) => barActions.includes(a)), barActions.join(" | "))
+    // Highlighting is the only passage-capture the bar has left, so its
+    // swatches are load-bearing rather than decoration.
+    const swatches = await bar.locator('button[title^="Highlight"]').count()
+    check("the selection still offers the highlight swatches", swatches === 4, `${swatches} swatches`)
 
-    // The header's own button is the document-wide arm of the same face. It used
-    // to leave the reader for /study; the whole rung is that it must not.
-    const headerPractice = page.getByRole("button", { name: "Practice", exact: true })
-    check("the header offers Practice", (await headerPractice.count()) > 0)
-    if (await headerPractice.count()) {
-      await headerPractice.first().click()
+    // Practice and Chat were removed from the header: each showed a face already
+    // in the tab bar, and Practice's extra trick -- arming the whole document --
+    // is the Practice face's own "Use the whole document" control. Read the
+    // header's own actions, since a section row carries a Practice button too.
+    const headerActions = await page.locator('[data-testid="reader-header-actions"] button')
+      .evaluateAll((els) => els.map((e) => e.textContent?.trim()).filter(Boolean))
+    check("the header carries no duplicate of a panel tab",
+      !headerActions.includes("Practice") && !headerActions.includes("Chat"),
+      headerActions.join(" | ") || "<none>")
+
+    // The face itself is reached from the tab, and the rung is unchanged: it
+    // used to leave the reader for /study, and it must not.
+    const practiceTab = page.locator("button[aria-pressed]").filter({ hasText: /^Practice$/ })
+    check("the panel offers the Practice face", (await practiceTab.count()) > 0)
+    if (await practiceTab.count()) {
+      await practiceTab.first().click()
       await page.waitForTimeout(1000)
       const opened = await panelState()
       check("Practice opens no dialog", opened.dialogs === 0, `${opened.dialogs} dialogs`)
       check("Practice opens the Practice face", opened.tab === "Practice", String(opened.tab))
-      check("the header's arm is scoped to the document", opened.scope === "This document", opened.scope)
+      check("the face is scoped to the document", opened.scope === "This document", opened.scope)
       check("Practice stays in the reader", opened.url.includes(`doc=${docId}`), opened.url)
+
+    }
+
+    // A goal's own Study button scopes the face to that goal's section rather
+    // than leaving for /study. Driven from the goals panel and not the page,
+    // because a section row carries a Practice button that does the same thing
+    // -- passing on that one would say nothing about this path.
+    //
+    // The document is found rather than assumed: objectives are extracted only
+    // from a tech book's chapter openings, so the document these checks read
+    // has none, and a check keyed to it would have skipped in silence forever.
+    const withGoal = await page.evaluate(async (api) => {
+      for (let pageNo = 1; pageNo <= 4; pageNo++) {
+        const res = await fetch(`${api}/documents?page=${pageNo}&page_size=50&sort=last_accessed`)
+        const items = (await res.json()).items ?? []
+        if (items.length === 0) break
+        for (const d of items) {
+          const objs = await fetch(`${api}/documents/${d.id}/objectives`)
+          if (!objs.ok) continue
+          const list = (await objs.json()).objectives ?? []
+          if (list.some((o) => !o.covered)) return d
+        }
+      }
+      return null
+    }, API)
+    if (!withGoal) {
+      console.log("  skip  the goal scope -- no document in this library has an uncovered chapter goal")
+    } else {
+      console.log(`  goals: ${withGoal.title}`)
+      await page.goto(`${APP}/library?doc=${withGoal.id}`, { waitUntil: "domcontentloaded" })
+      await page.waitForTimeout(4000)
+      const goalStudy = page.locator('[data-testid="chapter-goals"] button').filter({ hasText: /^Study$/ })
+      check("the reader shows the document's chapter goals", (await goalStudy.count()) > 0)
+      if (await goalStudy.count()) {
+        await goalStudy.first().click()
+        await page.waitForTimeout(1800)
+        const scoped = await panelState()
+        check("a goal's Study button opens the Practice face", scoped.tab === "Practice", String(scoped.tab))
+        check("it scopes the face to the goal's section, not the document",
+          scoped.scope !== "" && scoped.scope !== "This document", scoped.scope || "<no scope>")
+        check("and it never leaves the reader for /study",
+          scoped.url.includes(`doc=${withGoal.id}`) && !scoped.url.includes("/study"), scoped.url)
+      }
     }
 
     // The recall loop. Its whole claim is that the answer is not on screen until
@@ -809,19 +862,19 @@ if (paraCount) {
   }
 }
 
-// A note taken from a passage keeps where the passage was.
+// A passage captured from the reader keeps where the passage was.
 //
-// The rung's gate is that a citation survives selection -> note -> resolution,
-// and the note is where it was being lost: the composer received a section only
-// when a section's own note button was pressed, so a note taken from a
-// selection stored the quoted text and no locus at all.
+// The rung's gate is that a citation survives selection -> capture -> resolution.
+// Highlighting is the whole of that path now: Note, Flashcard and Clip have all
+// left the selection bar, so a swatch is the only way a passage is kept, and a
+// capture that records no section cannot be resolved back to anything.
 const recording = await page.evaluate(async (api) => {
   const res = await fetch(`${api}/documents?page=1&page_size=50&sort=last_accessed`)
   const data = await res.json()
   return (data.items ?? []).find((d) => ["audio", "video"].includes(d.content_type)) ?? null
 }, API)
 if (!recording) {
-  console.log("  SKIP the note-locus checks: the library holds no recording")
+  console.log("  SKIP the capture-locus checks: the library holds no recording")
 } else {
   console.log(`recording: ${recording.title} (${recording.content_type})`)
   await page.goto(`${APP}/library?doc=${recording.id}`, { waitUntil: "domcontentloaded" })
@@ -832,125 +885,73 @@ if (!recording) {
   if (turnCount) {
     const rect = await turn.boundingBox()
     if (rect) {
+      const before = await page.evaluate(async ({ api, docId }) => {
+        const res = await fetch(`${api}/annotations?document_id=${docId}`)
+        return (await res.json()).map((a) => a.id)
+      }, { api: API, docId: recording.id })
+
       await page.mouse.move(rect.x + 5, rect.y + Math.min(rect.height / 2, 20))
       await page.mouse.down()
       await page.mouse.move(rect.x + Math.min(rect.width - 5, 300), rect.y + Math.min(rect.height / 2, 20), { steps: 12 })
       await page.mouse.up()
       await page.waitForTimeout(800)
-      const noteAction = page.getByRole("button", { name: "Note", exact: true })
-      check("the selection offers Note", (await noteAction.count()) > 0)
-      if (await noteAction.count()) {
-        await noteAction.first().click()
-        await page.waitForTimeout(1500)
 
-        // The rung's rule: nothing opens over the document.
-        const capture = await page.evaluate(() => ({
-          dialogs: document.querySelectorAll('[role="dialog"]').length,
-          composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
-          onNotes: [...document.querySelectorAll("button[aria-pressed]")]
-            .some((b) => b.textContent === "Notes" && b.getAttribute("aria-pressed") === "true"),
-          raw: document.querySelector(".cm-content")?.innerText ?? "",
-          // What the draft holds, measured independently of how it is drawn.
-          lines: document.querySelectorAll(".cm-line").length,
-          // The composer renders as it writes: the quote's markers are gone
-          // from the DOM, and its lines carry the rendered class instead.
-          quoted: document.querySelectorAll(".cm-md-quote").length,
-        }))
-        check("taking a note opens no dialog", capture.dialogs === 0, `${capture.dialogs} dialogs`)
-        check("the composer is docked in the panel", capture.composers === 1, `${capture.composers} composers`)
-        check("the dock opens on the note", capture.onNotes)
-        check("the composer holds the captured passage", capture.lines >= 3, `${capture.lines} lines`)
-        // The quoted line renders as a quote and shows no marker. The line the
-        // cursor is on keeps its source, so this reads the passage's own line.
-        check("the composer renders the markdown it holds",
-          capture.quoted >= 3 && !capture.raw.includes('> "'), `${capture.quoted} quote lines`)
+      // The swatch carries no label, so it is addressed by the title the bar
+      // gives it -- and a disabled swatch has a different one, which is the
+      // failure this check is here to catch.
+      const swatch = page.locator('[data-testid="selection-action-bar"] button[title="Highlight yellow"]')
+      check("the transcript selection offers a highlight swatch", (await swatch.count()) > 0)
+      if (await swatch.count()) {
+        await swatch.first().click()
+        await page.waitForTimeout(2500)
+        const dialogs = await page.evaluate(() => document.querySelectorAll('[role="dialog"]').length)
+        check("highlighting a passage opens no dialog", dialogs === 0, `${dialogs} dialogs`)
 
-        // A docked composer outlives the capture that opened it, so the next
-        // one has to land in the draft rather than be dropped on the floor.
-        const second = page.locator("[data-chunk-id]").nth(1)
-        check("the transcript has a second passage to take", (await second.count()) > 0)
-        if (await second.count()) {
-          // Off screen, boundingBox still answers and the drag happens outside
-          // the window -- which reads as "no selection" rather than as a miss.
-          await second.scrollIntoViewIfNeeded()
-          await page.waitForTimeout(600)
-          const r2 = await second.boundingBox()
-          if (r2) {
-            await page.mouse.move(r2.x + 5, r2.y + Math.min(r2.height / 2, 20))
-            await page.mouse.down()
-            await page.mouse.move(r2.x + Math.min(r2.width - 5, 300), r2.y + Math.min(r2.height / 2, 20), { steps: 12 })
-            await page.mouse.up()
-            await page.waitForTimeout(800)
-            const noteAgain = page.getByRole("button", { name: "Note", exact: true })
-            check("the second selection offers Note", (await noteAgain.count()) > 0)
-            if (await noteAgain.count()) {
-              await noteAgain.first().click()
-              await page.waitForTimeout(1500)
-              const appended = await page.evaluate(() => ({
-                composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
-                lines: document.querySelectorAll(".cm-line").length,
-              }))
-              check("a second capture appends to the open note", appended.lines > capture.lines,
-                `${capture.lines} -> ${appended.lines} lines`)
-              check("a second capture opens no second composer", appended.composers === 1,
-                `${appended.composers} composers`)
-            }
-          }
-        }
-
-        // The composer autosaves on a debounce; give it room to create.
-        await page.waitForTimeout(9000)
-        const saved = await page.evaluate(async ({ api, docId }) => {
-          const res = await fetch(`${api}/notes?page=1&page_size=5`)
-          const notes = await res.json()
-          return notes.find((n) => n.document_id === docId) ?? null
-        }, { api: API, docId: recording.id })
-        check("the note was created", Boolean(saved))
+        // Identified by what was not there before, never by position: the
+        // endpoint's order is not this check's to assume, and asserting the
+        // locus of the wrong row would pass while the new one stored nothing.
+        const saved = await page.evaluate(async ({ api, docId, known }) => {
+          const res = await fetch(`${api}/annotations?document_id=${docId}`)
+          const fresh = (await res.json()).filter((a) => !known.includes(a.id))
+          return fresh.length === 1 ? fresh[0] : null
+        }, { api: API, docId: recording.id, known: before })
+        check("the highlight was created", Boolean(saved), saved ? saved.id : "no single new annotation")
         if (saved) {
-          check("the note keeps the chunk it came from", Boolean(saved.chunk_id), String(saved.chunk_id))
-          check("the note keeps the section it came from", Boolean(saved.section_id), String(saved.section_id))
+          check("the highlight keeps the section it came from", Boolean(saved.section_id), String(saved.section_id))
+          check("the highlight keeps the words it was taken from",
+            typeof saved.selected_text === "string" && saved.selected_text.length > 0,
+            String(saved.selected_text).slice(0, 60))
 
-          // Done closes the composer, and the panel's own list is where the
-          // note then is -- the reader never went to the notes page for it.
-          const doneBtn = page.getByRole("button", { name: "Done", exact: true })
-          if (await doneBtn.count()) {
-            await doneBtn.first().click()
-            await page.waitForTimeout(2500)
+          // The reader offers it back without leaving the document: the header's
+          // highlight control only appears once there is one to manage.
+          await page.reload({ waitUntil: "domcontentloaded" })
+          await page.waitForTimeout(4000)
+          const manage = page.getByTitle("Manage highlights")
+          check("the reader offers the highlight back", (await manage.count()) > 0)
+          if (await manage.count()) {
+            await manage.first().click()
+            await page.waitForTimeout(1000)
+            const listedText = await page.evaluate(() => document.body.innerText)
+            check("the panel lists the highlight it just took",
+              listedText.includes(String(saved.selected_text).trim().slice(0, 30)))
           }
-          // The panel's own tab, not the nav rail's Notes link.
+
+          // The Notes face lost nothing by losing Clip: it is still where a note
+          // is written, and it is the only way in now.
           const notesTab = page.locator("button[aria-pressed]").filter({ hasText: /^Notes$/ })
           if (await notesTab.count()) {
             await notesTab.first().click()
             await page.waitForTimeout(1500)
           }
-          const listed = await page.evaluate(() => ({
-            composers: document.querySelectorAll('[data-testid="docked-note-composer"]').length,
-            rows: document.querySelectorAll('[data-testid="docked-notes-list"] li').length,
-          }))
-          check("Done closes the composer", listed.composers === 0, `${listed.composers} composers`)
-          check("the panel lists the note it just took", listed.rows > 0, `${listed.rows} rows`)
+          const canWrite = await page.evaluate(() =>
+            [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "New note"))
+          check("the panel still offers a way to write a note", canWrite)
 
-          // The round trip: the note's own back-link must land on the passage.
-          await page.goto(`${APP}/notes`, { waitUntil: "domcontentloaded" })
-          await page.waitForTimeout(3000)
-          const back = page.getByRole("button", { name: "Go to source" })
-          check("the note offers a way back", (await back.count()) > 0)
-          if (await back.count()) {
-            await back.first().click()
-            await page.waitForTimeout(5000)
-            const landed = await page.evaluate(() => ({
-              url: location.href,
-              marks: document.querySelectorAll(".luminary-citation-mark, [data-citation-highlight]").length,
-            }))
-            check("the back-link opens the reader on the document", landed.url.includes("doc="), landed.url)
-            check("the passage is marked when the reader arrives", landed.marks > 0, `${landed.marks} marks`)
-          }
-
-          // The check cleans up after itself rather than leaving a note per run.
+          // The check cleans up after itself rather than leaving one per run.
           await page.evaluate(async ({ api, id }) => {
-            await fetch(`${api}/notes/${id}`, { method: "DELETE" })
+            await fetch(`${api}/annotations/${id}`, { method: "DELETE" })
           }, { api: API, id: saved.id })
-          console.log(`  (removed the note this check created: ${saved.id})`)
+          console.log(`  (removed the highlight this check created: ${saved.id})`)
         }
       }
     }

@@ -74,11 +74,14 @@ export function ChatConversation({
   variant = "page",
   threadKey = PAGE_THREAD,
   pinnedDocumentId,
+  onCitationInDocument,
 }: {
   variant?: "page" | "docked"
   threadKey?: string
   /** Docked beside a document: its scope, and not the reader's to change. */
   pinnedDocumentId?: string
+  /** Answer a citation without routing. Returns whether it was handled here. */
+  onCitationInDocument?: (c: SourceCitation) => boolean
 } = {}) {
   const isPage = variant === "page"
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
@@ -736,6 +739,11 @@ export function ChatConversation({
 
   // S148: navigate to Learning tab with DocumentReader open at the cited section/page
   function navigateToCitation(c: SourceCitation) {
+    // A conversation docked beside a document answers a citation into that same
+    // document where it stands. Routing remounts the reader from the URL, which
+    // takes the panel the citation was clicked in down with it -- the passage
+    // arrives and the conversation the reader was holding is gone.
+    if (onCitationInDocument?.(c)) return
     setActiveDocument(c.document_id)
     // Close the chat side-panel if open, so user sees the document
     const params = new URLSearchParams()
