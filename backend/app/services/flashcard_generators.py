@@ -1266,6 +1266,12 @@ async def generate_from_graph(
         co_pairs = graph.get_co_occurring_pairs_for_document(document_id, limit=k)
         pairs = [(a, b, "co-occurs", w) for a, b, w in co_pairs]
 
+    # The prompt shows names, not ids, and orders the model to write "the
+    # relationship between 'X' and 'Y'". Handed the same name twice it must invent
+    # one, which is where "how are the two mentions of Ulysses connected?" came
+    # from. Two ids sharing a name are no better than one id twice.
+    pairs = [p for p in pairs if p[0].strip().casefold() != p[1].strip().casefold()]
+
     if not pairs:
         logger.info("generate_from_graph: no entity pairs found for doc=%s", document_id)
         return []

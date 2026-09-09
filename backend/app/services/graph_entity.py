@@ -161,7 +161,15 @@ class KuzuEntityRepo:
             )
 
     def add_co_occurrence(self, entity_id_a: str, entity_id_b: str, document_id: str) -> None:
-        """Create or increment a CO_OCCURS edge between two entities."""
+        """Create or increment a CO_OCCURS edge between two distinct entities.
+
+        A self-loop is not a co-occurrence -- it is one entity named twice in a
+        chunk -- and its weight grows fastest on whatever the document repeats
+        most, so it sorts above every real pair. Refused here as well as at the
+        caller: the edge must not exist, whoever writes it.
+        """
+        if entity_id_a == entity_id_b:
+            return
         result = self._conn.execute(
             "MATCH (a:Entity {id: $aid})-[r:CO_OCCURS]->(b:Entity {id: $bid})"
             " WHERE r.document_id = $did RETURN r.weight",
@@ -235,6 +243,7 @@ class KuzuEntityRepo:
                 f"MATCH (e1:Entity)-[:MENTIONED_IN]->(d:Document {{id: $did}}),"
                 f" (e2:Entity)-[:MENTIONED_IN]->(d),"
                 f" (e1)-[r:RELATED_TO]->(e2)"
+                f" WHERE e1.id <> e2.id"
                 f" RETURN e1.name, e2.name, r.relation_label, r.confidence"
                 f" ORDER BY r.confidence DESC LIMIT {int(limit)}",
                 {"did": document_id},
@@ -261,23 +270,39 @@ class KuzuEntityRepo:
         capped at *limit*. Returns [] on any Kuzu error or when no CO_OCCURS edges exist.
 
         Used as a fallback by generate_from_graph when no RELATED_TO edges exist.
+        Self-pairs are excluded on read too: 8,235 of 74,376 edges in a real
+        library are an entity with itself, written before the guard existed, and
+        no re-ingest is going to remove them.
         """
         try:
             result = self._conn.execute(
                 f"MATCH (a:Entity)-[:MENTIONED_IN]->(d:Document {{id: $did}}),"
                 f" (b:Entity)-[:MENTIONED_IN]->(d),"
                 f" (a)-[r:CO_OCCURS]->(b)"
-                f" WHERE r.document_id = $did"
+                f" WHERE r.document_id = $did AND a.id <> b.id"
                 f" RETURN a.name, b.name, r.weight"
-                f" ORDER BY r.weight DESC LIMIT {int(limit)}",
+                f" ORDER BY r.weight DESC LIMIT {int(limit) * 2}",
                 {"did": document_id},
             )
+            # Direction was mention order until the ingest guard landed, so an
+            # existing graph holds one pair as two edges with separate weights
+            # ((minerva, ulysses) 19.0 beside (ulysses, minerva) 17.0). Undeduped
+            # they are two of the caller's k pairs and one repeated question.
+            # Over-fetch, keep the heavier direction, then honour the limit.
             pairs: list[tuple[str, str, float]] = []
+            seen: set[frozenset[str]] = set()
             while result.has_next():
                 row = result.get_next()
                 name_a, name_b, weight = row[0], row[1], row[2]
-                if name_a and name_b:
-                    pairs.append((name_a, name_b, float(weight or 0.0)))
+                if not (name_a and name_b):
+                    continue
+                key = frozenset((name_a.casefold(), name_b.casefold()))
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append((name_a, name_b, float(weight or 0.0)))
+                if len(pairs) >= limit:
+                    break
             return pairs
         except Exception:
             logger.debug(

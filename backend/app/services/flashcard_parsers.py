@@ -195,6 +195,54 @@ _LEADING_PHRASES = (
     "the writer",
 )
 
+# The list above enumerates PHRASINGS, so the model reaches for one it does not
+# hold. "In the provided context, how are the two mentions of Ulysses connected?"
+# shipped past it saying "the provided context" where the list had "this context";
+# 31 of 1234 library cards point at their source in wording no entry covers ("the
+# text suggests", "according to these notes", "in the provided text"). Key the rule
+# on the REFERENT instead -- a noun naming the material, under something that
+# points at it. A card is shown alone, so a question that needs the passage in
+# view cannot be answered at all.
+_SOURCE_NOUN = (
+    r"(?:context|passage|text|excerpt|document|material|snippet|transcript"
+    r"|notes|article|essay|paragraph|chapter|section|book)"
+)
+# A source noun taking "of"/"for" names a subject rather than the page in front of
+# the reader, and both cases are real: "What are CoW and MoR in the context of
+# modern data lakehouses?" must stand, "In the provided context, ..." must not.
+# Without this exception the rule refuses 26 library cards for a topical qualifier.
+_TOPICAL = r"(?!\s+(?:of|for)\b)"
+_HANDED_OVER = r"(?:provided|given|above|attached|source|following|preceding|original)"
+
+# Three ways a question reaches for the page. Bare "the <noun>" is deliberately not
+# one of them: "the query and the document" is an IR pair and "the context window"
+# is a model's input budget -- vocabulary, not deixis.
+_SOURCE_REFERENCE = (
+    # "this passage", "the provided text" -- pointing at something in view.
+    re.compile(
+        rf"\b(?:this|that|these|those)\s+{_SOURCE_NOUN}{_TOPICAL}\b"
+        rf"|\b(?:the|this|that)\s+{_HANDED_OVER}\s+{_SOURCE_NOUN}{_TOPICAL}\b",
+        re.I,
+    ),
+    # "according to the text", "mentioned in the excerpt" -- crediting the source.
+    re.compile(
+        rf"\b(?:in|from|per|within|according\s+to|based\s+on|mentioned\s+in"
+        rf"|described\s+in|depicted\s+in|stated\s+in|shown\s+in|given\s+in"
+        rf"|presented\s+in|discussed\s+in|found\s+in|outlined\s+in)\s+"
+        rf"the\s+(?:{_HANDED_OVER}\s+)?{_SOURCE_NOUN}{_TOPICAL}\b",
+        re.I,
+    ),
+    # "the text suggests", "the passage says" -- the source as the one speaking.
+    re.compile(
+        rf"\bthe\s+(?:{_HANDED_OVER}\s+)?{_SOURCE_NOUN}(?:'s)?\s+"
+        rf"(?:also\s+|then\s+|further\s+)?"
+        rf"(?:suggest|impl|argu|describ|defin|stat|say|mention|not|claim|frame|draw"
+        rf"|highlight|cit|recommend|contrast|impos|explain|indicat|show|tell|refer"
+        rf"|discuss|present|emphasi|list|call|treat|warn|assert)(?:e?s|ed|ing|y|ies)?\b",
+        re.I,
+    ),
+)
+
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text))
@@ -379,6 +427,11 @@ def card_rejection(
     for phrase in _LEADING_PHRASES:
         if phrase in q_lower:
             return REJECT_DEICTIC, f"leading/deictic phrase in question ({phrase!r})"
+    for rule in _SOURCE_REFERENCE:
+        match = rule.search(q)
+        if match:
+            pointed = " ".join(match.group(0).split())
+            return REJECT_DEICTIC, f"question points at its source ({pointed!r})"
 
     enumerated = sum(1 for line in a.splitlines() if _ENUM_LINE.match(line))
     if enumerated > _MAX_ENUMERATED_ITEMS:
