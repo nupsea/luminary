@@ -394,15 +394,40 @@ cannot rely on a user's shell.
 can actually ingest, so the frontend does not encode which component enables
 which feature — video needs both a transcriber and ffmpeg, and a YouTube URL
 needs yt-dlp on top of those. `UploadDialog` hides the Web URL tab, the
-audio/video content types and the media file extensions accordingly. Two mode
-axes apply: `surface-manifest.json` decides what is built, capabilities decide
-what is offered at runtime.
+audio/video content types and the media file extensions accordingly, and
+`VoiceRecordButton` hides itself on `dictation`. Two mode axes apply:
+`surface-manifest.json` decides what is built, capabilities decide what is
+offered at runtime.
+
+`dictation` is `transcription` alone — the browser hands the backend Opus in a
+WebM container and PyAV decodes it, so no ffmpeg. It is a separate key rather
+than a reading of `audio_ingest` so that the mic button never has to know which
+component happens to back it.
 
 **Installation.** `python_extra` components use the bundled `pip` with
 `--target`, never the bundle's own `site-packages` — that tree is read-only and
 code-signed. This is why `pip` is not pruned from the staged runtime. There is
 no automatic uninstall for them: `pip --target` cannot remove, and deleting the
 extras directory would take unrelated components with it.
+
+## The microphone
+
+Two things gate it, and **both are invisible in development**: `tauri dev` runs
+a bare binary, which inherits the terminal's TCC grant and enforces no
+entitlement. A signed bundle does neither.
+
+- `NSMicrophoneUsageDescription` in `src-tauri/Info.plist`, which Tauri merges
+  into the bundle's own. Without it macOS does not deny the microphone — TCC
+  **terminates the process** the moment `getUserMedia` reaches for it.
+- `com.apple.security.device.audio-input` in `src-tauri/entitlements.plist`.
+  The hardened runtime denies the device without it.
+
+`verify_signed.sh` checks for both on the built artefact, before a notarization
+round trip is spent.
+
+Neither entitlements file may carry an XML comment. AMFI's parser is stricter
+than `plutil`'s: the file lints clean and `codesign` then fails with
+`AMFIUnserializeXML: syntax error`.
 
 ## Constraints
 

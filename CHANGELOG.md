@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A citation points in the terms its source has** — a moment for a recording, a
   page for a paginated document, otherwise the section — and lands on its passage
   marked, centred and held there.
-- **Offline Whisper dictation** across notes, teach-back and Ask.
+- **Dictate instead of typing** — into a note, a teach-back answer or a
+  question. Whisper runs on the machine and nothing is uploaded; the mic button
+  appears once the Speech to text component is installed, which the bundle
+  cannot ship because faster-whisper carries GPL code.
 
 ### Changed
 - **The learner rail is five items** — Home, Library, Notes, Study, Progress. Ask

@@ -406,6 +406,21 @@ when it is shared is the point of writing one — which also retires the build-t
 `pages/Notes.tsx` that kept the publish dialog out of public bundles. `surfaceManifest.test.ts` pins
 the rail to those five ids and goes red on either half of the Ask change.
 
+**Dictation rides on the transcriber that was already here.** `POST /audio/transcribe` hands a
+browser recording to the same `AudioTranscriber` that ingests an audio file, so the mic in a note, a
+teach-back answer and Ask needs no new weights and no new model. It does need the `transcription`
+component, which the installer may not carry — faster-whisper pulls PyAV, whose wheels bundle
+`libx264`/`libx265` — so the button reads a `dictation` capability and is absent until that is
+installed. Without it a user records, waits, and is answered with a `uv sync` line.
+
+**Both halves of microphone access are invisible until the app is signed.** `tauri dev` runs a bare
+binary, which inherits the terminal's TCC grant and enforces no entitlement, so a mic button can be
+built, demonstrated and shipped while the packaged app has neither `NSMicrophoneUsageDescription` nor
+`com.apple.security.device.audio-input`. The first is not a denial but a **termination**: TCC kills a
+process that reaches a protected device with no declared purpose. Both are now checked by
+`verify_signed.sh` on the built artefact, and both were fired by stripping them from a signed bundle.
+An entitlements plist may carry no XML comment — AMFI's parser rejects what `plutil` accepts.
+
 **A rate of 1.0000 on the citation round-trip is a rubber stamp unless a deliberately unresolvable ref
 is in the same test and fails.** See `.claude/rules/common/verify-before-reporting.md`.
 

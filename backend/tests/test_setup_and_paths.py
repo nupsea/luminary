@@ -588,6 +588,9 @@ def test_capabilities_require_every_component_a_feature_depends_on(monkeypatch):
     caps = asyncio.run(components_module.capabilities())
 
     assert caps["audio_ingest"]["available"] is True
+    # Dictation needs the transcriber alone; gating it on ffmpeg too would hide
+    # the mic button on an install that can already transcribe.
+    assert caps["dictation"]["available"] is True
     assert caps["video_ingest"]["available"] is False
     assert "ffmpeg" in caps["video_ingest"]["requires"]
     assert caps["youtube_ingest"]["available"] is False
@@ -595,6 +598,26 @@ def test_capabilities_require_every_component_a_feature_depends_on(monkeypatch):
     assert caps["vision"]["requires"] == ["vision_model"]
     assert caps["chat"]["available"] is True
     assert caps["chat"]["requires"] == []
+
+
+def test_dictation_is_unavailable_without_the_transcriber(monkeypatch):
+    """The mic button reads this. Without it the distributed bundle -- which
+    ships no faster-whisper for licensing reasons -- offers dictation, records,
+    and answers with a `uv sync` instruction the user cannot act on."""
+
+    async def _fake_status():
+        return [
+            {"id": "transcription", "installed": False},
+            {"id": "ffmpeg", "installed": True},
+            {"id": "chat_model", "installed": True},
+            {"id": "vision_model", "installed": True},
+        ]
+
+    monkeypatch.setattr(components_module, "component_status", _fake_status)
+    caps = asyncio.run(components_module.capabilities())
+
+    assert caps["dictation"]["available"] is False
+    assert caps["dictation"]["requires"] == ["transcription"]
 
 
 def test_capabilities_endpoint_reports_every_key():
@@ -607,6 +630,7 @@ def test_capabilities_endpoint_reports_every_key():
     assert resp.status_code == 200
     assert set(resp.json()) == {
         "audio_ingest",
+        "dictation",
         "video_ingest",
         "youtube_ingest",
         "web_ingest",

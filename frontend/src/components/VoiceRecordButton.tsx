@@ -1,5 +1,6 @@
 import { Loader2, Mic, Square } from "lucide-react"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
+import { useCapability } from "@/hooks/useSetup"
 import { cn } from "@/lib/utils"
 
 export interface VoiceRecordButtonProps {
@@ -22,8 +23,14 @@ export function VoiceRecordButton({
   const { isRecording, isTranscribing, toggleRecording } = useAudioRecorder({
     onTranscribed,
   })
+  // The installer ships no transcriber -- faster-whisper pulls GPL code, so it
+  // is a component the user adds afterwards. Offering the mic before then gets
+  // a recording made and thrown away against a `uv sync` message.
+  const dictation = useCapability("dictation")
 
   const isSmall = size === "sm"
+
+  if (!dictation.available) return null
 
   return (
     <button

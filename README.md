@@ -52,7 +52,9 @@ macOS 14 (Sonoma) or newer.
 
 > The download is ~700 MB. First launch fetches ~1.4 GB of models; your library
 > opens in about 20 seconds and the rest finishes in the background. A chat model
-> is a separate ~2 GB download the app offers when you first need one.
+> is a separate ~2 GB download the app offers when you first need one, and
+> **Speech to text** — which powers audio ingest and voice dictation — is another
+> the app fetches on request, because it carries GPL code Luminary may not ship.
 
 On Linux, Windows, Intel Mac, or want it as a background service?
 **[Every other install path is below.](#other-ways-to-install)**
@@ -65,8 +67,10 @@ On Linux, Windows, Intel Mac, or want it as a background service?
    paste a web article or YouTube URL.
 2. **Wait for the summary card.** Usually under a minute. That means it is
    indexed and ready.
-3. **Ask it something.** The Ask tab, or `⌘K` from anywhere. Click a citation to
-   land on the exact passage it came from.
+3. **Ask it something.** Open the document and ask in the panel beside it —
+   the answer arrives without leaving the page, and clicking a citation marks
+   the passage it came from where it stands. `⌘K` searches everything from
+   anywhere.
 4. **Make some cards.** Study → generate from the document, then Start Review.
    Predict before you flip.
 
@@ -90,11 +94,12 @@ machine**, and it will not even offer you a cloud model.
 
 | | |
 |---|---|
-| **Read** | Side-by-side PDF viewer, section navigation, dark-page mode, saved reading position, highlights and clippings |
+| **Read** | Side-by-side PDF viewer, section navigation, dark-page mode, saved reading position, four-colour highlights |
 | **Ingest** | PDF, EPUB, docx, Markdown, txt, audio, video, web articles, YouTube, Kindle highlights |
 | **Ask** | Hybrid retrieval (vector + keyword + graph), Socratic mode, teach-back, optional web augmentation |
 | **Study** | Regular, cloze and code-trace cards; FSRS scheduling; three-phase sessions; prediction calibration |
 | **Notes** | Markdown editor with live preview, wiki-links, backlinks, Mermaid and Excalidraw |
+| **Dictate** | Speak instead of typing — into a note, a teach-back answer or a question. Transcribed on your machine by Whisper; nothing is uploaded |
 | **Track** | Mastery rings per document, "what's about to slip", study activity, time on task |
 | **Figures** | Diagrams and charts pulled out of PDFs and described by a vision model, so an answer can draw on them |
 | **Export** | Markdown vault (Obsidian-compatible), Anki `.apkg`, flashcard CSV |
@@ -158,6 +163,9 @@ make start     # Production server on http://localhost:7820
 `make install` needs `sudo` once, for Ollama and the `zstd` its installer
 requires. Node is fetched into `~/.local` — apt only carries Node 18 and the
 build needs 20+. Verified end to end on a clean `ubuntu:24.04` container (arm64).
+
+Audio and video ingestion and voice dictation are not part of it: add **Speech
+to text** from Settings, and `ffmpeg` from apt for video.
 </details>
 
 <details>
@@ -177,7 +185,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install.ps1   # one-
 
 Open http://localhost:7820 when the log settles. The native install covers everything except audio and video. For those, install
 ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
-to text** from Settings — Luminary fetches that one itself.
+to text** from Settings — Luminary fetches that one itself. Voice dictation
+needs that same component and no ffmpeg; the mic button appears once it is in.
 
 **Docker, only if something blocks the native install** (a proxy or VPN, or a
 managed machine). Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -311,8 +320,9 @@ Expect single-digit tokens per second either way (see
 [Running under Docker](#running-under-docker)). On an Intel i7-8850H with host
 Ollama, `qwen3.5:4b` decodes at ~6 tok/s, so answer length is what you feel most.
 
-Audio, video and YouTube ingestion are **off** in this image — ffmpeg and a
-transcriber are GPL, so they never travel inside anything Luminary distributes.
+Audio, video, YouTube ingestion and voice dictation are **off** in this image —
+ffmpeg and a transcriber are GPL, so they never travel inside anything Luminary
+distributes.
 The image is built on your machine, so you can opt in with
 `WITH_MEDIA=1 docker compose --profile ai up --build` (+850 MB). Installing
 ffmpeg on the Mac itself does nothing: the backend is a Linux container and

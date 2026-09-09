@@ -352,18 +352,17 @@ narration, and survives being watched with sound off in a README column.
 
 | Beat | Seconds | On screen |
 |---|---|---|
-| 1 | 0.0–1.5 | Ask tab, a document already in scope. Cursor moves to the macOS menu bar. |
+| 1 | 0.0–1.5 | A document open, its Ask face docked beside the text. Cursor moves to the macOS menu bar. |
 | 2 | 1.5–3.0 | Wi-Fi menu opens, **Wi-Fi switched off**. The menu-bar icon visibly changes. Hold one beat on the off state. |
 | 3 | 3.0–4.5 | Type a real question about the document. Keep it short enough to finish in a beat. |
 | 4 | 4.5–9.0 | The answer **streams in**. Do not cut this — streaming tokens are what makes it read as live rather than staged. |
-| 5 | 9.0–11.0 | Click a citation chip. The reader opens on the passage; the chip shows its section and page. |
+| 5 | 9.0–11.0 | Click a citation chip. The passage is marked in the pane already open beside the answer; the chip shows its section and page. |
 | 6 | 11.0–12.0 | Hold on the source with the wifi icon still off in frame. Freeze. |
 
 Two things make or break it. **The wifi icon must stay visible in every frame** —
 crop to include the menu bar, or the whole point is unproven. And **beat 5 needs
-the citation fix** (`fix/citation-section-and-page`): before it, chips render
-with no section and `page 0`, which undersells exactly what the shot exists to
-show.
+0.11.0 or newer**: before `caf5d48`, chips rendered with no section and `page 0`,
+which undersells exactly what the shot exists to show.
 
 Suggested question, because the answer is short and the document is recognisable:
 against `Attention`, ask *"What problem does multi-head attention solve?"*

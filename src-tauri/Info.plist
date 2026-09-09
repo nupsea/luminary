@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the generated bundle Info.plist. Tauri reads this path by name;
+     see `MacConfig::info_plist` in tauri-utils.
+
+     Without NSMicrophoneUsageDescription macOS does not deny the microphone, it
+     kills the process: TCC terminates any app that reaches for a protected
+     device with no declared purpose. The WKWebView's getUserMedia is that
+     reach, so dictation would take the whole app down on first use. Never
+     remove this while a mic button exists; verify_signed.sh checks for it. -->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Luminary uses the microphone only to turn your speech into text. Recordings are transcribed on this Mac and are never uploaded.</string>
+  </dict>
+</plist>

@@ -50,6 +50,21 @@ min="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist" 2>/de
 [ "$min" = "14.0" ] && _pass "LSMinimumSystemVersion 14.0" \
     || _fail "LSMinimumSystemVersion is '$min', expected 14.0 (onnxruntime ships macosx_14_0_arm64 only)"
 
+# Both halves of microphone access, checked on the built artefact because both
+# are silent in development: `tauri dev` runs a bare binary, where TCC inherits
+# the terminal's grant and no entitlement is enforced. A merge that quietly
+# stopped happening, or an entitlement dropped from the plist, would surface as
+# an app that dies the first time a user presses the mic button.
+mic_desc="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$plist" 2>/dev/null || echo '')"
+[ -n "$mic_desc" ] && _pass "NSMicrophoneUsageDescription present" \
+    || _fail "no NSMicrophoneUsageDescription in Info.plist (TCC kills the app when dictation asks for the mic)"
+
+if codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q 'com.apple.security.device.audio-input'; then
+    _pass "audio-input entitlement"
+else
+    _fail "no com.apple.security.device.audio-input entitlement (the hardened runtime denies the microphone)"
+fi
+
 _step "4. Attribution ships"
 # A licence obligation, so a hard failure rather than a checklist item.
 for f in OLLAMA-LICENSE LLAMA.CPP-LICENSE; do
