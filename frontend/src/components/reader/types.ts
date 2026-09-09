@@ -31,10 +31,11 @@ export const SUMMARY_TABS: SummaryTabDef[] = [
   { mode: "detailed", label: "Detailed" },
 ]
 
-/** Speaker-turn content gets a notes tab. The shape adapts underneath -- a
- *  meeting's notes are decisions and owners, a talk's are points and
- *  references -- which the reader does not need to be told. */
+/** Speaker-turn content gets a summary of its own. The shape adapts underneath
+ *  -- a meeting's is decisions and owners, a talk's is points and references --
+ *  which the reader does not need to be told. Not "Notes": that word belongs to
+ *  the face holding the reader's own writing, one row above this one. */
 export const CONVERSATION_TAB: SummaryTabDef = {
   mode: "conversation",
-  label: "Notes",
+  label: "Discussion",
 }

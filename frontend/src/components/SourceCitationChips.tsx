@@ -9,7 +9,7 @@
  */
 
 import { Badge } from "@/components/ui/badge"
-import { citationPageText, deduplicateCitations, type SourceCitation } from "@/lib/citationUtils"
+import { citationLocusText, deduplicateCitations, type SourceCitation } from "@/lib/citationUtils"
 
 export type { SourceCitation }
 
@@ -36,7 +36,7 @@ export function SourceCitationChips({ citations, navigateToCitation }: Props) {
           const headingAbbrev = headingOrSnippet
             ? ` / ${headingOrSnippet.slice(0, 30)}${headingOrSnippet.length > 30 ? "..." : ""}`
             : ""
-          const pageLabel = citationPageText(c)
+          const locusLabel = citationLocusText(c)
           const tooltipLines = [
             c.document_title,
             c.section_heading,
@@ -56,7 +56,7 @@ export function SourceCitationChips({ citations, navigateToCitation }: Props) {
                 variant="blue"
                 className="cursor-pointer hover:opacity-80 transition-opacity"
               >
-                {titleAbbrev}{headingAbbrev}{pageLabel}
+                {titleAbbrev}{headingAbbrev}{locusLabel}
               </Badge>
             </button>
           )

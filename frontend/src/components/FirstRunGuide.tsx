@@ -20,6 +20,7 @@ import { launchStudy } from "@/lib/studyLauncher"
 import { generateFlashcards } from "@/pages/Study/api"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store"
+import { EngineChoice } from "@/components/setup/EngineChoice"
 
 interface FirstRunDoc {
   id: string
@@ -103,8 +104,15 @@ export function FirstRunGuide() {
           </span>
           <h2 className="text-xl font-semibold text-foreground">Welcome to Luminary</h2>
           <p className="max-w-md text-sm text-muted-foreground">
-            Three quick steps to your first review. Everything stays on your machine.
+            One choice, then two quick steps. Your library never leaves this machine.
           </p>
+        </div>
+
+        {/* Asked before "add a document": it is the only setting that changes how
+            the next five minutes feel, and a stranger meets the local arm's
+            time-to-first-token before anything else. */}
+        <div className="rounded-xl border border-border bg-background/40 p-4">
+          <EngineChoice />
         </div>
 
         <ol className="flex flex-col gap-3">

@@ -19,32 +19,18 @@ import { OrganizationPlanDialog, type NamingViolation } from "@/components/Organ
 import { GenerateFlashcardsDialog } from "@/components/GenerateFlashcardsDialog"
 import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
 import type { BlogKind } from "@/lib/blogApi"
-import { isSurfaceVisible } from "@/lib/surfaceManifest"
 
-// Full-mode only, folded at BUILD time. `isSurfaceVisible("blog")` below decides
-// what renders; it does not decide what is compiled in, so a static import put
-// the whole publish dialog and lib/blogApi into the public Notes chunk. In a
-// public build LUMINARY_MODE folds this to null and the dynamic import is
-// dropped. Guarded by scripts/check_public_bundle_excludes_full.py.
-// Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
-// LUMINARY_MODE constant. vite `define` substitutes the env expression
-// textually before parsing, so this folds to `"public" === "full"` -> false and
-// Rollup drops the branch with its dynamic import. LUMINARY_MODE is the return
-// value of resolveMode(), which Rollup cannot constant-fold -- using it here
-// emits a separate chunk that still ships. Measured both ways.
-const BlogsPanel =
-  import.meta.env.VITE_LUMINARY_MODE === "full"
-    ? lazy(() => import("@/components/blog/BlogsPanel").then((m) => ({ default: m.BlogsPanel })))
-    : null
+// Lazy, not folded: blog ships in every mode now, and both of these are heavy
+// enough that the Notes chunk should not carry them until one is opened.
+const BlogsPanel = lazy(() =>
+  import("@/components/blog/BlogsPanel").then((m) => ({ default: m.BlogsPanel })),
+)
 
-const BlogPublishDialog =
-  import.meta.env.VITE_LUMINARY_MODE === "full"
-    ? lazy(() =>
-        import("@/components/blog/BlogPublishDialog").then((m) => ({
-          default: m.BlogPublishDialog,
-        })),
-      )
-    : null
+const BlogPublishDialog = lazy(() =>
+  import("@/components/blog/BlogPublishDialog").then((m) => ({
+    default: m.BlogPublishDialog,
+  })),
+)
 import { useDebounce } from "@/hooks/useDebounce"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -498,15 +484,14 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
   const [publishKind, setPublishKind] = useState<BlogKind | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const blogEnabled = isSurfaceVisible("blog")
   // A note is publishable to a collection only when it belongs to one named for
   // that target (case-insensitive): "BLOG" -> blog, "THOUGHTS" -> thoughts.
   const collectionNames = useMemo(
     () => new Set((note.collections ?? []).map((c) => c.name.toLowerCase())),
     [note.collections],
   )
-  const canPublishBlog = blogEnabled && collectionNames.has("blog")
-  const canPublishThoughts = blogEnabled && collectionNames.has("thoughts")
+  const canPublishBlog = collectionNames.has("blog")
+  const canPublishThoughts = collectionNames.has("thoughts")
 
   const deleteMut = useMutation({
     mutationFn: () => deleteNote(note.id),
@@ -622,7 +607,12 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
           onClick={(e) => {
             e.stopPropagation()
             const params = new URLSearchParams({ doc: note.document_id! })
+            // Both, when both were captured: the chunk marks the passage in a
+            // view that renders chunk by chunk, and the section is what a prose
+            // reader can be scrolled to. Sending only the chunk left a note
+            // taken from prose opening at the top of the document.
             if (note.chunk_id) params.set("chunk_id", note.chunk_id)
+            if (note.section_id) params.set("section_id", note.section_id)
             navigate(`/?${params.toString()}`)
           }}
           className="flex items-center gap-1.5 self-start rounded-md border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-primary hover:bg-accent hover:text-foreground transition-colors"
@@ -691,7 +681,7 @@ function NoteCard({ note, onEdit, onDeleted }: NoteCardProps) {
         </div>
       )}
 
-      {publishKind && BlogPublishDialog && (
+      {publishKind && (
         <Suspense fallback={null}>
         <BlogPublishDialog
           open={!!publishKind}
@@ -723,7 +713,6 @@ export default function NotesPage() {
   useTimeOnTask("note", null)
 
   const [filter, setFilter] = useState<FilterState>({ type: "all" })
-  const blogsEnabled = isSurfaceVisible("blog")
   const [isCreating, setIsCreating] = useState(false)
   const [showGenerateFlashcards, setShowGenerateFlashcards] = useState(false)
   const [showGapDetect, setShowGapDetect] = useState(false)
@@ -942,7 +931,7 @@ export default function NotesPage() {
         navigate={navigate}
       />
     )
-  } else if (filter.type === "blogs" && BlogsPanel) {
+  } else if (filter.type === "blogs") {
     panelContent = (
       <Suspense fallback={null}>
         <BlogsPanel />
@@ -1208,23 +1197,21 @@ export default function NotesPage() {
           Reading Journal
         </button>
 
-        {blogsEnabled && (
-          <button
-            onClick={() => {
-              setFilter({ type: "blogs" })
-              setActiveCollectionId(null)
-              setActiveTag(null)
-            }}
-            className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
-              filter.type === "blogs"
-                ? "bg-accent font-medium text-foreground"
-                : "text-muted-foreground hover:bg-accent/60"
-            }`}
-          >
-            <Newspaper size={13} />
-            Blog & Thoughts
-          </button>
-        )}
+        <button
+          onClick={() => {
+            setFilter({ type: "blogs" })
+            setActiveCollectionId(null)
+            setActiveTag(null)
+          }}
+          className={`flex items-center gap-2 rounded px-3 py-2 text-sm text-left transition-colors ${
+            filter.type === "blogs"
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/60"
+          }`}
+        >
+          <Newspaper size={13} />
+          Blog & Thoughts
+        </button>
 
         {/* Collections section */}
         <div className="mt-3">

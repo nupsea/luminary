@@ -113,6 +113,17 @@ class _GraphWithCoOccurs:
         return [("Eloi", "Morlock", 12)]
 
 
+class _GraphWithSelfPair:
+    """The top co-occurrence is an entity with itself -- the real shape of
+    the_odyssey, where ('ulysses', 'ulysses') outweighs every genuine pair."""
+
+    def get_related_entity_pairs_for_document(self, doc_id: str, limit: int = 5):
+        return []
+
+    def get_co_occurring_pairs_for_document(self, doc_id: str, limit: int = 5):
+        return [("Ulysses", "ulysses ", 62)]
+
+
 class _GraphEmpty:
     """Returns no pairs at all."""
 
@@ -317,3 +328,31 @@ async def test_get_entity_pairs_co_occurs_confidence_is_normalised(test_db):
     # The top pair normalises to 1.0 (it is the max)
     assert pairs[0]["confidence"] == pytest.approx(1.0)
     assert pairs[0]["relation_label"] == "co-occurs"
+
+
+async def test_an_entity_is_never_asked_how_it_relates_to_itself(test_db):
+    """A pair of one entity is not a relationship, and the prompt orders the model
+    to write one anyway -- which is how "In the provided context, how are the two
+    mentions of Ulysses connected?" reached a learner. No pair, so no call."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(chunk_id, doc_id=doc_id))
+        await session.commit()
+
+    mock_llm = _MockLLMService(response="[]")
+
+    with (
+        patch("app.services.flashcard.get_llm_service", return_value=mock_llm),
+        patch("app.services.graph.get_graph_service", return_value=_GraphWithSelfPair()),
+        patch("app.services.retriever.get_retriever", return_value=_Retriever(chunk_id, doc_id)),
+    ):
+        svc = FlashcardService()
+        async with factory() as session:
+            cards = await svc.generate_from_graph(document_id=doc_id, k=5, session=session)
+
+    assert cards == []
+    assert mock_llm.call_count == 0

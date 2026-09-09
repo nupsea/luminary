@@ -99,6 +99,29 @@ class StudyRepo:
         await self.session.refresh(sess)
         return sess
 
+    def append_planned_cards(
+        self, sess: StudySessionModel, card_ids: list[str]
+    ) -> int:
+        """Add cards to a session's planned queue. Returns how many were new.
+
+        Order is preserved and existing members are skipped, so a card already
+        answered in this session is not queued a second time. The list is
+        reassigned rather than mutated in place: `planned_card_ids` is a JSON
+        column, and SQLAlchemy does not see an append to the Python list.
+        """
+        planned: list[str] = list(sess.planned_card_ids or [])
+        seen = set(planned)
+        added: list[str] = []
+        for card_id in card_ids:
+            if card_id in seen:
+                continue
+            seen.add(card_id)
+            added.append(card_id)
+        if not added:
+            return 0
+        sess.planned_card_ids = planned + added
+        return len(added)
+
     async def commit_session(self, sess: StudySessionModel) -> StudySessionModel:
         """Persist mutations to a session row that the caller has already fetched
         and edited in place (used by /end, /reopen)."""

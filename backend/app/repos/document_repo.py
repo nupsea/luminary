@@ -18,6 +18,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from fastapi import Depends
 from sqlalchemy import func, select
@@ -168,8 +169,21 @@ def get_document_repo(session: AsyncSession = Depends(get_db)) -> DocumentRepo:
     return DocumentRepo(session)
 
 
-# chunk_id -> (section_id, pdf_page_number, pdf_page_label, section_heading)
-ChunkLocation = tuple[str | None, int | None, str | None, str | None]
+class ChunkLocation(NamedTuple):
+    """Where a chunk sits, in whatever terms its document has.
+
+    Named rather than a bare tuple because it grows: it was a 4-tuple unpacked
+    positionally at three call sites, so adding `start_time` to it would have
+    silently shifted a field at each one.
+
+    `start_time` is seconds into a recording, null for everything else.
+    """
+
+    section_id: str | None
+    pdf_page: int | None
+    pdf_page_label: str | None
+    heading: str | None
+    start_time: float | None
 
 
 async def fetch_chunk_locations(chunk_ids: list[str]) -> dict[str, ChunkLocation]:
@@ -197,13 +211,20 @@ async def fetch_chunk_locations(chunk_ids: list[str]) -> dict[str, ChunkLocation
                     ChunkModel.section_id,
                     ChunkModel.pdf_page_number,
                     ChunkModel.pdf_page_label,
+                    ChunkModel.start_time,
                     SectionModel.heading,
                 )
                 .outerjoin(SectionModel, SectionModel.id == ChunkModel.section_id)
                 .where(ChunkModel.id.in_(chunk_ids))
             )
             return {
-                row.id: (row.section_id, row.pdf_page_number, row.pdf_page_label, row.heading)
+                row.id: ChunkLocation(
+                    section_id=row.section_id,
+                    pdf_page=row.pdf_page_number,
+                    pdf_page_label=row.pdf_page_label,
+                    heading=row.heading,
+                    start_time=row.start_time,
+                )
                 for row in rows
             }
     except Exception:

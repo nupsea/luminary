@@ -4,6 +4,7 @@ identity + RELATED_TO edges, status honoured from score_concepts (concepts.md §
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import dispose_engine
 
 import app.database as db_module
 import app.services.graph as graph_module
@@ -29,6 +30,7 @@ async def test_db(tmp_path, monkeypatch):
     yield factory
     db_module._engine, db_module._session_factory = orig_e, orig_f
     graph_module._graph_service = orig_g
+    await dispose_engine(engine)
 
 
 def _state():

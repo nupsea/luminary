@@ -205,6 +205,67 @@ export async function reopenSession(sessionId: string): Promise<void> {
   )
 }
 
+/**
+ * Add cards to an open session's planned queue.
+ *
+ * A run is rebuilt from `planned_card_ids` on every resume, so cards generated
+ * mid-run have to reach the server: appending them only in React means the
+ * reader adds five questions, answers two, reopens the document, and finds a
+ * run that never heard of them.
+ *
+ * Returns the queue's new size, or null when the call failed -- the caller
+ * decides whether that is worth telling the learner about.
+ */
+export async function appendSessionCards(
+  sessionId: string,
+  cardIds: string[],
+): Promise<{ added: number; plannedCount: number } | null> {
+  if (cardIds.length === 0) return { added: 0, plannedCount: 0 }
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/cards`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_ids: cardIds }),
+    },
+  )
+  if (!res.ok) return null
+  const data = (await res.json()) as { added: number; planned_count: number }
+  return { added: data.added, plannedCount: data.planned_count }
+}
+
+export interface MaterialHeadroom {
+  total_chunks: number
+  used_chunks: number
+  unused_chunks: number
+  cards: number
+  cards_without_sources: number
+}
+
+/**
+ * How much of a scope no card has been written from yet.
+ *
+ * Asked before offering to write more, because a deck that already covers its
+ * document cannot be added to: generation reads a passage the deck holds and
+ * the near-duplicate filter removes every question it produces. The panel used
+ * to offer the button anyway and explain itself with an error afterwards.
+ *
+ * `cards_without_sources` counts cards predating `source_chunk_ids`. They claim
+ * no passage, so the headroom can over-state what is left but never under-state
+ * it -- which is the safe direction: it will not hide a button that would work.
+ */
+export async function fetchMaterialHeadroom(
+  documentId: string,
+  sectionId?: string | null,
+): Promise<MaterialHeadroom | null> {
+  const qs = sectionId ? `?section_id=${encodeURIComponent(sectionId)}` : ""
+  const res = await fetch(
+    `${API_BASE}/flashcards/${encodeURIComponent(documentId)}/headroom${qs}`,
+  )
+  if (!res.ok) return null
+  return res.json() as Promise<MaterialHeadroom>
+}
+
 export async function deleteStudySession(sessionId: string): Promise<void> {
   const res = await fetch(
     `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}`,

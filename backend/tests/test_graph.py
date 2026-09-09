@@ -799,3 +799,55 @@ def test_get_graph_for_documents_include_notes(graph_svc: KuzuService):
     note_nodes = [n for n in data["nodes"] if n.get("type") == "note"]
     assert len(note_nodes) == 1
     assert note_nodes[0]["note_id"] == "n1"
+
+
+def test_an_entity_is_never_recorded_as_co_occurring_with_itself(graph_svc: KuzuService):
+    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
+    graph_svc.add_co_occurrence("e1", "e1", "d1")
+
+    result = graph_svc._conn.execute(
+        "MATCH (a:Entity)-[r:CO_OCCURS]->(b:Entity) WHERE a.id = b.id RETURN count(r)"
+    )
+    assert result.get_next()[0] == 0
+
+
+def test_a_self_pair_already_in_the_graph_is_never_handed_out(graph_svc: KuzuService):
+    """8,235 of 74,376 edges in a real library are an entity with itself, written
+    before the guard existed. Those documents will not be re-ingested, so the read
+    excludes them too -- otherwise the heaviest pair on every document stays a
+    protagonist paired with himself, and the card generator is handed him first."""
+    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
+    graph_svc.upsert_entity("e2", "Minerva", "PERSON")
+    graph_svc.upsert_document("d1", "the_odyssey", "book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_co_occurrence("e1", "e2", "d1")
+    # Written the way ingestion used to, past the guard that now refuses it.
+    graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e1'}), (b:Entity {id: 'e1'})"
+        " CREATE (a)-[:CO_OCCURS {weight: 62.0, document_id: 'd1'}]->(b)"
+    )
+
+    pairs = graph_svc.get_co_occurring_pairs_for_document("d1", limit=5)
+
+    assert all(a != b for a, b, _ in pairs), pairs
+    assert [(a, b) for a, b, _ in pairs] == [("Ulysses", "Minerva")]
+
+
+def test_one_pair_is_handed_out_once_however_its_edges_point(graph_svc: KuzuService):
+    """Direction was mention order, so an existing graph holds both, with separate
+    weights. Undeduped they spend two of the caller's k pairs on one question."""
+    graph_svc.upsert_entity("e1", "Ulysses", "PERSON")
+    graph_svc.upsert_entity("e2", "Minerva", "PERSON")
+    graph_svc.upsert_document("d1", "the_odyssey", "book")
+    graph_svc.add_mention("e1", "d1")
+    graph_svc.add_mention("e2", "d1")
+    graph_svc.add_co_occurrence("e1", "e2", "d1")
+    graph_svc._conn.execute(
+        "MATCH (a:Entity {id: 'e2'}), (b:Entity {id: 'e1'})"
+        " CREATE (a)-[:CO_OCCURS {weight: 17.0, document_id: 'd1'}]->(b)"
+    )
+
+    pairs = graph_svc.get_co_occurring_pairs_for_document("d1", limit=5)
+
+    assert len(pairs) == 1, pairs

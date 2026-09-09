@@ -42,7 +42,23 @@ NOTES_EXCERPT_PLACEHOLDER = "<verbatim sentence from the notes>"
 PROMPT_SUPPLIED_EXCERPTS = (EXAMPLE_SOURCE_EXCERPT, NOTES_EXCERPT_PLACEHOLDER)
 
 
+# `_build_text` joins its windows with a line reading `[...]`, and until now
+# nothing told the model what that line was. Six places in a document arrived
+# looking like one continuous passage, so the model bridged them: a real card
+# read "What is the relationship between using AI for tasks like programming
+# lasers or creating worksheets and the traditional requirement to hire a team
+# or learn code?" -- two windows, one question, answerable from neither.
+_SEPARATE_EXCERPTS = (
+    "PASSAGE: the text may be several excerpts from one document, separated by a "
+    "line reading [...]. Those are different places in it with text left out "
+    "between them, not one continuous passage. Every card comes from a single "
+    "excerpt: never write a question whose answer needs two of them, and never "
+    "quote across a [...].\n"
+)
+
+
 FLASHCARD_SYSTEM = (
+    _SEPARATE_EXCERPTS +
     "You are a learning assistant that writes flashcards for active recall. Each card is a "
     "self-contained question testing understanding of exactly one idea, plus the shortest "
     "complete answer -- both grounded only in the provided text.\n"
@@ -306,6 +322,7 @@ _BOOK_CONTENT_GUIDELINE = (
 )
 
 TECH_FLASHCARD_SYSTEM = (
+    _SEPARATE_EXCERPTS +
     "You are a technical learning assistant writing flashcards. "
     # No taxonomy name and no level annotations (I-28). The type is a shape the
     # model can act on; the level it maps to is derived in code (TYPE_TO_BLOOM)
@@ -444,7 +461,9 @@ _GENRE_STRATEGY = {
 }
 
 
-def _infer_genre(doc: DocumentModel | None) -> str:
+def _infer_genre(
+    doc: DocumentModel | None, *, has_speakers: bool | None = None
+) -> str:
     """What kind of card this document wants.
 
     `DocumentProfile.card_genre` decides it for any measured document. The
@@ -471,8 +490,32 @@ def _infer_genre(doc: DocumentModel | None) -> str:
         return "technical" if _TECH_TITLE_KEYWORDS.search(title) else "non-fiction"
     # A transcript's value is the decision and its owner, which the non-fiction
     # prompt does not ask for; it also holds the most volatile facts in a library.
-    if content_type in ("conversation", "transcript", "meeting", "audio", "video"):
+    if content_type in ("conversation", "transcript", "meeting"):
         return "conversation"
+    # A recording is not automatically a meeting: this is the defect the docstring
+    # above already names, and `audio` is how it reaches real documents. A
+    # conference talk in a user's library was ingested as `audio`, so its cards
+    # were written under "ask what was decided, who owns it" -- a question that
+    # material does not answer.
+    #
+    # NOT claimed: that this produced any particular bad card. The suspicion was
+    # a deck question reading "How did the requirement for TEAM OWNERSHIP in AI
+    # generation change...", and 12 fresh generations from that talk's opening
+    # under each strategy produced **0 ownership-framed questions either way**.
+    # The mis-mapping is real and worth fixing on the docstring's own evidence;
+    # its effect on question wording is unmeasured, and one draw of a card is not
+    # a measurement of a prompt.
+    #
+    # Speaker labels are the evidence that there was more than one participant.
+    # `conversation_chunker` writes them, and in a real library every chunk of
+    # every `conversation` document carries one while all 11 `audio` documents
+    # carry none -- so the signal separates exactly the two populations this
+    # branch confuses. Without labels a recording is treated as expository, which
+    # asks what was claimed and why: weaker than the meeting prompt on an actual
+    # meeting, and not wrong on a talk. That asymmetry is the reason for the
+    # default, since a caller that knows better passes `has_speakers`.
+    if content_type in ("audio", "video"):
+        return "conversation" if has_speakers else "non-fiction"
     # notes / unknown: non-fiction recall prompt is safer than narrative
     return "non-fiction"
 

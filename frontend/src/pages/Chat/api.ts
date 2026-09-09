@@ -58,6 +58,11 @@ export function markSuggestionAsked(id: string): void {
   apiPost(`/chat/suggestions/${id}/asked`).catch(() => {})
 }
 
+/** Citations worth showing: anything that names a document or a page. */
+export function labelledCitations(citations: Citation[] | undefined): Citation[] {
+  return (citations ?? []).filter((c) => Boolean(c.document_title?.trim()) || c.page > 0)
+}
+
 export function persistedToChatMessage(p: PersistedMessage): ChatMessage {
   const extra = (p.extra ?? {}) as Record<string, unknown>
   return {

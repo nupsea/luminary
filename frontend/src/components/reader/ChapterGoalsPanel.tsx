@@ -123,7 +123,7 @@ export function ChapterGoalsPanel({ documentId, sectionId, onStudyClick }: Chapt
   }
 
   return (
-    <div className="mb-4 rounded-lg border border-border bg-card p-4">
+    <div data-testid="chapter-goals" className="mb-4 rounded-lg border border-border bg-card p-4">
       <h3 className="mb-2 text-sm font-semibold text-foreground">Chapter Goals</h3>
       <ul className="space-y-1.5">
         {visibleObjectives.map((obj) => (

@@ -78,7 +78,8 @@ def test_parse_teachback_response_valid_json():
     """_parse_teachback_response parses a well-formed JSON string."""
     raw = json.dumps(
         {
-            "score": 75,
+            "accuracy": 75,
+            "completeness": 75,
             "correct_points": ["Correct point A"],
             "missing_points": ["Missing B"],
             "misconceptions": [],
@@ -93,7 +94,8 @@ def test_parse_teachback_response_strips_markdown_fences():
     """_parse_teachback_response strips ```json ... ``` fences."""
     raw = (
         "```json\n"
-        '{"score": 80, "correct_points": [], "missing_points": [], "misconceptions": []}\n'
+        '{"accuracy": 80, "completeness": 80, "correct_points": [], '
+        '"missing_points": [], "misconceptions": []}\n'
         "```"
     )
     result = _parse_teachback_response(raw)
@@ -194,7 +196,8 @@ async def test_teachback_returns_score_and_feedback(test_db):
 
     llm_response = json.dumps(
         {
-            "score": 75,
+            "accuracy": 75,
+            "completeness": 75,
             "correct_points": ["Correctly identified intervals"],
             "missing_points": ["Did not mention forgetting curve"],
             "misconceptions": [],
@@ -230,7 +233,8 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
 
     llm_eval_response = json.dumps(
         {
-            "score": 40,
+            "accuracy": 40,
+            "completeness": 40,
             "correct_points": [],
             "missing_points": ["Everything"],
             "misconceptions": ["Confuses spaced repetition with massed practice"],
@@ -244,13 +248,13 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
         }
     )
 
-    # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
-    rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
-
+    # Two calls, not three: the rubric is read off the evaluation now, so the
+    # correction card is the second call. A third entry here would go unused and
+    # hide a regression back to a separate rubric call.
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, rubric_response, correction_response]
+            side_effect=[llm_eval_response, correction_response]
         )
         mock_get_llm.return_value = mock_llm
 
@@ -291,7 +295,8 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
 
     llm_eval_response = json.dumps(
         {
-            "score": 35,
+            "accuracy": 35,
+            "completeness": 35,
             "correct_points": [],
             "missing_points": [],
             "misconceptions": ["Wrong definition"],
@@ -305,13 +310,13 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
         }
     )
 
-    # S156: rubric call is now the 2nd LLM call; correction flashcard is the 3rd
-    rubric_response = "{}"  # invalid rubric JSON -> graceful fallback to null rubric
-
+    # Two calls, not three: the rubric is read off the evaluation now, so the
+    # correction card is the second call. A third entry here would go unused and
+    # hide a regression back to a separate rubric call.
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
         mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, rubric_response, correction_response]
+            side_effect=[llm_eval_response, correction_response]
         )
         mock_get_llm.return_value = mock_llm
 
@@ -347,7 +352,8 @@ async def test_teachback_stores_teachback_result(test_db):
 
     llm_response = json.dumps(
         {
-            "score": 90,
+            "accuracy": 90,
+            "completeness": 90,
             "correct_points": ["Good"],
             "missing_points": [],
             "misconceptions": [],

@@ -5,7 +5,7 @@
  * resolvePdfFallback tests are purely computational.
  */
 import { describe, expect, it } from "vitest"
-import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import type { SectionItem } from "./types"
 
 // Helper to build a minimal SectionItem
@@ -107,5 +107,32 @@ describe("resolvePdfFallback", () => {
   it("handles single section with page_start=0", () => {
     const sections = [makeSec("only", 0, 0)]
     expect(resolvePdfFallback(sections, 5, 10)).toBe("only")
+  })
+})
+
+
+// ── resolveChunkFromDom ───────────────────────────────────────────────
+
+describe("resolveChunkFromDom", () => {
+  it("finds the chunk a transcript selection sits in", () => {
+    // The transcript renders one element per chunk; a note taken from a
+    // recording needs that id, because the moment lives on the chunk row.
+    const chunkDiv = {
+      dataset: { chunkId: "chunk-7", sectionId: "sec-1" },
+      parentNode: null,
+    } as unknown as Node
+    const span = { parentNode: chunkDiv } as unknown as Node
+    const textNode = { parentNode: span } as unknown as Node
+
+    expect(resolveChunkFromDom(textNode)).toBe("chunk-7")
+  })
+
+  it("returns undefined in prose, which has no chunk boundaries", () => {
+    // The Read view renders the section body and never rebuilds it from chunks
+    // (I-29), so there is nothing to find and the note stays section-level.
+    const sectionDiv = { dataset: { sectionId: "sec-1" }, parentNode: null } as unknown as Node
+    const paragraph = { parentNode: sectionDiv } as unknown as Node
+
+    expect(resolveChunkFromDom(paragraph)).toBeUndefined()
   })
 })

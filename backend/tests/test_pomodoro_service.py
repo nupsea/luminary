@@ -263,8 +263,15 @@ async def test_stats_only_completed_count_total(test_db):
     now = datetime.now(UTC)
 
     # Seed 2 completed and 1 abandoned and 1 active.
+    #
+    # `today_count` counts rows whose created_at is at or after UTC midnight, so a
+    # seed written as a bare `now - 5 minutes` lands on yesterday for the first
+    # five minutes of each UTC day and the count comes back 1. Observed failing
+    # that way in CI at 00:0x UTC. Clamping to midnight keeps both seeds inside the
+    # day the assertion is about, at every hour.
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     await _seed_completed(factory, now)()
-    await _seed_completed(factory, now - timedelta(minutes=5))()
+    await _seed_completed(factory, max(now - timedelta(minutes=5), midnight))()
     async with factory() as db:
         db.add(
             PomodoroSessionModel(

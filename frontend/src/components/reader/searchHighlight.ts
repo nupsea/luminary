@@ -22,7 +22,11 @@ const MIN_TERM_LENGTH = 2
  * class attributes would corrupt the markup, so the scan tracks whether it is
  * inside a tag and only marks body text.
  */
-export function applySearchTerm(content: string, term: string): string {
+export function applySearchTerm(
+  content: string,
+  term: string,
+  className: string = SEARCH_MARK_CLASS,
+): string {
   const needle = term.trim()
   if (needle.length < MIN_TERM_LENGTH || !content) return content
 
@@ -40,7 +44,7 @@ export function applySearchTerm(content: string, term: string): string {
 
     if (!insideTag && lower.startsWith(lowerNeedle, i)) {
       result += content.slice(cursor, i)
-      result += `<mark class="${SEARCH_MARK_CLASS}">${content.slice(i, i + needle.length)}</mark>`
+      result += `<mark class="${className}">${content.slice(i, i + needle.length)}</mark>`
       i += needle.length
       cursor = i
       continue

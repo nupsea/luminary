@@ -56,6 +56,36 @@ class TestThePromptCarriesTheSource:
         assert "do not paraphrase" in _TEACHBACK_USER_TMPL
 
 
+class TestThePromptCarriesTheQuestion:
+    """It did not, and completeness was measured against the whole passage.
+
+    On a card asking why personal context matters, the stored missing_points
+    were "creating a personalized workflow definition (agents.md)" and
+    "demonstrating the iterative checking process with /skeptical" -- two topics
+    the question did not raise. The learner scored 10/100 on completeness for
+    answering exactly what was asked.
+    """
+
+    def test_the_evaluator_is_told_what_was_asked(self):
+        assert "{question}" in _TEACHBACK_USER_TMPL
+
+    def test_completeness_is_scored_against_the_question(self):
+        assert "the question did not ask about is not" in _TEACHBACK_USER_TMPL
+
+    def test_missing_points_may_not_range_beyond_the_question(self):
+        assert "IN ANSWER TO THE QUESTION" in _TEACHBACK_USER_TMPL
+        assert "Never list material the question did not ask about" in (
+            _TEACHBACK_USER_TMPL.replace("\n", " ").replace("  ", " ")
+        )
+
+
+def test_the_model_is_not_asked_for_a_score():
+    """The headline is computed from the dimensions printed under it
+    (`_score_from_dimensions`). Asking for it as a fourth free integer is what
+    produced a stored row reading `score` 0 against completeness 50."""
+    assert '"score"' not in _TEACHBACK_USER_TMPL
+
+
 class TestEvidenceIsVerified:
     def test_a_real_quote_survives(self):
         assert _verified_evidence({"evidence": "undid her weaving each night"}, _PASSAGE)

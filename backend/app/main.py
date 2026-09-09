@@ -24,6 +24,7 @@ from app.parent_watch import watch_parent
 from app.paths import app_version, spa_dist
 from app.routers.admin import router as admin_router
 from app.routers.annotations import router as annotations_router
+from app.routers.audio import router as audio_router
 from app.routers.blog import router as blog_router
 from app.routers.chat_meta import router as chat_meta_router
 from app.routers.chat_sessions import router as chat_sessions_router
@@ -56,6 +57,7 @@ from app.routers.setup import router as setup_router
 from app.routers.study import router as study_router
 from app.routers.summarize import router as summarize_router
 from app.routers.tags import router as tags_router
+from app.services.background import all_pending, clear_registries, task_registry
 from app.services.components import (
     activate_extras,
     install_ollama_model,
@@ -97,7 +99,8 @@ _APP_VERSION = app_version()
 
 # Warmup and the description backfill were fire-and-forget, so nothing cancelled
 # them at shutdown and nothing held a reference against garbage collection.
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 _SHUTDOWN_GRACE_S = 5.0
 
 
@@ -382,29 +385,58 @@ async def lifespan(app: FastAPI):
     await get_enrichment_worker().stop()
     await get_ingestion_jobs().cancel_all()
 
-    # Both sets, not just this module's. The ingestion nodes keep their own
-    # (`ingestion_nodes._shared._background_tasks`) and shutdown never touched
-    # it, so post-ingest work -- deferred section summaries, pregeneration --
-    # kept running against a database that was closing underneath it:
+    # Every registry, not a list maintained here. Naming them one at a time is how
+    # this came to drain two of ten: post-ingest work -- deferred section
+    # summaries, pregeneration -- kept running against a database that was closing
+    # underneath it,
     #
     #   deferred section summaries failed (non-fatal):
     #   (sqlite3.ProgrammingError) Cannot operate on a closed database.
     #
-    # It was survivable while deferral only happened above 40 sections. It is
-    # now the path every local-model ingest takes, so the leak is on every one.
-    from app.workflows.ingestion_nodes._shared import (  # noqa: PLC0415
-        _background_tasks as _ingestion_background_tasks,
-    )
-
-    pending = set(_background_tasks) | set(_ingestion_background_tasks)
+    # and note, flashcard and tag work was doing the same thing unnoticed. A
+    # registry declared through `task_registry` is drained here whether or not
+    # anyone remembered to mention it.
+    #
+    # Cancelling bounds the tasks, not the threads they may be sitting in: work
+    # inside `asyncio.to_thread` runs on to completion regardless (I-40).
+    pending = all_pending()
     for task in pending:
         task.cancel()
     if pending:
         await asyncio.wait(pending, timeout=_SHUTDOWN_GRACE_S)
-    _background_tasks.clear()
-    _ingestion_background_tasks.clear()
+    clear_registries()
 
     shutdown_model_executor()
+    await _release_default_executor()
+
+
+# The stdlib joins the loop's default executor for `THREAD_JOIN_TIMEOUT` -- 300
+# seconds -- on the way out of `asyncio.Runner.close()`, and every
+# `asyncio.to_thread` call runs there (I-40). A quit can therefore sit for five
+# minutes behind one embed or one model load.
+#
+# 20s is chosen against the two cases that bracket it. A Kuzu or LanceDB write is
+# sub-second to a few seconds, so a real write finishes inside it and is never
+# abandoned mid-flight; a model load is tens of seconds and is abandoned, which is
+# the trade `shutdown_model_executor` already makes for the same reason.
+#
+# **Bounding this is safer than not bounding it.** Unbounded, the desktop shell's
+# supervisor gives up and SIGKILLs -- killing whatever is mid-write with no grace
+# at all, and leaving the Kuzu lock held against the next launch. A bounded,
+# orderly abandon is the better of the two, not a free one.
+_EXECUTOR_RELEASE_GRACE_S = 20.0
+
+
+async def _release_default_executor() -> None:
+    """Join the loop's default executor briefly, then stop waiting for it."""
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.shutdown_default_executor(_EXECUTOR_RELEASE_GRACE_S)
+    except Exception:  # noqa: BLE001 - a slow quit must never become a failed one
+        logger.warning("Default executor did not shut down cleanly", exc_info=True)
+    # Detached so `Runner.close()` does not join it a second time for its own 300s.
+    # Whatever is still running holds no lock we can release by waiting longer.
+    loop._default_executor = None  # type: ignore[attr-defined]  # noqa: SLF001
 
 
 def _resolve_chat_model() -> str:
@@ -474,6 +506,7 @@ _API_PREFIX = "/api" if _mode == "public" else ""
 ROUTER_REGISTRY = {
     "admin": admin_router,
     "annotations": annotations_router,
+    "audio": audio_router,
     "blog": blog_router,
     "clips": clips_router,
     "collections": collections_router,

@@ -24,6 +24,8 @@ export interface SourceRef {
   documentId: string
   documentTitle: string
   pageNumber?: number
+  /** The chunk the selection sits in, where the view renders chunk by chunk. */
+  chunkId?: string
 }
 
 /** Maximum character count for highlights. Longer selections can still use other actions. */
@@ -38,11 +40,8 @@ export interface SelectionActionBarProps {
   containerRef: React.RefObject<HTMLElement | null>
   resolveSourceRef: (startContainer: Node) => SourceRef
   onExplain: (text: string, mode: ExplainMode) => void
-  onAddToNote: (text: string, sourceRef: SourceRef) => void
-  onCreateFlashcard: (text: string, sourceRef: SourceRef) => void
   onAskInChat: (text: string, sourceRef: SourceRef) => void
   onHighlight: (text: string, sourceRef: SourceRef, color: HighlightColor) => void
-  onClip: (text: string, sourceRef: SourceRef) => void
 }
 
 interface Position {
@@ -54,11 +53,8 @@ export function SelectionActionBar({
   containerRef,
   resolveSourceRef,
   onExplain,
-  onAddToNote,
-  onCreateFlashcard,
   onAskInChat,
   onHighlight,
-  onClip,
 }: SelectionActionBarProps) {
   const [position, setPosition] = useState<Position | null>(null)
   const [selectedText, setSelectedText] = useState("")
@@ -155,6 +151,7 @@ export function SelectionActionBar({
   return (
     <div
       ref={barRef}
+      data-testid="selection-action-bar"
       className="fixed z-[100] flex -translate-x-1/2 -translate-y-full gap-1 rounded-2xl border border-border/50 bg-background/80 backdrop-blur-xl p-1.5 shadow-2xl transition-all duration-200 ease-out"
       style={{ top: position.top, left: position.left }}
     >
@@ -165,29 +162,10 @@ export function SelectionActionBar({
         Explain
       </button>
       <button
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onAddToNote(selectedText, pendingSourceRef); reset() }}
-        className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
-      >
-        Note
-      </button>
-      <button
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onCreateFlashcard(selectedText, pendingSourceRef); reset() }}
-        className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
-      >
-        Flashcard
-      </button>
-      <button
         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onAskInChat(selectedText, pendingSourceRef); reset() }}
         className="rounded px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
       >
         Ask
-      </button>
-      <button
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onClip(selectedText, pendingSourceRef); reset() }}
-        title="Save to Reading Journal"
-        className="rounded px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
-      >
-        Clip
       </button>
       <div className="flex items-center gap-0.5 border-l border-border pl-1.5 ml-0.5">
         {HIGHLIGHT_SWATCHES.map((swatch) => (

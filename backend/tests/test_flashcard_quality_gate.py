@@ -364,3 +364,52 @@ def test_markdown_emphasis_is_formatting_not_fabrication() -> None:
     # collapsing those would let two different names compare equal.
     assert excerpt_is_verbatim("It uses read_source_text to decode the bytes.", note)
     assert not excerpt_is_verbatim("It uses readsourcetext to decode the bytes.", note)
+
+
+# A card is shown on its own, so a question that reaches for the passage cannot be
+# answered at all. The gate used to hold literal phrasings and the model simply
+# wrote a different one: every question below reached a real deck.
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "In the provided context, how are the two mentions of Ulysses connected?",
+        "What does the text suggest about designing modern data platforms?",
+        "According to the context, what separates true 'vibe coding' from Copilot?",
+        "What makes backpropagation possible according to these notes?",
+        "What is the inflection point in evolution mentioned in the text?",
+        "In the context of this text, what links Doug Dibi and Douglas C. Reiling?",
+        "What limitation does the provided text impose on the dataset?",
+        "How does the text contrast agent capabilities with human limitations?",
+    ],
+)
+def test_a_question_may_not_point_at_the_page_it_came_from(question):
+    from app.services.flashcard_parsers import REJECT_DEICTIC, card_rejection
+
+    verdict = card_rejection(question, "A real answer of sufficient length.", "", None)
+    assert verdict is not None, question
+    assert verdict[0] == REJECT_DEICTIC
+
+
+# The same nouns are ordinary vocabulary, and refusing these costs the learner
+# cards that are perfectly answerable alone. "the context window" is a model's
+# input budget; "the query and the document" is an IR pair; "in the context of X"
+# names a subject rather than the page. Measured over a 1234-card library: with
+# the topical exception the rule refuses 35 cards, without it 61.
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Why must a Cross-encoder receive both the query and the document at once?",
+        "If a system must scale beyond the context window limit, what must occur?",
+        "What are Copy-on-Write and Merge-on-Read in the context of data lakehouses?",
+        "What does 'EUR' represent in the context of customer currency?",
+        "What defines a whale according to Ishmael's definition?",
+        "How is the text tokenized before it reaches the embedding model?",
+        "What does the book of Genesis open with?",
+    ],
+)
+def test_a_source_noun_used_as_vocabulary_is_not_a_reference(question):
+    assert card_rejection_reason(question, "A real answer of sufficient length.") is None

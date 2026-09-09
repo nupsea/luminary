@@ -13,8 +13,11 @@ baseline: even tests that don't define their own DB fixture will never touch
 """
 
 import asyncio
+import asyncio.base_events
 import os
+import time
 import warnings
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -33,6 +36,24 @@ def isolated_data_dir(tmp_path_factory):
     """
     data_dir = str(tmp_path_factory.mktemp("luminary_test_data"))
     os.environ["DATA_DIR"] = data_dir
+
+    # Model weights are the one thing a fresh DATA_DIR must not re-fetch. They are
+    # content-addressed downloads rather than library state, and every model cache
+    # hangs off `DATA_DIR/models/<slug>` -- the embedder, the cross-encoder, GLiNER
+    # and `model_prefetch` all read it. A per-session temp dir therefore made every
+    # suite run re-download them: bge-small alone costs a measured 22.8s on first
+    # encode against 0.01s warm, and `POST /notes` pays it inside a fire-and-forget
+    # `run_in_executor`, which is where it became the I-40 teardown wedge.
+    #
+    # Only the cache is shared; every other path stays isolated, so a live dev
+    # backend is still safe to run alongside the suite. Nothing in the app deletes
+    # this directory -- component uninstall removes a tool binary, not a model.
+    shared_models = Path(
+        os.environ.get("LUMINARY_TEST_MODEL_CACHE")
+        or Path.home() / ".cache" / "luminary" / "test-models"
+    ).expanduser()
+    shared_models.mkdir(parents=True, exist_ok=True)
+    Path(data_dir, "models").symlink_to(shared_models, target_is_directory=True)
     # Disable Phoenix tracing so tests do not try to bind port 4317/6006.
     # This prevents conflicts when a live dev backend is running concurrently.
     os.environ["PHOENIX_ENABLED"] = "false"
@@ -112,6 +133,66 @@ def _reset_lancedb_singleton():
     yield
 
 
+# --- The default-executor join, bounded -------------------------------------
+#
+# `with TestClient(app)` runs the app on anyio's blocking portal, whose thread ends
+# in `asyncio.Runner.close()` -> `loop.shutdown_default_executor(THREAD_JOIN_TIMEOUT)`.
+# That constant is **300 seconds**, and the join waits out every thread the loop's
+# default executor is still running -- which is every `asyncio.to_thread` call, and
+# I-2 puts LanceDB and Kuzu there, with the embedder and GLiNER loads landing there
+# too. One fire-and-forget task still inside a `to_thread` when the client exits
+# therefore parks `TestClient.__exit__` until that call returns on its own, far past
+# the 120s per-test timeout, which kills the session and blames whichever test
+# happened to own that client.
+#
+# **This is a second mechanism, not the task-gathering one `_drain_leaked_tasks`
+# below handles, and no amount of task-draining reaches it.** Measured on this repo:
+# a 30s executor call held `__exit__` for 30.3s with *no pending task at all*.
+# Nothing awaits these threads through a task, so there is nothing to cancel or
+# detach -- which is why the hang survived two rounds of task-draining fixes. Both
+# mechanisms are real; they just need different remedies.
+#
+# 30s is bracketed by two measured cases: a GLiNER load takes ~6s and must never trip
+# this, and the per-test timeout is 120s, so one wedged client has to stay well under
+# it or the session dies anyway. On timeout the stdlib abandons the executor with
+# `shutdown(wait=False)`, which is the behaviour we want -- the threads finish on
+# their own, after the test that leaked them has stopped blocking the suite.
+_EXECUTOR_JOIN_GRACE_S = 30.0
+
+SLOW_EXECUTOR_JOINS: list[str] = []
+_CURRENT_NODEID = ""
+
+_original_shutdown_default_executor = (
+    asyncio.base_events.BaseEventLoop.shutdown_default_executor
+)
+
+
+async def _bounded_shutdown_default_executor(self, timeout=None):
+    """Join the default executor for `_EXECUTOR_JOIN_GRACE_S`, never for 300.
+
+    The grace is read from the module global on every call so a test can shorten
+    it; `timeout` from the caller is deliberately ignored, because the only caller
+    is the stdlib passing its own 300s constant.
+    """
+    started = time.monotonic()
+    await _original_shutdown_default_executor(self, _EXECUTOR_JOIN_GRACE_S)
+    elapsed = time.monotonic() - started
+    if elapsed >= _EXECUTOR_JOIN_GRACE_S:
+        SLOW_EXECUTOR_JOINS.append(f"{_CURRENT_NODEID} :: waited {elapsed:.1f}s")
+
+
+asyncio.base_events.BaseEventLoop.shutdown_default_executor = (
+    _bounded_shutdown_default_executor
+)
+
+
+def pytest_runtest_setup(item):
+    # Attribution for the report above: the join happens during teardown, by which
+    # point the node is no longer current.
+    global _CURRENT_NODEID
+    _CURRENT_NODEID = item.nodeid
+
+
 UNDRAINABLE_TASKS: list[str] = []
 
 
@@ -135,6 +216,12 @@ def _detach_from_loop_shutdown(task: asyncio.Task) -> None:
 
 
 def pytest_terminal_summary(terminalreporter):
+    if SLOW_EXECUTOR_JOINS:
+        terminalreporter.section(
+            "Background thread work outlived its test (executor join abandoned)", sep="="
+        )
+        for entry in SLOW_EXECUTOR_JOINS:
+            terminalreporter.write_line(f"  {entry}")
     if not UNDRAINABLE_TASKS:
         return
     terminalreporter.section("Leaked background tasks (ignored cancellation)", sep="=")

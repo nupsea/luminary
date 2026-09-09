@@ -114,6 +114,7 @@ class ClusteringService:
             return 0
 
         created = 0
+        suggestions: list[ClusterSuggestionModel] = []
 
         for label in unique_labels:
             member_indices = [i for i, lbl in enumerate(labels.tolist()) if lbl == label]
@@ -152,18 +153,30 @@ class ClusteringService:
             # Generate collection name via LiteLLM
             suggested_name = await self._generate_cluster_name(excerpts)
 
-            suggestion = ClusterSuggestionModel(
-                id=str(uuid.uuid4()),
-                suggested_name=suggested_name,
-                note_ids=member_note_ids,
-                confidence_score=round(confidence_score, 4),
-                status="pending",
-                created_at=datetime.now(UTC),
+            suggestions.append(
+                ClusterSuggestionModel(
+                    id=str(uuid.uuid4()),
+                    suggested_name=suggested_name,
+                    note_ids=member_note_ids,
+                    confidence_score=round(confidence_score, 4),
+                    status="pending",
+                    created_at=datetime.now(UTC),
+                )
             )
-            db.add(suggestion)
             created += 1
 
-        if created > 0:
+        # Added only once the naming calls are done, never inside the loop.
+        #
+        # `db.add` inside the loop left a row pending, and the next iteration's
+        # `select(NoteModel...)` autoflushed it -- which takes SQLite's single write
+        # lock. The loop then `await`ed an LLM call per cluster while holding it.
+        # Measured on a real library: 11.2s before commit, against a 5.0s
+        # busy_timeout, so every concurrent writer failed with "database is locked"
+        # -- notes, web references, collections and the enrichment queue alike (#88).
+        # Nothing is dirty during the naming calls now, so the autoflush is a no-op
+        # and the write lock is taken once, here, for the length of one insert.
+        if suggestions:
+            db.add_all(suggestions)
             await db.commit()
 
         logger.info("Clustering complete: %d suggestions created", created)

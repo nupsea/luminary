@@ -1,11 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, Search, Sparkles, StickyNote, Target, Trash2, X } from "lucide-react"
+import { ArrowLeft, Brain, ChevronLeft, ChevronRight, GitCompareArrows, Highlighter, Lightbulb, MessageSquare, PanelRightClose, PanelRightOpen, RefreshCw, ScrollText, Search, StickyNote, Trash2, X, type LucideIcon } from "lucide-react"
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
 import { toast } from "sonner"
 
-import { ExplanationSheet } from "@/components/ExplanationSheet"
 import type { ExplainMode } from "@/components/FloatingToolbar"
 import { IngestionHealthPanel } from "@/components/library/IngestionHealthPanel"
 import type { ContentType } from "@/components/library/types"
@@ -13,15 +11,15 @@ import { CONTENT_TYPE_ICONS, formatWordCount, isYouTubeDoc, relativeDate } from 
 import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/apiClient"
 import { API_BASE } from "@/lib/config"
 import { useTimeOnTask } from "@/lib/useTimeOnTask"
-import { cn } from "@/lib/utils"
+import { cn, stripMarkdown } from "@/lib/utils"
 import { useAppStore } from "@/store"
 
 import { ChapterGoalsPanel } from "./ChapterGoalsPanel"
-import { DocumentFlashcardDialog } from "./DocumentFlashcardDialog"
+import { PracticePanel } from "./PracticePanel"
 import { isSurfaceVisible } from "@/lib/surfaceManifest"
 
 // Full-mode only, folded at BUILD time. FEYNMAN_VISIBLE below gates rendering,
-// which hid the button but still compiled the dialog and its /feynman/* calls
+// which hid the button but still compiled the panel and its /feynman/* calls
 // into the public Learning chunk. LUMINARY_MODE is a vite `define`, so a public
 // build folds this to null and drops the dynamic import.
 // Compared against `import.meta.env.VITE_LUMINARY_MODE`, NOT the exported
@@ -36,12 +34,13 @@ const loadLastPracticed =
         import("./feynmanSessions").then((m) => m.lastPracticedBySection(documentId))
     : null
 
-const FeynmanDialog =
+const FeynmanPanel =
   import.meta.env.VITE_LUMINARY_MODE === "full"
-    ? lazy(() => import("./FeynmanDialog").then((m) => ({ default: m.FeynmanDialog })))
+    ? lazy(() => import("./FeynmanPanel").then((m) => ({ default: m.FeynmanPanel })))
     : null
 
 import { EPUBViewer } from "./EPUBViewer"
+import { ExplanationPanel } from "./ExplanationPanel"
 import { prefetchFeynmanSummary } from "./feynmanSummaryCache"
 import { COLOR_CLASSES } from "./highlightColors"
 import { readerLandingTab } from "./hooks/readerLandingTab"
@@ -54,20 +53,24 @@ import { useSelectionWorkflow } from "./hooks/useSelectionWorkflow"
 import { InDocSearchBar, type DocumentSectionSearchResult } from "./InDocSearchBar"
 import { orderHitsByDocument } from "./searchHighlight"
 import { AudioMiniPlayer, VideoPlayer } from "./MediaPlayers"
-import { QuickNoteComposer } from "@/components/notes/QuickNoteComposer"
+import { NoteComposer } from "@/components/notes/NoteComposer"
 import { PDFViewer, type PDFViewerHandle } from "./PDFViewer"
 import { ReadView } from "./ReadView"
-import { resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
+import { resolveChunkFromDom, resolveFromDom, resolvePdfFallback } from "./resolveSourceRefUtils"
 import { ResumeBanner, type ReadingPosition } from "./ResumeBanner"
 import { SectionListItem, type SectionHeatmapItem } from "./SectionListItem"
 import { SelectionActionBar } from "./SelectionActionBar"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
 import { SummaryPanel } from "./SummaryPanel"
+import { ChatConversation } from "@/pages/Chat/ChatConversation"
+import { docThreadKey } from "@/store/chatThreads"
+import type { SourceCitation } from "@/components/SourceCitationChips"
+import { buildCitationTarget } from "@/lib/citation"
 import type { AnnotationItem, DocumentDetail, SectionItem } from "./types"
 import { YouTubeTranscriptView } from "./YouTubeTranscriptView"
 
-// The Feynman dialog talks to the `feynman` router, which only full mode mounts.
+// The Feynman session talks to the `feynman` router, which only full mode mounts.
 // Gated on content type alone, the button shipped in public builds and answered 404.
 const FEYNMAN_VISIBLE = isSurfaceVisible("feynman")
 
@@ -117,18 +120,45 @@ class DocumentReaderErrorBoundary extends React.Component<
 const fetchDocument = (id: string): Promise<DocumentDetail> =>
   apiGet<DocumentDetail>(`/documents/${id}`)
 
-// Minimal note shape used for the section indicator (section_id only)
+// Minimal note shape: the section indicator needs the location, the docked
+// Notes tab needs enough to show a row.
 interface NoteEntry {
   id: string
   section_id: string | null
+  content: string
+  title?: string | null
 }
 
+// Which face of the docked panel is showing.
+type PanelTab = "insights" | "ask" | "note" | "practice" | "explain"
+
+// Each face carries the icon its feature already wears elsewhere, so the tab and
+// the control that opens it read as one thing: Brain is the section row's
+// Practice button and the Recall arm, MessageSquare and StickyNote are the nav
+// rail's own Ask and Notes.
+const PANEL_TABS: { id: PanelTab; label: string; Icon: LucideIcon }[] = [
+  { id: "insights", label: "Insights", Icon: ScrollText },
+  { id: "ask", label: "Ask AI", Icon: MessageSquare },
+  { id: "note", label: "Notes", Icon: StickyNote },
+  { id: "practice", label: "Practice", Icon: Brain },
+]
+
+// Explain is not a standing face. It holds the explanation of one passage, so a
+// tab offered with nothing behind it opens an empty panel; it joins the bar when
+// there is something to read and leaves when that is closed.
+const EXPLAIN_TAB: { id: PanelTab; label: string; Icon: LucideIcon } = {
+  id: "explain", label: "Explain", Icon: Lightbulb,
+}
 
 interface DocumentReaderProps {
   documentId: string
   onBack: () => void
   initialSectionId?: string
   initialChunkId?: string
+  /** A note to open in the panel, handed back by the full note page. */
+  initialNoteId?: string
+  /** The cited passage as words, marked in whichever view renders this document. */
+  initialCitationWords?: string[]
   initialPage?: number  // PDF page to navigate to on mount (from citation deep-link)
   initialSearch?: string  // opens the in-doc search bar prefilled (from Map entity deep-link)
 }
@@ -141,7 +171,9 @@ export function DocumentReader(props: DocumentReaderProps) {
   )
 }
 
-function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialPage, initialSearch }: DocumentReaderProps) {
+const EMPTY_WORDS: string[] = []
+
+function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunkId, initialNoteId, initialCitationWords = EMPTY_WORDS, initialPage, initialSearch }: DocumentReaderProps) {
   const qc = useQueryClient()
 
   // Reading time exists nowhere else: opening a document and reading it for
@@ -166,6 +198,42 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // A deep link names a passage, which only the Read view can scroll to.
   const hasDeepLink = Boolean(initialSectionId || initialChunkId || initialPage)
+  // A page is not a passage: it means something in the PDF viewer and nothing in
+  // the Read view, so only a named section or chunk overrides the format.
+  const hasPassageLink = Boolean(initialSectionId || initialChunkId)
+
+  // Arriving from a citation, the source gets the room.
+  //
+  // The insights panel takes roughly a third of the width, and the page is fitted
+  // to what is left -- so a cited PDF opened at about 118%, which on a paper is
+  // text too small to read, and widening it would only have traded that for
+  // sideways scrolling. Collapsing the panel gives the page the width instead, and
+  // fit-width follows it.
+  //
+  // Transient, and deliberately not written to the panel's stored state: the
+  // reader did not ask for their layout to change, so reopening it once puts
+  // everything back and it stays back.
+  const [insightsRestored, setInsightsRestored] = useState(false)
+  const citationOwnsScroll = initialCitationWords.length > 0
+  // A citation named in place carries the arrival it was named against, so a
+  // *new* arrival retires it by identity alone -- no effect syncing one piece
+  // of state to another, and no window where the old mark answers the new
+  // citation. `savedCitationWords` is state in `Learning.tsx`, so its identity
+  // changes only when a citation actually does.
+  const [inPlaceCitation, setInPlaceCitation] =
+    useState<{ against: string[]; words: string[] } | null>(null)
+  const citationWords =
+    inPlaceCitation?.against === initialCitationWords
+      ? inPlaceCitation.words
+      : initialCitationWords
+  const focusOnCitation = citationOwnsScroll && !insightsRestored
+  const insightsCollapsed = insights.collapsed || focusOnCitation
+  const toggleInsights = useCallback(() => {
+    setInsightsRestored(true)
+    // Only actually toggle when the panel is where the reader last left it;
+    // otherwise this click is undoing the citation focus, not collapsing.
+    if (!focusOnCitation) insights.toggle()
+  }, [focusOnCitation, insights])
 
   const {
     leftTab,
@@ -174,12 +242,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setPdfViewVisited,
     bookViewVisited,
     setBookViewVisited,
-  } = useReaderTabs({ format: doc?.format, hasDeepLink })
+  } = useReaderTabs({ format: doc?.format, hasDeepLink, hasPassageLink })
 
-  const [sheetOpen, setSheetOpen] = useState(false)
-  const [sheetText, setSheetText] = useState("")
-  const [sheetMode, setSheetMode] = useState<ExplainMode>("plain")
+  // The explanation the panel is holding. Empty means the face is idle, which
+  // is also what unmounts the stream.
+  const [explainText, setExplainText] = useState("")
+  const [explainMode, setExplainMode] = useState<ExplainMode>("plain")
   const [openNoteEditor, setOpenNoteEditor] = useState<string | null>(null) // section id
+  const [docNoteOpen, setDocNoteOpen] = useState(false) // note on the document, no section
+  const [openNoteId, setOpenNoteId] = useState<string | null>(initialNoteId ?? null)
   const [highlightsVisible, setHighlightsVisible] = useState(true)
   const [highlightsPanelOpen, setHighlightsPanelOpen] = useState(false)
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -197,12 +268,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [readSectionId, setReadSectionId] = useState<string | null>(null)
   // tracks which section's goals are shown in ChapterGoalsPanel; null = show all
   const [activeSectionGoals, setActiveSectionGoals] = useState<string | null>(null)
-  // Feynman mode — section id to open dialog for; null = closed
+  // Feynman mode — section id the docked session is for; null = no session
   const [feynmanSection, setFeynmanSection] = useState<string | null>(null)
   // Unified "section the user is currently focused on" — set by every section
   // action (Read, Practice, Note, PDF jump, Goals, citation deep-link). Drives
   // the sticky banner in the sections tab and the active-row visual treatment.
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
+  // A section the learner chose to practise, with no passage selected.
+  const [practiceSection, setPracticeSection] = useState<{ id: string; heading: string } | null>(null)
 
   // in-document Cmd+F search state
   const [searchOpen, setSearchOpen] = useState(false)
@@ -230,20 +303,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // throttle timer: one POST per 10 seconds max
   const positionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const setActiveDocument = useAppStore((s) => s.setActiveDocument)
-  const setStudySectionFilter = useAppStore((s) => s.setStudySectionFilter)
-  const navigate = useNavigate()
   const { canGoBack, backLabel: hookBackLabel, goBack: goBackToSource } = useBackNavigation()
   // DocumentReader falls back to onBack (library list) when no from state is set
   const backLabel = canGoBack ? hookBackLabel : "Back to library"
   const backAction = canGoBack ? goBackToSource : onBack
   const setChatPreload = useAppStore((s) => s.setChatPreload)
-  const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
-  const setActiveCollectionId = useAppStore((s) => s.setActiveCollectionId)
-  const setPendingStudyStart = useAppStore((s) => s.setPendingStudyStart)
-
-  // Header "Generate questions" -> in-context flashcard dialog scoped to the whole doc.
-  const [genQuestionsOpen, setGenQuestionsOpen] = useState(false)
 
   // Header "Delete" -> removes the open document without a trip back to the library.
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -273,6 +337,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const isYouTube = isYouTubeDoc(doc ?? {})
 
   // Pre-calculate section map for O(1) lookups in highlight loops
+  const docFormat = doc?.format
   const docSections = doc?.sections
   const sectionMap = useMemo(() => {
     const m = new Map<string, SectionItem>()
@@ -290,7 +355,45 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     return m
   }, [docSections])
 
-  const selection = useSelectionWorkflow({ documentId, sectionMap, setChatPreload })
+  // Insights is what the panel has always held; every other face is a workflow
+  // that used to open over the passage it is about -- this document's own
+  // conversation, its note composer, its flashcards and Feynman session, and an
+  // explanation of a selection.
+  // Arriving with a note is arriving at the note: the panel opens on it.
+  const [insightsTab, setInsightsTab] = useState<PanelTab>(initialNoteId ? "note" : "insights")
+  // Where a transient face returns the panel when it closes. One ref for all of
+  // them: the last face to take over is the one that has somewhere to go back to.
+  const tabBefore = useRef<PanelTab>("insights")
+  const showPanel = useCallback((tab: PanelTab) => {
+    setInsightsRestored(true)
+    if (insightsTab !== tab) tabBefore.current = insightsTab
+    setInsightsTab(tab)
+  }, [insightsTab, setInsightsRestored, setInsightsTab])
+  const openAsk = useCallback(() => { showPanel("ask") }, [showPanel])
+  const openNotes = useCallback(() => { showPanel("note") }, [showPanel])
+  const openPractice = useCallback(() => { showPanel("practice") }, [showPanel])
+  const selection = useSelectionWorkflow({
+    documentId,
+    setChatPreload,
+    openAsk,
+  })
+
+  // What the docked composer is holding: a section's own note button, a blank
+  // note on the document, or one opened from the list.
+  const noteCaptureOpen = openNoteEditor !== null || docNoteOpen || openNoteId !== null
+  const noteCaptureKey = openNoteEditor
+    ? `sec-${openNoteEditor}`
+    : docNoteOpen
+      ? "doc"
+      : openNoteId
+        ? `note-${openNoteId}`
+        : null
+  const closeNoteCapture = useCallback(() => {
+    setOpenNoteEditor(null)
+    setDocNoteOpen(false)
+    setOpenNoteId(null)
+    setInsightsTab(tabBefore.current)
+  }, [setOpenNoteEditor, setDocNoteOpen, setOpenNoteId, setInsightsTab])
 
   const {
     sectionTree,
@@ -337,9 +440,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     void el.play()
   }
 
-  // Scroll to initialSectionId once document sections are loaded
+  // Scroll to initialSectionId once document sections are loaded.
+  //
+  // A citation owns the scroll instead. Both this and the Read-tab effect below
+  // put the section *heading* at the top of the port, which for a chapter-length
+  // section leaves the cited passage off screen -- and being armed by the same
+  // navigation, they fire last and undo the centring. The passage is inside this
+  // section anyway, so landing on it lands here.
   useEffect(() => {
-    if (!initialSectionId || !doc) return
+    if (!initialSectionId || !doc || citationOwnsScroll) return
     // Wait a tick for DOM to update after doc is available
     const timer = setTimeout(() => {
       const el = document.querySelector(`[data-section-id="${initialSectionId}"]`)
@@ -348,11 +457,14 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }
     }, 100)
     return () => clearTimeout(timer)
-  }, [initialSectionId, doc])
+  }, [initialSectionId, doc, citationOwnsScroll])
 
-  // Explicit scroll when switching to Read tab via citation link
+  // Explicit scroll when switching to the Read tab from a section.
+  //
+  // Suppressed only for the section the reader arrived at with a citation; any
+  // section they pick afterwards scrolls normally.
   useEffect(() => {
-    if (leftTab === "read" && readSectionId) {
+    if (leftTab === "read" && readSectionId && !(citationOwnsScroll && readSectionId === initialSectionId)) {
       const timer = setTimeout(() => {
         const el = document.getElementById(`read-sec-${readSectionId}`)
         if (el) {
@@ -361,7 +473,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [leftTab, readSectionId])
+  }, [leftTab, readSectionId, initialSectionId, citationOwnsScroll])
 
   // Keep activeSectionId in sync with whichever per-action state was most
   // recently touched. Priority: Feynman > Read > Goals > Note editor.
@@ -458,6 +570,22 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     navigateTo: navigateToPlace,
   })
 
+  // Reading a section: from its row in the list, or from a note that was taken
+  // there. Pushes "Sections tab focused on this section" as the
+  // place-to-return-to, so Back scrolls back to that exact row.
+  const goToSection = useCallback((sid: string) => {
+    const sec = sectionMap.get(sid)
+    pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
+    setReadSectionId(sid)
+    if (docFormat === "pdf" && sec && sec.page_start > 0) {
+      setPdfViewVisited(true)
+      setLeftTab("pdfview")
+      pdfViewerRef.current?.goToPage(sec.page_start)
+      return
+    }
+    setLeftTab("read")
+  }, [sectionMap, pushHistory, setLeftTab, setPdfViewVisited, docFormat])
+
   // Fire the pending scroll once the Sections tab has actually rendered.
   // scrollActiveSectionIntoView itself retries with RAF until the row exists
   // in the DOM, so no setTimeout is required here.
@@ -481,7 +609,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   }, [doc?.format, initialSectionId, initialPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch notes for this document so dot indicators persist across reloads
-  const { data: docNotes, isError: notesError } = useQuery<NoteEntry[]>({
+  const { data: docNotes, isError: notesError, isLoading: notesLoading } = useQuery<NoteEntry[]>({
     queryKey: ["notes-for-doc", documentId],
     queryFn: () => apiGet<NoteEntry[]>("/notes", { document_id: documentId }),
     staleTime: 30_000,
@@ -644,9 +772,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     searchOpen && searchHitSectionId ? searchHitSectionId : readSectionId
 
   function handleStudyClick(sid: string) {
-    setActiveDocument(documentId)
-    setStudySectionFilter({ sectionId: sid, bloomLevelMin: 2 })
-    void navigate("/study", { state: { from: "/library" } })
+    setPracticeSection({ id: sid, heading: sectionMap.get(sid)?.heading ?? "" })
+    openPractice()
   }
 
   // Fetch FSRS fragility heatmap for section coloring
@@ -797,8 +924,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const resolveSourceRef = useCallback(
     (node: Node) => {
+      // The chunk, when the view has one: a transcript renders chunk by chunk,
+      // and the moment a note came from lives on that row.
+      const chunkId = resolveChunkFromDom(node)
       const fromDom = resolveFromDom(node)
-      if (fromDom) return { sectionId: fromDom, documentId, documentTitle: doc?.title ?? "" }
+      if (fromDom) return { sectionId: fromDom, documentId, documentTitle: doc?.title ?? "", chunkId }
       if (doc?.format === "pdf" && doc.sections.length > 0) {
         const fromPdf = resolvePdfFallback(doc.sections, pdfCurrentPage)
         if (fromPdf) return { sectionId: fromPdf, documentId, documentTitle: doc?.title ?? "", pageNumber: pdfCurrentPage }
@@ -809,10 +939,88 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   )
 
   const handleExplain = useCallback((text: string, mode: ExplainMode) => {
-    setSheetText(text)
-    setSheetMode(mode)
-    setSheetOpen(true)
-  }, [])
+    setExplainText(text)
+    setExplainMode(mode)
+    showPanel("explain")
+  }, [setExplainText, setExplainMode, showPanel])
+
+  const closeExplain = useCallback(() => {
+    setExplainText("")
+    setInsightsTab(tabBefore.current)
+  }, [setExplainText, setInsightsTab])
+
+  const panelTabs = useMemo(
+    () => (explainText ? [...PANEL_TABS, EXPLAIN_TAB] : PANEL_TABS),
+    [explainText],
+  )
+
+  // `closeExplain` restores the previous face when the panel's own close is
+  // used. This covers every other way the text can go -- a new selection
+  // explained then dismissed, a document swapped underneath -- so the panel is
+  // never left showing a tab the bar no longer offers.
+  useEffect(() => {
+    if (insightsTab === "explain" && !explainText) {
+      setInsightsTab(tabBefore.current === "explain" ? "insights" : tabBefore.current)
+    }
+  }, [insightsTab, explainText])
+
+  // A section's Practice button opens the session in the panel, not over it.
+  const openFeynman = useCallback((sectionId: string) => {
+    setFeynmanSection(sectionId)
+    showPanel("practice")
+  }, [setFeynmanSection, showPanel])
+
+  const closeFeynman = useCallback(() => {
+    const sid = feynmanSection
+    setFeynmanSection(null)
+    setInsightsTab(tabBefore.current)
+    if (sid) {
+      // Push so Back returns to whatever tab the session was opened from.
+      if (leftTab !== "sections") pushHistory()
+      setLeftTab("sections")
+      scrollActiveSectionIntoView(sid)
+    }
+  }, [feynmanSection, leftTab, pushHistory, setLeftTab, scrollActiveSectionIntoView,
+      setFeynmanSection, setInsightsTab])
+
+  // Revealing a card's answer puts the document on the passage it came from.
+  // This is the whole reason to practise inside the reader: the answer and its
+  // source end up on screen together.
+  const revealCardSource = useCallback((sid: string) => {
+    if (leftTab === "read" && readSectionId === sid) {
+      // Already the read target, so the target effect will not re-fire; the
+      // learner has usually scrolled away by now and is asking to go back.
+      document
+        .getElementById(`read-sec-${sid}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      return
+    }
+    if (leftTab !== "read") {
+      pushHistory()
+      setLeftTab("read")
+    }
+    setReadSectionId(sid)
+  }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId])
+
+  // A citation clicked in the docked conversation is answered beside it rather
+  // than by routing, so the marked passage is state and not only the arrival
+  // prop. `citationOwnsScroll` stays keyed on arrival: it stands down the three
+  // mount effects, which have long since fired by the time this changes.
+  const revealCitation = useCallback((c: SourceCitation) => {
+    if (c.document_id !== documentId) return false
+    const target = buildCitationTarget(c)
+    pushHistory()
+    setInPlaceCitation({ against: initialCitationWords, words: target.words })
+    if (doc?.format === "pdf" && c.pdf_page_number) {
+      setLeftTab("pdfview")
+      setPdfViewVisited(true)
+      pdfViewerRef.current?.goToPage(c.pdf_page_number)
+    } else {
+      setLeftTab("read")
+      if (c.section_id) setReadSectionId(c.section_id)
+    }
+    return true
+  }, [documentId, doc, initialCitationWords, pushHistory, setLeftTab, setReadSectionId])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
     pushHistory()
@@ -884,22 +1092,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           childCount={sectionTree.descendantCount.get(section.id) ?? 0}
           isCollapsed={collapsedParents.has(section.id)}
           onToggleCollapsed={toggleCollapsed}
-          onRead={(sid) => {
-            // Push "Sections tab focused on the clicked section" as the
-            // place-to-return-to, so Back scrolls back to that exact row.
-            const sec = sectionMap.get(sid)
-            if (doc.format === "pdf" && sec && sec.page_start > 0) {
-              pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
-              setReadSectionId(sid)
-              setPdfViewVisited(true)
-              setLeftTab("pdfview")
-              pdfViewerRef.current?.goToPage(sec.page_start)
-              return
-            }
-            pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
-            setReadSectionId(sid)
-            setLeftTab("read")
-          }}
+          onRead={goToSection}
           onPdfJump={(p) => {
             // The page anchor lives on a specific section — return to it.
             pushHistory({ tab: "sections", sectionId: section.id, pdfPage: null })
@@ -908,8 +1101,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             pdfViewerRef.current?.goToPage(p)
           }}
           onMediaJump={(t) => isAudio ? seekAndPlay(t) : seekAndPlayVideo(t)}
-          onToggleNote={(sid) => setOpenNoteEditor(openNoteEditor === sid ? null : sid)}
-          onFeynman={setFeynmanSection}
+          onToggleNote={(sid) => {
+            setOpenNoteEditor(openNoteEditor === sid ? null : sid)
+            if (openNoteEditor !== sid) openNotes()
+          }}
+          onFeynman={openFeynman}
           onPrefetchFeynman={(sid) => prefetchFeynmanSummary(doc.id, sid)}
           onShowGoals={(sid) => setActiveSectionGoals(activeSectionGoals === sid ? null : sid)}
         />
@@ -936,6 +1132,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     toggleCollapsed,
     isSectionHidden,
     listLimit,
+    goToSection,
+    openNotes,
   ])
 
   if (isLoading) {
@@ -1046,49 +1244,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             Back
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          {/* In-context actions for this document: study, generate questions, chat */}
-          <button
-            onClick={() => {
-              // Land directly in a session scoped to this document -- skip the
-              // launcher popup. Study.tsx auto-starts from pendingStudyStart once
-              // the doc scope resolves.
-              setActiveCollectionId(null)
-              setActiveDocument(documentId)
-              setPendingStudyStart({ documentId, mode: "flashcard" })
-              navigate("/study", { state: { from: "/library" } })
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Study this document"
-          >
-            <Target size={14} />
-            Study
-          </button>
-          <button
-            onClick={() => setGenQuestionsOpen(true)}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Generate questions from this document"
-          >
-            <Sparkles size={14} />
-            Generate questions
-          </button>
-          <button
-            onClick={() => {
-              // Open the full Chat page scoped to THIS document. Route through
-              // chatPreload (empty prompt, no auto-submit) so it starts a fresh,
-              // document-scoped conversation and the mount-time session hydration
-              // can't clobber the scope back to the last thread.
-              setChatPreload({ text: "", documentId, autoSubmit: false })
-              window.dispatchEvent(
-                new CustomEvent("luminary:navigate", { detail: { tab: "chat" } }),
-              )
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-            title="Chat about this document"
-          >
-            <MessageSquare size={14} />
-            Chat
-          </button>
+        <div data-testid="reader-header-actions" className="flex items-center gap-2">
+          {/* Practice and Chat used to sit here and did nothing the panel's own
+              tabs do not: both showed a face already in the tab bar, and
+              Practice's extra trick -- arming the whole document -- is the
+              panel's own "Use the whole document" control. */}
           <div className="relative">
             <button
               onClick={() => setConfirmDelete((open) => !open)}
@@ -1130,12 +1290,11 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           </div>
           {(docNotes?.length ?? 0) > 0 && (
             <button
-              onClick={() => {
-                setNotesDocumentId(documentId)
-                navigate("/notes", { state: { from: "/library" } })
-              }}
+              // The notes on this document are in the panel beside it, not on
+              // another page.
+              onClick={openNotes}
               className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground/80 hover:bg-muted transition-colors"
-              title="Open notes for this document"
+              title="Notes on this document"
             >
               <StickyNote size={12} />
               {docNotes?.length ?? 0} note{(docNotes?.length ?? 0) === 1 ? "" : "s"}
@@ -1144,10 +1303,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           {(docNotes?.length ?? 0) >= 3 && (
             <button
               onClick={() => {
-                setChatPreload({ text: "compare my notes with this book", documentId, autoSubmit: true })
-                window.dispatchEvent(
-                  new CustomEvent("luminary:navigate", { detail: { tab: "chat" } })
-                )
+                setChatPreload({
+                  text: "compare my notes with this book",
+                  documentId,
+                  autoSubmit: true,
+                  threadKey: docThreadKey(documentId),
+                })
+                openAsk()
               }}
               className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             >
@@ -1158,7 +1320,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         </div>
       </div>
 
-      {/* Two-panel layout (QuickNoteComposer overlays from the right when capturing) */}
+      {/* Two-panel layout; capturing a note docks into the panel, over nothing */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel — 60%; relative for SelectionActionBar absolute positioning */}
         <div ref={readerContainerRef} className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1337,7 +1499,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}
@@ -1370,6 +1532,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 extractionReport={doc.extraction_report}
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
+                citationWords={citationWords}
+                citedSectionId={initialSectionId}
               />
             )}
           </div>
@@ -1379,12 +1543,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             containerRef={readerContainerRef}
             resolveSourceRef={resolveSourceRef}
             onExplain={handleExplain}
-            onAddToNote={selection.handleAddToNote}
-            onCreateFlashcard={selection.handleCreateFlashcard}
             onAskInChat={selection.handleAskInChat}
             onHighlight={(text, sourceRef, color) => void selection.handleHighlight(text, sourceRef, color)}
-            onClip={(text, sourceRef) => void selection.handleClip(text, sourceRef)}
-          />
+              />
 
           {/* Section list */}
           <div
@@ -1487,29 +1648,189 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
           label="Resize insights panel"
         />
 
-        {insights.collapsed ? (
+        {insightsCollapsed && (
           <button
             type="button"
-            onClick={insights.toggle}
+            onClick={toggleInsights}
             aria-label="Show insights"
             title="Show insights"
             className="flex w-8 shrink-0 items-start justify-center border-l border-border pt-4 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <PanelRightOpen size={16} />
           </button>
-        ) : (
-        <div className="shrink-0 overflow-auto p-6" style={{ width: insights.width }}>
-          <div className="mb-2 flex justify-end">
+        )}
+        {/* Hidden rather than unmounted: collapsing the panel is a layout
+            change, and it may not cost a streaming answer or an unsaved note
+            draft. */}
+        <div
+          className={`flex shrink-0 flex-col overflow-hidden ${insightsCollapsed ? "hidden" : ""}`}
+          style={{ width: insights.width }}
+        >
+          <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {panelTabs.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setInsightsTab(id)}
+                aria-pressed={insightsTab === id}
+                className={`flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                  insightsTab === id
+                    ? "bg-accent font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                }`}
+              >
+                <Icon size={13} />
+                {label}
+              </button>
+            ))}
+            </div>
             <button
               type="button"
-              onClick={insights.toggle}
+              onClick={toggleInsights}
               aria-label="Hide insights"
               title="Hide insights"
-              className="text-muted-foreground hover:text-foreground"
+              className="ml-1 shrink-0 text-muted-foreground hover:text-foreground"
             >
               <PanelRightClose size={16} />
             </button>
           </div>
+          {/* Both stay mounted: a docked conversation that unmounted on every tab
+              switch would drop a streaming answer. */}
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "ask" ? "" : "hidden"}`}>
+            <ChatConversation
+              variant="docked"
+              threadKey={docThreadKey(documentId)}
+              pinnedDocumentId={documentId}
+              onCitationInDocument={revealCitation}
+            />
+          </div>
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "note" ? "" : "hidden"}`}>
+            {noteCaptureOpen ? (
+              <NoteComposer
+                variant="docked"
+                open
+                captureKey={noteCaptureKey}
+                noteId={openNoteId}
+                onClose={closeNoteCapture}
+                onSaved={() => {
+                  void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
+                  void qc.invalidateQueries({ queryKey: ["reader-notes"] })
+                  void qc.invalidateQueries({ queryKey: ["notes"] })
+                  void qc.invalidateQueries({ queryKey: ["notes-groups"] })
+                }}
+                initialSourceDocIds={[documentId]}
+                lockedCollectionId={autoCollection?.id ?? null}
+                documentId={documentId}
+                // Where the note came from, structured rather than only quoted
+                // in its text: the section whose note button was pressed.
+                // Without it a note stored no section at all and nothing could
+                // resolve it back.
+                sectionId={openNoteEditor}
+              />
+            ) : (
+              <div className="flex h-full min-h-0 flex-col overflow-auto p-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    tabBefore.current = "note"
+                    setDocNoteOpen(true)
+                  }}
+                  className="mb-3 flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+                >
+                  <StickyNote size={13} />
+                  New note
+                </button>
+                {notesLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+                    ))}
+                  </div>
+                ) : notesError ? (
+                  <p className="text-xs text-destructive">Could not load notes for this document.</p>
+                ) : (docNotes?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No notes on this document yet. Start one above.
+                  </p>
+                ) : (
+                  <ul data-testid="docked-notes-list" className="space-y-2">
+                    {docNotes?.map((n) => (
+                      <li key={n.id} className="rounded-md border border-border transition-colors hover:border-muted-foreground/30">
+                        <button
+                          type="button"
+                          // A note opened from a document is edited beside it.
+                          onClick={() => {
+                            tabBefore.current = "note"
+                            setOpenNoteId(n.id)
+                          }}
+                          className="w-full rounded-t-md px-3 py-2 text-left hover:bg-muted/50"
+                        >
+                          <p className="truncate text-xs text-foreground">
+                            {n.title?.trim() || stripMarkdown(n.content).slice(0, 90) || "Untitled note"}
+                          </p>
+                        </button>
+                        {n.section_id && (
+                          <button
+                            type="button"
+                            onClick={() => goToSection(n.section_id!)}
+                            className="w-full truncate rounded-b-md border-t border-border/60 px-3 py-1 text-left text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          >
+                            Go to {sectionMap.get(n.section_id)?.heading ?? "the passage"}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Practice: this document's flashcards, and the Feynman session that
+              takes the face over while one is running. */}
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "practice" ? "" : "hidden"}`}>
+            {feynmanSection && FeynmanPanel ? (
+              <Suspense fallback={null}>
+                <FeynmanPanel
+                  documentId={documentId}
+                  sectionId={feynmanSection}
+                  concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
+                  onClose={closeFeynman}
+                />
+              </Suspense>
+            ) : (
+              <PracticePanel
+                documentId={documentId}
+                // A section chosen on its own scopes it; without one it is the
+                // whole document.
+                sectionId={practiceSection?.id}
+                sectionHeading={practiceSection?.heading}
+                context=""
+                onClearScope={() => setPracticeSection(null)}
+                onJumpToSource={revealCardSource}
+              />
+            )}
+          </div>
+          <div className={`min-h-0 flex-1 overflow-hidden ${insightsTab === "explain" ? "" : "hidden"}`}>
+            {explainText ? (
+              <ExplanationPanel
+                // A new passage is a new explanation, not a reset of this one.
+                key={`${explainMode}:${explainText}`}
+                text={explainText}
+                documentId={documentId}
+                mode={explainMode}
+                onClose={closeExplain}
+              />
+            ) : (
+              <div className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  Select a passage and choose Explain. The explanation streams here, beside the
+                  text it is about.
+                </p>
+              </div>
+            )}
+          </div>
+          <div className={`min-h-0 flex-1 overflow-auto p-6 ${insightsTab === "insights" ? "" : "hidden"}`}>
           {/* Video player for video documents */}
           {isVideo && videoUrl && (
             <VideoPlayer videoRef={videoRef} videoUrl={videoUrl} />
@@ -1525,32 +1846,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             contentType={doc.content_type}
             form={doc.facets?.form}
           />
+          </div>
         </div>
-        )}
 
-        <QuickNoteComposer
-          open={selection.noteOpen || openNoteEditor !== null}
-          onClose={() => {
-            selection.closeNote()
-            setOpenNoteEditor(null)
-          }}
-          onSaved={() => {
-            void qc.invalidateQueries({ queryKey: ["notes-for-doc", documentId] })
-            void qc.invalidateQueries({ queryKey: ["reader-notes"] })
-            void qc.invalidateQueries({ queryKey: ["notes"] })
-            void qc.invalidateQueries({ queryKey: ["notes-groups"] })
-          }}
-          initialContent={(() => {
-            if (!selection.noteOpen) return ""
-            const parts = [selection.noteSourceRef?.documentTitle, selection.noteHeading].filter(Boolean)
-            const attribution = parts.length > 0 ? parts.join(", ") : ""
-            return `> "${selection.noteText}"\n>\n> -- ${attribution}`
-          })()}
-          initialSourceDocIds={[documentId]}
-          lockedCollectionId={autoCollection?.id ?? null}
-          documentId={documentId}
-          sectionId={openNoteEditor}
-        />
       </div>
 
       {/* Audio mini-player — sticky bottom bar, audio documents only */}
@@ -1573,55 +1871,6 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         />
       )}
 
-      {/* Feynman dialog */}
-      {feynmanSection && FeynmanDialog && (
-        <Suspense fallback={null}>
-        <FeynmanDialog
-          documentId={documentId}
-          sectionId={feynmanSection}
-          concept={doc.sections.find((s) => s.id === feynmanSection)?.heading ?? ""}
-          onClose={() => {
-            const sid = feynmanSection
-            setFeynmanSection(null)
-            if (sid) {
-              // Push so Back returns to whatever tab the dialog was opened from.
-              if (leftTab !== "sections") pushHistory()
-              setLeftTab("sections")
-              scrollActiveSectionIntoView(sid)
-            }
-          }}
-        />
-        </Suspense>
-      )}
-
-      {/* Flashcard generation dialog — scoped to selected text context */}
-      <DocumentFlashcardDialog
-        open={selection.flashcardOpen}
-        documentId={documentId}
-        sectionId={selection.flashcardSourceRef?.sectionId}
-        sectionHeading={selection.flashcardHeading}
-        context={selection.flashcardText}
-        onClose={selection.closeFlashcard}
-      />
-
-      {/* Header "Generate questions" — same dialog scoped to the whole document */}
-      <DocumentFlashcardDialog
-        open={genQuestionsOpen}
-        documentId={documentId}
-        sectionId={undefined}
-        sectionHeading={undefined}
-        context=""
-        onClose={() => setGenQuestionsOpen(false)}
-      />
-
-      {/* Explanation sheet */}
-      <ExplanationSheet
-        open={sheetOpen}
-        text={sheetText}
-        documentId={documentId}
-        mode={sheetMode}
-        onClose={() => setSheetOpen(false)}
-      />
     </div>
   )
 }

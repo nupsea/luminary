@@ -126,6 +126,14 @@ class ChunkModel(Base):
     # uses pdf_page_number, because that is what the viewer scrolls to. Null
     # when the PDF defines no labels, or the label is the sheet number already.
     pdf_page_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Where this chunk starts and ends in a recording, in seconds. Transcription
+    # groups Whisper segments into ~60s windows and knows both bounds
+    # (`transcribe.py` `_chunk_audio`); until these columns existed they were
+    # dropped at the write, so `ChunkItem.start_time` was hardcoded null and a
+    # citation into a lecture could name no moment in it. Null for everything
+    # that is not a recording, and for recordings ingested before this existed.
+    start_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Code-aware chunking fields (set by tech_book/tech_article content type)
     has_code: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     code_language: Mapped[str | None] = mapped_column(String(50), nullable=True)

@@ -1,6 +1,9 @@
 // Polling hook that resolves async teach-back evaluations submitted during
 // a session. Returns the latest results array plus aggregate stats; SessionComplete
-// is the primary consumer.
+// and the reader's RecallRunner are the consumers.
+//
+// The stats count CARDS, not submissions -- see latestAttempts.ts for why, and
+// for what counting submissions did to the summary of a re-answered card.
 
 import { useQuery } from "@tanstack/react-query"
 
@@ -10,11 +13,18 @@ import {
   fetchTeachbackResults,
 } from "@/lib/studyApi"
 
+import { tallyRun } from "./latestAttempts"
+
 export interface TeachbackStats {
   allDone: boolean
+  /** Distinct cards answered, however many explanations each took. */
+  answeredCount: number
+  /** Distinct cards whose standing attempt came back with a score. */
   completedCount: number
-  avgScore: number
+  /** Mean of the standing scores -- null while any is unscored, never 0. */
+  avgScore: number | null
   passCount: number
+  stillScoring: number
 }
 
 export function useTeachbackPolling(pending: PendingTeachback[]): {
@@ -40,20 +50,17 @@ export function useTeachbackPolling(pending: PendingTeachback[]): {
     refetchOnMount: "always",
   })
 
-  const completed = results?.filter((r) => r.status === "complete") ?? []
-  const allDone =
-    !hasUnresolved &&
-    results != null &&
-    results.length === realIds.length &&
-    results.every((r) => r.status !== "pending")
-  const avgScore =
-    completed.length > 0
-      ? Math.round(completed.reduce((s, r) => s + (r.score ?? 0), 0) / completed.length)
-      : 0
-  const passCount = completed.filter((r) => (r.score ?? 0) >= 60).length
-
+  const tally = tallyRun(pending, results)
   return {
     results,
-    stats: { allDone, completedCount: completed.length, avgScore, passCount },
+    stats: {
+      // A run with nothing submitted is not "done" -- it has not started.
+      allDone: pending.length > 0 && tally.stillScoring === 0,
+      answeredCount: tally.answered,
+      completedCount: tally.scored,
+      avgScore: tally.avgScore,
+      passCount: tally.passed,
+      stillScoring: tally.stillScoring,
+    },
   }
 }

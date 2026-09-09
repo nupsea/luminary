@@ -90,3 +90,32 @@ export function resolvePdfFallback(
   // Ultimate fallback: first section
   return sections[0].id
 }
+
+
+/**
+ * The chunk a selection sits in, when the view renders chunk by chunk.
+ *
+ * Only a transcript does: prose is rendered from the section body and never
+ * rebuilt from chunks (I-29), so there are no chunk boundaries in it to find.
+ * A note taken from a recording needs this -- the moment it came from lives on
+ * the chunk row and nothing else in the DOM identifies it.
+ */
+export function resolveChunkFromDom(startContainer: Node): string | undefined {
+  if (typeof Element !== "undefined" && startContainer instanceof Element) {
+    const el = startContainer.closest("[data-chunk-id]")
+    if (el) return (el as HTMLElement).dataset.chunkId
+  }
+  let node: Node | null = startContainer
+  const hasHTMLElement = typeof HTMLElement !== "undefined"
+  while (node) {
+    if (hasHTMLElement && node instanceof HTMLElement && node.dataset.chunkId) {
+      return node.dataset.chunkId
+    }
+    if (!hasHTMLElement && "dataset" in node) {
+      const ds = (node as unknown as HTMLElement).dataset
+      if (ds?.chunkId) return ds.chunkId
+    }
+    node = node.parentNode
+  }
+  return undefined
+}

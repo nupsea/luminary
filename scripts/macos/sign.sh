@@ -17,6 +17,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 APP="${1:?usage: sign.sh <app> [--adhoc]}"
 MODE="${2:-}"
+# Neither may carry an XML comment. AMFI's parser is stricter than plutil's, so
+# a documented entitlements file lints clean and then fails here with
+# "AMFIUnserializeXML: syntax error". Explanations go in docs/desktop-bundle.md.
 ENT_APP="$REPO_ROOT/src-tauri/entitlements.plist"
 ENT_PY="$REPO_ROOT/src-tauri/entitlements-python.plist"
 

@@ -33,6 +33,7 @@ import { NoteCollectionsField } from "@/components/notes/NoteCollectionsField"
 import { NoteEditor } from "@/components/notes/NoteEditor"
 import { NotePdfExport } from "@/components/notes/NotePdfExport"
 import { NoteSourceDocsField } from "@/components/notes/NoteSourceDocsField"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { setImageSizeInMarkdown } from "@/components/notes/markdownEditorCommands"
 import { type NoteLinkCompletionConfig } from "@/components/notes/noteLinkCompletion"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -47,6 +48,7 @@ import {
   type NoteDraft,
 } from "@/lib/noteAutosave"
 import { downloadNoteMarkdown } from "@/lib/noteExport"
+import { appendCapture } from "@/lib/noteCapture"
 import { useNoteSaveShortcut } from "@/lib/noteEditorUtils"
 import { dispatchTagNavigate } from "@/lib/noteNavigateUtils"
 import {
@@ -100,7 +102,7 @@ export default function NotePage() {
   // for the real id once it exists.
   const isNew = noteId === NEW_NOTE_ROUTE_ID
   const navigate = useNavigate()
-  const { canGoBack, backLabel, goBack } = useBackNavigation()
+  const { canGoBack, backLabel, goBack, fromPath } = useBackNavigation()
   const qc = useQueryClient()
 
   const [readingView, setReadingView] = useState(false)
@@ -364,7 +366,13 @@ export default function NotePage() {
       <div className="shrink-0 border-b border-border px-6 pt-4 pb-3">
         <div className="mb-2 flex items-center gap-2">
           <button
-            onClick={() => (canGoBack ? goBack() : navigate("/notes"))}
+            onClick={() => {
+              // A `from` carrying a query names a place, not a history step:
+              // the reader that expanded this note wants it back in its panel.
+              if (fromPath?.includes("?")) navigate(fromPath)
+              else if (canGoBack) goBack()
+              else navigate("/notes")
+            }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <ArrowLeft size={12} />
@@ -402,6 +410,14 @@ export default function NotePage() {
                 </button>
               </>
             )}
+            <VoiceRecordButton
+              size="sm"
+              onTranscribed={(text) => {
+                setEditContent((prev) => appendCapture(prev, text))
+                toast.success("Dictation added to note")
+              }}
+              title="Dictate into note (Whisper)"
+            />
           </div>
           <div
             role="status"

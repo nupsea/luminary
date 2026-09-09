@@ -26,6 +26,7 @@ to prevent FastAPI from matching literal segments as document_id.
 import asyncio
 import logging
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -68,6 +69,7 @@ from app.schemas.flashcards import (
     GenerateTechnicalRequest,
     GroundingAuditRequest,
     GroundingReport,
+    MaterialHeadroomResponse,
     RegenerateResponse,
     RepairReport,
     ReviewRequest,
@@ -76,6 +78,7 @@ from app.schemas.flashcards import (
 )
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.activity_service import ActivityService
+from app.services.background import task_registry
 from app.services.deck_health import DeckHealthService, get_deck_health_service
 from app.services.engagement_service import EngagementService
 from app.services.flashcard import (
@@ -103,7 +106,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
 # Strong references to fire-and-forget coverage update tasks (asyncio holds only weak refs).
-_background_tasks: set[asyncio.Task] = set()
+
+_background_tasks = task_registry(__name__)
 
 # Back-compat re-exports for routers/study.py and tests that import these
 # private aliases from this module.
@@ -266,9 +270,18 @@ async def generate_flashcards(
             "count": req.count,
             "difficulty": req.difficulty,
             "has_context": bool(req.context),
+            "avoid_used_material": req.avoid_used_material,
             "model": req.model or "auto",
         },
     )
+    # The chunks this document's deck was already written from. Passing them is
+    # what makes a second "add more" read a different passage: without it every
+    # run reads the classifier's same top pick, produces the same questions, and
+    # the near-duplicate filter removes all of them -- generation that appears to
+    # fail while working exactly as written (see `_passage_not_yet_used`).
+    exclude: set[str] | None = None
+    if req.avoid_used_material and not (req.context or "").strip():
+        exclude = await _used_chunk_ids(req.document_id, session)
     try:
         cards = await service.generate(
             document_id=req.document_id,
@@ -279,6 +292,7 @@ async def generate_flashcards(
             session=session,
             context=req.context,
             model=req.model,
+            exclude_chunk_ids=exclude,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(
@@ -315,6 +329,7 @@ async def regenerate_flashcards(
         extra={
             "document_id": req.document_id,
             "note_id": req.note_id,
+            "section_id": req.section_id,
             # 0 means "whatever the deck holds"; the service resolves it.
             "count": req.count,
             "difficulty": req.difficulty,
@@ -329,6 +344,8 @@ async def regenerate_flashcards(
             count=req.count or None,
             difficulty=req.difficulty,
             model=req.model,
+            section_id=req.section_id,
+            section_heading=req.section_heading,
         )
     except LLMUnavailableError as exc:
         raise HTTPException(status_code=503, detail=get_llm_error_message()) from exc
@@ -537,6 +554,18 @@ async def generate_cloze_flashcards(
 
 
 # Bloom's taxonomy coverage audit
+async def _used_chunk_ids(document_id: str, session: AsyncSession) -> set[str]:
+    """Chunks some card of this document was written from."""
+    rows = (
+        await session.execute(
+            select(FlashcardModel.source_chunk_ids).where(
+                FlashcardModel.document_id == document_id
+            )
+        )
+    ).scalars().all()
+    return {cid for row in rows for cid in (row or []) if isinstance(cid, str)}
+
+
 # NOTE: /audit before /{document_id} — prevents FastAPI treating "audit" as a document_id.
 
 
@@ -720,6 +749,27 @@ async def export_flashcards_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=flashcards.csv"},
     )
+
+
+@router.get("/{document_id}/headroom", response_model=MaterialHeadroomResponse)
+async def get_material_headroom(
+    document_id: str,
+    section_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    service: FlashcardService = Depends(get_flashcard_service),
+) -> MaterialHeadroomResponse:
+    """How much of this scope no card has been written from yet.
+
+    The reader's Practice face asks before offering to write more cards. A deck
+    that already covers its document's material cannot be added to -- generation
+    reads a passage the deck holds and the near-duplicate filter removes every
+    question it produces -- and a button that answers with an error afterwards
+    is worse than no button.
+    """
+    headroom = await service.material_headroom(
+        session, document_id, section_id=section_id
+    )
+    return MaterialHeadroomResponse(**asdict(headroom))
 
 
 @router.get("/{document_id}", response_model=list[FlashcardResponse])

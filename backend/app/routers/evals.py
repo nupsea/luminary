@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.models import DocumentModel, EvalRunModel, GoldenDatasetModel, GoldenQuestionModel
 from app.services import llm_output_stats
-from app.services.background import fire_and_forget
+from app.services.background import fire_and_forget, task_registry
 from app.services.dataset_generator_service import (
     count_questions,
     create_dataset,
@@ -46,7 +46,7 @@ _SCORES_HISTORY_PATH = REPO_ROOT / "evals" / "scores_history.jsonl"
 _EVALS_DIR = REPO_ROOT / "evals"
 
 # Strong references to background tasks — prevents GC before they complete.
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks = task_registry(__name__)
 
 
 def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]

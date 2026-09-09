@@ -27,6 +27,7 @@ from app.services.llm import (
     LLMServiceUnavailableError,
     get_llm_service,
 )
+from app.services.llm_routing import is_on_device
 from app.telemetry import trace_chain
 from app.types import ScoredChunk
 
@@ -101,13 +102,13 @@ async def _fill_citation_locations(citations: list[dict]) -> None:
         return
     locations = await fetch_chunk_locations(chunk_ids)
     for c in citations:
-        _section_id, pdf_page, _label, heading = locations.get(
-            c.get("chunk_id") or "", (None, None, None, None)
-        )
-        if heading and not (c.get("section_heading") or "").strip():
-            c["section_heading"] = heading
-        if pdf_page and not c.get("page"):
-            c["page"] = pdf_page
+        loc = locations.get(c.get("chunk_id") or "")
+        if loc is None:
+            continue
+        if loc.heading and not (c.get("section_heading") or "").strip():
+            c["section_heading"] = loc.heading
+        if loc.pdf_page and not c.get("page"):
+            c["page"] = loc.pdf_page
 
 
 def _enrich_citation_titles(
@@ -961,6 +962,11 @@ class QAService:
             #       are generated, not after the full response is buffered.
             first_doc_id = document_ids[0] if document_ids else None
             llm_prompt = result.get("_llm_prompt")
+            # Declared for both paths: a cached/pass-through answer streams without
+            # an LLM call and so has no time-to-first-token, which is a null in the
+            # receipt rather than a zero. Zero would read as "instant" and be
+            # averaged into a latency number that never happened.
+            ttft_seconds: float | None = None
 
             if llm_prompt:
                 # Path B — true streaming: call LLM here, yield tokens progressively
@@ -984,6 +990,21 @@ class QAService:
                         "[Full answer with citations below]\\n\\n"
                         + system_prompt
                     )
+                # Retrieval is already finished here -- the graph ran to completion
+                # and left `_llm_prompt` behind -- so the source chips can be on
+                # screen before the first token instead of after the last one. On
+                # the local arm that is the difference between "thinking" and
+                # "dead": time to first token is tens of seconds there, and all of
+                # it currently shows an empty panel.
+                #
+                # The `done` payload still carries `source_citations` (I-8 keeps it
+                # authoritative), so a client that ignores this event renders
+                # exactly as before.
+                early_sources = result.get("source_citations") or []
+                if early_sources:
+                    sources_event = {"type": "sources", "source_citations": early_sources}
+                    yield f"data: {json.dumps(sources_event)}\n\n"
+
                 llm = get_llm_service()
                 collected: list[str] = []
                 try:
@@ -1010,9 +1031,9 @@ class QAService:
                     hit_marker = False
                     async for token in token_gen:
                         if not ttft_logged:
+                            ttft_seconds = time.perf_counter() - t_llm
                             logger.info(
-                                "[perf] LLM time-to-first-token: %.2fs",
-                                time.perf_counter() - t_llm,
+                                "[perf] LLM time-to-first-token: %.2fs", ttft_seconds
                             )
                             ttft_logged = True
                         collected.append(token)
@@ -1193,6 +1214,27 @@ class QAService:
                 "web_calls_used": result.get("web_calls_used") or 0,
                 # chunk-derived source citations for trust/navigation
                 "source_citations": result.get("source_citations") or [],
+                # What this answer cost and what was sent for it. The privacy claim
+                # is only checkable if the answer says which engine served it and
+                # how much of the library went with the question; the latency half
+                # is what makes "cloud or private" a choice a user can make on
+                # evidence rather than on our description of it.
+                #
+                # `context_budget_reason` is here because the slow-host path halves
+                # the budget automatically (#100). That changes what the reader
+                # receives, and it used to say so only in a log line.
+                "receipt": {
+                    "engine": "local" if is_on_device(store_model) else "cloud",
+                    "model": store_model,
+                    "ttft_seconds": (
+                        round(ttft_seconds, 2) if ttft_seconds is not None else None
+                    ),
+                    "total_seconds": round(time.perf_counter() - t_start, 2),
+                    "passages_sent": result.get("_passages_sent"),
+                    "context_chars": result.get("_context_chars"),
+                    "context_budget_tokens": result.get("_context_budget"),
+                    "context_budget_reason": result.get("_budget_reason"),
+                },
             }
             # Eval-only: the faithfulness NLI must score the answer against the
             # exact grounding it was generated from, not a parallel /search. UI

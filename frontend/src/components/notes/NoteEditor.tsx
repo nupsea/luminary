@@ -87,6 +87,7 @@ export function NoteEditor({
           editorClassName={editorClassName}
           linkCompletion={linkCompletion}
           slashCommands={slashCommands}
+          onEditDiagram={openDiagramEditor}
           preview={
             content.trim() ? (
               <MarkdownRenderer

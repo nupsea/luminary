@@ -3016,6 +3016,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flashcards/{document_id}/headroom": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Material Headroom
+         * @description How much of this scope no card has been written from yet.
+         *
+         *     The reader's Practice face asks before offering to write more cards. A deck
+         *     that already covers its document's material cannot be added to -- generation
+         *     reads a passage the deck holds and the near-duplicate filter removes every
+         *     question it produces -- and a button that answers with an error afterwards
+         *     is worse than no button.
+         */
+        get: operations["get_material_headroom_flashcards__document_id__headroom_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flashcards/{document_id}": {
         parameters: {
             query?: never;
@@ -4680,6 +4706,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/llm/routing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Llm Routing
+         * @description Which engine serves each unit of work, and what that means leaves the machine.
+         */
+        get: operations["get_llm_routing_settings_llm_routing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/models": {
         parameters: {
             query?: never;
@@ -5236,7 +5282,20 @@ export interface paths {
          */
         get: operations["get_session_cards_study_sessions__session_id__cards_get"];
         put?: never;
-        post?: never;
+        /**
+         * Append Session Cards
+         * @description Add cards to an open session's planned queue.
+         *
+         *     A run is reconstructed from `planned_card_ids` on every resume, so cards
+         *     generated mid-run have to join the queue here and not only in the client's
+         *     memory -- otherwise the reader adds five questions, answers two, closes the
+         *     tab, and comes back to a run that never heard of them.
+         *
+         *     Ids that are not real cards are dropped rather than queued: a planned id
+         *     with no row behind it makes `remaining-cards` return a shorter queue than
+         *     `planned_count` promises, which reads as a run stuck short of its own total.
+         */
+        post: operations["append_session_cards_study_sessions__session_id__cards_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6269,6 +6328,20 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** AppendSessionCardsRequest */
+        AppendSessionCardsRequest: {
+            /** Card Ids */
+            card_ids: string[];
+        };
+        /** AppendSessionCardsResponse */
+        AppendSessionCardsResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Added */
+            added: number;
+            /** Planned Count */
+            planned_count: number;
         };
         /**
          * ArchiveMasteredResponse
@@ -8093,6 +8166,11 @@ export interface components {
             difficulty: "easy" | "medium" | "hard";
             /** Context */
             context?: string | null;
+            /**
+             * Avoid Used Material
+             * @default false
+             */
+            avoid_used_material: boolean;
             /** Model */
             model?: string | null;
         };
@@ -8121,6 +8199,10 @@ export interface components {
             difficulty: "easy" | "medium" | "hard";
             /** Model */
             model?: string | null;
+            /** Section Id */
+            section_id?: string | null;
+            /** Section Heading */
+            section_heading?: string | null;
         };
         /** FlashcardResponse */
         FlashcardResponse: {
@@ -8934,6 +9016,22 @@ export interface components {
             concepts: string[];
             /** Cells */
             cells: components["schemas"]["HeatmapCellOut"][];
+        };
+        /**
+         * MaterialHeadroomResponse
+         * @description Response schema for GET /flashcards/{document_id}/headroom
+         */
+        MaterialHeadroomResponse: {
+            /** Total Chunks */
+            total_chunks: number;
+            /** Used Chunks */
+            used_chunks: number;
+            /** Unused Chunks */
+            unused_chunks: number;
+            /** Cards */
+            cards: number;
+            /** Cards Without Sources */
+            cards_without_sources: number;
         };
         /** MergeRequest */
         MergeRequest: {
@@ -9834,6 +9932,25 @@ export interface components {
             resident_gb?: number | null;
             /** Fallback Reason */
             fallback_reason?: string | null;
+        };
+        /**
+         * RoutingResponse
+         * @description Where each unit of work runs under the current mode.
+         *
+         *     `leaves_device` is derived from the rows rather than stated beside them, so a
+         *     row and the summary cannot disagree.
+         */
+        RoutingResponse: {
+            /** Mode */
+            mode: string;
+            /** Provider */
+            provider: string | null;
+            /** Work */
+            work: components["schemas"]["WorkRoutingItem"][];
+            /** Leaves Device */
+            leaves_device: string[];
+            /** Local Probe Seconds */
+            local_probe_seconds?: number | null;
         };
         /** RubricCompletenessResponse */
         RubricCompletenessResponse: {
@@ -10921,6 +11038,23 @@ export interface components {
             seconds_by_activity: {
                 [key: string]: number;
             };
+        };
+        /** WorkRoutingItem */
+        WorkRoutingItem: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Model */
+            model: string | null;
+            /** On Device */
+            on_device: boolean;
+            /** Routable */
+            routable: boolean;
+            /** Why */
+            why: string;
+            /** Fallback Reason */
+            fallback_reason?: string | null;
         };
         /** SessionListItem */
         app__routers__chat_sessions__SessionListItem: {
@@ -16258,6 +16392,39 @@ export interface operations {
             };
         };
     };
+    get_material_headroom_flashcards__document_id__headroom_get: {
+        parameters: {
+            query?: {
+                section_id?: string | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaterialHeadroomResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_flashcards_flashcards__document_id__get: {
         parameters: {
             query?: {
@@ -18795,6 +18962,26 @@ export interface operations {
             };
         };
     };
+    get_llm_routing_settings_llm_routing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingResponse"];
+                };
+            };
+        };
+    };
     get_model_residency_settings_models_get: {
         parameters: {
             query?: never;
@@ -19617,6 +19804,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionCardDetail"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_session_cards_study_sessions__session_id__cards_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppendSessionCardsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendSessionCardsResponse"];
                 };
             };
             /** @description Validation Error */

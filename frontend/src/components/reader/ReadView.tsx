@@ -22,8 +22,34 @@ import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
 import type { AnnotationItem, SectionContentItem } from "./types"
+import {
+  CITATION_MARK_CLASS,
+  CITATION_MARK_TOKEN,
+  longestPresentRun,
+  markWords,
+  settleIntoView,
+} from "@/lib/citation"
 
 type DocumentImage = components["schemas"]["ImageItem"]
+
+/**
+ * The box a citation is centred within.
+ *
+ * `scrollIntoView({ block: "center" })` centres inside whichever ancestor
+ * scrolls, which in the reader is a panel occupying part of the window -- so
+ * measuring against the window would report a passage as off-centre while it sat
+ * exactly where it was asked to sit, and the settle loop would scroll forever.
+ */
+function scrollPortOf(el: Element): { top: number; height: number } {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) {
+      const rect = node.getBoundingClientRect()
+      return { top: rect.top, height: rect.height }
+    }
+  }
+  return { top: 0, height: window.innerHeight }
+}
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
   yellow: "bg-yellow-200/60 dark:bg-yellow-500/30",
@@ -78,6 +104,10 @@ interface LazySectionProps {
   isLast: boolean
   /** In-document search term to mark in the body. Empty when search is closed. */
   searchTerm?: string
+  /** Text from the citation that opened the reader, marked until it times out. */
+  citationWords?: string[]
+  /** True when this is the section the citation names. */
+  isCitedSection?: boolean
 }
 
 
@@ -142,7 +172,9 @@ SpeakerTurns.displayName = "SpeakerTurns"
 
 // LazySection renders heavy Markdown content only when it is near the viewport.
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "" }: LazySectionProps) => {
+const EMPTY_WORDS: string[] = []
+
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -151,6 +183,23 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const [loadingWhole, setLoadingWhole] = useState(false)
   const body = whole ?? section.content
   const stillShort = section.truncated && whole === null
+
+  // A shortened section can hold the cited passage in the part that did not
+  // arrive: a 47-section PDF cited text 11k characters into a section whose
+  // inline copy stopped well before it, so nothing matched and nothing marked.
+  // The rest is one call away and this is the one section worth spending it on.
+  useEffect(() => {
+    if (!isCitedSection || !section.truncated || whole !== null) return
+    // No loading flag and no "already requested" ref: setting state synchronously
+    // in an effect body cascades renders, and a ref latch would survive
+    // StrictMode's second run and turn it into a no-op in dev only. `whole`
+    // stopping the repeat is enough, and a duplicate fetch is harmless.
+    let cancelled = false
+    void fetchWholeSection(documentId, section.section_id)
+      .then((s) => { if (!cancelled) setWhole(s.content) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [isCitedSection, section.truncated, section.section_id, documentId, whole])
 
   useEffect(() => {
     const el = containerRef.current
@@ -170,18 +219,37 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
 
   const Tag = HeadingTag(section.level)
   const showHeading = hasAuthoredHeading(section)
+  // The citation run is computed whether or not this section is in view, because
+  // it decides whether the section must render at all.
+  const citationRun = useMemo(
+    () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
+    [citationWords, body],
+  )
+  // One decision, used by the memo and the JSX alike. They were separate, so the
+  // cited section computed its marked HTML and then rendered null anyway.
+  const shouldRender = isVisible || isCitedSection
   const highlighted = useMemo(() => {
-    if (!isVisible) return "" // defer processing
-    const marked = applyHighlights(body, highlightsVisible ? annotations : [])
-    return searchTerm ? applySearchTerm(marked, searchTerm) : marked
-  }, [isVisible, body, annotations, highlightsVisible, searchTerm])
+    // Sections defer their body until scrolled into view. A citation is an
+    // explicit request to see *this* passage, so the section holding it renders
+    // regardless: waiting for the scroll is circular, since the scroll targets a
+    // mark that only exists once the section has rendered. A 47-section PDF
+    // landed with the cited section showing its heading and 11 characters of
+    // nothing, and nothing was ever marked.
+    if (!shouldRender && citationRun.length === 0) return ""
+    let marked = applyHighlights(body, highlightsVisible ? annotations : [])
+    if (searchTerm) marked = applySearchTerm(marked, searchTerm)
+    // Matched against the normalised body but marked in the raw one, so the
+    // marker tolerates the paragraph breaks the chunk text collapsed.
+    if (citationRun.length > 0) marked = markWords(marked, citationRun, CITATION_MARK_CLASS)
+    return marked
+  }, [shouldRender, body, annotations, highlightsVisible, searchTerm, citationRun])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
-    if (!isVisible || !spec.speakerTurns) return null
+    if (!shouldRender || !spec.speakerTurns) return null
     if (highlighted !== body) return null
     return parseSpeakerTurns(body)
-  }, [isVisible, spec.speakerTurns, highlighted, body])
+  }, [shouldRender, spec.speakerTurns, highlighted, body])
 
   return (
     <div
@@ -198,7 +266,7 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
           {section.heading}
         </Tag>
       )}
-      {isVisible ? (
+      {shouldRender ? (
         <div className="leading-relaxed anim-fade-in">
           {turns ? (
             <SpeakerTurns turns={turns} />
@@ -416,6 +484,11 @@ interface ReadViewProps {
   sourceUrl?: string | null
   /** In-document search term, marked in the body. Empty when search is closed. */
   searchTerm?: string
+  /** The cited passage as words, marked where this document's prose holds them. */
+  citationWords?: string[]
+  /** The section the citation names. Distinct from `initialSectionId`, which the
+   *  reader also uses for search hits and history restores. */
+  citedSectionId?: string | null
 }
 
 export function ReadView({
@@ -428,7 +501,45 @@ export function ReadView({
   extractionReport,
   sourceUrl,
   searchTerm = "",
+  citationWords = EMPTY_WORDS,
+  citedSectionId,
 }: ReadViewProps) {
+  // The mark is transient by design: it answers "which words were the source"
+  // on arrival and then gets out of the way. Kept in state rather than read
+  // straight from the prop so it can expire without the caller re-rendering,
+  // and re-armed whenever a different citation arrives.
+  // The mark stays for as long as the reader is open on this citation. A timer was
+  // wrong: the reader is still reading around the passage well after six seconds,
+  // and a highlight that vanishes mid-read is a worse answer to "which words were
+  // the source" than none. It clears by going away -- leaving the reader unmounts
+  // this, and opening any document without a citation captures an empty snippet.
+  const activeCitation = citationWords
+
+  // Bring the mark to the centre and keep it there. Sections mount lazily, so
+  // the mark may not exist on the first pass and, worse, the ones that mount
+  // while scrolling change the height of everything above it -- scrolling once
+  // lands the passage off screen again. `settleIntoView` re-centres until it
+  // stops moving. `block: "center"` because a citation landing under the header
+  // reads as not having landed at all.
+  useEffect(() => {
+    if (activeCitation.length === 0) return
+    return settleIntoView<Element>({
+      find: () => document.querySelector(`.${CITATION_MARK_TOKEN}`),
+      distance: (el) => {
+        const mark = el.getBoundingClientRect()
+        const port = scrollPortOf(el)
+        return mark.top + mark.height / 2 - (port.top + port.height / 2)
+      },
+      // "instant", not "auto": the scroller carries `scroll-smooth`, and CSS wins
+      // over "auto", so every correction animated across up to forty thousand
+      // pixels at a fixed speed and the passage took eight seconds to arrive.
+      // Clicking a source is a jump, not a scroll.
+      centre: (el) => el.scrollIntoView({ behavior: "instant", block: "center" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+    })
+  }, [activeCitation])
+
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
     [contentType, structureType],
@@ -528,9 +639,15 @@ export function ReadView({
     return map
   }, [sections, docImages])
 
-  // Scroll to initial section
+  // Scroll to the initial section -- but never on top of a citation.
+  //
+  // Both scrolls are armed by the same navigation, this one fires last, and
+  // `block: "start"` puts the section heading at the top of the port: for a
+  // chapter-length section that leaves the cited passage somewhere off screen,
+  // which is exactly the "I have to scroll to find the highlight" report. The
+  // mark is inside this section anyway, so centring it lands here too.
   useEffect(() => {
-    if (!initialSectionId || !sections) return
+    if (!initialSectionId || !sections || activeCitation.length > 0) return
     const timer = setTimeout(() => {
       const el = document.getElementById(`read-sec-${initialSectionId}`)
       if (el) {
@@ -538,7 +655,7 @@ export function ReadView({
       }
     }, 200) // Slightly longer to ensure layout calculation is done
     return () => clearTimeout(timer)
-  }, [initialSectionId, sections])
+  }, [initialSectionId, sections, activeCitation])
 
   // Set initial active section once data loads
   useEffect(() => {
@@ -739,6 +856,8 @@ export function ReadView({
               spec={spec}
               isLast={i === sections.length - 1}
               searchTerm={searchTerm}
+              citationWords={activeCitation}
+              isCitedSection={Boolean(citedSectionId) && section.section_id === citedSectionId}
             />
           ))}
           

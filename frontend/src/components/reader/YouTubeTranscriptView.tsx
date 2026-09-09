@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiGet } from "@/lib/apiClient"
 import type { ChunkItem, DocumentDetail } from "./types"
 import { relativeDate } from "@/components/library/utils"
+import { cn } from "@/lib/utils"
+import { CITATION_MARK_TOKEN, formatTimestamp } from "@/lib/citation"
 
 const fetchChunks = (documentId: string): Promise<ChunkItem[]> =>
   apiGet<ChunkItem[]>(`/documents/${documentId}/chunks`)
@@ -17,14 +19,6 @@ function formatDuration(seconds: number | null): string | null {
   return `${m}:${String(s).padStart(2, "0")}`
 }
 
-function formatStartTime(seconds: number | null): string | null {
-  if (seconds == null) return null
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-  return `${m}:${String(s).padStart(2, "0")}`
-}
 
 /** Highlight all occurrences of `term` in `text` with <mark> wrapper. */
 function highlightText(text: string, term: string): React.ReactNode {
@@ -226,12 +220,25 @@ export function YouTubeTranscriptView({ doc, initialSectionId, initialChunkId }:
                   <div
                     key={chunk.id}
                     id={`chunk-${chunk.id}`}
+                    data-chunk-id={chunk.id}
                     data-section-id={chunk.section_id || ""}
-                    className="text-sm leading-relaxed text-foreground"
+                    className={cn(
+                      "text-sm leading-relaxed text-foreground",
+                      // A transcript renders one element per chunk, and a citation
+                      // names its chunk exactly -- so the cited passage is marked by
+                      // id here rather than by matching its text, which is what the
+                      // Read view has to do because prose has no chunk boundaries.
+                      // Stays until the reader leaves: they are still reading around
+                      // the passage, and a mark that vanishes answers "which words
+                      // were the source" worse than not marking at all.
+                      chunk.id === initialChunkId &&
+                        `${CITATION_MARK_TOKEN} -mx-2 rounded-md bg-amber-200/70 px-2 py-1 ` +
+                          "ring-1 ring-amber-400/60 dark:bg-amber-500/25 dark:ring-amber-400/40",
+                    )}
                   >
                     {chunk.start_time != null && (
                       <span className="mr-2 font-mono text-xs text-muted-foreground">
-                        [{formatStartTime(chunk.start_time)}]
+                        [{formatTimestamp(chunk.start_time)}]
                       </span>
                     )}
                     {chunk.speaker && (

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChunkModel,
+    DocumentModel,
     FlashcardModel,
     SectionModel,
 )
@@ -588,6 +589,15 @@ async def _fetch_existing_embeddings(
         return [], None
 
 
+def _cosine_sims(candidate_vec: "Any", pool_vecs: "Any") -> "Any":
+    """Cosine similarity of one vector against every row of a pool."""
+    import numpy as np  # noqa: PLC0415
+
+    candidate_norm = candidate_vec / (np.linalg.norm(candidate_vec) + 1e-10)
+    pool_norms = pool_vecs / (np.linalg.norm(pool_vecs, axis=1, keepdims=True) + 1e-10)
+    return pool_norms @ candidate_norm
+
+
 def _is_near_duplicate(
     candidate_vec: "Any",
     existing_vecs: "Any",
@@ -596,10 +606,54 @@ def _is_near_duplicate(
     """Return True if candidate_vec is within *threshold* cosine similarity of any existing_vec."""
     import numpy as np  # noqa: PLC0415
 
-    candidate_norm = candidate_vec / (np.linalg.norm(candidate_vec) + 1e-10)
-    existing_norms = existing_vecs / (np.linalg.norm(existing_vecs, axis=1, keepdims=True) + 1e-10)
-    sims = existing_norms @ candidate_norm
-    return bool(np.any(sims >= threshold))
+    return bool(np.any(_cosine_sims(candidate_vec, existing_vecs) >= threshold))
+
+
+# ONE CALL MAY NOT ASK THE SAME THING TWICE. A reader replaced a deck and got
+# three cards, two of which were one fact in two dresses: "Why does rambling
+# while prompting provide more value to an AI than concise input?" beside "What
+# advantage does providing continuous context via ramble offer...?" -- 0.8014 on
+# questions, under the 0.85 bar above, which across 221 real generation calls
+# (549 cards) has caught a within-call repeat exactly ZERO times.
+#
+# Adding the ANSWER as a second axis catches it, and the two bars are bracketed
+# by real cards from this library:
+#   refused  q=0.8014 a=0.7614  the ramble pair above
+#   kept     q=0.7890 a=0.7410  "Why do massive-scale corpora require hard
+#                               choices regarding storage costs?" against "Why
+#                               are lexical search and dense retrieval
+#                               considered complementary?"
+#
+# WITHIN ONE CALL ONLY, and that scope is the measured part. Applied against the
+# whole existing deck the same bars refuse a median of 19.1% of every document's
+# cards, including plainly distinct ones -- "Why is it necessary to define a
+# label for the nodes in an abstract syntax tree?" scores 0.785/0.809 against
+# "How does the `_backward` method enable automatic differentiation". A deck
+# accumulates legitimately similar cards over months of runs; one call reading
+# one passage does not. Within a call the same rule costs 21 of 549 cards
+# (3.8%). Do not widen this to the deck, and do not lower the 0.85 above to
+# reach these cases: 1,396 pairs in this library sit in [0.80, 0.85) on
+# questions alone and most are different cards.
+_SAME_FACT_QUESTION = 0.78
+_SAME_FACT_ANSWER = 0.75
+
+
+def _repeats_this_call(
+    q_vec: "Any",
+    a_vec: "Any",
+    call_q: "Any",
+    call_a: "Any",
+) -> bool:
+    """Return True if this card repeats one already accepted from the same call."""
+    import numpy as np  # noqa: PLC0415
+
+    q_sims = _cosine_sims(q_vec, call_q)
+    if bool(np.any(q_sims >= 0.85)):
+        return True
+    if a_vec is None or call_a is None:
+        return False
+    a_sims = _cosine_sims(a_vec, call_a)
+    return bool(np.any((q_sims >= _SAME_FACT_QUESTION) & (a_sims >= _SAME_FACT_ANSWER)))
 
 
 # What "Regenerate" asks for on a document with no deck yet. Same as the
@@ -624,6 +678,17 @@ class RegenerateResult:
     kept_previous: bool
 
 
+@dataclass
+class MaterialHeadroom:
+    """What a scope still has to be questioned on. See `material_headroom`."""
+
+    total_chunks: int
+    used_chunks: int
+    unused_chunks: int
+    cards: int
+    cards_without_sources: int
+
+
 class FlashcardService(FlashcardSearchService):
     async def generate(
         self,
@@ -644,6 +709,90 @@ class FlashcardService(FlashcardSearchService):
             exclude_chunk_ids=exclude_chunk_ids,
         )
 
+    async def material_headroom(
+        self,
+        session: AsyncSession,
+        document_id: str,
+        section_id: str | None = None,
+    ) -> MaterialHeadroom:
+        """How much of this scope's material no card has been written from yet.
+
+        The question the Practice panel asks before offering to write more. Its
+        "add more" button used to be offered unconditionally and then explain
+        itself with an error, because generation reads one passage and the
+        near-duplicate filter silently removes everything it produced from a
+        passage the deck already covers (`_passage_not_yet_used`). Asking first
+        is the difference between a button that does nothing and a button that
+        is not there.
+
+        Used means "named in some card's `source_chunk_ids`", which is the same
+        set `regenerate` excludes, so this predicts what generation will do
+        rather than approximating it. Cards written before that column existed
+        name nothing, so on an old deck this over-states the headroom -- it can
+        say there is material left when generation still comes back empty. It
+        never under-states it, so it will not hide a button that would have
+        worked, and the caller keeps its empty-result message for that case.
+        """
+        from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
+
+        doc = (
+            await session.execute(
+                select(DocumentModel).where(DocumentModel.id == document_id)
+            )
+        ).scalar_one_or_none()
+        content_type = doc.content_type if doc else "unknown"
+
+        if section_id:
+            chunks = list(
+                (
+                    await session.execute(
+                        select(ChunkModel)
+                        .where(ChunkModel.document_id == document_id)
+                        .where(ChunkModel.section_id == section_id)
+                        .order_by(ChunkModel.chunk_index)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            rows = await FlashcardRepo(session).list_for_section(document_id, section_id)
+            decks = [card for card, _sid in rows]
+        else:
+            # The same reader `generate` uses, so a book's skipped front matter
+            # is not counted as material anyone can be questioned on.
+            chunks = await _fetch_chunks(
+                document_id, "full", None, session, content_type
+            )
+            decks = list(
+                (
+                    await session.execute(
+                        select(FlashcardModel).where(
+                            FlashcardModel.document_id == document_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        used: set[str] = set()
+        unattributed = 0
+        for card in decks:
+            ids = [c for c in (card.source_chunk_ids or []) if isinstance(c, str)]
+            if ids:
+                used.update(ids)
+            else:
+                unattributed += 1
+
+        chunk_ids = {c.id for c in chunks}
+        return MaterialHeadroom(
+            total_chunks=len(chunk_ids),
+            used_chunks=len(chunk_ids & used),
+            unused_chunks=len(chunk_ids - used),
+            cards=len(decks),
+            cards_without_sources=unattributed,
+        )
+
     async def regenerate(
         self,
         session: AsyncSession,
@@ -652,6 +801,8 @@ class FlashcardService(FlashcardSearchService):
         count: int | None = None,
         difficulty: Literal["easy", "medium", "hard"] = "medium",
         model: str | None = None,
+        section_id: str | None = None,
+        section_heading: str | None = None,
     ) -> "RegenerateResult":
         """Replace one source's deck with cards written from material it has not used.
 
@@ -669,22 +820,40 @@ class FlashcardService(FlashcardSearchService):
 
         One source per call. A collection replaces its sources one at a time, so a
         source whose run fails costs that source's cards and no others.
+
+        `section_id` narrows every step of that to one section: the cards read,
+        the material generated from, and the cards deleted. A reader replacing
+        the questions on the chapter in front of them keeps the rest of the
+        book's deck, which is the difference between a scoped control and a
+        destructive one.
         """
         from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
 
         if bool(document_id) == bool(note_id):
             raise ValueError("regenerate takes exactly one of document_id, note_id")
+        if section_id and not document_id:
+            raise ValueError("regenerate: section_id needs a document_id")
 
-        owner = (
-            FlashcardModel.document_id == document_id
-            if document_id
-            else FlashcardModel.note_id == note_id
-        )
-        previous = (
-            await session.execute(
-                select(FlashcardModel.id, FlashcardModel.source_chunk_ids).where(owner)
+        if section_id and document_id:
+            # A card has no section column -- the section is its chunk's. Read the
+            # scope the same way GET /flashcards/{id}?section_id= reads it, so the
+            # deck the panel shows is exactly the deck this replaces.
+            rows = await FlashcardRepo(session).list_for_section(document_id, section_id)
+            previous = [(card.id, card.source_chunk_ids) for card, _sid in rows]
+        else:
+            owner = (
+                FlashcardModel.document_id == document_id
+                if document_id
+                else FlashcardModel.note_id == note_id
             )
-        ).all()
+            previous = [
+                (row[0], row[1])
+                for row in (
+                    await session.execute(
+                        select(FlashcardModel.id, FlashcardModel.source_chunk_ids).where(owner)
+                    )
+                ).all()
+            ]
         previous_ids = [row[0] for row in previous]
         requested = count if count is not None else len(previous_ids)
         requested = max(1, min(requested or _DEFAULT_REGENERATE_COUNT, 50))
@@ -698,8 +867,8 @@ class FlashcardService(FlashcardSearchService):
             }
             cards = await self.generate(
                 document_id=document_id,
-                scope="full",
-                section_heading=None,
+                scope="section" if section_heading else "full",
+                section_heading=section_heading,
                 count=requested,
                 session=session,
                 difficulty=difficulty,

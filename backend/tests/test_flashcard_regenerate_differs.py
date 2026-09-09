@@ -252,7 +252,9 @@ async def test_a_repeat_of_the_note_s_own_card_is_rejected(factory, monkeypatch)
 
     class _Embedder:
         def encode(self, texts):
-            return [vectors[t] for t in texts]
+            # Answers are encoded too (`_repeats_this_call`), and a real embedder
+            # takes any string -- an unmapped one is simply unlike everything.
+            return [vectors.get(t, [0.0, 0.0]) for t in texts]
 
     import app.services.embedder as embedder_module
 

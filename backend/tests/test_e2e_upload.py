@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import dispose_engine, drain_background_tasks
 
 import app.database as db_module
 import app.services.embedder as embedder_module
@@ -275,13 +276,7 @@ async def upload_db(tmp_path, monkeypatch):
         await _test_worker.stop()
 
     # Cancel ingestion background tasks before disposing the engine.
-    _pending = list(ingestion_module._background_tasks)
-    for _t in _pending:
-        _t.cancel()
-    if _pending:
-        import asyncio as _asyncio
-        await _asyncio.gather(*_pending, return_exceptions=True)
-    ingestion_module._background_tasks.clear()
+    await drain_background_tasks(ingestion_module._background_tasks)
 
     # Restore singletons
     db_module._engine = orig_engine
@@ -295,7 +290,7 @@ async def upload_db(tmp_path, monkeypatch):
     summarizer_module._summarization_service = orig_summarizer
     enrichment_worker_module._worker = orig_enrichment_worker
     get_settings.cache_clear()
-    await engine.dispose()
+    await dispose_engine(engine)
 
 
 # integration_http tests — included in make ci

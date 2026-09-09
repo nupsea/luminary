@@ -24,6 +24,16 @@ class StartSessionRequest(BaseModel):
     planned_card_ids: list[str] | None = None
 
 
+class AppendSessionCardsRequest(BaseModel):
+    card_ids: list[str]
+
+
+class AppendSessionCardsResponse(BaseModel):
+    session_id: str
+    added: int
+    planned_count: int
+
+
 class SessionResponse(BaseModel):
     id: str
     document_id: str | None

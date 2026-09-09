@@ -80,6 +80,11 @@ if [ "$STATUS" -eq 200 ]; then
     BODY=$(cat "$TMPFILE")
     check "GET /documents/$DOC_ID/chunks returns 200" "$STATUS" "200" "$BODY" ""
     check "GET /documents/$DOC_ID/chunks body is array" "$STATUS" "200" "$BODY" "isinstance(d, list)"
+    # A chunk carries the moment it came from. Null here -- this is a text file --
+    # but the key is the contract a citation into a recording reads, and it was
+    # served hardcoded null for every document until chunks stored their window.
+    check "GET /documents/$DOC_ID/chunks items carry start_time" "$STATUS" "200" "$BODY" \
+      "not d or 'start_time' in d[0]"
 
     # Test 5: GET /documents/{id} returns channel_name field (null for non-YouTube doc)
     STATUS=$(curl -s -o "$TMPFILE" -w "%{http_code}" "$BASE/documents/$DOC_ID")

@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { citationPageText, deduplicateCitations } from "@/lib/citationUtils"
+import { citationLocusText, deduplicateCitations } from "@/lib/citationUtils"
 import type { SourceCitation } from "@/lib/citationUtils"
 
 function makeCitation(overrides: Partial<SourceCitation> & { chunk_id: string }): SourceCitation {
@@ -63,7 +63,7 @@ describe("SourceCitationChips", () => {
   })
 })
 
-describe("citationPageText", () => {
+describe("citationLocusText", () => {
   const base: SourceCitation = {
     chunk_id: "c1",
     document_id: "d1",
@@ -78,19 +78,23 @@ describe("citationPageText", () => {
     // Measured: sheet 41 of one 613-page book is printed "19", because the
     // front matter is numbered separately. The chip must agree with the page
     // in the reader's hands, not with the file's sheet count.
-    expect(citationPageText({ ...base, pdf_page_label: "19" })).toBe(" p.19")
+    expect(citationLocusText({ ...base, pdf_page_label: "19" })).toBe(" p.19")
   })
 
   it("falls back to the sheet number when the PDF defines no label", () => {
-    expect(citationPageText({ ...base, pdf_page_label: null })).toBe(" p.41")
-    expect(citationPageText(base)).toBe(" p.41")
+    expect(citationLocusText({ ...base, pdf_page_label: null })).toBe(" p.41")
+    expect(citationLocusText(base)).toBe(" p.41")
   })
 
   it("shows no page at all for a document without one", () => {
-    expect(citationPageText({ ...base, pdf_page_number: null })).toBe("")
+    expect(citationLocusText({ ...base, pdf_page_number: null })).toBe("")
   })
 
   it("keeps a roman-numeral label rather than dropping it as non-numeric", () => {
-    expect(citationPageText({ ...base, pdf_page_number: 6, pdf_page_label: "iv" })).toBe(" p.iv")
+    expect(citationLocusText({ ...base, pdf_page_number: 6, pdf_page_label: "iv" })).toBe(" p.iv")
+  })
+
+  it("points a recording at its moment instead of a page", () => {
+    expect(citationLocusText({ ...base, pdf_page_number: null, start_time: 862.5 })).toBe(" 14:22")
   })
 })

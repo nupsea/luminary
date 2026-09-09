@@ -116,8 +116,14 @@ def write_entity_graph(
         for ent in canonical_entities:
             chunk_entities.setdefault(ent["chunk_id"], []).append(ent["id"])
 
+        # One id per entity, not per mention. `canonical_entities` carries a row
+        # for every mention, so a chunk naming Ulysses twice put his id in this
+        # list twice and `combinations` paired him with himself -- the top-weighted
+        # "co-occurrence" in the_odyssey, and the pair the card generator is handed
+        # first. Sorting also fixes the direction, so a pair is one edge and not
+        # two disagreeing ones ((minerva, ulysses) 19.0 beside (ulysses, minerva) 17.0).
         for chunk_ent_ids in chunk_entities.values():
-            for eid_a, eid_b in combinations(chunk_ent_ids, 2):
+            for eid_a, eid_b in combinations(sorted(set(chunk_ent_ids)), 2):
                 graph.add_co_occurrence(eid_a, eid_b, doc_id)
     except Exception:
         if canonical_entities:

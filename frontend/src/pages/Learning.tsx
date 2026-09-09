@@ -29,6 +29,7 @@ import type { DocAction } from "@/lib/docActionUtils"
 import { isDocumentReady } from "@/lib/documentReadiness"
 import { apiGet } from "@/lib/apiClient"
 import { useAppStore } from "@/store"
+import { PAGE_THREAD } from "@/store/chatThreads"
 
 import {
   bulkDelete,
@@ -43,6 +44,9 @@ import { LibraryTable } from "./Learning/LibraryTable"
 import { SearchPanel } from "./Learning/SearchPanel"
 import { TodayHero } from "./Learning/TodayHero"
 import { WhereToStartPanel } from "./Learning/WhereToStartPanel"
+import { libraryRefetchInterval } from "@/lib/libraryPolling"
+import { shouldCaptureDeepLink } from "@/lib/deepLinkCapture"
+import { stateValueToWords } from "@/lib/citation"
 
 const PAGE_SIZE = 20
 
@@ -78,8 +82,7 @@ export default function Learning() {
   const activeDocumentId = useAppStore((s) => s.activeDocumentId)
   const setActiveDocument = useAppStore((s) => s.setActiveDocument)
   const selectDocument = useSelectDocument()
-  const setChatSelectedDocId = useAppStore((s) => s.setChatSelectedDocId)
-  const setChatScope = useAppStore((s) => s.setChatScope)
+  const setChatThread = useAppStore((s) => s.setChatThread)
   const setNotesDocumentId = useAppStore((s) => s.setNotesDocumentId)
   const libraryView = useAppStore((s) => s.libraryView)
   const setLibraryView = useAppStore((s) => s.setLibraryView)
@@ -106,6 +109,14 @@ export default function Learning() {
   const [savedChunkId, setSavedChunkId] = useState<string | undefined>(
     searchParams.get("chunk_id") ?? undefined,
   )
+  // A note to open in the reader's own panel -- how the full note page hands a
+  // note back to the editor it was expanded from.
+  const [savedNoteId, setSavedNoteId] = useState<string | undefined>(
+    searchParams.get("note") ?? undefined,
+  )
+  // Not a URL param: a display hint for one arrival, not something a shared link
+  // should reproduce.
+  const [savedCitationWords, setSavedCitationWords] = useState<string[]>([])
   const [savedPage, setSavedPage] = useState<number | undefined>(() => {
     const raw = searchParams.get("page")
     if (!raw) return undefined
@@ -185,6 +196,9 @@ export default function Learning() {
       }),
     staleTime: 10_000,
     gcTime: 60_000,
+    // Poll while anything on this page is still being worked on; see
+    // lib/libraryPolling for why this is decided from the rows themselves.
+    refetchInterval: (query) => libraryRefetchInterval(query.state.data?.items),
   })
 
   const { data: recentItems } = useQuery({
@@ -245,8 +259,9 @@ export default function Learning() {
       return
     }
     if (action === "chat") {
-      setChatSelectedDocId(docId)
-      setChatScope("single")
+      // The document action opens the Ask page on this document, so it is the
+      // page's own conversation that gets re-scoped -- never a docked one.
+      setChatThread(PAGE_THREAD, { selectedDocId: docId, scope: "single" })
     } else if (action === "notes") {
       setNotesDocumentId(docId)
     } else {
@@ -316,25 +331,39 @@ export default function Learning() {
   // `doc` stays in the URL while the document is open so a reload returns to
   // it. The other params are one-shot: snapshotted into state, then dropped.
   useEffect(() => {
-    if (!docParam || docParam === activeDocumentId) return
+    // Not "did the document change" but "were we handed somewhere to go": see
+    // lib/deepLinkCapture. The old guard was false at exactly the moment it
+    // mattered, because navigateToCitation sets the active document before it
+    // navigates.
+    if (!shouldCaptureDeepLink(docParam, activeDocumentId, searchParams)) return
     const rawPage = searchParams.get("page")
     const pageNum = rawPage ? parseInt(rawPage, 10) : undefined
     setSavedSectionId(searchParams.get("section_id") ?? undefined)
     setSavedChunkId(searchParams.get("chunk_id") ?? undefined)
+    setSavedNoteId(searchParams.get("note") ?? undefined)
     setSavedPage(pageNum && !isNaN(pageNum) ? pageNum : undefined)
     setSavedSearch(searchParams.get("search") ?? undefined)
+    // Carried in route state rather than the URL: it is a display hint for one
+    // arrival, not something a shared link should reproduce.
+    setSavedCitationWords(
+      stateValueToWords((routeLocation.state as { citationWords?: string } | null)?.citationWords),
+    )
 
     setActiveDocument(docParam)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       next.delete("section_id")
       next.delete("chunk_id")
+      next.delete("note")
       next.delete("page")
       next.delete("search")
       return next
     }, { replace: true, state: routeLocation.state })
+  // searchParams is a dep so a citation clicked while already reading that
+  // document still re-targets. It terminates because the effect clears the params
+  // it consumed, and the next run finds nothing to act on.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docParam])
+  }, [docParam, searchParams])
 
   // Mirror the open document into the URL, however it was opened. `replace`:
   // the in-reader Back control, not history, returns to the list.
@@ -410,6 +439,8 @@ export default function Learning() {
             onBack={returnToLibrary}
             initialSectionId={savedSectionId}
             initialChunkId={savedChunkId}
+            initialNoteId={savedNoteId}
+            initialCitationWords={savedCitationWords}
             initialPage={savedPage}
             initialSearch={savedSearch}
           />

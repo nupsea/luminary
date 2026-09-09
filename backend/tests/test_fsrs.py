@@ -370,9 +370,21 @@ async def test_end_session_404_for_missing_session(test_db):
 
 
 async def test_start_session_persists_planned_card_ids(test_db):
-    """Planned queue is persisted so resume can reconstruct the original set."""
-    _, _factory, _ = test_db
-    ids = [str(uuid.uuid4()) for _ in range(3)]
+    """Planned queue is persisted so resume can reconstruct the original set --
+    and counts only the ids with a card behind them.
+
+    `planned_count` used to be the length of the raw list, which let a plan
+    promise a total the run could never reach: `cards` drops an id that resolves
+    to nothing, so the header read "7 of 8 reviewed" over a deck of three after
+    a replacement deleted five (I-47). POST /sessions/start takes the ids it is
+    given, so the read side is where this is settled.
+    """
+    _, factory, _ = test_db
+    live = [_make_card(), _make_card()]
+    ids = [c.id for c in live] + [str(uuid.uuid4())]
+    async with factory() as session:
+        session.add_all(live)
+        await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
@@ -384,14 +396,11 @@ async def test_start_session_persists_planned_card_ids(test_db):
         remaining = await client.get(f"/study/sessions/{sid}/remaining-cards")
 
     assert resp.status_code == 201
-    # No flashcards exist with those IDs, so remaining cards resolves to [].
-    # The endpoint still reports planned_count so the UI can restore the
-    # progress indicator on resume.
     assert remaining.status_code == 200
     body = remaining.json()
-    assert body["planned_count"] == 3
+    assert body["planned_count"] == 2, "the id with no card behind it is not a planned card"
     assert body["answered_count"] == 0
-    assert body["cards"] == []
+    assert [c["id"] for c in body["cards"]] == [c.id for c in live]
 
 
 async def test_get_open_session_returns_most_recent_match(test_db):

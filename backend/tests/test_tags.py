@@ -7,6 +7,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import drain_background_tasks
 
 import app.database as db_module
 import app.services.embedder as embedder_module
@@ -55,12 +56,7 @@ async def test_db(tmp_path, monkeypatch):
 
     # Clean up note creation background tasks to avoid engine.dispose hang
     from app.routers.notes import _background_tasks
-    pending = list(_background_tasks)
-    for t in pending:
-        t.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    _background_tasks.clear()
+    await drain_background_tasks(_background_tasks)
 
     db_module._engine = orig_engine
     db_module._session_factory = orig_factory

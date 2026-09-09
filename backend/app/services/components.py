@@ -138,7 +138,12 @@ def catalogue() -> tuple[Component, ...]:
             # Apache-2.0 Luminary cannot ship those, so this is fetched from PyPI
             # on request instead of travelling inside the installer.
             licence="GPL-2.0-or-later components (not distributed with Luminary)",
-            enables=("Audio ingestion", "Video ingestion", "YouTube transcription"),
+            enables=(
+                "Audio ingestion",
+                "Video ingestion",
+                "YouTube transcription",
+                "Voice dictation",
+            ),
         ),
         Component(
             id="ffmpeg",
@@ -378,6 +383,11 @@ async def capabilities() -> dict:
     )
     return {
         "audio_ingest": cap(transcribe, ("transcription",)),
+        # Dictating into a note needs the transcriber and nothing else -- no
+        # ffmpeg, because the browser hands us Opus in a WebM container and PyAV
+        # decodes it. Named separately from `audio_ingest` so the mic button
+        # does not have to know which component happens to back it.
+        "dictation": cap(transcribe, ("transcription",)),
         "video_ingest": cap(transcribe and ffmpeg, missing_media),
         "youtube_ingest": cap(transcribe and ffmpeg and ytdlp, missing_media),
         "web_ingest": cap(article, ()),

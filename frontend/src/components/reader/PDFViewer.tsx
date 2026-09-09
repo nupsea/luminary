@@ -23,6 +23,14 @@ import { createLinkService } from "./pdfLinkService"
 import { PdfSearchBar } from "./PdfSearchBar"
 import { ZOOM_PRESETS, ZOOM_STOPS, type PageMatch, activeMatchIndexForPage, buildGlobalMatches, findMatchIndices, formatMatchCounts, parsePageEntry, printedPageLabel, sheetForPrintedLabel, stepZoom } from "./pdfSearchUtils"
 import { clearOverlays, computeHighlightRects, renderOverlayDivs } from "./pdfHighlightOverlay"
+import {
+  CITATION_OVERLAY_ATTR,
+  CITATION_OVERLAY_COLOR,
+  findRunOffsets,
+  locateCitationPage,
+  longestPresentRun,
+} from "@/lib/citation"
+import { bodyTextHeight, readableScale } from "@/lib/pdf/readableScale"
 
 // Set worker once at module load
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL
@@ -203,6 +211,45 @@ function applySearchHighlights(
   return matchIndices.length
 }
 
+/**
+ * Draw the cited passage on the page, and say whether it was found.
+ *
+ * The PDF renders the source itself, so a citation belongs on the page rather
+ * than on the extracted text beside it. The words are located in the text layer's
+ * concatenated span text, which joins spans with single spaces -- the same
+ * whitespace tolerance the prose view needs, for the same reason: the stored
+ * chunk collapsed the source's own spacing.
+ */
+function applyCitationHighlight(
+  textLayerDiv: HTMLDivElement,
+  overlayContainer: HTMLDivElement,
+  words: string[],
+): boolean {
+  clearOverlays(overlayContainer, CITATION_OVERLAY_ATTR)
+  if (words.length === 0) return false
+
+  const textData = buildTextParts(textLayerDiv)
+  if (!textData) return false
+  const { spans, parts, fullText } = textData
+
+  // Narrow first, then locate -- the same two steps the prose view takes, for the
+  // same reason. A citation's words include material this page does not hold
+  // contiguously (a section heading the chunk was stored with, a tail that runs
+  // onto the next page), so demanding the whole sequence finds nothing even on the
+  // right page.
+  const run = longestPresentRun(words, fullText)
+  if (run.length === 0) return false
+
+  const at = findRunOffsets(fullText, run)
+  if (!at) return false
+
+  const rects = computeHighlightRects(
+    spans, parts, at.start, at.end, overlayContainer.getBoundingClientRect(),
+  )
+  renderOverlayDivs(overlayContainer, rects, CITATION_OVERLAY_COLOR, CITATION_OVERLAY_ATTR)
+  return rects.length > 0
+}
+
 const PDF_HIGHLIGHT_COLORS: Record<string, string> = {
   yellow: "rgba(250, 204, 21, 0.4)",  // yellow-400
   green: "rgba(74, 222, 128, 0.4)",   // green-400
@@ -224,6 +271,8 @@ interface PDFViewerProps {
    */
   pageLabels?: Record<string, string>
   initialPage?: number  // navigate to this page after PDF loads (from citation deep-link)
+  /** The cited passage as words, drawn on whichever page contains it. */
+  citationWords?: string[]
   annotations?: AnnotationItem[]
   highlightsVisible?: boolean
   onPageChange?: (page: number) => void
@@ -235,9 +284,17 @@ export interface PDFViewerHandle {
 
 type LoadStatus = "loading" | "error" | "ready"
 
+const EMPTY_WORDS: string[] = []
+
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, pageLabels, initialPage, annotations = [], highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, citationWords = EMPTY_WORDS, annotations = [], highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
+    // Read inside the page-render closure, which is not re-created per prop change.
+    const citationWordsRef = useRef<string[]>(citationWords)
+    citationWordsRef.current = citationWords
+    // Scroll to the citation once, on the first page that actually shows it.
+    const citationScrolledRef = useRef(false)
+
     const [currentPage, setCurrentPage] = useState(1)
     const [totalPages, setTotalPages] = useState(0)
     const [zoom, setZoom] = useState(1.0)
@@ -268,6 +325,15 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     const annotationLayerRef = useRef<HTMLDivElement>(null)
     const nextCanvasRef = useRef<HTMLCanvasElement>(null)
     const scrollAreaRef = useRef<HTMLDivElement>(null)
+    // Fit-width is a mode, not a one-off calculation.
+    //
+    // It used to be computed once, from `clientWidth` at load. The pane is not
+    // its final size then -- the insights panel and the contents list are still
+    // settling -- so the page fitted a narrower box than it ended up in and
+    // stayed there: a PDF that opened noticeably zoomed out, with text too small
+    // to read, and no way back except the zoom menu. Staying in the mode means
+    // the fit follows the pane until the reader picks a zoom themselves.
+    const [zoomMode, setZoomMode] = useState<"readable" | "manual">("readable")
     // Bumped after each text layer render to trigger highlight application
     const [textLayerVersion, setTextLayerVersion] = useState(0)
     // PDF built-in outline (bookmarks) -- preferred over backend sections when available
@@ -525,6 +591,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                 if (highlightsVisibleRef.current && annotationsRef.current.length > 0 && overlayDiv) {
                   applyPdfHighlights(textLayerDiv, overlayDiv, annotationsRef.current, pageNum, sectionsRef.current)
                 }
+                // The cited passage, drawn on the page that holds it. Tried on
+                // every rendered page rather than only the one the citation names:
+                // a chunk can straddle a page break, and the sheet a citation
+                // carries is the one its first line fell on.
+                if (overlayDiv && citationWordsRef.current.length > 0) {
+                  const drawn = applyCitationHighlight(textLayerDiv, overlayDiv, citationWordsRef.current)
+                  if (drawn && !citationScrolledRef.current) {
+                    citationScrolledRef.current = true
+                    overlayDiv
+                      .querySelector(`[${CITATION_OVERLAY_ATTR}]`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                  }
+                }
                 setTextLayerVersion((v) => v + 1)
               }
             } catch (err) {
@@ -661,6 +740,34 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       setPageInput(String(clamped))
     }
 
+    // Go to the page holding the cited passage.
+    //
+    // The citation's own page is tried first and is often null -- ingestion
+    // cannot always attribute a chunk to a sheet -- so the passage itself is the
+    // address and the page is derived from it. Without this the viewer opens at
+    // page 1 and the overlay, which only draws on rendered pages, never sees the
+    // passage at all.
+    useEffect(() => {
+      if (!pdfDoc || citationWords.length === 0) return
+      let cancelled = false
+      void locateCitationPage(citationWords, {
+        pageCount: pdfDoc.numPages,
+        preferredPage: initialPage ?? null,
+        isCancelled: () => cancelled,
+        getPageText: async (n) => {
+          const page = await pdfDoc.getPage(n)
+          const content = await page.getTextContent()
+          return content.items.map((it) => ("str" in it ? it.str : "")).join(" ")
+        },
+      }).then((page) => {
+        if (!cancelled && page !== null) goToPage(page)
+      })
+      return () => { cancelled = true }
+    // goToPage is a stable declaration recreated each render; adding it would
+    // re-run the scan on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pdfDoc, citationWords, initialPage])
+
     /** The sheet a typed entry names, or null if it names nothing.
      *
      * A `p`-prefixed entry that matches no printed label returns null rather
@@ -789,22 +896,37 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       return () => { cancelled = true }
     }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
 
-    // Fit the page to the window, the two zooms a reader actually reaches for.
-    // Measured from the page itself rather than a remembered number, so they
-    // stay correct after the panel is resized.
+    // Size the page to the pane. Measured from the page itself rather than a
+    // remembered number, so every mode stays correct after the panel is resized.
+    //
+    // "readable" is the default and the only one that looks at the type rather
+    // than the paper: fit-width is a ceiling there, not the target. See
+    // `lib/pdf/readableScale`.
     const fitTo = useCallback(
-      async (mode: "width" | "page") => {
+      async (mode: "readable" | "width" | "page") => {
         if (!pdfDoc || !scrollAreaRef.current) return
         try {
           const page = await pdfDoc.getPage(currentPage)
           const viewport = page.getViewport({ scale: 1.0 })
-          page.cleanup()
           const availableWidth = scrollAreaRef.current.clientWidth - 32 // 2 x p-4
           const availableHeight = scrollAreaRef.current.clientHeight - 32
-          if (viewport.width <= 0 || availableWidth <= 0) return
+          if (viewport.width <= 0 || availableWidth <= 0) {
+            page.cleanup()
+            return
+          }
           const byWidth = availableWidth / viewport.width
           const byHeight = viewport.height > 0 ? availableHeight / viewport.height : byWidth
-          setZoom(mode === "width" ? byWidth : Math.min(byWidth, byHeight))
+          if (mode !== "readable") {
+            page.cleanup()
+            setZoom(mode === "width" ? byWidth : Math.min(byWidth, byHeight))
+            return
+          }
+          const text = await page.getTextContent()
+          page.cleanup()
+          const extents = text.items.flatMap((item) =>
+            "str" in item ? [{ str: item.str, height: item.height }] : [],
+          )
+          setZoom(readableScale({ bodyHeight: bodyTextHeight(extents), fitWidthScale: byWidth }))
         } catch {
           // Non-fatal: the zoom simply stays where it is.
         }
@@ -812,6 +934,16 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       [pdfDoc, currentPage],
     )
     const fitToWidth = useCallback(() => void fitTo("width"), [fitTo])
+
+    // Refit on resize: opening the insights panel, dragging its divider, or the
+    // window changing all alter the room the page has to be legible in.
+    useEffect(() => {
+      const el = scrollAreaRef.current
+      if (!el || zoomMode !== "readable" || !pdfDoc) return
+      const observer = new ResizeObserver(() => void fitTo("readable"))
+      observer.observe(el)
+      return () => observer.disconnect()
+    }, [zoomMode, pdfDoc, fitTo])
     const fitToPage = useCallback(() => void fitTo("page"), [fitTo])
 
     // Which match on this page is the active one. Derived here so the effect
@@ -1164,7 +1296,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
             <div className="ml-auto flex items-center gap-0.5" ref={zoomPopoverRef}>
               <button
                 className="p-1 rounded hover:bg-accent disabled:opacity-40"
-                onClick={() => setZoom(stepZoom(zoom, -1))}
+                onClick={() => { setZoomMode("manual"); setZoom(stepZoom(zoom, -1)) }}
                 disabled={zoom <= ZOOM_STOPS[0]}
                 title="Zoom out (Ctrl -)"
                 aria-label="Zoom out"
@@ -1185,13 +1317,19 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                   <div className="absolute right-0 bottom-full mb-2 z-30 min-w-[9rem] overflow-hidden rounded-md border bg-background py-1 shadow-md">
                     <button
                       className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
-                      onClick={() => { fitToWidth(); setZoomOpen(false) }}
+                      onClick={() => { setZoomMode("readable"); void fitTo("readable"); setZoomOpen(false) }}
+                    >
+                      Readable
+                    </button>
+                    <button
+                      className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
+                      onClick={() => { setZoomMode("manual"); fitToWidth(); setZoomOpen(false) }}
                     >
                       Fit width
                     </button>
                     <button
                       className="block w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
-                      onClick={() => { fitToPage(); setZoomOpen(false) }}
+                      onClick={() => { setZoomMode("manual"); fitToPage(); setZoomOpen(false) }}
                     >
                       Fit page
                     </button>
@@ -1200,7 +1338,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
                       <button
                         key={preset}
                         className="block w-full px-3 py-1.5 text-left text-xs tabular-nums hover:bg-accent"
-                        onClick={() => { setZoom(preset); setZoomOpen(false) }}
+                        onClick={() => { setZoomMode("manual"); setZoom(preset); setZoomOpen(false) }}
                       >
                         {Math.round(preset * 100)}%
                       </button>
@@ -1210,7 +1348,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
               </div>
               <button
                 className="p-1 rounded hover:bg-accent disabled:opacity-40"
-                onClick={() => setZoom(stepZoom(zoom, 1))}
+                onClick={() => { setZoomMode("manual"); setZoom(stepZoom(zoom, 1)) }}
                 disabled={zoom >= ZOOM_STOPS[ZOOM_STOPS.length - 1]}
                 title="Zoom in (Ctrl +)"
                 aria-label="Zoom in"

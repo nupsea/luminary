@@ -1,5 +1,8 @@
-// Session-summary results list: one row per pending/error/complete teach-back,
-// with an aggregate score header when all evaluations have landed.
+// Session-summary results list: one row per CARD, carrying the attempt that
+// stands, with an aggregate score header when all evaluations have landed.
+//
+// One row per submission put a re-answered card in the list twice, at both its
+// old score and its new one. See latestAttempts.ts.
 
 import { Loader2 } from "lucide-react"
 import { useState } from "react"
@@ -9,6 +12,7 @@ import { type PendingTeachback, type TeachbackResultItem } from "@/lib/studyApi"
 import { useAppStore } from "@/store"
 
 import { ExpandableResultRow } from "./ExpandableResultRow"
+import { standingAttempts } from "./latestAttempts"
 import type { TeachbackStats } from "./useTeachbackPolling"
 
 interface TeachbackResultsPanelProps {
@@ -28,7 +32,7 @@ export function TeachbackResultsPanel({
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
       {/* Summary bar */}
-      {stats.allDone && stats.completedCount > 0 && (
+      {stats.allDone && stats.completedCount > 0 && stats.avgScore !== null && (
         <div className="rounded-lg border border-border bg-card/50 p-4 text-center">
           <span className="text-sm text-muted-foreground">Average score: </span>
           <span
@@ -58,7 +62,7 @@ export function TeachbackResultsPanel({
         )}
       </div>
 
-      {pending.map((tb) => {
+      {standingAttempts(pending).map(({ attempt: tb, attemptCount }) => {
         if (tb.id.startsWith("error-")) {
           return (
             <div key={tb.id} className="rounded-lg border border-border bg-muted/30 p-4">
@@ -111,13 +115,21 @@ export function TeachbackResultsPanel({
 
         const isExpanded = expandedId === tb.id
         return (
-          <ExpandableResultRow
-            key={tb.id}
-            result={result}
-            fallbackQuestion={tb.question}
-            isExpanded={isExpanded}
-            onToggle={() => setExpandedId(isExpanded ? null : tb.id)}
-          />
+          <div key={tb.id} className="flex flex-col gap-1">
+            <ExpandableResultRow
+              result={result}
+              fallbackQuestion={tb.question}
+              isExpanded={isExpanded}
+              onToggle={() => setExpandedId(isExpanded ? null : tb.id)}
+            />
+            {attemptCount > 1 && (
+              // The replaced score is not shown, but the fact of it is: a 45
+              // that arrived after a 10 is a different thing from a 45 first time.
+              <span className="text-xs text-muted-foreground">
+                Attempt {attemptCount}
+              </span>
+            )}
+          </div>
         )
       })}
     </div>

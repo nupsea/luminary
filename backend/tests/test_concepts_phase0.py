@@ -7,6 +7,7 @@ and mastery recompute (I-19).
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from task_drain import dispose_engine
 
 import app.database as db_module
 import app.services.graph as graph_module
@@ -37,6 +38,7 @@ async def test_db(tmp_path, monkeypatch):
     yield engine, factory
     db_module._engine, db_module._session_factory = orig_engine, orig_factory
     graph_module._graph_service = orig_graph
+    await dispose_engine(engine)
 
 
 # LanceDB predicates are interpolated, so ids are shape-checked before they reach

@@ -51,3 +51,20 @@ export function sourceNote(card: CardChecks): SourceNote {
 export function isDoubted(card: CardChecks): boolean {
   return card.grounding === "unsupported" || card.factuality === "unsupported"
 }
+
+/**
+ * What the screen may say about the ANSWER, as opposed to the quote.
+ *
+ * `sourceNote` deliberately says nothing about the answer when only the quote
+ * was checked, which is right for a note printed under a quote and wrong as the
+ * learner's whole picture: a card reading "Found in this document" beside an
+ * answer nobody verified is read as an endorsement of the answer. Returns null
+ * where `sourceNote` already covers the answer, so the two never say it twice.
+ */
+export function answerCheckNote(card: CardChecks): SourceNote | null {
+  if (card.factuality === "supported" || card.factuality === "unsupported") return null
+  if (card.factuality === "unverifiable") {
+    return { text: "The answer could not be checked against the passage", className: MUTED }
+  }
+  return { text: "The answer has not been checked against the passage", className: MUTED }
+}
