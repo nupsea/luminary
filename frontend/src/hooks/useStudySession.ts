@@ -51,6 +51,9 @@ export interface UseStudySessionResult {
   setQueue: React.Dispatch<React.SetStateAction<Flashcard[]>>
   setCurrentIndex: React.Dispatch<React.SetStateAction<number>>
   setReviewed: React.Dispatch<React.SetStateAction<number>>
+  /** Grows when cards are added to a run in progress, so the progress bar
+   *  denominator stays the run's real size rather than the size it started at. */
+  setTotal: React.Dispatch<React.SetStateAction<number>>
   setSessionState: React.Dispatch<React.SetStateAction<SessionState>>
   completeSession: () => Promise<void>
   exit: (onExit: () => void) => Promise<void>
@@ -177,6 +180,7 @@ export function useStudySession(
     setQueue,
     setCurrentIndex,
     setReviewed,
+    setTotal,
     setSessionState,
     completeSession,
     exit,

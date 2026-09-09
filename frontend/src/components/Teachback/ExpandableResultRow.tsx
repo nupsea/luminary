@@ -1,9 +1,12 @@
-// One expandable row inside the session summary. Click toggles the
-// detail panel; the inner "Answer/Evaluation" pill flips the panel
-// between the reference answer and the rubric feedback.
+// One expandable row inside the session summary. Click toggles the detail
+// panel, which shows the reference answer beside the verdict.
+//
+// The two used to be a flip: an "Answer/Evaluation" pill replaced one with the
+// other. A learner deciding whether a score is fair is comparing what they said
+// against what the card says, and that comparison cannot be made one at a time
+// from memory. The grader is given this answer for reference; so is the reader.
 
-import { ChevronDown, ChevronUp, RotateCw } from "lucide-react"
-import { useState } from "react"
+import { ChevronDown, ChevronUp } from "lucide-react"
 
 import { type TeachbackResultItem, scoreBadgeClass } from "@/lib/studyApi"
 
@@ -22,11 +25,11 @@ export function ExpandableResultRow({
   isExpanded,
   onToggle,
 }: ExpandableResultRowProps) {
-  const [showAnswer, setShowAnswer] = useState(false)
-  const hasExpected = Boolean(result.expected_answer && result.expected_answer.trim())
+  const expected = result.expected_answer?.trim()
 
   return (
     <div
+      data-testid="result-row"
       className="rounded-lg border border-border bg-card p-4 cursor-pointer transition-colors hover:bg-accent/30"
       onClick={onToggle}
     >
@@ -49,42 +52,28 @@ export function ExpandableResultRow({
           className="mt-3 border-t border-border pt-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="mb-3 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowAnswer((v) => !v)}
-              className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-              title={showAnswer ? "Show evaluation" : "Show expected answer"}
-            >
-              <RotateCw size={11} />
-              {showAnswer ? "Evaluation" : "Answer"}
-            </button>
+          {result.user_explanation && (
+            <div className="mb-3">
+              <p className="text-xs font-medium text-muted-foreground">Your explanation:</p>
+              <blockquote className="mt-1 border-l-2 border-border pl-3 text-xs text-foreground/80 italic">
+                {result.user_explanation}
+              </blockquote>
+            </div>
+          )}
+
+          <div
+            data-testid="expected-answer"
+            className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20"
+          >
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+              What the card says
+            </div>
+            <p className="whitespace-pre-wrap text-xs text-foreground">
+              {expected || "No reference answer available for this card."}
+            </p>
           </div>
 
-          {showAnswer ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                Expected answer
-              </div>
-              <p className="whitespace-pre-wrap text-xs text-foreground">
-                {hasExpected
-                  ? result.expected_answer
-                  : "No reference answer available for this card."}
-              </p>
-            </div>
-          ) : (
-            <>
-              {result.user_explanation && (
-                <div className="mb-3">
-                  <p className="text-xs font-medium text-muted-foreground">Your explanation:</p>
-                  <blockquote className="mt-1 border-l-2 border-border pl-3 text-xs text-foreground/80 italic">
-                    {result.user_explanation}
-                  </blockquote>
-                </div>
-              )}
-              <InlineTeachbackFeedback result={result} />
-            </>
-          )}
+          <InlineTeachbackFeedback result={result} />
         </div>
       )}
     </div>

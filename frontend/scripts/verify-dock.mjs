@@ -34,8 +34,77 @@ function check(name, ok, detail = "") {
   if (!ok) failures.push(name)
 }
 
+/** "N of M reviewed" has to be arithmetic, wherever a run is on screen.
+ *
+ * This exists because the same defect shipped twice from two different counters.
+ * The first read "4 of 3 reviewed" because the in-run tally counted submissions;
+ * that was fixed and checked -- but only on the SUMMARY, and only on a fresh
+ * run. The resume path keeps a tally of its own, seeded from one teach-back row
+ * per attempt, and read "30 of 15 reviewed" on a run holding 30 attempts across
+ * 5 cards. So the assertion belongs to the rendered number, at every point it
+ * can be reached, rather than to any one of the counters behind it.
+ *
+ * It never returns quietly. The first version did -- it looked for the runner's
+ * ratio, found a summary instead, and printed nothing at all on the resumed run,
+ * which is the path that had the bug. A check that finds nothing to assert is a
+ * check that cannot fail, so both faces are handled and anything else FAILS.
+ *
+ * The third instance was not arithmetic at all: "7 of 8 reviewed" on a document
+ * holding three cards, because replacing the deck deleted five the run had
+ * planned and their review events stayed behind. Internally consistent, and
+ * wrong -- which is why `deckCap` comes from the deck endpoint rather than from
+ * the session the header is drawn from. */
+async function checkProgressHeader(page, where, plannedFallback = null, deckCap = null) {
+  const seen = await page.evaluate(() => {
+    const run = document.querySelector('[data-testid="recall-runner"]')
+    const out = document.querySelector('[data-testid="recall-readout"]')
+    const ratio = /(\d+)\s+of\s+(\d+)\s+reviewed/i.exec(run?.innerText ?? "")
+    const stat = /REVIEWED\s*\n?\s*(\d+)/i.exec(out?.innerText ?? "")
+    return {
+      face: run ? "runner" : out ? "readout" : "none",
+      ratio: ratio ? [Number(ratio[1]), Number(ratio[2])] : null,
+      reviewed: stat ? Number(stat[1]) : null,
+    }
+  })
+  const name = `${where} never claims more reviewed than it holds`
+  if (seen.ratio) {
+    check(name, seen.ratio[0] <= seen.ratio[1], `${seen.ratio[0]} of ${seen.ratio[1]}`)
+  } else if (seen.reviewed !== null && plannedFallback !== null) {
+    // The summary prints REVIEWED without a denominator; the run's plan is it.
+    check(name, seen.reviewed <= plannedFallback,
+      `${seen.reviewed} reviewed, ${plannedFallback} planned`)
+  } else {
+    check(name, false, `nothing to count on the ${seen.face} face`)
+  }
+  if (deckCap === null) return
+  // The denominator against the DECK, from a different endpoint than the one
+  // the header is built from. Without this the run's own total is checked
+  // against a number the same session state produced, which is no check at all:
+  // a plan holding five cards a replacement had deleted read "7 of 8 reviewed"
+  // over a deck of three, and every count on that screen agreed with itself.
+  const total = seen.ratio ? seen.ratio[1] : seen.reviewed
+  check(`${where} counts no card the deck no longer holds`,
+    total !== null && total <= deckCap, `${total} counted, ${deckCap} in the deck`)
+}
+
 const browser = await launch()
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+
+// What the page itself says went wrong. Without this a broken render shows up
+// only as the check downstream of it failing, and the cause is invisible: a
+// query added to one docked face took out the notes list, and the harness could
+// report the symptom and nothing else.
+const pageErrors = []
+page.on("pageerror", (err) => pageErrors.push(`pageerror: ${err.message}`))
+page.on("console", (msg) => {
+  if (msg.type() === "error") pageErrors.push(`console: ${msg.text().slice(0, 300)}`)
+})
+// A bare "404 (Not Found)" in the console names no URL, which is the half of
+// the message that matters when a new route shadows an old one.
+page.on("response", (res) => {
+  if (res.status() >= 400) pageErrors.push(`HTTP ${res.status()} ${res.url()}`)
+})
+page.on("requestfailed", (req) => pageErrors.push(`REQFAIL ${req.method()} ${req.url()} -- ${req.failure()?.errorText}`))
 page.on("pageerror", (e) => console.log("PAGE ERROR:", e.message.slice(0, 160)))
 
 // A question on the Ask page first: it is what must survive everything after.
@@ -276,6 +345,12 @@ if (paraCount) {
       console.log("  skip  the recall loop -- no document in this library has a card due")
     } else {
       console.log(`  practising: ${practicable.title}`)
+      // How many cards this document actually has. A run can plan a subset of
+      // the deck and never more than it.
+      const deckSize = await page.evaluate(async ([api, id]) => {
+        const res = await fetch(`${api}/flashcards/${id}`)
+        return res.ok ? ((await res.json()) ?? []).length : null
+      }, [API, practicable.id])
       const sessionsBefore = await page.evaluate(async ([api, id]) => {
         const res = await fetch(`${api}/study/sessions?page=1&page_size=100&document_id=${id}`)
         return ((await res.json()).items ?? []).map((x) => x.id)
@@ -339,12 +414,23 @@ if (paraCount) {
         }
       }
 
-      // The teach-back arm is off by default: each submission is scored, and
-      // scoring applies an FSRS review of its own (study.py:1529), so a run of
+      // The teach-back arm is off by default: a submission is scored, and the
+      // first attempt on a card applies an FSRS review of its own, so a run of
       // it advances the schedule of every card it touches and no delete undoes
       // that -- deleting the session removes the events, not the card state.
+      // (Re-answers do not reschedule, so the retry checks below are free; the
+      // first pass over each card is not.)
       // LUMINARY_VERIFY_TEACHBACK=1 turns it on; that is how the arm was measured.
       let explainSessionId = null
+      if (process.env.LUMINARY_VERIFY_TEACHBACK !== "1") {
+        // Said, not silent. A whole arm sitting out is a fact about the run, and
+        // reading a log of nothing but "ok" lines gave no way to tell that the
+        // teach-back checks -- including the fresh run's progress header -- had
+        // never executed.
+        console.log(
+          "  SKIP the teach-back arm: it submits a real explanation (LUMINARY_VERIFY_TEACHBACK=1)",
+        )
+      }
       if (process.env.LUMINARY_VERIFY_TEACHBACK === "1") {
         // Back to the deck first: the recall run above is still mounted, and
         // this block skipped in silence when it looked for a start button that
@@ -363,6 +449,7 @@ if (paraCount) {
             const raw = JSON.parse(localStorage.getItem("luminary-app-store") ?? "{}")
             return raw.state?.studySessionId ?? null
           })
+          await checkProgressHeader(page, "a fresh run", null, deckSize)
           const ta = page.locator('[data-testid="recall-runner"] textarea')
           check("the explain arm asks for an explanation", (await ta.count()) === 1)
           if (await ta.count()) {
@@ -421,8 +508,150 @@ if (paraCount) {
               } else {
                 console.log("  skip  the last verdict stays in view -- this attempt came back unscored")
               }
+
+              // The summary after a re-answer. One row per CARD, carrying the
+              // score that stands: listing both attempts put the same question
+              // on screen twice, at 10/100 and at 45/100, and averaged the two
+              // into a figure for a run of one card.
+              if (await ta.count()) {
+                await ta.fill(
+                  "The objective is linear, so its optimum lies on the boundary of the " +
+                  "feasible region and therefore at one of its vertices.")
+                await page.getByRole("button", { name: /Submit and compare/ }).click()
+                await page.waitForTimeout(2000)
+                const next = page.locator('[data-testid="teachback-next"]')
+                if (await next.count()) {
+                  await next.first().click()
+                  await page.waitForTimeout(2500)
+                }
+                // Walk to the end so the summary is on screen. Bounded by the
+                // CLOCK, not by a turn count: a card being scored offers neither
+                // a textarea nor a next button, so on a slow model every one of
+                // the 25 turns this used to allow was spent waiting, the run
+                // never reached its readout, and the whole summary block below
+                // skipped without a word. Twenty minutes of checks that could
+                // not fail.
+                const walkUntil = Date.now() + 8 * 60 * 1000
+                while (
+                  Date.now() < walkUntil &&
+                  !(await page.locator('[data-testid="recall-readout"]').count())
+                ) {
+                  const n = page.locator('[data-testid="teachback-next"]')
+                  const s = page.locator('[data-testid="recall-runner"] textarea')
+                  if (await s.count()) {
+                    await s.fill("A vertex of the feasible region carries the optimum.")
+                    await page.getByRole("button", { name: /Submit and compare/ }).click()
+                    await page.waitForTimeout(2000)
+                  } else if (await n.count()) {
+                    await n.first().click()
+                    await page.waitForTimeout(1500)
+                  } else {
+                    await page.waitForTimeout(1500)
+                  }
+                }
+                // Said out loud either way. The summary checks below are the
+                // ones that caught "4 of 3 reviewed", and a run that never got
+                // to the readout must not report their absence as success.
+                const reachedSummary =
+                  (await page.locator('[data-testid="recall-readout"]').count()) > 0
+                check(
+                  "the run reaches its summary",
+                  reachedSummary,
+                  // Only when it did not. `check` prints whatever detail it is
+                  // given, so a fixed string put a failure message beside a
+                  // passing line.
+                  reachedSummary ? "" : "walked the full budget without the readout appearing",
+                )
+                // Straight to the backend, not through the page: a relative
+                // /api path inside the SPA answers with index.html, and the
+                // check then dies on "<!doctype" instead of reporting anything.
+                const plannedInRun = explainSessionId
+                  ? await fetch(`${API}/study/sessions/${explainSessionId}/remaining-cards`)
+                      .then((r) => (r.ok ? r.json() : null))
+                      .then((d) => d?.planned_count ?? Number.MAX_SAFE_INTEGER)
+                      .catch(() => Number.MAX_SAFE_INTEGER)
+                  : Number.MAX_SAFE_INTEGER
+                if (await page.locator('[data-testid="recall-readout"]').count()) {
+                  const readout = await page.evaluate(() => {
+                    const el = document.querySelector('[data-testid="recall-readout"]')
+                    const text = el?.innerText ?? ""
+                    // Card identity, not question wording: this deck holds cards
+                    // that ask nearly the same thing, and comparing text called
+                    // two of them one card listed twice.
+                    const questions = [...el.querySelectorAll("[data-testid='readout-retry']")]
+                      .map((b) => b.getAttribute("data-card-id") ?? "")
+                    return {
+                      retries: document.querySelectorAll('[data-testid="readout-retry"]').length,
+                      addMore: document.querySelectorAll('[data-testid="readout-add-3"]').length,
+                      reviewed: /REVIEWED\s*\n?\s*(\d+)/i.exec(text)?.[1] ?? "?",
+                      dupes: questions.length - new Set(questions).size,
+                      text: text.slice(0, 400),
+                    }
+                  })
+                  check("the summary lists a re-answered card once",
+                    readout.dupes === 0, `${readout.dupes} duplicate rows`)
+                  check("the summary offers to add more to this run",
+                    readout.addMore === 1, `${readout.addMore} add buttons`)
+                  // Not "reviewed === rows": a continuous run carries the cards
+                  // answered in earlier sittings too, so reviewed legitimately
+                  // exceeds what this sitting submitted. What must never happen
+                  // is the count running past the cards in the run -- the
+                  // screenshot that started this said REVIEWED 4 over 3 cards.
+                  check("reviewed never exceeds the cards in the run",
+                    Number(readout.reviewed) <= plannedInRun,
+                    `reviewed=${readout.reviewed} planned=${plannedInRun}`)
+
+                  // Expanding a row must show what the card says next to the
+                  // verdict on it. These were a flip -- one replaced the other --
+                  // and a learner deciding whether a score is fair is comparing
+                  // the two, which cannot be done one at a time from memory.
+                  const row = page.locator('[data-testid="readout-retry"]').first()
+                  if (await row.count()) {
+                    await page.locator('[data-testid="result-row"]').first().click()
+                    await page.waitForTimeout(400)
+                    const together = await page.evaluate(() => ({
+                      answer: document.querySelectorAll(
+                        '[data-testid="expected-answer"]').length,
+                      breakdown: [...document.querySelectorAll("p")]
+                        .filter((p) => /why this score/i.test(p.textContent ?? "")).length,
+                    }))
+                    check("an expanded card shows its answer beside the verdict",
+                      together.answer >= 1 && together.breakdown >= 1,
+                      `answer=${together.answer} breakdown=${together.breakdown}`)
+                  }
+                }
+              }
             }
           }
+        }
+      }
+
+      // Wait for this run's evaluations to land before moving on.
+      //
+      // Not politeness: the checks after this one take a note, and creating a
+      // note awaits an LLM tagger inside the request (notes.py). The runtime
+      // serves one call at a time, so a run that walked its whole deck leaves a
+      // queue of teach-back evaluations that the note save then sits behind,
+      // and the composer hangs on "Saving...". That failure is real -- a learner
+      // who practises and then writes a note hits it -- but it is not what the
+      // notes checks are for, and a check that makes later checks fail hides
+      // more than it finds. Bounded, because a stuck evaluation must not stop
+      // the suite from reporting everything else.
+      if (explainSessionId) {
+        const settleBy = Date.now() + 120_000
+        for (;;) {
+          const pending = await fetch(
+            `${API}/study/sessions/${explainSessionId}/teachback-results`,
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => (d?.results ?? []).filter((r) => r.status === "pending").length)
+            .catch(() => 0)
+          if (!pending) break
+          if (Date.now() > settleBy) {
+            console.log(`  note  ${pending} evaluation(s) still running; not waiting further`)
+            break
+          }
+          await page.waitForTimeout(3000)
         }
       }
 
@@ -435,6 +664,44 @@ if (paraCount) {
         const backToPractice = page.getByRole("button", { name: "Practice", exact: true })
         if (await backToPractice.count()) await backToPractice.first().click()
         await page.waitForTimeout(2000)
+        // The model that writes the cards is nameable from here. "Auto" follows
+        // Settings; picking one overrides only this surface, and the confirm
+        // text for a replacement names it so a fresh set is never written by a
+        // model the learner did not choose.
+        const modelPick = await page.evaluate(() => {
+          const sel = [...document.querySelectorAll("select")].find((s) =>
+            s.closest("label")?.innerText?.includes("Model:"))
+          return {
+            present: Boolean(sel),
+            auto: sel?.options?.[0]?.text?.startsWith("Auto") ?? false,
+            choices: sel?.options?.length ?? 0,
+          }
+        })
+        check("the deck names the model that writes its cards", modelPick.present)
+        check("and defaults to following Settings", modelPick.auto,
+          `first option: ${modelPick.choices} options`)
+
+        // Start over replaces the scope's deck. It is opened and cancelled here,
+        // never confirmed: a check that deletes the library's cards to prove it
+        // can is not a check anyone can afford to run twice.
+        const startOver = page.locator('[data-testid="regenerate-cards"]')
+        check("the deck offers a way to start over", (await startOver.count()) === 1)
+        if (await startOver.count()) {
+          await startOver.first().click()
+          await page.waitForTimeout(500)
+          const confirm = await page.evaluate(() => {
+            const el = document.querySelector('[data-testid="regenerate-confirm"]')
+            return { shown: Boolean(el), text: el?.innerText ?? "" }
+          })
+          check("start over asks before deleting anything", confirm.shown)
+          check("it says what is lost", /cannot be undone/i.test(confirm.text))
+          const keep = page.getByRole("button", { name: /Keep them/ })
+          if (await keep.count()) await keep.first().click()
+          await page.waitForTimeout(400)
+          check("declining leaves the deck alone",
+            (await page.locator('[data-testid="regenerate-confirm"]').count()) === 0)
+        }
+
         const openRun = await page.locator('[data-testid="open-run"]').first()
           .textContent().catch(() => null)
         check("an abandoned run is offered back", /left a .* run open/i.test(openRun ?? ""),
@@ -469,6 +736,15 @@ if (paraCount) {
             resumed.sessionId !== null && resumed.sessionId === expectedResume,
             `${String(resumed.sessionId).slice(0, 8)} vs ${String(expectedResume).slice(0, 8)}`)
           check("the resumed run is on screen", resumed.running === 1, `${resumed.running} faces`)
+          // A resumed run can land on either face, and the summary carries no
+          // denominator of its own -- so the plan comes from the session.
+          const resumedPlanned = resumed.sessionId
+            ? await fetch(`${API}/study/sessions/${resumed.sessionId}/remaining-cards`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => d?.planned_count ?? null)
+                .catch(() => null)
+            : null
+          await checkProgressHeader(page, "a resumed run", resumedPlanned, deckSize)
         }
       }
 
@@ -682,6 +958,10 @@ if (!recording) {
 }
 
 await page.screenshot({ path: ".citation-verify/dock.png" })
+if (failures.length && pageErrors.length) {
+  console.log("\nwhat the page reported while these ran:")
+  for (const e of [...new Set(pageErrors)].slice(0, 8)) console.log(`  ${e}`)
+}
 console.log(failures.length ? `\n${failures.length} failed` : "\nall checks passed")
 await browser.close()
 process.exit(failures.length ? 1 : 0)

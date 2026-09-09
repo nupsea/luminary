@@ -5,9 +5,11 @@ import { AlertTriangle, Check, X as XIcon } from "lucide-react"
 
 import { type TeachbackResultItem, scoreBadgeClass } from "@/lib/studyApi"
 
+import { PASS_MARK, completenessNote } from "./latestAttempts"
+
 export function InlineTeachbackFeedback({ result }: { result: TeachbackResultItem }) {
   const score = result.score ?? 0
-  const passed = score >= 60
+  const passed = score >= PASS_MARK
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
@@ -30,27 +32,31 @@ export function InlineTeachbackFeedback({ result }: { result: TeachbackResultIte
           <Dimension
             label="Accuracy"
             score={result.rubric.accuracy.score}
-            body={result.rubric.accuracy.evidence}
+            body={
+              result.rubric.accuracy.evidence
+                ? `Passage: "${result.rubric.accuracy.evidence}"`
+                : "The evaluator quoted nothing this check could find in the passage."
+            }
           />
           <Dimension
             label="Completeness"
             score={result.rubric.completeness.score}
-            body={
-              result.rubric.completeness.missed_points.length > 0
-                ? `Missed: ${result.rubric.completeness.missed_points.join("; ")}`
-                : "Nothing material was left out."
-            }
+            body={completenessNote(result.rubric.completeness)}
           />
+          {/* Shown, and explicitly not part of the score: it is the one dimension
+              with no passage behind it, and it read 6/100 on an explanation whose
+              own correct_points named two right concepts. */}
           <Dimension
             label="Clarity"
             score={result.rubric.clarity.score}
-            body={result.rubric.clarity.evidence}
+            body="Feedback on how it was put. Not counted toward the score."
+            muted
           />
         </div>
       ) : (
-        // The rubric is a second, best-effort LLM call (study.py:1384). When it
-        // fails the row is stored with a null rubric, and saying so beats an
-        // absence the reader reads as "no notes".
+        // Accuracy or completeness came back missing or out of range, so there is
+        // no breakdown to print. Saying so beats an absence the reader reads as
+        // "no notes".
         <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
           No breakdown came back for this attempt -- the score above stands on its own.
         </p>
@@ -95,12 +101,24 @@ export function InlineTeachbackFeedback({ result }: { result: TeachbackResultIte
   )
 }
 
-function Dimension({ label, score, body }: { label: string; score: number; body: string }) {
+function Dimension({
+  label,
+  score,
+  body,
+  muted = false,
+}: {
+  label: string
+  score: number
+  body: string
+  muted?: boolean
+}) {
   return (
     <div className="flex gap-2">
-      {/* 0-100 per dimension, the scale _RUBRIC_USER_TMPL asks the model for
-          (study.py:284) -- not the 0-5 a rubric is usually assumed to use. */}
-      <span className="w-28 shrink-0 font-semibold text-foreground">
+      {/* 0-100 per dimension, the scale _TEACHBACK_USER_TMPL asks the model for
+          -- not the 0-5 a rubric is usually assumed to use. */}
+      <span
+        className={`w-28 shrink-0 font-semibold ${muted ? "text-muted-foreground" : "text-foreground"}`}
+      >
         {label} {score}/100
       </span>
       <span className="flex-1 text-muted-foreground">{body}</span>

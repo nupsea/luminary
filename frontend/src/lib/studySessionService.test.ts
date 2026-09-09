@@ -25,7 +25,9 @@ vi.mock("@/lib/studyApi", () => ({
   startSession: (...args: unknown[]) => mocks.startSession(...args),
 }))
 
-const { prepareStudySession } = await import("./studySessionService")
+const { prepareStudySession, endOpenSessionsForScope } = await import(
+  "./studySessionService",
+)
 
 const scope = {
   mode: "teachback" as const,
@@ -102,6 +104,55 @@ describe("prepareStudySession -- invariant: one user action = one session", () =
     expect(outcome.session.id).toBe("open-sid")
     expect(outcome.session.plannedTotal).toBe(5)
     expect(outcome.session.answeredCount).toBe(2)
+  })
+
+  it("counts a re-answered card once when picking a run back up", async () => {
+    // The reported header: "30 of 15 reviewed". A continuous run holds one
+    // teach-back row per ATTEMPT, and this resume path took `prevResults.length`
+    // -- 30 rows over 5 cards -- against a planned total of 15.
+    mocks.fetchOpenSession.mockResolvedValue({ id: "open-sid" })
+    mocks.fetchSessionTeachbackResults.mockResolvedValue([
+      { id: "t1", flashcard_id: "a" },
+      { id: "t2", flashcard_id: "a" },
+      { id: "t3", flashcard_id: "a" },
+      { id: "t4", flashcard_id: "b" },
+      { id: "t5", flashcard_id: "b" },
+    ])
+    mocks.fetchSessionRemainingCards.mockResolvedValue({
+      answered_count: 2,
+      planned_count: 5,
+      cards: [{ id: "c" }, { id: "d" }, { id: "e" }],
+    })
+
+    const outcome = await prepareStudySession(scope)
+
+    if (outcome.kind !== "studying") throw new Error("unreachable")
+    expect(outcome.session.answeredCount).toBe(2)
+    expect(outcome.session.answeredCount).toBeLessThanOrEqual(
+      outcome.session.plannedTotal,
+    )
+  })
+
+  it("still counts a result whose card has left the planned set", async () => {
+    // Why the max survives: `answered_count` is restricted to the planned ids,
+    // so a card answered and then regenerated out of the plan would vanish from
+    // the tally if only the backend's number were used.
+    mocks.fetchOpenSession.mockResolvedValue({ id: "open-sid" })
+    mocks.fetchSessionTeachbackResults.mockResolvedValue([
+      { id: "t1", flashcard_id: "gone" },
+      { id: "t2", flashcard_id: "a" },
+      { id: "t3", flashcard_id: "b" },
+    ])
+    mocks.fetchSessionRemainingCards.mockResolvedValue({
+      answered_count: 2,
+      planned_count: 5,
+      cards: [{ id: "c" }],
+    })
+
+    const outcome = await prepareStudySession(scope)
+
+    if (outcome.kind !== "studying") throw new Error("unreachable")
+    expect(outcome.session.answeredCount).toBe(3)
   })
 
   it("ends a stale empty open session and creates one fresh", async () => {
@@ -206,3 +257,69 @@ describe("prepareStudySession -- invariant: one user action = one session", () =
   })
 })
 
+
+describe("a run whose deck was replaced", () => {
+  beforeEach(() => resetMocks())
+
+  it("is not offered back as a finished run when nothing of its plan survives", async () => {
+    // Every planned card deleted: the server reports an empty plan (I-47), so
+    // there is no summary worth showing and no work to resume. Adopting it
+    // would put the learner on a complete screen whose only button re-resumes
+    // the same dead session.
+    mocks.fetchOpenSession.mockResolvedValue({ id: "dead-sid" })
+    mocks.fetchSessionRemainingCards.mockResolvedValue({
+      answered_count: 0,
+      planned_count: 0,
+      cards: [],
+    })
+    mocks.fetchSessionTeachbackResults.mockResolvedValue([
+      { id: "r1", flashcard_id: "deleted-card", question: "q" },
+    ])
+    mocks.fetchDueCards.mockResolvedValue([{ id: "fresh" }])
+    mocks.startSession.mockResolvedValue("fresh-sid")
+
+    const outcome = await prepareStudySession(scope)
+
+    expect(mocks.endSession).toHaveBeenCalledWith("dead-sid")
+    expect(outcome.kind).toBe("studying")
+    if (outcome.kind !== "studying") throw new Error("unreachable")
+    expect(outcome.session.id).toBe("fresh-sid")
+  })
+})
+
+describe("endOpenSessionsForScope", () => {
+  beforeEach(() => resetMocks())
+
+  it("closes every open session for the scope, not just the newest", async () => {
+    // The reported case: a document held two open teach-back runs. Closing one
+    // left the other to be adopted by the panel, carrying a plan of cards the
+    // replacement had just deleted -- which is how "7 of 8 reviewed" appeared
+    // over a deck of three.
+    const open: Record<string, string[]> = {
+      teachback: ["tb-1", "tb-2"],
+      flashcard: ["fc-1"],
+    }
+    mocks.fetchOpenSession.mockImplementation(({ mode }: { mode: string }) => {
+      const next = open[mode].shift()
+      return Promise.resolve(next ? { id: next } : null)
+    })
+
+    await endOpenSessionsForScope("doc-1", null)
+
+    expect(mocks.endSession.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "fc-1",
+      "tb-1",
+      "tb-2",
+    ])
+  })
+
+  it("stops rather than spinning when a session will not close", async () => {
+    // endSession swallows its errors, so an unclosable session must not loop.
+    mocks.fetchOpenSession.mockResolvedValue({ id: "stuck" })
+    mocks.endSession.mockRejectedValue(new Error("nope"))
+
+    await endOpenSessionsForScope("doc-1", null)
+
+    expect(mocks.endSession.mock.calls.length).toBeLessThanOrEqual(20)
+  })
+})

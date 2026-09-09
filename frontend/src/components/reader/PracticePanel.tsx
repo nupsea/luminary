@@ -6,27 +6,45 @@
  * a count field with a Generate button answers a different one. Generating is
  * the way to fill an empty deck, so it sits below the run, not above it.
  *
+ * ONE RUN PER DOCUMENT PER MODE, kept open. Practising a document is a thing a
+ * learner does over weeks, not a series of unrelated sittings, so the panel
+ * adopts the open session rather than opening another beside it, and cards
+ * written mid-practice join that run (`prepareContinuousStudySession`, and
+ * POST /study/sessions/{id}/cards for the half of it that has to persist).
+ * "Start over" is the deliberate opposite: it replaces the scope's cards and
+ * ends the run they belonged to.
+ *
  * A run's mode is fixed when it starts because POST /study/teachback/async
  * rewrites its session's mode -- offering both inside one run would silently
- * relabel it in the learner's session history.
+ * relabel it in the learner's session history. That is why the run is per mode
+ * and not literally one per document.
  */
 
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Brain, History, Loader2, MessageSquareQuote, X } from "lucide-react"
 
-import { apiGet } from "@/lib/apiClient"
+import { apiGet, apiPost } from "@/lib/apiClient"
 import type { Flashcard } from "@/lib/studyApi"
-import { fetchSessions } from "@/lib/studyApi"
+import { ModelSelector } from "@/components/ModelSelector"
+import {
+  buildModelOptions,
+  cloudOverrideAllowed,
+  effectiveDefaultModel,
+  shouldClearPrivateModeOverride,
+} from "@/lib/chatSettingsUtils"
+import { fetchLLMSettings } from "@/lib/llmSettings"
+import { appendSessionCards, fetchMaterialHeadroom, fetchSessions } from "@/lib/studyApi"
 import {
   type PreparedStudySessionOutcome,
   type StudyMode,
-  prepareSectionStudyFromCards,
+  endOpenSessionsForScope,
+  prepareContinuousStudySession,
   prepareStudySession,
 } from "@/lib/studySessionService"
 
 import { CardGenerator } from "./CardGenerator"
-import { summariseDeck } from "./practiceDeck"
+import { materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
 import { RecallRunner } from "./RecallRunner"
 
 // A reading-session run, not a daily queue: the Study page's 50 is the number
@@ -99,38 +117,72 @@ export function PracticePanel({
     },
   })
 
+  // Whether there is anything left to write questions from. Asked before the
+  // panel offers to write more, not discovered afterwards: a deck that already
+  // covers its material yields nothing, because generation reads a passage the
+  // deck holds and the near-duplicate filter drops every question it produces.
+  const { data: headroom } = useQuery({
+    queryKey: ["reader-headroom", documentId, sectionId ?? null],
+    queryFn: () => fetchMaterialHeadroom(documentId, sectionId),
+  })
+  const exhausted = materialExhausted(headroom)
+
+  // The model that writes cards here. Same shape as the Study page's selector:
+  // "Auto" follows Settings, a concrete id overrides only this surface.
+  const [practiceModel, setPracticeModel] = useState("")
+  const { data: llmSettings } = useQuery({
+    queryKey: ["llm-settings"],
+    queryFn: fetchLLMSettings,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+  // Private mode promises on-device only, so a cloud model is never offered as
+  // an override there -- the same guard Chat and Study carry.
+  const cloudAllowed = cloudOverrideAllowed(llmSettings?.mode)
+  const provider = llmSettings?.provider
+  const { data: cloudModels } = useQuery({
+    queryKey: ["practice-cloud-models", provider],
+    queryFn: () =>
+      apiGet<{ id: string }[]>("/settings/llm/models", { provider: provider as string }),
+    enabled: Boolean(provider) && cloudAllowed,
+    staleTime: 300_000,
+  })
+  const cloudModelChoices = cloudAllowed
+    ? (cloudModels ?? []).map((m) => `${provider}/${m.id}`)
+    : []
+  // Derived, never cleared: every request reads this, not the raw state, so a
+  // mode change cannot leave a cloud id in flight.
+  const activeModel = shouldClearPrivateModeOverride(llmSettings?.mode, practiceModel)
+    ? ""
+    : practiceModel
+
   const { total: deckTotal, due: dueCards } = summariseDeck(deck ?? [])
 
   async function start(mode: StudyMode, ahead: boolean, resumeSessionId?: string) {
     setStarting(mode)
     setStartError(null)
     try {
-      // Section scope always runs from an explicit card set: prepareStudySession
-      // resolves an open session by document, so a section run would adopt the
-      // document's and study the wrong cards.
       // useStudySession wants a scope for its Start-New path. The panel offers
-      // no such button, and a section run must not be rebuilt from this: it
-      // would resolve the document's open session and study the wrong cards.
+      // no such button; this is what that path would rebuild from.
       const scopeForBeginNew = {
         mode,
         documentId,
         cardLimit: READER_CARD_LIMIT,
         ...(sectionId ? { filters: { section_id: sectionId } } : {}),
       }
-      // Start starts; only the resume button resumes.
-      //
-      // prepareStudySession adopts any open session for the scope, so pressing
-      // "Explain it" on a deck with cards due landed the learner in the summary
-      // of a run they had finished days ago. That adoption is right for the
-      // Study page, which has no other way back into a run; here the deck names
-      // the open run and offers it explicitly, so these two intents are separate.
+      // Both doors lead to the same run. Starting adopts this document's open
+      // session for the mode; the resume button names it explicitly. The two
+      // used to differ -- Start always opened a fresh session -- and a document
+      // collected one abandoned run per visit as a result.
       const outcome = resumeSessionId
         ? await prepareStudySession({ ...scopeForBeginNew, resumeSessionId })
-        : await prepareSectionStudyFromCards(
+        : await prepareContinuousStudySession({
             documentId,
-            (ahead ? (deck ?? []) : dueCards).slice(0, READER_CARD_LIMIT),
             mode,
-          )
+            // The deck the panel is showing, not a due round trip: a card
+            // written a moment ago is not due yet and must still be runnable.
+            cards: (ahead ? (deck ?? []) : dueCards).slice(0, READER_CARD_LIMIT),
+          })
       if (outcome.kind === "empty") {
         setStartError("Nothing to run here yet. Generate a few cards first.")
         return
@@ -156,6 +208,73 @@ export function PracticePanel({
     void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
     void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
     void qc.invalidateQueries({ queryKey: ["section-heatmap", documentId] })
+  }
+
+  /** Write cards for the scope the panel is showing. Shared by both doors. */
+  async function generateCards(count: number): Promise<Flashcard[]> {
+    return apiPost<Flashcard[]>("/flashcards/generate", {
+      document_id: documentId,
+      scope: sectionHeading ? "section" : "full",
+      section_heading: sectionHeading ?? null,
+      count,
+      difficulty: "medium",
+      context: context || null,
+      // Adding to a deck means adding what the deck does not have. Without this
+      // every run re-reads the passage the classifier picked first, and the
+      // near-duplicate filter removes the identical questions it produces.
+      avoid_used_material: true,
+      model: activeModel || null,
+    })
+  }
+
+  function refreshDeck() {
+    void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
+    void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
+    // Cards consume material, so what is left has changed.
+    void qc.invalidateQueries({ queryKey: ["reader-headroom", documentId] })
+  }
+
+  /**
+   * Cards generated from the deck screen while a run is open on this document.
+   *
+   * They join that run rather than waiting for the next one. The learner just
+   * asked for more questions on what they are reading; putting them behind a
+   * "start a new session" step is asking them to file paperwork.
+   */
+  async function absorbGenerated(cards: Flashcard[]) {
+    refreshDeck()
+    if (cards.length === 0) {
+      setGeneratedNote(
+        context
+          ? "No cards came back. The selected passage may be too short to make any from."
+          : noCardsNote(headroom),
+      )
+      return
+    }
+    const joined = openRun
+      ? await appendSessionCards(openRun.id, cards.map((c) => c.id))
+      : null
+    setGeneratedNote(
+      joined && joined.added > 0
+        ? `${joined.added} card${joined.added === 1 ? "" : "s"} added to the run you have open here.`
+        : `${cards.length} card${cards.length === 1 ? "" : "s"} added. They are due now.`,
+    )
+  }
+
+  /**
+   * The scope's deck was replaced. Whatever run was practising those cards is
+   * practising rows that no longer exist, so it ends here rather than being
+   * left to fail card by card.
+   */
+  async function absorbReplacement(result: { cards: Flashcard[]; replaced: number }) {
+    await endOpenSessionsForScope(documentId, null).catch(() => {})
+    setRun(null)
+    refreshDeck()
+    setGeneratedNote(
+      `${result.replaced} card${result.replaced === 1 ? "" : "s"} replaced with ` +
+        `${result.cards.length} fresh question${result.cards.length === 1 ? "" : "s"}. ` +
+        "Start a run to take them from the top.",
+    )
   }
 
   const scopeLabel = context
@@ -203,6 +322,23 @@ export function PracticePanel({
           scopeForBeginNew={run.scopeForBeginNew}
           mode={run.mode}
           onJumpToSource={onJumpToSource}
+          onGenerateMore={
+            exhausted
+              ? undefined
+              : async (count) => {
+                  const cards = await generateCards(count)
+                  refreshDeck()
+                  return cards
+                }
+          }
+          noCardsNote={noCardsNote(headroom)}
+          exhaustedNote={
+            exhausted
+              ? `Every passage in ${
+                  sectionHeading ? "this section" : "this document"
+                } already has a question. There is nothing left to add -- write a fresh set from the deck if you want different ones.`
+              : null
+          }
           onDone={endRun}
         />
       ) : (
@@ -263,19 +399,36 @@ export function PracticePanel({
               </p>
             )}
 
-            <div className="flex flex-col gap-2 border-t border-border pt-5">
+            <div className="flex flex-col gap-3 border-t border-border pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+                  Write cards
+                </p>
+                <ModelSelector
+                  value={practiceModel}
+                  onChange={setPracticeModel}
+                  localModels={
+                    buildModelOptions(llmSettings).length > 0
+                      ? buildModelOptions(llmSettings)
+                      : (llmSettings?.available_local_models ?? [])
+                  }
+                  cloudModels={cloudModelChoices}
+                  effectiveDefault={effectiveDefaultModel(llmSettings)}
+                  title="Model that writes the cards here. 'Auto' follows your Settings."
+                />
+              </div>
               <CardGenerator
                 documentId={documentId}
+                sectionId={sectionId}
                 sectionHeading={sectionHeading}
                 context={context}
-                onGenerated={(count) => {
-                  setGeneratedNote(
-                    count === 0
-                      ? "No cards came back. The passage may be too short to make any from."
-                      : `${count} card${count === 1 ? "" : "s"} added. They are due now.`,
-                  )
-                  void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
-                }}
+                model={activeModel}
+                // A selection is its own passage, so it is always writable; the
+                // document's material can run out, and saying so beats a button
+                // that answers with an error.
+                exhausted={exhausted && !context}
+                onGenerated={(cards) => void absorbGenerated(cards)}
+                onReplaced={(result) => void absorbReplacement(result)}
               />
               {generatedNote && (
                 <p className="text-sm text-muted-foreground">{generatedNote}</p>

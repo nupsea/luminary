@@ -13,11 +13,23 @@
  */
 
 import { useState } from "react"
-import { ArrowRight, Check, ChevronsUp, Loader2, Minus, RotateCcw, Send, Text, X } from "lucide-react"
+import {
+  ArrowRight,
+  Check,
+  ChevronsUp,
+  Loader2,
+  Minus,
+  Plus,
+  RotateCcw,
+  Send,
+  Text,
+  X,
+} from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { ExpandableResultRow } from "@/components/Teachback/ExpandableResultRow"
 import { InlineTeachbackFeedback } from "@/components/Teachback/InlineTeachbackFeedback"
+import { standingAttempts } from "@/components/Teachback/latestAttempts"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useTeachbackPolling } from "@/components/Teachback/useTeachbackPolling"
 import { answerCheckNote, sourceNote } from "@/lib/cardSourceNote"
@@ -37,12 +49,14 @@ import {
   type PendingTeachback,
   type Rating,
   type TeachbackResultItem,
+  appendSessionCards,
   fetchSourceContext,
   reopenSession,
   submitReview,
   submitTeachbackAsync,
 } from "@/lib/studyApi"
 import type { StudyMode } from "@/lib/studySessionService"
+import { advanceLabel } from "./practiceDeck"
 
 const RATING_ICONS: Record<Rating, LucideIcon> = {
   again: RotateCcw,
@@ -65,6 +79,24 @@ interface RecallRunnerProps {
   onJumpToSource: (sectionId: string) => void
   /** The run is over, or the learner left it. Back to the deck. */
   onDone: () => void
+  /**
+   * Write more cards for this run's scope and hand them back. Offered on the
+   * summary, where "keep going" is the thing a learner actually wants and the
+   * old panel made them leave the run to get.
+   */
+  onGenerateMore?: (count: number) => Promise<Flashcard[]>
+  /**
+   * Set when the scope has no material left to write from, which is why
+   * `onGenerateMore` is absent. Said rather than left blank: a control that
+   * disappears with no explanation reads as a bug.
+   */
+  exhaustedNote?: string | null
+  /**
+   * What to say when a generation call returns nothing. Composed by the panel,
+   * which is what holds the headroom: an empty result is not evidence that the
+   * material ran out, and this used to claim it was.
+   */
+  noCardsNote?: string | null
 }
 
 export function RecallRunner({
@@ -73,6 +105,9 @@ export function RecallRunner({
   mode,
   onJumpToSource,
   onDone,
+  onGenerateMore,
+  exhaustedNote,
+  noCardsNote,
 }: RecallRunnerProps) {
   const {
     sessionState,
@@ -85,6 +120,7 @@ export function RecallRunner({
     setQueue,
     setCurrentIndex,
     setReviewed,
+    setTotal,
     setSessionState,
     completeSession,
     exit,
@@ -98,6 +134,11 @@ export function RecallRunner({
       setPending(
         prev.map((r) => ({ id: r.id, flashcardId: r.flashcard_id, question: r.question })),
       )
+      // The resumed count already includes these cards. Without seeding the set,
+      // re-answering one the learner answered in an earlier sitting counted it a
+      // second time, and a continuous run drifted past its own total the longer
+      // it was kept open.
+      setCountedCards(new Set(prev.map((r) => r.flashcard_id)))
     },
   })
 
@@ -111,13 +152,22 @@ export function RecallRunner({
   // Where this card's answer lives in the document. Only some cards arrive
   // carrying it (see reveal).
   const [jumpSection, setJumpSection] = useState<string | null>(null)
-  // Set when a card was pulled back out of the finished summary: advancing from
-  // it returns there, and it is not counted as a second card reviewed.
-  const [reAnswering, setReAnswering] = useState(false)
+  // The card pulled back out of the finished summary, if any. Advancing from it
+  // returns to the summary rather than walking on through the queue.
+  const [retryTarget, setRetryTarget] = useState<string | null>(null)
+  // Which cards have been counted as reviewed. A card answered twice -- in-run
+  // with "Answer again", or from the summary -- is one card reviewed, and the
+  // run's own header said "4 of 3 reviewed" until this was a set of ids.
+  const [countedCards, setCountedCards] = useState<Set<string>>(new Set())
   const [calibration, setCalibration] = useState<{ text: string; tone: CalibrationTone } | null>(null)
 
   // Run totals.
   const [correct, setCorrect] = useState(0)
+  // WHICH count is in flight, not merely whether one is: a single boolean
+  // spun the loader on all three buttons at once, so the run appeared to be
+  // writing 3, 5 and 10 cards simultaneously.
+  const [addingCount, setAddingCount] = useState<number | null>(null)
+  const [addError, setAddError] = useState<string | null>(null)
   const [predictionsMade, setPredictionsMade] = useState(0)
   const [predictionsCalibrated, setPredictionsCalibrated] = useState(0)
   const [pending, setPending] = useState<PendingTeachback[]>([])
@@ -182,20 +232,45 @@ export function RecallRunner({
     }
   }
 
+  // A button names where it goes: the last card of the queue and a card pulled
+  // back out of the summary both land on the readout, and both said "Next card".
+  const nextLabel = advanceLabel({
+    fromSummary: retryTarget !== null,
+    index: currentIndex,
+    queueLength: queue.length,
+  })
+
   function advance(countReviewed = false) {
-    if (countReviewed && !reAnswering) setReviewed((r) => r + 1)
+    if (countReviewed) countCard(currentCard?.id)
     setPredicted(null)
     setRevealed(false)
     setExplanation("")
     setGraded(null)
     setCalibration(null)
     setJumpSection(null)
+    // A card reached back out of the summary goes back to the summary. It is
+    // not a position in the queue, so the queue does not move.
+    if (retryTarget !== null) {
+      setRetryTarget(null)
+      void completeSession()
+      return
+    }
     const nextIdx = currentIndex + 1
     if (nextIdx >= queue.length) {
       void completeSession()
     } else {
       setCurrentIndex(nextIdx)
     }
+  }
+
+  /** Count a card once, however many explanations or grades it took.
+   *
+   * The bump lives outside the set updater on purpose: StrictMode invokes an
+   * updater twice, so a counter incremented inside one counts twice. */
+  function countCard(cardId: string | undefined) {
+    if (!cardId || countedCards.has(cardId)) return
+    setCountedCards((seen) => new Set(seen).add(cardId))
+    setReviewed((r) => r + 1)
   }
 
   /** Same card, blank box, with the last verdict kept in view to improve on. */
@@ -207,14 +282,16 @@ export function RecallRunner({
 
   /** A card reached back out of the finished summary. */
   async function reAnswer(cardId: string) {
-    const card = queue.find((c) => c.id === cardId)
-    if (!card || !sessionId) return
+    const index = queue.findIndex((c) => c.id === cardId)
+    if (index < 0 || !sessionId) return
     // The run is over, so its session was ended. Reopening keeps the retry in
     // the same run rather than opening a second one for one card.
     await reopenSession(sessionId).catch(() => {})
-    setReAnswering(true)
-    setQueue([card])
-    setCurrentIndex(0)
+    // Move to the card, never replace the queue with it. Cutting the queue down
+    // to the one card being retried meant the summary's other "Answer this one
+    // again" buttons could no longer find their card, and silently did nothing.
+    setRetryTarget(cardId)
+    setCurrentIndex(index)
     setRevealed(false)
     setExplanation("")
     setJumpSection(null)
@@ -227,7 +304,7 @@ export function RecallRunner({
   async function handleGrade(rating: Rating) {
     if (!currentCard || !sessionId || graded) return
     await submitReview(currentCard.id, rating, sessionId, predicted ?? undefined)
-    setReviewed((r) => r + 1)
+    countCard(currentCard.id)
     if (rating !== "again") setCorrect((c) => c + 1)
 
     if (predicted !== null) {
@@ -248,6 +325,54 @@ export function RecallRunner({
     advance()
   }
 
+  /**
+   * More questions on the same run, rather than a second run beside it.
+   *
+   * The append reaches the server before the queue grows here: `planned_card_ids`
+   * is what a resume rebuilds from, so cards added only in React are gone the
+   * next time the document is opened. If that call fails the cards are still in
+   * the deck -- they just are not in this run, and saying so beats a run that
+   * silently forgets them.
+   */
+  async function addMoreCards(count: number) {
+    if (!onGenerateMore || addingCount !== null) return
+    setAddingCount(count)
+    setAddError(null)
+    try {
+      const cards = await onGenerateMore(count)
+      if (cards.length === 0) {
+        setAddError(noCardsNote ?? "No cards came back.")
+        return
+      }
+      if (sessionId) {
+        const appended = await appendSessionCards(
+          sessionId,
+          cards.map((c) => c.id),
+        )
+        if (appended === null) {
+          setAddError("The cards were written but could not join this run. They are in the deck.")
+          return
+        }
+        await reopenSession(sessionId).catch(() => {})
+      }
+      setCurrentIndex(queue.length)
+      setQueue((q) => [...q, ...cards])
+      setTotal((t) => t + cards.length)
+      setRetryTarget(null)
+      setRevealed(false)
+      setExplanation("")
+      setPredicted(null)
+      setGraded(null)
+      setCalibration(null)
+      setJumpSection(null)
+      setSessionState("studying")
+    } catch {
+      setAddError("Could not write more cards. Is the model reachable?")
+    } finally {
+      setAddingCount(null)
+    }
+  }
+
   if (sessionState === "complete") {
     return (
       <Readout
@@ -262,6 +387,10 @@ export function RecallRunner({
         teachbackAvg={stats.avgScore}
         teachbackDone={stats.completedCount}
         teachbackPassed={stats.passCount}
+        onAddMore={onGenerateMore ? addMoreCards : undefined}
+        exhaustedNote={exhaustedNote ?? null}
+        addingCount={addingCount}
+        addError={addError}
         onDone={onDone}
       />
     )
@@ -486,7 +615,7 @@ export function RecallRunner({
                     onClick={() => advance(true)}
                     className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                   >
-                    Next card
+                    {nextLabel}
                     <ArrowRight size={14} />
                   </button>
                   <button
@@ -506,10 +635,11 @@ export function RecallRunner({
                 </div>
               ) : graded ? (
                 <button
+                  data-testid="recall-next"
                   onClick={() => advance()}
                   className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
-                  Next card
+                  {nextLabel}
                 </button>
               ) : (
                 <div>
@@ -578,6 +708,10 @@ function Readout({
   teachbackAvg,
   teachbackDone,
   teachbackPassed,
+  onAddMore,
+  exhaustedNote,
+  addingCount,
+  addError,
   onDone,
 }: {
   mode: StudyMode
@@ -588,9 +722,13 @@ function Readout({
   correct: number
   predictionsMade: number
   predictionsCalibrated: number
-  teachbackAvg: number
+  teachbackAvg: number | null
   teachbackDone: number
   teachbackPassed: number
+  onAddMore: ((count: number) => Promise<void>) | undefined
+  exhaustedNote: string | null
+  addingCount: number | null
+  addError: string | null
   onDone: () => void
 }) {
   return (
@@ -637,7 +775,12 @@ function Readout({
               Your explanations
             </p>
             <p className="mt-2 text-base leading-relaxed text-foreground">
-              {teachbackDone} scored, averaging {teachbackAvg}/100.
+              {/* No average until every card that stands has one. A mean over
+                  the cards that happen to have finished moves as the rest land,
+                  and the learner reads the first figure as the run's result. */}
+              {teachbackAvg === null
+                ? `${teachbackDone} scored so far. The average waits for the rest.`
+                : `${teachbackDone} scored, averaging ${teachbackAvg}/100.`}
             </p>
           </div>
         )}
@@ -649,6 +792,47 @@ function Readout({
 
         {mode === "teachback" && pending.length > 0 && (
           <TeachbackAttempts pending={pending} results={results} onReAnswer={onReAnswer} />
+        )}
+
+        {!onAddMore && exhaustedNote && (
+          <p
+            data-testid="readout-exhausted"
+            className="border-t border-border pt-5 text-sm text-muted-foreground"
+          >
+            {exhaustedNote}
+          </p>
+        )}
+
+        {onAddMore && (
+          <div className="flex flex-col gap-2 border-t border-border pt-5">
+            <p className="text-sm text-muted-foreground">
+              Keep going on this document -- new questions join this run rather than
+              starting another one.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {[3, 5, 10].map((n) => (
+                <button
+                  key={n}
+                  data-testid={`readout-add-${n}`}
+                  onClick={() => void onAddMore(n)}
+                  disabled={addingCount !== null}
+                  className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  {addingCount === n ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                  {n} more
+                </button>
+              ))}
+            </div>
+            {addError && (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {addError}
+              </p>
+            )}
+          </div>
         )}
 
         <button
@@ -672,9 +856,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Every explanation this run submitted, expanded to what was written, what was
- * expected and how it scored. Moving on while a card is still being evaluated
- * only works if the verdict is still somewhere afterwards.
+ * One row per CARD, carrying the explanation that stands -- expanded to what was
+ * written, what was expected and how it scored. Moving on while a card is still
+ * being evaluated only works if the verdict is still somewhere afterwards.
+ *
+ * One row per submission put a re-answered card in this list twice, at both its
+ * old score and its new one, and the learner had no way to tell which was which.
  */
 function TeachbackAttempts({
   pending,
@@ -689,9 +876,9 @@ function TeachbackAttempts({
   return (
     <div className="flex flex-col gap-2">
       <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
-        Every answer you gave
+        Where each card stands
       </p>
-      {pending.map((p) => {
+      {standingAttempts(pending).map(({ attempt: p, attemptCount }) => {
         const result = results?.find((r) => r.id === p.id)
         if (!result || result.status !== "complete") {
           return (
@@ -718,14 +905,28 @@ function TeachbackAttempts({
               isExpanded={expandedId === p.id}
               onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
             />
-            <button
-              data-testid="readout-retry"
-              onClick={() => onReAnswer(p.flashcardId)}
-              className="flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
-            >
-              <RotateCcw size={11} />
-              Answer this one again
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                data-testid="readout-retry"
+                // The card, not the question text: two cards can ask nearly the
+                // same thing, and a check that compares wording cannot tell that
+                // from the same card listed twice.
+                data-card-id={p.flashcardId}
+                onClick={() => onReAnswer(p.flashcardId)}
+                className="flex items-center gap-1.5 self-start text-xs font-medium text-primary hover:underline"
+              >
+                <RotateCcw size={11} />
+                Answer this one again
+              </button>
+              {attemptCount > 1 && (
+                // The replaced score is gone from the summary, but the fact of
+                // it is not: a 45 that arrived after a 10 is a different thing
+                // from a 45 first time.
+                <span className="text-xs text-muted-foreground">
+                  Attempt {attemptCount}
+                </span>
+              )}
+            </div>
           </div>
         )
       })}

@@ -27,7 +27,8 @@ export function SessionComplete({
 }: SessionCompleteProps) {
   const { results, stats } = useTeachbackPolling(pendingTeachbacks)
 
-  const displayReviewed = stats.completedCount || reviewed
+  // Cards, not submissions: a card answered twice is one card explained.
+  const displayReviewed = stats.answeredCount || reviewed
 
   // Enter activates the primary action; arrows/Esc are handled by the
   // session-level listener in TeachbackSession.
@@ -83,14 +84,19 @@ export function SessionComplete({
           <div className="flex flex-col items-center">
             <span
               className={`text-3xl font-bold ${
-                stats.avgScore >= 80
-                  ? "text-green-600"
-                  : stats.avgScore >= 60
-                    ? "text-amber-600"
-                    : "text-red-600"
+                stats.avgScore === null
+                  ? "text-muted-foreground"
+                  : stats.avgScore >= 80
+                    ? "text-green-600"
+                    : stats.avgScore >= 60
+                      ? "text-amber-600"
+                      : "text-red-600"
               }`}
             >
-              {stats.avgScore}/100
+              {/* Withheld, not zeroed, while a card is still being scored:
+                  a mean of the ones that happen to have landed is a number
+                  for a session that is not over. */}
+              {stats.avgScore === null ? "--" : `${stats.avgScore}/100`}
             </span>
             <span className="text-sm text-muted-foreground">Average Score</span>
           </div>
