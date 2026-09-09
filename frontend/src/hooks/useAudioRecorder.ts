@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react"
 import { toast } from "sonner"
-import { API_BASE } from "@/lib/config"
+import { apiPost, detailFromError } from "@/lib/apiClient"
 
 export interface UseAudioRecorderOptions {
   onTranscribed: (text: string) => void
@@ -65,26 +65,15 @@ export function useAudioRecorder({ onTranscribed }: UseAudioRecorderOptions) {
         formData.append("file", blob, `voice_recording.${ext}`)
 
         try {
-          const res = await fetch(`${API_BASE}/audio/transcribe`, {
-            method: "POST",
-            body: formData,
-          })
-
-          if (!res.ok) {
-            const errJson = await res.json().catch(() => null)
-            const detail = errJson?.detail || "Transcription failed"
-            throw new Error(detail)
-          }
-
-          const data = (await res.json()) as { text?: string }
+          const data = await apiPost<{ text?: string }>("/audio/transcribe", formData)
           if (data.text && data.text.trim()) {
             onTranscribed(data.text.trim())
           } else {
             toast.info("No speech detected.")
           }
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : "Could not transcribe audio"
-          toast.error(message)
+          const error = detailFromError(err, "Could not transcribe audio")
+          toast.error(error.message)
         } finally {
           setIsTranscribing(false)
         }
