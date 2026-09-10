@@ -6,7 +6,6 @@ mod report;
 mod stage;
 mod supervisor;
 
-use std::os::unix::process::ExitStatusExt;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -99,14 +98,6 @@ fn warn(app: &AppHandle, message: &str) {
     let _ = app.emit("boot-warning", message.to_string());
 }
 
-fn describe(status: std::process::ExitStatus) -> String {
-    match (status.code(), status.signal()) {
-        (Some(code), _) => format!("exit code {code}"),
-        (None, Some(signal)) => format!("killed by signal {signal}"),
-        _ => "an unknown status".into(),
-    }
-}
-
 /// Wait for the backend to answer, for it to die, or for the deadline.
 ///
 /// Watching only the port was the single worst diagnostic in the app: uvicorn
@@ -127,7 +118,7 @@ fn wait_for_backend(sup: &Supervisor, port: u16) -> Result<(), (String, String)>
                 "Luminary's engine stopped unexpectedly while starting up.".into(),
                 format!(
                     "backend exited with {} before opening {addr}\n\n{}",
-                    describe(status),
+                    luminary_host::describe_exit(status),
                     sup.tail("backend").join("\n")
                 ),
             ));

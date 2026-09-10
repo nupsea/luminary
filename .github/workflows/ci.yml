@@ -74,6 +74,39 @@ jobs:
       - name: Test and lint the desktop shell
         run: make desktop-test
 
+  # The other half of `desktop-shell`, on the platform whose process model is
+  # different rather than merely untested. Windows has no process groups
+  # reachable from a GUI binary, so the supervisor kills a tree through a Job
+  # Object instead -- and `host/tests/tree.rs` is the only place that mechanism
+  # is ever *executed*. `cargo check` would prove the FFI compiles and nothing
+  # about whether closing a job kills its members.
+  #
+  # This job and the code it compiles landed together. A Windows job pushed
+  # ahead of the code that makes it pass is a known-red gate on master, which
+  # teaches everyone to ignore the column.
+  desktop-shell-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Build and test the desktop shell
+        run: cargo test --workspace
+      - name: Lint the desktop shell
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
   # The support policy decides whether a host is offered a local model at all,
   # and it got Windows wrong for a whole release: `_has_accelerator` probed
   # /dev nodes that do not exist there, so every Windows machine resolved to

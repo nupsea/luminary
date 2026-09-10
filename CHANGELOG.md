@@ -35,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `signal.raise_signal` rather than `os.kill` against itself. Latent, not live:
   only the desktop shell sets `LUMINARY_PARENT_PID` and it has no Windows build
   yet. Now I-54.
+- **The supervisor kills a process tree on Windows, through a Job Object.** A
+  GUI binary has no reachable process group there -- console control events
+  need a shared console -- so each child gets a job with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Python, Ollama and the model runners
+  die when the last handle closes, which covers the crash and force-quit cases
+  no shutdown hook reaches. `host/tests/tree.rs` spawns a grandchild and
+  asserts it dies with the tree; it runs on both platforms and fails when the
+  kill is narrowed to the leader.
+- **`src-tauri/host`, a crate for the half of the shell that differs per
+  platform.** `tauri-build` needs a resource compiler macOS does not have, so
+  nothing in `luminary-desktop` can be compiled for Windows locally.
+  `luminary-host` has no Tauri dependency and is checked for
+  `x86_64-pc-windows-msvc` by `make desktop-test` on any machine.
+- **`desktop-shell-windows`** runs `cargo test --workspace` on
+  `windows-latest`, so the job object is executed rather than merely compiled.
 - **`icons/icon.ico`**, without which `tauri-build` panics before compiling a
   line for a Windows target.
 - **CI runs on Windows.** `windows-host-policy` installs the backend with

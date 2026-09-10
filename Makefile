@@ -72,8 +72,15 @@ verify-stage:
 # fmt first, and in the same order CI runs it: the desktop-shell job checks
 # formatting before it tests, so a local gate without it reports green on a
 # branch CI will reject -- which is exactly how it got rejected.
+# The Windows cross-check is part of the gate, not an extra: `luminary-host` is
+# the only crate whose correctness differs per platform, and it is the only one
+# that CAN be checked for Windows from a Mac -- the shell itself needs a
+# resource compiler macOS does not have. Without this line its Windows half is
+# invisible until CI.
 desktop-test:
-	cd src-tauri && cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings
+	cd src-tauri && cargo fmt --all --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
+	@command -v rustup >/dev/null && rustup target add x86_64-pc-windows-msvc >/dev/null || true
+	cd src-tauri && cargo clippy --target x86_64-pc-windows-msvc -p luminary-host --all-targets -- -D warnings
 
 # Run the shell against build/stage without bundling. Requires `make stage`.
 desktop-dev:

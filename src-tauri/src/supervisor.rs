@@ -3,15 +3,16 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use luminary_host::{alive, executable_of, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::logging;
+use crate::stage::{OLLAMA_BINARY, PYTHON_BINARY};
 
 /// Enough of a child's output to explain why it died, without turning the
 /// failure screen into a wall of text.
@@ -28,6 +29,33 @@ const RUNTIME_FILE: &str = ".runtime.json";
 /// is wedged rather than listening may not add seconds to closing the window.
 const ASK_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Where the staged interpreter keeps its console scripts (yt-dlp).
+#[cfg(windows)]
+const SCRIPTS_DIR: &str = "python/Scripts";
+#[cfg(not(windows))]
+const SCRIPTS_DIR: &str = "python/bin";
+
+/// The system minimum a child needs on `PATH`, beyond the staged tree.
+#[cfg(windows)]
+const SYSTEM_PATH: &[&str] = &[r"C:\Windows\System32", r"C:\Windows"];
+#[cfg(not(windows))]
+const SYSTEM_PATH: &[&str] = &["/usr/bin", "/bin"];
+
+#[cfg(windows)]
+const PATH_SEPARATOR: &str = ";";
+#[cfg(not(windows))]
+const PATH_SEPARATOR: &str = ":";
+
+/// Environment a child needs from ours, and nothing else (see `base_env`).
+///
+/// Windows CPython does not start without `SystemRoot`: it is how every DLL
+/// search and the temp directory are resolved. `USERPROFILE` is what `Path.home()`
+/// reads there, the way `HOME` is on unix.
+#[cfg(windows)]
+const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "TEMP", "TMP"];
+#[cfg(not(windows))]
+const INHERITED_ENV: &[&str] = &["HOME"];
+
 /// How to ask a child to stop before signalling it.
 ///
 /// Only the backend has one: it serves HTTP on a port we chose and we hand it
@@ -40,13 +68,19 @@ struct StopRequest {
 struct Tracked {
     name: &'static str,
     child: Child,
-    /// Equal to the child's pid, because we spawn with `process_group(0)`.
-    pgid: i32,
+    /// The child and everything it spawns. Dropping it on Windows closes the
+    /// job object, which kills the tree -- so this outlives `shutdown`.
+    tree: Tree,
     exe: PathBuf,
     tail: Arc<Mutex<VecDeque<String>>>,
     stop: Option<StopRequest>,
 }
 
+/// What survives this process, so a crash cannot strand a tree.
+///
+/// `pgid` is the unix process group. Windows writes the child's own pid there:
+/// a job object dies with the process that made it, so there is nothing
+/// group-shaped to record and recovery walks the parent chain instead.
 #[derive(Serialize, Deserialize)]
 struct Record {
     name: String,
@@ -93,7 +127,7 @@ impl Supervisor {
             .map(|c| Record {
                 name: c.name.to_string(),
                 pid: c.child.id() as i32,
-                pgid: c.pgid,
+                pgid: c.tree.group_id(),
                 exe: c.exe.to_string_lossy().into_owned(),
             })
             .collect();
@@ -133,11 +167,12 @@ impl Supervisor {
     /// It runs on macOS too, deliberately: a path taken only on the platform
     /// nobody here can test is a path nobody tests.
     ///
-    /// SIGTERM goes to the whole process group, not the leader: ollama's model
+    /// What follows goes to the whole tree, not the leader: ollama's model
     /// runners are its children and killing only the leader used to strand
-    /// them. The grace period matters because SIGKILL leaves SQLite's WAL
+    /// them. The grace period matters because a hard kill leaves SQLite's WAL
     /// unmerged and Kuzu's exclusive lock is only released when the holder
-    /// actually dies.
+    /// actually dies -- which is why the ask above is the only graceful path
+    /// on Windows, where `request_stop` already terminates.
     pub fn shutdown(&self) {
         let Ok(mut children) = self.children.lock() else {
             return;
@@ -159,7 +194,7 @@ impl Supervisor {
                 continue;
             }
             logging::write("shell", &format!("stopping {}", tracked.name));
-            signal_group(tracked.pgid, libc::SIGTERM);
+            tracked.tree.request_stop();
         }
 
         let deadline = Instant::now() + TERM_GRACE;
@@ -176,7 +211,7 @@ impl Supervisor {
         for tracked in children.iter_mut() {
             if matches!(tracked.child.try_wait(), Ok(None)) {
                 logging::write("shell", &format!("{} did not stop, killing", tracked.name));
-                signal_group(tracked.pgid, libc::SIGKILL);
+                tracked.tree.kill();
             }
             let _ = tracked.child.kill();
             let _ = tracked.child.wait();
@@ -245,28 +280,6 @@ fn shutdown_token() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn signal_group(pgid: i32, sig: i32) {
-    if pgid > 1 {
-        // SAFETY: a plain kill(2) on a process group we created.
-        unsafe { libc::killpg(pgid, sig) };
-    }
-}
-
-fn alive(pid: i32) -> bool {
-    // SAFETY: signal 0 performs error checking without sending anything.
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-/// What is actually running under this pid, as the kernel sees it.
-fn executable_of(pid: i32) -> Option<String> {
-    let out = Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!path.is_empty()).then_some(path)
-}
-
 /// Kill anything a previous run left behind, before opening the library.
 ///
 /// A crash or force-quit never delivers `RunEvent::Exit`, so the children
@@ -298,11 +311,7 @@ pub fn reap_leftovers(data_dir: &Path) {
                     record.name, record.pid
                 ),
             );
-            signal_group(record.pgid, libc::SIGTERM);
-            std::thread::sleep(Duration::from_millis(500));
-            if alive(record.pid) {
-                signal_group(record.pgid, libc::SIGKILL);
-            }
+            luminary_host::kill_stale_tree(record.pid, record.pgid);
         } else {
             logging::write(
                 "shell",
@@ -412,20 +421,7 @@ fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
 
 /// Physical RAM in GB, or `None` if the kernel will not say.
 fn total_memory_gb() -> Option<u64> {
-    let mut bytes: u64 = 0;
-    let mut len = std::mem::size_of::<u64>();
-    let name = c"hw.memsize";
-    // SAFETY: a read-only sysctl into a stack u64 whose size we pass by value.
-    let rc = unsafe {
-        libc::sysctlbyname(
-            name.as_ptr(),
-            (&mut bytes as *mut u64).cast(),
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    (rc == 0 && bytes > 0).then_some(bytes / 1_073_741_824)
+    luminary_host::total_memory_bytes().map(|bytes| bytes / 1_073_741_824)
 }
 
 /// How many requests the bundled Ollama serves concurrently (I-31).
@@ -489,7 +485,7 @@ pub fn spawn_ollama(
     data_dir: &Path,
     port: u16,
 ) -> Result<(), String> {
-    let binary = stage.join("ollama/ollama");
+    let binary = stage.join(OLLAMA_BINARY);
     if !binary.is_file() {
         return Err(format!("no ollama binary at {binary:?}"));
     }
@@ -513,21 +509,21 @@ pub fn spawn_ollama(
             ollama_max_loaded_models(data_dir).to_string(),
         )
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Its model runners are its own children; a new group lets us take the
-        // whole tree down at once.
-        .process_group(0);
+        .stderr(Stdio::piped());
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start ollama: {e}"))?;
-    let pgid = child.id() as i32;
+    let tree = luminary_host::adopt(&child);
     let tail = stream_output(&mut child, "ollama");
     sup.track(Tracked {
+        // Ollama has no stop endpoint, so it takes the signal. On Windows that
+        // means it is terminated: there is no polite alternative, and it holds
+        // no store of ours to corrupt.
         stop: None,
         name: "ollama",
         child,
-        pgid,
+        tree,
         exe: binary,
         tail,
     });
@@ -541,7 +537,7 @@ pub fn spawn_backend(
     port: u16,
     ollama_port: u16,
 ) -> Result<(), String> {
-    let python = stage.join("python/bin/python3.13");
+    let python = stage.join(PYTHON_BINARY);
     if !python.is_file() {
         return Err(format!("no interpreter at {python:?}"));
     }
@@ -584,18 +580,17 @@ pub fn spawn_backend(
         .env("LUMINARY_PARENT_PID", std::process::id().to_string())
         .env("LUMINARY_SHUTDOWN_TOKEN", &token)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+        .stderr(Stdio::piped());
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start backend: {e}"))?;
-    let pgid = child.id() as i32;
+    let tree = luminary_host::adopt(&child);
     let tail = stream_output(&mut child, "backend");
     sup.track(Tracked {
         name: "backend",
         child,
-        pgid,
+        tree,
         exe: python,
         tail,
         stop: (!token.is_empty()).then_some(StopRequest { port, token }),
@@ -605,25 +600,32 @@ pub fn spawn_backend(
 
 /// Console scripts the backend spawns by name (yt-dlp) plus the system minimum.
 fn bundled_path(stage: &Path) -> String {
-    let mut parts: Vec<PathBuf> = vec![stage.join("python/bin")];
-    parts.push(PathBuf::from("/usr/bin"));
-    parts.push(PathBuf::from("/bin"));
+    let mut parts: Vec<PathBuf> = vec![stage.join(SCRIPTS_DIR)];
+    parts.extend(SYSTEM_PATH.iter().map(PathBuf::from));
     parts
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
-        .join(":")
+        .join(PATH_SEPARATOR)
 }
 
 /// Start from an empty environment so a user's DYLD_*, PYTHON* or VIRTUAL_ENV
 /// cannot reach either child, then add back only what is needed.
+///
+/// The allow-list is per-platform because what "needed" means is: unix wants
+/// `HOME`, and Windows needs `SystemRoot` and a temp directory before CPython
+/// will start at all -- `_bootlocale`, `tempfile` and every DLL load path are
+/// resolved through them. Carrying `PATH` over is pointless in both cases;
+/// each caller sets its own.
 fn base_env(cmd: &mut Command) -> &mut Command {
     cmd.env_clear();
-    if let Ok(home) = std::env::var("HOME") {
-        cmd.env("HOME", home);
+    for key in INHERITED_ENV {
+        if let Ok(value) = std::env::var(key) {
+            cmd.env(key, value);
+        }
     }
-    cmd.env("PATH", "/usr/bin:/bin");
-    cmd
+    cmd.env("PATH", SYSTEM_PATH.join(PATH_SEPARATOR));
+    luminary_host::before_spawn(cmd)
 }
 
 #[cfg(test)]
@@ -802,7 +804,7 @@ mod tests {
         // 16GB is the supported floor and the band `MAX_RESIDENT` uses; this
         // sat at 24 after the floor moved, so a 24GB DMG got one slot while the
         // backend resolved a pair against it.
-        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        let gb = total_memory_gb().expect("every supported host reports its RAM");
         assert_eq!(ollama_max_loaded_models(&dir), if gb >= 16 { 2 } else { 1 });
 
         std::fs::write(dir.join(".env"), b"OLLAMA_MAX_LOADED_MODELS=2\n").unwrap();
@@ -828,7 +830,7 @@ mod tests {
 
     #[test]
     fn memory_sizing_never_opts_a_small_machine_into_a_second_kv_cache() {
-        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        let gb = total_memory_gb().expect("every supported host reports its RAM");
         assert!(gb >= 4, "implausible RAM reading: {gb}GB");
 
         let dir = std::env::temp_dir().join(format!("luminary-envmem-{}", std::process::id()));

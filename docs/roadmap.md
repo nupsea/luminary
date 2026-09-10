@@ -547,9 +547,8 @@ by platform-pinned tests, five of which redden when the Windows branch is remove
 calls the real probe on whatever host is running it and asserts no verdict. `windows-host-policy`
 in `ci.yml` runs `uv sync --frozen`, an import of `app.main`, and those tests on `windows-latest`.
 `--frozen` deliberately: a lock that does not resolve on Windows is the defect the job exists to
-surface, and `install.ps1` runs the same step on every Windows install. Every package in the lock
-has a Windows wheel or is excluded there (`uvloop` is gated `sys_platform != 'win32'`), which is why
-this is expected to pass — but no part of it has executed on a Windows runner yet.
+surface, and `install.ps1` runs the same step on every Windows install. **It runs green**: the lock
+resolves on Windows, `app.main` imports, and the policy answers there.
 
 **What the job does not claim is the rung.** It proves the dependency step resolves, the app
 imports, and the policy answers. `make ci` and `make smoke` green on Windows are this rung's exit
@@ -572,21 +571,39 @@ has no SIGTERM. It runs on macOS too, because a path taken only where nobody can
 nobody tests. What accepts is deliberately not also signalled: a second SIGTERM while uvicorn is
 unwinding sets its `force_exit` and abandons the drain.
 
-**Windows still has no process groups, so the supervisor would orphan its children.** `supervisor.rs`
-signals with `libc::killpg` and `std::os::unix::process::CommandExt`, `main.rs` uses `ExitStatusExt`,
-`stage.rs` calls `statvfs`, and `total_memory_gb` calls `sysctlbyname`, which is macOS-only. Tauri
-does not clean up sidecar grandchildren for you. The substitute is a Job Object with
-`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the kernel kills Python and Ollama when the shell's handle
-closes, including on a crash, which is the case no shutdown hook covers — the polite request above
-is the normal path, and the job is the net under it. `icons/icon.ico` now exists, so a Windows build
-reaches the compiler instead of panicking in `tauri-build`. `tauri.conf.json` targets `["app"]` and
-gains NSIS and AppImage.
+**A process tree is a Job Object on Windows, and the shell now kills one either way.** Windows has
+no process group a GUI binary can reach: console control events need a console shared with the
+target, and the shell is `windows_subsystem = "windows"`. Each child gets its own job with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so Python, Ollama and the model runners die when the last
+handle closes — including on a crash or a force-quit, the case no shutdown hook covers. The polite
+request above is the normal path; the job is the net under it. There is no polite signal there, so
+`request_stop` terminates rather than waiting out a grace period that could only end in the same
+call, which is why the backend must be asked over HTTP first.
 
-**The Windows arm lands with the job that compiles it.** `cargo check` for
-`x86_64-pc-windows-msvc` needs `llvm-rc`, which no machine here has, so a `#[cfg(windows)]` block is
-invisible to every runner this repo has. A `desktop-shell-windows` job is what makes it real, and it
-ships in the same commit as the code — never ahead of it, which would only put a known-red job on
-master.
+**The platform half is its own crate, `src-tauri/host`, because the shell cannot be compiled for
+Windows here.** `tauri-build` needs a resource compiler macOS does not have, so a `#[cfg(windows)]`
+block inside `luminary-desktop` is invisible to every developer machine. `luminary-host` has no
+Tauri dependency, and `cargo clippy --target x86_64-pc-windows-msvc -p luminary-host` runs anywhere
+— it is part of `make desktop-test`. Keep it that way: a Windows branch only CI can see is a branch
+nobody reads before pushing.
+
+**`desktop-shell-windows` executes the mechanism, it does not merely compile it.** The job runs
+`cargo test --workspace` on `windows-latest`, and `host/tests/tree.rs` spawns a child that spawns a
+grandchild and asserts the grandchild dies with the tree — the defect the job object exists to
+prevent, and one `cargo check` could never see. The same tests run on macOS against process groups.
+The job shipped in the same commit as the code that makes it pass.
+
+**The rest of the platform seams moved with it.** `stage.rs` and `total_memory_gb` had `statvfs` and
+`sysctlbyname` hardcoded; `main.rs` read a signal number through `ExitStatusExt`. `base_env` cleared
+the environment and added back `HOME` — on Windows CPython does not start without `SystemRoot`, and
+`PATH` is `;`-separated. The log had no directory at all there (`%LOCALAPPDATA%\Luminary\Logs`
+now), and `report.rs` scrubbed only `HOME`, so every Windows bug report would have carried
+`C:\Users\<their name>` in every path unredacted.
+
+**No Windows payload exists yet.** `make stage` builds a macOS tree, `tauri.conf.json` targets
+`["app"]`, and the staged binary names are the only Windows-shaped thing in place
+(`python/python.exe`, `ollama/ollama.exe`). NSIS, `.msi`, AppImage and `.deb` targets are what
+remain, and `make ci` and `make smoke` green on Windows are the exit gate rather than any job above.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows

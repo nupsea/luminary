@@ -4,10 +4,23 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
+/// The staged interpreter. Windows lays python-build-standalone out flat --
+/// no `bin/`, no version in the name -- so this is not one path with a suffix.
+#[cfg(windows)]
+pub const PYTHON_BINARY: &str = "python/python.exe";
+#[cfg(not(windows))]
+pub const PYTHON_BINARY: &str = "python/bin/python3.13";
+
+/// The staged model server.
+#[cfg(windows)]
+pub const OLLAMA_BINARY: &str = "ollama/ollama.exe";
+#[cfg(not(windows))]
+pub const OLLAMA_BINARY: &str = "ollama/ollama";
+
 /// Every piece the shell needs before it is worth spawning anything.
 const REQUIRED: [&str; 4] = [
     "surface-manifest.json",
-    "python/bin/python3.13",
+    PYTHON_BINARY,
     "backend/app",
     "frontend",
 ];
@@ -69,23 +82,9 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Free bytes on the volume holding `path`, if it can be determined.
-pub fn free_space(path: &Path) -> Option<u64> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-
-    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: a valid NUL-terminated path and an owned, correctly sized struct.
-    if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
-        return None;
-    }
-    Some(stat.f_bavail as u64 * stat.f_frsize as u64)
-}
-
 /// A human-readable warning when the disk is too full to finish first run.
 pub fn space_warning(data_dir: &Path) -> Option<String> {
-    let free = free_space(data_dir)?;
+    let free = luminary_host::free_space(data_dir)?;
     if free >= MIN_FREE_BYTES {
         return None;
     }
@@ -110,8 +109,8 @@ mod tests {
         }
         assert!(missing_pieces(&dir).is_empty());
 
-        std::fs::remove_file(dir.join("python/bin/python3.13")).unwrap();
-        assert_eq!(missing_pieces(&dir), vec!["python/bin/python3.13"]);
+        std::fs::remove_file(dir.join(PYTHON_BINARY)).unwrap();
+        assert_eq!(missing_pieces(&dir), vec![PYTHON_BINARY]);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -126,6 +125,6 @@ mod tests {
 
     #[test]
     fn free_space_is_readable_for_a_real_directory() {
-        assert!(free_space(&std::env::temp_dir()).is_some_and(|b| b > 0));
+        assert!(luminary_host::free_space(&std::env::temp_dir()).is_some_and(|b| b > 0));
     }
 }

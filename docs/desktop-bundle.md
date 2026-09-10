@@ -64,11 +64,21 @@ A crash or force-quit never delivers `RunEvent::Exit`, so "killed on exit" alone
 is not enough. Four mechanisms overlap, because no single one covers every way a
 process can end:
 
-1. Both children are spawned with `process_group(0)` and signalled as a group,
-   which also catches Ollama's model runners — its own children, which used to
-   survive a kill of their parent.
-2. Shutdown is SIGTERM, a grace period, then SIGKILL. SIGKILL alone leaves
-   SQLite's WAL unmerged.
+1. Both children are tracked as a tree, which also catches Ollama's model
+   runners — its own children, which used to survive a kill of their parent. On
+   unix that is `process_group(0)` plus `killpg`. Windows has no process group a
+   GUI binary can reach, so each child gets a Job Object with
+   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the kernel kills its members when the
+   last handle closes, which is the only mechanism there that survives a parent
+   with no chance to run code. Both live in `src-tauri/host` and are exercised
+   by `host/tests/tree.rs` on whichever platform runs it.
+2. Shutdown asks, waits, then kills. The backend is asked over HTTP
+   (`POST /setup/shutdown`, per-launch secret) and what accepts is **not** also
+   signalled — a second SIGTERM while uvicorn is unwinding sets `force_exit` and
+   abandons the drain. What refuses gets SIGTERM, a grace period, then SIGKILL;
+   SIGKILL alone leaves SQLite's WAL unmerged. **Windows has no polite signal**,
+   so the HTTP ask is the only graceful path there and anything that declines it
+   is terminated.
 3. The backend watches `LUMINARY_PARENT_PID` (`backend/app/parent_watch.py`) and
    stops itself if the shell disappears. This is the only mechanism that works
    when the shell had no chance to run code at all.
@@ -94,9 +104,11 @@ migration or a bad `DATA_DIR` means the port never opens — which as a pure TCP
 poll looked identical to a slow start for three minutes and then reported
 nothing useful.
 
-Everything goes to `~/Library/Logs/Luminary/luminary.log` (rotated, 3 kept),
-deliberately not under `DATA_DIR`: an unwritable library is itself a failure
-worth logging. The failure screen offers a redacted diagnostic report and a
+Everything goes to a log outside `DATA_DIR` (rotated, 3 kept), deliberately so:
+an unwritable library is itself a failure worth logging. macOS
+`~/Library/Logs/Luminary/luminary.log`, Windows
+`%LOCALAPPDATA%\Luminary\Logs`, Linux `$XDG_STATE_HOME/luminary` falling back
+to `~/.local/state/luminary`. The failure screen offers a redacted diagnostic report and a
 pre-filled GitHub issue, opened from Rust so no window is granted the ability to
 open arbitrary URLs. Redaction is tested in `src-tauri/src/report.rs`.
 
@@ -108,8 +120,13 @@ a bug rather than a damaged install.
 
 `make desktop-dev` runs it against `build/stage`; `make desktop-app` produces an
 unsigned `Luminary.app` and refuses to run against an incomplete stage.
-`make desktop-test` runs the crate's tests and clippy, which CI also does on
-`macos-14` — ordinary `make ci` is ubuntu-only and cannot build this crate.
+`make desktop-test` runs the workspace's tests and clippy, plus clippy for
+`x86_64-pc-windows-msvc` on `luminary-host` alone. That last one is the only
+Windows compile available locally: `tauri-build` needs a resource compiler macOS
+does not have, which is why every platform-specific piece lives in that crate
+rather than behind `#[cfg(windows)]` inside the shell. CI runs the whole
+workspace on `macos-14` and `windows-latest` — ordinary `make ci` is ubuntu-only
+and cannot build this crate at all.
 
 The app icon in `src-tauri/icons/` is a placeholder generated from the web
 logo and needs replacing with real artwork before release.
