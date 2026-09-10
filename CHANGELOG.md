@@ -4,6 +4,18 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Luminary checks whether your machine can run a local model, and says so.**
+  An Intel Mac through Docker decodes at ~6 tok/s and takes ~121s to answer one
+  question; the native installers already refused that host, and Docker was the
+  remaining door. On an unsupported system the library still opens -- reading,
+  search, notes and the learner record need no fast model -- and a banner names
+  the API-key arm and the hosted version coming after 1.0.0. The check is for the
+  accelerator, never for Docker: a container with a GPU passed through is a
+  first-class host, and a bare-metal box without one is not.
+
 ## [0.11.1] - 2026-09-10
 
 ### Added

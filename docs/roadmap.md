@@ -181,6 +181,22 @@ the write path already falls back to a plaintext row in the library database.
 `keyring_available` reports which of the two will happen, and the sentence
 follows it. README carries the same split per install path.
 
+**Supported hosts are now a policy the code enforces, not a hope.** Luminary
+promises a local model, and a host with no accelerator cannot keep that promise:
+an Intel Mac through Docker decodes at ~6 tok/s, ~121s for one question, ~143s to
+enrich a 128-page book. `install.sh` and `bootstrap.sh` already refused macOS
+x86_64 (no lancedb wheel, and none for torch past 2.2.2 either); the container was
+the remaining door, and Docker Desktop on macOS is a Linux VM that is never handed
+Metal or the Neural Engine. `app/host_support.py` refuses on three grounds --
+Intel Mac, no accelerator, or under `_STANDARD_MIN_RAM_GB` -- and `HostSupportBanner`
+states it wherever the user is. **The check is the accelerator, never the install
+method**: refusing Docker as a class would refuse Linux with the NVIDIA container
+toolkit, which is the fastest way to run this app and the shape a hosted Luminary
+will be deployed in. `test_host_support.py` fails CI if a container with a GPU is
+refused, and S251 guards the wire contract. The compose stack still reserves no
+GPU device, so as shipped every container fails this check -- that reservation is
+the open work here.
+
 ### 2. The docked reader — 0.11.0
 
 **The reader's work used to open over the text it was about.** The note composer was a dialog, the

@@ -56,8 +56,26 @@ macOS 14 (Sonoma) or newer.
 > **Speech to text** — which powers audio ingest and voice dictation — is another
 > the app fetches on request, because it carries GPL code Luminary may not ship.
 
-On Linux, Windows, Intel Mac, or want it as a background service?
+On Linux, Windows, or want it as a background service?
 **[Every other install path is below.](#other-ways-to-install)**
+
+### What Luminary needs
+
+Luminary runs a model on your machine, so it checks that your machine can
+actually do that — and tells you plainly when it cannot, instead of letting you
+find out over two minutes of waiting.
+
+| | |
+|---|---|
+| **Supported** | Apple Silicon Mac · Linux or Windows with an NVIDIA or AMD GPU · a container **with a GPU passed through** (Linux + NVIDIA Container Toolkit, or WSL2), with at least 16 GB of memory |
+| **Not supported** | **Intel Mac** · Docker on any Mac, where no GPU passes through and none ever will · any host with no accelerator · under the 16 GB floor |
+
+The check is for the accelerator, never for Docker: a container with a GPU is a
+first-class host, and a bare-metal box without one is not. On an unsupported
+system Luminary still opens your library — reading, search, notes, highlights
+and your whole learner record are unaffected — and says that local models will
+not perform there. **A hosted version, where none of this is your machine's
+problem, is the plan for after 1.0.0.**
 
 ---
 
@@ -252,127 +270,30 @@ docker compose --profile ai up --build
 </details>
 
 <details>
-<summary><b>macOS (Intel / x86_64) — via Docker</b></summary>
+<summary><b>macOS (Intel / x86_64) — not supported</b></summary>
 
-Intel Macs have no native `lancedb` wheel, so `make install` cannot run there.
-Everything below is the Docker path. Apple Silicon Macs use the native path above.
+**Intel Macs cannot run Luminary well, and it no longer pretends otherwise.**
 
-**Install first**
+There is no native install: `lancedb` publishes no macOS x86_64 wheel, and
+neither does `torch` past 2.2.2, so `make install` and `bootstrap.sh` both refuse
+before they start. Docker was the remaining route and it leads somewhere worse.
+Docker Desktop on macOS is a Linux VM under Apple's Virtualization.framework,
+and **neither Metal nor the Neural Engine is exposed to it** — on any Mac,
+Intel or Apple Silicon. There is no setting that fixes this. Measured on an
+i7-8850H: `qwen3.5:4b` at ~6 tok/s, ~121s for one question, ~143s to enrich a
+128-page book.
 
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/), running —
-   check its memory and disk against
-   [Running under Docker](#running-under-docker) before the first build.
-   **Keep it current.** The compose targets need a stable `docker compose` (v2 or
-   later, not a pre-release) and **buildx 0.17.0 or later**, both of which ship
-   inside the Docker Desktop bundle. `make docker-run…` checks each and refuses
-   with the fix rather than hanging. Verify with:
+Luminary now checks the machine rather than the installer, and says so plainly
+rather than letting you discover it over two minutes of waiting.
 
-   ```bash
-   docker compose version   # must not say alpha/beta/rc
-   docker buildx version    # must be >= v0.17.0
-   ```
+**What still works.** Reading, search, notes, highlights, the graph and your
+whole learner record are unaffected — none of them needs a fast model. Add an
+OpenAI, Anthropic or Google key in Settings and answers and flashcards work
+properly too, because only synthesis is routed; see
+[Faster answers, if you want them](#faster-answers-if-you-want-them).
 
-   On a Docker Desktop too old to upgrade in place, you can override just these
-   two plugins — the CLI prefers `~/.docker/cli-plugins` over the app bundle:
-
-   ```bash
-   brew install docker-compose docker-buildx
-   mkdir -p ~/.docker/cli-plugins
-   ln -sfn "$(brew --prefix)/opt/docker-compose/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
-   ln -sfn "$(brew --prefix)/opt/docker-buildx/bin/docker-buildx"   ~/.docker/cli-plugins/docker-buildx
-   ```
-
-   A 2021 Docker Desktop failed twice this way — its compose created the
-   container and never started it, and its buildx was refused by a current
-   compose — while its daemon was fine. Upgrading Desktop fixes both at once.
-2. [Homebrew](https://brew.sh), then `brew install ollama` — only for the
-   recommended path; the all-in-Docker path needs nothing but Docker.
-
-**Recommended: inference on the host, app in Docker**
-
-The container is already running the embedder, reranker and entity model inside
-Docker's Linux VM; putting Ollama there too makes them compete for one capped
-CPU allowance. On the host it gets the whole machine, and it is the only latency
-change measured so far that costs nothing in answer quality.
-
-```bash
-# terminal 1 — Ollama must listen beyond loopback, or the container cannot
-# reach it. It binds 127.0.0.1 by default; the container arrives via the bridge.
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-
-# terminal 2
-ollama pull qwen3.5:4b
-git clone https://github.com/nupsea/luminary.git
-cd luminary
-make docker-run-host-ollama
-```
-
-The target refuses to start rather than fail obscurely: it checks that Ollama
-answers, that it is **not** bound to loopback only, and that the model is
-present — the model sidecar does not run in this topology, so nothing else
-will fetch it for you.
-
-**Simplest: everything in Docker**
-
-No Homebrew, no host Ollama. One command, and the model is pulled for you into
-a Docker volume on first run. Good for trying Luminary; slow for real ingestion
-— see [Running under Docker](#running-under-docker):
-
-```bash
-git clone https://github.com/nupsea/luminary.git
-cd luminary
-make docker-run
-```
-
-*(or directly via compose: `docker compose --profile ai up --build`)*
-
-Either way, open http://localhost:7820. First run pulls a ~3.4 GB model and
-builds the image, so give it time.
-
-**Fastest on Intel: point generation at a hosted model**
-
-Both options above run generation on an Intel CPU with no GPU, and that is the
-whole of the cost. Measured on an i7-8850H: `qwen3.5:4b` decodes at ~6 tok/s, a
-question takes ~121s end to end, five flashcards ~118s, and enriching a
-128-page book ~143s. Nothing in the retrieval stack is slow — search is
-milliseconds — the model is. **If this is your first look at Luminary on an
-Intel Mac, use a hosted model for generation.** Everything else still runs on
-your machine: ingestion, embeddings, search, the graph and your library never
-leave it.
-
-```bash
-# in .env beside the compose file — a Docker container has no OS keyring, so a
-# key saved in Settings would be stored in the database as plain text
-LITELLM_DEFAULT_MODEL=openai/gpt-4o
-OPENAI_API_KEY=sk-...
-```
-
-The trade is explicit and worth stating: your question and the passages
-retrieved for it go to that provider. Nothing else does, and Private mode turns
-it off entirely — see [Choosing a model](#choosing-a-model). Apple Silicon does
-not need this; local generation there is comfortable.
-
-**If answering feels slow**
-
-```bash
-bash scripts/diagnose-slow-host.sh
-```
-
-One command, one paste: which build is running, whether this host measured
-itself slow at start-up, which context budget that resolved to, and where a
-real question's seconds went. It starts nothing and changes nothing.
-
-Expect single-digit tokens per second either way (see
-[Running under Docker](#running-under-docker)). On an Intel i7-8850H with host
-Ollama, `qwen3.5:4b` decodes at ~6 tok/s, so answer length is what you feel most.
-
-Audio, video, YouTube ingestion and voice dictation are **off** in this image —
-ffmpeg and a transcriber are GPL, so they never travel inside anything Luminary
-distributes.
-The image is built on your machine, so you can opt in with
-`WITH_MEDIA=1 docker compose --profile ai up --build` (+850 MB). Installing
-ffmpeg on the Mac itself does nothing: the backend is a Linux container and
-cannot see the host's `PATH`.
+**What is coming.** A hosted version of Luminary, where none of this is your
+machine's problem. That is the plan for after 1.0.0.
 </details>
 
 > First launch is slow because it downloads ML models. Every launcher polls the

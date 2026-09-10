@@ -38,6 +38,26 @@ async def environment_report_endpoint() -> dict:
     return {"environment": await environment_report()}
 
 
+@router.get("/host-support")
+async def host_support() -> dict:
+    """Whether this machine can run local models at a speed worth offering.
+
+    Separate from `/capabilities`, which answers what this *build* can do. This
+    answers what this *host* can do, and it is the only place the support policy
+    is stated -- the native installers refuse macOS x86_64 before they get this
+    far, so the case this endpoint exists for is the container.
+    """
+    from app.host_support import local_inference_support  # noqa: PLC0415
+
+    verdict = local_inference_support()
+    return {
+        "supported": verdict.supported,
+        "reason": verdict.reason,
+        "host": verdict.detail,
+        "message": verdict.message,
+    }
+
+
 @router.get("/capabilities")
 async def list_capabilities() -> dict:
     """What the UI may offer. Keeps it from advertising what this build cannot do."""

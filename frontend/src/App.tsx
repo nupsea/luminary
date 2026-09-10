@@ -9,6 +9,7 @@ import {
 import type { QueryKey } from "@tanstack/react-query"
 import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
+import { HostSupportBanner } from "@/components/HostSupportBanner"
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary"
 import { UploadDialog } from "@/components/library/UploadDialog"
 import { WindowDropZone } from "@/components/library/WindowDropZone"
@@ -568,6 +569,9 @@ function AppShell() {
           while starting below a banner, and the strip that fell off the end was
           the docked panel's footer: its mic, Open full note and Done. */}
       <main className="relative flex h-full min-h-0 flex-1 flex-col overflow-auto animate-[fadeIn_0.2s_ease-out]">
+        {/* Above the Ollama warning: on a host that cannot run a local model at
+            all, "Ollama is unavailable" is a symptom and this is the cause. */}
+        <HostSupportBanner />
         {ollamaUnavailable && !ollamaWarningDismissed && (
           <div className="mx-4 mt-2 flex shrink-0 items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle size={14} className="shrink-0" />

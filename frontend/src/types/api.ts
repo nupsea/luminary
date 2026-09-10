@@ -4917,6 +4917,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/setup/host-support": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Host Support
+         * @description Whether this machine can run local models at a speed worth offering.
+         *
+         *     Separate from `/capabilities`, which answers what this *build* can do. This
+         *     answers what this *host* can do, and it is the only place the support policy
+         *     is stated -- the native installers refuse macOS x86_64 before they get this
+         *     far, so the case this endpoint exists for is the container.
+         */
+        get: operations["host_support_setup_host_support_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/setup/capabilities": {
         parameters: {
             query?: never;
@@ -19310,6 +19335,28 @@ export interface operations {
         };
     };
     environment_report_endpoint_setup_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    host_support_setup_host_support_get: {
         parameters: {
             query?: never;
             header?: never;
