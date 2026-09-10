@@ -1929,6 +1929,7 @@ name = "luminary-desktop"
 version = "0.11.2"
 dependencies = [
  "chrono",
+ "getrandom 0.3.4",
  "libc",
  "percent-encoding",
  "regex",

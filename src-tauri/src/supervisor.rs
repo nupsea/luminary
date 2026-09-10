@@ -1,8 +1,8 @@
 //! Spawns, supervises and reaps the backend and the local model server.
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -24,6 +24,19 @@ const TERM_GRACE: Duration = Duration::from_secs(6);
 /// Processes we spawned last time, so a crash cannot strand them.
 const RUNTIME_FILE: &str = ".runtime.json";
 
+/// Bound on the whole stop request. It runs on the quit path, so a backend that
+/// is wedged rather than listening may not add seconds to closing the window.
+const ASK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How to ask a child to stop before signalling it.
+///
+/// Only the backend has one: it serves HTTP on a port we chose and we hand it
+/// the secret at spawn. Ollama has no equivalent and takes the signal.
+struct StopRequest {
+    port: u16,
+    token: String,
+}
+
 struct Tracked {
     name: &'static str,
     child: Child,
@@ -31,6 +44,7 @@ struct Tracked {
     pgid: i32,
     exe: PathBuf,
     tail: Arc<Mutex<VecDeque<String>>>,
+    stop: Option<StopRequest>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,10 +123,21 @@ impl Supervisor {
 
     /// Terminate both children and everything they spawned.
     ///
-    /// SIGTERM to the whole process group first: ollama's model runners are its
-    /// children, and killing only the leader used to strand them. The grace
-    /// period matters because SIGKILL leaves SQLite's WAL unmerged and Kuzu's
-    /// exclusive lock is only released when the holder actually dies.
+    /// Ask, then signal, then kill. The backend is asked over HTTP because
+    /// **Windows has no SIGTERM**, and that request is what runs `lifespan`'s
+    /// shutdown there at all -- the enrichment worker drains, ingestion jobs
+    /// cancel, and every task registry empties before the database closes.
+    /// Skipping it cuts post-ingest work mid-write and leaves SQLite, LanceDB
+    /// and Kuzu disagreeing.
+    ///
+    /// It runs on macOS too, deliberately: a path taken only on the platform
+    /// nobody here can test is a path nobody tests.
+    ///
+    /// SIGTERM goes to the whole process group, not the leader: ollama's model
+    /// runners are its children and killing only the leader used to strand
+    /// them. The grace period matters because SIGKILL leaves SQLite's WAL
+    /// unmerged and Kuzu's exclusive lock is only released when the holder
+    /// actually dies.
     pub fn shutdown(&self) {
         let Ok(mut children) = self.children.lock() else {
             return;
@@ -122,6 +147,17 @@ impl Supervisor {
         }
 
         for tracked in children.iter() {
+            // A second SIGTERM while uvicorn is already unwinding sets its
+            // `force_exit` and abandons the drain -- the exact work this
+            // request exists to run. So what accepts is not also signalled;
+            // the deadline below is what covers a backend that lied.
+            if tracked.stop.as_ref().is_some_and(ask_to_stop) {
+                logging::write(
+                    "shell",
+                    &format!("{} accepted the stop request", tracked.name),
+                );
+                continue;
+            }
             logging::write("shell", &format!("stopping {}", tracked.name));
             signal_group(tracked.pgid, libc::SIGTERM);
         }
@@ -139,10 +175,7 @@ impl Supervisor {
 
         for tracked in children.iter_mut() {
             if matches!(tracked.child.try_wait(), Ok(None)) {
-                logging::write(
-                    "shell",
-                    &format!("{} ignored SIGTERM, killing", tracked.name),
-                );
+                logging::write("shell", &format!("{} did not stop, killing", tracked.name));
                 signal_group(tracked.pgid, libc::SIGKILL);
             }
             let _ = tracked.child.kill();
@@ -157,6 +190,59 @@ impl Supervisor {
             }
         }
     }
+}
+
+/// Ask a child to stop politely, over the port we gave it. True if it accepted.
+///
+/// Best effort by construction: a backend that is already dead, still starting,
+/// or wedged refuses the connection or never answers, and the caller falls
+/// through to the signal. Every step is bounded by `ASK_TIMEOUT`, because this
+/// runs between the user clicking close and the window going away.
+///
+/// Written by hand rather than through an HTTP client: one fixed request to
+/// loopback with a known body length does not justify pulling a client and its
+/// TLS stack into a shell that makes no other request.
+fn ask_to_stop(stop: &StopRequest) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], stop.port));
+    let Ok(mut socket) = TcpStream::connect_timeout(&addr, ASK_TIMEOUT) else {
+        return false;
+    };
+    let _ = socket.set_write_timeout(Some(ASK_TIMEOUT));
+    let _ = socket.set_read_timeout(Some(ASK_TIMEOUT));
+
+    let request = format!(
+        "POST /setup/shutdown HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         X-Luminary-Shutdown-Token: {token}\r\n\
+         Content-Length: 0\r\n\
+         Connection: close\r\n\r\n",
+        port = stop.port,
+        token = stop.token,
+    );
+    if socket.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    // 202 and nothing else. A 403 means the token did not match, which is a
+    // defect worth falling through to the signal rather than papering over.
+    let mut response = String::new();
+    let _ = socket.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 202")
+}
+
+/// A secret only this process and the backend it spawns know.
+///
+/// The API is unauthenticated on localhost and CSRF is deliberately open, so
+/// any page in any tab can POST to the backend. Without this, the shutdown
+/// endpoint would be a button for closing someone else's app.
+fn shutdown_token() -> String {
+    let mut bytes = [0u8; 32];
+    if getrandom::fill(&mut bytes).is_err() {
+        // Never a fixed fallback: a guessable token is worse than no endpoint,
+        // and an empty one is refused by the backend outright.
+        return String::new();
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn signal_group(pgid: i32, sig: i32) {
@@ -438,6 +524,7 @@ pub fn spawn_ollama(
     let pgid = child.id() as i32;
     let tail = stream_output(&mut child, "ollama");
     sup.track(Tracked {
+        stop: None,
         name: "ollama",
         child,
         pgid,
@@ -459,6 +546,7 @@ pub fn spawn_backend(
         return Err(format!("no interpreter at {python:?}"));
     }
 
+    let token = shutdown_token();
     let mut cmd = Command::new(&python);
     base_env(&mut cmd)
         // -I isolates the interpreter: no PYTHONPATH, no PYTHONHOME, no user
@@ -494,6 +582,7 @@ pub fn spawn_backend(
         // Lets the backend exit on its own if this process dies without ever
         // getting the chance to stop it.
         .env("LUMINARY_PARENT_PID", std::process::id().to_string())
+        .env("LUMINARY_SHUTDOWN_TOKEN", &token)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
@@ -509,6 +598,7 @@ pub fn spawn_backend(
         pgid,
         exe: python,
         tail,
+        stop: (!token.is_empty()).then_some(StopRequest { port, token }),
     });
     Ok(())
 }
@@ -539,6 +629,96 @@ fn base_env(cmd: &mut Command) -> &mut Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A backend that answers once with `status`, and reports what it was sent.
+    ///
+    /// A real socket, because the request is hand-written: a missing blank line
+    /// or a wrong header name is invisible to a mocked writer and fatal here.
+    fn fake_backend(status: &'static str) -> (u16, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = String::new();
+            let mut buf = [0u8; 512];
+            // Read until the headers end. Content-Length is 0, so that is all.
+            while let Ok(n) = socket.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                request.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if request.contains("\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = tx.send(request);
+            let _ = socket
+                .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes());
+        });
+        (port, rx)
+    }
+
+    #[test]
+    fn a_backend_that_accepts_is_not_also_signalled() {
+        let (port, sent) = fake_backend("202 Accepted");
+        let stop = StopRequest {
+            port,
+            token: "the-secret".into(),
+        };
+
+        assert!(ask_to_stop(&stop));
+
+        let request = sent
+            .recv_timeout(Duration::from_secs(5))
+            .expect("no request");
+        assert!(
+            request.starts_with("POST /setup/shutdown HTTP/1.1\r\n"),
+            "{request}"
+        );
+        assert!(
+            request.contains("X-Luminary-Shutdown-Token: the-secret\r\n"),
+            "{request}"
+        );
+        // Without it the server waits for a body that never comes, and the quit
+        // path blocks until the read timeout instead of returning.
+        assert!(request.contains("Content-Length: 0\r\n"), "{request}");
+        assert!(request.ends_with("\r\n\r\n"), "{request}");
+    }
+
+    #[test]
+    fn a_refused_token_falls_through_to_the_signal() {
+        // 403 means the secret did not match, which is a defect. Reporting it as
+        // accepted would leave the backend running and unsignalled.
+        let (port, _sent) = fake_backend("403 Forbidden");
+        assert!(!ask_to_stop(&StopRequest {
+            port,
+            token: "wrong".into()
+        }));
+    }
+
+    #[test]
+    fn nothing_listening_is_not_an_acceptance() {
+        // The ordinary case: the backend already died, or never started.
+        let port = free_port().expect("a free port");
+        assert!(!ask_to_stop(&StopRequest {
+            port,
+            token: "the-secret".into()
+        }));
+    }
+
+    #[test]
+    fn every_launch_gets_its_own_token() {
+        let (a, b) = (shutdown_token(), shutdown_token());
+        assert_eq!(a.len(), 64, "32 bytes, hex");
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        // Header-safe by construction; a token with a newline in it would let
+        // the request carry headers we did not write.
+        assert!(!a.contains(['\r', '\n', ' ', ':']));
+    }
 
     fn record(exe: &str) -> Record {
         Record {
