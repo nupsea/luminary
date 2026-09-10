@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No CI runner is Windows and `conftest` pins the verdict for the suite, so the
   guard is a platform-pinned test; removing the branch turns five of it red.
 
+### Changed
+- **A Linux install no longer downloads 3.9 GB of CUDA it never uses.** PyPI's
+  torch is the CUDA build on Linux x86_64 -- 915.7 MB of torch, fifteen
+  `nvidia-*-cu12` wheels at 3013.9 MB and triton at 188.4 MB -- while
+  `embedder.py` and `retriever_strategies.py` both pass `device="cpu"` and no
+  `cuda` or `mps` reference exists anywhere in `app/`. Linux and Windows now
+  take `torch==2.10.0+cpu` from the PyTorch CPU index: 188.9 MB on Linux, from
+  4118.0 MB. **This buys install size and nothing else** -- no inference gets
+  slower, because none of it was on a GPU. Windows was already CPU-only
+  (113.8 -> 113.7 MB) and gains nothing but the shared version. macOS is
+  unchanged, still PyPI's 2.10.0.
+
 ## [0.11.2] - 2026-09-10
 
 ### Added
