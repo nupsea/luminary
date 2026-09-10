@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the API-key arm and the hosted version coming after 1.0.0. The check is for the
   accelerator, never for Docker: a container with a GPU passed through is a
   first-class host, and a bare-metal box without one is not.
+- **Local model calls are refused on those hosts, not merely flagged.** The
+  refusal sits where a call is issued and reads the model that will actually run,
+  so a pinned local model is refused on the same terms; describing a route is
+  never refused, because role resolution asks what an 8GB host *would* use. A
+  cloud model is never refused -- a key makes the host irrelevant, and that is the
+  way out the message names. `LUMINARY_HOST_SUPPORTED=1` overrides all of it.
+- **`docker-compose.gpu.yml` and `make docker-run-gpu`** hand the model container
+  an NVIDIA GPU, which is the only container setup Luminary supports. Kept as an
+  overlay because a device reservation is not advisory: in the base file it would
+  break every host without a GPU to help the one that has to opt in anyway.
 
 ## [0.11.1] - 2026-09-10
 

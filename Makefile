@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -420,6 +420,13 @@ verify-dock:
 measure-ttft:
 	@echo "Measuring time to first token (requires backend on :7820)..."
 	python3 scripts/measure_ttft.py --runs $(if $(RUNS),$(RUNS),5) $(if $(Q),--question "$(Q)",) $(if $(DOC),--document-id $(DOC),)
+
+# The only supported container topology: the model gets the GPU. Needs the NVIDIA
+# Container Toolkit on the host -- without it compose refuses the device
+# reservation and says so, which is the right failure.
+docker-run-gpu: require-docker require-compose-release
+	@echo "Starting with GPU passthrough (NVIDIA Container Toolkit required)..."
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up $(if $(DETACH),-d,)
 
 smoke-clean:
 	@echo "Removing smoke fixtures from the library (requires backend on :7820)..."

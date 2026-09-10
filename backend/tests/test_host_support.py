@@ -121,3 +121,147 @@ def test_docker_alone_never_decides_it():
         patch("app.memory_profile.host_ram_gb", return_value=64),
     ):
         assert local_inference_support().supported is True
+
+
+# The deployment's own declaration
+#
+# Under compose the model runs in a *sibling* container and `make
+# docker-run-host-ollama` puts it on the host, so the app container has no device
+# node to find however fast inference actually is. The thing that knows is the
+# deployment, and `docker-compose.gpu.yml` says so.
+
+
+def test_a_deployment_can_declare_the_accelerator(host, monkeypatch):
+    monkeypatch.setenv("LUMINARY_HOST_SUPPORTED", "1")
+    v = host("Linux", "aarch64", container=True, accel=False)
+    assert v.supported is True
+    assert "LUMINARY_HOST_SUPPORTED set" in v.detail
+
+
+def test_the_declaration_overrides_even_the_intel_mac_refusal(host, monkeypatch):
+    # An operator who sets it has been told what it means. The refusal is there
+    # to stop a surprise, not to overrule someone who has decided.
+    monkeypatch.setenv("LUMINARY_HOST_SUPPORTED", "1")
+    assert host("Darwin", "x86_64", container=False, accel=False).supported is True
+
+
+def test_a_present_but_empty_declaration_declares_nothing(host, monkeypatch):
+    # An unset compose variable interpolates to "", which must not read as yes.
+    monkeypatch.setenv("LUMINARY_HOST_SUPPORTED", "")
+    assert host("Darwin", "x86_64", container=False, accel=False).supported is False
+
+
+# Refusing the call, not just describing the host
+#
+# The refusal lives at the point a call is issued, keyed on the model that will
+# actually run -- not in `get_effective_routing`, which describes a route as
+# often as it picks one. Raising there broke role resolution, which only asks
+# what an 8GB host *would* resolve to.
+
+
+@pytest.fixture
+def routing(monkeypatch):
+    """Drive llm_mode with the module cache restored afterwards."""
+    from app.services import settings_service as ss
+
+    original = dict(ss._cache)
+    yield ss
+    ss._cache.clear()
+    ss._cache.update(original)
+
+
+def _unsupported():
+    from app.host_support import HostSupport
+
+    return HostSupport(False, "intel_mac", "Darwin/x86_64", "no local models here")
+
+
+@pytest.mark.parametrize("background", [False, True])
+def test_a_local_call_is_refused_on_an_unsupported_host(routing, background):
+    from app.exceptions import DependencyUnavailable
+    from app.services.llm import LLMService
+
+    routing._cache.update({"llm_mode": "private"})
+    with patch("app.host_support.local_inference_support", return_value=_unsupported()):
+        with pytest.raises(DependencyUnavailable) as excinfo:
+            LLMService()._resolve_model(None, background=background)
+    # 503, and carrying why -- a refusal nobody can act on is the failure mode.
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.extra["reason"] == "intel_mac"
+
+
+def test_a_pinned_local_model_is_refused_on_the_same_terms(routing):
+    # An explicit override used to return before any check ran, so pinning the
+    # model was a way around the refusal.
+    from app.exceptions import DependencyUnavailable
+    from app.services.llm import LLMService
+
+    with patch("app.host_support.local_inference_support", return_value=_unsupported()):
+        with pytest.raises(DependencyUnavailable):
+            LLMService()._resolve_model("ollama/qwen3.5:4b", background=False)
+
+
+def test_a_key_still_answers_on_an_unsupported_host(routing):
+    # I-16 and the message both promise this: the cloud arm is the way out the
+    # refusal names, so it must not be refused alongside it.
+    from app.services.llm import LLMService
+
+    routing._cache.update(
+        {
+            "llm_mode": "hybrid",
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-4o-mini",
+            "openai_api_key": "sk-x",
+        }
+    )
+    with patch("app.host_support.local_inference_support", return_value=_unsupported()):
+        model, key = LLMService()._resolve_model(None, background=False)
+    assert model == "openai/gpt-4o-mini"
+    assert key == "sk-x"
+
+
+def test_describing_a_route_is_never_refused(routing):
+    """`get_effective_routing` must answer on an unsupported host.
+
+    Role resolution and the environment report call it to ask what *would* run.
+    Raising there failed `test_a_fresh_install_on_8gb_resolves_every_role_to_one_model`,
+    which asks that question about a host this policy calls unsupported.
+    """
+    routing._cache.update({"llm_mode": "private"})
+    with patch("app.host_support.local_inference_support", return_value=_unsupported()):
+        model, key = routing.get_effective_routing(background=False)
+    assert model.startswith("ollama/")
+    assert key is None
+
+
+def test_a_supported_host_calls_locally_as_before(routing):
+    from app.host_support import HostSupport
+    from app.services.llm import LLMService
+
+    routing._cache.update({"llm_mode": "private"})
+    ok = HostSupport(True, None, "Darwin/arm64", None)
+    with patch("app.host_support.local_inference_support", return_value=ok):
+        model, key = LLMService()._resolve_model(None, background=False)
+    assert model.startswith("ollama/")
+    assert key is None
+
+
+def test_the_refusal_survives_the_llm_service_fallback(routing):
+    """`_resolve_model` falls back to the default local model on any exception.
+
+    That fallback runs on the path a refused host takes, so the check has to sit
+    after it. Before it did, the fallback answered with the very model the
+    refusal exists to stop.
+    """
+    from app.exceptions import DependencyUnavailable
+    from app.services.llm import LLMService
+
+    with (
+        patch(
+            "app.services.settings_service.get_effective_routing",
+            side_effect=RuntimeError("routing blew up"),
+        ),
+        patch("app.host_support.local_inference_support", return_value=_unsupported()),
+    ):
+        with pytest.raises(DependencyUnavailable):
+            LLMService()._resolve_model(None, background=False)

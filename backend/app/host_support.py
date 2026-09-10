@@ -49,6 +49,23 @@ class HostSupport:
     message: str | None
 
 
+# An explicit declaration that inference is accelerated, for the cases a device
+# check cannot see and for the operator who has decided anyway.
+#
+# Two real topologies need it. Under compose, Ollama is a *separate container*:
+# `docker-compose.gpu.yml` hands it the GPU, and the app container -- which is
+# where this check runs -- has no device node to find. `make docker-run-host-ollama`
+# is worse still, with Ollama on the host and the app in a container. In both, the
+# thing that knows an accelerator is serving inference is the deployment, not the
+# process asking. It doubles as the escape hatch for a host that fails the check
+# and whose owner wants it anyway; README says so plainly.
+_DECLARED = "LUMINARY_HOST_SUPPORTED"
+
+
+def _declared_supported() -> bool:
+    return os.environ.get(_DECLARED, "").strip().lower() in ("1", "true", "yes")
+
+
 def _in_container() -> bool:
     """Whether this process is inside a container.
 
@@ -108,6 +125,11 @@ def local_inference_support() -> HostSupport:
     system, machine = platform.system(), platform.machine()
     containerised = _in_container()
     where = f"{system}/{machine}{' in a container' if containerised else ''}"
+
+    # Checked before every refusal, including the Intel Mac one: an operator who
+    # sets this has been told what it means and is not asking to be protected.
+    if _declared_supported():
+        return HostSupport(True, None, f"{where}, {_DECLARED} set", None)
 
     if system == "Darwin" and machine not in ("arm64", "aarch64"):
         return HostSupport(False, "intel_mac", where, UNSUPPORTED_MESSAGE)

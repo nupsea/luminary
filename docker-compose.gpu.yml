@@ -1,0 +1,39 @@
+# GPU passthrough, as an overlay rather than an edit.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up
+#   make docker-run-gpu
+#
+# Kept out of docker-compose.yml deliberately: a `deploy.resources.reservations.devices`
+# block is not advisory. On a host with no GPU, or without the NVIDIA Container
+# Toolkit installed, compose refuses to start the service at all -- so putting it
+# in the base file would break the one path that works everywhere in order to
+# help the one that needs opting into anyway.
+#
+# **This is the only container topology Luminary supports.** Without a GPU the
+# stack runs, and runs badly: measured on an Intel i7-8850H in a 12GB Docker VM,
+# `qwen3.5:4b` loaded in 9.6-155s and one question took 261s. `host_support.py`
+# refuses local inference there rather than let you discover that by waiting.
+#
+# NVIDIA only. AMD needs `/dev/kfd` and `/dev/dri` devices and the `:rocm` image
+# tag instead; it is not covered here because nobody has measured it on this
+# project, and an untested block that fails at `up` is worse than its absence.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  app:
+    environment:
+      # The app container has no device of its own to find, and it is where the
+      # host check runs: under compose the model lives in a *sibling* container.
+      # The deployment is the only thing that knows a GPU is serving inference,
+      # so it says so. Setting this on a stack whose ollama service did not in
+      # fact get a GPU is how you get the slow experience the check exists to
+      # prevent -- which is why it lives in this file and not the base one.
+      - LUMINARY_HOST_SUPPORTED=1

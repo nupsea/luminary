@@ -71,11 +71,27 @@ find out over two minutes of waiting.
 | **Not supported** | **Intel Mac** · Docker on any Mac, where no GPU passes through and none ever will · any host with no accelerator · under the 16 GB floor |
 
 The check is for the accelerator, never for Docker: a container with a GPU is a
-first-class host, and a bare-metal box without one is not. On an unsupported
-system Luminary still opens your library — reading, search, notes, highlights
-and your whole learner record are unaffected — and says that local models will
-not perform there. **A hosted version, where none of this is your machine's
-problem, is the plan for after 1.0.0.**
+first-class host, and a bare-metal box without one is not.
+
+On an unsupported system Luminary opens your library and **refuses to run a local
+model**, rather than taking two minutes to answer. Reading, search, notes,
+highlights and your whole learner record are unaffected. Add an API key and
+answers and flashcards work normally, because only synthesis is routed — though
+ingest enrichment (auto summaries, tags and titles) stays local by design, so it
+stays off. **A hosted version, where none of this is your machine's problem, is
+the plan for after 1.0.0.**
+
+**Docker with a GPU** is the one supported container setup. The base compose
+stack reserves no device, so it is CPU-only and gets refused:
+
+```bash
+make docker-run-gpu      # needs the NVIDIA Container Toolkit on the host
+```
+
+**To override the check** on a host you know is fine — a large CPU-only server,
+or Ollama running outside the container — set `LUMINARY_HOST_SUPPORTED=1`. It
+skips every refusal, including the Intel Mac one. Nothing gets faster; you have
+only said that you know.
 
 ---
 

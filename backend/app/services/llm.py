@@ -317,19 +317,53 @@ class LLMService:
         self, model: str | None, *, background: bool
     ) -> tuple[str, str | None]:
         if model is not None:
-            return model, None
+            return self._refuse_unsupported_local(model), None
         try:
             from app.services.settings_service import (  # noqa: PLC0415
                 get_effective_routing,
             )
 
-            return get_effective_routing(background=background)
+            resolved, key = get_effective_routing(background=background)
         except ValueError:
             raise
         except Exception:
             from app.model_registry import default_chat_model  # noqa: PLC0415
 
-            return default_chat_model(), None
+            resolved, key = default_chat_model(), None
+        return self._refuse_unsupported_local(resolved), key
+
+    @staticmethod
+    def _refuse_unsupported_local(model: str) -> str:
+        """Refuse a call that would run locally on a host that cannot do it well.
+
+        Here rather than in `get_effective_routing`, which *describes* a route as
+        often as it picks one -- role resolution and the environment report both
+        call it without issuing anything, and raising there failed a test that
+        merely asked what an 8GB host would resolve to.
+
+        Keyed on the model that will actually run, so a locally pinned override is
+        refused on the same terms as the default. A cloud model is never refused:
+        a key makes the host irrelevant to the answer, and that is the way out
+        this error names (I-16).
+        """
+        from app.services.connectivity import is_cloud_model  # noqa: PLC0415
+
+        if is_cloud_model(model):
+            return model
+
+        from app.host_support import local_inference_support  # noqa: PLC0415
+
+        verdict = local_inference_support()
+        if verdict.supported:
+            return model
+
+        from app.exceptions import DependencyUnavailable  # noqa: PLC0415
+
+        raise DependencyUnavailable(
+            verdict.message or "This system cannot run local models.",
+            host=verdict.detail,
+            reason=verdict.reason,
+        )
 
     async def complete(
         self,

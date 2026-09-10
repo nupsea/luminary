@@ -193,9 +193,26 @@ states it wherever the user is. **The check is the accelerator, never the instal
 method**: refusing Docker as a class would refuse Linux with the NVIDIA container
 toolkit, which is the fastest way to run this app and the shape a hosted Luminary
 will be deployed in. `test_host_support.py` fails CI if a container with a GPU is
-refused, and S251 guards the wire contract. The compose stack still reserves no
-GPU device, so as shipped every container fails this check -- that reservation is
-the open work here.
+refused, and S251 guards the wire contract.
+
+**The refusal is a refusal, not a banner.** It sits in `LLMService._resolve_model`,
+keyed on the model that will actually run, so a pinned local model is refused on
+the same terms as the default. It is deliberately *not* in `get_effective_routing`:
+that function describes a route as often as it picks one, and raising there failed
+`test_a_fresh_install_on_8gb_resolves_every_role_to_one_model`, which only asks
+what an 8GB host would resolve to. A cloud model is never refused. The cost to
+state plainly is that background work is refused too, so **ingest enrichment --
+summaries, tags, titles -- is off on an unsupported host even when a key is
+present**, because enrichment is deliberately local so a library build never
+spends quota. Routing enrichment to the cloud on those hosts is the open question.
+
+`docker-compose.gpu.yml` (`make docker-run-gpu`) reserves an NVIDIA device for the
+model container and declares `LUMINARY_HOST_SUPPORTED=1` on the app container --
+necessary because under compose the model runs in a *sibling* container, so the
+process running the check has no device of its own to find. The same variable is
+the documented escape hatch for a host whose owner has decided anyway. An
+AMD/ROCm overlay is not shipped: nobody has measured it here, and an untested
+device block that fails at `up` is worse than its absence.
 
 ### 2. The docked reader — 0.11.0
 
