@@ -7,7 +7,7 @@ endpoints precisely when the rest of the app is not yet usable.
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.services.components import (
@@ -19,6 +19,7 @@ from app.services.components import (
 )
 from app.services.diagnostics import environment_report
 from app.services.enrichment_worker import requeue_skipped_jobs
+from app.services.lifecycle import request_shutdown
 from app.services.startup_status import get_startup_status
 from app.services.warmup import retry_failed
 
@@ -62,6 +63,24 @@ async def host_support() -> dict:
 async def list_capabilities() -> dict:
     """What the UI may offer. Keeps it from advertising what this build cannot do."""
     return await capabilities()
+
+
+@router.post("/shutdown", status_code=202)
+async def shutdown(
+    token: str | None = Header(default=None, alias="X-Luminary-Shutdown-Token"),
+) -> dict:
+    """Stop this process the way a SIGTERM would, for a host that has no SIGTERM.
+
+    Here rather than in a router of its own because `setup` is already the
+    non-surface router for this process's own environment, and one lifecycle
+    endpoint does not earn a surface-manifest entry.
+
+    202, not 204: the work is scheduled, not done. The response has to reach the
+    shell before the signal does, or the shell reads a dropped connection and
+    cannot tell a graceful stop from a crash.
+    """
+    request_shutdown(token)
+    return {"status": "shutting_down"}
 
 
 @router.post("/retry")

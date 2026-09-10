@@ -32,6 +32,16 @@ class InvalidInput(LuminaryError):
     status_code = 422
 
 
+class Forbidden(LuminaryError):
+    """The caller is known and is not allowed to do this.
+
+    Distinct from `NotFound`: the resource exists and the answer is no. Used
+    where a secret decides, so the message may not say which half was wrong.
+    """
+
+    status_code = 403
+
+
 class DependencyUnavailable(LuminaryError):
     """A required local component (Ollama, ffmpeg, a model) is not usable."""
 
