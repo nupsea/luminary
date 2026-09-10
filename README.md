@@ -88,17 +88,24 @@ Turn the wifi off mid-session and it keeps answering.
 
 ## Faster answers, if you want them
 
-A local model is private and slow. On this project's development Mac
-(`qwen3.5:4b`, one document, five passages) the source chips appear in about
-1.9s, the first token at about 3.2s, and the finished answer takes 19-41s. Your
-machine is not that machine, so treat those as an order of magnitude rather than
-a promise.
+A local model is private and slow. Hand Luminary an API key and synthesis moves
+to a hosted model. **Only the question and the passages retrieved for it leave**
+— never the document, the library, or your learner record.
 
-Hand Luminary an API key and synthesis moves to a hosted model. **Only the
-question and the passages retrieved for it leave** — never the document, the
-library, or your learner record. Luminary quotes no speed figure for that arm,
-because nothing has measured it on your machine; the receipt under your first
-answer will.
+Both arms measured back to back on this project's development Mac, one document,
+same question, five runs each. Your machine is not that machine, so read these as
+a shape rather than a promise — and the receipt under your own first answer is
+the figure that actually applies to you:
+
+| | Local (`qwen3.5:4b`) | Hosted |
+|---|---|---|
+| First token | ~3.1s | ~2.3s |
+| Finished answer | 14-37s | 6-11s |
+
+**What you are buying is the finish, not the start.** Both arms search your
+library on your machine, and that search is most of the wait before the first
+word appears — so first-token time barely moves. It is the whole answer that
+arrives two to three times sooner.
 
 **Turning it on**
 

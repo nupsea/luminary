@@ -117,18 +117,27 @@ backend's `rerank_enabled` and exits rather than guessing when it cannot read it
 Retrieval baselines recorded before 2026-08-26 are the unreranked funnel and are not comparable to
 anything this rung produces.
 
-**Exit gate, half taken.** `make measure-ttft` reads the figure each answer's receipt reports rather
-than timing from outside, so a quoted number is the one a user sees. Measured 2026-09-06, local arm,
-`ollama/qwen3.5:4b`, 5 runs scoped to one document, 5–6 passages, default 1500-token budget:
+**Exit gate, both arms.** `make measure-ttft` reads the figure each answer's receipt reports rather
+than timing from outside, so a quoted number is the one a user sees. Measured 2026-09-10, the two arms
+back to back on one machine, same document, same question, 20 passages each, default 1500-token
+budget — an earlier local-only run on 2026-09-06 scoped 5-6 passages and is **not** comparable to
+these:
 
-| | |
-|---|---|
-| first visible content (source chips) | median 1.85s |
-| first token | median 3.22s (1.89–3.37) |
-| complete answer | 18.9–40.7s |
+| | local (`ollama/qwen3.5:4b`) | cloud (`openai/gpt-5.6-sol`) |
+|---|---|---|
+| first token, median | 3.14s | 2.30s |
+| first token, range | 2.21-3.54s | 1.62-2.90s |
+| complete answer | 13.8-36.6s | 5.7-10.8s |
 
-**The pair is not complete**: the cloud arm needs a provider key and has not been measured, and a
-mean across arms would describe no system that exists — `measure_ttft.py` refuses to compute one.
+Five runs per arm, all five producing a token. `measure_ttft.py` still refuses to average across
+arms: a single mean here would describe no system that exists.
+
+**The pair says something the local number alone did not.** Time to first token barely moves —
+0.84s of median between the arms — while the complete answer moves by a factor of two to three.
+Both arms retrieve locally, and retrieval is most of the wait before the first token, so the cloud
+buys the *finish*, not the start. A release note quoting the cloud arm as "faster to first token"
+would be quoting noise. The slowest run on each arm was its first, on both arms, which is warm-up
+and not a difference between them.
 
 **This corrects a premise stated earlier in this plan.** "A stranger meets a 40–90s first answer"
 conflated time-to-first-token with total answer time. On a host the probe does not call slow, first

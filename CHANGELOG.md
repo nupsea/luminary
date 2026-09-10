@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A library that already existed is offered the engine question.** The
   fast-or-private choice was mounted only by the first-run guide, which the Hub
   shows only for an empty library, so everyone who upgraded kept the local
-  default without being asked and met a 19-41s answer with no explanation for
+  default without being asked and met a 14-37s answer with no explanation for
   it. The Hub now offers the same question once, and the key panel says where to
   get a key and where the key will be stored.
 
