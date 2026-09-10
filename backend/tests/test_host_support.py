@@ -205,6 +205,27 @@ def test_docker_alone_never_decides_it():
         assert local_inference_support().supported is True
 
 
+def test_the_probe_answers_on_whatever_host_is_running_it(monkeypatch):
+    """The one check that reads real hardware, and asserts no verdict.
+
+    A suite may not have a different result on different hardware, so this
+    asserts only that the probe *answers*. That is what a platform gets wrong:
+    on Windows `Path("/dev").glob(...)` and an absent SYSTEMROOT are both on the
+    path, and either raising would refuse every host on that platform rather
+    than reporting one. Worth running on every runner for exactly that reason.
+    """
+    monkeypatch.delenv("LUMINARY_HOST_SUPPORTED", raising=False)
+    from app import host_support
+
+    assert isinstance(host_support._has_accelerator(), bool)
+    v = host_support.local_inference_support()
+    assert isinstance(v.supported, bool)
+    assert v.detail
+    # The two halves of the contract every surface reads.
+    assert (v.message is None) is v.supported
+    assert (v.reason is None) is v.supported
+
+
 # The deployment's own declaration
 #
 # Under compose the model runs in a *sibling* container and `make

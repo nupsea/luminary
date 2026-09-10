@@ -541,16 +541,20 @@ A public 1.0 that runs on one operating system is a beta with a version number. 
 signed and notarized; Windows is #24 and Linux has no bundle at all. This rung is what makes the
 support policy shipped in 0.11.2 true on the two platforms it cannot currently see.
 
-**No runner exercises the policy on the platform it gets wrong.** The probe now branches per
-platform — Windows reads the driver libraries Ollama loads, everywhere else keeps the device-node
-check — and six platform-pinned tests hold it, five of which redden when the Windows branch is
-removed. That is the whole of the guard, and it is not enough: nothing here has ever executed on
-Windows. `4125cc21` pinned the verdict in `conftest` for the right reason, so the ambient check is
-exactly the one the suite no longer makes, and `ci.yml` has ubuntu and macOS jobs only. **This rung
-adds the Windows job**, on the same argument the `desktop-shell` job carries: code that cannot run
-on ubuntu has no automated coverage without one. Expect it red on its first push — whether `uv sync`
-even completes on Windows is unmeasured, and `install.ps1` does exactly that on every Windows
-install.
+**The policy now runs on the platform it got wrong, narrowly.** The probe branches per platform —
+Windows reads the driver libraries Ollama loads, everywhere else keeps the device-node check — held
+by platform-pinned tests, five of which redden when the Windows branch is removed, plus one that
+calls the real probe on whatever host is running it and asserts no verdict. `windows-host-policy`
+in `ci.yml` runs `uv sync --frozen`, an import of `app.main`, and those tests on `windows-latest`.
+`--frozen` deliberately: a lock that does not resolve on Windows is the defect the job exists to
+surface, and `install.ps1` runs the same step on every Windows install. Every package in the lock
+has a Windows wheel or is excluded there (`uvloop` is gated `sys_platform != 'win32'`), which is why
+this is expected to pass — but no part of it has executed on a Windows runner yet.
+
+**What the job does not claim is the rung.** It proves the dependency step resolves, the app
+imports, and the policy answers. `make ci` and `make smoke` green on Windows are this rung's exit
+gate, and widening the job to them is where the rest of the Windows work will show up — path
+handling, the Kuzu lock, and whatever the suite assumes about `/`.
 
 Keep one probe with a branch per platform. A second copy of the policy would eventually disagree
 with this one, and the copy a user meets is the one that has to be right.

@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No CI runner is Windows and `conftest` pins the verdict for the suite, so the
   guard is a platform-pinned test; removing the branch turns five of it red.
 
+### Added
+- **CI runs on Windows.** `windows-host-policy` installs the backend with
+  `uv sync --frozen`, imports `app.main` and runs the host-support tests on
+  `windows-latest`. It is deliberately narrow -- `make ci` and `make smoke` on
+  Windows are a later gate -- but it covers the class of defect that shipped in
+  0.11.2, where a policy about hosts had no runner on two of the three platforms
+  it decides.
+
 ### Changed
 - **A Linux install no longer downloads 3.9 GB of CUDA it never uses.** PyPI's
   torch is the CUDA build on Linux x86_64 -- 915.7 MB of torch, fifteen
