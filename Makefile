@@ -318,7 +318,11 @@ docker-run-host-ollama: require-compose-release
 		     echo "will fetch it for you and the app will report the model missing:"; \
 		     echo "   ollama pull $$m"; exit 1; }
 	@echo "Using host Ollama at :11434 (no ollama container)."
+	# The model is on the host, so the app container has no device of its own to
+	# find and the host check would refuse every local call. This topology exists
+	# precisely to put inference somewhere capable, so it says so.
 	OLLAMA_URL=http://host.docker.internal:11434 \
+	LUMINARY_HOST_SUPPORTED=1 \
 		docker compose --profile ai up --build --no-deps app
 
 # There was no way to bring the stack down. `make stop` frees the port -- and now
@@ -426,7 +430,7 @@ measure-ttft:
 # reservation and says so, which is the right failure.
 docker-run-gpu: require-docker require-compose-release
 	@echo "Starting with GPU passthrough (NVIDIA Container Toolkit required)..."
-	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up $(if $(DETACH),-d,)
+	docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up --build $(if $(DETACH),-d,)
 
 smoke-clean:
 	@echo "Removing smoke fixtures from the library (requires backend on :7820)..."

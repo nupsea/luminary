@@ -4,7 +4,7 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.2] - 2026-09-10
 
 ### Added
 - **Luminary checks whether your machine can run a local model, and says so.**
@@ -1253,7 +1253,8 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/nupsea/luminary/releases/tag/v0.11.2
 [0.11.1]: https://github.com/nupsea/luminary/releases/tag/v0.11.1
 [0.11.0]: https://github.com/nupsea/luminary/releases/tag/v0.11.0
 [0.9.0]: https://github.com/nupsea/luminary/releases/tag/v0.9.0

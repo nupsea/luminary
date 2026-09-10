@@ -268,20 +268,13 @@ ffmpeg and leave it on `PATH` (`winget install Gyan.FFmpeg`), then add **Speech
 to text** from Settings — Luminary fetches that one itself. Voice dictation
 needs that same component and no ffmpeg; the mic button appears once it is in.
 
-**Docker, only if something blocks the native install** (a proxy or VPN, or a
-managed machine). Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-running — check [Running under Docker](#running-under-docker) first:
+**Docker, only if something blocks the native install** and you have an NVIDIA
+GPU — without one Luminary refuses to run a local model. See
+[Running under Docker](#running-under-docker).
 
 ```powershell
-docker compose --profile ai up --build
-```
-
-Audio, video and YouTube ingestion are **off** in that image; PowerShell has no
-inline `VAR=value` form, so opt in by setting it first:
-
-```powershell
-$env:WITH_MEDIA=1
-docker compose --profile ai up --build
+$env:WITH_MEDIA=1    # optional: audio, video and YouTube ingest
+make docker-run-gpu
 ```
 </details>
 
@@ -328,7 +321,7 @@ server next boots.
 | One-command script (`bootstrap.sh`) | `luminary update` — re-runs the installer against the latest release |
 | DMG | Download the new DMG and replace the app |
 | From source | `git pull && make install` — `install.sh` is idempotent |
-| Docker | `git pull && make docker-run` — it passes `--build`, so this rebuilds |
+| Docker | `git pull && make docker-run-gpu` — it passes `--build`, so this rebuilds |
 
 `luminary update` resolves the newest **published release**, not `master`, and
 verifies the download against the release's `.sha256` before replacing anything.
@@ -336,7 +329,7 @@ It stages the download and swaps it in, so an interrupted update cannot leave a
 half-replaced install behind. Pin a specific version with
 `LUMINARY_VERSION=0.8.24`.
 
-Under Docker, `make docker-run` already passes `--build`, so it rebuilds the
+Under Docker, `make docker-run-gpu` already passes `--build`, so it rebuilds the
 image and recreates the containers in one step — `make docker-build` is only for
 building without starting. Neither stop target passes `--volumes`, so your
 library survives `make docker-down`.
@@ -385,64 +378,47 @@ runner maps — so `scripts/model_footprint.py` is what these come from.
 
 ### Running under Docker
 
-> **Docker is the slowest way to run Luminary, and the last one to reach for.**
-> The compose stack reserves no GPU device, so inference is CPU-only whatever
-> the host has. Measured on an Intel i7-8850H in a 12GB Docker VM: loading
-> `qwen3.5:4b` took anywhere from 9.6s to 155s, and a single question took 261s
-> of which 87.5s was a model load — against seconds on the Apple Silicon hosts
-> this app is tuned on. Vision calls on that machine ran 278–305s each.
->
-> Use it when a native install is blocked, for a headless Linux box, or to try
-> the app quickly. On macOS use the `.dmg` or the one-command install; on Windows
-> use `install.ps1`; on Linux install from source.
+**Docker is supported only when the model gets a GPU.** Without one Luminary
+refuses to run a local model rather than take minutes to answer — see
+[What Luminary needs](#what-luminary-needs). Docker on macOS never qualifies: no
+GPU passes through Apple's VM, on Intel or Apple Silicon.
 
-> **Run the model outside the container.** Docker on a Mac is CPU-only — no GPU
-> passes through — and the container is already sharing that CPU with the
-> embedder, reranker and entity model. Ingesting a full technical book this way
-> takes a long time and there is no setting that fixes it. Two ways out, either
-> of which moves generation off the VM entirely:
->
-> - **`make docker-run-host-ollama`** — Ollama on your Mac, app in Docker.
-> - **A hosted model** — set `LITELLM_DEFAULT_MODEL` and its API key in `.env`
->   beside the compose file, or in Settings. See
->   [Choosing a model](#choosing-a-model).
->
-> The all-in-Docker path is the simplest way to *try* Luminary, not the way to
-> run a library through it.
+**Prerequisites**
 
-Docker Desktop is a Linux VM. **Every number above is that VM's allowance, not
-your machine's** — it gets a fraction of the host, often half, so a 16 GB Mac
-presents as roughly 7.7 GB and lands under the floor. Luminary reads the VM and
-says so at startup:
+- Docker Desktop or Docker Engine, with `docker compose` v2 (not a pre-release)
+  and **buildx 0.17.0+**. Both ship in Docker Desktop; a stale toolchain is
+  refused up front rather than hanging mid-build.
+- **10 GB free disk** before the first build: a 3.4 GB image (4.2 with
+  `WITH_MEDIA=1`) plus a 3.4 GB model blob.
+- **16 GB of memory for the container.** Docker Desktop gives its VM a fraction
+  of the host, often half, so a 16 GB Mac presents as ~7.7 GB and is refused.
+  Raise it in **Settings → Resources → Memory**.
+- For `docker-run-gpu`: the **NVIDIA Container Toolkit** on the host.
 
-```
-model configuration: ollama/qwen3.5:4b needs 8GB and this machine has 7GB -- it will swap under load
+**Commands**
+
+```bash
+make docker-run-gpu           # model in a container with an NVIDIA GPU
+make docker-run-host-ollama   # model on the host, app in a container
+make docker-stop              # stop, keep containers for a fast restart
+make docker-down              # also remove containers and the network
 ```
 
-| | |
-|---|---|
-| **Memory** | Raise it in **Settings → Resources → Memory** |
-| **Disk** | **10 GB free** before the first build, or `apt` fails partway through: a 3.4 GB image (4.2 with `WITH_MEDIA=1`) plus a 3.4 GB model blob |
-| **GPU** | None passes through on any Mac, so generation runs at a few tokens per second whatever the memory |
-| **Model** | Pulled into a Docker volume on first run by the `--profile ai` sidecar |
-| **Secrets** | A container has no OS keyring, so a cloud API key saved in Settings is stored in the database as plain text — readable by anyone who can read the `luminary-data` volume. Put it in `.env` beside the compose file instead |
+`WITH_MEDIA=1` adds audio, video and YouTube ingest (GPL components, opt-in).
+Neither stop target touches your library — no target here ever passes
+`--volumes`.
 
-`make docker-run-host-ollama` runs the model on your machine instead of in the
-VM, which takes the memory and speed rows off the table. The compose file maps
-`host.docker.internal` to the host gateway, so this works on Linux as well as
-Docker Desktop.
+**Worth knowing**
 
-**Stopping.** `make docker-stop` leaves the containers in place for a fast
-restart; `make docker-down` also removes them and the network. Neither touches
-your library — no target here ever passes `--volumes`.
+- **Secrets.** A container has no OS keyring, so an API key saved in Settings
+  goes into the library database as plain text. Put it in `.env` beside the
+  compose file instead.
+- **Reclaiming disk.** `docker builder prune -af` and `docker image prune -af`.
+  **Never add `--volumes`** — that deletes `luminary-data`, which is your library.
+- **Why the GPU rule exists.** Measured on an Intel i7-8850H in a 12 GB Docker
+  VM: `qwen3.5:4b` loaded in 9.6–155s, one question took 261s of which 87.5s was
+  the model load, and vision calls ran 278–305s each.
 
-**A stale Docker toolchain is refused up front** rather than hanging mid-build:
-compose needs buildx 0.17.0+, and compose 2.0.0-beta.4 creates a container it
-never starts. Stopping still works whatever the version.
-
-Reclaim disk with `docker builder prune -af` (build cache) and
-`docker image prune -af` (unused images). **Never add `--volumes`** — that
-deletes `luminary-data`, which is your library.
 
 <details>
 <summary><b>Why the first question after a break is slow, and what is already done about it</b></summary>
@@ -462,7 +438,7 @@ is left alone entirely — no pings, no pinned memory.
 To take the eviction off the table yourself, keep the model resident for good:
 
 ```sh
-OLLAMA_KEEP_ALIVE=-1 docker compose --profile ai up
+OLLAMA_KEEP_ALIVE=-1 make docker-run-gpu
 ```
 
 That pins the model's memory (3.4 GB for `qwen3.5:4b`) for as long as Ollama
@@ -674,7 +650,7 @@ frontend/src/
 | `make db-migrate` | Apply pending migrations (the server also does this on boot) |
 | `make db-revision m="..."` | Generate a migration after changing `models.py` |
 | `make docker-build` | Build the image (`WITH_MEDIA=1` adds ffmpeg and the transcriber) |
-| `make docker-run` | Run via Docker Compose (with Ollama sidecar) |
+| `make docker-run-gpu` | Run via Docker Compose, model on an NVIDIA GPU |
 | `make docker-stop` | Stop the compose stack, containers kept for a fast restart |
 | `make docker-down` | Stop and remove containers and network; **volumes, i.e. your library, are kept** |
 
