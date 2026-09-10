@@ -28,6 +28,29 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="aiosqlite
 
 
 @pytest.fixture(scope="session", autouse=True)
+def host_is_supported():
+    """Pin the host-support verdict so the suite does not read the hardware.
+
+    `host_support.local_inference_support()` refuses local inference on a machine
+    with no accelerator, and `LLMService._resolve_model` turns that into a
+    `DependencyUnavailable`. Left to read the real machine, the suite passes on an
+    Apple Silicon laptop and fails on a GitHub runner -- which is exactly what
+    happened: `test_llm.py` lost seven tests and then hung out the job.
+
+    A test suite may not have a different result on different hardware. Tests that
+    exercise the refusal patch `local_inference_support` themselves
+    (`test_host_support.py`), which is the only honest way to assert on a verdict.
+    """
+    previous = os.environ.get("LUMINARY_HOST_SUPPORTED")
+    os.environ["LUMINARY_HOST_SUPPORTED"] = "1"
+    yield
+    if previous is None:
+        os.environ.pop("LUMINARY_HOST_SUPPORTED", None)
+    else:
+        os.environ["LUMINARY_HOST_SUPPORTED"] = previous
+
+
+@pytest.fixture(scope="session", autouse=True)
 def isolated_data_dir(tmp_path_factory):
     """Set DATA_DIR to a session-scoped temp directory for all tests.
 

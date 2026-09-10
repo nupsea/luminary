@@ -19,6 +19,13 @@ from app.host_support import UNSUPPORTED_MESSAGE, local_inference_support
 def host(monkeypatch):
     """Drive the three inputs the verdict reads."""
 
+    # conftest pins LUMINARY_HOST_SUPPORTED for the whole session so the suite does
+    # not read the hardware it runs on. These are the tests of the rule itself, so
+    # they are the ones that must see it unset. Cleared here at fixture setup, not
+    # inside `_set`: the two tests that set it deliberately do so in the test body,
+    # which runs after this and would otherwise be undone.
+    monkeypatch.delenv("LUMINARY_HOST_SUPPORTED", raising=False)
+
     def _set(system: str, machine: str, *, container: bool, accel: bool, ram: int = 32):
         monkeypatch.setattr("platform.system", lambda: system)
         monkeypatch.setattr("platform.machine", lambda: machine)
