@@ -1,9 +1,9 @@
 //! A log file the user can find, and support can read.
 //!
-//! `~/Library/Logs/Luminary/` rather than somewhere under the library: an
-//! unwritable or misconfigured `DATA_DIR` is itself a failure worth recording,
-//! so logging must not depend on the thing most likely to be broken. It is also
-//! where macOS users and Console.app already look.
+//! Never under `DATA_DIR`: an unwritable or misconfigured library is itself a
+//! failure worth recording, so logging must not depend on the thing most likely
+//! to be broken. Each platform gets the directory its users are already told to
+//! look in -- Console.app reads the macOS one.
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -28,9 +28,31 @@ struct Sink {
 
 static SINK: OnceLock<Sink> = OnceLock::new();
 
+#[cfg(target_os = "macos")]
 fn log_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(PathBuf::from(home).join("Library/Logs/Luminary"))
+}
+
+#[cfg(windows)]
+fn log_dir() -> Option<PathBuf> {
+    // Not `%APPDATA%`: that roams, and a 2MB log times three has no business
+    // being copied to a domain server on every sign-in.
+    let local = std::env::var_os("LOCALAPPDATA")?;
+    Some(PathBuf::from(local).join("Luminary/Logs"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn log_dir() -> Option<PathBuf> {
+    // State, not cache: a cache directory is something the user is invited to
+    // delete, and the log is what a bug report is made of.
+    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
+        if !state.is_empty() {
+            return Some(PathBuf::from(state).join("luminary"));
+        }
+    }
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".local/state/luminary"))
 }
 
 /// Best-effort: a failure to open the log must never stop the app starting.

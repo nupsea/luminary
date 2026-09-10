@@ -16,6 +16,13 @@ pub const REPO: &str = "nupsea/luminary";
 /// the theoretical maximum. Stay comfortably under both.
 const MAX_URL: usize = 6000;
 
+/// Present at an absolute path on macOS; on Windows it ships in System32 and is
+/// found on `PATH`, which is where every modern Windows install has it.
+#[cfg(windows)]
+const CURL: &str = "curl.exe";
+#[cfg(not(windows))]
+const CURL: &str = "/usr/bin/curl";
+
 /// `-`, `.`, `_` and `~` are unreserved in RFC 3986 and need no escaping.
 const QUERY: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -81,10 +88,19 @@ pub fn redact(text: &str) -> String {
 /// Paths carry the user's real name. Replace the home directory, then any bare
 /// occurrence of the account name left behind by other tools.
 fn scrub_home(text: &str) -> String {
-    match std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()) {
+    match home_dir() {
         Some(home) => scrub_home_in(text, &home),
         None => text.to_string(),
     }
+}
+
+/// The user's home, whatever this platform calls it.
+///
+/// Windows leaves `HOME` unset, so reading only that would have shipped every
+/// `C:\Users\<their real name>\...` path in every Windows report unredacted.
+fn home_dir() -> Option<String> {
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(key).map(|h| h.to_string_lossy().into_owned())
 }
 
 /// Split out so it can be tested without mutating the process environment,
@@ -95,7 +111,7 @@ fn scrub_home_in(text: &str, home: &str) -> String {
     }
     let out = text.replace(home, "~");
 
-    match home.rsplit('/').next() {
+    match home.rsplit(['/', '\\']).next() {
         // A very short account name would collide with ordinary words.
         Some(user) if user.len() >= 3 => out.replace(user, "<user>"),
         _ => out,
@@ -122,11 +138,16 @@ pub fn fingerprint(step: &str, message: &str) -> String {
 }
 
 fn run(bin: &str, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(bin).args(args).output().ok()?;
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args(args);
+    // Same treatment every child of this shell gets: no console window flashing
+    // up behind the report dialog on Windows.
+    let out = luminary_host::before_spawn(&mut cmd).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!text.is_empty()).then_some(text)
 }
 
+#[cfg(target_os = "macos")]
 pub fn os_version() -> String {
     let product = run("/usr/bin/sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".into());
     format!("macOS {product} ({})", std::env::consts::ARCH)
@@ -134,10 +155,64 @@ pub fn os_version() -> String {
 
 /// macOS build and kernel, which distinguish two machines reporting the same
 /// product version -- the pair asked for in nupsea/luminary#41.
+#[cfg(target_os = "macos")]
 fn os_detail() -> String {
     let build = run("/usr/bin/sw_vers", &["-buildVersion"]).unwrap_or_else(|| "unknown".into());
     let kernel = run("/usr/bin/uname", &["-r"]).unwrap_or_else(|| "unknown".into());
     format!("build {build}, Darwin {kernel}")
+}
+
+#[cfg(windows)]
+pub fn os_version() -> String {
+    let raw = run("cmd", &["/c", "ver"]).unwrap_or_default();
+    format!(
+        "Windows {} ({})",
+        windows_release(&raw),
+        std::env::consts::ARCH
+    )
+}
+
+#[cfg(windows)]
+fn os_detail() -> String {
+    run("cmd", &["/c", "ver"]).unwrap_or_else(|| "unknown".into())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn os_version() -> String {
+    let release = run("/usr/bin/uname", &["-r"]).unwrap_or_else(|| "unknown".into());
+    format!("Linux {release} ({})", std::env::consts::ARCH)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn os_detail() -> String {
+    run(
+        "/bin/sh",
+        &["-c", ". /etc/os-release && echo \"$PRETTY_NAME\""],
+    )
+    .unwrap_or_else(|| "unknown distribution".into())
+}
+
+/// The build out of `cmd /c ver`, which prints
+/// `Microsoft Windows [Version 10.0.22631.4317]`.
+///
+/// The build number is the whole point: "Windows 11" is not a version anyone
+/// can act on, and 10.0.22000 versus 10.0.19045 is the difference between the
+/// two supported releases. Falls back to the raw line rather than to
+/// "unknown" -- an unexpected format still says more than nothing.
+#[cfg(any(windows, test))]
+fn windows_release(raw: &str) -> String {
+    raw.rsplit_once("Version ")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(version, _)| version.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                "unknown".into()
+            } else {
+                raw.to_string()
+            }
+        })
 }
 
 /// Blocking, and deliberately so: a report is assembled on demand, not on a hot
@@ -147,7 +222,7 @@ fn ollama_get(port: u16, path: &str) -> Option<String> {
         return None;
     }
     let url = format!("http://127.0.0.1:{port}{path}");
-    run("/usr/bin/curl", &["-sf", "--max-time", "3", &url])
+    run(CURL, &["-sf", "--max-time", "3", &url])
 }
 
 fn json_strings(body: &str, key: &str) -> Vec<String> {
@@ -334,8 +409,44 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_home_is_scrubbed_too() {
+        // `HOME` is unset on Windows, so this ran with nothing to strip until
+        // `home_dir` learned about `USERPROFILE` -- every report from there
+        // carried the user's real name in every path.
+        let out = scrub_home_in(
+            r"could not open C:\Users\aurelia\AppData\Local\Luminary\Logs, owner aurelia",
+            r"C:\Users\aurelia",
+        );
+        assert!(!out.contains("aurelia"), "leaked the account name: {out}");
+        assert!(out.contains('~'));
+    }
+
+    #[test]
     fn an_absent_home_is_not_a_panic() {
         assert_eq!(scrub_home_in("nothing to do", ""), "nothing to do");
+    }
+
+    #[test]
+    fn the_windows_build_number_survives_the_version_banner() {
+        // The build is the whole value of the line: 10.0.19045 and 10.0.22631
+        // are the two supported releases, and "Windows 11" separates nothing.
+        assert_eq!(
+            windows_release("Microsoft Windows [Version 10.0.22631.4317]"),
+            "10.0.22631.4317"
+        );
+        // Localised banners keep the bracketed version; only the words change.
+        assert_eq!(
+            windows_release("Microsoft Windows [Version 10.0.19045.5011]\r\n"),
+            "10.0.19045.5011"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_version_banner_is_reported_rather_than_dropped() {
+        // "unknown" in a bug report costs a round trip with the reporter. Any
+        // line at all is worth more than that.
+        assert_eq!(windows_release("Windows, probably"), "Windows, probably");
+        assert_eq!(windows_release("   "), "unknown");
     }
 
     #[test]

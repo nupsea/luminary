@@ -60,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it decides.
 
 ### Changed
+- **The shell's log, environment and bug reports are no longer macOS-shaped.**
+  The log had no directory at all on Windows (`%LOCALAPPDATA%\Luminary\Logs`
+  now, `$XDG_STATE_HOME` on Linux); `base_env` cleared the environment and
+  restored only `HOME`, but Windows CPython does not start without
+  `SystemRoot`; and `report.rs` scrubbed only `HOME`, so a Windows report would
+  have carried `C:\Users\<the user's name>` in every path.
 - **A Linux install no longer downloads 3.9 GB of CUDA it never uses.** PyPI's
   torch is the CUDA build on Linux x86_64 -- 915.7 MB of torch, fifteen
   `nvidia-*-cu12` wheels at 3013.9 MB and triton at 188.4 MB -- while
