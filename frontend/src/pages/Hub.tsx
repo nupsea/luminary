@@ -20,6 +20,7 @@ import { useNavigate } from "react-router-dom"
 
 import { LuminaryGlyph } from "@/components/icons/LuminaryGlyph"
 import { FirstRunGuide } from "@/components/FirstRunGuide"
+import { EngineOffer } from "@/components/setup/EngineOffer"
 import { useStartupStatus } from "@/hooks/useSetup"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiGet, apiPost } from "@/lib/apiClient"
@@ -93,6 +94,12 @@ export default function Hub() {
   return (
     <PageSurface>
       <HubHeader />
+
+      {/* The other half of the first-run question. HubEmpty asks it through
+          FirstRunGuide; this branch is every library that already existed when
+          it shipped, and it is the only one that never got asked. Renders
+          nothing once the question has an answer. */}
+      <EngineOffer />
 
       <WhereYouLeftOff resume={resume} action={data.today_action ?? null} />
 

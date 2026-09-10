@@ -26,7 +26,7 @@ import {
   generateDocumentFlashcards,
   regenerateCollectionFlashcards,
 } from "@/lib/studyApi"
-import { type StudyFilters, endOpenSessionsForScope } from "@/lib/studySessionService"
+import { type StudyFilters } from "@/lib/studySessionService"
 import { SessionHistory } from "@/components/study/SessionHistory"
 import { CollectionCardManager } from "@/components/study/CollectionCardManager"
 
@@ -63,7 +63,7 @@ interface DashboardData {
 interface CollectionStudyDashboardProps {
   collectionId: string
   onBack: () => void
-  onStartStudy: (filters?: StudyFilters) => void
+  onStartStudy: (filters?: StudyFilters, resumeId?: string) => void
   onStartTeachback: (filters?: StudyFilters, resumeId?: string) => void
   onNavigateToCollection: (id: string) => void
 }
@@ -96,6 +96,9 @@ export function CollectionStudyDashboard({
     queryClient.invalidateQueries({ queryKey: ["collection-cards", collectionId] })
     queryClient.invalidateQueries({ queryKey: ["flashcards"] })
     queryClient.invalidateQueries({ queryKey: ["deck-list"] })
+    queryClient.invalidateQueries({ queryKey: ["scoped-sessions", "collection", collectionId] })
+    queryClient.invalidateQueries({ queryKey: ["study-sessions-active"] })
+    queryClient.invalidateQueries({ queryKey: ["study-sessions-completed"] })
   }
 
   const collectionGenMutation = useMutation({
@@ -135,8 +138,10 @@ export function CollectionStudyDashboard({
         genCount,
         genDifficulty,
       )
-      // Fresh cards -> fresh review, but only if something actually changed.
-      if (result.replaced > 0) await endOpenSessionsForScope(null, collectionId)
+      // The runs go with the cards inside each replace call: a run left with no
+      // card to practise is deleted there, and one that still has cards stays
+      // resumable. Ending them from here raced the call that had already
+      // removed them.
       return result
     },
     onSuccess: (result) => {
@@ -608,7 +613,7 @@ export function CollectionStudyDashboard({
               </p>
             )}
 
-            {/* Regenerate (replace): fresh set, discards existing cards + history */}
+            {/* Regenerate (replace): fresh set, discards existing cards and the runs built on them */}
             {!confirmReplace ? (
               <button
                 onClick={() => {
@@ -637,8 +642,9 @@ export function CollectionStudyDashboard({
               <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
                 <p className="text-xs text-foreground">
                   Write a fresh set of cards for each source and replace its current
-                  ones? Their review history is lost. A source that produces nothing
-                  keeps the cards it has.
+                  ones? Every practice run left with no card to practise goes with
+                  them, and your progress record (streak, reviews, accuracy) is kept.
+                  A source that produces nothing keeps the cards it has.
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -672,7 +678,11 @@ export function CollectionStudyDashboard({
       {/* Session history (teach-back + flashcard) scoped to this collection */}
       <SessionHistory
         scope={{ kind: "collection", id: collectionId }}
-        onResumeTeachback={(sid) => onStartTeachback(undefined, sid)}
+        onResume={(sid, mode) =>
+          mode === "teachback"
+            ? onStartTeachback(undefined, sid)
+            : onStartStudy(undefined, sid)
+        }
       />
     </div>
   )

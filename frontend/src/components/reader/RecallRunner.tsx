@@ -29,6 +29,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { ExpandableResultRow } from "@/components/Teachback/ExpandableResultRow"
 import { InlineTeachbackFeedback } from "@/components/Teachback/InlineTeachbackFeedback"
+import { VoiceRecordButton } from "@/components/VoiceRecordButton"
 import { standingAttempts } from "@/components/Teachback/latestAttempts"
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { useTeachbackPolling } from "@/components/Teachback/useTeachbackPolling"
@@ -521,13 +522,23 @@ export function RecallRunner({
               <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
                 {previousAttempt ? "Explain it again" : "Explain it in your own words"}
               </p>
-              <textarea
-                value={explanation}
-                onChange={(e) => setExplanation(e.target.value)}
-                rows={7}
-                placeholder="Say it the way you would to someone who has not read this."
-                className="w-full resize-y rounded-lg border border-border bg-background p-3 text-sm leading-relaxed text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
+              <div className="relative">
+                <textarea
+                  value={explanation}
+                  onChange={(e) => setExplanation(e.target.value)}
+                  rows={7}
+                  placeholder="Say it the way you would to someone who has not read this."
+                  className="w-full resize-y rounded-lg border border-border bg-background p-3 pr-12 text-sm leading-relaxed text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <VoiceRecordButton
+                  size="sm"
+                  onTranscribed={(text) => {
+                    setExplanation((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
+                  }}
+                  title="Speak your explanation (Whisper)"
+                  className="absolute right-2 top-2"
+                />
+              </div>
               <button
                 onClick={() => void handleSubmitExplanation()}
                 disabled={submitting || explanation.trim().length === 0}

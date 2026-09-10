@@ -22,6 +22,9 @@
 #   6. a note is a source too, and exactly one source is accepted per call --
 #      a collection replaces its sources one at a time so a failed run costs
 #      one source's cards, not the collection's
+#   7. the response reports `sessions_removed` -- the runs the replacement left
+#      with no card to practise, deleted with the deck -- and it is 0 whenever
+#      the deck was kept
 #
 # Costs no model time: an unknown document has no chunks, so generation returns
 # before any LLM call.
@@ -42,7 +45,7 @@ curl -s "${BASE}/openapi.json" | python3 -c "
 import sys, json
 schemas = json.load(sys.stdin)['components']['schemas']
 report = schemas['RegenerateResponse']['properties']
-for field in ('cards', 'requested', 'delivered', 'replaced', 'kept_previous'):
+for field in ('cards', 'requested', 'delivered', 'replaced', 'kept_previous', 'sessions_removed'):
     assert field in report, f'a replacement cannot report {field}'
 request = schemas['FlashcardRegenerateRequest']['properties']
 for field in ('document_id', 'note_id'):
@@ -67,6 +70,7 @@ assert r['kept_previous'] is True, 'a run that produced nothing must say so'
 assert r['delivered'] == 0, f\"delivered {r['delivered']} cards from no document\"
 assert r['replaced'] == 0, 'nothing may be deleted when nothing was generated'
 assert r['cards'] == [], 'no cards can come from a document that does not exist'
+assert r['sessions_removed'] == 0, 'a deck that was kept cannot have lost its runs'
 print('  nothing generated -> nothing deleted, reported as kept_previous')
 " || fail "an empty run did not leave the deck alone"
 

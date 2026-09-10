@@ -15,7 +15,7 @@ Routes:
   PUT  /flashcards/{card_id}                — update question/answer, sets is_user_edited
   DELETE /flashcards/{card_id}              — delete a card (204)
   POST /flashcards/bulk-delete              — delete multiple cards by ID
-  DELETE /flashcards/document/{document_id} — delete all cards for a document (204)
+  DELETE /flashcards/document/{document_id} — delete all cards for a document
   POST /flashcards/{card_id}/review         — FSRS review with rating
   GET  /flashcards/{card_id}/source-context — source passage for SourceContextPanel
 
@@ -26,6 +26,7 @@ to prevent FastAPI from matching literal segments as document_id.
 import asyncio
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
@@ -44,6 +45,7 @@ from app.models import (
     SectionModel,
 )
 from app.repos.flashcard_repo import FlashcardRepo, get_flashcard_repo
+from app.repos.study_repo import StudyRepo
 from app.schemas.flashcards import (
     ArchiveMasteredResponse,
     BulkDeleteRequest,
@@ -360,6 +362,7 @@ async def regenerate_flashcards(
         delivered=len(result.cards),
         replaced=result.replaced,
         kept_previous=result.kept_previous,
+        sessions_removed=result.sessions_removed,
     )
 
 
@@ -818,6 +821,27 @@ async def update_flashcard(
     return _to_response(card)
 
 
+async def _purge_emptied_runs(
+    session: AsyncSession,
+    deleted_card_ids: Sequence[str],
+    *,
+    document_ids: Sequence[str] = (),
+    collection_ids: Sequence[str] = (),
+) -> int:
+    """Remove the practice runs this deletion left with no card to practise.
+
+    A run whose plan names nothing that still exists cannot be entered and
+    reports nothing outstanding (I-47), so it stays in the history as a row that
+    does not work. Its review events are not touched: they are the learner
+    record, and it outlives the deck it was earned against.
+    """
+    return await StudyRepo(session).purge_runs_without_live_cards(
+        document_ids=document_ids,
+        collection_ids=collection_ids,
+        deleted_card_ids=deleted_card_ids,
+    )
+
+
 @router.delete("/{card_id}", status_code=204)
 async def delete_flashcard(
     card_id: str,
@@ -825,12 +849,19 @@ async def delete_flashcard(
     repo: FlashcardRepo = Depends(get_flashcard_repo),
 ) -> None:
     """Delete a flashcard by ID."""
-    await repo.get_or_404(card_id)
+    card = await repo.get_or_404(card_id)
+    document_id = card.document_id
 
     # remove from FTS index before deleting
     await _delete_flashcard_fts(card_id, session)
     await repo.delete_by_id(card_id)
-    logger.info("Deleted flashcard", extra={"card_id": card_id})
+    sessions_removed = await _purge_emptied_runs(
+        session, [card_id], document_ids=[document_id] if document_id else []
+    )
+    logger.info(
+        "Deleted flashcard",
+        extra={"card_id": card_id, "sessions_removed": sessions_removed},
+    )
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
@@ -841,29 +872,48 @@ async def bulk_delete_flashcards(
 ) -> BulkDeleteResponse:
     """Delete multiple flashcards in one call. Keeps FTS index in sync per I-4."""
     existing = await repo.list_existing_ids_in(req.ids)
+    document_ids = await repo.list_document_ids_for_cards(existing)
     for card_id in existing:
         await _delete_flashcard_fts(card_id, session)
     await repo.delete_by_ids(existing)
-    logger.info("Bulk deleted flashcards", extra={"count": len(existing)})
-    return BulkDeleteResponse(deleted=len(existing))
+    sessions_removed = await _purge_emptied_runs(
+        session, existing, document_ids=document_ids
+    )
+    logger.info(
+        "Bulk deleted flashcards",
+        extra={"count": len(existing), "sessions_removed": sessions_removed},
+    )
+    return BulkDeleteResponse(deleted=len(existing), sessions_removed=sessions_removed)
 
 
-@router.delete("/document/{document_id}", status_code=204)
+@router.delete("/document/{document_id}", response_model=BulkDeleteResponse)
 async def delete_all_document_flashcards(
     document_id: str,
     session: AsyncSession = Depends(get_db),
     repo: FlashcardRepo = Depends(get_flashcard_repo),
-) -> None:
-    """Delete all flashcards for a specific document. Keeps FTS index in sync per I-4."""
+) -> BulkDeleteResponse:
+    """Delete all flashcards for a specific document. Keeps FTS index in sync per I-4.
+
+    Answers with both counts rather than 204: the UI states how many runs went,
+    and a number it was told is not the number it guessed from the list length.
+    """
     ids = await repo.list_ids_for_document(document_id)
     for card_id in ids:
         await _delete_flashcard_fts(card_id, session)
     if ids:
         await repo.delete_for_document(document_id)
+    sessions_removed = await _purge_emptied_runs(
+        session, ids, document_ids=[document_id]
+    )
     logger.info(
         "Deleted all flashcards for document",
-        extra={"document_id": document_id, "count": len(ids)},
+        extra={
+            "document_id": document_id,
+            "count": len(ids),
+            "sessions_removed": sessions_removed,
+        },
     )
+    return BulkDeleteResponse(deleted=len(ids), sessions_removed=sessions_removed)
 
 
 @router.delete("/collection/{collection_id}", response_model=BulkDeleteResponse)
@@ -877,14 +927,24 @@ async def delete_all_collection_flashcards(
     Returns the deleted count so the UI can confirm. Keeps FTS in sync per I-4.
     """
     ids = await repo.list_ids_for_collection(collection_id)
+    document_ids = await repo.list_document_ids_for_cards(ids)
     for card_id in ids:
         await _delete_flashcard_fts(card_id, session)
     await repo.delete_by_ids(ids)
+    # Both scopes: a run on one of these documents and a run on the collection
+    # itself are different rows, and this call empties the decks under both.
+    sessions_removed = await _purge_emptied_runs(
+        session, ids, document_ids=document_ids, collection_ids=[collection_id]
+    )
     logger.info(
         "Deleted all flashcards for collection",
-        extra={"collection_id": collection_id, "count": len(ids)},
+        extra={
+            "collection_id": collection_id,
+            "count": len(ids),
+            "sessions_removed": sessions_removed,
+        },
     )
-    return BulkDeleteResponse(deleted=len(ids))
+    return BulkDeleteResponse(deleted=len(ids), sessions_removed=sessions_removed)
 
 
 @router.post("/{card_id}/review", response_model=FlashcardResponse)

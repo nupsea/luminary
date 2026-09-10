@@ -201,6 +201,8 @@ class RegenerateResponse(BaseModel):
     "Replaced with 3 fresh cards" for a deck of 5 that had just lost 2 with no
     explanation. `kept_previous` says the run produced nothing usable and the
     old deck is still there -- `cards` is then empty and nothing was deleted.
+    `sessions_removed` counts the runs the replacement left with no card to
+    practise, which are deleted with it; their review events are kept.
     """
 
     cards: list[FlashcardResponse]
@@ -208,6 +210,7 @@ class RegenerateResponse(BaseModel):
     delivered: int
     replaced: int
     kept_previous: bool = False
+    sessions_removed: int = 0
 
 
 class GroundingAuditRequest(BaseModel):
@@ -352,3 +355,6 @@ class BulkDeleteRequest(BaseModel):
 
 class BulkDeleteResponse(BaseModel):
     deleted: int
+    # Practice runs the deletion left with no card to practise. Their review
+    # events survive: the learner record outlives the deck.
+    sessions_removed: int = 0

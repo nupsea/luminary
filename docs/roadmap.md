@@ -140,6 +140,38 @@ is still the case the hybrid offer exists for, and it remains unmeasured here.
 from 1500 to 750 tokens on a slow host with the answer-quality cost unmeasured (#100). A second latency
 win taken out of content is the failure this rung is most likely to produce.
 
+**The offer now has a door for a library that already exists.** `EngineChoice`
+was mounted only by `FirstRunGuide`, which `Hub.tsx` renders only from `HubEmpty`:
+no today action, no recent items, no active collections, nothing to continue
+reading, nothing fading. An upgrade meets none of those conditions, so every
+library carrying documents from before this rung kept the `private` default
+without being asked and met the complete-answer time the rung exists to explain.
+`EngineOffer` is the same question on the Hub's non-empty branch. It renders
+`EngineChoice` rather than restating it -- two wordings about what leaves the
+machine is two things to keep true (I-16).
+
+The condition is the row, not the value. `settings` on the install this was found
+on holds no `llm_mode` row at all, and `private` reads the same whether it was
+chosen or defaulted, so `get_llm_settings` reports `mode_chosen` from whether the
+row exists (`test_a_library_that_was_never_asked_reports_no_choice`). Waving the
+offer away is stored separately as `llm_offer_dismissed`: declining to decide is
+not a decision, and a notice that returns on every launch is a nag.
+
+**The offer, once accepted, used to produce an answer that could not resolve.**
+`get_effective_routing` returns `f"{provider}/{cloud_model}"` from two settings
+written independently, and the engine question sends a provider and no model --
+so picking Anthropic, the question's own default, left `gpt-4o-mini` in place and
+routed `anthropic/gpt-4o-mini`. A provider *change* now carries that provider's
+default model, while a model picked for the provider being kept survives. That is
+I-53.
+
+**Where the key lands is now read from the machine rather than promised.** The
+key panel said "stored in your OS keychain, never in the library" everywhere,
+including the installs that have no keyring -- Docker, headless Linux -- where
+the write path already falls back to a plaintext row in the library database.
+`keyring_available` reports which of the two will happen, and the sentence
+follows it. README carries the same split per install path.
+
 ### 2. The docked reader — 0.11.0
 
 **The reader's work used to open over the text it was about.** The note composer was a dialog, the
@@ -277,6 +309,13 @@ button answer a question the learner did not ask. A run's mode is fixed when it 
 takes it as a prop) because `POST /study/teachback/async` rewrites its session's mode: offering both
 inside one run would relabel it in the learner's own history.
 
+Below the generator sit **the runs on this document** — the same `SessionHistory` rows the Study page
+lists, from the same request, in both modes. A run started in the reader was otherwise findable only
+from the Study page, and only if it was teach-back: the list filtered the other mode out, so the two
+surfaces disagreed about what had happened on one document. Entering a run, deleting one and reading
+its verdicts now mean the same thing from either view, and emptying the deck -- by replacing it or by
+deleting it -- removes the runs it emptied from both (I-52).
+
 The rule the loop enforces is that **the answer is not rendered until the learner has committed** —
 a three-point confidence prediction, or an explanation typed out. Behind a `hidden` class it would
 still be a panel you can read ahead in. Revealing puts the reading pane on the section the card came
@@ -398,13 +437,15 @@ there before rather than by position — asserting the locus of the wrong row wo
 one stored nothing. It then reloads, opens the reader's highlight list and finds the passage in it,
 and deletes what it created. A note is still written in the panel, and the check says so.
 
-**The nav is cut to five rail items** — Home, Library, Notes, Study, Progress. Ask leaves the rail as
-a `feature` rather than a mode change: `/chat` stays routed and its routers stay `public`, because the
-docked conversation is served by them, and a document's "Chat about this" still opens the page with
-that document scoped. Map stays `full`; `blog` moves `full` → `public`, because what a note becomes
-when it is shared is the point of writing one — which also retires the build-time fold in
-`pages/Notes.tsx` that kept the publish dialog out of public bundles. `surfaceManifest.test.ts` pins
-the rail to those five ids and goes red on either half of the Ask change.
+**The nav is six rail items** — Home, Library, Notes, Study, Ask, Progress. This rung cut Ask from
+it on the argument that a conversation with no scope is the one nobody asks for; that argument was
+wrong in the case the rail exists to serve. A question across the whole library — compare two books,
+search everything at once — has no other door, because a docked conversation is pinned to its
+document and offers no scope picker by design. `/chat` was still routed the whole time, which in a
+desktop app with no address bar is not the same as reachable. Map stays `full`; `blog` moves
+`full` → `public`, because what a note becomes when it is shared is the point of writing one — which
+also retires the build-time fold in `pages/Notes.tsx` that kept the publish dialog out of public
+bundles. `surfaceManifest.test.ts` pins the rail to those six ids.
 
 **Dictation rides on the transcriber that was already here.** `POST /audio/transcribe` hands a
 browser recording to the same `AudioTranscriber` that ingests an audio file, so the mic in a note, a

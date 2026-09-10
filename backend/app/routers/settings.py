@@ -47,6 +47,18 @@ class LLMSettingsResponse(BaseModel):
     # collapse to processing_mode="unavailable". Defaults True so non-private
     # modes and legacy consumers are unaffected.
     ollama_reachable: bool = True
+    # Whether anyone ever answered the engine question, which is not the same as
+    # what the mode is: a library that predates the question runs `private`
+    # because that is the default. False is what lets an existing library be
+    # offered the choice its first run never asked (roadmap 0.10.0).
+    mode_chosen: bool = False
+    # The learner waved that offer away without answering. Kept apart from
+    # `mode_chosen` so declining to decide is not recorded as a decision.
+    offer_dismissed: bool = False
+    # Whether a key saved here reaches an OS keychain. False in a container,
+    # where it is written to the library instead -- which the dialog must say
+    # rather than promise the keychain everywhere.
+    keyring_available: bool = True
 
 
 class LLMSettingsPatch(BaseModel):
@@ -61,6 +73,7 @@ class LLMSettingsPatch(BaseModel):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
+    offer_dismissed: bool | None = None
 
 
 async def _fetch_ollama_models(ollama_url: str) -> tuple[bool, list[str]]:
@@ -120,6 +133,9 @@ async def _build_response(data: dict, ollama_url: str) -> LLMSettingsResponse:
         available_local_models=available_local_models,
         cloud_providers=cloud_providers,
         ollama_reachable=ollama_reachable,
+        mode_chosen=data["mode_chosen"],
+        offer_dismissed=data["offer_dismissed"],
+        keyring_available=data["keyring_available"],
     )
 
 
@@ -282,6 +298,7 @@ async def patch_llm_settings(
         model=req.model,
         local_chat_model=req.local_chat_model,
         vision_model=req.vision_model,
+        offer_dismissed=req.offer_dismissed,
         openai_api_key=req.openai_api_key,
         anthropic_api_key=req.anthropic_api_key,
         google_api_key=req.google_api_key,

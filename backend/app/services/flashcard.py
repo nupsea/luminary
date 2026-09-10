@@ -676,6 +676,7 @@ class RegenerateResult:
     requested: int
     replaced: int
     kept_previous: bool
+    sessions_removed: int = 0
 
 
 @dataclass
@@ -828,6 +829,7 @@ class FlashcardService(FlashcardSearchService):
         destructive one.
         """
         from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
+        from app.repos.study_repo import StudyRepo  # noqa: PLC0415
 
         if bool(document_id) == bool(note_id):
             raise ValueError("regenerate takes exactly one of document_id, note_id")
@@ -898,6 +900,18 @@ class FlashcardService(FlashcardSearchService):
         for card_id in previous_ids:
             await _delete_flashcard_fts(card_id, session)
         await FlashcardRepo(session).delete_by_ids(previous_ids)
+        # The runs those cards belonged to go with them. A run is only removed
+        # when the replacement left its plan holding nothing that still exists,
+        # so a section-scoped replace leaves the document's other runs alone.
+        # The deleted ids are passed as well because a collection-scoped run
+        # plans several documents' cards and this call never names a collection.
+        sessions_removed = (
+            await StudyRepo(session).purge_runs_without_live_cards(
+                document_ids=[document_id], deleted_card_ids=previous_ids
+            )
+            if document_id
+            else 0
+        )
         logger.info(
             "flashcard.regenerate: replaced deck",
             extra={
@@ -905,6 +919,7 @@ class FlashcardService(FlashcardSearchService):
                 "replaced": len(previous_ids),
                 "requested": requested,
                 "delivered": len(cards),
+                "sessions_removed": sessions_removed,
             },
         )
         return RegenerateResult(
@@ -912,6 +927,7 @@ class FlashcardService(FlashcardSearchService):
             requested=requested,
             replaced=len(previous_ids),
             kept_previous=False,
+            sessions_removed=sessions_removed,
         )
 
     async def generate_from_notes(

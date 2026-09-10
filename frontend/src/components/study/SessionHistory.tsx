@@ -1,7 +1,12 @@
 /**
- * SessionHistory -- scoped list of past teach-back sessions for either a
- * collection or a document. Uses the shared SessionHistoryRow component so
- * behavior stays consistent with the landing-page history view.
+ * SessionHistory -- scoped list of past runs for a collection or a document.
+ *
+ * Both modes, not teach-back alone. The docked Practice face and the Study page
+ * are two views of one document's practice, and a list that hides recall runs
+ * makes them disagree about what happened: the reader offers to pick a recall
+ * run back up while the Study page shows no such run exists. Resume carries the
+ * row's own mode so the host reopens the run that was clicked rather than the
+ * one it prefers.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -10,6 +15,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { SessionHistoryRow } from "@/components/study/SessionHistoryRow"
 import { deleteStudySession, fetchSessions } from "@/lib/studyApi"
+import type { StudyMode } from "@/lib/studySessionService"
 
 type Scope =
   | { kind: "collection"; id: string }
@@ -17,14 +23,17 @@ type Scope =
 
 interface SessionHistoryProps {
   scope: Scope
-  onResumeTeachback: (sessionId: string) => void
+  onResume: (sessionId: string, mode: StudyMode) => void
   title?: string
+  /** Told after a delete, so a host holding its own view of these runs refreshes. */
+  onChanged?: () => void
 }
 
 export function SessionHistory({
   scope,
-  onResumeTeachback,
+  onResume,
   title = "Session History",
+  onChanged,
 }: SessionHistoryProps) {
   const queryClient = useQueryClient()
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -39,7 +48,6 @@ export function SessionHistory({
       fetchSessions(1, 50, {
         collectionId: scope.kind === "collection" ? scope.id : undefined,
         documentId: scope.kind === "document" ? scope.id : undefined,
-        mode: "teachback",
       }),
     staleTime: 5_000,
     // Keep refreshing while any row still has teach-back evaluations in flight
@@ -56,6 +64,7 @@ export function SessionHistory({
     })
     queryClient.invalidateQueries({ queryKey: ["study-sessions-active"] })
     queryClient.invalidateQueries({ queryKey: ["study-sessions-completed"] })
+    onChanged?.()
   }
 
   const deleteMutation = useMutation({
@@ -136,7 +145,7 @@ export function SessionHistory({
         <div className="rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
           <History size={24} className="mx-auto mb-2 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">
-            No teach-back sessions yet for {scopeLabel}.
+            No practice runs yet for {scopeLabel}.
           </p>
         </div>
       ) : (
@@ -163,7 +172,7 @@ export function SessionHistory({
               onToggleSelect={() => toggleSelect(s.id)}
               onDelete={(id) => deleteMutation.mutate(id)}
               isDeleting={deleteMutation.isPending}
-              onResume={onResumeTeachback}
+              onResume={(id) => onResume(id, s.mode === "teachback" ? "teachback" : "flashcard")}
               showChevron={false}
             />
           ))}

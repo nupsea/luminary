@@ -98,7 +98,7 @@
     {
       "id": "ask",
       "mode": "public",
-      "kind": "feature",
+      "kind": "nav_tab",
       "frontend": {
         "route": "/chat",
         "component": "pages/Chat"
@@ -115,7 +115,7 @@
       "labels": {
         "en": "Ask"
       },
-      "description": "A conversation about a scope. Off the rail and still routed: the reader docks one beside the text, and a document's Chat about this opens /chat with that document already scoped. Its routers stay public because the docked conversation is served by them."
+      "description": "A conversation about a scope. On the rail because a question across the whole library -- comparing two books, searching everything at once -- has no other door: a docked conversation is pinned to its document and cannot be re-scoped. The reader still docks one beside the text, and a document's Chat about this opens /chat with that document already scoped."
     },
     {
       "id": "map",

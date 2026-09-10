@@ -629,3 +629,169 @@ def test_llm_error_message_cloud_mentions_keys_not_ollama(restore_mode):
 def test_llm_error_message_defaults_to_private_when_unset(restore_mode):
     svc_module._cache.pop("llm_mode", None)
     assert "ollama serve" in get_llm_error_message()
+
+
+# The engine offer — whether the fast-or-private question was ever answered
+#
+# `EngineChoice` is mounted only by the first-run guide, which an upgrade never
+# meets, so a library carrying documents from before rung 0.10.0 keeps `private`
+# without anyone declining the cloud. `mode_chosen` is what lets that library be
+# offered the question, and it reads the row rather than the value: the value is
+# `private` either way (roadmap 0.10.0).
+
+
+async def test_a_library_that_was_never_asked_reports_no_choice(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            data = (await client.get("/settings/llm")).json()
+
+    assert data["mode"] == "private"
+    assert data["mode_chosen"] is False
+    assert data["offer_dismissed"] is False
+
+
+async def test_answering_the_question_records_a_choice(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            patched = (await client.patch("/settings/llm", json={"mode": "private"})).json()
+            fetched = (await client.get("/settings/llm")).json()
+
+    # Same value as the default, and now a decision rather than one.
+    assert patched["mode"] == "private"
+    assert patched["mode_chosen"] is True
+    assert fetched["mode_chosen"] is True
+
+
+async def test_waving_the_offer_away_survives_a_reload(test_db):
+    import unittest.mock
+
+    _engine, factory = test_db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            patched = (await client.patch("/settings/llm", json={"offer_dismissed": True})).json()
+
+    assert patched["offer_dismissed"] is True
+    # Still un-answered: dismissing is not choosing.
+    assert patched["mode_chosen"] is False
+
+    # Drop the cache the way a restart does, then read it back off the row.
+    svc_module._cache.update(_DEFAULTS)
+    async with factory() as session:
+        reloaded = await svc_module.get_llm_settings(session)
+    assert reloaded["offer_dismissed"] is True
+
+
+async def test_a_dismissal_can_be_taken_back(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            await client.patch("/settings/llm", json={"offer_dismissed": True})
+            data = (await client.patch("/settings/llm", json={"offer_dismissed": False})).json()
+
+    assert data["offer_dismissed"] is False
+
+
+# Provider and model are spent together
+#
+# `get_effective_routing` returns f"{provider}/{cloud_model}". The engine question
+# sends a provider and no model, so leaving the previous provider's model in place
+# produced `anthropic/gpt-4o-mini` -- a first answer that cannot resolve, on the
+# default path through the one question this rung is about.
+
+
+async def test_choosing_a_provider_carries_a_model_that_provider_serves(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            data = (
+                await client.patch(
+                    "/settings/llm",
+                    json={"mode": "hybrid", "provider": "anthropic", "anthropic_api_key": "sk-x"},
+                )
+            ).json()
+
+    assert data["provider"] == "anthropic"
+    assert data["model"].startswith("claude-")
+    model, api_key = get_effective_routing(background=False)
+    assert model == f"anthropic/{data['model']}"
+    assert api_key == "sk-x"
+
+
+async def test_every_offered_provider_resolves_to_one_of_its_own_models(test_db):
+    import unittest.mock
+
+    expected_prefix = {"openai": "gpt-", "anthropic": "claude-", "gemini": "gemini-"}
+    key_field = {
+        "openai": "openai_api_key",
+        "anthropic": "anthropic_api_key",
+        "gemini": "google_api_key",
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            for provider, prefix in expected_prefix.items():
+                data = (
+                    await client.patch(
+                        "/settings/llm",
+                        json={
+                            "mode": "hybrid",
+                            "provider": provider,
+                            key_field[provider]: "sk-x",
+                        },
+                    )
+                ).json()
+                assert data["model"].startswith(prefix), (provider, data["model"])
+                model, _key = get_effective_routing(background=False)
+                assert model == f"{provider}/{data['model']}"
+
+
+async def test_a_model_picked_for_the_provider_being_kept_survives(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            await client.patch(
+                "/settings/llm",
+                json={"mode": "cloud", "provider": "openai", "model": "gpt-4o"},
+            )
+            # Re-sending the same provider is not a change and must not reset it.
+            data = (await client.patch("/settings/llm", json={"provider": "openai"})).json()
+
+    assert data["model"] == "gpt-4o"
+
+
+async def test_a_named_model_wins_over_the_provider_default(test_db):
+    import unittest.mock
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with unittest.mock.patch(
+            "app.routers.settings._fetch_ollama_models", return_value=(False, [])
+        ):
+            data = (
+                await client.patch(
+                    "/settings/llm",
+                    json={"provider": "anthropic", "model": "claude-opus-4-6"},
+                )
+            ).json()
+
+    assert data["model"] == "claude-opus-4-6"

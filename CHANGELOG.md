@@ -4,7 +4,53 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.1] - 2026-09-10
+
+### Added
+- **A library that already existed is offered the engine question.** The
+  fast-or-private choice was mounted only by the first-run guide, which the Hub
+  shows only for an empty library, so everyone who upgraded kept the local
+  default without being asked and met a 19-41s answer with no explanation for
+  it. The Hub now offers the same question once, and the key panel says where to
+  get a key and where the key will be stored.
+
+### Fixed
+- **Picking a provider no longer routes to another provider's model.** Routing
+  concatenates two settings written independently, so accepting the offer with
+  Anthropic -- the question's own default -- sent `anthropic/gpt-4o-mini` and the
+  first answer could not resolve. A provider change carries that provider's
+  default model; a model chosen for the provider you keep survives (I-53).
+- **The key panel no longer promises a keychain that is not there.** Docker and
+  headless Linux have no OS keyring, and the write path already fell back to a
+  plaintext row in the library database. It now reads which case the machine is
+  in and says so before you paste anything.
+- **Ask is back on the learner rail.** Off it, there was no way to ask across the
+  whole library -- compare two books, search everything -- because a docked
+  conversation is pinned to its document. `/chat` stayed routed, which in a
+  desktop app with no address bar is not the same as reachable.
+- **A banner above the route no longer pushes the bottom of the page off screen.**
+  `main` was a block box, so a page sizing itself with `h-full` measured the whole
+  viewport while starting below the focus pill: every full-height page lost its
+  last 42px. In the reader that strip was the docked panel's footer -- the mic,
+  Open full note and Done.
+- **The docked teach-back answer offers the mic**, as the Study page's already did.
+- **One malformed verdict no longer takes out a run's results.** A model that
+  answered `"misconceptions": [["a", "b"]]` had the nesting written to the row, and
+  every later read of that session 500'd -- so "Explain it" reported the backend
+  unreachable while it was fine. Lists are flattened on the way in and on the way
+  out; `test_teachback_result_shapes.py` holds it.
+- **Emptying a deck removes the runs it empties, and keeps your progress.** A
+  document holding three cards listed four practice runs built on cards that were
+  already gone; none could be entered. Replacing a deck, deleting all of it,
+  deleting a selection and deleting one card now each delete a run whose plan
+  holds nothing that still exists, warn before they do, and never touch a review
+  event -- the streak, active days and accuracy are the record of what you did,
+  not of what the cards say (I-52). The two delete endpoints report the runs they
+  removed, so the count in the toast is one the server sent.
+- **The reader lists the runs on the document**, the same rows the Study page
+  shows, so a run started in the reader can be entered or deleted from either
+  surface. Both lists now carry recall runs too: the Study page filtered them out,
+  and its Resume button silently started a new session instead of the one named.
 
 ## [0.11.0] - 2026-09-10
 
@@ -1185,7 +1231,8 @@ get a cited chat, and review it on an FSRS schedule — all on your own machine.
 - **Chat auto-scope** — mentioning a document title in a question automatically
   scopes the answer to that document.
 
-[Unreleased]: https://github.com/nupsea/luminary/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/nupsea/luminary/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/nupsea/luminary/releases/tag/v0.11.1
 [0.11.0]: https://github.com/nupsea/luminary/releases/tag/v0.11.0
 [0.9.0]: https://github.com/nupsea/luminary/releases/tag/v0.9.0
 [0.8.28]: https://github.com/nupsea/luminary/releases/tag/v0.8.28

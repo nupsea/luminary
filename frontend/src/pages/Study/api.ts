@@ -106,6 +106,8 @@ export interface RegenerateResult {
   delivered: number
   replaced: number
   kept_previous: boolean
+  /** Runs the replacement left with no card to practise. Deleted with the deck. */
+  sessions_removed: number
 }
 
 /** Replace a document's deck in one request.
@@ -160,11 +162,17 @@ export async function deleteFlashcard(id: string): Promise<void> {
   }
 }
 
+/** Cards deleted, and the practice runs that deletion left with nothing to practise. */
+export interface CardDeleteResult {
+  deleted: number
+  sessions_removed: number
+}
+
 export async function bulkDeleteFlashcards(
   ids: string[],
-): Promise<{ deleted: number }> {
+): Promise<CardDeleteResult> {
   try {
-    return await apiPost<{ deleted: number }>("/flashcards/bulk-delete", { ids })
+    return await apiPost<CardDeleteResult>("/flashcards/bulk-delete", { ids })
   } catch {
     throw new Error("Failed to delete selected flashcards")
   }
@@ -172,9 +180,11 @@ export async function bulkDeleteFlashcards(
 
 export async function deleteAllFlashcardsForDocument(
   documentId: string,
-): Promise<void> {
+): Promise<CardDeleteResult> {
   try {
-    await apiDelete(`/flashcards/document/${encodeURIComponent(documentId)}`)
+    return await apiDelete<CardDeleteResult>(
+      `/flashcards/document/${encodeURIComponent(documentId)}`,
+    )
   } catch {
     throw new Error("Failed to delete all flashcards")
   }
@@ -182,9 +192,9 @@ export async function deleteAllFlashcardsForDocument(
 
 export async function deleteAllFlashcardsForCollection(
   collectionId: string,
-): Promise<{ deleted: number }> {
+): Promise<CardDeleteResult> {
   try {
-    return await apiDelete<{ deleted: number }>(
+    return await apiDelete<CardDeleteResult>(
       `/flashcards/collection/${encodeURIComponent(collectionId)}`,
     )
   } catch {

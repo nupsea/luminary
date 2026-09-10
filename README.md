@@ -84,9 +84,48 @@ Luminary's default is a local model through Ollama, so the whole loop — readin
 asking, generating cards, reviewing — runs with no connection and no account.
 Turn the wifi off mid-session and it keeps answering.
 
-Prefer a frontier model? Add an OpenAI, Anthropic or Google key in Settings and
-switch to Cloud or Hybrid mode. **Private mode never sends anything off the
-machine**, and it will not even offer you a cloud model.
+---
+
+## Faster answers, if you want them
+
+A local model is private and slow. On this project's development Mac
+(`qwen3.5:4b`, one document, five passages) the source chips appear in about
+1.9s, the first token at about 3.2s, and the finished answer takes 19-41s. Your
+machine is not that machine, so treat those as an order of magnitude rather than
+a promise.
+
+Hand Luminary an API key and synthesis moves to a hosted model. **Only the
+question and the passages retrieved for it leave** — never the document, the
+library, or your learner record. Luminary quotes no speed figure for that arm,
+because nothing has measured it on your machine; the receipt under your first
+answer will.
+
+**Turning it on**
+
+1. Create a key at [Anthropic](https://console.anthropic.com/settings/keys),
+   [OpenAI](https://platform.openai.com/api-keys) or
+   [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Luminary asks where answers should come from on first run. If your library
+   is older than that question, the Hub offers it once; either way it is
+   **Settings -> LLM Mode**.
+3. Choose **Answer with your API key**, pick the provider, paste the key, and
+   ask something. The line under the answer names the model, the cost, and how
+   many passages were sent.
+
+**Where the key is stored** depends on whether the machine has an OS keyring,
+and the key panel tells you which case you are in before you paste anything:
+
+| | |
+|---|---|
+| **macOS app, macOS one-command, Windows native, Linux desktop** | The OS keychain. Never in the library, never in the database |
+| **Docker (including Intel Mac and Windows Docker), headless Linux** | There is no keyring, so a key saved in Settings is written to the library database in plain text. Pass it in `.env` beside the compose file instead — see [Running under Docker](#running-under-docker) |
+
+**What never leaves, in any mode:** your library and its index, search and
+reranking, transcription, entity extraction, figure reading, and the whole
+learner record. Ingest enrichment stays local too, so building a library never
+spends your quota. **Settings -> Where your work runs** lists every unit of work with
+the model that serves it and whether it is on this machine. **Private mode sends
+nothing at all**, and will not even offer you a cloud model.
 
 ---
 

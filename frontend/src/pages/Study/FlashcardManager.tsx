@@ -21,7 +21,8 @@ import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { SessionHistory } from "@/components/study/SessionHistory"
-import { type StudyFilters, endOpenSessionsForScope } from "@/lib/studySessionService"
+import { fetchSessions } from "@/lib/studyApi"
+import { type StudyFilters } from "@/lib/studySessionService"
 import { useAppStore } from "@/store"
 
 import {
@@ -48,7 +49,7 @@ import { WeakAreasPanel } from "./WeakAreasPanel"
 
 interface FlashcardManagerProps {
   documentId: string
-  onStartStudy: (filters?: StudyFilters) => void
+  onStartStudy: (filters?: StudyFilters, resumeId?: string) => void
   onStartTeachback: (filters?: StudyFilters, resumeId?: string) => void
 }
 
@@ -111,6 +112,17 @@ export function FlashcardManager({
       }),
   })
 
+  // What the replacement warning has to name. Every card on the document is
+  // replaced, so every run built on one is left with nothing to practise --
+  // the count below is exactly what the backend will remove.
+  const { data: runs } = useQuery({
+    queryKey: ["scoped-sessions", "document", documentId],
+    queryFn: () => fetchSessions(1, 50, { documentId }),
+    enabled: !!documentId,
+    staleTime: 5_000,
+  })
+  const runCount = runs?.total ?? 0
+
   const { data: docData } = useQuery<DocumentSections>({
     queryKey: ["document-sections", documentId],
     queryFn: () => fetchDocumentSections(documentId),
@@ -168,32 +180,39 @@ export function FlashcardManager({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["flashcards-search"] }),
   })
 
+  // The runs go with the cards inside the delete call itself, the way a replace
+  // does. Ending them from here afterwards raced it and left the history full
+  // of rows that could not be entered.
+  const afterCardsDeleted = (sessionsRemoved: number) => {
+    qc.invalidateQueries({ queryKey: ["flashcards-search"] })
+    qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
+    qc.invalidateQueries({ queryKey: ["scoped-sessions", "document", documentId] })
+    qc.invalidateQueries({ queryKey: ["study-sessions-active"] })
+    qc.invalidateQueries({ queryKey: ["study-sessions-completed"] })
+    clearSelection()
+    setSelectionMode(false)
+    setConfirmBulkDelete(null)
+    return sessionsRemoved > 0
+      ? {
+          description: `${sessionsRemoved} run${sessionsRemoved === 1 ? "" : "s"} removed; your progress record is kept.`,
+        }
+      : undefined
+  }
+
   const bulkDeleteMutation = useMutation({
     mutationFn: bulkDeleteFlashcards,
     onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
-      qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
-      clearSelection()
-      setSelectionMode(false)
-      setConfirmBulkDelete(null)
-      toast.success(`Deleted ${res.deleted} flashcard${res.deleted === 1 ? "" : "s"}`)
+      const note = afterCardsDeleted(res.sessions_removed)
+      toast.success(`Deleted ${res.deleted} flashcard${res.deleted === 1 ? "" : "s"}`, note)
     },
     onError: () => toast.error("Failed to delete selected flashcards"),
   })
 
   const deleteAllMutation = useMutation({
-    mutationFn: async () => {
-      await deleteAllFlashcardsForDocument(documentId)
-      // Drop any in-progress session so it can't resume with deleted cards.
-      await endOpenSessionsForScope(documentId, null)
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flashcards-search"] })
-      qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
-      clearSelection()
-      setSelectionMode(false)
-      setConfirmBulkDelete(null)
-      toast.success("All flashcards deleted for this document")
+    mutationFn: () => deleteAllFlashcardsForDocument(documentId),
+    onSuccess: (res) => {
+      const note = afterCardsDeleted(res.sessions_removed)
+      toast.success("All flashcards deleted for this document", note)
     },
     onError: () => toast.error("Failed to delete flashcards"),
   })
@@ -206,19 +225,22 @@ export function FlashcardManager({
   const replaceMutation = useMutation({
     mutationFn: async () => {
       const count = Math.min(Math.max(totalCards || 10, 1), 50)
-      const result = await regenerateFlashcards({
+      // The runs go with the cards inside this one call. Ending them from here
+      // afterwards raced it and left the history full of rows that could not be
+      // entered; POST /flashcards/regenerate deletes the ones its replacement
+      // emptied, and keeps their review events.
+      return regenerateFlashcards({
         document_id: documentId,
         count,
         difficulty: "medium",
       })
-      // Fresh cards -> fresh review: drop the stale in-progress session. After
-      // the swap, so a run that kept the old deck keeps its session too.
-      if (!result.kept_previous) await endOpenSessionsForScope(documentId, null)
-      return result
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["flashcards-search"] })
       qc.invalidateQueries({ queryKey: ["study-stats", documentId] })
+      qc.invalidateQueries({ queryKey: ["scoped-sessions", "document", documentId] })
+      qc.invalidateQueries({ queryKey: ["study-sessions-active"] })
+      qc.invalidateQueries({ queryKey: ["study-sessions-completed"] })
       clearSelection()
       setSelectionMode(false)
       setConfirmBulkDelete(null)
@@ -227,15 +249,17 @@ export function FlashcardManager({
         toast.error("No new cards could be written from this document — your deck is unchanged")
         return
       }
-      const short = result.delivered < result.requested
+      const notes = [
+        result.delivered < result.requested
+          ? `Asked for ${result.requested}. The rest did not quote the source and were dropped.`
+          : null,
+        result.sessions_removed > 0
+          ? `${result.sessions_removed} run${result.sessions_removed === 1 ? "" : "s"} removed; your progress record is kept.`
+          : null,
+      ].filter(Boolean)
       toast.success(
         `Replaced with ${result.delivered} fresh card${result.delivered === 1 ? "" : "s"}`,
-        short
-          ? {
-              description:
-                `Asked for ${result.requested}. The rest did not quote the source and were dropped.`,
-            }
-          : undefined,
+        notes.length > 0 ? { description: notes.join(" ") } : undefined,
       )
     },
     onError: (err: Error) => {
@@ -531,10 +555,18 @@ export function FlashcardManager({
             <AlertCircle size={16} />
             <span className="flex-1">
               {confirmBulkDelete === "selected"
-                ? `Permanently delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
+                ? `Permanently delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? "" : "s"}? Any practice run left with no card to practise goes too; your progress record is kept. This cannot be undone.`
                 : isReplace
-                  ? `Replace all ${totalCards} flashcard${totalCards === 1 ? "" : "s"} with a freshly generated set? This deletes the current cards and their review history.`
-                  : `Permanently delete ALL ${totalCards} flashcards for this document? This cannot be undone.`}
+                  ? `Replace all ${totalCards} flashcard${totalCards === 1 ? "" : "s"} with a freshly generated set? The current cards go, and with them ${
+                      runCount === 0
+                        ? "any run built on them"
+                        : `the ${runCount} practice run${runCount === 1 ? "" : "s"} below`
+                    } -- your progress record (streak, reviews, accuracy) is kept. This cannot be undone.`
+                  : `Permanently delete ALL ${totalCards} flashcards for this document, and with them ${
+                      runCount === 0
+                        ? "any run built on them"
+                        : `the ${runCount} practice run${runCount === 1 ? "" : "s"} below`
+                    }? Your progress record (streak, reviews, accuracy) is kept. This cannot be undone.`}
             </span>
             <button
               onClick={() => {
@@ -609,8 +641,10 @@ export function FlashcardManager({
       {/* Session history scoped to this document */}
       <SessionHistory
         scope={{ kind: "document", id: documentId }}
-        onResumeTeachback={(sid) =>
-          onStartTeachback(undefined, sid)
+        onResume={(sid, mode) =>
+          mode === "teachback"
+            ? onStartTeachback(undefined, sid)
+            : onStartStudy(undefined, sid)
         }
       />
     </div>

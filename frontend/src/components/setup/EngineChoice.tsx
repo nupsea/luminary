@@ -16,6 +16,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { apiGet, apiPatch } from "@/lib/apiClient"
+import { PROVIDER_SETUP, providerSetup } from "@/lib/engineOffer"
 import { fetchRouting } from "@/lib/llmRouting"
 import { cn } from "@/lib/utils"
 
@@ -24,13 +25,10 @@ interface LLMModeState {
   has_openai_key: boolean
   has_anthropic_key: boolean
   has_google_key: boolean
+  // False in a container, where a saved key is written to the library rather
+  // than an OS keychain. The sentence below has to follow it.
+  keyring_available: boolean
 }
-
-const PROVIDERS = [
-  { id: "openai", label: "OpenAI" },
-  { id: "anthropic", label: "Anthropic" },
-  { id: "gemini", label: "Google Gemini" },
-] as const
 
 export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   const queryClient = useQueryClient()
@@ -72,6 +70,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   })
 
   const probe = routing?.local_probe_seconds ?? null
+  const setup = providerSetup(provider)
   const hasAnyKey =
     llm?.has_openai_key || llm?.has_anthropic_key || llm?.has_google_key || false
 
@@ -140,7 +139,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
               onChange={(e) => setProvider(e.target.value)}
               className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
             >
-              {PROVIDERS.map((p) => (
+              {PROVIDER_SETUP.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
@@ -154,9 +153,25 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
             />
           </div>
+          {/* Where a key comes from is the step between wanting the fast arm and
+              having it, and the question used to say nothing about it. */}
           <p className="text-[11px] text-muted-foreground">
-            Stored in your OS keychain, never in the library. Skip this and Luminary
-            keeps working locally.
+            No key yet? Create one at{" "}
+            <a
+              href={setup?.consoleUrl ?? "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              {setup?.consoleLabel}
+            </a>
+            , then paste it above.
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {llm?.keyring_available === false
+              ? "This install has no OS keychain, so the key is saved in your library database. Set it in the environment instead if that matters to you."
+              : "Stored in your OS keychain, never in the library."}{" "}
+            Skip this and Luminary keeps working locally.
           </p>
         </div>
       )}

@@ -12,7 +12,8 @@
  * compare against and a run that produces nothing leaves the learner their
  * cards. It is scoped to whatever scopes the panel -- replacing a chapter must
  * not take the rest of the book's deck with it -- and it is confirmed first,
- * because it deletes cards the learner may have practised for weeks.
+ * because it deletes cards the learner may have practised for weeks, and the
+ * runs those cards leave empty.
  *
  * Distinct from GenerateFlashcardsDialog, which is note-scoped.
  */
@@ -31,6 +32,7 @@ interface RegenerateResponse {
   delivered: number
   replaced: number
   kept_previous: boolean
+  sessions_removed: number
 }
 
 interface CardGeneratorProps {
@@ -52,7 +54,11 @@ interface CardGeneratorProps {
   /** Cards landed in the deck. The panel refetches rather than trusting a list. */
   onGenerated: (cards: Flashcard[]) => void
   /** The scope's deck was replaced. Carries what the run must be rebuilt from. */
-  onReplaced: (result: { cards: Flashcard[]; replaced: number }) => void
+  onReplaced: (result: {
+    cards: Flashcard[]
+    replaced: number
+    sessionsRemoved: number
+  }) => void
 }
 
 export function CardGenerator({
@@ -130,7 +136,11 @@ export function CardGenerator({
         setError("Nothing usable came back, so your existing cards were kept.")
         return
       }
-      onReplaced({ cards: result.cards, replaced: result.replaced })
+      onReplaced({
+        cards: result.cards,
+        replaced: result.replaced,
+        sessionsRemoved: result.sessions_removed,
+      })
     } catch (err) {
       setError(describe(err, "Could not replace these cards."))
     } finally {
@@ -198,10 +208,10 @@ export function CardGenerator({
             Replace every card on {scopeName}?
           </p>
           <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
-            The current cards are deleted along with their review history, and{" "}
-            {count} fresh questions are written from the start
-            {model ? ` by ${shortModelLabel(model)}` : ""}. Any run in progress
-            here ends. This cannot be undone.
+            The current cards are deleted and {count} fresh questions are written
+            from the start{model ? ` by ${shortModelLabel(model)}` : ""}. Any run
+            left with no cards to practise goes with them -- your progress record
+            (streak, reviews, accuracy) is kept. This cannot be undone.
           </p>
           <div className="mt-3 flex items-center gap-2">
             <button

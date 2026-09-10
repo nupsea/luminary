@@ -71,6 +71,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/audio/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe Audio
+         * @description Transcribe an audio recording into text using faster-whisper.
+         */
+        post: operations["transcribe_audio_audio_transcribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/blog/config": {
         parameters: {
             query?: never;
@@ -3123,6 +3143,9 @@ export interface paths {
         /**
          * Delete All Document Flashcards
          * @description Delete all flashcards for a specific document. Keeps FTS index in sync per I-4.
+         *
+         *     Answers with both counts rather than 204: the UI states how many runs went,
+         *     and a number it was told is not the number it guessed from the list length.
          */
         delete: operations["delete_all_document_flashcards_flashcards_document__document_id__delete"];
         options?: never;
@@ -5316,6 +5339,10 @@ export interface paths {
          *     Used by resume so the queue reflects what was originally planned, not the
          *     set of cards currently due for the scope. Also returns the count of already-
          *     answered cards so the hook can restore the progress indicator on resume.
+         *
+         *     Both counts are over the planned cards that STILL EXIST: a deck replaced
+         *     under an open run deletes cards it planned, and those are neither progress
+         *     nor work outstanding (I-47).
          */
         get: operations["get_session_remaining_cards_study_sessions__session_id__remaining_cards_get"];
         put?: never;
@@ -6726,6 +6753,11 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_transcribe_audio_audio_transcribe_post */
+        Body_transcribe_audio_audio_transcribe_post: {
+            /** File */
+            file: string;
+        };
         /** Body_upload_note_image_images_notes_post */
         Body_upload_note_image_images_notes_post: {
             /** File */
@@ -6735,6 +6767,11 @@ export interface components {
         BulkDeleteResponse: {
             /** Deleted */
             deleted: number;
+            /**
+             * Sessions Removed
+             * @default 0
+             */
+            sessions_removed: number;
         };
         /** CalibrationStatsResponse */
         CalibrationStatsResponse: {
@@ -8871,6 +8908,8 @@ export interface components {
             anthropic_api_key?: string | null;
             /** Google Api Key */
             google_api_key?: string | null;
+            /** Offer Dismissed */
+            offer_dismissed?: boolean | null;
         };
         /** LLMSettingsResponse */
         LLMSettingsResponse: {
@@ -8921,6 +8960,21 @@ export interface components {
              * @default true
              */
             ollama_reachable: boolean;
+            /**
+             * Mode Chosen
+             * @default false
+             */
+            mode_chosen: boolean;
+            /**
+             * Offer Dismissed
+             * @default false
+             */
+            offer_dismissed: boolean;
+            /**
+             * Keyring Available
+             * @default true
+             */
+            keyring_available: boolean;
         };
         /**
          * LabCatalogue
@@ -9832,6 +9886,8 @@ export interface components {
          *     "Replaced with 3 fresh cards" for a deck of 5 that had just lost 2 with no
          *     explanation. `kept_previous` says the run produced nothing usable and the
          *     old deck is still there -- `cards` is then empty and nothing was deleted.
+         *     `sessions_removed` counts the runs the replacement left with no card to
+         *     practise, which are deleted with it; their review events are kept.
          */
         RegenerateResponse: {
             /** Cards */
@@ -9847,6 +9903,11 @@ export interface components {
              * @default false
              */
             kept_previous: boolean;
+            /**
+             * Sessions Removed
+             * @default 0
+             */
+            sessions_removed: number;
         };
         /** RenameRequest */
         RenameRequest: {
@@ -10930,6 +10991,16 @@ export interface components {
             /** Message */
             message?: string | null;
         };
+        /** TranscriptionResponse */
+        TranscriptionResponse: {
+            /** Text */
+            text: string;
+            /**
+             * Duration
+             * @default 0
+             */
+            duration: number;
+        };
         /** UpdateGoalRequest */
         UpdateGoalRequest: {
             /** Title */
@@ -11368,6 +11439,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transcribe_audio_audio_transcribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_transcribe_audio_audio_transcribe_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptionResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -16568,11 +16672,13 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

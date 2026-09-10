@@ -6,6 +6,7 @@ import logging
 import socket
 
 import keyring
+import keyring.backends.fail
 import keyring.errors
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,10 @@ _XOR_KEY: bytes = hashlib.sha256(socket.gethostname().encode()).digest()
 
 _LLM_SETTING_KEYS = (
     "llm_mode",
+    # "1" once the learner has waved the engine offer away without answering it.
+    # Persisted rather than held in component state: a notice that returns on
+    # every launch is a nag, and dismissing is not the same as choosing.
+    "llm_offer_dismissed",
     "cloud_provider",
     "cloud_model",
     # Empty means "whatever config says". Kept settable because a user who
@@ -40,6 +45,7 @@ _API_KEY_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "google_api_
 
 _DEFAULTS: dict[str, str] = {
     "llm_mode": "private",
+    "llm_offer_dismissed": "",
     "cloud_provider": "openai",
     "cloud_model": "gpt-4o-mini",
     "local_chat_model": "",
@@ -52,6 +58,13 @@ _DEFAULTS: dict[str, str] = {
 # Module-level mutable cache — populated on startup and updated on PATCH.
 # API key fields store the raw (decrypted) value; non-key fields store as-is.
 _cache: dict[str, str] = dict(_DEFAULTS)
+
+# Whether a `llm_mode` row exists at all, which is a different question from what
+# the mode is. Every library predating the engine question runs `private` because
+# that is the default in `_DEFAULTS`, not because anyone declined the cloud, and
+# the two are indistinguishable from `_cache` alone -- the load path substitutes
+# the default silently. Only the row answers it, so its presence is carried here.
+_mode_row_present: bool = False
 
 
 def encrypt_setting(value: str) -> str:
@@ -109,6 +122,24 @@ def _keyring_get(field: str) -> str | None:
         return None
 
 
+def keyring_available() -> bool:
+    """Whether a key saved from Settings will reach an OS keychain at all.
+
+    The write path already falls back to a plaintext-prefixed row when no keyring
+    answers -- a container has none -- but nothing reported which of the two
+    happened, so the dialog promised "stored in your OS keychain, never in the
+    library" on installs where the key goes into the library. A claim about where
+    a secret lives has to be read from the machine making it.
+
+    Probes the resolved backend rather than writing one: `fail.Keyring` is exactly
+    what raises `NoKeyringError` in `_keyring_set`.
+    """
+    try:
+        return not isinstance(keyring.get_keyring(), keyring.backends.fail.Keyring)
+    except Exception:
+        return False
+
+
 def _keyring_delete(field: str) -> None:
     """Delete a value from the OS keyring, ignoring all errors."""
     with contextlib.suppress(keyring.errors.PasswordDeleteError, keyring.errors.NoKeyringError):
@@ -123,9 +154,12 @@ async def load_llm_settings(db: AsyncSession) -> None:
     When no system keyring is available (e.g. Docker), XOR-encrypted DB values
     are used directly without migration.
     """
+    global _mode_row_present
     for key in _LLM_SETTING_KEYS:
         result = await db.execute(select(SettingsModel).where(SettingsModel.key == key))
         row = result.scalar_one_or_none()
+        if key == "llm_mode":
+            _mode_row_present = row is not None
         if row is None:
             continue
 
@@ -180,6 +214,9 @@ async def get_llm_settings(db: AsyncSession) -> dict:
         "has_openai_key": bool(_cache["openai_api_key"]),
         "has_anthropic_key": bool(_cache["anthropic_api_key"]),
         "has_google_key": bool(_cache["google_api_key"]),
+        "mode_chosen": _mode_row_present,
+        "keyring_available": keyring_available(),
+        "offer_dismissed": bool(_cache["llm_offer_dismissed"]),
     }
 
 
@@ -224,12 +261,25 @@ def get_vision_model() -> str:
     return configured_vision_override() or default_vision_model()
 
 
+# The model a provider starts on when the learner picks the provider and nothing
+# else -- which is every path through the engine question, first run or upgrade.
+# The Settings dropdown offers the rest; these only have to be real and cheap.
+# Kept here rather than read from the router's catalogue because a service may
+# not import from the API layer.
+_PROVIDER_DEFAULT_MODEL: dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-haiku-4-5-20251001",
+    "gemini": "gemini-1.5-flash-8b-001",
+}
+
+
 async def update_llm_settings(
     db: AsyncSession,
     *,
     mode: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    offer_dismissed: bool | None = None,
     local_chat_model: str | None = None,
     vision_model: str | None = None,
     openai_api_key: str | None = None,
@@ -253,6 +303,18 @@ async def update_llm_settings(
     if provider is not None:
         updates_db["cloud_provider"] = provider
         updates_cache["cloud_provider"] = provider
+        # A provider and a model are stored separately but spent together:
+        # `get_effective_routing` returns f"{provider}/{cloud_model}". Choosing a
+        # provider without naming a model used to leave the previous provider's
+        # model in place, so the engine question -- which sends a provider and no
+        # model -- produced `anthropic/gpt-4o-mini` and a first answer that could
+        # not resolve. Only a provider *change* resets it, so a model deliberately
+        # picked for the provider being kept survives.
+        if model is None and provider != _cache.get("cloud_provider"):
+            fallback = _PROVIDER_DEFAULT_MODEL.get(provider)
+            if fallback:
+                updates_db["cloud_model"] = fallback
+                updates_cache["cloud_model"] = fallback
     if model is not None:
         updates_db["cloud_model"] = model
         updates_cache["cloud_model"] = model
@@ -264,6 +326,9 @@ async def update_llm_settings(
     if vision_model is not None:
         updates_db["vision_model"] = vision_model
         updates_cache["vision_model"] = vision_model
+    if offer_dismissed is not None:
+        updates_db["llm_offer_dismissed"] = "1" if offer_dismissed else ""
+        updates_cache["llm_offer_dismissed"] = "1" if offer_dismissed else ""
 
     key_args = {
         "openai_api_key": openai_api_key,
@@ -293,6 +358,9 @@ async def update_llm_settings(
         setting = SettingsModel(key=key, value=value)
         await db.merge(setting)
     await db.commit()
+    if "llm_mode" in updates_db:
+        global _mode_row_present
+        _mode_row_present = True
     _cache.update(updates_cache)
     logger.debug("LLM settings updated: %s", list(updates_db.keys()))
 

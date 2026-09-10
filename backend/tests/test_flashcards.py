@@ -379,7 +379,8 @@ async def test_delete_all_document_flashcards(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.delete(f"/flashcards/document/{doc_id}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
+        assert resp.json() == {"deleted": 2, "sessions_removed": 0}
 
         # Check doc_id cards are gone
         get_resp = await client.get(f"/flashcards/{doc_id}")
@@ -410,7 +411,7 @@ async def test_bulk_delete_flashcards(test_db):
             json={"ids": [drop_a, drop_b, "missing-id"]},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"deleted": 2}
+        assert resp.json() == {"deleted": 2, "sessions_removed": 0}
 
         get_resp = await client.get(f"/flashcards/{doc_id}")
         remaining = get_resp.json()

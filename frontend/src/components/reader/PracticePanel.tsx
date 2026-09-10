@@ -38,10 +38,11 @@ import { appendSessionCards, fetchMaterialHeadroom, fetchSessions } from "@/lib/
 import {
   type PreparedStudySessionOutcome,
   type StudyMode,
-  endOpenSessionsForScope,
   prepareContinuousStudySession,
   prepareStudySession,
 } from "@/lib/studySessionService"
+
+import { SessionHistory } from "@/components/study/SessionHistory"
 
 import { CardGenerator } from "./CardGenerator"
 import { materialExhausted, noCardsNote, summariseDeck } from "./practiceDeck"
@@ -232,6 +233,8 @@ export function PracticePanel({
     void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
     // Cards consume material, so what is left has changed.
     void qc.invalidateQueries({ queryKey: ["reader-headroom", documentId] })
+    // The Study page reads this key for the same document. One list, two views.
+    void qc.invalidateQueries({ queryKey: ["scoped-sessions", "document", documentId] })
   }
 
   /**
@@ -262,17 +265,26 @@ export function PracticePanel({
   }
 
   /**
-   * The scope's deck was replaced. Whatever run was practising those cards is
-   * practising rows that no longer exist, so it ends here rather than being
-   * left to fail card by card.
+   * The scope's deck was replaced. A run practising those cards is practising
+   * rows that no longer exist, and POST /flashcards/regenerate has already
+   * deleted the ones its replacement emptied -- so this drops the open run on
+   * screen and says what went, rather than ending sessions a second time from
+   * here and racing the call that removed them.
    */
-  async function absorbReplacement(result: { cards: Flashcard[]; replaced: number }) {
-    await endOpenSessionsForScope(documentId, null).catch(() => {})
+  function absorbReplacement(result: {
+    cards: Flashcard[]
+    replaced: number
+    sessionsRemoved: number
+  }) {
     setRun(null)
     refreshDeck()
     setGeneratedNote(
       `${result.replaced} card${result.replaced === 1 ? "" : "s"} replaced with ` +
         `${result.cards.length} fresh question${result.cards.length === 1 ? "" : "s"}. ` +
+        (result.sessionsRemoved > 0
+          ? `${result.sessionsRemoved} run${result.sessionsRemoved === 1 ? "" : "s"} removed with them; ` +
+            "your progress record is kept. "
+          : "") +
         "Start a run to take them from the top.",
     )
   }
@@ -428,11 +440,29 @@ export function PracticePanel({
                 // that answers with an error.
                 exhausted={exhausted && !context}
                 onGenerated={(cards) => void absorbGenerated(cards)}
-                onReplaced={(result) => void absorbReplacement(result)}
+                onReplaced={absorbReplacement}
               />
               {generatedNote && (
                 <p className="text-sm text-muted-foreground">{generatedNote}</p>
               )}
+            </div>
+
+            {/* The runs the Study page lists for this document, in the view the
+                reader has room for. One list, two surfaces: entering or deleting
+                a run has to mean the same thing from either of them. */}
+            <div
+              data-testid="docked-session-history"
+              className="border-t border-border pt-5"
+            >
+              <SessionHistory
+                scope={{ kind: "document", id: documentId }}
+                title="Runs on this document"
+                onResume={(sid, mode) => void start(mode, false, sid)}
+                onChanged={() => {
+                  void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
+                  void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
+                }}
+              />
             </div>
           </div>
         </div>

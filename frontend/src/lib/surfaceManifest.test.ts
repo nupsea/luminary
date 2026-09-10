@@ -67,18 +67,20 @@ describe("surfaceManifest", () => {
     }
   })
 
-  // The public rail is five items and the count is the claim: Ask left it
-  // because a conversation with no scope is the one nobody asks for, and it is
-  // still routed and still served -- the reader docks one beside the document.
-  it("the public learner rail is exactly five items", async () => {
+  // The public rail is six items and the count is the claim. Ask was cut from it
+  // in 0.11.0 on the argument that a conversation with no scope is the one
+  // nobody asks for; a library-wide question -- compare two books, search
+  // everything -- is exactly that conversation, and the docked one cannot serve
+  // it because it is pinned to its document.
+  it("the public learner rail is exactly six items", async () => {
     const m = await loadWithMode("public")
     const rail = m.navTabs().filter((s) => s.rail !== "dev").map((s) => s.id)
-    expect(rail).toEqual(["luminary_hub", "library", "notes", "study", "progress"])
+    expect(rail).toEqual(["luminary_hub", "library", "notes", "study", "ask", "progress"])
   })
 
-  it("Ask is off the rail, still routed and still public", async () => {
+  it("Ask is on the rail, routed and public", async () => {
     const m = await loadWithMode("public")
-    expect(m.navTabs().map((s) => s.id)).not.toContain("ask")
+    expect(m.navTabs().map((s) => s.id)).toContain("ask")
     expect(m.routedSurfaces().map((s) => s.id)).toContain("ask")
     expect(m.isSurfaceVisible("ask")).toBe(true)
   })

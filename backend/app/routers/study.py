@@ -348,6 +348,33 @@ async def _source_passage(card: FlashcardModel, session: AsyncSession) -> str:
     return text[max(0, middle - half) : middle + half]
 
 
+def _string_list(value: object) -> list[str]:
+    """One of the evaluator's lists, in the shape the store and the schema agree on.
+
+    The prompt asks for a list of strings and a model sometimes answers one nesting
+    deeper -- `"misconceptions": [["a", "b"]]`. That was written to the row verbatim,
+    and every later read of the session it belonged to failed `TeachbackResultItem`
+    with a 500, so a single malformed verdict took out the whole run's results and
+    the reader could not start a teach-back on that document again. Flattening is
+    applied on the way in, so no new row can carry it, and on the way out, so a row
+    already holding it is readable rather than fatal.
+    """
+    out: list[str] = []
+
+    def walk(v: object) -> None:
+        if isinstance(v, str):
+            if v.strip():
+                out.append(v.strip())
+        elif isinstance(v, (list, tuple)):
+            for item in v:
+                walk(item)
+        elif v is not None:
+            out.append(str(v))
+
+    walk(value)
+    return out
+
+
 def _verified_evidence(parsed: dict, source: str) -> str:
     """The evaluator's quote, kept only when it is really in the passage.
 
@@ -1601,9 +1628,9 @@ async def teachback(
             detail="The model returned an unreadable evaluation. Please try again.",
         )
     score = parsed.get("score", 0)
-    correct_points: list[str] = parsed.get("correct_points", [])
-    missing_points: list[str] = parsed.get("missing_points", [])
-    misconceptions: list[str] = parsed.get("misconceptions", [])
+    correct_points: list[str] = _string_list(parsed.get("correct_points"))
+    missing_points: list[str] = _string_list(parsed.get("missing_points"))
+    misconceptions: list[str] = _string_list(parsed.get("misconceptions"))
 
     # The rubric comes out of the call above, not a second one of its own. See
     # _rubric_from_evaluation for what that call was grading against before.
@@ -1861,9 +1888,9 @@ async def _evaluate_teachback_bg(
         await _mark_teachback_error(tb_id)
         return
     score = parsed.get("score", 0)
-    correct_points: list[str] = parsed.get("correct_points", [])
-    missing_points: list[str] = parsed.get("missing_points", [])
-    misconceptions: list[str] = parsed.get("misconceptions", [])
+    correct_points: list[str] = _string_list(parsed.get("correct_points"))
+    missing_points: list[str] = _string_list(parsed.get("missing_points"))
+    misconceptions: list[str] = _string_list(parsed.get("misconceptions"))
 
     # A correction card asserts the student is wrong about something. The
     # evaluator has to have quoted the passage before the product will say that:
@@ -2159,9 +2186,9 @@ async def get_teachback_results(
                 question=question or "",
                 expected_answer=expected_answer or "",
                 score=tb.score if tb.status == "complete" else None,
-                correct_points=tb.correct_points if tb.status == "complete" else [],
-                missing_points=tb.missing_points if tb.status == "complete" else [],
-                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                correct_points=_string_list(tb.correct_points) if tb.status == "complete" else [],
+                missing_points=_string_list(tb.missing_points) if tb.status == "complete" else [],
+                misconceptions=_string_list(tb.misconceptions) if tb.status == "complete" else [],
                 rubric=rubric_response,
                 user_explanation=tb.user_explanation if tb.status == "complete" else None,
             )
@@ -2215,9 +2242,9 @@ async def get_session_teachback_results(
                 question=question or "",
                 expected_answer=expected_answer or "",
                 score=tb.score if tb.status == "complete" else None,
-                correct_points=tb.correct_points if tb.status == "complete" else [],
-                missing_points=tb.missing_points if tb.status == "complete" else [],
-                misconceptions=tb.misconceptions if tb.status == "complete" else [],
+                correct_points=_string_list(tb.correct_points) if tb.status == "complete" else [],
+                missing_points=_string_list(tb.missing_points) if tb.status == "complete" else [],
+                misconceptions=_string_list(tb.misconceptions) if tb.status == "complete" else [],
                 rubric=rubric_response,
                 user_explanation=tb.user_explanation if tb.status == "complete" else None,
             )

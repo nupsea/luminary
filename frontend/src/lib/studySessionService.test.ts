@@ -25,7 +25,7 @@ vi.mock("@/lib/studyApi", () => ({
   startSession: (...args: unknown[]) => mocks.startSession(...args),
 }))
 
-const { prepareStudySession, endOpenSessionsForScope } = await import(
+const { prepareStudySession } = await import(
   "./studySessionService",
 )
 
@@ -287,39 +287,3 @@ describe("a run whose deck was replaced", () => {
   })
 })
 
-describe("endOpenSessionsForScope", () => {
-  beforeEach(() => resetMocks())
-
-  it("closes every open session for the scope, not just the newest", async () => {
-    // The reported case: a document held two open teach-back runs. Closing one
-    // left the other to be adopted by the panel, carrying a plan of cards the
-    // replacement had just deleted -- which is how "7 of 8 reviewed" appeared
-    // over a deck of three.
-    const open: Record<string, string[]> = {
-      teachback: ["tb-1", "tb-2"],
-      flashcard: ["fc-1"],
-    }
-    mocks.fetchOpenSession.mockImplementation(({ mode }: { mode: string }) => {
-      const next = open[mode].shift()
-      return Promise.resolve(next ? { id: next } : null)
-    })
-
-    await endOpenSessionsForScope("doc-1", null)
-
-    expect(mocks.endSession.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "fc-1",
-      "tb-1",
-      "tb-2",
-    ])
-  })
-
-  it("stops rather than spinning when a session will not close", async () => {
-    // endSession swallows its errors, so an unclosable session must not loop.
-    mocks.fetchOpenSession.mockResolvedValue({ id: "stuck" })
-    mocks.endSession.mockRejectedValue(new Error("nope"))
-
-    await endOpenSessionsForScope("doc-1", null)
-
-    expect(mocks.endSession.mock.calls.length).toBeLessThanOrEqual(20)
-  })
-})

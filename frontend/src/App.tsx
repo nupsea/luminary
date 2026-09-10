@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
-import { Activity, AlertTriangle, BookOpen, Info, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
+import { Activity, AlertTriangle, BookOpen, Info, MessageSquare, Network, BarChart2, StickyNote, TrendingUp, Wrench, X, Sun, Moon, ClipboardCheck } from "lucide-react"
 import { LuminaryGlyph } from "./components/icons/LuminaryGlyph"
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary"
 import { UploadDialog } from "@/components/library/UploadDialog"
@@ -96,6 +96,7 @@ const ICONS: Record<string, IconComponent> = {
   library: BookOpen,
   notes: StickyNote,
   study: BarChart2,
+  ask: MessageSquare,
   map: Network,
   progress: TrendingUp,
   quality_dashboard: ClipboardCheck,
@@ -560,9 +561,15 @@ function AppShell() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar mainTabs={mainTabs} devTabs={devTabs} />
-      <main className="flex-1 h-full overflow-auto relative animate-[fadeIn_0.2s_ease-out]">
+      {/* A column, not a block: anything that renders above the route -- the model
+          warning, the focus pill -- takes height from the page rather than pushing
+          the bottom of it out of view. A page sizing itself with `h-full` reads
+          100% of this element, so under a block box it measured the whole viewport
+          while starting below a banner, and the strip that fell off the end was
+          the docked panel's footer: its mic, Open full note and Done. */}
+      <main className="relative flex h-full min-h-0 flex-1 flex-col overflow-auto animate-[fadeIn_0.2s_ease-out]">
         {ollamaUnavailable && !ollamaWarningDismissed && (
-          <div className="mx-4 mt-2 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <div className="mx-4 mt-2 flex shrink-0 items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle size={14} className="shrink-0" />
             <span className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
               {ollamaModelMissing ? (
@@ -584,12 +591,15 @@ function AppShell() {
         )}
         {/* Focus timer pill (app-wide) -- full-mode surface, only when pomodoro is visible */}
         {pomodoroVisible && FocusTimerPill && (
-          <div className="flex items-center justify-end gap-2 px-4 pt-3">
+          <div className="flex shrink-0 items-center justify-end gap-2 px-4 pt-3">
             <Suspense fallback={null}>
               <FocusTimerPill />
             </Suspense>
           </div>
         )}
+        {/* `h-full` on a page resolves against this box, which is what is left
+            after the banners above it -- not against the whole viewport. */}
+        <div className="min-h-0 flex-1">
         <Routes>
           {routes.map((s) => {
             const route = s.frontend!.route!
@@ -614,6 +624,7 @@ function AppShell() {
           {LUMINARY_MODE === "full" && <Route path="/evals" element={<Navigate to="/quality" replace />} />}
           <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
+        </div>
       </main>
 
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

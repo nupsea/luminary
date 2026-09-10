@@ -1,5 +1,5 @@
 /**
- * SessionHistoryRow -- single row in any list of study sessions (teach-back).
+ * SessionHistoryRow -- single row in any list of study sessions.
  *
  * Consolidates what used to be two drift-prone copies (CompletedSessionRow in
  * SessionManager.tsx and SessionRow in SessionHistory.tsx). The expanded body
@@ -167,8 +167,8 @@ export function SessionHistoryRow({
               className="flex items-center gap-1 rounded-md bg-violet-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-violet-700"
               title={
                 isComplete
-                  ? "Reopen this teach-back session to add more answers"
-                  : "Continue this teach-back session"
+                  ? `Reopen this ${isTeachback ? "teach-back" : "recall"} run to add more answers`
+                  : `Continue this ${isTeachback ? "teach-back" : "recall"} run`
               }
             >
               <PlayCircle size={11} />

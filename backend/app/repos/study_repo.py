@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 from fastapi import Depends
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -145,6 +145,104 @@ class StudyRepo:
         )
         await self.session.delete(sess)
         await self.session.commit()
+
+    async def purge_runs_without_live_cards(
+        self,
+        *,
+        document_ids: Sequence[str] = (),
+        collection_ids: Sequence[str] = (),
+        deleted_card_ids: Sequence[str] = (),
+    ) -> int:
+        """Delete runs in these scopes whose plan names no card that still exists.
+
+        Emptying a deck -- replaced or deleted -- takes the cards its runs were
+        practising. What is left can never be practised again: I-47 counts only
+        planned cards that still exist, so the run reports nothing planned and
+        nothing outstanding, and the results it holds render against a blank
+        question because the join to the card is outer. It is a row in the
+        history that cannot be entered.
+
+        Review events are NOT touched. An event records a review that happened,
+        streaks and per-day accuracy read them, and the learner record outlives
+        the cards it was earned against -- the same rule
+        `flashcard_repo._CARD_CHILD_TABLES` and
+        `document_deletion_service._LEARNER_RECORD_TABLES` already follow.
+
+        Two different questions decide what is reconsidered. The scopes clear the
+        list the caller just emptied, including rows an earlier delete had
+        already killed. `deleted_card_ids` catches the spill: a collection-scoped
+        run plans cards from several documents at once, so replacing one
+        document's deck can empty it without ever naming the collection. Only a
+        run that planned one of these cards is reconsidered that way, so a run
+        that was dead before this call and belongs to nobody's list here is left
+        where it is.
+        """
+        scopes = []
+        if document_ids:
+            scopes.append(StudySessionModel.document_id.in_(list(document_ids)))
+        if collection_ids:
+            scopes.append(StudySessionModel.collection_id.in_(list(collection_ids)))
+        if not scopes and not deleted_card_ids:
+            return 0
+
+        rows = (
+            (
+                await self.session.execute(
+                    select(StudySessionModel).where(or_(*scopes))
+                )
+            ).scalars().all()
+            if scopes
+            else []
+        )
+        # A run with no plan at all was never built on these cards, so a
+        # replacement does not make it dead.
+        planned_runs = [(s, list(s.planned_card_ids or [])) for s in rows]
+        planned_runs = [(s, plan) for s, plan in planned_runs if plan]
+
+        if deleted_card_ids:
+            gone = set(deleted_card_ids)
+            seen = {s.id for s, _plan in planned_runs}
+            spill = (
+                await self.session.execute(
+                    select(StudySessionModel).where(
+                        StudySessionModel.collection_id.is_not(None),
+                        StudySessionModel.document_id.is_(None),
+                    )
+                )
+            ).scalars().all()
+            planned_runs += [
+                (s, plan)
+                for s, plan in ((s, list(s.planned_card_ids or [])) for s in spill)
+                if plan and s.id not in seen and gone.intersection(plan)
+            ]
+
+        if not planned_runs:
+            return 0
+
+        every_planned = {cid for _s, plan in planned_runs for cid in plan}
+        live = set(
+            (
+                await self.session.execute(
+                    select(FlashcardModel.id).where(FlashcardModel.id.in_(every_planned))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        dead_ids = [s.id for s, plan in planned_runs if not any(c in live for c in plan)]
+        if not dead_ids:
+            return 0
+
+        await self.session.execute(
+            sa_delete(TeachbackResultModel).where(
+                TeachbackResultModel.session_id.in_(dead_ids)
+            )
+        )
+        await self.session.execute(
+            sa_delete(StudySessionModel).where(StudySessionModel.id.in_(dead_ids))
+        )
+        await self.session.commit()
+        return len(dead_ids)
 
     # -- Review events / teachback results --------------------------------
 

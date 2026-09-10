@@ -251,36 +251,6 @@ export async function prepareSectionStudyFromCards(
   }
 }
 
-// One scope should hold one open run per mode, but a second window, a crashed
-// tab or a script can leave more. This is the ceiling on how many are closed in
-// one pass, not a claim that a scope may have that many.
-const MAX_OPEN_SESSIONS_PER_SCOPE = 10
-
-// Close any open flashcard/teach-back session for a scope. Call after deleting
-// or regenerating a scope's cards so the next study run starts fresh instead of
-// resuming a session whose planned cards no longer exist.
-export async function endOpenSessionsForScope(
-  documentId: string | null,
-  collectionId: string | null,
-): Promise<void> {
-  const modes: StudyMode[] = ["flashcard", "teachback"]
-  await Promise.all(
-    modes.map(async (mode) => {
-      // EVERY open session for the mode, not the newest one. /sessions/open
-      // returns one row, and closing only that left a second run open on the
-      // same document -- the panel then adopted it, inherited a plan of cards
-      // the replacement had just deleted, and appended the fresh ones to it.
-      // Bounded rather than while(true): endSession swallows its errors, so an
-      // unclosable session must not spin here.
-      for (let i = 0; i < MAX_OPEN_SESSIONS_PER_SCOPE; i++) {
-        const open = await fetchOpenSession({ mode, documentId, collectionId }).catch(() => null)
-        if (!open) return
-        await endSession(open.id).catch(() => {})
-      }
-    }),
-  )
-}
-
 async function reattach(
   sid: string,
   ctx: {

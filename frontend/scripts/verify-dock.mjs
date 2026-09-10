@@ -123,6 +123,26 @@ check("the Ask page has a conversation", askPageThread > 0, `${askPageThread} me
 
 // Open a document.
 const API = process.env.LUMINARY_API ?? "http://localhost:7820"
+
+// Dictation is a component the installer does not carry, so an absent mic is
+// correct on a machine without the transcriber and a defect on one with it.
+// The capability decides which, and the run says which way it went: a mic check
+// that silently skips is how a missing button shipped on two docked faces while
+// the same button was on screen everywhere else.
+const dictation = await page.evaluate(async (api) => {
+  try {
+    const r = await fetch(`${api}/setup/capabilities`)
+    if (!r.ok) return null
+    return (await r.json())?.dictation?.available ?? null
+  } catch { return null }
+}, API)
+console.log(
+  dictation === null
+    ? "  note  the dictation capability could not be read; the mic checks are skipped"
+    : dictation
+    ? "  note  dictation is installed, so every docked face that takes typing must offer the mic"
+    : "  SKIP the mic checks: the transcriber is not installed (Settings -> Speech to text)",
+)
 // Prose, deliberately: the selection check below drags across a paragraph, and
 // a PDF's text layer is spans over a canvas.
 const doc = await page.evaluate(async (api) => {
@@ -425,6 +445,32 @@ if (paraCount) {
       const deck = await page.locator('[data-testid="deck-summary"]').first().textContent().catch(() => null)
       check("the face opens on the deck, not the generator", /card|practise/i.test(deck ?? ""), (deck ?? "").slice(0, 60))
 
+      // The runs on this document, in the reader. The Study page lists the same
+      // rows from the same endpoint; a dock that cannot show them is a surface
+      // where a learner can start a run and never find it again.
+      const historyMounted = await page
+        .locator('[data-testid="docked-session-history"]')
+        .count()
+      check("the Practice face lists this document's runs", historyMounted === 1, String(historyMounted))
+      if (historyMounted === 1) {
+        const listed = await page
+          .locator('[data-testid="docked-session-history"] input[type="checkbox"]')
+          .count()
+        const reported = await fetch(
+          `${API}/study/sessions?document_id=${docId}&page=1&page_size=50`,
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+        // The bulk bar's "Select all" carries a checkbox of its own, so a list
+        // of N runs holds N+1; an empty list renders no bar at all.
+        const shown = listed === 0 ? 0 : listed - 1
+        check(
+          "the reader's run list matches the record",
+          reported !== null && shown === Math.min(reported.total, 50),
+          `dock ${shown}, api ${reported?.total ?? "unreachable"}`,
+        )
+      }
+
       const startRecall = page.locator('[data-testid="start-recall"]')
       check("the deck offers a recall run", (await startRecall.count()) > 0)
       let ranSessionId = null
@@ -505,6 +551,10 @@ if (paraCount) {
           await checkProgressHeader(page, "a fresh run", null, deckSize)
           const ta = page.locator('[data-testid="recall-runner"] textarea')
           check("the explain arm asks for an explanation", (await ta.count()) === 1)
+          if (dictation) {
+            check("the docked teach-back answer offers the mic",
+              (await page.locator('[data-testid="recall-runner"] button[title*="Speak your explanation"]').count()) === 1)
+          }
           if (await ta.count()) {
             await ta.fill("The maximum of a linear objective sits at a vertex, so interior points can be skipped.")
             await page.getByRole("button", { name: /Submit and compare/ }).click()
@@ -946,6 +996,20 @@ if (!recording) {
           const canWrite = await page.evaluate(() =>
             [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "New note"))
           check("the panel still offers a way to write a note", canWrite)
+
+          // Dictating into a note is the same feature on the full note page and
+          // in the panel, and the panel is where a reader is. An empty draft is
+          // discarded when it closes, so opening one leaves nothing behind --
+          // nothing is typed into it here for that reason.
+          if (canWrite && dictation) {
+            const newNote = page.locator("button").filter({ hasText: /^New note$/ })
+            await newNote.first().click()
+            await page.waitForTimeout(1200)
+            const composer = page.locator('[data-testid="docked-note-composer"]')
+            check("the Notes face opens a docked composer", (await composer.count()) === 1)
+            check("the docked note composer offers the mic",
+              (await composer.locator('button[title*="Dictate"]').count()) === 1)
+          }
 
           // The check cleans up after itself rather than leaving one per run.
           await page.evaluate(async ({ api, id }) => {

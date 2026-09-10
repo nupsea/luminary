@@ -17,7 +17,6 @@ import {
 } from "@/pages/Study/api"
 import type { FlashcardSearchResponse } from "@/pages/Study/types"
 import { FlashcardCard } from "@/pages/Study/FlashcardCard"
-import { endOpenSessionsForScope } from "@/lib/studySessionService"
 
 const PAGE_SIZE = 20
 
@@ -41,7 +40,17 @@ export function CollectionCardManager({ collectionId }: { collectionId: string }
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["collection-cards", collectionId] })
     qc.invalidateQueries({ queryKey: ["collection-dashboard", collectionId] })
+    qc.invalidateQueries({ queryKey: ["scoped-sessions", "collection", collectionId] })
+    qc.invalidateQueries({ queryKey: ["study-sessions-active"] })
+    qc.invalidateQueries({ queryKey: ["study-sessions-completed"] })
   }
+
+  // The runs the deletion emptied are gone by the time it answers, and it says
+  // how many. Ending them from here afterwards raced that call.
+  const runsRemoved = (n: number) =>
+    n > 0
+      ? { description: `${n} run${n === 1 ? "" : "s"} removed; your progress record is kept.` }
+      : undefined
 
   const clearSelection = () => setSelectedIds(new Set())
   const toggleSelect = (id: string) =>
@@ -70,25 +79,26 @@ export function CollectionCardManager({ collectionId }: { collectionId: string }
       clearSelection()
       setSelectionMode(false)
       setConfirmDelete(null)
-      toast.success(`Deleted ${res.deleted} card${res.deleted === 1 ? "" : "s"}`)
+      toast.success(
+        `Deleted ${res.deleted} card${res.deleted === 1 ? "" : "s"}`,
+        runsRemoved(res.sessions_removed),
+      )
     },
     onError: () => toast.error("Failed to delete selected cards"),
   })
 
   const deleteAllMutation = useMutation({
-    mutationFn: async () => {
-      const res = await deleteAllFlashcardsForCollection(collectionId)
-      // Drop any in-progress session so it can't resume with deleted cards.
-      await endOpenSessionsForScope(null, collectionId)
-      return res
-    },
+    mutationFn: () => deleteAllFlashcardsForCollection(collectionId),
     onSuccess: (res) => {
       invalidate()
       clearSelection()
       setSelectionMode(false)
       setConfirmDelete(null)
       setPage(1)
-      toast.success(`Deleted ${res.deleted} card${res.deleted === 1 ? "" : "s"} from this collection`)
+      toast.success(
+        `Deleted ${res.deleted} card${res.deleted === 1 ? "" : "s"} from this collection`,
+        runsRemoved(res.sessions_removed),
+      )
     },
     onError: () => toast.error("Failed to delete collection cards"),
   })
@@ -168,8 +178,8 @@ export function CollectionCardManager({ collectionId }: { collectionId: string }
           <AlertCircle size={16} />
           <span className="flex-1">
             {confirmDelete === "selected"
-              ? `Permanently delete ${selectedIds.size} selected card${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
-              : `Permanently delete ALL ${total} cards in this collection? This cannot be undone.`}
+              ? `Permanently delete ${selectedIds.size} selected card${selectedIds.size === 1 ? "" : "s"}? Any practice run left with no card to practise goes too; your progress record is kept. This cannot be undone.`
+              : `Permanently delete ALL ${total} cards in this collection? Every practice run left with no card to practise goes with them; your progress record (streak, reviews, accuracy) is kept. This cannot be undone.`}
           </span>
           <button
             onClick={() =>

@@ -567,7 +567,7 @@ export default function Study() {
             <FlashcardManager
               documentId={studyDocumentId}
               onStartStudy={handleStartFlashcard}
-              onStartTeachback={(f) => handleStartTeachback(f)}
+              onStartTeachback={handleStartTeachback}
             />
           </>
         ) : (
