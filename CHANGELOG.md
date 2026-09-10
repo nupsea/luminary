@@ -4,6 +4,19 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Windows machines are no longer refused a local model they can run.** The
+  accelerator probe tested `/dev/nvidiactl` and `/proc/driver/nvidia/version`,
+  which do not exist on Windows, so every Windows host resolved to
+  `no_accelerator` and `LLMService._resolve_model` raised on every local call --
+  an RTX 4090 included. Windows now checks for the driver libraries Ollama
+  itself loads, `nvcuda.dll` and `amdhip64.dll`, and falls back to `nvidia-smi`
+  on PATH. Refusing an accelerator-less Linux box is unchanged and deliberate.
+  No CI runner is Windows and `conftest` pins the verdict for the suite, so the
+  guard is a platform-pinned test; removing the branch turns five of it red.
+
 ## [0.11.2] - 2026-09-10
 
 ### Added

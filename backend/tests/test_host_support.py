@@ -113,6 +113,81 @@ async def test_the_endpoint_reports_this_host():
     assert (body["message"] is None) is body["supported"]
 
 
+# What the probe itself sees
+#
+# Every test above stubs `_has_accelerator`, which is right for testing the rule
+# and is exactly why the probe's own blind spot survived: `/dev/nvidiactl` and
+# `/proc/driver/nvidia/version` do not exist on Windows, so before the Windows
+# branch the probe refused every Windows machine including one with an RTX 4090.
+# These pin a platform and call the real thing.
+
+
+@pytest.fixture
+def probe(monkeypatch, tmp_path):
+    """Run the real `_has_accelerator` against a pinned platform."""
+
+    monkeypatch.delenv("LUMINARY_HOST_SUPPORTED", raising=False)
+    # The developer machine may have either of these; neither may decide a test.
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("SYSTEMROOT", str(tmp_path))
+    (tmp_path / "System32").mkdir()
+
+    def _windows(*drivers: str, machine: str = "AMD64", ram: int = 32):
+        for dll in drivers:
+            (tmp_path / "System32" / dll).write_bytes(b"")
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.setattr("platform.machine", lambda: machine)
+        monkeypatch.setattr("app.host_support._in_container", lambda: False)
+        monkeypatch.setattr("app.memory_profile.host_ram_gb", lambda: ram)
+        return local_inference_support()
+
+    return _windows
+
+
+def test_a_windows_host_with_an_nvidia_driver_is_supported(probe):
+    # The regression this branch exists for. `nvcuda.dll` ships with the display
+    # driver and is what Ollama loads; nothing under /dev is reachable here.
+    v = probe("nvcuda.dll")
+    assert v.supported is True, v.detail
+    assert v.reason is None
+
+
+def test_a_windows_host_with_an_amd_driver_is_supported(probe):
+    v = probe("amdhip64.dll")
+    assert v.supported is True, v.detail
+
+
+def test_a_windows_host_with_no_gpu_driver_is_refused(probe):
+    v = probe()
+    assert v.supported is False
+    assert v.reason == "no_accelerator"
+    assert v.message == UNSUPPORTED_MESSAGE
+
+
+def test_windows_on_arm_is_refused_because_the_runner_uses_its_cpu(probe):
+    # A Snapdragon has neither library: Ollama serves it on the CPU, and the
+    # Adreno GPU and Hexagon NPU are not paths it takes. Refusing is the policy
+    # working -- but it must be refused for the missing driver, not for the arch,
+    # so an ARM box that ever acquires one is not refused by a name.
+    v = probe(machine="ARM64")
+    assert v.supported is False
+    assert v.reason == "no_accelerator"
+    assert probe("nvcuda.dll", machine="ARM64").supported is True
+
+
+def test_a_windows_gpu_does_not_excuse_too_little_memory(probe):
+    v = probe("nvcuda.dll", ram=8)
+    assert v.supported is False
+    assert v.reason == "under_memory_floor"
+
+
+def test_nvidia_smi_on_path_is_enough_when_the_driver_is_elsewhere(probe, monkeypatch):
+    monkeypatch.setattr(
+        "shutil.which", lambda name: r"C:\nv\nvidia-smi.exe" if name == "nvidia-smi" else None
+    )
+    assert probe().supported is True
+
+
 def test_docker_alone_never_decides_it():
     """A container is not the disqualifier -- the missing accelerator is.
 
