@@ -65,21 +65,25 @@ planning unit.
 
 Rung numbers are ordering, not commitments. Several will split once scoped.
 
-The ladder was re-cut on 2026-09-05. The four rungs that lead are experience rungs, and the integrity
-rungs that used to be 0.10.0–0.12.0 sit behind them. The whole cost of that trade is that four
-feature rungs land on a suite with a live quarantine, so **a rung ships its smoke scripts with its
-endpoints (I-14) and adds nothing to the quarantine**. If the quarantine grows once, 0.14.0 moves
-back up the ladder.
+The ladder was re-cut on 2026-09-05 to lead with experience rungs, and again on 2026-09-10 to put
+the platform rung ahead of Capture. The cost of the first trade is that feature rungs land on a
+suite with a live quarantine, so **a rung ships its smoke scripts with its endpoints (I-14) and adds
+nothing to the quarantine**. If the quarantine grows once, 0.15.0 moves back up the ladder.
+
+The second trade is the cheaper one. Every rung that lands after 0.13.0 adds surface to a Windows
+and a Linux build that already work; every rung that lands before it adds surface to fix later, on
+platforms no CI runner exercises. The Brief keeps its place ahead of it because it is the artefact a
+stranger meets, and a wider audience for an unfinished first run is not a wider audience.
 
 | Rung | Theme | Exit gate |
 |---|---|---|
 | 0.10.0 | Smart Hybrid, and the privacy receipt | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | 0.11.0 | The docked reader | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
 | 0.12.0 | The Brief | Every claim in a Brief resolves to a chunk of that document, measured on the golden corpus against a floor that can come out red |
-| 0.13.0 | Capture | Three source types round-trip from the browser to a readable document; an unpaired origin is refused |
-| 0.14.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
-| 0.15.0 | Stores that agree, ingest you can measure | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number |
-| 0.16.0 | Windows | First-run setup completes on a machine that has never seen Luminary |
+| 0.13.0 | Every host is a first-class host | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
+| 0.14.0 | Capture | Three source types round-trip from the browser to a readable document; an unpaired origin is refused |
+| 0.15.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
+| 0.16.0 | Stores that agree, ingest you can measure | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number |
 | 0.17.0 | The re-embed rail | A full re-embed of a real library runs to completion, survives being killed, and resumes |
 | 1.0.0 | The public release | Every rung's exit gate green together, on one build |
 
@@ -204,7 +208,7 @@ what an 8GB host would resolve to. A cloud model is never refused. The cost to
 state plainly is that background work is refused too, so **ingest enrichment --
 summaries, tags, titles -- is off on an unsupported host even when a key is
 present**, because enrichment is deliberately local so a library build never
-spends quota. Routing enrichment to the cloud on those hosts is the open question.
+spends quota. Offering that work to the key the user already pasted is 0.13.0's.
 
 `docker-compose.gpu.yml` (`make docker-run-gpu`) reserves an NVIDIA device for the
 model container and declares `LUMINARY_HOST_SUPPORTED=1` on the app container --
@@ -531,7 +535,66 @@ Paired with the Brief, the first-run reward stops being a flashcard. `feynman_se
 explanation against the chapter and returns a critique naming the page; that is the payoff, and the cards
 come after it as the consequence of being measured.
 
-### 4. Capture — 0.13.0
+### 4. Every host is a first-class host — 0.13.0
+
+A public 1.0 that runs on one operating system is a beta with a version number. The macOS bundle is
+signed and notarized; Windows is #24 and Linux has no bundle at all. This rung is what makes the
+support policy shipped in 0.11.2 true on the two platforms it cannot currently see.
+
+**No runner exercises the policy on the platform it gets wrong.** The probe now branches per
+platform — Windows reads the driver libraries Ollama loads, everywhere else keeps the device-node
+check — and six platform-pinned tests hold it, five of which redden when the Windows branch is
+removed. That is the whole of the guard, and it is not enough: nothing here has ever executed on
+Windows. `4125cc21` pinned the verdict in `conftest` for the right reason, so the ambient check is
+exactly the one the suite no longer makes, and `ci.yml` has ubuntu and macOS jobs only. **This rung
+adds the Windows job**, on the same argument the `desktop-shell` job carries: code that cannot run
+on ubuntu has no automated coverage without one. Expect it red on its first push — whether `uv sync`
+even completes on Windows is unmeasured, and `install.ps1` does exactly that on every Windows
+install.
+
+Keep one probe with a branch per platform. A second copy of the policy would eventually disagree
+with this one, and the copy a user meets is the one that has to be right.
+
+**What the Linux install costs is now measured, and the image is not.** Torch comes from the PyTorch
+CPU index on Linux and Windows, which took the linux-x86_64 footprint from 4118.0 MB to 188.9 MB by
+retiring fifteen `nvidia-*-cu12` wheels and triton that nothing reached — both model call sites pass
+`device="cpu"` and no `cuda` or `mps` reference exists in `backend/app`. **The README's 3.4 GB image
+figure is now stale and unremeasured**; rebuild and quote the new one here. Windows gained nothing
+from the move (113.8 -> 113.7 MB) and macOS is untouched, so the saving is Linux's alone.
+
+**Windows has no process groups, so the supervisor orphans its children.** `supervisor.rs` signals
+with `libc::killpg` and `std::os::unix::process::CommandExt`, `main.rs` uses `ExitStatusExt`,
+`stage.rs` calls `statvfs`, and `supervisor.rs:334` calls `sysctlbyname`, which is macOS-only. Tauri
+does not clean up sidecar grandchildren for you. The substitute is a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the kernel kills Python and Ollama when the shell's handle
+closes, including on a crash, which is the case a shutdown hook cannot cover. `tauri.conf.json`
+targets `["app"]` and gains NSIS and AppImage.
+
+**A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
+when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows
+locks are mandatory and a handle can outlive an abrupt termination, so the same relaunch raises
+`PermissionError: [WinError 32]`. Do not port the graph store on that argument alone — 2,583 lines
+and 163 Cypher statements across 26 node and edge types, for a retrieval arm whose contribution has
+never been measured. What this rung ships is the measurement: the `--no-graph` retrieval ablation on
+the golden corpus, recorded with its provenance, so 0.16.0 decides port-or-delete on a number.
+Deleting the arm would answer the Windows lock too.
+
+**BYOK does not yet finish the job on an unsupported host.** The refusal covers background work, so
+ingest enrichment — summaries, tags, titles — is off even when a key is present, and a legacy laptop
+that pastes a key gets answers over an unenriched library. Enrichment is local by construction so a
+library build never spends quota (I-16), but on a host that cannot run the model, "stays local" means
+"does not happen". The choice moves to the user, defaults to off, and the receipt names which arm ran.
+
+**What does not move on any platform.** Indexing, retrieval, transcription, entity extraction and the
+learner record stay local in every mode and are reported as such by `llm_routing.routing_report`. A
+hosted embedder is a full re-embed behind I-9, not a setting, and routing extraction or reranking to a
+provider would put document text rather than a question on the wire.
+
+**Exit gate.** First run completes with no terminal on a Windows and a Linux machine that has never
+seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
+test and a Windows CI job; `make smoke` green on Windows.
+
+### 5. Capture — 0.14.0
 
 **A library stays empty when filling it means opening the app and finding the file.** This is not the
 mobile rung and is much cheaper than it: the backend is already HTTP on :7820, so an extension needs a
@@ -543,7 +606,7 @@ deliberately open, so any page in any tab can already POST to :7820 — an exten
 into a documented invitation. The gate is that an unpaired origin is refused, proven by a test that
 fails when pairing is removed.
 
-### 5. Gates you can believe — 0.14.0
+### 6. Gates you can believe — 0.15.0
 
 `make ci` and `make smoke` green together with nothing quarantined to keep them so: 22 `pytest.mark.unstable`
 markers across 14 files today (#50). Local green is necessary and not sufficient — GLiNER memory pressure
@@ -552,22 +615,25 @@ has produced GitHub-only failures no local run reproduces.
 This rung exists to shrink as the ladder runs. It grows only if a rung above it breaks the no-new-quarantine
 rule, and that is the signal to move it back up.
 
-### 6. Stores that agree, ingest you can measure — 0.15.0
+### 7. Stores that agree, ingest you can measure — 0.16.0
 
 A failed graph write is lost and SQLite and Kuzu diverge with nothing reconciling them (#65). Entity ingest
 samples 2.4% of a long book and reindex disagrees with ingest (#63). The md/epub/docx/txt paths are
 unmeasured and a parent section can store its descendants' text (#97).
 
+**The graph store's fate is decided here, on the number 0.13.0 records.** Three claims about the arm
+point the same way and none of them is a measurement: `RELATED_TO` is empty library-wide, 11.1% of
+co-occurrence edges pair an entity with itself, and #65 says the store diverges from SQLite with
+nothing reconciling it. If the `--no-graph` ablation shows the arm contributes nothing to RRF,
+removing it retires 2,583 lines, closes #65 and answers Windows mandatory locking at once. If it
+contributes, the port to SQLite relational edges is justified by that number and belongs in this
+rung, where the other store work already is. **Decide on the ablation, not on the anecdotes** — an
+arm that looks broken in three places can still be carrying recall.
+
 **The last of the document-model work belongs here.** `form`, `domain` and `register` are written at ingest
 by `_persist_classification` and `DocumentProfile` owns the policy, so what remains is retiring the legacy
 `content_type` projection and `is_technical` now that 0.9.0 has shipped without them being the source of
 truth. It is a migration, and migrations get more expensive with every user.
-
-### 7. Windows — 0.16.0
-
-A public 1.0 that runs on one operating system is a beta with a version number. The macOS bundle is signed
-and notarized; Windows is #24. The gate is a first run that completes with no terminal on a machine that has
-never seen Luminary.
 
 ### 8. The re-embed rail — 0.17.0
 
@@ -601,12 +667,32 @@ stores rebuilt from it. Conflict resolution is the open question and the reason 
 a script: two machines that both studied offline have divergent FSRS state, and last-writer-wins silently
 discards a review session.
 
+**Luminary on the user's own cloud (BYOC).** The container is most of it already: `Dockerfile` plus
+`LUMINARY_MODE=public` serves the SPA and the API on one port, and a compose volume holds the library.
+**What is missing is authentication, and it is the whole feature.** `docker-compose.yml` binds
+`127.0.0.1` precisely because there is none, so "reachable from any device" means publishing an
+unauthenticated library to the internet. Until that exists, the container is a single-machine
+deployment and the docs say so; reaching it from elsewhere is a tunnel the user owns. One auth
+mechanism serves this, the mobile client below and the capture extension's pairing, which is the
+argument for building it once rather than three times.
+
 **A mobile client for capture and review.** Note taking and flashcard review — the two things done away from
 a desk. Reading and ingest stay on the machine with the models. The backend is already HTTP, so the surface
 exists; **there is no authentication**, and a phone reaching a laptop needs an answer to who is asking. A
 phone that only works while the laptop is awake is not a client, so the honest version needs on-device storage
 and a sync path, which is the entry above. `surface-manifest.json` already declares each surface's mode, so a
 mobile build is a third mode rather than a fork.
+
+**ONNX Runtime for the encoders.** Same gate as the swap below and for the same reason: a quantized
+ONNX embedder produces different vectors, so it is a full re-embed behind I-9 and cannot start before
+0.17.0's rail exists. Two facts disqualify it as a size or speed win in the meantime. `optimum`,
+`sentence-transformers` and `gliner` each declare torch unconditionally, so adding ONNX *increases*
+the bundle until all three are replaced (`desktop-bundle.md`); and the encoders are not the
+bottleneck — bge-small and MiniLM run on CPU today with Metal idle beside them, while a slow host's
+~121s question is the 4B model at ~6 tok/s, served by Ollama, which already ships Metal, CUDA, ROCm
+and Vulkan. If it is taken up, `onnxruntime-directml` is the broadest Windows execution provider
+(NVIDIA, AMD, Intel Arc and Intel NPUs through one wheel) but publishes `win_amd64` only — Windows on
+ARM is not covered by it, so a Snapdragon NPU needs a different provider, not the same binary.
 
 **The multilingual embedder swap.** Embeddings are `BAAI/bge-small-en-v1.5`, 384-dim and English-only, and
 every stored chunk, note, image and concept vector lives in that space. GLiNER is already multilingual
@@ -640,6 +726,14 @@ something else.
 - **`passes=true` and a reviewer gate** — named by I-13/I-14 for months; neither ever existed in
   the repo. The gates are `make ci` and `make smoke`. A gate name with nothing behind it is worse
   than no gate, because a claim to have satisfied it cannot be checked.
+- **Routing embedding, reranking or entity extraction to a cloud provider** — rejected 2026-09-10,
+  proposed as the way to make legacy CPU laptops usable. Two disqualifying facts. A hosted embedder
+  is a different vector space, so it is a full re-embed behind I-21's rail and a migration rather
+  than a setting (I-9); `llm_routing.routing_report` reports indexing as fixed-local for that reason.
+  And it inverts the claim the product sells: today one question and its packed passages leave the
+  machine, while this puts every chunk of every document — and, for extraction, whole document text —
+  on the wire. Synthesis is routable; the index is not. BYOK for **generation** on a host that cannot
+  run a model is the supported answer and ships in 0.13.0.
 - **Two Ollama services** — rejected on a single-GPU/8GB machine. See I-31: enrichment cost is
   call count, not concurrency, so the lever is fewer calls, never more parallelism.
 
