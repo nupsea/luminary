@@ -30,7 +30,7 @@ The named doc is the live contract. The plan that produced the work is gone.
 |---|---|
 | Frontend lint as a CI gate, `apiClient` used everywhere | `Makefile` `ci` target, `frontend/eslint.config.js` |
 | Six-layer architecture, stores, surface modes | `architecture.md` |
-| The 50 hard invariants | `invariants.md` |
+| The 54 hard invariants | `invariants.md` |
 | Backend implementation patterns | `patterns.md` |
 | Ingestion + reading (all 4 reader phases) | `universal-reader.md` |
 | Hybrid retrieval: RRF, cross-encoder rerank | `retrieval-funnel.md` |
@@ -566,13 +566,27 @@ retiring fifteen `nvidia-*-cu12` wheels and triton that nothing reached — both
 figure is now stale and unremeasured**; rebuild and quote the new one here. Windows gained nothing
 from the move (113.8 -> 113.7 MB) and macOS is untouched, so the saving is Linux's alone.
 
-**Windows has no process groups, so the supervisor orphans its children.** `supervisor.rs` signals
-with `libc::killpg` and `std::os::unix::process::CommandExt`, `main.rs` uses `ExitStatusExt`,
-`stage.rs` calls `statvfs`, and `supervisor.rs:334` calls `sysctlbyname`, which is macOS-only. Tauri
+**Stopping the backend no longer needs a signal.** The shell POSTs `/setup/shutdown` with a
+per-launch secret and signals only what does not answer, so `lifespan`'s drain runs on a host that
+has no SIGTERM. It runs on macOS too, because a path taken only where nobody can test it is a path
+nobody tests. What accepts is deliberately not also signalled: a second SIGTERM while uvicorn is
+unwinding sets its `force_exit` and abandons the drain.
+
+**Windows still has no process groups, so the supervisor would orphan its children.** `supervisor.rs`
+signals with `libc::killpg` and `std::os::unix::process::CommandExt`, `main.rs` uses `ExitStatusExt`,
+`stage.rs` calls `statvfs`, and `total_memory_gb` calls `sysctlbyname`, which is macOS-only. Tauri
 does not clean up sidecar grandchildren for you. The substitute is a Job Object with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the kernel kills Python and Ollama when the shell's handle
-closes, including on a crash, which is the case a shutdown hook cannot cover. `tauri.conf.json`
-targets `["app"]` and gains NSIS and AppImage.
+closes, including on a crash, which is the case no shutdown hook covers — the polite request above
+is the normal path, and the job is the net under it. `icons/icon.ico` now exists, so a Windows build
+reaches the compiler instead of panicking in `tauri-build`. `tauri.conf.json` targets `["app"]` and
+gains NSIS and AppImage.
+
+**The Windows arm lands with the job that compiles it.** `cargo check` for
+`x86_64-pc-windows-msvc` needs `llvm-rc`, which no machine here has, so a `#[cfg(windows)]` block is
+invisible to every runner this repo has. A `desktop-shell-windows` job is what makes it real, and it
+ships in the same commit as the code — never ahead of it, which would only put a known-red job on
+master.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows

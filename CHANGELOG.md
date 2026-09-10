@@ -18,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard is a platform-pinned test; removing the branch turns five of it red.
 
 ### Added
+- **The desktop shell asks the backend to stop before signalling it.** Windows
+  has no SIGTERM, and terminating the process skips `lifespan`'s shutdown --
+  the enrichment worker, the ingestion jobs and every task registry drain there
+  before the database closes, so skipping it cuts an ingest mid-write and leaves
+  the stores disagreeing. `POST /setup/shutdown` takes a per-launch secret the
+  shell hands its own backend; without one it refuses everyone, so a source
+  install is unaffected. What accepts is not also signalled -- a second SIGTERM
+  while uvicorn is unwinding abandons the drain.
+- **The backend's parent watchdog would have killed the desktop shell on
+  Windows.** `os.kill(parent_pid, 0)` is the Unix liveness idiom and, on
+  Windows, CPython documents it as TerminateProcess with the exit code set to
+  the signal -- so the five-second poll would terminate the shell it was asking
+  about, with exit code 0, looking like a clean quit. Windows now asks via
+  `OpenProcess`/`GetExitCodeProcess`, and the stop path uses
+  `signal.raise_signal` rather than `os.kill` against itself. Latent, not live:
+  only the desktop shell sets `LUMINARY_PARENT_PID` and it has no Windows build
+  yet. Now I-54.
+- **`icons/icon.ico`**, without which `tauri-build` panics before compiling a
+  line for a Windows target.
 - **CI runs on Windows.** `windows-host-policy` installs the backend with
   `uv sync --frozen`, imports `app.main` and runs the host-support tests on
   `windows-latest`. It is deliberately narrow -- `make ci` and `make smoke` on
