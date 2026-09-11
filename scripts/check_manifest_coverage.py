@@ -39,7 +39,7 @@ def manifest_components(data: dict) -> set[str]:
 
 
 def main() -> int:
-    data = json.loads(MANIFEST.read_text())
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     errors: list[str] = []
 
     covered_routers = manifest_routers(data) | ROUTER_ALLOWLIST

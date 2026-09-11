@@ -56,7 +56,7 @@ def router_prefixes() -> dict[str, str]:
     for f in sorted(ROUTERS.glob("*.py")):
         if f.stem == "__init__":
             continue
-        m = pat.search(f.read_text())
+        m = pat.search(f.read_text(encoding="utf-8"))
         if m:
             out[f.stem] = m.group(1)
     return out
@@ -93,7 +93,7 @@ def resolve_router(path: str, prefixes: dict[str, str]) -> str | None:
 
 
 def main() -> int:
-    data = json.loads(MANIFEST.read_text())
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     public = enabled_routers(data, "public")
     full = enabled_routers(data, "full")
     full_only = full - public
@@ -108,7 +108,7 @@ def main() -> int:
     for f in sorted([*FRONTEND.rglob("*.ts"), *FRONTEND.rglob("*.tsx")]):
         if f in exempt or f.name.endswith(".test.ts") or f.name.endswith(".test.tsx"):
             continue
-        text = f.read_text()
+        text = f.read_text(encoding="utf-8")
         calls = set(_CALL_RE.findall(text)) | set(_CALL_RE_NOGENERIC.findall(text))
         for call in calls:
             path = call.split("?")[0]
