@@ -1,16 +1,20 @@
 """Pipeline tail: section_summarize, summarize, error_finalize, enrichment_enqueue.
 
-These five small nodes complete the ingestion pipeline:
+These small nodes complete the ingestion pipeline:
 
-- _run_pregenerate          background helper that triggers post-ingest
-                            summary pre-generation + library-summary
-                            cache invalidation
-- section_summarize_node    populates SectionSummaryModel rows for
-                            qualifying sections (delegates to a service)
-- summarize_node            sets stage='complete' and fires _run_pregenerate
-- error_finalize_node       writes stage='error' on a failed run
-- enrichment_enqueue_node   enqueues image / diagram / hypothesis / KaTeX
-                            enrichment jobs and pokes the worker
+- _run_pregenerate              background helper that triggers post-ingest
+                                summary pre-generation + library-summary
+                                cache invalidation
+- _run_progressive_summarization   deferred-section-summary path: seeds a few
+                                section summaries, derives one_sentence/executive
+                                from them, then finishes the rest (see its own
+                                docstring for why the ordering matters)
+- section_summarize_node        populates SectionSummaryModel rows for
+                                qualifying sections (delegates to a service)
+- summarize_node                sets stage='complete' and fires _run_pregenerate
+- error_finalize_node           writes stage='error' on a failed run
+- enrichment_enqueue_node       enqueues image / diagram / hypothesis / KaTeX
+                                enrichment jobs and pokes the worker
 """
 
 import asyncio
@@ -60,20 +64,76 @@ async def _run_pregenerate(doc_id: str) -> None:
         await svc.refresh_library_summary()
 
 
-async def _run_deferred_section_summaries(doc_id: str) -> None:
-    """Section summaries, then the document summary reduced from them.
+async def _run_progressive_summarization(doc_id: str) -> None:
+    """Progressive summarization, without ever falling back to chunk map-reduce.
 
-    Ordered, not parallel: the second reads what the first writes.
+    A document-level summary needs SOME input, and the only two sources are
+    chunks (map-reduce -- sequential, 30-90s per batch, up to 8 batches) or
+    section summaries. Calling pregenerate() before any section summary
+    exists -- the naive "generate the doc summary first" ordering -- forces
+    the map-reduce path even on a document large enough to have >=3 sections,
+    because summarizer.pregenerate()'s fast path can only see section
+    summaries that are already stored. That nearly doubled total LLM calls in
+    testing (12 -> 20 on a 10-section document) and made 'summarized' status
+    arrive LATER, not sooner, since map-reduce runs sequentially while section
+    summarization runs at concurrency=3 -- the opposite of the intended win.
+
+    So this seeds just enough real section summaries first:
+    1. generate_progressive() summarises the first FAST_PATH_MIN_UNITS sections.
+    2. pregenerate() derives one_sentence/executive from those seed summaries via
+       the existing section-summary fast path -- one short call each, no map-reduce.
+    3. generate_progressive_rest() finishes the remaining sections.
+    4. A final pregenerate() picks up 'detailed', assembled for free once every
+       section has a summary -- one_sentence/executive are already cached.
     """
+    section_svc = get_section_summarizer_service()
+    seed_inserted, rest_units, next_index = 0, [], 0
     try:
-        count = await get_section_summarizer_service().generate(doc_id, per_section=True)
+        seed_inserted, rest_units, next_index = await section_svc.generate_progressive(doc_id)
         logger.info(
-            "deferred section summaries: %d units stored", count, extra={"doc_id": doc_id}
+            "progressive summarize: seeded %d section summaries",
+            seed_inserted,
+            extra={"doc_id": doc_id},
         )
     except Exception as exc:
         logger.warning(
-            "deferred section summaries failed (non-fatal): %s", exc, extra={"doc_id": doc_id}
+            "progressive summarize: section seed failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
         )
+
+    if seed_inserted:
+        try:
+            await get_summarization_service().pregenerate(
+                doc_id, modes=("one_sentence", "executive")
+            )
+            logger.info(
+                "progressive summarize: fast document summaries stored",
+                extra={"doc_id": doc_id},
+            )
+        except Exception as exc:
+            logger.warning(
+                "progressive summarize: fast document summaries failed (non-fatal): %s",
+                exc,
+                extra={"doc_id": doc_id},
+            )
+
+    try:
+        rest_inserted = await section_svc.generate_progressive_rest(
+            doc_id, rest_units, next_index
+        )
+        logger.info(
+            "progressive summarize: %d remaining section summaries stored",
+            rest_inserted,
+            extra={"doc_id": doc_id},
+        )
+    except Exception as exc:
+        logger.warning(
+            "progressive summarize: remaining section summaries failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+
     await _run_pregenerate(doc_id)
 
 
@@ -272,9 +332,11 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # _run_pregenerate is created here (not in summarize_node) so the shared
     # StaticPool connection is free of concurrent writers when _update_stage runs.
     try:
-        # A deferred document owes its section summaries first.
+        # A deferred document runs progressive summarization: immediate executive
+        # summary first (<15s) so the document reaches 'summarized' status right away,
+        # followed by deferred section summaries and detailed assembly in background.
         deferred = state.get("defer_section_summaries")
-        coro = _run_deferred_section_summaries(doc_id) if deferred else _run_pregenerate(doc_id)
+        coro = _run_progressive_summarization(doc_id) if deferred else _run_pregenerate(doc_id)
         pregenerate_task = asyncio.create_task(coro)
         _background_tasks.add(pregenerate_task)
         pregenerate_task.add_done_callback(_background_tasks.discard)

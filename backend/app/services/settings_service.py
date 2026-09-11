@@ -106,19 +106,34 @@ _PLAINTEXT_PREFIX = "__plain__:"
 
 
 def _keyring_set(field: str, value: str) -> bool:
-    """Store *value* in the OS keyring. Returns False (no-op) when unavailable."""
+    """Store *value* in the OS keyring. Returns False (no-op) when unavailable.
+
+    Catches KeyringError, not just NoKeyringError: a locked/denied keychain
+    (KeyringLocked -- e.g. the user clicked Deny on the OS permission prompt)
+    is exactly as unavailable as no backend at all, and the caller already
+    falls back to a plaintext-prefixed DB row for either case.
+    """
     try:
         keyring.set_password(_KEYCHAIN_SERVICE, field, value)
         return True
-    except keyring.errors.NoKeyringError:
+    except keyring.errors.KeyringError as exc:
+        logger.warning("keyring set failed for %r, falling back to DB storage: %s", field, exc)
         return False
 
 
 def _keyring_get(field: str) -> str | None:
-    """Retrieve a value from the OS keyring. Returns None when unavailable."""
+    """Retrieve a value from the OS keyring. Returns None when unavailable.
+
+    A denied/locked keychain used to raise KeyringLocked, which only
+    NoKeyringError was caught for -- so one denied field aborted
+    load_llm_settings' whole loop (via the broad except in main.py's
+    lifespan) instead of just leaving that one field empty, and every
+    later cloud-provider setting silently reverted to its default too.
+    """
     try:
         return keyring.get_password(_KEYCHAIN_SERVICE, field)
-    except keyring.errors.NoKeyringError:
+    except keyring.errors.KeyringError as exc:
+        logger.warning("keyring get failed for %r, treating as unset: %s", field, exc)
         return None
 
 

@@ -472,6 +472,47 @@ async def test_stale_sentinel_missing_from_keychain(test_db):
     assert svc_module._cache["openai_api_key"] == ""
 
 
+async def test_locked_keychain_degrades_that_field_without_aborting_the_load(
+    test_db, monkeypatch, caplog
+):
+    """A denied/locked keychain (KeyringLocked) must not abort load_llm_settings.
+
+    Only NoKeyringError used to be caught, so a user clicking "Deny" on the OS
+    permission prompt raised KeyringLocked out of the whole settings-load loop --
+    caught only by main.py's broad lifespan except, which then silently reverted
+    every OTHER cloud setting (cloud_provider, cloud_model, ...) to its default
+    too, not just the denied key.
+    """
+    import logging
+
+    engine, factory = test_db
+
+    async with factory() as session:
+        session.add(SettingsModel(key="openai_api_key", value=_KEYCHAIN_SENTINEL))
+        session.add(SettingsModel(key="cloud_provider", value="anthropic"))
+        await session.commit()
+
+    svc_module._cache.update(_DEFAULTS)
+
+    monkeypatch.setattr(
+        keyring,
+        "get_password",
+        lambda *a, **k: (_ for _ in ()).throw(keyring.errors.KeyringLocked("denied")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.services.settings_service"):
+        async with factory() as session:
+            from app.services.settings_service import load_llm_settings
+
+            await load_llm_settings(session)
+
+    # The locked field degrades to empty rather than raising...
+    assert svc_module._cache["openai_api_key"] == ""
+    # ...and a field with nothing to do with the keychain still loads.
+    assert svc_module._cache["cloud_provider"] == "anthropic"
+    assert any("keyring get failed" in r.message for r in caplog.records)
+
+
 async def test_unknown_format_key_loaded_with_warning(test_db, caplog):
     """Non-sentinel, non-empty, non-hex DB value loads as-is with a warning logged."""
     import logging
