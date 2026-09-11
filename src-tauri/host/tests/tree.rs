@@ -9,27 +9,37 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// A child that spawns a grandchild and prints the grandchild's pid.
+/// A leader that will spawn a grandchild and print its pid, once asked.
 ///
-/// The grandchild is what makes the test worth writing: killing the leader
-/// alone leaves it running, which is the defect this whole mechanism exists to
-/// prevent -- ollama's model runners are its children, not itself.
-fn spawn_a_family() -> (std::process::Child, i32) {
+/// Returned before it has done either, and that gap is load-bearing: on
+/// Windows, job membership is assigned to a running process, not inherited by
+/// one that already exists when the assignment happens. Waiting here for the
+/// grandchild's pid -- which this function used to do -- guarantees the
+/// grandchild was already born by the time a caller could call `adopt`, so it
+/// could never have been a member of anything. `adopt` must run on the `Child`
+/// this returns before [`read_grandchild_pid`] is ever called.
+fn spawn_leader() -> std::process::Child {
     let mut cmd = spawner();
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
     luminary_host::before_spawn(&mut cmd);
+    cmd.spawn().expect("spawn")
+}
 
-    let mut child = cmd.spawn().expect("spawn");
+/// Block until the leader has spawned its grandchild, and return its pid.
+///
+/// The grandchild is what makes these tests worth writing: killing the leader
+/// alone leaves it running, which is the defect this whole mechanism exists to
+/// prevent -- ollama's model runners are its children, not itself.
+fn read_grandchild_pid(child: &mut std::process::Child) -> i32 {
     let stdout = child.stdout.take().expect("piped");
     let mut lines = BufReader::new(stdout).lines();
     let printed = lines
         .next()
         .expect("the child printed nothing")
         .expect("unreadable");
-    let grandchild: i32 = printed.trim().parse().unwrap_or_else(|e| {
+    printed.trim().parse().unwrap_or_else(|e| {
         panic!("not a pid: {printed:?} ({e})");
-    });
-    (child, grandchild)
+    })
 }
 
 #[cfg(unix)]
@@ -71,7 +81,8 @@ fn gone(pid: i32) -> bool {
 
 #[test]
 fn stopping_a_tree_takes_the_grandchild_with_it() {
-    let (mut child, grandchild) = spawn_a_family();
+    let mut child = spawn_leader();
+    // `adopt` before the grandchild exists: see `spawn_leader`.
     let tree = luminary_host::adopt(&child);
     // Asserted separately so a refused job object reads as a refused job
     // object, not as a mechanism that ran and did not work.
@@ -80,6 +91,7 @@ fn stopping_a_tree_takes_the_grandchild_with_it() {
         "the tree does not cover descendants: on Windows the job object was \
          refused, and every assertion below would be about the wrong thing"
     );
+    let grandchild = read_grandchild_pid(&mut child);
     assert!(luminary_host::alive(grandchild), "grandchild never started");
 
     tree.request_stop();
@@ -92,8 +104,9 @@ fn stopping_a_tree_takes_the_grandchild_with_it() {
 
 #[test]
 fn killing_a_tree_takes_the_grandchild_with_it() {
-    let (mut child, grandchild) = spawn_a_family();
+    let mut child = spawn_leader();
     let tree = luminary_host::adopt(&child);
+    let grandchild = read_grandchild_pid(&mut child);
 
     tree.kill();
 
@@ -112,8 +125,9 @@ fn killing_a_tree_takes_the_grandchild_with_it() {
 // asserted: on unix `Tree` is a process group id and holds nothing.
 #[allow(clippy::drop_non_drop)]
 fn dropping_the_handle_is_the_crash_net() {
-    let (mut child, grandchild) = spawn_a_family();
+    let mut child = spawn_leader();
     let tree = luminary_host::adopt(&child);
+    let grandchild = read_grandchild_pid(&mut child);
     drop(tree);
 
     if cfg!(windows) {
