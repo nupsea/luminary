@@ -29,7 +29,7 @@ from app.models import (
     SummaryModel,
 )
 from app.services.llm import LLMAuthenticationError, get_llm_service
-from app.services.section_summarizer import _is_metadata_section
+from app.services.section_summarizer import FAST_PATH_MIN_UNITS, _is_metadata_section
 from app.types import DocumentProfile
 
 logger = logging.getLogger(__name__)
@@ -466,10 +466,11 @@ class SummarizationService:
         return "\n\n".join(p for p in parts if p)
 
     async def _build_section_summary_input(self, document_id: str) -> str | None:
-        """Return a markdown string built from section summaries, or None if < 3 units exist.
+        """Return a markdown string built from section summaries, or None if too few units exist.
 
-        When >= 3 section summary units are available, this string is used as the
-        direct input to all summarization modes (fast path), bypassing chunk map-reduce.
+        When >= FAST_PATH_MIN_UNITS section summary units are available, this string is
+        used as the direct input to all summarization modes (fast path), bypassing
+        chunk map-reduce.
         """
         async with get_session_factory()() as session:
             result = await session.execute(
@@ -482,7 +483,7 @@ class SummarizationService:
         # Filter out metadata/legal section summary rows
         qualifying = [row for row in rows if not _is_metadata_section(row.heading, row.content)]
 
-        if len(qualifying) < 3:
+        if len(qualifying) < FAST_PATH_MIN_UNITS:
             return None
 
         parts = [f"## {row.heading}\n{row.content}" for row in qualifying]

@@ -31,6 +31,12 @@ MIN_PREVIEW_LEN = 200
 MAX_UNITS = 30
 TEXT_HARD_CAP = 10000
 
+# Matches summarizer.py's `_build_section_summary_input` fast-path threshold.
+# generate_progressive() seeds exactly this many sections first so pregenerate()
+# can derive one_sentence/executive from real section summaries instead of
+# falling back to chunk map-reduce.
+FAST_PATH_MIN_UNITS = 3
+
 # Unit count alone does not bound the work; total prompt characters do. The
 # per-unit cap shrinks as a document grows, trading detail for a bounded wait.
 TOTAL_TEXT_BUDGET = 90000
@@ -132,33 +138,22 @@ class SectionSummarizerService:
             and not _is_metadata_section(s.heading, s.preview)
         )
 
-    async def generate(
-        self, document_id: str, concurrency: int = 3, *, per_section: bool = False
-    ) -> int:
-        """Generate section summaries for the given document.
+    async def _clear_existing(self, document_id: str) -> None:
+        """Invalidate the section-reduce cache and drop existing summary rows.
 
-        `per_section` gives every qualifying section its own summary rather
-        than grouping into MAX_UNITS. Consumers look summaries up per section,
-        so grouping leaves the unsummarised ones invisible to them; background
-        callers pass True and trade time for coverage.
+        Replace, never append. `finalize` reaches this from two paths and
+        neither cleared the other, so `ml_notes` held 20 rows for 10 sections
+        and the surplus inflated the executive summary's input by ~0.08 theme
+        coverage. Invalidating the reduce cache without dropping the rows is
+        half the job -- the cache is rebuilt from exactly these rows.
 
-        Returns the number of SectionSummaryModel rows inserted.
-        Returns 0 immediately (non-raising) if Ollama is unreachable.
+        Circular: app.services.summarizer imports _is_metadata_section from
+        this module, so this lookup has to stay lazy.
         """
-        # Invalidate the _section_reduce cache so pregenerate() recomputes the
-        # document summary using the freshly generated section summaries.
-
-        # Circular: app.services.summarizer imports _is_metadata_section from
-        # this module, so this lookup has to stay lazy.
         from app.services.summarizer import get_summarization_service  # noqa: PLC0415
 
         await get_summarization_service().invalidate_section_reduce_cache(document_id)
 
-        # Replace, never append. `finalize` reaches this from two paths and
-        # neither cleared the other, so `ml_notes` held 20 rows for 10 sections
-        # and the surplus inflated the executive summary's input by ~0.08 theme
-        # coverage. Invalidating the reduce cache above without this is half the
-        # job -- the cache is rebuilt from exactly these rows.
         async with get_session_factory()() as session:
             stale = await session.execute(
                 delete(SectionSummaryModel).where(
@@ -173,7 +168,8 @@ class SectionSummarizerService:
                 extra={"doc_id": document_id},
             )
 
-        # Fetch qualifying sections
+    async def _fetch_qualifying_sections(self, document_id: str) -> list[SectionModel]:
+        """Sections worth summarising: real content, not metadata/legal boilerplate."""
         async with get_session_factory()() as session:
             result = await session.execute(
                 select(SectionModel)
@@ -182,7 +178,6 @@ class SectionSummarizerService:
             )
             all_sections = list(result.scalars().all())
 
-        # Filter metadata/legal sections before preview length check
         non_metadata: list[SectionModel] = []
         for s in all_sections:
             if _is_metadata_section(s.heading, s.preview):
@@ -194,29 +189,23 @@ class SectionSummarizerService:
             else:
                 non_metadata.append(s)
 
-        qualifying = [s for s in non_metadata if len(section_text(s)) >= MIN_PREVIEW_LEN]
+        return [s for s in non_metadata if len(section_text(s)) >= MIN_PREVIEW_LEN]
 
-        if not qualifying:
-            logger.info(
-                "section_summarizer: no qualifying sections (preview < %d chars)",
-                MIN_PREVIEW_LEN,
-                extra={"doc_id": document_id},
-            )
-            return 0
+    async def _summarize_units(
+        self,
+        document_id: str,
+        units: list[dict],
+        start_index: int,
+        concurrency: int,
+        text_cap: int,
+    ) -> int:
+        """One LLM call per unit, inserting a SectionSummaryModel row each.
 
-        # Group sections so total units <= MAX_UNITS
-        units = self._as_units(qualifying) if per_section else self._group_sections(qualifying)
-
-        logger.info(
-            "section_summarizer: %d qualifying sections → %d units",
-            len(qualifying),
-            len(units),
-            extra={"doc_id": document_id},
-        )
-
+        `start_index` offsets `unit_index` so a later batch (generate_progressive_rest)
+        continues the numbering a prior batch (generate_progressive's seed) left off,
+        rather than colliding on 0.
+        """
         semaphore = asyncio.Semaphore(concurrency)
-        # The shrinking cap only bounds grouped runs on the blocking path.
-        text_cap = TEXT_HARD_CAP if per_section else unit_text_cap(len(units))
         total_inserted = 0
 
         async def _summarize_unit(unit_index: int, unit: dict) -> None:
@@ -259,7 +248,9 @@ class SectionSummarizerService:
                 total_inserted += 1
 
         try:
-            await asyncio.gather(*[_summarize_unit(i, unit) for i, unit in enumerate(units)])
+            await asyncio.gather(
+                *[_summarize_unit(start_index + i, unit) for i, unit in enumerate(units)]
+            )
         except LLMUnavailableError:
             logger.warning(
                 "section_summarizer: LLM unavailable — skipping section summaries",
@@ -272,6 +263,45 @@ class SectionSummarizerService:
             total_inserted,
             extra={"doc_id": document_id},
         )
+        return total_inserted
+
+    async def generate(
+        self, document_id: str, concurrency: int = 3, *, per_section: bool = False
+    ) -> int:
+        """Generate section summaries for the given document.
+
+        `per_section` gives every qualifying section its own summary rather
+        than grouping into MAX_UNITS. Consumers look summaries up per section,
+        so grouping leaves the unsummarised ones invisible to them; background
+        callers pass True and trade time for coverage.
+
+        Returns the number of SectionSummaryModel rows inserted.
+        Returns 0 immediately (non-raising) if Ollama is unreachable.
+        """
+        await self._clear_existing(document_id)
+        qualifying = await self._fetch_qualifying_sections(document_id)
+
+        if not qualifying:
+            logger.info(
+                "section_summarizer: no qualifying sections (preview < %d chars)",
+                MIN_PREVIEW_LEN,
+                extra={"doc_id": document_id},
+            )
+            return 0
+
+        # Group sections so total units <= MAX_UNITS
+        units = self._as_units(qualifying) if per_section else self._group_sections(qualifying)
+
+        logger.info(
+            "section_summarizer: %d qualifying sections → %d units",
+            len(qualifying),
+            len(units),
+            extra={"doc_id": document_id},
+        )
+
+        # The shrinking cap only bounds grouped runs on the blocking path.
+        text_cap = TEXT_HARD_CAP if per_section else unit_text_cap(len(units))
+        total_inserted = await self._summarize_units(document_id, units, 0, concurrency, text_cap)
 
         # Enqueue web_refs enrichment only when at least one section summary was written.
         # This guarantees the source data exists before the enrichment job runs.
@@ -279,6 +309,74 @@ class SectionSummarizerService:
             await self._enqueue_web_refs(document_id)
 
         return total_inserted
+
+    async def generate_progressive(
+        self, document_id: str, seed_count: int = FAST_PATH_MIN_UNITS, concurrency: int = 3
+    ) -> tuple[int, list[dict], int]:
+        """Summarise only the first `seed_count` qualifying sections, per-section.
+
+        Exists so a caller can reach summarizer.pregenerate()'s section-summary
+        fast path (>= FAST_PATH_MIN_UNITS real section summaries) immediately,
+        without running a full per-section pass first and without ever falling
+        back to chunk map-reduce -- the two things a naive "generate the doc
+        summary before section summaries exist" ordering forces (see the
+        finalize.py docstring on _run_progressive_summarization).
+
+        Clears existing rows up front, exactly like generate() -- call this
+        at most once per document, then finish with generate_progressive_rest
+        rather than calling generate() afterward, or the seed rows are wiped.
+
+        Returns (seed_inserted, remaining_units, next_unit_index): the caller
+        passes the last two straight through to generate_progressive_rest.
+        """
+        await self._clear_existing(document_id)
+        qualifying = await self._fetch_qualifying_sections(document_id)
+
+        if not qualifying:
+            logger.info(
+                "section_summarizer: no qualifying sections (preview < %d chars)",
+                MIN_PREVIEW_LEN,
+                extra={"doc_id": document_id},
+            )
+            return 0, [], 0
+
+        units = self._as_units(qualifying)
+        seed_units, rest_units = units[:seed_count], units[seed_count:]
+
+        logger.info(
+            "section_summarizer: %d qualifying sections → seeding %d, %d remaining",
+            len(qualifying),
+            len(seed_units),
+            len(rest_units),
+            extra={"doc_id": document_id},
+        )
+
+        seed_inserted = await self._summarize_units(
+            document_id, seed_units, 0, concurrency, TEXT_HARD_CAP
+        )
+
+        # Nothing left to do in a second batch: this was the whole document.
+        if not rest_units and seed_inserted > 0:
+            await self._enqueue_web_refs(document_id)
+
+        return seed_inserted, rest_units, len(seed_units)
+
+    async def generate_progressive_rest(
+        self, document_id: str, rest_units: list[dict], start_index: int, concurrency: int = 3
+    ) -> int:
+        """Finish per-section summarization after generate_progressive seeded the first batch.
+
+        Does not clear existing rows -- the seed batch's rows must survive this call.
+        """
+        if not rest_units:
+            return 0
+
+        inserted = await self._summarize_units(
+            document_id, rest_units, start_index, concurrency, TEXT_HARD_CAP
+        )
+        if inserted > 0:
+            await self._enqueue_web_refs(document_id)
+        return inserted
 
     async def _enqueue_web_refs(self, document_id: str) -> None:
         """Enqueue a web_refs enrichment job for document_id.

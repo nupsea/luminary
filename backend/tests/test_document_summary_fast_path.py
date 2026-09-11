@@ -14,6 +14,15 @@
 
 (d) test_fast_path_skipped_with_fewer_than_3_units:
     Only 2 SectionSummaryModel rows → slow path is taken, no '_section_reduce' row.
+
+(g) test_progressive_summarization_never_falls_back_to_map_reduce:
+    10 real SectionModel rows, no chunks → generate_progressive() seeds
+    FAST_PATH_MIN_UNITS section summaries, pregenerate() derives one_sentence/
+    executive from those (2 calls), generate_progressive_rest() finishes the
+    remaining sections (7 calls), and the final pregenerate() assembles
+    'detailed' for free. 9 total LLM calls, never chunk map-reduce -- there are
+    no chunks to map-reduce over, so a fallback to it would fail loudly instead
+    of silently passing.
 """
 
 import uuid
@@ -27,7 +36,7 @@ import app.database as db_module
 import app.services.summarizer as summarizer
 from app.database import make_engine
 from app.db_init import create_all_tables
-from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
+from app.models import ChunkModel, DocumentModel, SectionModel, SectionSummaryModel, SummaryModel
 from app.services.summarizer import SummarizationService, _input_token_budget
 
 _MAP_TOKEN_THRESHOLD = _input_token_budget()
@@ -76,6 +85,28 @@ async def _insert_document(factory, doc_id: str) -> None:
                 tags=[],
             )
         )
+        await session.commit()
+
+
+async def _insert_sections(factory, doc_id: str, count: int) -> None:
+    """Real SectionModel rows -- what generate_progressive actually queries.
+
+    Distinct from _insert_section_summaries, which seeds the already-generated
+    SectionSummaryModel rows a fast-path test starts from.
+    """
+    async with factory() as session:
+        for i in range(count):
+            session.add(
+                SectionModel(
+                    id=f"sec-{i}",
+                    document_id=doc_id,
+                    heading=f"Section {i}",
+                    level=1,
+                    section_order=i,
+                    body=f"Section {i} body text discussing real content. " * 20,
+                    preview=f"Section {i} body text discussing real content. " * 5,
+                )
+            )
         await session.commit()
 
 
@@ -325,31 +356,23 @@ async def test_detailed_without_section_summaries_covers_every_batch(test_db):
         assert call.kwargs["background"] is True
 
 
-# (g) test_progressive_summarization_stores_executive_immediately
+# (g) test_progressive_summarization_never_falls_back_to_map_reduce
 
 
 @pytest.mark.asyncio
-async def test_progressive_summarization_stores_executive_immediately(test_db):
-    """Progressive summarization stores executive & one_sentence summaries first,
-    enabling instant 'summarized' status before deferred section summaries complete."""
+async def test_progressive_summarization_never_falls_back_to_map_reduce(test_db):
+    """Progressive summarization must reach the section-summary fast path, not
+    chunk map-reduce, even though it derives one_sentence/executive before all
+    section summaries exist.
+
+    No ChunkModel rows are inserted: map-reduce needs chunks, so if the seed +
+    fast-path ordering broke and pregenerate() fell back to map-reduce, this
+    would fail on "no chunks found" instead of silently taking the slow path.
+    """
     _engine, factory, _tmp_path = test_db
     doc_id = str(uuid.uuid4())
     await _insert_document(factory, doc_id)
-
-    # Insert 5 chunks so the document has readable content
-    chunks = [
-        ChunkModel(
-            id=str(uuid.uuid4()),
-            document_id=doc_id,
-            text=f"Chunk {i} content discussing key concepts and ideas.",
-            chunk_index=i,
-            token_count=10,
-        )
-        for i in range(5)
-    ]
-    async with factory() as session:
-        session.add_all(chunks)
-        await session.commit()
+    await _insert_sections(factory, doc_id, count=10)
 
     mock_llm = _make_mock_llm()
     mock_llm.generate = AsyncMock(return_value="Executive summary of the document.")
@@ -360,15 +383,43 @@ async def test_progressive_summarization_stores_executive_immediately(test_db):
     with (
         patch("app.services.summarizer.get_llm_service", return_value=mock_llm),
         patch("app.services.section_summarizer.get_llm_service", return_value=mock_llm),
-        patch("app.services.summarizer.SummarizationService.refresh_library_summary", new_callable=AsyncMock),
+        patch(
+            "app.services.summarizer.SummarizationService.refresh_library_summary",
+            new_callable=AsyncMock,
+        ),
     ):
         await _run_progressive_summarization(doc_id)
 
     async with factory() as session:
-        result = await session.execute(
-            select(SummaryModel.mode).where(SummaryModel.document_id == doc_id)
+        modes = set(
+            (
+                await session.execute(
+                    select(SummaryModel.mode).where(SummaryModel.document_id == doc_id)
+                )
+            )
+            .scalars()
+            .all()
         )
-        stored_modes = set(result.scalars().all())
+        section_count = len(
+            (
+                await session.execute(
+                    select(SectionSummaryModel).where(SectionSummaryModel.document_id == doc_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    assert "executive" in stored_modes
-    assert "one_sentence" in stored_modes
+    assert "executive" in modes
+    assert "one_sentence" in modes
+    assert "detailed" in modes
+    assert "_map_reduce" not in modes, "map-reduce ran despite real section summaries existing"
+    assert section_count == 10, "every section must get a summary, not just the seed batch"
+
+    # 2 mode calls (one_sentence, executive; detailed is assembled) + 1 per section.
+    assert mock_llm.generate.call_count == 2, (
+        f"expected exactly one_sentence + executive, got {mock_llm.generate.call_count}"
+    )
+    assert mock_llm.complete.call_count == 10, (
+        f"expected one call per section, got {mock_llm.complete.call_count}"
+    )
