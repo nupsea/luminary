@@ -438,7 +438,11 @@ def _excerpt_from_chunk(chunk_text: str, hint: str = "", answer: str = "") -> st
     window = " ".join(sentences[lo : hi + 1]).strip()
     if len(window) > _EXCERPT_MAX_CHARS:
         window = window[:_EXCERPT_MAX_CHARS].rsplit(" ", 1)[0] + "..."
-    return ("..." if lo > 0 else "") + window
+    # A space after the ellipsis, not fused to the window: synthesize_node's
+    # source_citations feed this into word-splitting fuzzy matching
+    # (frontend/src/lib/citation/target.ts), where "...The" is a token "The"
+    # never occurs in.
+    return ("... " if lo > 0 else "") + window
 
 
 def _resolve_marker_citations(
