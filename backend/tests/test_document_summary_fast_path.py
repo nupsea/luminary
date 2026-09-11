@@ -323,3 +323,52 @@ async def test_detailed_without_section_summaries_covers_every_batch(test_db):
     for call in mock_llm.generate.call_args_list:
         assert call.kwargs["max_tokens"] == summarizer._DETAILED_BATCH_MAX_TOKENS
         assert call.kwargs["background"] is True
+
+
+# (g) test_progressive_summarization_stores_executive_immediately
+
+
+@pytest.mark.asyncio
+async def test_progressive_summarization_stores_executive_immediately(test_db):
+    """Progressive summarization stores executive & one_sentence summaries first,
+    enabling instant 'summarized' status before deferred section summaries complete."""
+    _engine, factory, _tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_document(factory, doc_id)
+
+    # Insert 5 chunks so the document has readable content
+    chunks = [
+        ChunkModel(
+            id=str(uuid.uuid4()),
+            document_id=doc_id,
+            text=f"Chunk {i} content discussing key concepts and ideas.",
+            chunk_index=i,
+            token_count=10,
+        )
+        for i in range(5)
+    ]
+    async with factory() as session:
+        session.add_all(chunks)
+        await session.commit()
+
+    mock_llm = _make_mock_llm()
+    mock_llm.generate = AsyncMock(return_value="Executive summary of the document.")
+    mock_llm.complete = AsyncMock(return_value="Section summary text.")
+
+    from app.workflows.ingestion_nodes.finalize import _run_progressive_summarization
+
+    with (
+        patch("app.services.summarizer.get_llm_service", return_value=mock_llm),
+        patch("app.services.section_summarizer.get_llm_service", return_value=mock_llm),
+        patch("app.services.summarizer.SummarizationService.refresh_library_summary", new_callable=AsyncMock),
+    ):
+        await _run_progressive_summarization(doc_id)
+
+    async with factory() as session:
+        result = await session.execute(
+            select(SummaryModel.mode).where(SummaryModel.document_id == doc_id)
+        )
+        stored_modes = set(result.scalars().all())
+
+    assert "executive" in stored_modes
+    assert "one_sentence" in stored_modes

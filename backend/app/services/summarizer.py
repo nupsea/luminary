@@ -597,15 +597,25 @@ class SummarizationService:
             err_evt = {"error": "llm_unavailable", "message": msg, "done": True}
             yield f"data: {json.dumps(err_evt)}\n\n"
 
-    async def generate_all_summaries(self, document_id: str, model: str | None = None) -> None:
+    async def generate_all_summaries(
+        self,
+        document_id: str,
+        model: str | None = None,
+        modes: tuple[str, ...] | None = None,
+    ) -> None:
         """Public entry point for background summary generation.
 
         Generates one_sentence, executive, and detailed summaries sequentially.
         Delegates to pregenerate which handles caching and error isolation.
         """
-        await self.pregenerate(document_id, model)
+        await self.pregenerate(document_id, model, modes=modes)
 
-    async def pregenerate(self, document_id: str, model: str | None = None) -> None:
+    async def pregenerate(
+        self,
+        document_id: str,
+        model: str | None = None,
+        modes: tuple[str, ...] | None = None,
+    ) -> None:
         """Pre-generate and store summaries for PREGENERATE_MODES.
 
         Called during ingestion so summaries are ready when the user first opens
@@ -626,8 +636,9 @@ class SummarizationService:
             # Fetched once: every mode in this call summarises the same document.
             profile = await self._fetch_profile(document_id)
             # Determine which modes still need generation
+            target_modes = modes if modes is not None else PREGENERATE_MODES
             modes_needed = []
-            for mode in PREGENERATE_MODES:
+            for mode in target_modes:
                 cached = await self._fetch_cached(document_id, mode)
                 if cached is not None:
                     logger.debug(

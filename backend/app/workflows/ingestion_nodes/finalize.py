@@ -77,6 +77,29 @@ async def _run_deferred_section_summaries(doc_id: str) -> None:
     await _run_pregenerate(doc_id)
 
 
+async def _run_progressive_summarization(doc_id: str) -> None:
+    """Progressive summarization:
+    1. Pre-generate document-level summaries (one_sentence, executive) immediately
+       so the document reaches 'summarized' status within seconds (<15s) rather than minutes.
+    2. Then run deferred section summaries in background and assemble detailed mode.
+    """
+    try:
+        svc = get_summarization_service()
+        await svc.pregenerate(doc_id, modes=("one_sentence", "executive"))
+        logger.info(
+            "progressive summarize: fast document summaries stored",
+            extra={"doc_id": doc_id},
+        )
+    except Exception as exc:
+        logger.warning(
+            "progressive summarize: fast document summaries failed (non-fatal): %s",
+            exc,
+            extra={"doc_id": doc_id},
+        )
+
+    await _run_deferred_section_summaries(doc_id)
+
+
 async def section_summarize_node(state: IngestionState) -> IngestionState:
     """Generate section-level summaries before document summarization.
 
@@ -272,9 +295,11 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # _run_pregenerate is created here (not in summarize_node) so the shared
     # StaticPool connection is free of concurrent writers when _update_stage runs.
     try:
-        # A deferred document owes its section summaries first.
+        # A deferred document runs progressive summarization: immediate executive
+        # summary first (<15s) so the document reaches 'summarized' status right away,
+        # followed by deferred section summaries and detailed assembly in background.
         deferred = state.get("defer_section_summaries")
-        coro = _run_deferred_section_summaries(doc_id) if deferred else _run_pregenerate(doc_id)
+        coro = _run_progressive_summarization(doc_id) if deferred else _run_pregenerate(doc_id)
         pregenerate_task = asyncio.create_task(coro)
         _background_tasks.add(pregenerate_task)
         pregenerate_task.add_done_callback(_background_tasks.discard)
