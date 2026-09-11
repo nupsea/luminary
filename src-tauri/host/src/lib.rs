@@ -54,6 +54,17 @@ impl Tree {
         self.0.kill();
     }
 
+    /// Whether ending this tree reaches the child's own children.
+    ///
+    /// Always true on unix: `process_group(0)` cannot fail after the child
+    /// exists. False on Windows means the job object could not be created or
+    /// the child could not be assigned to it, and the tree has degraded to a
+    /// single process -- the crash net is gone, and a caller that does not say
+    /// so out loud leaves the user with orphans and no explanation.
+    pub fn covers_descendants(&self) -> bool {
+        self.0.covers_descendants()
+    }
+
     /// What to persist so a later run can find this tree without this handle.
     ///
     /// The process group id on unix. On Windows a job object cannot outlive the

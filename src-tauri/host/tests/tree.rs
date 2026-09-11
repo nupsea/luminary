@@ -42,12 +42,18 @@ fn spawner() -> Command {
 #[cfg(windows)]
 fn spawner() -> Command {
     let mut cmd = Command::new("powershell");
+    // `-NoNewWindow` is load-bearing: without it `Start-Process` goes through
+    // `ShellExecute`, and what it returns need not be a child of this shell at
+    // all -- so the grandchild would never inherit the job and the test would
+    // be measuring its own harness. The grandchild sleeps rather than pinging
+    // because it inherits stdout, and its output would race the pid we read.
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "$p = Start-Process -PassThru -WindowStyle Hidden ping \
-         -ArgumentList '-n','60','127.0.0.1'; Write-Output $p.Id; Wait-Process -Id $p.Id",
+        "$p = Start-Process -PassThru -NoNewWindow powershell \
+         -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60'; \
+         Write-Output $p.Id; Wait-Process -Id $p.Id",
     ]);
     cmd
 }
@@ -67,6 +73,13 @@ fn gone(pid: i32) -> bool {
 fn stopping_a_tree_takes_the_grandchild_with_it() {
     let (mut child, grandchild) = spawn_a_family();
     let tree = luminary_host::adopt(&child);
+    // Asserted separately so a refused job object reads as a refused job
+    // object, not as a mechanism that ran and did not work.
+    assert!(
+        tree.covers_descendants(),
+        "the tree does not cover descendants: on Windows the job object was \
+         refused, and every assertion below would be about the wrong thing"
+    );
     assert!(luminary_host::alive(grandchild), "grandchild never started");
 
     tree.request_stop();

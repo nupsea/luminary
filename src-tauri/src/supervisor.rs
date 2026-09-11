@@ -108,6 +108,19 @@ impl Supervisor {
     }
 
     fn track(&self, tracked: Tracked) {
+        if !tracked.tree.covers_descendants() {
+            // Windows only, and it means the job object was refused: this child
+            // can still be stopped, but its own children now outlive it and a
+            // crash strands the lot. Worth a line, because the symptom is a
+            // second launch failing on a lock held by something invisible.
+            logging::write(
+                "shell",
+                &format!(
+                    "{}: could not track its process tree; its children may outlive it",
+                    tracked.name
+                ),
+            );
+        }
         if let Ok(mut children) = self.children.lock() {
             children.push(tracked);
         }

@@ -88,6 +88,10 @@ impl Tree {
         unsafe { TerminateProcess(process.0, TERMINATED) };
     }
 
+    pub fn covers_descendants(&self) -> bool {
+        self.job.is_some()
+    }
+
     /// The child's own pid: a job object cannot outlive the process that made
     /// it, so there is nothing group-shaped to write down.
     pub fn group_id(&self) -> i32 {

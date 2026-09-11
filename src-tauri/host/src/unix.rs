@@ -16,6 +16,10 @@ impl Tree {
         signal_group(self.pgid, libc::SIGKILL);
     }
 
+    pub fn covers_descendants(&self) -> bool {
+        true
+    }
+
     pub fn group_id(&self) -> i32 {
         self.pgid
     }
