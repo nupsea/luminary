@@ -115,13 +115,21 @@ jobs:
   # suite cannot read its own hardware. Same argument as `desktop-shell`: code
   # that cannot run on ubuntu has no automated coverage without a job for it.
   #
-  # Deliberately narrow. `make ci` on Windows is 0.13.0's exit gate, not this
-  # job's claim -- what this proves is that the shipped Windows install path's
-  # dependency step resolves, that the app imports, and that the policy answers
-  # where it was wrong. Widen it as that rung lands.
+  # Widened for 0.13.0's exit gate: `make ci` and `make smoke` green on
+  # Windows. There is no `make` on windows-latest, so this runs the same
+  # commands `make ci` runs rather than the target itself -- the ubuntu `ci`
+  # job above is the one source of truth for what those commands are.
+  # Deliberately still missing two pieces of `make ci`: `check_public_import.sh`
+  # rebuilds a second uv environment at a hardcoded `/tmp/luminary-public-env`,
+  # which is a Linux path under Git Bash's MSYS root rather than a Windows one,
+  # and `check_powershell.sh` is already covered on Windows-authored intent by
+  # the `powershell-syntax` job. The frontend steps (build/tsc/eslint/vitest)
+  # stay ubuntu-only: Node's toolchain is not the platform seam this rung is
+  # about, and running them twice would cost the job's time without teaching
+  # anything ubuntu's `ci` job did not already prove.
   windows-host-policy:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     needs: [branch-check]
     if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
     defaults:
@@ -147,8 +155,29 @@ jobs:
       - name: The app imports
         run: uv run python -c "import app.main"
 
-      - name: The host-support policy, on the platform it got wrong
-        run: uv run pytest tests/test_host_support.py -q
+      - name: ruff
+        run: uv run ruff check .
+
+      - name: Layer linter
+        run: uv run python tools/layer_linter.py
+
+      - name: Boundary checker
+        run: uv run python tools/boundary_checker.py
+
+      - name: Full backend suite, on the platform it got wrong
+        run: uv run pytest
+
+      - name: Manifest schema
+        run: uv run python ../scripts/check_manifest_schema.py
+
+      - name: Manifest coverage
+        run: uv run python ../scripts/check_manifest_coverage.py
+
+      - name: Public-surface calls
+        run: uv run python ../scripts/check_public_surface_calls.py
+
+      - name: Smoke script paths still exist in the API surface
+        run: uv run python ../scripts/check_smoke_paths.py
 
   powershell-syntax:
     runs-on: ubuntu-latest
