@@ -404,12 +404,17 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("failed to start Luminary")
-        .run(move |app, event| match event {
+        // `_app` because the only arm that reads it is macOS-only, and an
+        // unused binding is a warning, which this repo treats as an error.
+        .run(move |_app, event| match event {
             RunEvent::Exit => for_exit.shutdown(),
             // macOS reactivation: Spotlight, the Dock, or `open -a` on an app
             // that is already running. Without this the click does nothing
-            // visible and the user launches again, or gives up.
-            RunEvent::Reopen { .. } => activate(app),
+            // visible and the user launches again, or gives up. The variant
+            // only exists on macOS -- elsewhere the single-instance plugin
+            // covers relaunch, and `activate` is reached through it.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => activate(_app),
             _ => {}
         });
 }
