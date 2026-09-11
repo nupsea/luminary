@@ -403,7 +403,7 @@ async def git_add_commit(repo: Path, files: list[Path], message: str) -> str:
 
     Does not push -- the user pushes manually.
     """
-    rel = [str(f.relative_to(repo)) for f in files]
+    rel = [f.relative_to(repo).as_posix() for f in files]
     # -A so the same path stages new files, edits, AND deletions (used by delete).
     code, _, err = await _git(["add", "-A", "--", *rel], repo)
     if code != 0:

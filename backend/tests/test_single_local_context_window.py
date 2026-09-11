@@ -47,7 +47,7 @@ def test_settings_expose_one_local_context_window():
 def test_no_call_site_chooses_a_window():
     offenders: list[str] = []
     for path in _APP.rglob("*.py"):
-        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for value in _NUM_CTX_ARG.findall(line):
                 value = value.strip()
                 if value in _PLUMBING:
@@ -70,7 +70,7 @@ def test_only_the_registry_reads_the_global_window():
         f"{path.relative_to(_APP.parent)}:{lineno}"
         for path in _APP.rglob("*.py")
         if path.name not in {"config.py", "model_registry.py"}
-        for lineno, line in enumerate(path.read_text().splitlines(), 1)
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if "OLLAMA_NUM_CTX" in line and not line.lstrip().startswith("#")
     ]
     assert not offenders, (

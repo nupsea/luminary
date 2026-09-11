@@ -37,12 +37,12 @@ def _assign(text: str, pattern: str) -> str:
 
 @pytest.fixture(scope="module")
 def sh() -> str:
-    return _SH.read_text()
+    return _SH.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
 def ps1() -> str:
-    return _PS1.read_text()
+    return _PS1.read_text(encoding="utf-8")
 
 
 def test_the_generalist_is_registered_and_multimodal():
@@ -151,7 +151,7 @@ def test_the_desktop_shell_agrees_about_the_residency_band():
     Read as text for the same reason the installers are: nothing here can call
     Rust. The band is what matters, so the band is what is asserted.
     """
-    rust = _SUPERVISOR.read_text()
+    rust = _SUPERVISOR.read_text(encoding="utf-8")
     start = rust.index("fn ollama_max_loaded_models")
     # To the function's own closing brace at column 0, not to the next `fn`:
     # the following item is `pub fn`, so a `\nfn ` split runs past this body and
@@ -192,10 +192,10 @@ def test_the_serving_width_band_agrees_across_every_install_path(sh, ps1):
     taking two slots -- the value never changed, the band under it did.
     `supervisor.rs` sized from RAM and was the only path that did not drift.
     """
-    rust = _SUPERVISOR.read_text()
+    rust = _SUPERVISOR.read_text(encoding="utf-8")
     start = rust.index("fn ollama_num_parallel")
     shell_of_rust = rust[start : rust.index("\n}\n", start)]
-    bootstrap = _BOOTSTRAP.read_text()
+    bootstrap = _BOOTSTRAP.read_text(encoding="utf-8")
 
     for name, text, pattern in (
         ("supervisor.rs", shell_of_rust, "gb >= 24 => 2"),
@@ -261,7 +261,7 @@ def test_no_launch_path_pulls_a_literal_model_name():
 
     offenders = []
     for path in _LAUNCH_PATHS:
-        for number, line in enumerate(path.read_text().splitlines(), 1):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.strip().startswith("#"):
                 continue
             for match in literal.finditer(line):
@@ -276,7 +276,7 @@ def test_no_launch_path_pulls_a_literal_model_name():
 
 def test_bootstrap_resolves_its_model_from_the_profile():
     """It must not fall back to a name: that name reaches the user's .env."""
-    text = _BOOTSTRAP.read_text()
+    text = _BOOTSTRAP.read_text(encoding="utf-8")
     assign = _assign(text, r'^CHAT_MODEL="\$\{LUMINARY_CHAT_MODEL:-(.*)\}"')
     assert assign == "", (
         f"bootstrap.sh defaults CHAT_MODEL to {assign!r}; it writes that into "
@@ -287,15 +287,15 @@ def test_bootstrap_resolves_its_model_from_the_profile():
 
 def test_bootstrap_uses_the_same_memory_bands_as_install_sh():
     """Two installers that band differently give the same laptop two setups."""
-    boot = (_SCRIPTS / "bootstrap.sh").read_text()
+    boot = (_SCRIPTS / "bootstrap.sh").read_text(encoding="utf-8")
     assert re.search(r"MEM_GB.*-gt 24", boot), "bootstrap.sh lost the performance band"
     assert re.search(r"MEM_GB.*-lt 16", boot), "bootstrap.sh lost the 16GB floor warning"
-    for name, source in (("install.sh", _SH.read_text()), ("bootstrap.sh", boot)):
+    for name, source in (("install.sh", _SH.read_text(encoding="utf-8")), ("bootstrap.sh", boot)):
         assert "performance" in source and "standard" in source, f"{name} lost a profile"
 
 def test_start_sh_does_not_assert_a_model_name():
     """A pre-flight warning that names the wrong model sends the user to pull it."""
-    text = _START.read_text()
+    text = _START.read_text(encoding="utf-8")
     assert not re.search(r'CHAT_MODEL="\$\{LUMINARY_CHAT_MODEL:-[a-z]', text), (
         "start.sh hardcodes a model name in its warning"
     )
@@ -303,7 +303,7 @@ def test_start_sh_does_not_assert_a_model_name():
 
 def test_compose_pulls_the_configured_model_without_the_provider_prefix():
     """`ollama pull` rejects the `ollama/` prefix that LiteLLM requires."""
-    text = _COMPOSE.read_text()
+    text = _COMPOSE.read_text(encoding="utf-8")
     assert "LITELLM_DEFAULT_MODEL" in text, "compose pulls a model nothing configures"
     assert "#ollama/" in text, (
         "compose passes the setting to `ollama pull` without stripping `ollama/`"
@@ -323,7 +323,7 @@ def test_compose_escapes_shell_expansions_it_does_not_want_interpolated():
     """A `$` meant for the container's shell must be written `$$`."""
     offenders = [
         line.strip()
-        for line in _COMPOSE.read_text().splitlines()
+        for line in _COMPOSE.read_text(encoding="utf-8").splitlines()
         # Full-line comments only. Matching any line *containing* a `#` would
         # exempt every line this is meant to check, since `#` is the shell
         # expansion operator it looks for.
@@ -363,7 +363,7 @@ def test_no_installer_writes_the_legacy_profile_alias():
     from app.memory_profile import _LEGACY_ALIASES
 
     for path in (_SH, _PS1, _BOOTSTRAP):
-        for number, line in enumerate(path.read_text().splitlines(), 1):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if "LUMINARY_MEMORY_PROFILE" not in line or line.strip().startswith("#"):
                 continue
             for alias in _LEGACY_ALIASES:
@@ -382,7 +382,7 @@ def test_the_large_text_threshold_is_the_measured_feasibility_point():
     """
     from app.model_registry import fits_together, profile_for
 
-    declared = int(_assign(_SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
+    declared = int(_assign(_SH.read_text(encoding="utf-8"), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
     pair = (profile_for("ollama/qwen2.5:14b-instruct"), profile_for("ollama/qwen3.5:4b"))
     assert all(p is not None for p in pair), "the performance pair left the registry"
 
@@ -401,7 +401,7 @@ def test_the_profile_comment_states_the_bands_the_code_uses():
     split existed -- a reader checking the code against the comment would have
     concluded the code was wrong.
     """
-    text = _SH.read_text()
+    text = _SH.read_text(encoding="utf-8")
     banner = next(
         (line for line in text.splitlines() if "standard=" in line and "performance=" in line),
         None,
@@ -419,7 +419,7 @@ def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
     vision model, and figures failed quietly -- the mode the profile exists to
     prevent.
     """
-    text = _SH.read_text()
+    text = _SH.read_text(encoding="utf-8")
     chat_block_start = text.index('if [ -z "$CHAT_MODEL" ]; then')
     chat_block_end = text.index("\nfi\n", chat_block_start)
     vision_default = text.index('VISION_MODEL="$PUBLIC_GENERALIST"')
@@ -430,7 +430,7 @@ def test_pinning_only_the_chat_model_still_leaves_a_figure_reader():
 
 def test_an_unknown_profile_is_refused_rather_than_written_to_env():
     """The backend rejects it and re-sizes, so the two silently disagreed."""
-    text = _SH.read_text()
+    text = _SH.read_text(encoding="utf-8")
     assert re.search(r"standard\|performance\)\s*;;", text), (
         "install.sh no longer validates LUMINARY_PROFILE against the known set"
     )
@@ -447,7 +447,7 @@ def test_an_unknown_profile_is_refused_rather_than_written_to_env():
 
 def test_ps1_vision_default_is_not_nested_in_the_chat_model_block():
     """Nested, pinning LUMINARY_CHAT_MODEL left a roomy host with no reader."""
-    text = _PS1.read_text()
+    text = _PS1.read_text(encoding="utf-8")
     block_start = text.index("if (-not $chatModel) {")
     # The block ends at the first line that closes it at column 0.
     block_end = text.index("\n}\n", block_start)
@@ -463,9 +463,9 @@ def test_ps1_gates_the_large_text_model_on_actual_ram():
     `LUMINARY_PROFILE=performance` on an 8GB box is a supported override, so the
     band cannot be the only condition.
     """
-    text = _PS1.read_text()
+    text = _PS1.read_text(encoding="utf-8")
     declared = int(_assign(text, r"^\$LargeTextMinRamGB = (\d+)"))
-    sh_declared = int(_assign(_SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
+    sh_declared = int(_assign(_SH.read_text(encoding="utf-8"), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"))
     assert declared == sh_declared, (
         f"install.ps1 gates at {declared}GB and install.sh at {sh_declared}GB"
     )
@@ -479,7 +479,7 @@ def test_ps1_refuses_an_unknown_profile():
     written to backend/.env. PowerShell's `switch` is also case-insensitive, so
     `Performance` installed a performance profile on Windows and exited 1 on
     macOS -- the same input, two different products."""
-    text = _PS1.read_text()
+    text = _PS1.read_text(encoding="utf-8")
     assert "-cin @(" in text, "install.ps1 does not validate LUMINARY_PROFILE case-sensitively"
     assert '"standard", "performance"' in text
 
@@ -488,7 +488,7 @@ def test_ps1_guards_the_vision_pull_on_ollama_being_present():
     """The chat pull is guarded and the vision pull was not, so on the branch the
     script explicitly tolerates -- ollama off the PATH -- it invoked a missing
     command under `$ErrorActionPreference = "Stop"`."""
-    text = _PS1.read_text()
+    text = _PS1.read_text(encoding="utf-8")
     pull = text.index("ollama pull $visionModel")
     guard = text.rindex('Test-CommandExists "ollama"', 0, pull)
     condition = text.rindex("if (", 0, pull)
@@ -580,7 +580,8 @@ def test_every_installer_accepts_the_backends_name_for_the_small_profile(script)
     """`low` and `public` named the retired one-model profile. Both must still be
     ACCEPTED -- an installed .env carries one, and refusing it fails the upgrade --
     and both now resolve to `standard`."""
-    text = {"sh": _SH, "ps1": _PS1, "bootstrap": _SCRIPTS / "bootstrap.sh"}[script].read_text()
+    path = {"sh": _SH, "ps1": _PS1, "bootstrap": _SCRIPTS / "bootstrap.sh"}[script]
+    text = path.read_text(encoding="utf-8")
     assert "low" in text and re.search(r'(-ceq "low"|low\|public\))', text), (
         f"{script} does not accept `low` as a name for the small profile"
     )
@@ -589,18 +590,18 @@ def test_every_installer_accepts_the_backends_name_for_the_small_profile(script)
 def test_bootstrap_gates_the_large_text_model_on_actual_ram():
     """`LUMINARY_PROFILE=performance` is a supported override, so the profile
     alone does not mean the machine can hold the 9.67GB model."""
-    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    text = (_SCRIPTS / "bootstrap.sh").read_text(encoding="utf-8")
     assert "LARGE_TEXT_MIN_RAM_GB" in text, "bootstrap.sh pulls the large model ungated"
     assert re.search(r'MEM_GB" -ge "\$LARGE_TEXT_MIN_RAM_GB', text), (
         "bootstrap.sh names the threshold but does not compare RAM against it"
     )
     assert _assign(text, r"^LARGE_TEXT_MIN_RAM_GB=(\d+)") == _assign(
-        _SH.read_text(), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"
+        _SH.read_text(encoding="utf-8"), r"^LARGE_TEXT_MIN_RAM_GB=(\d+)"
     ), "bootstrap.sh and install.sh disagree about the band"
 
 
 def test_bootstrap_refuses_an_unknown_profile():
-    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    text = (_SCRIPTS / "bootstrap.sh").read_text(encoding="utf-8")
     assert re.search(r"_die \"LUMINARY_PROFILE=", text), (
         "bootstrap.sh writes an unvalidated profile into .env, where the backend rejects it"
     )
@@ -609,7 +610,7 @@ def test_bootstrap_refuses_an_unknown_profile():
 def test_bootstrap_does_not_write_a_key_the_template_already_sets():
     """The template sets these uncommented, so appending duplicated them and a
     user editing the first occurrence saw no effect."""
-    text = (_SCRIPTS / "bootstrap.sh").read_text()
+    text = (_SCRIPTS / "bootstrap.sh").read_text(encoding="utf-8")
     assert re.search(r"grep -vE '\^\(LITELLM_DEFAULT_MODEL\|VISION_MODEL", text), (
         "bootstrap.sh appends model keys without stripping the template's copies"
     )

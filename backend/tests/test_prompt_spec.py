@@ -148,7 +148,7 @@ def _defined_specs() -> set[str]:
     return {
         path.name
         for path in services.glob("*.py")
-        if "PromptSpec(" in path.read_text() and path.name != "prompt_spec.py"
+        if "PromptSpec(" in path.read_text(encoding="utf-8") and path.name != "prompt_spec.py"
     }
 
 
@@ -277,7 +277,7 @@ def test_nothing_renders_a_prompt_against_the_configured_default():
     offenders = [
         f"{path.relative_to(app_dir)}:{i}"
         for path in app_dir.rglob("*.py")
-        for i, line in enumerate(path.read_text().splitlines(), start=1)
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
         if pattern.search(line)
     ]
 

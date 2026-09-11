@@ -115,7 +115,7 @@ async def get_blog_config(kind: str = "blog") -> BlogConfigResponse:
     )
     return BlogConfigResponse(
         repo_path=str(repo),
-        content_subdir=str(_content_dir(kind).relative_to(repo)),
+        content_subdir=_content_dir(kind).relative_to(repo).as_posix(),
         url_base=get_settings().LUMINARY_BLOG_URL_BASE,
         existing_slugs=sorted(blog_service.existing_slugs(content_dir)),
         ahead=ahead,
@@ -222,7 +222,7 @@ async def publish(
     repo = _configured_repo()
 
     # Honor a user-edited destination folder, but never let it escape the repo.
-    subdir = req.subdir or str(_content_dir(kind).relative_to(repo))
+    subdir = req.subdir or _content_dir(kind).relative_to(repo).as_posix()
     content_dir = (repo / subdir).resolve()
     if not _within(content_dir, repo):
         raise HTTPException(status_code=400, detail=f"destination escapes repo: {subdir}")
@@ -258,7 +258,7 @@ async def publish(
     return BlogPublishResponse(
         committed=True,
         commit_sha=sha,
-        files=[str(f.relative_to(repo)) for f in files],
+        files=[f.relative_to(repo).as_posix() for f in files],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
         url=_post_url(slug, kind),
@@ -355,8 +355,8 @@ async def update_post(
     return BlogPublishResponse(
         committed=True,
         commit_sha=sha,
-        files=[str(f.relative_to(repo)) for f in files],
-        removed_assets=[str(f.relative_to(repo)) for f in removed],
+        files=[f.relative_to(repo).as_posix() for f in files],
+        removed_assets=[f.relative_to(repo).as_posix() for f in removed],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
         url=_post_url(clean, kind),
@@ -381,7 +381,7 @@ async def delete_post(slug: str, kind: str = "blog") -> BlogPublishResponse:
     return BlogPublishResponse(
         committed=True,
         commit_sha=sha,
-        files=[str(f.relative_to(repo)) for f in files],
+        files=[f.relative_to(repo).as_posix() for f in files],
         pushed=False,
         push_hint=f"git -C {repo} push origin {settings.LUMINARY_BLOG_BRANCH}",
         url=f"{settings.LUMINARY_BLOG_URL_BASE}/{kind}/",

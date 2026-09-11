@@ -14,6 +14,7 @@ Two shipped defects are pinned here:
 """
 
 import io
+import sys
 from pathlib import Path
 
 import pytest
@@ -178,6 +179,15 @@ def test_a_tool_outside_the_bundles_path_is_still_found(tmp_path, monkeypatch):
     assert components_module.resolve_tool("ffmpeg") == str(tool)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "os.access(path, os.X_OK) is not meaningful on Windows -- CPython documents it "
+        "as true for any existing file there -- and _WELL_KNOWN_TOOL_DIRS is a tuple of "
+        "POSIX prefixes (Homebrew, MacPorts, /usr/bin) that never resolve on that "
+        "platform, so the fallback branch this test exercises is unreachable there too."
+    ),
+)
 def test_a_present_but_unexecutable_file_is_not_a_find(tmp_path, monkeypatch):
     """Reporting one turns "not installed" into a failure at the point of use."""
     import app.services.components as components_module
