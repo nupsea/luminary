@@ -45,7 +45,7 @@ def _logical_lines(text: str) -> list[str]:
 
 @pytest.mark.parametrize("relpath", SHIPPED_LAUNCHERS)
 def test_a_shipped_launcher_never_resolves_dependencies(relpath):
-    for line in _logical_lines((REPO / relpath).read_text()):
+    for line in _logical_lines((REPO / relpath).read_text(encoding="utf-8")):
         if line.startswith("#") or "uvicorn" not in line:
             continue
         if not re.search(r"\buv\b", line):
@@ -59,7 +59,9 @@ def test_the_docker_entrypoint_does_not_go_through_uv_at_all():
     """Nothing to resolve and nothing to shell out to: the image was built with
     exactly the dependencies it should run."""
     cmd = [
-        ln for ln in (REPO / "Dockerfile").read_text().splitlines() if ln.startswith("CMD ")
+        ln
+        for ln in (REPO / "Dockerfile").read_text(encoding="utf-8").splitlines()
+        if ln.startswith("CMD ")
     ]
     assert len(cmd) == 1
     assert "uv" not in cmd[0].split()

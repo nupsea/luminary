@@ -46,7 +46,7 @@ def _offenders() -> list[str]:
     for path in _APP.rglob("*.py"):
         if path.name in _MAY_READ_CONFIG:
             continue
-        for i, line in enumerate(path.read_text().splitlines(), start=1):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if _CONFIG_MODEL_READ.search(line):
                 hits.append(f"{path.relative_to(_APP)}:{i}")
     return hits
@@ -194,7 +194,7 @@ def test_no_module_outside_the_registry_writes_a_model_name_down():
     for path in _APP.rglob("*.py"):
         if path.name in _MAY_NAME_A_MODEL:
             continue
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         exempt = _exempt_string_nodes(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Constant) or not isinstance(node.value, str):

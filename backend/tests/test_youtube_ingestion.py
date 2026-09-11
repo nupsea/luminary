@@ -415,13 +415,18 @@ async def test_download_passes_the_resolved_ffmpeg_location(monkeypatch, tmp_pat
         captured.extend(args)
         return _Proc()
 
-    monkeypatch.setattr(yt, "resolve_tool", lambda name: f"/opt/homebrew/bin/{name}")
+    # Built through Path rather than hardcoded, so the expected separator
+    # matches whatever the code under test normalizes to on this platform --
+    # the mac-style prefix is arbitrary, the code's job is a real OS path.
+    monkeypatch.setattr(
+        yt, "resolve_tool", lambda name: str(Path("/opt/homebrew/bin") / name)
+    )
     monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
 
     await yt.download_audio("https://youtu.be/x", tmp_path / "out")
 
     assert "--ffmpeg-location" in captured
-    assert captured[captured.index("--ffmpeg-location") + 1] == "/opt/homebrew/bin"
+    assert captured[captured.index("--ffmpeg-location") + 1] == str(Path("/opt/homebrew/bin"))
 
 
 async def test_download_omits_the_flag_when_ffmpeg_is_not_found(monkeypatch, tmp_path):

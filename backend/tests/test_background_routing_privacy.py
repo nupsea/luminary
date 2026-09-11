@@ -76,7 +76,7 @@ def test_hybrid_sends_background_work_to_ollama(hybrid_routing):
 @pytest.mark.parametrize(("module_path", "callee"), LOCAL_ONLY_CALL_SITES)
 def test_local_only_call_sites_declare_background(module_path, callee):
     path = pathlib.Path(__file__).resolve().parents[1] / module_path
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
 
     calls = [
         node

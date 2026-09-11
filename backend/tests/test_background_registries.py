@@ -31,7 +31,7 @@ def _bare_registry_declarations() -> list[str]:
     for path in sorted(APP_ROOT.rglob("*.py")):
         if "__pycache__" in str(path):
             continue
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             targets = (
                 [node.target] if isinstance(node, ast.AnnAssign) else getattr(node, "targets", [])

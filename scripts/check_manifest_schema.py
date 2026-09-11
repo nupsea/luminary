@@ -24,7 +24,7 @@ def component_exists(rel: str) -> bool:
 
 
 def main() -> int:
-    data = json.loads(MANIFEST.read_text())
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     errors: list[str] = []
 
     if data.get("version") != 2:

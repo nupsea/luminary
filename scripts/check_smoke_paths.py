@@ -117,7 +117,7 @@ def main() -> int:
     checked = 0
     scripts = sorted(SMOKE.glob("S*.sh"))
     for script in scripts:
-        text = script.read_text()
+        text = script.read_text(encoding="utf-8")
         absent = {p.rstrip("/") for p in _EXPECTS_ABSENT.findall(text)}
         for raw in _CALL.findall(text):
             path = normalise(raw)
