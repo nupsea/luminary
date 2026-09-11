@@ -4,9 +4,32 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-11
 
 ### Fixed
+- **Citation highlighting no longer targets the chunk's first 150 characters
+  instead of the sentence that answers the question.** `synthesize_node` built
+  every citation's preview snippet as a plain head cut, so the reader's
+  click-to-highlight landed on generic opening prose while the actual
+  Recall/Precision content sat three sentences later in the same chunk. It now
+  calls the sentence-scoring excerpt picker already used elsewhere in the
+  codebase, so the snippet is still a verbatim slice of the retrieved chunk
+  (I-33) -- just a smarter choice of which slice.
+- **Progressive summarization no longer nearly doubles background LLM calls on
+  large documents.** The feature seeded a bulk of section summaries in the
+  background, but the fast-path document-summary check ran before any
+  existed, fell through to chunk map-reduce, and then the section summaries
+  ran anyway -- 20 calls where the pre-feature code made 12. It now seeds
+  exactly the section count the fast-path check requires before generating the
+  document summary, then fills in the rest; a regression test asserts zero
+  map-reduce calls and the exact call counts on a 10-section document.
+- **A denied Keychain prompt no longer reverts every cloud provider setting to
+  its default.** `_keyring_get`/`_keyring_set` caught only `NoKeyringError`;
+  `KeyringLocked` (a user clicking Deny) escaped into the broad exception
+  handler around `load_llm_settings`, aborting the whole settings load instead
+  of leaving just that one field empty. Both now catch `KeyringError`, so a
+  denied field degrades alone and the app falls back to its existing
+  plaintext-prefixed DB storage for that field.
 - **Windows machines are no longer refused a local model they can run.** The
   accelerator probe tested `/dev/nvidiactl` and `/proc/driver/nvidia/version`,
   which do not exist on Windows, so every Windows host resolved to
@@ -76,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slower, because none of it was on a GPU. Windows was already CPU-only
   (113.8 -> 113.7 MB) and gains nothing but the shared version. macOS is
   unchanged, still PyPI's 2.10.0.
+- **`windows-host-policy` runs the full backend suite and lint scripts, not a
+  narrow slice.** Doing so found three real bugs invisible to the previous
+  job: `bash` resolving to a WSL stub instead of Git Bash, about a dozen
+  `.read_text()` call sites defaulting to cp1252 instead of UTF-8, and a
+  blog-publishing path built with `str(Path)` instead of `.as_posix()`. All
+  three are fixed; a test asserting Unix-only executable-permission semantics
+  is now skipped on Windows instead of failing there.
 
 ## [0.11.2] - 2026-09-10
 

@@ -1,6 +1,6 @@
 [package]
 name = "luminary-host"
-version = "0.11.2"
+version = "0.12.0"
 description = "The OS-specific half of the desktop shell: process trees, disk, memory."
 edition = "2021"
 rust-version = "1.77"
