@@ -489,14 +489,39 @@ mod tests {
         assert!(!url.contains(' '), "unencoded space in {url}");
     }
 
+    /// What the OS line must name on the host running this test.
+    ///
+    /// Not the whole `os_detail` string: macOS reports a build and a Darwin
+    /// version, Windows a single banner, and a shared assertion would only be
+    /// whichever one is weaker. The platform name plus the architecture is the
+    /// part every host owes the report.
+    #[cfg(target_os = "macos")]
+    const OS_MARKERS: [&str; 3] = ["macOS ", "build ", "Darwin "];
+    #[cfg(windows)]
+    const OS_MARKERS: [&str; 2] = ["Windows ", "Version "];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    const OS_MARKERS: [&str; 1] = ["Linux "];
+
     #[test]
     fn the_environment_carries_what_reproducing_needs() {
         // nupsea/luminary#41: a version and an OS name were not enough to
         // rebuild someone's setup.
         let env = report("boom").environment();
-        for expected in ["Luminary ", "macOS ", "build ", "Darwin ", "Ollama "] {
+        for expected in ["Luminary ", "Ollama "].iter().chain(OS_MARKERS.iter()) {
             assert!(env.contains(expected), "missing {expected:?} in {env}");
         }
+        assert!(
+            env.contains(std::env::consts::ARCH),
+            "no architecture in {env}"
+        );
+        // The probe answering with "unknown" is the failure this whole field
+        // has: a report that names no version costs a round trip with the
+        // person who filed it.
+        let version = os_version();
+        assert!(
+            !version.contains("unknown"),
+            "the OS probe failed: {version}"
+        );
         assert!(env.lines().count() >= 4, "collapsed to one line: {env}");
     }
 
