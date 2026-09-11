@@ -500,12 +500,31 @@ def _run_platform_guard(sh: str, os_name: str, arch: str):
     with `uname` shadowed rather than the block reimplemented, so this proves
     the actual file's logic and not a paraphrase of it."""
     import subprocess
+    import tempfile
 
     start = sh.index("_info()  { printf")
     end = sh.index("fi\n", sh.index("Native install isn't supported")) + len("fi\n")
     block = sh[start:end]
     harness = f'uname() {{ case "$1" in -s) echo {os_name};; -m) echo {arch};; esac; }}\n' + block
-    return subprocess.run(["bash", "-c", harness], capture_output=True, text=True, timeout=10)
+
+    # A `-c` argument this long, with this many nested quotes, round-trips
+    # through Windows' list2cmdline re-escaping and then Git Bash's own MSYS
+    # argv re-parse on the way to the process -- on windows-latest this
+    # produced the *right* exit code for the wrong reason (both cases fell
+    # into install.sh's "Unsupported OS" branch, since the shadowed `uname`
+    # never took effect) and no stderr at all. A script FILE has no argv to
+    # mis-escape. newline="\n" keeps it LF-only even though Python's text
+    # mode would otherwise write CRLF on Windows, which bash does not parse
+    # the way it parses LF.
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, newline="\n", encoding="utf-8"
+    ) as fh:
+        fh.write(harness)
+        script_path = fh.name
+    try:
+        return subprocess.run(["bash", script_path], capture_output=True, text=True, timeout=10)
+    finally:
+        Path(script_path).unlink(missing_ok=True)
 
 
 def test_intel_mac_is_refused_with_docker_guidance(sh):
