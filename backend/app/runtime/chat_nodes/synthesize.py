@@ -27,6 +27,7 @@ from app.services.qa import (
     CITATION_MIN_SCORE,
     CITATION_REL_RATIO,
     MAX_CITATIONS,
+    _excerpt_from_chunk,
     _should_use_summary,
 )
 from app.services.summarizer import get_summarization_service
@@ -462,7 +463,17 @@ async def synthesize_node(state: ChatState) -> dict:
                     # Seconds into a recording, null for everything else: what a
                     # citation into a lecture points at is a moment, not a page.
                     "start_time": meta.start_time,
-                    "section_preview_snippet": chunk_text[:150],  # hover tooltip preview
+                    # This drives more than a tooltip: the reader's citation-click
+                    # highlight fuzzy-matches these words against the rendered
+                    # prose (frontend/src/lib/citation/target.ts). A chunk is
+                    # sized for the embedder, so the sentence bearing the user's
+                    # answer sits anywhere in it -- chunk_text[:150] used to land
+                    # on whatever came first, which reads as a random highlight
+                    # next to a question about something three sentences later.
+                    # _excerpt_from_chunk (already proven in qa.py's marker
+                    # citations, I-33) scores every sentence by overlap with the
+                    # question and windows around the best one, verbatim.
+                    "section_preview_snippet": _excerpt_from_chunk(chunk_text, hint=question),
                 }
             )
 

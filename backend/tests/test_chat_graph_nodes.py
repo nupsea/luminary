@@ -778,15 +778,99 @@ async def test_synthesize_node_collects_citations_deduplicated(test_db):
     assert section_id_1 in section_ids_in_citations
     assert section_id_2 in section_ids_in_citations
 
-    # S157: section_preview_snippet must be populated from chunk text (first 150 chars)
+    # S157: section_preview_snippet must be populated from chunk text
     for c in source_citations:
         assert "section_preview_snippet" in c, f"Missing section_preview_snippet in citation: {c}"
         snippet = c["section_preview_snippet"]
         assert isinstance(snippet, str), "section_preview_snippet must be a string"
-        assert len(snippet) <= 150, f"section_preview_snippet exceeds 150 chars: {len(snippet)}"
-    # The first citation (chunk c1, text='text1') has snippet 'text1'
+    # Below _EXCERPT_MAX_CHARS, _excerpt_from_chunk returns the chunk unchanged.
     first_cit = next(c for c in source_citations if c["section_id"] == section_id_1)
     assert first_cit["section_preview_snippet"] == "text1"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_node_snippet_targets_the_question_not_the_chunk_head(test_db):
+    """The highlighted snippet is the sentence the question is about, not chunk[:150].
+
+    Reported live: asking "What is Recall and Precision?" against a chunk whose
+    first sentence is a generic definition of retrieval highlighted that generic
+    sentence in the reader instead of the chunk's actual Recall/Precision
+    sentence three sentences later. A head cut is technically a real quote (I-33
+    is not violated) but reads as a random highlight next to an unrelated
+    question, which is the whole trust argument for citations in the first place.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    section_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(
+            SectionModel(
+                id=section_id,
+                document_id=doc_id,
+                heading="Part 0",
+                level=1,
+                section_order=0,
+            )
+        )
+        session.add(
+            ChunkModel(
+                id=chunk_id,
+                document_id=doc_id,
+                section_id=section_id,
+                text=(
+                    "Retrieval is the task of finding, from a large corpus of documents, "
+                    "the small subset most relevant to a query. "
+                    "Every retrieval system is solving the same optimization problem. "
+                    "Recall measures how many of the relevant items were retrieved, while "
+                    "precision measures how many of the retrieved items were actually relevant. "
+                    "Real systems chain multiple stages together to balance both."
+                ),
+                chunk_index=0,
+                pdf_page_number=5,
+            )
+        )
+        await session.commit()
+
+    chunks = [
+        {
+            "chunk_id": chunk_id,
+            "document_id": doc_id,
+            "text": (
+                "Retrieval is the task of finding, from a large corpus of documents, "
+                "the small subset most relevant to a query. "
+                "Every retrieval system is solving the same optimization problem. "
+                "Recall measures how many of the relevant items were retrieved, while "
+                "precision measures how many of the retrieved items were actually relevant. "
+                "Real systems chain multiple stages together to balance both."
+            ),
+            "section_heading": "Part 0",
+            "page": 5,
+            "score": 0.9,
+            "source": "vector",
+        },
+    ]
+    state = _make_state(
+        question="What is Recall and Precision?",
+        chunks=chunks,
+        doc_ids=[doc_id],
+        intent="factual",
+    )
+
+    result = await synthesize_node(state)
+
+    source_citations = result.get("source_citations", [])
+    assert len(source_citations) == 1
+    snippet = source_citations[0]["section_preview_snippet"]
+    assert "recall measures" in snippet.lower(), (
+        f"snippet did not target the question's own terms: {snippet!r}"
+    )
+    assert not snippet.lower().startswith("retrieval is the task"), (
+        f"snippet regressed to a head cut of the chunk: {snippet!r}"
+    )
 
 
 # S158 AC: synthesize_node emits transparency event; augment_node sets augmented
