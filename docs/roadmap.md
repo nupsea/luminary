@@ -587,11 +587,16 @@ Tauri dependency, and `cargo clippy --target x86_64-pc-windows-msvc -p luminary-
 — it is part of `make desktop-test`. Keep it that way: a Windows branch only CI can see is a branch
 nobody reads before pushing.
 
-**`desktop-shell-windows` executes the mechanism, it does not merely compile it.** The job runs
-`cargo test --workspace` on `windows-latest`, and `host/tests/tree.rs` spawns a child that spawns a
-grandchild and asserts the grandchild dies with the tree — the defect the job object exists to
-prevent, and one `cargo check` could never see. The same tests run on macOS against process groups.
-The job shipped in the same commit as the code that makes it pass.
+**`desktop-shell-windows` executes the mechanism, it does not merely compile it, and it has now
+run green.** The job runs `cargo test --workspace` on `windows-latest`, and `host/tests/tree.rs`
+spawns a child that spawns a grandchild and asserts the grandchild dies with the tree — the defect
+the job object exists to prevent, and one `cargo check` could never see. The same tests run on
+macOS against process groups. The job shipped in the same commit as the code that makes it pass,
+and its first three runs found real defects rather than passing by luck: a `RunEvent` variant that
+does not exist off macOS, a test that could only pass on one platform, and a race in the test
+harness itself — it read the grandchild's pid, which blocks until the leader has spawned it,
+*before* calling `adopt`, so on Windows the grandchild was provably born before it could have
+joined the job. `covers_descendants()` was true throughout; the job was never the problem.
 
 **The rest of the platform seams moved with it.** `stage.rs` and `total_memory_gb` had `statvfs` and
 `sysctlbyname` hardcoded; `main.rs` read a signal number through `ExitStatusExt`. `base_env` cleared
