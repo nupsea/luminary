@@ -14,12 +14,21 @@ is silent on the machine that can least afford it.
 """
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 from app import memory_profile
 from app.model_registry import GENERALIST_PREFERENCE, REGISTRY, profile_for
+
+# A bare "bash" on windows-latest resolves to C:\Windows\System32\bash.exe --
+# the WSL launcher stub, present with no distribution installed -- ahead of
+# Git's on PATH. It prints a UTF-16 "wsl.exe --install <Distro>' to install."
+# message to STDOUT (never stderr) and a misleading exit code, which is why
+# both platform-guard cases below looked identical regardless of input: WSL
+# was answering, not install.sh. Git for Windows always installs here.
+_BASH = r"C:\Program Files\Git\bin\bash.exe" if sys.platform == "win32" else "bash"
 
 _REPO = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO / "scripts"
@@ -522,7 +531,7 @@ def _run_platform_guard(sh: str, os_name: str, arch: str):
         fh.write(harness)
         script_path = fh.name
     try:
-        return subprocess.run(["bash", script_path], capture_output=True, text=True, timeout=10)
+        return subprocess.run([_BASH, script_path], capture_output=True, text=True, timeout=10)
     finally:
         Path(script_path).unlink(missing_ok=True)
 
