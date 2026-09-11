@@ -102,6 +102,11 @@ VALID_DATASETS = [
     "play",
     "study",
     "thoughts",
+    # Added 2026-09-11: comparison/keyword/semantic-intent phrasings over a
+    # document whose concepts sit close together in one small corpus -- the
+    # shape that exposed graph_node/comparative_node misgrounding a real
+    # answer (I-55). No other dataset exercises that routing combination.
+    "retrieval_and_memory_tutorial",
 ]
 
 # Per-/qa timeout for generation runs. A local answering model (Ollama, CPU)

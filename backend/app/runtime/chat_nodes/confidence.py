@@ -18,6 +18,7 @@ import logging
 
 from langgraph.graph import END
 
+from app.database import get_session_factory
 from app.runtime.chat_nodes._shared import _chunk_to_dict
 from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,
@@ -31,6 +32,7 @@ from app.services import (
     web_searcher as _web_searcher_module,  # indirect: get_web_searcher is patched
 )
 from app.services.retriever import get_retriever
+from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -76,7 +78,7 @@ async def augment_node(state: ChatState) -> dict:
 
     Selects the complementary strategy based on primary_strategy:
       search_node / factual / exploratory → Kuzu entity graph lines → section_context
-      graph_node (relational)             → hybrid search k=15 → chunks
+      graph_node (relational)             → hybrid search k=15, rerank per setting → chunks
       summary_node                        → hybrid search k=10 → chunks
       comparative_node                    → hybrid search k=10, no doc filter → chunks
       notes_node                          → broader note search k=10 → section_context
@@ -110,9 +112,14 @@ async def augment_node(state: ChatState) -> dict:
                 logger.warning("augment_node: Kuzu query failed", exc_info=True)
 
         elif primary == "graph_node":
-            # Complementary: broader hybrid search k=15
+            # Complementary: broader hybrid search k=15, same rerank setting search_node uses
+            try:
+                async with get_session_factory()() as session:
+                    rerank = await get_rerank_enabled(session)
+            except Exception:
+                rerank = False
             retriever = get_retriever()
-            chunks = await retriever.retrieve(question, effective_doc_ids, k=15)
+            chunks = await retriever.retrieve(question, effective_doc_ids, k=15, rerank=rerank)
             new_chunks = [_chunk_to_dict(c) for c in chunks]
 
         elif primary == "summary_node":

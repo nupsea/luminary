@@ -1,29 +1,39 @@
 """graph_node and its entity-extraction / Kuzu-query helpers.
 
 intent='relational' path: extract entity names from the question, query
-Kuzu's CO_OCCURS + RELATED_TO edges, and run hybrid retrieval (k=5) as a
-grounding supplement. Falls through to search (intent='factual') on
-Kuzu failure or 0 results.
+Kuzu's CO_OCCURS + RELATED_TO edges, and run hybrid retrieval (same depth +
+rerank setting as search_node) as a grounding supplement. Falls through to
+search (intent='factual') on Kuzu failure or 0 results.
 """
 
 import logging
 import re
 
+from app.database import get_session_factory
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.retriever import get_retriever
+from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
+
+from ._shared import _chunk_to_dict
 
 logger = logging.getLogger(__name__)
 
 
 _ENTITY_RE = re.compile(r'["\']([^"\']{2,})["\']')
-_CAPITALIZED_RE = re.compile(r"\b([A-Z][a-zA-Z]{2,})\b")
+# A run of one or more capitalized words, e.g. "Inverted Index" or "Marie
+# Curie" -- not just its first token. Matching only the first word of a
+# multi-word proper noun sent Kuzu lookups for names that exist nowhere in
+# the graph (I-55).
+_CAPITALIZED_PHRASE_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*\b")
 
 
 def _extract_entities_from_question(question: str) -> list[str]:
     """Extract potential entity names from a question.
 
-    Finds quoted strings first, then capitalized words (skipping first word).
+    Finds quoted strings first, then runs of capitalized words merged into a
+    single phrase (skipping the question's own first word, which is
+    capitalized because it opens the sentence, not because it names something).
     """
     entities: list[str] = []
     seen: set[str] = set()
@@ -35,13 +45,13 @@ def _extract_entities_from_question(question: str) -> list[str]:
             seen.add(name)
             entities.append(name)
 
-    # Capitalized words (skip first word of the question)
-    words = question.split()
-    for word in words[1:]:
-        clean = re.sub(r"[^\w]", "", word)
-        if clean and clean[0].isupper() and len(clean) > 2 and clean not in seen:
-            seen.add(clean)
-            entities.append(clean)
+    # Capitalized phrases, skipping the sentence's own first word
+    first_word, _, rest = question.partition(" ")
+    for m in _CAPITALIZED_PHRASE_RE.finditer(rest):
+        name = m.group(0).strip()
+        if name and name not in seen:
+            seen.add(name)
+            entities.append(name)
 
     return entities
 
@@ -84,8 +94,9 @@ async def graph_node(state: ChatState) -> dict:
     """Kuzu entity traversal for relational queries.
 
     Extracts entity names from the question, queries CO_OCCURS + RELATED_TO edges,
-    and runs hybrid retrieval (k=5) as a grounding supplement.
-    Falls through to search_node (via intent='factual') on Kuzu failure or 0 results.
+    and runs hybrid retrieval (same depth + rerank setting as search_node) as a
+    grounding supplement. Falls through to search_node (via intent='factual') on
+    Kuzu failure or 0 results.
     """
     question = state["question"]
     q = state.get("rewritten_question") or question
@@ -115,23 +126,26 @@ async def graph_node(state: ChatState) -> dict:
 
     section_context = "Knowledge graph connections:\n" + "\n".join(graph_lines)
 
-    # Grounding supplement: hybrid retrieval k=5
+    # Grounding supplement: same depth and rerank setting search_node uses.
+    # A graph match (even a real one) says nothing about whether that entity's
+    # co-occurrence neighbours are the passage that answers the question -- the
+    # supplement is what actually has to carry the answer, so it must not be a
+    # weaker retrieval than the search path gets (I-55).
+    k = 6 if scope == "all" else 10
+    try:
+        async with get_session_factory()() as session:
+            rerank = await get_rerank_enabled(session)
+    except Exception as exc:
+        logger.warning("graph_node: could not read rerank setting, defaulting off: %s", exc)
+        rerank = False
+
     chunks_dicts: list[dict] = []
     try:
         retriever = get_retriever()
-        chunks: list[ScoredChunk] = await retriever.retrieve(q, effective_doc_ids, k=5)
-        chunks_dicts = [
-            {
-                "chunk_id": c.chunk_id,
-                "document_id": c.document_id,
-                "text": c.text,
-                "section_heading": c.section_heading,
-                "page": c.page,
-                "score": c.score,
-                "source": c.source,
-            }
-            for c in chunks
-        ]
+        chunks: list[ScoredChunk] = await retriever.retrieve(
+            q, effective_doc_ids, k=k, rerank=rerank
+        )
+        chunks_dicts = [_chunk_to_dict(c) for c in chunks]
     except Exception:
         logger.warning("graph_node: retrieval failed", exc_info=True)
 

@@ -204,6 +204,82 @@ async def test_graph_node_falls_through_on_kuzu_error(test_db):
     assert result.get("intent") == "factual"
 
 
+# (c2) graph_node's own entity extraction and grounding-supplement retrieval
+
+
+def test_extract_entities_from_question_merges_capitalized_phrase():
+    """A multi-word proper noun is one entity, not its first word alone.
+
+    "What is Inverted Index and how does it differ..." used to extract just
+    "Inverted", which matched no real Kuzu node and let a spurious partial
+    match through where a real multi-word entity would have found nothing and
+    correctly fallen through to search (I-55).
+    """
+    from app.runtime.chat_nodes.graph import _extract_entities_from_question
+
+    entities = _extract_entities_from_question(
+        "What is Inverted Index and how does it differ from Marie Curie's notebook?"
+    )
+    assert "Inverted Index" in entities
+    assert "Marie Curie" in entities
+    assert "Inverted" not in entities
+    assert "Curie" not in entities
+
+
+@pytest.mark.asyncio
+async def test_graph_node_passes_rerank_toggle_and_search_depth(test_db):
+    """graph_node's grounding-supplement retrieval matches search_node's depth
+    and rerank setting.
+
+    Before this, a relational-intent question that found even one graph edge
+    got a k=5, never-reranked supplement while the same question over
+    search_node got k=10 with reranking -- a real answer chunk could be in
+    search_node's context and missing from graph_node's for no reason the
+    graph traversal itself explains (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+
+    # One entity ("Something") -> _query_kuzu_for_entity issues exactly two
+    # Kuzu queries (CO_OCCURS, then RELATED_TO). The CO_OCCURS query yields one
+    # row, RELATED_TO yields none: has_next() is called True, False, False.
+    mock_service = MagicMock()
+    mock_result = MagicMock()
+    mock_result.has_next.side_effect = [True, False, False]
+    mock_result.get_next.return_value = ["Related Entity", 1.0]
+    mock_service._conn.execute.return_value = mock_result
+
+    with (
+        patch("app.services.graph.get_graph_service", return_value=mock_service),
+        patch("app.runtime.chat_nodes.graph.get_retriever", return_value=mock_retriever),
+    ):
+        state = _make_state(
+            question="How is Something related to it?",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="relational",
+        )
+        result = await graph_node(state)
+
+        assert result.get("chunks")
+        assert mock_retriever.retrieve.call_args.kwargs["k"] == 10
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        mock_result.has_next.side_effect = [True, False, False]
+        await graph_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False
+
+
 # (d) test_search_node_augments_chunks_with_section_summaries
 
 
@@ -389,6 +465,90 @@ async def test_comparative_node_interleaves_results(test_db):
     assert texts[1].startswith("side_b")
     assert texts[2].startswith("side_a")
     assert texts[3].startswith("side_b")
+
+
+# (e2) comparative_node honours the DB-backed L3 rerank toggle
+
+
+@pytest.mark.asyncio
+async def test_comparative_node_passes_rerank_toggle(test_db):
+    """Per-side retrieval matches search_node's rerank setting.
+
+    Before this, comparing two concepts within one document (rather than two
+    documents/authors, which is what side-resolution is built for) had both
+    sides fall back to the same unfiltered, never-reranked query over the same
+    document -- which routinely returned the same top chunks for both sides,
+    leaving the model nothing to contrast (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
+        state = _make_state(
+            question="Compare side_a versus side_b",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="comparative",
+        )
+        await comparative_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        await comparative_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False
+
+
+@pytest.mark.asyncio
+async def test_comparative_node_deduplicates_across_sides(test_db):
+    """Two sides sharing top passages get distinct context, not a duplicate.
+
+    Reproduced live: comparing "Cross-encoder" vs "bi-encoder" within one small
+    document, both sides' retrieval converged on the same six chunks, and the
+    model wrote "**Cross-encoder:**" and stopped, with nothing to contrast
+    (I-55). A chunk shared by both sides' retrieved pools must be assigned to
+    only one side, and the other side must backfill from its own pool rather
+    than carry the duplicate.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    shared = [_make_scored_chunk(doc_id, "Shared", text=f"shared_{i}") for i in range(4)]
+    side_a_only = _make_scored_chunk(doc_id, "A-only", text="a_only")
+    side_b_only = _make_scored_chunk(doc_id, "B-only", text="b_only")
+
+    # Side A's pool: 4 shared chunks ranked first, then its own distinct chunk.
+    # Side B's pool: the same 4 shared chunks, then its own distinct chunk.
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(
+        side_effect=[[*shared, side_a_only], [*shared, side_b_only]]
+    )
+
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
+        state = _make_state(
+            question="Compare side_a versus side_b",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="comparative",
+        )
+        result = await comparative_node(state)
+
+    chunks = result.get("chunks", [])
+    chunk_ids = [c["chunk_id"] for c in chunks]
+    assert len(chunk_ids) == len(set(chunk_ids)), "no chunk_id may appear on both sides"
+    texts = {c["text"] for c in chunks}
+    # Side B must have backfilled with its own distinct chunk instead of
+    # carrying only duplicates of side A's.
+    assert "b_only" in texts
 
 
 # (f) test_synthesize_node_calls_litellm
