@@ -1,17 +1,18 @@
 //! Spawns, supervises and reaps the backend and the local model server.
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
-use std::os::unix::process::CommandExt;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use luminary_host::{alive, executable_of, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::logging;
+use crate::stage::{OLLAMA_BINARY, PYTHON_BINARY};
 
 /// Enough of a child's output to explain why it died, without turning the
 /// failure screen into a wall of text.
@@ -24,15 +25,62 @@ const TERM_GRACE: Duration = Duration::from_secs(6);
 /// Processes we spawned last time, so a crash cannot strand them.
 const RUNTIME_FILE: &str = ".runtime.json";
 
+/// Bound on the whole stop request. It runs on the quit path, so a backend that
+/// is wedged rather than listening may not add seconds to closing the window.
+const ASK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Where the staged interpreter keeps its console scripts (yt-dlp).
+#[cfg(windows)]
+const SCRIPTS_DIR: &str = "python/Scripts";
+#[cfg(not(windows))]
+const SCRIPTS_DIR: &str = "python/bin";
+
+/// The system minimum a child needs on `PATH`, beyond the staged tree.
+#[cfg(windows)]
+const SYSTEM_PATH: &[&str] = &[r"C:\Windows\System32", r"C:\Windows"];
+#[cfg(not(windows))]
+const SYSTEM_PATH: &[&str] = &["/usr/bin", "/bin"];
+
+#[cfg(windows)]
+const PATH_SEPARATOR: &str = ";";
+#[cfg(not(windows))]
+const PATH_SEPARATOR: &str = ":";
+
+/// Environment a child needs from ours, and nothing else (see `base_env`).
+///
+/// Windows CPython does not start without `SystemRoot`: it is how every DLL
+/// search and the temp directory are resolved. `USERPROFILE` is what `Path.home()`
+/// reads there, the way `HOME` is on unix.
+#[cfg(windows)]
+const INHERITED_ENV: &[&str] = &["SystemRoot", "USERPROFILE", "TEMP", "TMP"];
+#[cfg(not(windows))]
+const INHERITED_ENV: &[&str] = &["HOME"];
+
+/// How to ask a child to stop before signalling it.
+///
+/// Only the backend has one: it serves HTTP on a port we chose and we hand it
+/// the secret at spawn. Ollama has no equivalent and takes the signal.
+struct StopRequest {
+    port: u16,
+    token: String,
+}
+
 struct Tracked {
     name: &'static str,
     child: Child,
-    /// Equal to the child's pid, because we spawn with `process_group(0)`.
-    pgid: i32,
+    /// The child and everything it spawns. Dropping it on Windows closes the
+    /// job object, which kills the tree -- so this outlives `shutdown`.
+    tree: Tree,
     exe: PathBuf,
     tail: Arc<Mutex<VecDeque<String>>>,
+    stop: Option<StopRequest>,
 }
 
+/// What survives this process, so a crash cannot strand a tree.
+///
+/// `pgid` is the unix process group. Windows writes the child's own pid there:
+/// a job object dies with the process that made it, so there is nothing
+/// group-shaped to record and recovery walks the parent chain instead.
 #[derive(Serialize, Deserialize)]
 struct Record {
     name: String,
@@ -60,6 +108,19 @@ impl Supervisor {
     }
 
     fn track(&self, tracked: Tracked) {
+        if !tracked.tree.covers_descendants() {
+            // Windows only, and it means the job object was refused: this child
+            // can still be stopped, but its own children now outlive it and a
+            // crash strands the lot. Worth a line, because the symptom is a
+            // second launch failing on a lock held by something invisible.
+            logging::write(
+                "shell",
+                &format!(
+                    "{}: could not track its process tree; its children may outlive it",
+                    tracked.name
+                ),
+            );
+        }
         if let Ok(mut children) = self.children.lock() {
             children.push(tracked);
         }
@@ -79,7 +140,7 @@ impl Supervisor {
             .map(|c| Record {
                 name: c.name.to_string(),
                 pid: c.child.id() as i32,
-                pgid: c.pgid,
+                pgid: c.tree.group_id(),
                 exe: c.exe.to_string_lossy().into_owned(),
             })
             .collect();
@@ -109,10 +170,22 @@ impl Supervisor {
 
     /// Terminate both children and everything they spawned.
     ///
-    /// SIGTERM to the whole process group first: ollama's model runners are its
-    /// children, and killing only the leader used to strand them. The grace
-    /// period matters because SIGKILL leaves SQLite's WAL unmerged and Kuzu's
-    /// exclusive lock is only released when the holder actually dies.
+    /// Ask, then signal, then kill. The backend is asked over HTTP because
+    /// **Windows has no SIGTERM**, and that request is what runs `lifespan`'s
+    /// shutdown there at all -- the enrichment worker drains, ingestion jobs
+    /// cancel, and every task registry empties before the database closes.
+    /// Skipping it cuts post-ingest work mid-write and leaves SQLite, LanceDB
+    /// and Kuzu disagreeing.
+    ///
+    /// It runs on macOS too, deliberately: a path taken only on the platform
+    /// nobody here can test is a path nobody tests.
+    ///
+    /// What follows goes to the whole tree, not the leader: ollama's model
+    /// runners are its children and killing only the leader used to strand
+    /// them. The grace period matters because a hard kill leaves SQLite's WAL
+    /// unmerged and Kuzu's exclusive lock is only released when the holder
+    /// actually dies -- which is why the ask above is the only graceful path
+    /// on Windows, where `request_stop` already terminates.
     pub fn shutdown(&self) {
         let Ok(mut children) = self.children.lock() else {
             return;
@@ -122,8 +195,19 @@ impl Supervisor {
         }
 
         for tracked in children.iter() {
+            // A second SIGTERM while uvicorn is already unwinding sets its
+            // `force_exit` and abandons the drain -- the exact work this
+            // request exists to run. So what accepts is not also signalled;
+            // the deadline below is what covers a backend that lied.
+            if tracked.stop.as_ref().is_some_and(ask_to_stop) {
+                logging::write(
+                    "shell",
+                    &format!("{} accepted the stop request", tracked.name),
+                );
+                continue;
+            }
             logging::write("shell", &format!("stopping {}", tracked.name));
-            signal_group(tracked.pgid, libc::SIGTERM);
+            tracked.tree.request_stop();
         }
 
         let deadline = Instant::now() + TERM_GRACE;
@@ -139,11 +223,8 @@ impl Supervisor {
 
         for tracked in children.iter_mut() {
             if matches!(tracked.child.try_wait(), Ok(None)) {
-                logging::write(
-                    "shell",
-                    &format!("{} ignored SIGTERM, killing", tracked.name),
-                );
-                signal_group(tracked.pgid, libc::SIGKILL);
+                logging::write("shell", &format!("{} did not stop, killing", tracked.name));
+                tracked.tree.kill();
             }
             let _ = tracked.child.kill();
             let _ = tracked.child.wait();
@@ -159,26 +240,57 @@ impl Supervisor {
     }
 }
 
-fn signal_group(pgid: i32, sig: i32) {
-    if pgid > 1 {
-        // SAFETY: a plain kill(2) on a process group we created.
-        unsafe { libc::killpg(pgid, sig) };
+/// Ask a child to stop politely, over the port we gave it. True if it accepted.
+///
+/// Best effort by construction: a backend that is already dead, still starting,
+/// or wedged refuses the connection or never answers, and the caller falls
+/// through to the signal. Every step is bounded by `ASK_TIMEOUT`, because this
+/// runs between the user clicking close and the window going away.
+///
+/// Written by hand rather than through an HTTP client: one fixed request to
+/// loopback with a known body length does not justify pulling a client and its
+/// TLS stack into a shell that makes no other request.
+fn ask_to_stop(stop: &StopRequest) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], stop.port));
+    let Ok(mut socket) = TcpStream::connect_timeout(&addr, ASK_TIMEOUT) else {
+        return false;
+    };
+    let _ = socket.set_write_timeout(Some(ASK_TIMEOUT));
+    let _ = socket.set_read_timeout(Some(ASK_TIMEOUT));
+
+    let request = format!(
+        "POST /setup/shutdown HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         X-Luminary-Shutdown-Token: {token}\r\n\
+         Content-Length: 0\r\n\
+         Connection: close\r\n\r\n",
+        port = stop.port,
+        token = stop.token,
+    );
+    if socket.write_all(request.as_bytes()).is_err() {
+        return false;
     }
+
+    // 202 and nothing else. A 403 means the token did not match, which is a
+    // defect worth falling through to the signal rather than papering over.
+    let mut response = String::new();
+    let _ = socket.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 202")
 }
 
-fn alive(pid: i32) -> bool {
-    // SAFETY: signal 0 performs error checking without sending anything.
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-/// What is actually running under this pid, as the kernel sees it.
-fn executable_of(pid: i32) -> Option<String> {
-    let out = Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!path.is_empty()).then_some(path)
+/// A secret only this process and the backend it spawns know.
+///
+/// The API is unauthenticated on localhost and CSRF is deliberately open, so
+/// any page in any tab can POST to the backend. Without this, the shutdown
+/// endpoint would be a button for closing someone else's app.
+fn shutdown_token() -> String {
+    let mut bytes = [0u8; 32];
+    if getrandom::fill(&mut bytes).is_err() {
+        // Never a fixed fallback: a guessable token is worse than no endpoint,
+        // and an empty one is refused by the backend outright.
+        return String::new();
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Kill anything a previous run left behind, before opening the library.
@@ -212,11 +324,7 @@ pub fn reap_leftovers(data_dir: &Path) {
                     record.name, record.pid
                 ),
             );
-            signal_group(record.pgid, libc::SIGTERM);
-            std::thread::sleep(Duration::from_millis(500));
-            if alive(record.pid) {
-                signal_group(record.pgid, libc::SIGKILL);
-            }
+            luminary_host::kill_stale_tree(record.pid, record.pgid);
         } else {
             logging::write(
                 "shell",
@@ -326,20 +434,7 @@ fn env_file_value(data_dir: &Path, key: &str) -> Option<String> {
 
 /// Physical RAM in GB, or `None` if the kernel will not say.
 fn total_memory_gb() -> Option<u64> {
-    let mut bytes: u64 = 0;
-    let mut len = std::mem::size_of::<u64>();
-    let name = c"hw.memsize";
-    // SAFETY: a read-only sysctl into a stack u64 whose size we pass by value.
-    let rc = unsafe {
-        libc::sysctlbyname(
-            name.as_ptr(),
-            (&mut bytes as *mut u64).cast(),
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    (rc == 0 && bytes > 0).then_some(bytes / 1_073_741_824)
+    luminary_host::total_memory_bytes().map(|bytes| bytes / 1_073_741_824)
 }
 
 /// How many requests the bundled Ollama serves concurrently (I-31).
@@ -403,7 +498,7 @@ pub fn spawn_ollama(
     data_dir: &Path,
     port: u16,
 ) -> Result<(), String> {
-    let binary = stage.join("ollama/ollama");
+    let binary = stage.join(OLLAMA_BINARY);
     if !binary.is_file() {
         return Err(format!("no ollama binary at {binary:?}"));
     }
@@ -427,20 +522,21 @@ pub fn spawn_ollama(
             ollama_max_loaded_models(data_dir).to_string(),
         )
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Its model runners are its own children; a new group lets us take the
-        // whole tree down at once.
-        .process_group(0);
+        .stderr(Stdio::piped());
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start ollama: {e}"))?;
-    let pgid = child.id() as i32;
+    let tree = luminary_host::adopt(&child);
     let tail = stream_output(&mut child, "ollama");
     sup.track(Tracked {
+        // Ollama has no stop endpoint, so it takes the signal. On Windows that
+        // means it is terminated: there is no polite alternative, and it holds
+        // no store of ours to corrupt.
+        stop: None,
         name: "ollama",
         child,
-        pgid,
+        tree,
         exe: binary,
         tail,
     });
@@ -454,11 +550,12 @@ pub fn spawn_backend(
     port: u16,
     ollama_port: u16,
 ) -> Result<(), String> {
-    let python = stage.join("python/bin/python3.13");
+    let python = stage.join(PYTHON_BINARY);
     if !python.is_file() {
         return Err(format!("no interpreter at {python:?}"));
     }
 
+    let token = shutdown_token();
     let mut cmd = Command::new(&python);
     base_env(&mut cmd)
         // -I isolates the interpreter: no PYTHONPATH, no PYTHONHOME, no user
@@ -494,51 +591,149 @@ pub fn spawn_backend(
         // Lets the backend exit on its own if this process dies without ever
         // getting the chance to stop it.
         .env("LUMINARY_PARENT_PID", std::process::id().to_string())
+        .env("LUMINARY_SHUTDOWN_TOKEN", &token)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+        .stderr(Stdio::piped());
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start backend: {e}"))?;
-    let pgid = child.id() as i32;
+    let tree = luminary_host::adopt(&child);
     let tail = stream_output(&mut child, "backend");
     sup.track(Tracked {
         name: "backend",
         child,
-        pgid,
+        tree,
         exe: python,
         tail,
+        stop: (!token.is_empty()).then_some(StopRequest { port, token }),
     });
     Ok(())
 }
 
 /// Console scripts the backend spawns by name (yt-dlp) plus the system minimum.
 fn bundled_path(stage: &Path) -> String {
-    let mut parts: Vec<PathBuf> = vec![stage.join("python/bin")];
-    parts.push(PathBuf::from("/usr/bin"));
-    parts.push(PathBuf::from("/bin"));
+    let mut parts: Vec<PathBuf> = vec![stage.join(SCRIPTS_DIR)];
+    parts.extend(SYSTEM_PATH.iter().map(PathBuf::from));
     parts
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
-        .join(":")
+        .join(PATH_SEPARATOR)
 }
 
 /// Start from an empty environment so a user's DYLD_*, PYTHON* or VIRTUAL_ENV
 /// cannot reach either child, then add back only what is needed.
+///
+/// The allow-list is per-platform because what "needed" means is: unix wants
+/// `HOME`, and Windows needs `SystemRoot` and a temp directory before CPython
+/// will start at all -- `_bootlocale`, `tempfile` and every DLL load path are
+/// resolved through them. Carrying `PATH` over is pointless in both cases;
+/// each caller sets its own.
 fn base_env(cmd: &mut Command) -> &mut Command {
     cmd.env_clear();
-    if let Ok(home) = std::env::var("HOME") {
-        cmd.env("HOME", home);
+    for key in INHERITED_ENV {
+        if let Ok(value) = std::env::var(key) {
+            cmd.env(key, value);
+        }
     }
-    cmd.env("PATH", "/usr/bin:/bin");
-    cmd
+    cmd.env("PATH", SYSTEM_PATH.join(PATH_SEPARATOR));
+    luminary_host::before_spawn(cmd)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A backend that answers once with `status`, and reports what it was sent.
+    ///
+    /// A real socket, because the request is hand-written: a missing blank line
+    /// or a wrong header name is invisible to a mocked writer and fatal here.
+    fn fake_backend(status: &'static str) -> (u16, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = String::new();
+            let mut buf = [0u8; 512];
+            // Read until the headers end. Content-Length is 0, so that is all.
+            while let Ok(n) = socket.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                request.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if request.contains("\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = tx.send(request);
+            let _ = socket
+                .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes());
+        });
+        (port, rx)
+    }
+
+    #[test]
+    fn a_backend_that_accepts_is_not_also_signalled() {
+        let (port, sent) = fake_backend("202 Accepted");
+        let stop = StopRequest {
+            port,
+            token: "the-secret".into(),
+        };
+
+        assert!(ask_to_stop(&stop));
+
+        let request = sent
+            .recv_timeout(Duration::from_secs(5))
+            .expect("no request");
+        assert!(
+            request.starts_with("POST /setup/shutdown HTTP/1.1\r\n"),
+            "{request}"
+        );
+        assert!(
+            request.contains("X-Luminary-Shutdown-Token: the-secret\r\n"),
+            "{request}"
+        );
+        // Without it the server waits for a body that never comes, and the quit
+        // path blocks until the read timeout instead of returning.
+        assert!(request.contains("Content-Length: 0\r\n"), "{request}");
+        assert!(request.ends_with("\r\n\r\n"), "{request}");
+    }
+
+    #[test]
+    fn a_refused_token_falls_through_to_the_signal() {
+        // 403 means the secret did not match, which is a defect. Reporting it as
+        // accepted would leave the backend running and unsignalled.
+        let (port, _sent) = fake_backend("403 Forbidden");
+        assert!(!ask_to_stop(&StopRequest {
+            port,
+            token: "wrong".into()
+        }));
+    }
+
+    #[test]
+    fn nothing_listening_is_not_an_acceptance() {
+        // The ordinary case: the backend already died, or never started.
+        let port = free_port().expect("a free port");
+        assert!(!ask_to_stop(&StopRequest {
+            port,
+            token: "the-secret".into()
+        }));
+    }
+
+    #[test]
+    fn every_launch_gets_its_own_token() {
+        let (a, b) = (shutdown_token(), shutdown_token());
+        assert_eq!(a.len(), 64, "32 bytes, hex");
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        // Header-safe by construction; a token with a newline in it would let
+        // the request carry headers we did not write.
+        assert!(!a.contains(['\r', '\n', ' ', ':']));
+    }
 
     fn record(exe: &str) -> Record {
         Record {
@@ -622,7 +817,7 @@ mod tests {
         // 16GB is the supported floor and the band `MAX_RESIDENT` uses; this
         // sat at 24 after the floor moved, so a 24GB DMG got one slot while the
         // backend resolved a pair against it.
-        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        let gb = total_memory_gb().expect("every supported host reports its RAM");
         assert_eq!(ollama_max_loaded_models(&dir), if gb >= 16 { 2 } else { 1 });
 
         std::fs::write(dir.join(".env"), b"OLLAMA_MAX_LOADED_MODELS=2\n").unwrap();
@@ -648,7 +843,7 @@ mod tests {
 
     #[test]
     fn memory_sizing_never_opts_a_small_machine_into_a_second_kv_cache() {
-        let gb = total_memory_gb().expect("macOS always reports hw.memsize");
+        let gb = total_memory_gb().expect("every supported host reports its RAM");
         assert!(gb >= 4, "implausible RAM reading: {gb}GB");
 
         let dir = std::env::temp_dir().join(format!("luminary-envmem-{}", std::process::id()));

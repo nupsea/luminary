@@ -1,0 +1,21 @@
+[package]
+name = "luminary-host"
+version = "0.11.2"
+description = "The OS-specific half of the desktop shell: process trees, disk, memory."
+edition = "2021"
+rust-version = "1.77"
+
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }

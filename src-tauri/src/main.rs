@@ -6,7 +6,6 @@ mod report;
 mod stage;
 mod supervisor;
 
-use std::os::unix::process::ExitStatusExt;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -99,14 +98,6 @@ fn warn(app: &AppHandle, message: &str) {
     let _ = app.emit("boot-warning", message.to_string());
 }
 
-fn describe(status: std::process::ExitStatus) -> String {
-    match (status.code(), status.signal()) {
-        (Some(code), _) => format!("exit code {code}"),
-        (None, Some(signal)) => format!("killed by signal {signal}"),
-        _ => "an unknown status".into(),
-    }
-}
-
 /// Wait for the backend to answer, for it to die, or for the deadline.
 ///
 /// Watching only the port was the single worst diagnostic in the app: uvicorn
@@ -127,7 +118,7 @@ fn wait_for_backend(sup: &Supervisor, port: u16) -> Result<(), (String, String)>
                 "Luminary's engine stopped unexpectedly while starting up.".into(),
                 format!(
                     "backend exited with {} before opening {addr}\n\n{}",
-                    describe(status),
+                    luminary_host::describe_exit(status),
                     sup.tail("backend").join("\n")
                 ),
             ));
@@ -413,12 +404,17 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("failed to start Luminary")
-        .run(move |app, event| match event {
+        // `_app` because the only arm that reads it is macOS-only, and an
+        // unused binding is a warning, which this repo treats as an error.
+        .run(move |_app, event| match event {
             RunEvent::Exit => for_exit.shutdown(),
             // macOS reactivation: Spotlight, the Dock, or `open -a` on an app
             // that is already running. Without this the click does nothing
-            // visible and the user launches again, or gives up.
-            RunEvent::Reopen { .. } => activate(app),
+            // visible and the user launches again, or gives up. The variant
+            // only exists on macOS -- elsewhere the single-instance plugin
+            // covers relaunch, and `activate` is reached through it.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => activate(_app),
             _ => {}
         });
 }

@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     # carry a developer's home path or site, and an empty repo path leaves the
     # feature inert until a user deliberately points it somewhere.
     LUMINARY_BLOG_REPO_PATH: str = ""
+    # Shared secret for `POST /setup/shutdown`, written by the desktop shell into
+    # the environment of the backend it spawns. Windows has no SIGTERM, so the
+    # shell asks over HTTP for the drain that `lifespan` runs on the way down --
+    # otherwise an ingest in flight is cut mid-write and the stores diverge.
+    #
+    # Empty is the safe default and means the endpoint refuses everyone. The API
+    # is unauthenticated on localhost and CSRF is deliberately open, so any page
+    # in any tab can already POST here; without a secret this would be a button
+    # for closing someone else's app. `make dev` sets nothing and is unaffected.
+    LUMINARY_SHUTDOWN_TOKEN: str = ""
     LUMINARY_BLOG_CONTENT_SUBDIR: str = "src/content/blog"
     LUMINARY_BLOG_ASSET_SUBDIR: str = "public/blog"
     LUMINARY_BLOG_BRANCH: str = "master"

@@ -74,6 +74,82 @@ jobs:
       - name: Test and lint the desktop shell
         run: make desktop-test
 
+  # The other half of `desktop-shell`, on the platform whose process model is
+  # different rather than merely untested. Windows has no process groups
+  # reachable from a GUI binary, so the supervisor kills a tree through a Job
+  # Object instead -- and `host/tests/tree.rs` is the only place that mechanism
+  # is ever *executed*. `cargo check` would prove the FFI compiles and nothing
+  # about whether closing a job kills its members.
+  #
+  # This job and the code it compiles landed together. A Windows job pushed
+  # ahead of the code that makes it pass is a known-red gate on master, which
+  # teaches everyone to ignore the column.
+  desktop-shell-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Build and test the desktop shell
+        run: cargo test --workspace
+      - name: Lint the desktop shell
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # The support policy decides whether a host is offered a local model at all,
+  # and it got Windows wrong for a whole release: `_has_accelerator` probed
+  # /dev nodes that do not exist there, so every Windows machine resolved to
+  # `no_accelerator` and every local call raised. Nothing could catch it --
+  # ubuntu and macOS are the only runners, and `conftest` pins the verdict so a
+  # suite cannot read its own hardware. Same argument as `desktop-shell`: code
+  # that cannot run on ubuntu has no automated coverage without a job for it.
+  #
+  # Deliberately narrow. `make ci` on Windows is 0.13.0's exit gate, not this
+  # job's claim -- what this proves is that the shipped Windows install path's
+  # dependency step resolves, that the app imports, and that the policy answers
+  # where it was wrong. Widen it as that rung lands.
+  windows-host-policy:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    needs: [branch-check]
+    if: always() && (needs.branch-check.result == 'success' || github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      # --frozen, because a lock that does not resolve on Windows is the defect
+      # this job exists to surface -- not something to paper over by re-locking
+      # on the runner. install.ps1 runs the same step on every Windows install.
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: The app imports
+        run: uv run python -c "import app.main"
+
+      - name: The host-support policy, on the platform it got wrong
+        run: uv run pytest tests/test_host_support.py -q
+
   powershell-syntax:
     runs-on: ubuntu-latest
     needs: [branch-check]

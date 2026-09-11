@@ -4,6 +4,79 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Windows machines are no longer refused a local model they can run.** The
+  accelerator probe tested `/dev/nvidiactl` and `/proc/driver/nvidia/version`,
+  which do not exist on Windows, so every Windows host resolved to
+  `no_accelerator` and `LLMService._resolve_model` raised on every local call --
+  an RTX 4090 included. Windows now checks for the driver libraries Ollama
+  itself loads, `nvcuda.dll` and `amdhip64.dll`, and falls back to `nvidia-smi`
+  on PATH. Refusing an accelerator-less Linux box is unchanged and deliberate.
+  No CI runner is Windows and `conftest` pins the verdict for the suite, so the
+  guard is a platform-pinned test; removing the branch turns five of it red.
+
+### Added
+- **The desktop shell asks the backend to stop before signalling it.** Windows
+  has no SIGTERM, and terminating the process skips `lifespan`'s shutdown --
+  the enrichment worker, the ingestion jobs and every task registry drain there
+  before the database closes, so skipping it cuts an ingest mid-write and leaves
+  the stores disagreeing. `POST /setup/shutdown` takes a per-launch secret the
+  shell hands its own backend; without one it refuses everyone, so a source
+  install is unaffected. What accepts is not also signalled -- a second SIGTERM
+  while uvicorn is unwinding abandons the drain.
+- **The backend's parent watchdog would have killed the desktop shell on
+  Windows.** `os.kill(parent_pid, 0)` is the Unix liveness idiom and, on
+  Windows, CPython documents it as TerminateProcess with the exit code set to
+  the signal -- so the five-second poll would terminate the shell it was asking
+  about, with exit code 0, looking like a clean quit. Windows now asks via
+  `OpenProcess`/`GetExitCodeProcess`, and the stop path uses
+  `signal.raise_signal` rather than `os.kill` against itself. Latent, not live:
+  only the desktop shell sets `LUMINARY_PARENT_PID` and it has no Windows build
+  yet. Now I-54.
+- **The supervisor kills a process tree on Windows, through a Job Object.** A
+  GUI binary has no reachable process group there -- console control events
+  need a shared console -- so each child gets a job with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Python, Ollama and the model runners
+  die when the last handle closes, which covers the crash and force-quit cases
+  no shutdown hook reaches. `host/tests/tree.rs` spawns a grandchild and
+  asserts it dies with the tree; it runs on both platforms and fails when the
+  kill is narrowed to the leader.
+- **`src-tauri/host`, a crate for the half of the shell that differs per
+  platform.** `tauri-build` needs a resource compiler macOS does not have, so
+  nothing in `luminary-desktop` can be compiled for Windows locally.
+  `luminary-host` has no Tauri dependency and is checked for
+  `x86_64-pc-windows-msvc` by `make desktop-test` on any machine.
+- **`desktop-shell-windows`** runs `cargo test --workspace` on
+  `windows-latest`, so the job object is executed rather than merely compiled.
+- **`icons/icon.ico`**, without which `tauri-build` panics before compiling a
+  line for a Windows target.
+- **CI runs on Windows.** `windows-host-policy` installs the backend with
+  `uv sync --frozen`, imports `app.main` and runs the host-support tests on
+  `windows-latest`. It is deliberately narrow -- `make ci` and `make smoke` on
+  Windows are a later gate -- but it covers the class of defect that shipped in
+  0.11.2, where a policy about hosts had no runner on two of the three platforms
+  it decides.
+
+### Changed
+- **The shell's log, environment and bug reports are no longer macOS-shaped.**
+  The log had no directory at all on Windows (`%LOCALAPPDATA%\Luminary\Logs`
+  now, `$XDG_STATE_HOME` on Linux); `base_env` cleared the environment and
+  restored only `HOME`, but Windows CPython does not start without
+  `SystemRoot`; and `report.rs` scrubbed only `HOME`, so a Windows report would
+  have carried `C:\Users\<the user's name>` in every path.
+- **A Linux install no longer downloads 3.9 GB of CUDA it never uses.** PyPI's
+  torch is the CUDA build on Linux x86_64 -- 915.7 MB of torch, fifteen
+  `nvidia-*-cu12` wheels at 3013.9 MB and triton at 188.4 MB -- while
+  `embedder.py` and `retriever_strategies.py` both pass `device="cpu"` and no
+  `cuda` or `mps` reference exists anywhere in `app/`. Linux and Windows now
+  take `torch==2.10.0+cpu` from the PyTorch CPU index: 188.9 MB on Linux, from
+  4118.0 MB. **This buys install size and nothing else** -- no inference gets
+  slower, because none of it was on a GPU. Windows was already CPU-only
+  (113.8 -> 113.7 MB) and gains nothing but the shared version. macOS is
+  unchanged, still PyPI's 2.10.0.
+
 ## [0.11.2] - 2026-09-10
 
 ### Added

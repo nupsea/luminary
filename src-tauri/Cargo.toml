@@ -1,3 +1,10 @@
+# The platform-specific half of the shell lives in `host/`, which has no Tauri
+# dependency and can therefore be checked for Windows from a Mac. See its
+# crate docs -- `tauri-build` needs a resource compiler that macOS does not
+# have, so nothing in this package can be compiled for Windows locally.
+[workspace]
+members = ["host"]
+
 [package]
 name = "luminary-desktop"
 version = "0.11.2"
@@ -15,7 +22,8 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
-libc = "0.2"
+getrandom = "0.3"
+luminary-host = { path = "host" }
 percent-encoding = "2"
 regex = "1"
 

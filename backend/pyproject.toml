@@ -54,6 +54,15 @@ dependencies = [
     "yt-dlp>=2026.8.19",
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn[standard]>=0.41.0",
+    # Direct, though nothing imports it: `tool.uv.sources` applies only to a
+    # project's own dependencies, so pinning torch's index while it arrived
+    # transitively through sentence-transformers and gliner changed nothing at
+    # all -- `uv lock` re-resolved to the same 4.1GB. Upper bound because the two
+    # indexes must land on the SAME version: unbounded, macOS took PyPI's 2.10.0
+    # while Linux and Windows took the CPU index's 2.14.0, which is a dependency
+    # upgrade smuggled in as a size fix. Raise both halves together, and read the
+    # index listing before raising the floor.
+    "torch>=2.10.0,<2.11.0",
 ]
 
 
@@ -157,3 +166,28 @@ dev = [
 [tool.uv]
 # Developers and CI get everything; only the distributed bundle omits `media`.
 default-groups = ["dev", "full", "media"]
+
+# torch from PyPI is the CUDA build on Linux x86_64: 915.7MB of torch plus 15
+# `nvidia-*-cu12` wheels at 3013.9MB and triton at 188.4MB, 4.1GB in all. Nothing
+# in this app ever reaches it -- `embedder.py` and `retriever_strategies.py` both
+# pass `device="cpu"`, GLiNER takes torch's default, and there is no `cuda` or
+# `mps` reference anywhere in `app/`. Local inference is Ollama's job and Ollama
+# brings its own CUDA.
+#
+# This buys install size and NOTHING else. No inference gets slower, because none
+# of it was on a GPU. If a future encoder is moved onto a device, this pin is what
+# has to be revisited first -- and moving the embedder at all is a full re-embed
+# behind I-9, not a setting.
+#
+# macOS is deliberately not pinned: PyPI's macOS wheel is already the only one
+# there, and routing it through this index would change what a Mac resolves for
+# no gain.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
