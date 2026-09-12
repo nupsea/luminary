@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
-import type { ElementContent, Root } from "hast"
+import type { Root, RootContent } from "hast"
 import { Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -197,7 +197,7 @@ function ExcalidrawDiagramPreview({
  */
 function rehypeCleanTableWhitespace() {
   return (tree: Root) => {
-    function visit(node: ElementContent | Root) {
+    function visit(node: RootContent | Root) {
       if (
         node.type === "element" &&
         (node.tagName === "table" ||

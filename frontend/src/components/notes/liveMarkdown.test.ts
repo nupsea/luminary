@@ -70,7 +70,7 @@ describe("MarkdownRenderer table whitespace", () => {
 | 2 | Second item | Done |`
 
     const html = ReactDOMServer.renderToStaticMarkup(
-      React.createElement(MarkdownRenderer, { reading: false }, tableText),
+      React.createElement(MarkdownRenderer, { reading: false, children: tableText }),
     )
 
     // Verify there are no leading newlines before the table
