@@ -3,7 +3,7 @@
 import json
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -526,6 +526,96 @@ async def test_generate_retries_to_backfill_gated_cards(test_db):
     questions = {c["question"] for c in data}
     assert "What input closes the analytics loop?" not in questions
     assert all(len(c["answer"].split()) >= 2 for c in data)
+
+
+async def test_generate_retries_to_backfill_deduped_cards(test_db):
+    """When a candidate card is dropped by near-duplicate detection, extra LLM
+    passes backfill the shortfall so the requested count is met."""
+    _, factory, _ = test_db
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(_make_doc(doc_id))
+        session.add(_make_chunk(chunk_id, doc_id=doc_id))
+        # Existing card already in the document's deck:
+        session.add(
+            FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                deck="default",
+                question="What is a write-ahead log?",
+                answer="A durable append-only record written before applying changes.",
+                source_excerpt=_CHUNK_QUOTE,
+            )
+        )
+        await session.commit()
+
+    # Pass 1 produces 2 cards: one repeats the existing WAL card, one is fresh (follower replica).
+    # Pass 2 produces 1 fresh card (quorum) to backfill the dropped card.
+    first = json.dumps(
+        {
+            "flashcards": [
+                {
+                    "question": "What is a write-ahead log?",
+                    "answer": "A durable append-only record written before applying changes.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
+                {
+                    "question": "What is a follower replica?",
+                    "answer": "A replica that applies the leader's writes to serve reads.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
+            ]
+        }
+    )
+    second = json.dumps(
+        {
+            "flashcards": [
+                {
+                    "question": "What does a quorum guarantee?",
+                    "answer": "That a read and a write overlap on at least one replica.",
+                    "source_excerpt": _CHUNK_QUOTE,
+                },
+            ]
+        }
+    )
+    seq_llm = _SequenceLLMService([first, second])
+
+    class _MockEmbedder:
+        def encode(self, texts):
+            # Deterministic vectors: identical texts get [1.0, 0.0], distinct get orthog
+            vecs = []
+            for t in texts:
+                if "write-ahead log" in t:
+                    vecs.append([1.0, 0.0] + [0.0] * 382)
+                elif "follower" in t:
+                    vecs.append([0.0, 1.0] + [0.0] * 382)
+                else:
+                    vecs.append([0.0, 0.0, 1.0] + [0.0] * 381)
+            return vecs
+
+    mock_emb = _MockEmbedder()
+
+    with (
+        patch("app.services.flashcard.get_llm_service", return_value=seq_llm),
+        patch("app.services.embedder.get_embedding_service", return_value=mock_emb),
+        patch("asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, texts: fn(texts))),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/flashcards/generate",
+                json={"document_id": doc_id, "scope": "full", "count": 2},
+            )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data) == 2, f"Expected 2 cards delivered after backfill, got {len(data)}"
+    assert seq_llm.call_count == 2, f"Expected 2 LLM calls for backfill, got {seq_llm.call_count}"
+    questions = {c["question"] for c in data}
+    assert "What is a follower replica?" in questions
+    assert "What does a quorum guarantee?" in questions
 
 
 async def test_list_flashcards_returns_all_for_document(test_db):
