@@ -129,11 +129,11 @@ export interface EnclosingBlock {
   to: number
   startLine: number
   endLine: number
-  type: "math" | "table" | "code"
+  type: "math" | "table" | "code" | "diagram" | "heading"
 }
 
 /**
- * Identify whether `pos` sits within a structured markdown block (display math, table, or code).
+ * Identify whether `pos` sits within a structured markdown block (display math, table, code, diagram, or heading).
  */
 export function findEnclosingBlock(state: EditorState, pos: number): EnclosingBlock | null {
   if (pos < 0 || pos > state.doc.length) return null
@@ -291,13 +291,55 @@ export function findEnclosingBlock(state: EditorState, pos: number): EnclosingBl
     }
   }
 
+  // 4. Check Diagram / Image block: ![...] + optional <!-- luminary:excalidraw=... -->
+  const trimmed = currentLine.text.trim()
+  const isImageLine = /^!\[.*\]\(.*\)/.test(trimmed)
+  const isExcalidrawComment = /^<!--\s*luminary:excalidraw=.*-->$/.test(trimmed)
+  if (isImageLine || isExcalidrawComment) {
+    let diagStart = currentLine.number
+    let diagEnd = currentLine.number
+    if (
+      isExcalidrawComment &&
+      diagStart > 1 &&
+      /^!\[.*\]\(.*\)/.test(state.doc.line(diagStart - 1).text.trim())
+    ) {
+      diagStart = diagStart - 1
+    } else if (
+      isImageLine &&
+      diagEnd < totalLines &&
+      /^<!--\s*luminary:excalidraw=.*-->$/.test(state.doc.line(diagEnd + 1).text.trim())
+    ) {
+      diagEnd = diagEnd + 1
+    }
+    const startL = state.doc.line(diagStart)
+    const endL = state.doc.line(diagEnd)
+    return {
+      from: startL.from,
+      to: endL.to,
+      startLine: startL.number,
+      endLine: endL.number,
+      type: "diagram",
+    }
+  }
+
+  // 5. Check Heading block
+  if (/^#{1,6}\s+\S/.test(trimmed)) {
+    return {
+      from: currentLine.from,
+      to: currentLine.to,
+      startLine: currentLine.number,
+      endLine: currentLine.number,
+      type: "heading",
+    }
+  }
+
   return null
 }
 
 /**
  * Move the current block (or current line) up (-1) or down (1).
- * When cursor is inside a math block, table, or code block, moves the entire block as a unit,
- * seamlessly swapping past adjacent blocks or paragraphs.
+ * When cursor is inside a math block, table, code, diagram, or heading, moves the entire block as a unit,
+ * seamlessly swapping past adjacent blocks or paragraphs while normalizing spacing.
  */
 export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): TransactionSpec | null {
   const { from, to } = state.selection.main
@@ -306,7 +348,7 @@ export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): Transactio
   if (block) {
     const startLine = block.startLine
     const endLine = block.endLine
-    const blockText = state.sliceDoc(block.from, block.to)
+    const blockText = state.sliceDoc(block.from, block.to).trim()
 
     if (dir === -1) {
       // Move UP
@@ -315,10 +357,12 @@ export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): Transactio
       while (targetLineNum > 1 && state.doc.line(targetLineNum).text.trim() === "") {
         targetLineNum--
       }
+      if (state.doc.line(targetLineNum).text.trim() === "") return null
+
       const aboveBlock = findEnclosingBlock(state, state.doc.line(targetLineNum).from)
       const targetStartLine = aboveBlock ? aboveBlock.startLine : targetLineNum
       const targetFrom = state.doc.line(targetStartLine).from
-      const aboveText = state.sliceDoc(targetFrom, block.from).trim()
+      const aboveText = state.sliceDoc(targetFrom, state.doc.line(startLine - 1).to).trim()
 
       const newText = `${blockText}\n\n${aboveText}`
       const replaceTo = block.to
@@ -335,10 +379,12 @@ export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): Transactio
       while (targetLineNum < state.doc.lines && state.doc.line(targetLineNum).text.trim() === "") {
         targetLineNum++
       }
+      if (state.doc.line(targetLineNum).text.trim() === "") return null
+
       const belowBlock = findEnclosingBlock(state, state.doc.line(targetLineNum).from)
       const targetEndLine = belowBlock ? belowBlock.endLine : targetLineNum
       const targetTo = state.doc.line(targetEndLine).to
-      const belowText = state.sliceDoc(block.to, targetTo).trim()
+      const belowText = state.sliceDoc(state.doc.line(endLine + 1).from, targetTo).trim()
 
       const newText = `${belowText}\n\n${blockText}`
       const targetFrom = block.from
@@ -352,31 +398,37 @@ export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): Transactio
     }
   }
 
-  // Normal line motion
+  // Normal line motion — block aware so lines do not slice into the middle of structured blocks
   const lineFrom = state.doc.lineAt(from)
   const lineTo = state.doc.lineAt(to)
   if (dir === -1) {
     if (lineFrom.number <= 1) return null
-    const prevLine = state.doc.line(lineFrom.number - 1)
+    const targetNum = lineFrom.number - 1
+    const aboveBlock = findEnclosingBlock(state, state.doc.line(targetNum).from)
+    const targetStartLine = aboveBlock ? aboveBlock.startLine : targetNum
+    const prevFrom = state.doc.line(targetStartLine).from
     const movingText = state.sliceDoc(lineFrom.from, lineTo.to)
-    const prevText = prevLine.text
+    const aboveText = state.sliceDoc(prevFrom, lineFrom.from - 1)
     return {
       changes: [
-        { from: prevLine.from, to: lineTo.to, insert: `${movingText}\n${prevText}` },
+        { from: prevFrom, to: lineTo.to, insert: `${movingText}\n${aboveText}` },
       ],
-      selection: { anchor: prevLine.from + (from - lineFrom.from) },
+      selection: { anchor: prevFrom + (from - lineFrom.from) },
       scrollIntoView: true,
     }
   } else {
     if (lineTo.number >= state.doc.lines) return null
-    const nextLine = state.doc.line(lineTo.number + 1)
+    const targetNum = lineTo.number + 1
+    const belowBlock = findEnclosingBlock(state, state.doc.line(targetNum).from)
+    const targetEndLine = belowBlock ? belowBlock.endLine : targetNum
+    const nextTo = state.doc.line(targetEndLine).to
     const movingText = state.sliceDoc(lineFrom.from, lineTo.to)
-    const nextText = nextLine.text
+    const belowText = state.sliceDoc(lineTo.to + 1, nextTo)
     return {
       changes: [
-        { from: lineFrom.from, to: nextLine.to, insert: `${nextText}\n${movingText}` },
+        { from: lineFrom.from, to: nextTo, insert: `${belowText}\n${movingText}` },
       ],
-      selection: { anchor: lineFrom.from + nextText.length + 1 + (from - lineFrom.from) },
+      selection: { anchor: lineFrom.from + belowText.length + 1 + (from - lineFrom.from) },
       scrollIntoView: true,
     }
   }

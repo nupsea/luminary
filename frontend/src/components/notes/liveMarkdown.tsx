@@ -157,7 +157,8 @@ function RenderedBlockContent({
       </div>
 
       <MarkdownRenderer
-        reading
+        reading={false}
+        className="[&_.prose]:my-0 [&_figure]:my-1.5 [&_img]:my-1"
         onEditExcalidrawDiagram={
           onEditDiagram &&
           ((diagram) => {
@@ -195,7 +196,7 @@ class RenderedBlock extends WidgetType {
 
   toDOM(view: EditorView) {
     const host = document.createElement("div")
-    host.className = "cm-md-block group/md-block relative my-2"
+    host.className = "cm-md-block group/md-block relative my-1"
     this.root = createRoot(host)
     this.root.render(
       <RenderedBlockContent
@@ -303,9 +304,9 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
   const marks: Range<Decoration>[] = []
   const rendered: TextRange[] = []
 
-  const renderBlock = (from: number, to: number, delimited = false) => {
+  const renderBlock = (from: number, to: number, delimited = false, alwaysRender = false) => {
     const range = blockRange(state, from, to)
-    if (lineIsBeingEdited(selection, range.from, range.to)) return false
+    if (!alwaysRender && lineIsBeingEdited(selection, range.from, range.to)) return false
     rendered.push(range)
     marks.push(
       Decoration.replace({
@@ -367,12 +368,13 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
         return false
       }
       if (node.name === "Paragraph" && isImageOnlyParagraph(state.doc.sliceString(node.from, node.to))) {
-        // A diagram is the image plus the sidecar comment beneath it. Rendered
-        // apart, the renderer sees an image and offers no way to edit the scene.
+        // A diagram is the image plus the sidecar comment beneath it.
+        // Always keep images rendered so navigating past them does not collapse
+        // a 600px image into a 20px line of raw text and throw the viewport.
         const imageLine = state.doc.lineAt(node.to)
         const next = imageLine.number < state.doc.lines ? state.doc.line(imageLine.number + 1) : null
         const to = next && EXCALIDRAW_COMMENT.test(next.text.trim()) ? next.to : node.to
-        renderBlock(node.from, to)
+        renderBlock(node.from, to, false, true)
         return false
       }
       if (node.name === "Blockquote") {
@@ -409,7 +411,25 @@ const liveTheme = EditorView.theme({
     paddingLeft: "10px",
     color: "hsl(var(--muted-foreground))",
   },
-  ".cm-md-block": { margin: "8px 0", position: "relative" },
+  ".cm-md-block": { margin: "4px 0", position: "relative" },
+  ".cm-md-block .prose": {
+    margin: "0 !important",
+    maxWidth: "none !important",
+  },
+  ".cm-md-block .prose > *": {
+    marginTop: "0.25rem !important",
+    marginBottom: "0.25rem !important",
+  },
+  ".cm-md-block figure": {
+    margin: "0.35rem 0 !important",
+  },
+  ".cm-line": {
+    lineHeight: "1.5",
+  },
+  ".cm-line:empty, .cm-line:has(> br:only-child)": {
+    height: "0.85rem",
+    lineHeight: "0.85rem",
+  },
   ".cm-md-code": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.92em",
@@ -420,7 +440,7 @@ const liveTheme = EditorView.theme({
     fontFamily: "var(--font-mono)",
     fontSize: "0.90em",
     letterSpacing: "-0.01em",
-    lineHeight: "1.6",
+    lineHeight: "1.5",
     backgroundColor: "hsl(var(--muted) / 0.25)",
     paddingLeft: "4px",
   },
@@ -437,12 +457,12 @@ const liveTheme = EditorView.theme({
     minWidth: "min(100%, 320px)",
     maxWidth: "100%",
     borderCollapse: "collapse",
-    margin: "6px 0",
+    margin: "4px 0",
     fontSize: "0.875rem",
-    lineHeight: "1.4",
+    lineHeight: "1.35",
   },
   ".cm-md-block th": {
-    padding: "6px 12px",
+    padding: "5px 10px",
     backgroundColor: "hsl(var(--muted) / 0.6)",
     color: "hsl(var(--foreground))",
     fontWeight: "600",
@@ -454,7 +474,7 @@ const liveTheme = EditorView.theme({
     whiteSpace: "nowrap",
   },
   ".cm-md-block td": {
-    padding: "6px 12px",
+    padding: "5px 10px",
     border: "1px solid hsl(var(--border))",
     color: "hsl(var(--foreground) / 0.9)",
     verticalAlign: "top",
@@ -486,9 +506,18 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
   let anchor: number | null = null
   // Coming down, the line below is the block's first; coming up, it is the
   // block's last. Either way the decoration covers that point.
-  view.state.field(field).between(edge.from, edge.from, (from, _to, deco) => {
+  view.state.field(field).between(edge.from, edge.from, (from, to, deco) => {
     const widget = deco.spec.widget
     if (!(widget instanceof RenderedBlock)) return
+    if (isImageOnlyParagraph(widget.source)) {
+      const blockLineFrom = doc.lineAt(from).number
+      const blockLineTo = doc.lineAt(to).number
+      const nextNum = dir === 1 ? blockLineTo + 1 : blockLineFrom - 1
+      if (nextNum >= 1 && nextNum <= doc.lines) {
+        anchor = dir === 1 ? doc.line(nextNum).from : doc.line(nextNum).to
+      }
+      return
+    }
     const lines = widget.source.split("\n").length
     const offset =
       dir === 1
@@ -503,7 +532,7 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
     }
   })
   if (anchor === null) return false
-  view.dispatch({ selection: { anchor }, scrollIntoView: true })
+  view.dispatch({ selection: { anchor } })
   return true
 }
 

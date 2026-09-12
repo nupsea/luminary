@@ -253,4 +253,45 @@ describe("insertBlockBreakSpec (Mod-Enter escape)", () => {
   })
 })
 
+describe("Diagram & Heading block movement in moveBlockOrLineSpec", () => {
+  it("identifies a diagram with excalidraw comment as a single atomic block", () => {
+    const doc = "## Section\n\n![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->\n"
+    const state = mdState(doc, 15) // inside image line
+    const block = findEnclosingBlock(state, 15)
+    expect(block).not.toBeNull()
+    expect(block!.type).toBe("diagram")
+    expect(block!.startLine).toBe(3)
+    expect(block!.endLine).toBe(4)
+
+    // Also when cursor is on the comment line
+    const commentPos = doc.indexOf("luminary:excalidraw")
+    const blockFromComment = findEnclosingBlock(state, commentPos)
+    expect(blockFromComment).not.toBeNull()
+    expect(blockFromComment!.type).toBe("diagram")
+    expect(blockFromComment!.startLine).toBe(3)
+    expect(blockFromComment!.endLine).toBe(4)
+  })
+
+  it("moves a diagram block up past a math block atomically without breaking either", () => {
+    const doc = "$$\nE = mc^2\n$$\n\n![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->"
+    const diagPos = doc.indexOf("![Diagram")
+    const state = mdState(doc, diagPos)
+    const spec = moveBlockOrLineSpec(state, -1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->\n\n$$\nE = mc^2\n$$")
+  })
+
+  it("normalizes excessive blank lines when swapping blocks", () => {
+    const doc = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\n\n\n$$\nfb = f + b\n$$"
+    const mathPos = doc.indexOf("fb = f + b")
+    const state = mdState(doc, mathPos)
+    const spec = moveBlockOrLineSpec(state, -1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("$$\nfb = f + b\n$$\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+  })
+})
+
+
 
