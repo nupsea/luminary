@@ -378,10 +378,38 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .lum-msg-enter,
   .lum-typing-dot,
-  .lum-halo {
+  .lum-halo,
+  .lum-voice-bar-1,
+  .lum-voice-bar-2,
+  .lum-voice-bar-3,
+  .lum-voice-bar-4 {
     animation: none;
+    height: 8px;
   }
 }
+
+/* Voice recording dynamic audio waveform bars */
+@keyframes lum-voice-bar-1 {
+  0%, 100% { height: 3px; }
+  50% { height: 13px; }
+}
+@keyframes lum-voice-bar-2 {
+  0%, 100% { height: 6px; }
+  50% { height: 15px; }
+}
+@keyframes lum-voice-bar-3 {
+  0%, 100% { height: 4px; }
+  50% { height: 11px; }
+}
+@keyframes lum-voice-bar-4 {
+  0%, 100% { height: 3px; }
+  50% { height: 14px; }
+}
+
+.lum-voice-bar-1 { animation: lum-voice-bar-1 0.8s ease-in-out infinite; }
+.lum-voice-bar-2 { animation: lum-voice-bar-2 0.8s ease-in-out 0.15s infinite; }
+.lum-voice-bar-3 { animation: lum-voice-bar-3 0.8s ease-in-out 0.3s infinite; }
+.lum-voice-bar-4 { animation: lum-voice-bar-4 0.8s ease-in-out 0.45s infinite; }
 
 /* Notion-style compact markdown tables: avoid bloated 100% full-width whitespace and 2em margins */
 .prose table {

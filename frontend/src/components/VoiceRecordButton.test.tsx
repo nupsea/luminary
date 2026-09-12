@@ -32,4 +32,17 @@ describe("VoiceRecordButton", () => {
     // refuses what it cannot do anyway.
     expect(html(undefined)).toContain("Dictate")
   })
+
+  it("supports icon variant without text label", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(["setup", "capabilities"], { dictation: { available: true, requires: [] } })
+    const out = renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <VoiceRecordButton onTranscribed={() => {}} variant="icon" size="sm" />
+      </QueryClientProvider>,
+    )
+    expect(out).toContain("<button")
+    expect(out).toContain("h-7 w-7")
+    expect(out).not.toContain("<span>")
+  })
 })

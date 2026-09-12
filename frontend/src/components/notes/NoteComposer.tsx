@@ -461,6 +461,7 @@ export function NoteComposer({
         </div>
         <VoiceRecordButton
           size="sm"
+          label="Dictate"
           onTranscribed={(text) => {
             setEditContent((prev) => appendCapture(prev, text))
             toast.success("Dictation added to note")

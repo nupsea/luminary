@@ -412,6 +412,7 @@ export default function NotePage() {
             )}
             <VoiceRecordButton
               size="sm"
+              variant="icon"
               onTranscribed={(text) => {
                 setEditContent((prev) => appendCapture(prev, text))
                 toast.success("Dictation added to note")

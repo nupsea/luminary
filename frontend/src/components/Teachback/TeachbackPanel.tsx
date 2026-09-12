@@ -115,41 +115,41 @@ export function TeachbackPanel({
       {/* Input form */}
       {showForm && (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground">
-            Explain the answer in your own words -- as if teaching someone else:
-          </p>
-          <div className="relative">
-            <textarea
-              value={explanation}
-              onChange={(e) => setExplanation(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  handleSubmit()
-                  return
-                }
-                // The autofocused textarea swallows the session-level Esc: with a
-                // draft, Esc just leaves the field (second Esc ends); empty, it
-                // ends the session directly.
-                if (e.key === "Escape") {
-                  e.preventDefault()
-                  if (explanation.trim()) e.currentTarget.blur()
-                  else onEndSession()
-                }
-              }}
-              placeholder="Type your explanation here..."
-              className="h-36 w-full resize-none rounded-lg border border-border bg-background p-4 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-400"
-              autoFocus
-            />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Explain the answer in your own words -- as if teaching someone else:
+            </p>
             <VoiceRecordButton
               size="sm"
+              label="Speak"
               onTranscribed={(text) => {
                 setExplanation((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
               }}
               title="Speak your explanation (Whisper)"
-              className="absolute right-3 top-3"
             />
           </div>
+          <textarea
+            value={explanation}
+            onChange={(e) => setExplanation(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                handleSubmit()
+                return
+              }
+              // The autofocused textarea swallows the session-level Esc: with a
+              // draft, Esc just leaves the field (second Esc ends); empty, it
+              // ends the session directly.
+              if (e.key === "Escape") {
+                e.preventDefault()
+                if (explanation.trim()) e.currentTarget.blur()
+                else onEndSession()
+              }
+            }}
+            placeholder="Type your explanation here..."
+            className="h-36 w-full resize-none rounded-lg border border-border bg-background p-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-violet-400"
+            autoFocus
+          />
           <div className="flex items-center gap-3">
             <button
               onClick={handleSubmit}
