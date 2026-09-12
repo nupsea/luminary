@@ -256,16 +256,14 @@ describe("insertBlockBreakSpec (Mod-Enter escape)", () => {
 describe("Diagram & Heading block movement in moveBlockOrLineSpec", () => {
   it("identifies a diagram with excalidraw comment as a single atomic block", () => {
     const doc = "## Section\n\n![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->\n"
-    const state = mdState(doc, 15) // inside image line
-    const block = findEnclosingBlock(state, 15)
+    const block = findEnclosingBlock(mdState(doc, 15), 15)
     expect(block).not.toBeNull()
     expect(block!.type).toBe("diagram")
     expect(block!.startLine).toBe(3)
     expect(block!.endLine).toBe(4)
 
-    // Also when cursor is on the comment line
     const commentPos = doc.indexOf("luminary:excalidraw")
-    const blockFromComment = findEnclosingBlock(state, commentPos)
+    const blockFromComment = findEnclosingBlock(mdState(doc, commentPos), commentPos)
     expect(blockFromComment).not.toBeNull()
     expect(blockFromComment!.type).toBe("diagram")
     expect(blockFromComment!.startLine).toBe(3)
@@ -292,6 +290,4 @@ describe("Diagram & Heading block movement in moveBlockOrLineSpec", () => {
     expect(next.doc.toString()).toBe("$$\nfb = f + b\n$$\n\n| A | B |\n|---|---|\n| 1 | 2 |")
   })
 })
-
-
 

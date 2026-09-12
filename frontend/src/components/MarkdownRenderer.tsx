@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
+import type { ElementContent, Root } from "hast"
 import { Pencil } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -188,6 +189,35 @@ function ExcalidrawDiagramPreview({
   )
 }
 
+/**
+ * Strip inter-element whitespace text nodes from table structures before rehypeRaw.
+ * Without this, rehypeRaw's HTML5 parser (parse5) foster-parents any whitespace text
+ * nodes found inside <table>, <thead>, <tbody>, or <tr> to before the <table> element,
+ * causing dozens of empty lines (900px+ of blank void) in white-space: pre-wrap containers.
+ */
+function rehypeCleanTableWhitespace() {
+  return (tree: Root) => {
+    function visit(node: ElementContent | Root) {
+      if (
+        node.type === "element" &&
+        (node.tagName === "table" ||
+          node.tagName === "thead" ||
+          node.tagName === "tbody" ||
+          node.tagName === "tfoot" ||
+          node.tagName === "tr")
+      ) {
+        node.children = node.children.filter(
+          (c) => !(c.type === "text" && /^\s+$/.test(c.value)),
+        )
+      }
+      if ("children" in node && Array.isArray(node.children)) {
+        node.children.forEach(visit)
+      }
+    }
+    visit(tree)
+  }
+}
+
 function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", reading = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0 }: MarkdownRendererProps) {
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
@@ -198,8 +228,8 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
   const rehypePlugins: PluggableList = useMemo(
     () =>
       trackSourceLines
-        ? [rehypeHighlight, rehypeKatex, rehypeRaw, [rehypeSourceLine, sourceLineOffset]]
-        : [rehypeHighlight, rehypeKatex, rehypeRaw],
+        ? [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeRaw, [rehypeSourceLine, sourceLineOffset]]
+        : [rehypeCleanTableWhitespace, rehypeHighlight, rehypeKatex, rehypeRaw],
     [trackSourceLines, sourceLineOffset],
   )
 

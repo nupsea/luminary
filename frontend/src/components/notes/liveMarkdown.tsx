@@ -225,12 +225,32 @@ class RenderedBlock extends WidgetType {
     return host
   }
 
-  destroy() {
+  updateDOM(dom: HTMLElement, view: EditorView): boolean {
+    if (this.root) {
+      this.root.render(
+        <RenderedBlockContent
+          source={this.source}
+          delimited={this.delimited}
+          view={view}
+          host={dom}
+          onEditDiagram={this.onEditDiagram}
+        />,
+      )
+      return true
+    }
+    return false
+  }
+
+  destroy(dom: HTMLElement) {
     const root = this.root
     this.root = null
     // Unmounting inside CodeMirror's update would unmount a React tree while
-    // React is rendering.
-    if (root) queueMicrotask(() => root.unmount())
+    // React is rendering. Only unmount when dom is truly disconnected.
+    if (root) {
+      queueMicrotask(() => {
+        if (!dom.isConnected) root.unmount()
+      })
+    }
   }
 
   ignoreEvent() {
@@ -411,7 +431,11 @@ const liveTheme = EditorView.theme({
     paddingLeft: "10px",
     color: "hsl(var(--muted-foreground))",
   },
-  ".cm-md-block": { margin: "4px 0", position: "relative" },
+  ".cm-md-block": {
+    margin: "4px 0",
+    position: "relative",
+    whiteSpace: "normal",
+  },
   ".cm-md-block .prose": {
     margin: "0 !important",
     maxWidth: "none !important",
@@ -427,8 +451,12 @@ const liveTheme = EditorView.theme({
     lineHeight: "1.5",
   },
   ".cm-line:empty, .cm-line:has(> br:only-child)": {
-    height: "0.85rem",
-    lineHeight: "0.85rem",
+    height: "0.75rem",
+    lineHeight: "0.75rem",
+  },
+  ".cm-line:empty + .cm-line:empty, .cm-line:has(> br:only-child) + .cm-line:has(> br:only-child)": {
+    height: "0.25rem",
+    lineHeight: "0.25rem",
   },
   ".cm-md-code": {
     fontFamily: "var(--font-mono)",
