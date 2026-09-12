@@ -382,3 +382,19 @@ html {
     animation: none;
   }
 }
+
+/* Notion-style compact markdown tables: avoid bloated 100% full-width whitespace and 2em margins */
+.prose table {
+  width: auto;
+  min-width: min(100%, 320px);
+  max-width: 100%;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-collapse: collapse;
+}
+
+.prose th,
+.prose td {
+  padding: 0.375rem 0.75rem;
+}
+

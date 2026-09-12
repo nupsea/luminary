@@ -104,7 +104,15 @@ export function mathBlockRanges(text: string): TextRange[] {
   let offset = 0
   let openFrom: number | null = null
   for (const line of lines) {
-    if (line.trim() === "$$") {
+    const trimmed = line.trim()
+    if (
+      openFrom === null &&
+      trimmed.startsWith("$$") &&
+      trimmed.endsWith("$$") &&
+      trimmed.length > 2
+    ) {
+      found.push({ from: offset, to: offset + line.length })
+    } else if (trimmed === "$$") {
       if (openFrom === null) openFrom = offset
       else {
         found.push({ from: openFrom, to: offset + line.length })

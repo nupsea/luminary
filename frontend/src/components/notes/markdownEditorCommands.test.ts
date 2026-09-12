@@ -7,9 +7,14 @@ import {
   markdownLanguage,
 } from "@codemirror/lang-markdown"
 import {
+  findEnclosingBlock,
+  insertBlockBreakSpec,
   insertBlockSpec,
   insertInlineSpec,
+  moveBlockOrLineSpec,
   replaceSelectionSpec,
+  tableNextCellSpec,
+  tablePrevCellSpec,
   toggleInlineMarkSpec,
 } from "./markdownEditorCommands"
 
@@ -127,3 +132,162 @@ describe("markdown continuation (headless CM commands)", () => {
     expect(next.doc.toString()).toBe("- item\n  ")
   })
 })
+
+describe("findEnclosingBlock", () => {
+  it("detects a math block", () => {
+    const doc = "before\n$$\nx = 1\n$$\nafter"
+    const state = mdState(doc, 12) // inside x = 1
+    const block = findEnclosingBlock(state, 12)
+    expect(block).not.toBeNull()
+    expect(block?.type).toBe("math")
+    expect(state.sliceDoc(block!.from, block!.to)).toBe("$$\nx = 1\n$$")
+  })
+
+  it("detects a markdown table", () => {
+    const doc = "| A | B |\n|---|---|\n| 1 | 2 |"
+    const state = mdState(doc, 22) // inside row 2
+    const block = findEnclosingBlock(state, 22)
+    expect(block).not.toBeNull()
+    expect(block?.type).toBe("table")
+    expect(state.sliceDoc(block!.from, block!.to)).toBe(doc)
+  })
+})
+
+describe("moveBlockOrLineSpec (swapping blocks like LaTeX above/below Table)", () => {
+  it("moves a LaTeX block down past a Table", () => {
+    const doc = "$$\n\\int x dx\n$$\n\n| Col A | Col B |\n|---|---|\n| 1 | 2 |"
+    const state = mdState(doc, 5) // inside LaTeX block
+    const spec = moveBlockOrLineSpec(state, 1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe(
+      "| Col A | Col B |\n|---|---|\n| 1 | 2 |\n\n$$\n\\int x dx\n$$",
+    )
+  })
+
+  it("moves a LaTeX block up past a Table", () => {
+    const doc = "| Col A | Col B |\n|---|---|\n| 1 | 2 |\n\n$$\n\\int x dx\n$$"
+    const state = mdState(doc, 48) // inside LaTeX block
+    const spec = moveBlockOrLineSpec(state, -1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe(
+      "$$\n\\int x dx\n$$\n\n| Col A | Col B |\n|---|---|\n| 1 | 2 |",
+    )
+  })
+
+  it("moves a single normal line up and down", () => {
+    const doc = "line 1\nline 2\nline 3"
+    const state = mdState(doc, 9) // inside line 2
+    const downSpec = moveBlockOrLineSpec(state, 1)
+    expect(downSpec).not.toBeNull()
+    const downState = apply(state, downSpec!)
+    expect(downState.doc.toString()).toBe("line 1\nline 3\nline 2")
+
+    const upSpec = moveBlockOrLineSpec(state, -1)
+    expect(upSpec).not.toBeNull()
+    const upState = apply(state, upSpec!)
+    expect(upState.doc.toString()).toBe("line 2\nline 1\nline 3")
+  })
+})
+
+describe("tableNextCellSpec (Tab in tables)", () => {
+  it("moves to the next cell in the same row", () => {
+    const doc = "| Col A | Col B |"
+    const state = mdState(doc, 3) // inside Col A
+    const spec = tableNextCellSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.selection.main.anchor).toBe(10) // inside Col B
+  })
+
+  it("moves to the next row skipping the separator row", () => {
+    const doc = "| Col A | Col B |\n|---|---|\n| 1 | 2 |"
+    const state = mdState(doc, 11) // inside Col B on header row
+    const spec = tableNextCellSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    // Should land inside the data row | 1 | 2 | on cell '1'
+    expect(next.doc.lineAt(next.selection.main.anchor).text).toBe("| 1 | 2 |")
+  })
+
+  it("appends a new row when pressing Tab on the last cell of the table", () => {
+    const doc = "| A | B |\n|---|---|\n| 1 | 2 |"
+    const state = mdState(doc, doc.length - 2) // inside cell '2'
+    const spec = tableNextCellSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("| A | B |\n|---|---|\n| 1 | 2 |\n|   |   |")
+  })
+})
+
+describe("tablePrevCellSpec (Shift-Tab in tables)", () => {
+  it("moves to the previous cell in the same row", () => {
+    const doc = "| Col A | Col B |"
+    const state = mdState(doc, 10) // inside Col B
+    const spec = tablePrevCellSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.selection.main.anchor).toBe(2) // inside Col A
+  })
+
+  it("moves to the previous row skipping the separator row", () => {
+    const doc = "| Col A | Col B |\n|---|---|\n| 1 | 2 |"
+    const state = mdState(doc, doc.length - 6) // inside cell '1'
+    const spec = tablePrevCellSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.lineAt(next.selection.main.anchor).text).toBe("| Col A | Col B |")
+  })
+})
+
+describe("insertBlockBreakSpec (Mod-Enter escape)", () => {
+  it("escapes past a multi-line block inserting a new line", () => {
+    const doc = "$$\nE = mc^2\n$$"
+    const state = mdState(doc, 5) // inside LaTeX formula
+    const spec = insertBlockBreakSpec(state)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("$$\nE = mc^2\n$$\n\n")
+    expect(next.selection.main.anchor).toBe(next.doc.length)
+  })
+})
+
+describe("Diagram & Heading block movement in moveBlockOrLineSpec", () => {
+  it("identifies a diagram with excalidraw comment as a single atomic block", () => {
+    const doc = "## Section\n\n![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->\n"
+    const block = findEnclosingBlock(mdState(doc, 15), 15)
+    expect(block).not.toBeNull()
+    expect(block!.type).toBe("diagram")
+    expect(block!.startLine).toBe(3)
+    expect(block!.endLine).toBe(4)
+
+    const commentPos = doc.indexOf("luminary:excalidraw")
+    const blockFromComment = findEnclosingBlock(mdState(doc, commentPos), commentPos)
+    expect(blockFromComment).not.toBeNull()
+    expect(blockFromComment!.type).toBe("diagram")
+    expect(blockFromComment!.startLine).toBe(3)
+    expect(blockFromComment!.endLine).toBe(4)
+  })
+
+  it("moves a diagram block up past a math block atomically without breaking either", () => {
+    const doc = "$$\nE = mc^2\n$$\n\n![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->"
+    const diagPos = doc.indexOf("![Diagram")
+    const state = mdState(doc, diagPos)
+    const spec = moveBlockOrLineSpec(state, -1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("![Diagram|large](img.svg)\n<!-- luminary:excalidraw=scene.json -->\n\n$$\nE = mc^2\n$$")
+  })
+
+  it("normalizes excessive blank lines when swapping blocks", () => {
+    const doc = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\n\n\n$$\nfb = f + b\n$$"
+    const mathPos = doc.indexOf("fb = f + b")
+    const state = mdState(doc, mathPos)
+    const spec = moveBlockOrLineSpec(state, -1)
+    expect(spec).not.toBeNull()
+    const next = apply(state, spec!)
+    expect(next.doc.toString()).toBe("$$\nfb = f + b\n$$\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+  })
+})
+
