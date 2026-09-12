@@ -8,6 +8,9 @@ the per-node modules in this package.
 
 from __future__ import annotations
 
+import logging
+
+from app.database import get_session_factory
 from app.services.background import task_registry
 from app.services.qa import (
     CITATION_RULE,
@@ -15,12 +18,28 @@ from app.services.qa import (
     QA_FACTUAL_SYSTEM_PROMPT,
     QA_SYSTEM_PROMPT,
 )
+from app.services.settings_service import get_rerank_enabled
 from app.types import ScoredChunk
 
 # Strong references for fire-and-forget background tasks (asyncio holds weak refs only).
 # Shared across all chat-graph nodes that spawn background work.
 
 _background_tasks = task_registry(__name__)
+
+
+async def _read_rerank_enabled(logger: logging.Logger, node_name: str) -> bool:
+    """DB-backed rerank toggle, failing soft to off.
+
+    Every retrieval call inside the chat graph must match search_node's rerank
+    setting (I-55) -- a stale or unread toggle silently weakens grounding on
+    exactly the supplemental/retry paths meant to strengthen it.
+    """
+    try:
+        async with get_session_factory()() as session:
+            return await get_rerank_enabled(session)
+    except Exception as exc:
+        logger.warning("%s: could not read rerank setting, defaulting off: %s", node_name, exc)
+        return False
 
 
 # Intent-specific system prompts (used by synthesize_node)

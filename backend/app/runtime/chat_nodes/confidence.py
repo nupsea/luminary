@@ -18,7 +18,7 @@ import logging
 
 from langgraph.graph import END
 
-from app.runtime.chat_nodes._shared import _chunk_to_dict
+from app.runtime.chat_nodes._shared import _chunk_to_dict, _read_rerank_enabled
 from app.runtime.chat_nodes.graph import (
     _extract_entities_from_question,
     _query_kuzu_for_entity,
@@ -76,9 +76,10 @@ async def augment_node(state: ChatState) -> dict:
 
     Selects the complementary strategy based on primary_strategy:
       search_node / factual / exploratory → Kuzu entity graph lines → section_context
-      graph_node (relational)             → hybrid search k=15 → chunks
-      summary_node                        → hybrid search k=10 → chunks
-      comparative_node                    → hybrid search k=10, no doc filter → chunks
+      graph_node (relational)             → hybrid search k=15, rerank per setting → chunks
+      summary_node                        → hybrid search k=10, rerank per setting → chunks
+      comparative_node                    → hybrid search k=10, no doc filter, rerank per setting →
+                                             chunks
       notes_node                          → broader note search k=10 → section_context
 
     APPENDS to existing chunks/section_context; pack_context() deduplicates.
@@ -110,21 +111,25 @@ async def augment_node(state: ChatState) -> dict:
                 logger.warning("augment_node: Kuzu query failed", exc_info=True)
 
         elif primary == "graph_node":
-            # Complementary: broader hybrid search k=15
+            # Complementary: broader hybrid search k=15, same rerank setting search_node uses
+            rerank = await _read_rerank_enabled(logger, "augment_node")
             retriever = get_retriever()
-            chunks = await retriever.retrieve(question, effective_doc_ids, k=15)
+            chunks = await retriever.retrieve(question, effective_doc_ids, k=15, rerank=rerank)
             new_chunks = [_chunk_to_dict(c) for c in chunks]
 
         elif primary == "summary_node":
-            # Complementary: hybrid search k=10
+            # Complementary: hybrid search k=10, same rerank setting search_node uses (I-55)
+            rerank = await _read_rerank_enabled(logger, "augment_node")
             retriever = get_retriever()
-            chunks = await retriever.retrieve(question, effective_doc_ids, k=10)
+            chunks = await retriever.retrieve(question, effective_doc_ids, k=10, rerank=rerank)
             new_chunks = [_chunk_to_dict(c) for c in chunks]
 
         elif primary == "comparative_node":
-            # Complementary: hybrid search k=10, no doc_id filter
+            # Complementary: hybrid search k=10, no doc_id filter, same rerank
+            # setting search_node uses (I-55)
+            rerank = await _read_rerank_enabled(logger, "augment_node")
             retriever = get_retriever()
-            chunks = await retriever.retrieve(question, None, k=10)
+            chunks = await retriever.retrieve(question, None, k=10, rerank=rerank)
             new_chunks = [_chunk_to_dict(c) for c in chunks]
 
         elif primary == "notes_node":

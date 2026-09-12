@@ -379,7 +379,36 @@ def _content_tokens(text: str) -> set[str]:
     }
 
 
-def _excerpt_from_chunk(chunk_text: str, hint: str = "", answer: str = "") -> str:
+_ENTITY_TAIL_RE = re.compile(r"\[Entities:\s*[^\]]*\]\s*")
+
+
+def _strip_context_headers(text: str, doc_title: str) -> str:
+    """Drop retrieval scaffolding `keyword_index_node` glues onto chunk text.
+
+    The FTS5 index text is `context_header || text || entities_text`
+    (`embed.py`'s `keyword_index_node`) so BM25 can match on a title, a
+    section heading, or a canonical entity name -- `[Title > Heading]` in
+    front, `[Entities: A, B, C]` (`build_entity_tail`) behind. A chunk
+    surfaced by the lexical leg of hybrid search returns this glued string as
+    its `.text`, not the plain `ChunkModel.text`. Neither marker is document
+    content -- the reader's section body never contains either -- so an
+    excerpt window that starts on or grows into one puts a string in the
+    reader's citation-click highlight (frontend/src/lib/citation/target.ts)
+    that cannot exist in the rendered prose, and the whole highlight silently
+    fails to place. A neighbour-expanded `source_text` joins several chunks,
+    each carrying its own markers, so every occurrence is removed, not just a
+    leading one.
+    """
+    text = _ENTITY_TAIL_RE.sub("", text)
+    if not doc_title:
+        return text
+    pattern = re.compile(r"\[" + re.escape(doc_title) + r"(?:\s*>\s*[^\]]*)?\]\s*")
+    return pattern.sub("", text)
+
+
+def _excerpt_from_chunk(
+    chunk_text: str, hint: str = "", answer: str = "", doc_title: str = ""
+) -> str:
     """Cut the part of *chunk_text* that bears on *answer*, verbatim.
 
     Showing the head of the chunk shows the wrong text: a chunk is sized for the
@@ -391,9 +420,11 @@ def _excerpt_from_chunk(chunk_text: str, hint: str = "", answer: str = "") -> st
     *hint* is whatever the model typed as its quote and *answer* is the prose the
     chip sits under. Both are used only to choose which sentences to show, never
     as content, so a paraphrased hint costs relevance and can never put words in
-    the source's mouth.
+    the source's mouth. *doc_title* names the chunk's own retrieval breadcrumb so
+    it can be dropped before any sentence is chosen, never as a source of truth.
     """
     text = " ".join(chunk_text.split())
+    text = _strip_context_headers(text, doc_title).strip()
     if not text or len(text) <= _EXCERPT_MAX_CHARS:
         return text
     sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
@@ -483,18 +514,25 @@ def _resolve_marker_citations(
             continue
         seen_chunk_ids.add(chunk_key)
         doc_id = chunk.get("document_id", "")
+        doc_title = doc_titles.get(doc_id) or c.get("document_title") or ""
         resolved.append(
             {
-                "document_title": doc_titles.get(doc_id) or c.get("document_title"),
+                "document_title": doc_title,
                 "section_heading": chunk.get("section_heading") or "",
                 "page": chunk.get("page", 0),
                 "excerpt": _excerpt_from_chunk(
-                    # Never the packed `text`: that carries the generated
-                    # section summary, and an excerpt cut from it would be
-                    # presented as a quote from the document (I-33).
-                    chunk.get("source_text") or chunk.get("text", ""),
+                    # Never the packed `text` (a generated section summary can
+                    # ride in front of it, I-33) and never `source_text` alone
+                    # (search_node's neighbour expansion joins it across a
+                    # section boundary by chunk_index, which does not reset
+                    # per section -- an excerpt cut from the join can quote
+                    # real prose from the PREVIOUS section under this one's
+                    # heading). `own_text` is this chunk alone; only chunks
+                    # without it (graph_node, comparative_node) fall through.
+                    chunk.get("own_text") or chunk.get("source_text") or chunk.get("text", ""),
                     str(c.get("quote") or ""),
                     answer,
+                    doc_title,
                 ),
                 "chunk_id": chunk.get("chunk_id", ""),
                 "document_id": doc_id,

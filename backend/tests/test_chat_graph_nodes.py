@@ -204,6 +204,103 @@ async def test_graph_node_falls_through_on_kuzu_error(test_db):
     assert result.get("intent") == "factual"
 
 
+# (c2) graph_node's own entity extraction and grounding-supplement retrieval
+
+
+def test_extract_entities_from_question_merges_capitalized_phrase():
+    """A multi-word proper noun is one entity, not its first word alone.
+
+    "What is Inverted Index and how does it differ..." used to extract just
+    "Inverted", which matched no real Kuzu node and let a spurious partial
+    match through where a real multi-word entity would have found nothing and
+    correctly fallen through to search (I-55).
+    """
+    from app.runtime.chat_nodes.graph import _extract_entities_from_question
+
+    entities = _extract_entities_from_question(
+        "What is Inverted Index and how does it differ from Marie Curie's notebook?"
+    )
+    assert "Inverted Index" in entities
+    assert "Marie Curie" in entities
+    assert "Inverted" not in entities
+    assert "Curie" not in entities
+
+
+def test_extract_entities_from_question_keeps_sentence_initial_proper_noun():
+    """A multi-word proper noun that OPENS the question is not the sentence's
+    own capitalized-because-it's-first opener and must not be truncated.
+
+    Unconditionally dropping the question's first word (because a leading
+    interrogative like "What" is capitalized without naming anything) also
+    dropped the first word of a sentence-initial entity: "Marie Curie's
+    notebook was destroyed" extracted only "Curie", the same wrong entity
+    name the pre-fix code produced (I-55).
+    """
+    from app.runtime.chat_nodes.graph import _extract_entities_from_question
+
+    entities = _extract_entities_from_question("Marie Curie's notebook was destroyed")
+    assert "Marie Curie" in entities
+    assert "Curie" not in entities
+
+    entities = _extract_entities_from_question("Inverted Index vs hash tables")
+    assert "Inverted Index" in entities
+    assert "Index" not in entities
+
+
+@pytest.mark.asyncio
+async def test_graph_node_passes_rerank_toggle_and_search_depth(test_db):
+    """graph_node's grounding-supplement retrieval matches search_node's depth
+    and rerank setting.
+
+    Before this, a relational-intent question that found even one graph edge
+    got a k=5, never-reranked supplement while the same question over
+    search_node got k=10 with reranking -- a real answer chunk could be in
+    search_node's context and missing from graph_node's for no reason the
+    graph traversal itself explains (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+
+    # One entity ("Something") -> _query_kuzu_for_entity issues exactly two
+    # Kuzu queries (CO_OCCURS, then RELATED_TO). The CO_OCCURS query yields one
+    # row, RELATED_TO yields none: has_next() is called True, False, False.
+    mock_service = MagicMock()
+    mock_result = MagicMock()
+    mock_result.has_next.side_effect = [True, False, False]
+    mock_result.get_next.return_value = ["Related Entity", 1.0]
+    mock_service._conn.execute.return_value = mock_result
+
+    with (
+        patch("app.services.graph.get_graph_service", return_value=mock_service),
+        patch("app.runtime.chat_nodes.graph.get_retriever", return_value=mock_retriever),
+    ):
+        state = _make_state(
+            question="How is Something related to it?",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="relational",
+        )
+        result = await graph_node(state)
+
+        assert result.get("chunks")
+        assert mock_retriever.retrieve.call_args.kwargs["k"] == 10
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        mock_result.has_next.side_effect = [True, False, False]
+        await graph_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False
+
+
 # (d) test_search_node_augments_chunks_with_section_summaries
 
 
@@ -272,6 +369,58 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db, monke
     assert heading in augmented_text
     assert section_summary in augmented_text
     assert mock_chunk.text in augmented_text
+
+
+@pytest.mark.asyncio
+async def test_search_node_own_text_excludes_a_neighbour_from_another_section(test_db):
+    """`own_text` never carries a neighbour's content, even one search_node's
+    own context-expansion legitimately pulled in for the model to read.
+
+    chunk_index is a document-wide counter that does not reset at a section
+    boundary, so the "previous" neighbour of a section's first chunk is
+    routinely the last chunk of the PREVIOUS section -- real, verbatim text,
+    just not text this citation's section_heading can claim. `source_text`
+    is right to include it (that's what expansion is for); `own_text`, the
+    only field safe to build a citation excerpt from, must not.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    async with factory() as session:
+        session.add(
+            ChunkModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                section_id=str(uuid.uuid4()),
+                text="Tail sentence that belongs to the previous section.",
+                chunk_index=0,
+            )
+        )
+        await session.commit()
+
+    mock_chunk = ScoredChunk(
+        chunk_id=str(uuid.uuid4()),
+        document_id=doc_id,
+        text="Opening sentence of the current section.",
+        section_heading="Heading",
+        page=1,
+        score=0.9,
+        source="vector",
+        chunk_index=1,
+    )
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
+
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
+        result = await search_node(
+            _make_state(question="What does the current section say?", doc_ids=[doc_id])
+        )
+
+    chunk = result["chunks"][0]
+    assert "previous section" in chunk["source_text"]
+    assert "previous section" not in chunk["own_text"]
+    assert chunk["own_text"] == mock_chunk.text
 
 
 @pytest.mark.asyncio
@@ -389,6 +538,90 @@ async def test_comparative_node_interleaves_results(test_db):
     assert texts[1].startswith("side_b")
     assert texts[2].startswith("side_a")
     assert texts[3].startswith("side_b")
+
+
+# (e2) comparative_node honours the DB-backed L3 rerank toggle
+
+
+@pytest.mark.asyncio
+async def test_comparative_node_passes_rerank_toggle(test_db):
+    """Per-side retrieval matches search_node's rerank setting.
+
+    Before this, comparing two concepts within one document (rather than two
+    documents/authors, which is what side-resolution is built for) had both
+    sides fall back to the same unfiltered, never-reranked query over the same
+    document -- which routinely returned the same top chunks for both sides,
+    leaving the model nothing to contrast (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
+        state = _make_state(
+            question="Compare side_a versus side_b",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="comparative",
+        )
+        await comparative_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        await comparative_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False
+
+
+@pytest.mark.asyncio
+async def test_comparative_node_deduplicates_across_sides(test_db):
+    """Two sides sharing top passages get distinct context, not a duplicate.
+
+    Reproduced live: comparing "Cross-encoder" vs "bi-encoder" within one small
+    document, both sides' retrieval converged on the same six chunks, and the
+    model wrote "**Cross-encoder:**" and stopped, with nothing to contrast
+    (I-55). A chunk shared by both sides' retrieved pools must be assigned to
+    only one side, and the other side must backfill from its own pool rather
+    than carry the duplicate.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    shared = [_make_scored_chunk(doc_id, "Shared", text=f"shared_{i}") for i in range(4)]
+    side_a_only = _make_scored_chunk(doc_id, "A-only", text="a_only")
+    side_b_only = _make_scored_chunk(doc_id, "B-only", text="b_only")
+
+    # Side A's pool: 4 shared chunks ranked first, then its own distinct chunk.
+    # Side B's pool: the same 4 shared chunks, then its own distinct chunk.
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve = AsyncMock(
+        side_effect=[[*shared, side_a_only], [*shared, side_b_only]]
+    )
+
+    with patch("app.runtime.chat_nodes.comparative.get_retriever", return_value=mock_retriever):
+        state = _make_state(
+            question="Compare side_a versus side_b",
+            doc_ids=[doc_id],
+            scope="single",
+            intent="comparative",
+        )
+        result = await comparative_node(state)
+
+    chunks = result.get("chunks", [])
+    chunk_ids = [c["chunk_id"] for c in chunks]
+    assert len(chunk_ids) == len(set(chunk_ids)), "no chunk_id may appear on both sides"
+    texts = {c["text"] for c in chunks}
+    # Side B must have backfilled with its own distinct chunk instead of
+    # carrying only duplicates of side A's.
+    assert "b_only" in texts
 
 
 # (f) test_synthesize_node_calls_litellm
@@ -987,6 +1220,51 @@ async def test_synthesize_node_transparency_augmented_hybrid(test_db):
     assert transparency is not None
     assert transparency["strategy_used"] == "augmented_hybrid"
     assert transparency["augmented"] is True
+
+
+@pytest.mark.asyncio
+async def test_augment_node_passes_rerank_toggle_for_summary_and_comparative(test_db):
+    """augment_node's summary_node and comparative_node branches match
+    search_node's rerank setting, same as the graph_node branch already did.
+
+    Before this, a low-confidence retry after a summary_node or
+    comparative_node primary silently got an unreranked supplement -- the
+    same L2-off failure I-55 exists to prevent, just on the retry path
+    instead of the primary one (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+
+    for primary in ("summary_node", "comparative_node"):
+        mock_retriever = MagicMock()
+        mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+        state = _make_state(
+            question="What is this about?",
+            doc_ids=[doc_id],
+            scope="single",
+            chunks=[],
+            intent="factual",
+            primary_strategy=primary,
+            retry_attempted=False,
+        )
+
+        with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
+            await augment_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True, primary
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
+            await augment_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False, primary
+
+        async with factory() as session:
+            await set_rerank_enabled(session, True)
 
 
 @pytest.mark.asyncio

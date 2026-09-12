@@ -1,9 +1,9 @@
 """graph_node and its entity-extraction / Kuzu-query helpers.
 
 intent='relational' path: extract entity names from the question, query
-Kuzu's CO_OCCURS + RELATED_TO edges, and run hybrid retrieval (k=5) as a
-grounding supplement. Falls through to search (intent='factual') on
-Kuzu failure or 0 results.
+Kuzu's CO_OCCURS + RELATED_TO edges, and run hybrid retrieval (same depth +
+rerank setting as search_node) as a grounding supplement. Falls through to
+search (intent='factual') on Kuzu failure or 0 results.
 """
 
 import logging
@@ -13,17 +13,59 @@ from app.services import graph as _graph_module  # indirect: get_graph_service i
 from app.services.retriever import get_retriever
 from app.types import ChatState, ScoredChunk
 
+from ._shared import _chunk_to_dict, _read_rerank_enabled
+
 logger = logging.getLogger(__name__)
 
 
 _ENTITY_RE = re.compile(r'["\']([^"\']{2,})["\']')
-_CAPITALIZED_RE = re.compile(r"\b([A-Z][a-zA-Z]{2,})\b")
+# A run of one or more capitalized words, e.g. "Inverted Index" or "Marie
+# Curie" -- not just its first token. Matching only the first word of a
+# multi-word proper noun sent Kuzu lookups for names that exist nowhere in
+# the graph (I-55).
+_CAPITALIZED_PHRASE_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*\b")
+
+# Unconditionally dropping the question's first word (because a sentence
+# opener is capitalized without naming anything) also dropped the first word
+# of a sentence-initial proper noun -- "Marie Curie's notebook..." lost
+# "Marie", extracting only "Curie" (I-55). Only skip the first word when it
+# actually reads as a question opener; otherwise it may be part of the entity.
+_QUESTION_OPENERS = frozenset(
+    {
+        "what",
+        "how",
+        "when",
+        "why",
+        "where",
+        "who",
+        "whose",
+        "which",
+        "is",
+        "are",
+        "was",
+        "were",
+        "does",
+        "do",
+        "did",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "tell",
+        "explain",
+        "describe",
+    }
+)
 
 
 def _extract_entities_from_question(question: str) -> list[str]:
     """Extract potential entity names from a question.
 
-    Finds quoted strings first, then capitalized words (skipping first word).
+    Finds quoted strings first, then runs of capitalized words merged into a
+    single phrase. The sentence's first word is skipped only when it is a
+    question opener ("What is..."); a sentence-initial proper noun is a real
+    entity and must not be dropped (I-55).
     """
     entities: list[str] = []
     seen: set[str] = set()
@@ -35,13 +77,14 @@ def _extract_entities_from_question(question: str) -> list[str]:
             seen.add(name)
             entities.append(name)
 
-    # Capitalized words (skip first word of the question)
-    words = question.split()
-    for word in words[1:]:
-        clean = re.sub(r"[^\w]", "", word)
-        if clean and clean[0].isupper() and len(clean) > 2 and clean not in seen:
-            seen.add(clean)
-            entities.append(clean)
+    first_word, _, rest = question.partition(" ")
+    is_opener = first_word.strip(",.?!'\"").lower() in _QUESTION_OPENERS
+    search_text = rest if is_opener else question
+    for m in _CAPITALIZED_PHRASE_RE.finditer(search_text):
+        name = m.group(0).strip()
+        if name and name not in seen:
+            seen.add(name)
+            entities.append(name)
 
     return entities
 
@@ -84,8 +127,9 @@ async def graph_node(state: ChatState) -> dict:
     """Kuzu entity traversal for relational queries.
 
     Extracts entity names from the question, queries CO_OCCURS + RELATED_TO edges,
-    and runs hybrid retrieval (k=5) as a grounding supplement.
-    Falls through to search_node (via intent='factual') on Kuzu failure or 0 results.
+    and runs hybrid retrieval (same depth + rerank setting as search_node) as a
+    grounding supplement. Falls through to search_node (via intent='factual') on
+    Kuzu failure or 0 results.
     """
     question = state["question"]
     q = state.get("rewritten_question") or question
@@ -115,23 +159,21 @@ async def graph_node(state: ChatState) -> dict:
 
     section_context = "Knowledge graph connections:\n" + "\n".join(graph_lines)
 
-    # Grounding supplement: hybrid retrieval k=5
+    # Grounding supplement: same depth and rerank setting search_node uses.
+    # A graph match (even a real one) says nothing about whether that entity's
+    # co-occurrence neighbours are the passage that answers the question -- the
+    # supplement is what actually has to carry the answer, so it must not be a
+    # weaker retrieval than the search path gets (I-55).
+    k = 6 if scope == "all" else 10
+    rerank = await _read_rerank_enabled(logger, "graph_node")
+
     chunks_dicts: list[dict] = []
     try:
         retriever = get_retriever()
-        chunks: list[ScoredChunk] = await retriever.retrieve(q, effective_doc_ids, k=5)
-        chunks_dicts = [
-            {
-                "chunk_id": c.chunk_id,
-                "document_id": c.document_id,
-                "text": c.text,
-                "section_heading": c.section_heading,
-                "page": c.page,
-                "score": c.score,
-                "source": c.source,
-            }
-            for c in chunks
-        ]
+        chunks: list[ScoredChunk] = await retriever.retrieve(
+            q, effective_doc_ids, k=k, rerank=rerank
+        )
+        chunks_dicts = [_chunk_to_dict(c) for c in chunks]
     except Exception:
         logger.warning("graph_node: retrieval failed", exc_info=True)
 

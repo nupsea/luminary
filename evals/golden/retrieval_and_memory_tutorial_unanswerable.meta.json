@@ -1,0 +1,8 @@
+{
+  "name": "retrieval_and_memory_tutorial_unanswerable",
+  "source_file": "DATA/papers/retrieval_and_memory_tutorial.md",
+  "generated_at": "2026-09-11T13:20:00+00:00",
+  "generator_model": "hand-authored (Claude Sonnet 5, this session) -- not model-generated",
+  "row_provenance": "hand",
+  "row_provenance_note": "Questions with no relation whatsoever to the source document's content (retrieval, search, and LLM memory). Deliberately kept out of the scored retrieval golden (retrieval_and_memory_tutorial.jsonl): these rows carry no context_hint on purpose, and evals/retrieval_metrics.py counts every sample in HR@5's denominator whether or not it has a hint, so mixing an unanswerable row into the scored set would silently and permanently drag down HR@5/MRR for a reason that has nothing to do with retrieval quality, and would corrupt answer_rate the same way in the opposite direction. Scored separately by run_refusal_eval.py, which checks the shipped /qa path either declines (not_found) or clearly labels any answer as general knowledge rather than presenting an ungrounded guess as if it were sourced from the document -- the exact failure class (a confidently wrong grounding claim) the incident that motivated this dataset was about."
+}

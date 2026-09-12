@@ -2,20 +2,22 @@
 
 intent='comparative' path: ask the LLM to extract N subjects + topic,
 resolve each subject to its document set (Kuzu entity match -> title
-match), retrieve topic-focused chunks per side in parallel, then
-round-robin interleave so no side dominates the context window.
-Falls back to unfiltered retrieval if decomposition fails.
+match), retrieve topic-focused chunks per side in parallel with the same
+rerank setting search_node uses, then round-robin interleave so no side
+dominates the context window. Falls back to unfiltered retrieval if
+decomposition fails.
 """
 
 import asyncio
 import json
 import logging
+import time
 
 from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import DocumentModel
-from app.runtime.chat_nodes._shared import _chunk_to_dict, _round_robin
+from app.runtime.chat_nodes._shared import _chunk_to_dict, _read_rerank_enabled, _round_robin
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
@@ -155,8 +157,19 @@ async def comparative_node(state: ChatState) -> dict:
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
     retriever = get_retriever()
+    rerank = await _read_rerank_enabled(logger, "comparative_node")
 
+    # Sequential LLM call before any retrieval starts -- on a small local model
+    # this alone can be a double-digit-second cost that never shows up in the
+    # UI's "first token" figure, which times only the final-answer LLM call
+    # (qa.py's t_llm), not this decomposition call or the retrieval below.
+    t_decompose = time.perf_counter()
     decomposed = await _decompose_comparison(question)
+    logger.info(
+        "[perf] comparative_node: decomposition took %.2fs (matched=%s)",
+        time.perf_counter() - t_decompose,
+        bool(decomposed),
+    )
 
     if decomposed:
         sides: list[str] = decomposed["sides"]
@@ -174,6 +187,14 @@ async def comparative_node(state: ChatState) -> dict:
         )
 
         k_per_side = max(4, 12 // len(sides))
+        # Overfetch so a global dedup pass (below) still leaves each side its
+        # full quota. Sides that share a document -- the common case when a
+        # subject is a concept rather than a document/author, so neither
+        # resolves to a distinct doc set -- otherwise retrieve the same top
+        # passages for both queries and the comparison has nothing to contrast
+        # (I-55). This only asks the retriever to return more of the pool it
+        # already ranked; it does not deepen the rerank candidate pool.
+        fetch_k = min(k_per_side * 3, 20)
 
         async def _retrieve_for_side(side: str, side_docs: list[str]) -> list[dict]:
             # If no docs resolved for this side, widen the query to include the
@@ -181,7 +202,9 @@ async def comparative_node(state: ChatState) -> dict:
             query = topic if side_docs else f"{side} {topic}"
             filter_ids = side_docs or effective_doc_ids
             try:
-                chunks = await retriever.retrieve(query, filter_ids, k=k_per_side)
+                chunks = await retriever.retrieve(
+                    query, filter_ids, k=fetch_k, rerank=rerank
+                )
                 return [_chunk_to_dict(c) for c in chunks]
             except Exception:
                 logger.warning(
@@ -189,9 +212,45 @@ async def comparative_node(state: ChatState) -> dict:
                 )
                 return []
 
-        per_side_chunks: list[list[dict]] = await asyncio.gather(
+        t_retrieve = time.perf_counter()
+        per_side_chunks_raw: list[list[dict]] = await asyncio.gather(
             *[_retrieve_for_side(side, docs) for side, docs in zip(sides, resolved, strict=True)]
         )
+        logger.info(
+            "[perf] comparative_node: %d-side retrieval took %.2fs (fetch_k=%d, rerank=%s)",
+            len(sides),
+            time.perf_counter() - t_retrieve,
+            fetch_k,
+            rerank,
+        )
+
+        # A chunk retrieved by an earlier side is not repeated for a later one:
+        # each chunk_id is assigned to the first (highest-ranked-so-far) side
+        # that surfaced it, and every side keeps filling from its own
+        # overfetched pool up to k_per_side. Without this, two concepts that
+        # live in the same passage of a small corpus get identical context on
+        # both sides of the comparison and the model has nothing to compare.
+        seen_chunk_ids: set[str] = set()
+        per_side_chunks: list[list[dict]] = []
+        duplicates_dropped = 0
+        for side_chunks in per_side_chunks_raw:
+            deduped: list[dict] = []
+            for c in side_chunks:
+                cid = c.get("chunk_id")
+                if cid and cid in seen_chunk_ids:
+                    duplicates_dropped += 1
+                    continue
+                if cid:
+                    seen_chunk_ids.add(cid)
+                deduped.append(c)
+                if len(deduped) >= k_per_side:
+                    break
+            per_side_chunks.append(deduped)
+        if duplicates_dropped:
+            logger.info(
+                "comparative_node: dropped %d cross-side duplicate chunk(s)",
+                duplicates_dropped,
+            )
 
         interleaved = _round_robin(per_side_chunks)
 
@@ -212,7 +271,7 @@ async def comparative_node(state: ChatState) -> dict:
     # Fallback: unfiltered retrieval when LLM decomposition fails
     logger.info("comparative_node: LLM decomposition failed — using unfiltered retrieval")
     try:
-        chunks = await retriever.retrieve(q, effective_doc_ids, k=10)
+        chunks = await retriever.retrieve(q, effective_doc_ids, k=10, rerank=rerank)
         interleaved = [_chunk_to_dict(c) for c in chunks]
     except Exception:
         logger.warning("comparative_node: fallback retrieval failed", exc_info=True)

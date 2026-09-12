@@ -14,10 +14,10 @@ from sqlalchemy import and_, or_, select
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models import ChunkModel, DocumentModel, SectionSummaryModel
+from app.runtime.chat_nodes._shared import _read_rerank_enabled
 from app.services.context_packer import _cap_per_document
 from app.services.query_understanding import parse_query_filters
 from app.services.retriever import get_retriever
-from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
 
 logger = logging.getLogger(__name__)
@@ -207,12 +207,7 @@ async def search_node(state: ChatState) -> dict:
     # L2 of the retrieval funnel: cross-encoder rerank of the RRF pool.
     # DB-backed toggle so users on slow CPUs can opt out; the reranker itself
     # fails soft to plain RRF order, and so does this read.
-    try:
-        async with get_session_factory()() as session:
-            rerank = await get_rerank_enabled(session)
-    except Exception as exc:
-        logger.warning("search_node: could not read rerank setting, defaulting off: %s", exc)
-        rerank = False
+    rerank = await _read_rerank_enabled(logger, "search_node")
 
     chunks_dicts: list[dict] = []
     image_ids: list[str] = []
@@ -298,6 +293,15 @@ async def search_node(state: ChatState) -> dict:
                     # summary, so a citation excerpt cut from it can quote prose
                     # the document does not contain (I-33).
                     "source_text": expanded_text,
+                    # `source_text` still isn't safe to excerpt from: it's
+                    # joined with neighbours by chunk_index, which runs
+                    # document-wide and does not reset at a section boundary,
+                    # so it can carry real verbatim prose from the PREVIOUS
+                    # section. A window that grows into it quotes true text
+                    # under the wrong section_heading -- not a display bug, a
+                    # misattributed citation. `own_text` is this chunk alone,
+                    # the only text guaranteed to belong to `section_heading`.
+                    "own_text": c.text,
                     "section_heading": c.section_heading,
                     "section_summary": section_summary,
                     "page": c.page,

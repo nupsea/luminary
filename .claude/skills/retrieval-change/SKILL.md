@@ -21,6 +21,21 @@ make eval-d2l      # technical corpus, HR@5 / MRR, no judge — fast
 Both need a backend running on :7820 with the corpus ingested. Record the numbers before you
 touch anything.
 
+**If the change touches a chat-graph node** (`app/runtime/chat_nodes/*.py` — `graph_node`,
+`comparative_node`, `search_node`, `augment_node`), `make eval`/`make eval-d2l` cannot see it:
+both call `/search` directly, never the classify → route → retrieve path `/qa` actually runs.
+I-55 shipped exactly this way — a routing bug in `graph_node`/`comparative_node` with `make eval`
+green throughout, because no eval question was phrased to reach those nodes. Also run:
+
+```
+make eval-chat-routing   # generation quality through /qa on a comparison/keyword/semantic holdout
+make eval-refusal        # honest-decline check on questions with no answer in the document
+```
+
+`eval-chat-routing` is report-only (see `docs/eval-coverage.md` for why — the dataset's own
+measured variance isn't resolvable yet at 15-row batch size); read the numbers, don't just check
+the exit code. `eval-refusal` is gated at a collapse-detector floor.
+
 ## The metrics
 
 - **HR@5** — was a relevant chunk in the top 5. Recall-shaped.

@@ -1533,7 +1533,17 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
                 citationWords={citationWords}
-                citedSectionId={initialSectionId}
+                // The section the ACTIVE citation names, not the section the
+                // reader happened to mount on. `initialSectionId` (this
+                // component's own mount-time prop) is fixed for the reader's
+                // whole lifetime, so a citation clicked in the docked chat
+                // after the first one -- the common case, since the panel
+                // stays open across a whole conversation -- always forced a
+                // stale section to render eagerly while the REAL target sat
+                // behind the visibility gate showing a skeleton, never
+                // scrolled to and never marked. `readSectionId` is exactly
+                // what `revealCitation` sets to `c.section_id` on every click.
+                citedSectionId={readSectionId}
               />
             )}
           </div>

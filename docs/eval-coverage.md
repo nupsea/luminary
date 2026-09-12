@@ -22,6 +22,8 @@ whatever retrieval returned.
 | Summaries | `make eval-summary` — theme coverage, grounding (HHEM), conciseness, hallucination | `golden/summaries.jsonl` | yes |
 | Flashcards | `make eval-flashcards` — generation rate, repairs, factuality/atomicity/clarity | `golden/flashcards.jsonl`, 35 rows over 5 content types | yes |
 | Corpus routing | `make eval-routing` — route@1, route@5, unscoped HR@5 | book, paper, legal, play, study | baseline only, no floor |
+| Chat-graph routing | `make eval-chat-routing` — generation quality (citation support/coverage) through `/qa`, not `/search` | `golden/retrieval_and_memory_tutorial.jsonl`, 45 rows, one document | report-only, see below |
+| Refusal / honest decline | `make eval-refusal` — honest_rate (decline or clearly-labelled general knowledge vs. presenting a guess as sourced) | `golden/retrieval_and_memory_tutorial_unanswerable.jsonl`, 12 rows | yes, floor 0.70 (collapse detector) |
 | Note search | `make eval-notes` — recall over the user's own notes | no committed golden, by design (see below) | baseline only, corpus-coupled |
 | Model output quality | `GET /evals/output-stats` — repair kinds, first-pass rate, shape deviations, card-gate rejections, attempts per generation | any run | recorded per eval run |
 | Model choice | `make eval-matrix MODELS=a,b` — the model-sensitive runners across candidates, structural tier only | whatever the chosen tasks use | `--assert-separation` gates the instrument, not a model |
@@ -77,6 +79,12 @@ whatever retrieval returned.
   stderr; the number is biased upward and is not comparable to a run judged by another model.
 - **Enrichment, entity extraction and the graph are unmeasured.** `eval-ingest` stops at chunk
   retention.
+
+- **`make eval` and `make eval-gen` cannot see a chat-graph routing bug.** Both call `/search`
+  for retrieval and `/qa` for generation, but neither question set is phrased to route through
+  `graph_node` or `comparative_node` specifically, so a bug confined to those nodes (I-55) had no
+  eval that could have caught it before it reached a live demo. `make eval-chat-routing` closes
+  that gap for one document; see below for what it found and what it still cannot resolve.
 
 ## Running it: one model, or a text model plus vision
 
@@ -190,6 +198,71 @@ to guess when it cannot read it; `--no-rerank` measures the ablation and says so
 `study` in one library state: HR@5 0.5667 unreranked against 0.7000 shipped. Retrieval baselines
 and floors recorded before 2026-08-26 are the unreranked funnel and are not comparable to later
 ones.
+
+## Chat-graph routing holdout and refusal eval (added 2026-09-11)
+
+**Incident.** A live demo asked *"What is Inverted Index and how does it differ to standard
+document to word mapping"* over a document whose "1.1 The Inverted Index" section answers it
+directly. The answer said the document didn't cover it. `make eval` and `make eval-gen` were both
+green at the time and could not have caught this: the word "differ" is a relational keyword
+(`intent.py`) that routes to `graph_node`, and neither eval's questions are phrased to reach
+`graph_node` or `comparative_node` — both call `/search`/`/qa` directly with plain factual
+questions. `docs/invariants.md` I-55 has the full mechanism (an entity-extraction regex kept only
+the first word of a multi-word proper noun, and `graph_node`'s own grounding retrieval ran at half
+the depth and with reranking permanently off, unlike `search_node`).
+
+`golden/retrieval_and_memory_tutorial.jsonl` (45 rows, one document, hand-authored — see its
+`.meta.json` for exactly why) is a holdout built specifically to reach these two nodes: pure
+keyword, pure comparison, pure semantic-intent phrasing and every pairwise combination, plus
+relational, summary/global and mixed-grounding (compound questions only partially answerable)
+rows. `golden/retrieval_and_memory_tutorial_unanswerable.jsonl` (12 rows) holds questions with no
+relation to the document at all, scored separately by `run_refusal_eval.py` because mixing
+polarities into one dataset corrupts `answer_rate`/HR@5 in opposite, meaningless directions (see
+its own `.meta.json`).
+
+**Measured, before/after the I-55 fix, same corpus, same day (default model
+`ollama/qwen3.5:4b`, memory-constrained machine — see caveat below):**
+
+| | citation_support_rate | citation_coverage | uncited_answers |
+|---|---|---|---|
+| before (15-row batch, keyword+comparison) | 0.7333 | 0.4000 | 9/15 |
+| after (same batch) | 0.8200 | 0.6000 | 6/15 |
+| before (15-row batch, semantic+relational+summary) | 0.7500 | 0.5333 | 7/15 |
+| after (same batch, 2 runs) | 0.6111, 0.6471 | 0.3333, 0.5333 | 10/15, 7/15 |
+| before (15-row batch, mixed-grounding+combos) | 0.7273 | 0.6667 | 5/15 |
+| after (same batch) | 0.7222 | 0.5333 | 7/15 |
+| refusal `honest_rate` (12 rows) | before 0.9167 | after 0.8333 | -- |
+
+**What this does and does not show.** The first batch (keyword/comparison rows, the shape of the
+reported incident) improved on both metrics and matches the direct, deterministic verification
+already in I-55 (before: a 2-word truncated answer with 6 duplicate chunks on "Cross-encoder vs
+bi-encoder"; after: a full correct answer with 0 duplicates, reproduced on two separate question
+pairs by inspecting the actual context sent to the model). The other two batches did not show a
+clean improvement — the second batch's citation numbers moved in *both* directions across two
+identical-code repeats (0.3333 → 0.5333 on citation_coverage with nothing changed), which matches
+this repo's own documented finding that `book`'s citation_support_rate ranges 0.5893–0.7065 across
+identical runs on a 40-row set (`eval-integrity` skill). Fifteen rows move in ~6.7% steps and this
+was run on a memory-constrained machine (see below), so this dataset **cannot yet resolve a change
+this size** — reporting a single before/after delta as proof of an aggregate improvement would be
+exactly the kind of number this file exists to warn against.
+
+**Not yet done, and gating on it before quoting an aggregate number**: `make eval-variance` over
+this dataset, several runs per arm, on a machine with real headroom (this measurement ran in three
+15-row batches because a 45-row single run and one earlier attempt were both killed by the
+platform's OOM handler — this laptop had ~68MB free RAM and 17GB/18GB swap in use from unrelated
+running applications, not from anything in this pipeline). Until that exists, `eval-chat-routing`
+is **report-only** — no `DATASET_THRESHOLDS` entry, because every other floor in this repo is a
+measured number and this one is not yet measurable at a resolvable sample size. `eval-refusal` is
+gated at 0.70, a collapse detector well under both observed runs (0.9167, 0.8333), not a quality
+bar.
+
+**What is solid regardless of the above**: `test_extract_entities_from_question_merges_capitalized_phrase`,
+`test_graph_node_passes_rerank_toggle_and_search_depth`, `test_comparative_node_passes_rerank_toggle`
+and `test_comparative_node_deduplicates_across_sides` in `backend/tests/test_chat_graph_nodes.py`
+are deterministic, mocked, and gate the exact mechanism in `make ci` today — they will fail
+immediately if any chat-graph node reverts to a smaller `k`, drops the rerank-setting read, or lets
+a chunk_id repeat across comparison sides. They do not need a live model and carry none of the
+variance above.
 
 ## Note search
 

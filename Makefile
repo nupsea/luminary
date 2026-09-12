@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -511,6 +511,36 @@ eval-gen:
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset book --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
 	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset paper --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations --assert-thresholds
 
+# Chat-graph routing holdout (I-55): 45 hand-authored rows over one document,
+# covering pure keyword/comparison/semantic-intent phrasing and every pairwise
+# combination, relational, summary/global and mixed-grounding questions. Unlike
+# `make eval`/`make eval-gen`, HR@5 here is not the point -- it is unaffected by
+# chat-graph routing bugs because it hits /search directly. The generation-side
+# numbers (citation_support_rate, citation_coverage) are what this dataset
+# exists to exercise, since /qa is what actually runs classify_node ->
+# graph_node/comparative_node/search_node.
+#
+# NOT --assert-thresholds yet. Two before/after batches on this machine moved
+# citation_support_rate by more than book's own documented run-to-run spread
+# (0.5893-0.7065 on a 40-row set) even with IDENTICAL code, which this
+# dataset's 15-row batches cannot resolve below. Run `make eval-variance` on
+# this dataset once real headroom exists before setting DATASET_THRESHOLDS --
+# every other floor in this repo is a measured, not guessed, number.
+eval-chat-routing:
+	@echo "Chat-graph routing holdout: comparison/keyword/semantic combos (report-only, see comment above)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_eval.py --dataset retrieval_and_memory_tutorial --backend-url $(BACKEND_URL) --judge-model $(EVAL_TEXT_MODEL) --check-citations
+
+# Companion to eval-chat-routing: questions with NO answer in the document at
+# all. A good run declines (not_found) or clearly labels an answer as general
+# knowledge; presenting an ungrounded guess as if it were sourced is the exact
+# failure class the I-55 incident was about, just the inverse direction.
+# Asserted at 0.70 -- a collapse detector well below both measured runs
+# (0.9167, 0.8333 honest_rate on 12 rows), not a quality bar; see
+# evals/golden/retrieval_and_memory_tutorial_unanswerable.meta.json.
+eval-refusal:
+	@echo "Refusal eval: questions with no answer in the document (asserted floor is a collapse detector)..."
+	cd evals && UV_CACHE_DIR=$(CURDIR)/.uv-cache uv run --no-sync python run_refusal_eval.py --dataset retrieval_and_memory_tutorial_unanswerable --backend-url $(BACKEND_URL) --model $(EVAL_TEXT_MODEL) --threshold 0.70 --assert-thresholds
+
 # Repeated generation eval: mean and sd over N runs in ONE library state, gated
 # on the mean. A single generation run cannot resolve a change below ~0.10 on
 # book or ~0.05 on paper, so this is the only honest way to A/B a change that
@@ -595,6 +625,8 @@ eval-all:
 	$(MAKE) eval
 	$(MAKE) eval-routing
 	$(MAKE) eval-gen
+	$(MAKE) eval-chat-routing
+	$(MAKE) eval-refusal
 	$(MAKE) eval-intent
 	$(MAKE) eval-topics
 
