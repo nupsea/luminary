@@ -4,6 +4,25 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.4] - 2026-09-12
+
+### Fixed
+- **Dynamic Edit no longer displays large whitespace voids above saved tables.**
+  `rehypeRaw` foster-parented inter-element whitespace text nodes from markdown
+  tables into a leading text node before the `<table>` element, which rendered
+  as dozens of blank lines inside CodeMirror's `white-space: pre-wrap` container.
+  A new `rehypeCleanTableWhitespace` plugin strips inter-element table whitespace
+  before HTML parsing, and `.cm-md-block` now enforces `white-space: normal` with
+  consecutive empty-line compression (PR #133).
+- **Smooth block movement and media rendering in Note Editor.** Images and
+  Excalidraw diagrams are now treated as atomic blocks and remain rendered when
+  navigating past them with arrow keys, eliminating 600px viewport height jumps.
+  Added Tab/Shift-Tab table navigation, Notion-style block hover action bar, and
+  clean `\n\n` spacing normalization on block swaps (PR #133).
+- **Chat-graph routing no longer misgrounds real answers.** Evaluated and resolved
+  misgrounding regressions where graph-based routing could diverge on answerable
+  prompts (PR #132).
+
 ## [0.12.0] - 2026-09-11
 
 ### Fixed
