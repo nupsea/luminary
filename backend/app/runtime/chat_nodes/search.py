@@ -293,6 +293,15 @@ async def search_node(state: ChatState) -> dict:
                     # summary, so a citation excerpt cut from it can quote prose
                     # the document does not contain (I-33).
                     "source_text": expanded_text,
+                    # `source_text` still isn't safe to excerpt from: it's
+                    # joined with neighbours by chunk_index, which runs
+                    # document-wide and does not reset at a section boundary,
+                    # so it can carry real verbatim prose from the PREVIOUS
+                    # section. A window that grows into it quotes true text
+                    # under the wrong section_heading -- not a display bug, a
+                    # misattributed citation. `own_text` is this chunk alone,
+                    # the only text guaranteed to belong to `section_heading`.
+                    "own_text": c.text,
                     "section_heading": c.section_heading,
                     "section_summary": section_summary,
                     "page": c.page,

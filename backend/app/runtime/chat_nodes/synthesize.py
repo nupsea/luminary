@@ -446,7 +446,14 @@ async def synthesize_node(state: ChatState) -> dict:
                 continue
             seen_dedup_keys.add(dedup_key)
 
-            chunk_text = c.get("text", "") or ""
+            # Never the packed `text` (a generated section summary can ride in
+            # front of it, I-33) and never `source_text` alone (search_node's
+            # neighbour expansion joins it across a section boundary by
+            # chunk_index, which does not reset per section -- an excerpt cut
+            # from the join can quote real prose from the PREVIOUS section
+            # under this one's heading). `own_text` is this chunk alone; only
+            # chunks without it (graph_node, comparative_node) fall through.
+            chunk_text = c.get("own_text") or c.get("source_text") or c.get("text", "") or ""
             source_citations_out.append(
                 {
                     "chunk_id": cid,
@@ -473,7 +480,9 @@ async def synthesize_node(state: ChatState) -> dict:
                     # _excerpt_from_chunk (already proven in qa.py's marker
                     # citations, I-33) scores every sentence by overlap with the
                     # question and windows around the best one, verbatim.
-                    "section_preview_snippet": _excerpt_from_chunk(chunk_text, hint=question),
+                    "section_preview_snippet": _excerpt_from_chunk(
+                        chunk_text, hint=question, doc_title=doc_title
+                    ),
                 }
             )
 

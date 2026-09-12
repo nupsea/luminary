@@ -1419,6 +1419,76 @@ def test_a_citation_excerpt_never_quotes_the_generated_section_summary():
     assert "redundancy masks" not in excerpt
 
 
+def test_excerpt_drops_the_retrieval_breadcrumb_ingestion_prepends():
+    """chunk.py's `_context_header` bakes "[Title > Heading]" into every stored
+    chunk at ingestion. It is retrieval scaffolding, not document content -- the
+    reader's rendered section never contains it -- so a window that starts on
+    or grows into it puts a string the reader's citation-click highlight can
+    never find in the real document, and the whole highlight silently fails to
+    place (reported live: the "Part 12" citation on a real /qa call).
+    """
+    from app.services.qa import _excerpt_from_chunk
+
+    title = "retrieval-and-memory-tutorial_revised"
+    heading = "Part 12 — Future Work: A Roadmap for Luminary"
+    real_content = (
+        "Each step keeps the project's constraint — local-first, embedded "
+        "stores, no servers — which is itself the roadmap's quiet thesis: "
+        "everything in this tutorial, including an L2 reranker and a scoped "
+        "GraphRAG, now fits on a laptop."
+    )
+    chunk_text = f"[{title} > {heading}] {real_content}"
+
+    excerpt = _excerpt_from_chunk(chunk_text, hint="roadmap laptop", doc_title=title)
+
+    assert excerpt.strip()
+    assert title not in excerpt
+    assert "[" not in excerpt and "]" not in excerpt
+
+
+def test_excerpt_drops_every_header_in_a_neighbour_expanded_chunk():
+    """search_node's neighbour expansion joins several chunks' `.text` into one
+    `source_text`, and each carries its own header -- not just the first one.
+    """
+    from app.services.qa import _excerpt_from_chunk
+
+    title = "Some Book"
+    joined = (
+        f"[{title} > Ch. 1] First chunk's real sentence about the subject. "
+        f"[{title} > Ch. 2] Second chunk's real sentence, also about the subject."
+    )
+
+    excerpt = _excerpt_from_chunk(joined, hint="subject", doc_title=title)
+
+    assert title not in excerpt
+
+
+def test_excerpt_drops_the_entity_tail_the_lexical_leg_glues_on():
+    """keyword_index_node's FTS text is context_header || text || entities_text,
+    so a chunk surfaced via lexical search returns `[Entities: A, B]` glued to
+    the end -- also not document content, also breaks the reader highlight.
+    """
+    from app.services.qa import _excerpt_from_chunk
+
+    real_content = "FTS5 is SQLite's built-in full-text engine with BM25 ranking."
+    chunk_text = f"{real_content} [Entities: Fts5, Sqlite]"
+
+    excerpt = _excerpt_from_chunk(chunk_text, hint="FTS5 BM25 ranking")
+
+    assert excerpt.strip()
+    assert "Entities" not in excerpt
+    assert "[" not in excerpt and "]" not in excerpt
+
+
+def test_excerpt_is_unaffected_with_no_doc_title():
+    """A caller with no title in scope gets the pre-existing behaviour, not a crash."""
+    from app.services.qa import _excerpt_from_chunk
+
+    text = "Fruit, by the bye, was all their diet."
+    assert _excerpt_from_chunk(text, "", "anything") == text
+    assert _excerpt_from_chunk(text, "", "anything", doc_title="") == text
+
+
 # One message used to cover four situations, and it named the least likely one:
 # "make sure at least one document has been ingested", shown to a user holding 52
 # documents while a 53rd was indexing (2026-08-17).

@@ -372,6 +372,58 @@ async def test_search_node_augments_chunks_with_section_summaries(test_db, monke
 
 
 @pytest.mark.asyncio
+async def test_search_node_own_text_excludes_a_neighbour_from_another_section(test_db):
+    """`own_text` never carries a neighbour's content, even one search_node's
+    own context-expansion legitimately pulled in for the model to read.
+
+    chunk_index is a document-wide counter that does not reset at a section
+    boundary, so the "previous" neighbour of a section's first chunk is
+    routinely the last chunk of the PREVIOUS section -- real, verbatim text,
+    just not text this citation's section_heading can claim. `source_text`
+    is right to include it (that's what expansion is for); `own_text`, the
+    only field safe to build a citation excerpt from, must not.
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+
+    async with factory() as session:
+        session.add(
+            ChunkModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                section_id=str(uuid.uuid4()),
+                text="Tail sentence that belongs to the previous section.",
+                chunk_index=0,
+            )
+        )
+        await session.commit()
+
+    mock_chunk = ScoredChunk(
+        chunk_id=str(uuid.uuid4()),
+        document_id=doc_id,
+        text="Opening sentence of the current section.",
+        section_heading="Heading",
+        page=1,
+        score=0.9,
+        source="vector",
+        chunk_index=1,
+    )
+    mock_retriever = MagicMock()
+    mock_retriever.retrieve_with_images = AsyncMock(return_value=([mock_chunk], []))
+
+    with patch("app.runtime.chat_nodes.search.get_retriever", return_value=mock_retriever):
+        result = await search_node(
+            _make_state(question="What does the current section say?", doc_ids=[doc_id])
+        )
+
+    chunk = result["chunks"][0]
+    assert "previous section" in chunk["source_text"]
+    assert "previous section" not in chunk["own_text"]
+    assert chunk["own_text"] == mock_chunk.text
+
+
+@pytest.mark.asyncio
 async def test_search_node_omits_section_summaries_by_default(test_db):
     """The default is not to attach, and the default is what ships.
 

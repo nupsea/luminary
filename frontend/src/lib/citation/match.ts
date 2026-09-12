@@ -18,8 +18,31 @@
 /** Below this a match lands on any sentence and points the reader at the wrong place. */
 export const MIN_MATCH_CHARS = 24
 
+/**
+ * Markdown syntax ingestion keeps verbatim in chunk text (I-33) but that the
+ * rendered reader strips before the text ever reaches the DOM: code fences,
+ * inline-code backticks, emphasis markers, and a leading blockquote `>`.
+ * Left in, a marker glues onto its neighbour ("`document", "*index",
+ * "textbook*.") and the word never recurs in rendered prose, so an excerpt
+ * landing on a code block, an emphasised term, or a blockquote (an "Analogy:"
+ * callout, common in a technical/instructional document) can fail to clear
+ * MIN_MATCH_CHARS anywhere and silently produce no highlight at all.
+ *
+ * A bare `>` is doubly dangerous: markWords' own guard against re-wrapping an
+ * existing `<mark>` annotation skips any match containing `<` or `>`, so a
+ * blockquote token left in a citation's word list reads as "this match spans
+ * a tag" and the whole run is silently refused, not just mismatched.
+ */
+function stripMarkdownSyntax(text: string): string {
+  return text
+    .replace(/`{3,}/g, " ")
+    .replace(/`/g, "")
+    .replace(/\*+/g, "")
+    .replace(/(^|\s)>+(?=\s|$)/g, "$1")
+}
+
 export function normalise(text: string | null | undefined): string {
-  return (text ?? "").replace(/\s+/g, " ").trim()
+  return stripMarkdownSyntax(text ?? "").replace(/\s+/g, " ").trim()
 }
 
 /**
@@ -65,9 +88,27 @@ export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-/** A regex matching `words` with any whitespace run between them. */
+/**
+ * Markdown noise `wordsPattern` tolerates anywhere -- including mid-word.
+ *
+ * `stripMarkdownSyntax` removes these before a word list is built, but
+ * `wordsPattern` searches the RAW markdown source (`markWords` marks up the
+ * section body before it is rendered, not after -- see ReadView.tsx), where
+ * they are still there. A `\s+` join between words is not enough: a closing
+ * backtick can sit with no whitespace on either side, right against trailing
+ * punctuation ("`document → words`, store" -- "words`," has no word boundary
+ * for `\s+` to land on at all). Tolerating it between every character, not
+ * just between words, is what actually finds "words," in "words`,".
+ */
+const _MARKDOWN_NOISE_CLASS = "[`*]*"
+
+function fuzzyEscape(word: string): string {
+  return word.split("").map(escapeRegExp).join(_MARKDOWN_NOISE_CLASS)
+}
+
+/** A regex matching `words` with any whitespace (and stray Markdown syntax) between them. */
 export function wordsPattern(words: string[], flags = "i"): RegExp {
-  return new RegExp(words.map(escapeRegExp).join("\\s+"), flags)
+  return new RegExp(words.map(fuzzyEscape).join(`[\`*\\s]+`), flags)
 }
 
 /**

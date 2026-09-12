@@ -41,6 +41,49 @@ describe("longestPresentRun", () => {
   })
 })
 
+describe("normalise / markdown syntax", () => {
+  it("strips code fences, inline backticks, and bold markers", () => {
+    expect(normalise("Instead of storing `document → words`")).toBe(
+      "Instead of storing document → words",
+    )
+    expect(normalise("Each entry (a **posting list**) also stores")).toBe(
+      "Each entry (a posting list) also stores",
+    )
+    expect(normalise("``` \"neural\" → [doc3] ```")).toBe('"neural" → [doc3]')
+  })
+
+  it("strips italic emphasis and a leading blockquote marker", () => {
+    // Real citation excerpt from retrieval_and_memory_tutorial.md, section 1.1:
+    // a blockquote "Analogy:" callout. A bare `>` surviving into the word list
+    // is worse than a missed match -- markWords' own guard against re-wrapping
+    // an existing <mark> annotation skips ANY match containing `<` or `>`, so
+    // this makes the whole run silently unmarkable, not just mismatched.
+    expect(normalise("an inverted index is the *index at the back of a textbook*.")).toBe(
+      "an inverted index is the index at the back of a textbook.",
+    )
+    expect(normalise("> **Analogy:** an inverted index")).toBe("Analogy: an inverted index")
+  })
+
+  it("finds a run across a Markdown code block and bold term the rendered DOM never shows", () => {
+    // The real excerpt _excerpt_from_chunk selected for retrieval_and_memory_tutorial.md
+    // 1.1 (I-33: kept verbatim, backticks and all). The reader renders the same
+    // section with react-markdown, which drops every one of these markers.
+    const excerpt =
+      "The core data structure. Instead of storing `document → words`, store " +
+      "`word → documents`: ``` \"neural\" → [doc3, doc17, doc42] \"network\" → " +
+      "[doc3, doc9, doc17] \"protocol\" → [doc9, doc51] ``` Each entry (a **posting " +
+      "list**) also stores term frequency and positions."
+    const rendered =
+      "The core data structure. Instead of storing document → words, store word " +
+      "→ documents: \"neural\" → [doc3, doc17, doc42] \"network\" → [doc3, doc9, " +
+      "doc17] \"protocol\" → [doc9, doc51] Each entry (a posting list) also stores " +
+      "term frequency and positions."
+
+    const got = longestPresentRun(words(excerpt), rendered)
+    expect(got.join(" ")).toBe(normalise(excerpt))
+  })
+})
+
 describe("endsOnWordBoundary", () => {
   it("accepts a later occurrence when the first falls inside a word", () => {
     expect(endsOnWordBoundary("cat", "concatenate the cat")).toBe(true)
