@@ -9,13 +9,17 @@
  * back.
  */
 
+import { useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { syntaxTree } from "@codemirror/language"
 import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from "@codemirror/view"
+import { Check, ChevronDown, ChevronUp, Copy, Pencil, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { type ExcalidrawNoteDiagramRef } from "@/lib/noteDiagrams"
+import { moveBlockOrLineSpec } from "./markdownEditorCommands"
 
 import {
   caretInTableRow,
@@ -36,6 +40,8 @@ const hiddenBlock = Decoration.replace({ block: true })
 const quoteLine = Decoration.line({ class: "cm-md-quote" })
 const codeLine = Decoration.line({ class: "cm-md-code" })
 const fenceLine = Decoration.line({ class: "cm-md-fence" })
+const tableLine = Decoration.line({ class: "cm-md-table-line" })
+const mathLine = Decoration.line({ class: "cm-md-math-line" })
 
 /** The sidecar an excalidraw diagram is paired with; the renderer needs both. */
 const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
@@ -43,6 +49,127 @@ const EXCALIDRAW_COMMENT = /^<!-- luminary:excalidraw=.+ -->$/
 export interface LiveMarkdownOptions {
   /** Gives a rendered diagram the same edit button the preview has. */
   onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+function RenderedBlockContent({
+  source,
+  delimited,
+  view,
+  host,
+  onEditDiagram,
+}: {
+  source: string
+  delimited: boolean
+  view: EditorView
+  host: HTMLElement
+  onEditDiagram?: (diagram: ExcalidrawNoteDiagramRef) => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const handleMove = (dir: -1 | 1) => {
+    const from = view.posAtDOM(host)
+    // Anchor at the target block to ensure correct block movement even if editor was focused elsewhere
+    const stateWithPos = view.state.update({ selection: { anchor: from } }).state
+    const spec = moveBlockOrLineSpec(stateWithPos, dir)
+    if (spec) {
+      view.dispatch(spec)
+      view.focus()
+    }
+  }
+
+  const handleEdit = () => {
+    const from = view.posAtDOM(host)
+    const firstLine = view.state.doc.lineAt(from)
+    const offset = firstEditableLine(delimited)
+    const line = view.state.doc.line(Math.min(firstLine.number + offset, view.state.doc.lines))
+    view.dispatch({ selection: { anchor: line.to } })
+    view.focus()
+  }
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(source)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+    toast.success("Block markdown copied")
+  }
+
+  const handleDelete = () => {
+    const from = view.posAtDOM(host)
+    const firstLine = view.state.doc.lineAt(from)
+    const lines = source.split("\n").length
+    const endLine = view.state.doc.line(Math.min(firstLine.number + lines - 1, view.state.doc.lines))
+    let deleteTo = endLine.to
+    if (endLine.number < view.state.doc.lines && view.state.doc.line(endLine.number + 1).text.trim() === "") {
+      deleteTo = view.state.doc.line(endLine.number + 1).to
+    }
+    view.dispatch({ changes: { from: firstLine.from, to: deleteTo, insert: "" } })
+    view.focus()
+  }
+
+  return (
+    <div className="relative">
+      <div
+        className="absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border/80 bg-background/95 px-1 py-0.5 shadow-sm backdrop-blur-sm opacity-0 transition-opacity duration-150 group-hover/md-block:opacity-100 not-prose"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={() => handleMove(-1)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title="Move block up (Alt+Up)"
+        >
+          <ChevronUp size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => handleMove(1)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title="Move block down (Alt+Down)"
+        >
+          <ChevronDown size={13} />
+        </button>
+        <div className="mx-0.5 h-3 w-px bg-border" />
+        <button
+          type="button"
+          onClick={handleEdit}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title="Edit markdown source"
+        >
+          <Pencil size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title="Copy markdown"
+        >
+          {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          title="Delete block"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+
+      <MarkdownRenderer
+        reading
+        onEditExcalidrawDiagram={
+          onEditDiagram &&
+          ((diagram) => {
+            const base = view.posAtDOM(host)
+            onEditDiagram({ ...diagram, start: diagram.start + base, end: diagram.end + base })
+          })
+        }
+      >
+        {source}
+      </MarkdownRenderer>
+    </div>
+  )
 }
 
 class RenderedBlock extends WidgetType {
@@ -68,24 +195,16 @@ class RenderedBlock extends WidgetType {
 
   toDOM(view: EditorView) {
     const host = document.createElement("div")
-    host.className = "cm-md-block"
+    host.className = "cm-md-block group/md-block relative my-2"
     this.root = createRoot(host)
-    const edit = this.onEditDiagram
     this.root.render(
-      <MarkdownRenderer
-        reading
-        onEditExcalidrawDiagram={
-          edit &&
-          ((diagram) => {
-            // The renderer measured the diagram inside this block; the note it
-            // is written back to is the whole document.
-            const base = view.posAtDOM(host)
-            edit({ ...diagram, start: diagram.start + base, end: diagram.end + base })
-          })
-        }
-      >
-        {this.source}
-      </MarkdownRenderer>,
+      <RenderedBlockContent
+        source={this.source}
+        delimited={this.delimited}
+        view={view}
+        host={host}
+        onEditDiagram={this.onEditDiagram}
+      />,
     )
     // The renderer paints after this returns, and an image finishes later
     // still, so the height CodeMirror measured here is always the wrong one.
@@ -201,12 +320,30 @@ function decorate(state: EditorState, options: LiveMarkdownOptions): DecorationS
     return true
   }
 
-  for (const { from, to } of mathBlockRanges(state.doc.toString())) renderBlock(from, to, true)
+  for (const { from, to } of mathBlockRanges(state.doc.toString())) {
+    if (!renderBlock(from, to, true)) {
+      const first = state.doc.lineAt(from).number
+      const last = state.doc.lineAt(to).number
+      for (let n = first; n <= last; n++) {
+        const line = state.doc.line(n)
+        marks.push(mathLine.range(line.from))
+      }
+    }
+  }
 
   syntaxTree(state).iterate({
     enter: (node) => {
       if (rendersAsBlock(node.name)) {
-        renderBlock(node.from, node.to, isDelimitedBlock(node.name))
+        if (!renderBlock(node.from, node.to, isDelimitedBlock(node.name))) {
+          if (node.name === "Table") {
+            const first = state.doc.lineAt(node.from).number
+            const last = state.doc.lineAt(node.to).number
+            for (let n = first; n <= last; n++) {
+              const line = state.doc.line(n)
+              marks.push(tableLine.range(line.from))
+            }
+          }
+        }
         return false
       }
       if (node.name === "FencedCode" && !renderBlock(node.from, node.to, true)) {
@@ -272,15 +409,62 @@ const liveTheme = EditorView.theme({
     paddingLeft: "10px",
     color: "hsl(var(--muted-foreground))",
   },
-  ".cm-md-block": { margin: "4px 0" },
+  ".cm-md-block": { margin: "8px 0", position: "relative" },
   ".cm-md-code": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.92em",
     backgroundColor: "hsl(var(--muted) / 0.6)",
   },
   ".cm-md-fence": { color: "hsl(var(--muted-foreground))", opacity: "0.55" },
+  ".cm-md-table-line": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.90em",
+    letterSpacing: "-0.01em",
+    lineHeight: "1.6",
+    backgroundColor: "hsl(var(--muted) / 0.25)",
+    paddingLeft: "4px",
+  },
+  ".cm-md-math-line": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.92em",
+    backgroundColor: "hsl(var(--primary) / 0.05)",
+    borderLeft: "2px solid hsl(var(--primary) / 0.5)",
+    paddingLeft: "8px",
+  },
   ".cm-md-block img": { maxWidth: "100%", height: "auto" },
-  ".cm-md-block table": { fontSize: "0.9em" },
+  ".cm-md-block table": {
+    width: "auto",
+    minWidth: "min(100%, 320px)",
+    maxWidth: "100%",
+    borderCollapse: "collapse",
+    margin: "6px 0",
+    fontSize: "0.875rem",
+    lineHeight: "1.4",
+  },
+  ".cm-md-block th": {
+    padding: "6px 12px",
+    backgroundColor: "hsl(var(--muted) / 0.6)",
+    color: "hsl(var(--foreground))",
+    fontWeight: "600",
+    fontSize: "0.75rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    border: "1px solid hsl(var(--border))",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+  },
+  ".cm-md-block td": {
+    padding: "6px 12px",
+    border: "1px solid hsl(var(--border))",
+    color: "hsl(var(--foreground) / 0.9)",
+    verticalAlign: "top",
+  },
+  ".cm-md-block tr:nth-child(even) td": {
+    backgroundColor: "hsl(var(--muted) / 0.15)",
+  },
+  ".cm-md-block tr:hover td": {
+    backgroundColor: "hsl(var(--accent) / 0.3)",
+  },
 })
 
 // A state field, not a view plugin: CodeMirror refuses block decorations from
@@ -292,6 +476,7 @@ const liveTheme = EditorView.theme({
  * reveals it.
  */
 function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -1): boolean {
+  if (!view.state.selection.main.empty) return false
   const { doc } = view.state
   const head = view.state.selection.main.head
   const line = doc.lineAt(head)
@@ -309,7 +494,13 @@ function stepInto(view: EditorView, field: StateField<DecorationSet>, dir: 1 | -
       dir === 1
         ? firstEditableLine(widget.delimited)
         : clickedSourceLine(null, lines, widget.delimited)
-    anchor = doc.line(Math.min(doc.lineAt(from).number + offset, doc.lines)).to
+    const targetLine = doc.line(Math.min(doc.lineAt(from).number + offset, doc.lines))
+    if (targetLine.text.includes("|")) {
+      const cellPos = caretInTableRow(targetLine.text, 0)
+      anchor = targetLine.from + cellPos
+    } else {
+      anchor = targetLine.to
+    }
   })
   if (anchor === null) return false
   view.dispatch({ selection: { anchor }, scrollIntoView: true })

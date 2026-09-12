@@ -19,10 +19,14 @@ import {
 import { languages } from "@codemirror/language-data"
 import { tags as t } from "@lezer/highlight"
 import {
+  insertBlockBreakSpec,
   insertBlockSpec,
   insertInlineSpec,
+  moveBlockOrLineSpec,
   replaceSelectionSpec,
   syncDocSpec,
+  tableNextCellSpec,
+  tablePrevCellSpec,
   toggleInlineMarkSpec,
 } from "./markdownEditorCommands"
 import {
@@ -216,6 +220,63 @@ export const MarkdownCodeEditor = forwardRef<MarkdownEditorHandle, MarkdownCodeE
             keymap.of([
               { key: "Enter", run: insertNewlineContinueMarkup },
               { key: "Backspace", run: deleteMarkupBackward },
+              {
+                key: "Tab",
+                run: (v) => {
+                  const spec = tableNextCellSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
+              {
+                key: "Shift-Tab",
+                run: (v) => {
+                  const spec = tablePrevCellSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
+              {
+                key: "Alt-ArrowUp",
+                mac: "Alt-ArrowUp",
+                run: (v) => {
+                  const spec = moveBlockOrLineSpec(v.state, -1)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
+              {
+                key: "Alt-ArrowDown",
+                mac: "Alt-ArrowDown",
+                run: (v) => {
+                  const spec = moveBlockOrLineSpec(v.state, 1)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
+              {
+                key: "Mod-Enter",
+                run: (v) => {
+                  const spec = insertBlockBreakSpec(v.state)
+                  if (spec) {
+                    v.dispatch(spec)
+                    return true
+                  }
+                  return false
+                },
+              },
               {
                 key: "Mod-b",
                 run: (v) => {

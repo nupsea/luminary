@@ -123,3 +123,421 @@ export function toggleInlineMarkSpec(state: EditorState, marker: string): Transa
       : { anchor: from + mlen },
   }
 }
+
+export interface EnclosingBlock {
+  from: number
+  to: number
+  startLine: number
+  endLine: number
+  type: "math" | "table" | "code"
+}
+
+/**
+ * Identify whether `pos` sits within a structured markdown block (display math, table, or code).
+ */
+export function findEnclosingBlock(state: EditorState, pos: number): EnclosingBlock | null {
+  if (pos < 0 || pos > state.doc.length) return null
+  const currentLine = state.doc.lineAt(pos)
+  const totalLines = state.doc.lines
+
+  // 1. Check Math block: $$ ... $$
+  let mathOpenLine: number | null = null
+  for (let ln = currentLine.number; ln >= 1; ln--) {
+    const text = state.doc.line(ln).text.trim()
+    if (text === "$$") {
+      let isCloseOfPrevious = false
+      let countAbove = 0
+      for (let up = ln - 1; up >= 1; up--) {
+        if (state.doc.line(up).text.trim() === "$$") countAbove++
+      }
+      if (countAbove % 2 === 1 && ln === currentLine.number) {
+        isCloseOfPrevious = true
+      }
+      if (isCloseOfPrevious) {
+        for (let up = ln - 1; up >= 1; up--) {
+          if (state.doc.line(up).text.trim() === "$$") {
+            const openL = state.doc.line(up)
+            const closeL = state.doc.line(ln)
+            return {
+              from: openL.from,
+              to: closeL.to,
+              startLine: openL.number,
+              endLine: closeL.number,
+              type: "math",
+            }
+          }
+        }
+      }
+      mathOpenLine = ln
+      break
+    }
+  }
+
+  if (mathOpenLine !== null) {
+    let mathCloseLine: number | null = null
+    for (let ln = mathOpenLine + 1; ln <= totalLines; ln++) {
+      if (state.doc.line(ln).text.trim() === "$$") {
+        mathCloseLine = ln
+        break
+      }
+    }
+    if (mathCloseLine !== null && currentLine.number <= mathCloseLine) {
+      const openL = state.doc.line(mathOpenLine)
+      const closeL = state.doc.line(mathCloseLine)
+      return {
+        from: openL.from,
+        to: closeL.to,
+        startLine: openL.number,
+        endLine: closeL.number,
+        type: "math",
+      }
+    }
+  }
+
+  // 2. Check Fenced Code Block: ``` or ~~~
+  let codeOpenLine: number | null = null
+  let codeFenceChar = ""
+  for (let ln = currentLine.number; ln >= 1; ln--) {
+    const text = state.doc.line(ln).text.trim()
+    const match = text.match(/^(`{3,}|~{3,})/)
+    if (match) {
+      let countAbove = 0
+      for (let up = ln - 1; up >= 1; up--) {
+        const upText = state.doc.line(up).text.trim()
+        if (upText.startsWith(match[1])) countAbove++
+      }
+      if (countAbove % 2 === 1 && ln === currentLine.number) {
+        // Closing fence on current line
+        for (let up = ln - 1; up >= 1; up--) {
+          const upText = state.doc.line(up).text.trim()
+          if (upText.startsWith(match[1])) {
+            const openL = state.doc.line(up)
+            const closeL = state.doc.line(ln)
+            return {
+              from: openL.from,
+              to: closeL.to,
+              startLine: openL.number,
+              endLine: closeL.number,
+              type: "code",
+            }
+          }
+        }
+      }
+      codeOpenLine = ln
+      codeFenceChar = match[1]
+      break
+    }
+  }
+  if (codeOpenLine !== null) {
+    let codeCloseLine: number | null = null
+    const fencePrefix = codeFenceChar[0].repeat(codeFenceChar.length)
+    for (let ln = codeOpenLine + 1; ln <= totalLines; ln++) {
+      const text = state.doc.line(ln).text.trim()
+      if (text.startsWith(fencePrefix)) {
+        codeCloseLine = ln
+        break
+      }
+    }
+    if (codeCloseLine !== null && currentLine.number <= codeCloseLine) {
+      const openL = state.doc.line(codeOpenLine)
+      const closeL = state.doc.line(codeCloseLine)
+      return {
+        from: openL.from,
+        to: closeL.to,
+        startLine: openL.number,
+        endLine: closeL.number,
+        type: "code",
+      }
+    }
+  }
+
+  // 3. Check Table: consecutive lines containing | and having a header separator
+  if (currentLine.text.includes("|")) {
+    let tableStart = currentLine.number
+    while (
+      tableStart > 1 &&
+      state.doc.line(tableStart - 1).text.includes("|") &&
+      state.doc.line(tableStart - 1).text.trim().length > 0
+    ) {
+      tableStart--
+    }
+    let tableEnd = currentLine.number
+    while (
+      tableEnd < totalLines &&
+      state.doc.line(tableEnd + 1).text.includes("|") &&
+      state.doc.line(tableEnd + 1).text.trim().length > 0
+    ) {
+      tableEnd++
+    }
+    if (tableEnd > tableStart) {
+      let hasSep = false
+      for (let ln = tableStart; ln <= tableEnd; ln++) {
+        if (/\|[\s:-]+-+\s*\|/.test(state.doc.line(ln).text)) {
+          hasSep = true
+          break
+        }
+      }
+      if (hasSep) {
+        const startL = state.doc.line(tableStart)
+        const endL = state.doc.line(tableEnd)
+        return {
+          from: startL.from,
+          to: endL.to,
+          startLine: startL.number,
+          endLine: endL.number,
+          type: "table",
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Move the current block (or current line) up (-1) or down (1).
+ * When cursor is inside a math block, table, or code block, moves the entire block as a unit,
+ * seamlessly swapping past adjacent blocks or paragraphs.
+ */
+export function moveBlockOrLineSpec(state: EditorState, dir: -1 | 1): TransactionSpec | null {
+  const { from, to } = state.selection.main
+  const block = findEnclosingBlock(state, from)
+
+  if (block) {
+    const startLine = block.startLine
+    const endLine = block.endLine
+    const blockText = state.sliceDoc(block.from, block.to)
+
+    if (dir === -1) {
+      // Move UP
+      if (startLine <= 1) return null
+      let targetLineNum = startLine - 1
+      while (targetLineNum > 1 && state.doc.line(targetLineNum).text.trim() === "") {
+        targetLineNum--
+      }
+      const aboveBlock = findEnclosingBlock(state, state.doc.line(targetLineNum).from)
+      const targetStartLine = aboveBlock ? aboveBlock.startLine : targetLineNum
+      const targetFrom = state.doc.line(targetStartLine).from
+      const aboveText = state.sliceDoc(targetFrom, block.from).trim()
+
+      const newText = `${blockText}\n\n${aboveText}`
+      const replaceTo = block.to
+      const relOffset = Math.min(from - block.from, blockText.length)
+      return {
+        changes: { from: targetFrom, to: replaceTo, insert: newText },
+        selection: { anchor: targetFrom + relOffset },
+        scrollIntoView: true,
+      }
+    } else {
+      // Move DOWN
+      if (endLine >= state.doc.lines) return null
+      let targetLineNum = endLine + 1
+      while (targetLineNum < state.doc.lines && state.doc.line(targetLineNum).text.trim() === "") {
+        targetLineNum++
+      }
+      const belowBlock = findEnclosingBlock(state, state.doc.line(targetLineNum).from)
+      const targetEndLine = belowBlock ? belowBlock.endLine : targetLineNum
+      const targetTo = state.doc.line(targetEndLine).to
+      const belowText = state.sliceDoc(block.to, targetTo).trim()
+
+      const newText = `${belowText}\n\n${blockText}`
+      const targetFrom = block.from
+      const newBlockStart = targetFrom + belowText.length + 2 // length + \n\n
+      const relOffset = Math.min(from - block.from, blockText.length)
+      return {
+        changes: { from: targetFrom, to: targetTo, insert: newText },
+        selection: { anchor: newBlockStart + relOffset },
+        scrollIntoView: true,
+      }
+    }
+  }
+
+  // Normal line motion
+  const lineFrom = state.doc.lineAt(from)
+  const lineTo = state.doc.lineAt(to)
+  if (dir === -1) {
+    if (lineFrom.number <= 1) return null
+    const prevLine = state.doc.line(lineFrom.number - 1)
+    const movingText = state.sliceDoc(lineFrom.from, lineTo.to)
+    const prevText = prevLine.text
+    return {
+      changes: [
+        { from: prevLine.from, to: lineTo.to, insert: `${movingText}\n${prevText}` },
+      ],
+      selection: { anchor: prevLine.from + (from - lineFrom.from) },
+      scrollIntoView: true,
+    }
+  } else {
+    if (lineTo.number >= state.doc.lines) return null
+    const nextLine = state.doc.line(lineTo.number + 1)
+    const movingText = state.sliceDoc(lineFrom.from, lineTo.to)
+    const nextText = nextLine.text
+    return {
+      changes: [
+        { from: lineFrom.from, to: nextLine.to, insert: `${nextText}\n${movingText}` },
+      ],
+      selection: { anchor: lineFrom.from + nextText.length + 1 + (from - lineFrom.from) },
+      scrollIntoView: true,
+    }
+  }
+}
+
+/**
+ * Navigate to next cell in a markdown table on Tab.
+ * If at end of row, moves to next row.
+ * If at end of last row, automatically appends a new row with matching column count!
+ */
+export function tableNextCellSpec(state: EditorState): TransactionSpec | null {
+  const { from } = state.selection.main
+  const line = state.doc.lineAt(from)
+  if (!line.text.includes("|")) return null
+
+  const parts = line.text.split("|")
+  if (parts.length < 3) return null
+
+  const colIndex = from - line.from
+  let cumLen = 0
+  let currentPipeIndex = 0
+  for (let i = 0; i < parts.length; i++) {
+    cumLen += parts[i].length + (i > 0 ? 1 : 0)
+    if (colIndex <= cumLen) {
+      currentPipeIndex = i
+      break
+    }
+  }
+
+  // Next cell in same row
+  if (currentPipeIndex < parts.length - 2) {
+    const nextPipeIdx = currentPipeIndex + 1
+    const cellStart = parts.slice(0, nextPipeIdx).join("|").length + 1
+    const cellText = parts[nextPipeIdx]
+    const contentOffset = cellText.startsWith(" ") ? 1 : 0
+    return {
+      selection: { anchor: line.from + cellStart + contentOffset },
+      scrollIntoView: true,
+    }
+  }
+
+  // Last cell in row -> move to next row
+  const nextLineNum = line.number + 1
+  if (nextLineNum <= state.doc.lines) {
+    const nextLine = state.doc.line(nextLineNum)
+    if (nextLine.text.includes("|")) {
+      if (/\|[\s:-]+-+\s*\|/.test(nextLine.text)) {
+        if (nextLineNum + 1 <= state.doc.lines) {
+          const rowAfter = state.doc.line(nextLineNum + 1)
+          if (rowAfter.text.includes("|")) {
+            const firstCellOffset = rowAfter.text.indexOf("|") + 1
+            const spaceOffset = rowAfter.text.slice(firstCellOffset).startsWith(" ") ? 1 : 0
+            return {
+              selection: { anchor: rowAfter.from + firstCellOffset + spaceOffset },
+              scrollIntoView: true,
+            }
+          }
+        }
+      } else {
+        const firstCellOffset = nextLine.text.indexOf("|") + 1
+        const spaceOffset = nextLine.text.slice(firstCellOffset).startsWith(" ") ? 1 : 0
+        return {
+          selection: { anchor: nextLine.from + firstCellOffset + spaceOffset },
+          scrollIntoView: true,
+        }
+      }
+    }
+  }
+
+  // At the very end of table -> append a new row
+  const colCount = Math.max(1, parts.length - 2)
+  const newRow = "\n| " + Array(colCount).fill(" ").join(" | ") + " |"
+  const insertPos = line.to
+  return {
+    changes: { from: insertPos, to: insertPos, insert: newRow },
+    selection: { anchor: insertPos + 3 },
+    scrollIntoView: true,
+  }
+}
+
+/**
+ * Navigate to previous cell in a markdown table on Shift-Tab.
+ */
+export function tablePrevCellSpec(state: EditorState): TransactionSpec | null {
+  const { from } = state.selection.main
+  const line = state.doc.lineAt(from)
+  if (!line.text.includes("|")) return null
+
+  const parts = line.text.split("|")
+  if (parts.length < 3) return null
+
+  const colIndex = from - line.from
+  let cumLen = 0
+  let currentPipeIndex = 0
+  for (let i = 0; i < parts.length; i++) {
+    cumLen += parts[i].length + (i > 0 ? 1 : 0)
+    if (colIndex <= cumLen) {
+      currentPipeIndex = i
+      break
+    }
+  }
+
+  if (currentPipeIndex > 1) {
+    const prevPipeIdx = currentPipeIndex - 1
+    const cellStart = parts.slice(0, prevPipeIdx).join("|").length + 1
+    const cellText = parts[prevPipeIdx]
+    const contentOffset = cellText.startsWith(" ") ? 1 : 0
+    return {
+      selection: { anchor: line.from + cellStart + contentOffset },
+      scrollIntoView: true,
+    }
+  }
+
+  // First cell in row -> move to last cell of previous row
+  const prevLineNum = line.number - 1
+  if (prevLineNum >= 1) {
+    let targetPrevNum = prevLineNum
+    let targetPrevLine = state.doc.line(targetPrevNum)
+    if (targetPrevLine.text.includes("|") && /\|[\s:-]+-+\s*\|/.test(targetPrevLine.text)) {
+      if (targetPrevNum - 1 >= 1) {
+        targetPrevNum--
+        targetPrevLine = state.doc.line(targetPrevNum)
+      }
+    }
+    if (targetPrevLine.text.includes("|")) {
+      const prevParts = targetPrevLine.text.split("|")
+      if (prevParts.length >= 3) {
+        const lastCellIdx = prevParts.length - 2
+        const cellStart = prevParts.slice(0, lastCellIdx).join("|").length + 1
+        const cellText = prevParts[lastCellIdx]
+        const contentOffset = cellText.startsWith(" ") ? 1 : 0
+        return {
+          selection: { anchor: targetPrevLine.from + cellStart + contentOffset },
+          scrollIntoView: true,
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Insert a clean line/paragraph break below the current block (Mod-Enter).
+ * Allows instantly escaping any block without breaking delimiters.
+ */
+export function insertBlockBreakSpec(state: EditorState): TransactionSpec | null {
+  const { from } = state.selection.main
+  const block = findEnclosingBlock(state, from)
+  if (block) {
+    const insertPos = block.to
+    return {
+      changes: { from: insertPos, to: insertPos, insert: "\n\n" },
+      selection: { anchor: insertPos + 2 },
+      scrollIntoView: true,
+    }
+  }
+  const line = state.doc.lineAt(from)
+  return {
+    changes: { from: line.to, to: line.to, insert: "\n" },
+    selection: { anchor: line.to + 1 },
+    scrollIntoView: true,
+  }
+}
