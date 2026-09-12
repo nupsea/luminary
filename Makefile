@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -625,6 +625,8 @@ eval-all:
 	$(MAKE) eval
 	$(MAKE) eval-routing
 	$(MAKE) eval-gen
+	$(MAKE) eval-chat-routing
+	$(MAKE) eval-refusal
 	$(MAKE) eval-intent
 	$(MAKE) eval-topics
 

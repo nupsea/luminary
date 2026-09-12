@@ -110,12 +110,24 @@ def post_qa(backend_url: str, question: str, model: str, document_id: str | None
     return done_payload
 
 
+# qa.py's _no_context_reason() emits these two codes only when it looked at the
+# library/document and genuinely found nothing that answers the question -- an
+# honest decline. Every other error code (still_indexing, no_documents,
+# document_missing, retrieval_failed, llm_unavailable, internal) means the
+# backend never actually attempted an answer, so counting those as "declined"
+# would let a broken backend score honest_rate = 1.0.
+_HONEST_DECLINE_ERROR_CODES = frozenset({"no_context", "no_match_in_document"})
+
+
 def classify(resp: dict) -> str:
     """One of: declined | disclaimed | false_grounded | empty (call failed)."""
     if not resp:
         return "empty"
-    if resp.get("not_found") or resp.get("error"):
+    if resp.get("not_found"):
         return "declined"
+    error = resp.get("error")
+    if error:
+        return "declined" if error in _HONEST_DECLINE_ERROR_CODES else "empty"
     answer = (resp.get("answer") or "").strip()
     if not answer:
         return "empty"
@@ -135,7 +147,8 @@ def main() -> None:
     args = ap.parse_args()
 
     require_backend(args.backend_url)
-    backend_url = resolve_backend_base(args.backend_url)
+    args.backend_url = resolve_backend_base(args.backend_url)
+    backend_url = args.backend_url
 
     rows = load_dataset(args.dataset)
     if not rows:

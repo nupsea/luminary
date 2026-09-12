@@ -11,16 +11,16 @@ decomposition fails.
 import asyncio
 import json
 import logging
+import time
 
 from sqlalchemy import func, select
 
 from app.database import get_session_factory
 from app.models import DocumentModel
-from app.runtime.chat_nodes._shared import _chunk_to_dict, _round_robin
+from app.runtime.chat_nodes._shared import _chunk_to_dict, _read_rerank_enabled, _round_robin
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.llm import get_llm_service
 from app.services.retriever import get_retriever
-from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState
 
 logger = logging.getLogger(__name__)
@@ -157,17 +157,19 @@ async def comparative_node(state: ChatState) -> dict:
     scope = state.get("scope", "all")
     effective_doc_ids = doc_ids if scope == "single" else None
     retriever = get_retriever()
+    rerank = await _read_rerank_enabled(logger, "comparative_node")
 
-    try:
-        async with get_session_factory()() as session:
-            rerank = await get_rerank_enabled(session)
-    except Exception as exc:
-        logger.warning(
-            "comparative_node: could not read rerank setting, defaulting off: %s", exc
-        )
-        rerank = False
-
+    # Sequential LLM call before any retrieval starts -- on a small local model
+    # this alone can be a double-digit-second cost that never shows up in the
+    # UI's "first token" figure, which times only the final-answer LLM call
+    # (qa.py's t_llm), not this decomposition call or the retrieval below.
+    t_decompose = time.perf_counter()
     decomposed = await _decompose_comparison(question)
+    logger.info(
+        "[perf] comparative_node: decomposition took %.2fs (matched=%s)",
+        time.perf_counter() - t_decompose,
+        bool(decomposed),
+    )
 
     if decomposed:
         sides: list[str] = decomposed["sides"]
@@ -210,8 +212,16 @@ async def comparative_node(state: ChatState) -> dict:
                 )
                 return []
 
+        t_retrieve = time.perf_counter()
         per_side_chunks_raw: list[list[dict]] = await asyncio.gather(
             *[_retrieve_for_side(side, docs) for side, docs in zip(sides, resolved, strict=True)]
+        )
+        logger.info(
+            "[perf] comparative_node: %d-side retrieval took %.2fs (fetch_k=%d, rerank=%s)",
+            len(sides),
+            time.perf_counter() - t_retrieve,
+            fetch_k,
+            rerank,
         )
 
         # A chunk retrieved by an earlier side is not repeated for a later one:

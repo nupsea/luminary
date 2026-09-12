@@ -226,6 +226,27 @@ def test_extract_entities_from_question_merges_capitalized_phrase():
     assert "Curie" not in entities
 
 
+def test_extract_entities_from_question_keeps_sentence_initial_proper_noun():
+    """A multi-word proper noun that OPENS the question is not the sentence's
+    own capitalized-because-it's-first opener and must not be truncated.
+
+    Unconditionally dropping the question's first word (because a leading
+    interrogative like "What" is capitalized without naming anything) also
+    dropped the first word of a sentence-initial entity: "Marie Curie's
+    notebook was destroyed" extracted only "Curie", the same wrong entity
+    name the pre-fix code produced (I-55).
+    """
+    from app.runtime.chat_nodes.graph import _extract_entities_from_question
+
+    entities = _extract_entities_from_question("Marie Curie's notebook was destroyed")
+    assert "Marie Curie" in entities
+    assert "Curie" not in entities
+
+    entities = _extract_entities_from_question("Inverted Index vs hash tables")
+    assert "Inverted Index" in entities
+    assert "Index" not in entities
+
+
 @pytest.mark.asyncio
 async def test_graph_node_passes_rerank_toggle_and_search_depth(test_db):
     """graph_node's grounding-supplement retrieval matches search_node's depth
@@ -1147,6 +1168,51 @@ async def test_synthesize_node_transparency_augmented_hybrid(test_db):
     assert transparency is not None
     assert transparency["strategy_used"] == "augmented_hybrid"
     assert transparency["augmented"] is True
+
+
+@pytest.mark.asyncio
+async def test_augment_node_passes_rerank_toggle_for_summary_and_comparative(test_db):
+    """augment_node's summary_node and comparative_node branches match
+    search_node's rerank setting, same as the graph_node branch already did.
+
+    Before this, a low-confidence retry after a summary_node or
+    comparative_node primary silently got an unreranked supplement -- the
+    same L2-off failure I-55 exists to prevent, just on the retry path
+    instead of the primary one (I-55).
+    """
+    _engine, factory, _tmp = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc(factory, doc_id)
+    mock_chunk = _make_scored_chunk(doc_id, "Heading")
+
+    for primary in ("summary_node", "comparative_node"):
+        mock_retriever = MagicMock()
+        mock_retriever.retrieve = AsyncMock(return_value=[mock_chunk])
+        state = _make_state(
+            question="What is this about?",
+            doc_ids=[doc_id],
+            scope="single",
+            chunks=[],
+            intent="factual",
+            primary_strategy=primary,
+            retry_attempted=False,
+        )
+
+        with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
+            await augment_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is True, primary
+
+        from app.services.settings_service import set_rerank_enabled
+
+        async with factory() as session:
+            await set_rerank_enabled(session, False)
+
+        with patch("app.runtime.chat_nodes.confidence.get_retriever", return_value=mock_retriever):
+            await augment_node(state)
+        assert mock_retriever.retrieve.call_args.kwargs["rerank"] is False, primary
+
+        async with factory() as session:
+            await set_rerank_enabled(session, True)
 
 
 @pytest.mark.asyncio

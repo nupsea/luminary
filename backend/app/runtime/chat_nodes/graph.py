@@ -9,13 +9,11 @@ search (intent='factual') on Kuzu failure or 0 results.
 import logging
 import re
 
-from app.database import get_session_factory
 from app.services import graph as _graph_module  # indirect: get_graph_service is patched
 from app.services.retriever import get_retriever
-from app.services.settings_service import get_rerank_enabled
 from app.types import ChatState, ScoredChunk
 
-from ._shared import _chunk_to_dict
+from ._shared import _chunk_to_dict, _read_rerank_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +25,47 @@ _ENTITY_RE = re.compile(r'["\']([^"\']{2,})["\']')
 # the graph (I-55).
 _CAPITALIZED_PHRASE_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*\b")
 
+# Unconditionally dropping the question's first word (because a sentence
+# opener is capitalized without naming anything) also dropped the first word
+# of a sentence-initial proper noun -- "Marie Curie's notebook..." lost
+# "Marie", extracting only "Curie" (I-55). Only skip the first word when it
+# actually reads as a question opener; otherwise it may be part of the entity.
+_QUESTION_OPENERS = frozenset(
+    {
+        "what",
+        "how",
+        "when",
+        "why",
+        "where",
+        "who",
+        "whose",
+        "which",
+        "is",
+        "are",
+        "was",
+        "were",
+        "does",
+        "do",
+        "did",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "tell",
+        "explain",
+        "describe",
+    }
+)
+
 
 def _extract_entities_from_question(question: str) -> list[str]:
     """Extract potential entity names from a question.
 
     Finds quoted strings first, then runs of capitalized words merged into a
-    single phrase (skipping the question's own first word, which is
-    capitalized because it opens the sentence, not because it names something).
+    single phrase. The sentence's first word is skipped only when it is a
+    question opener ("What is..."); a sentence-initial proper noun is a real
+    entity and must not be dropped (I-55).
     """
     entities: list[str] = []
     seen: set[str] = set()
@@ -45,9 +77,10 @@ def _extract_entities_from_question(question: str) -> list[str]:
             seen.add(name)
             entities.append(name)
 
-    # Capitalized phrases, skipping the sentence's own first word
     first_word, _, rest = question.partition(" ")
-    for m in _CAPITALIZED_PHRASE_RE.finditer(rest):
+    is_opener = first_word.strip(",.?!'\"").lower() in _QUESTION_OPENERS
+    search_text = rest if is_opener else question
+    for m in _CAPITALIZED_PHRASE_RE.finditer(search_text):
         name = m.group(0).strip()
         if name and name not in seen:
             seen.add(name)
@@ -132,12 +165,7 @@ async def graph_node(state: ChatState) -> dict:
     # supplement is what actually has to carry the answer, so it must not be a
     # weaker retrieval than the search path gets (I-55).
     k = 6 if scope == "all" else 10
-    try:
-        async with get_session_factory()() as session:
-            rerank = await get_rerank_enabled(session)
-    except Exception as exc:
-        logger.warning("graph_node: could not read rerank setting, defaulting off: %s", exc)
-        rerank = False
+    rerank = await _read_rerank_enabled(logger, "graph_node")
 
     chunks_dicts: list[dict] = []
     try:
