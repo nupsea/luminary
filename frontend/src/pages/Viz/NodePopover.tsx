@@ -10,6 +10,7 @@ import type { EntityType } from "@/lib/vizUtils"
 
 import { DEFAULT_COLOR, TYPE_COLORS } from "./constants"
 import type { SelectedNodeInfo } from "./types"
+import { getNodeFindInDocUrl } from "./utils"
 
 interface NodePopoverProps {
   node: SelectedNodeInfo
@@ -65,16 +66,9 @@ export function NodePopover({
       )}
       <button
         onClick={() => {
-          const docId = activeDocumentId
-          const entityLabel = node.label
+          const url = getNodeFindInDocUrl(node, activeDocumentId)
           onClose()
-          if (docId) {
-            onNavigate(
-              `/library?doc=${encodeURIComponent(docId)}&search=${encodeURIComponent(entityLabel)}`,
-            )
-          } else {
-            onNavigate(`/library?search=${encodeURIComponent(entityLabel)}`)
-          }
+          onNavigate(url)
         }}
         className="w-full rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors text-center"
       >

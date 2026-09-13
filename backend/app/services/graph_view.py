@@ -168,6 +168,8 @@ class KuzuViewRepo:
                     "size": freq or 1,
                     "source_image_id": "",
                     "mention_count": count or 1,
+                    "document_id": document_id,
+                    "document_ids": [document_id],
                 }
             )
             entity_ids.add(eid)
@@ -210,13 +212,13 @@ class KuzuViewRepo:
         result = self._conn.execute(
             f"MATCH (e:Entity)-[r:MENTIONED_IN]->(d:Document)"
             f" WHERE d.id IN [{placeholders}]"
-            f" RETURN e.id, e.name, e.type, e.frequency, r.count",
+            f" RETURN e.id, e.name, e.type, e.frequency, r.count, d.id",
             params,
         )
         nodes_map: dict[str, dict] = {}
         while result.has_next():
             row = result.get_next()
-            eid, name, etype, freq, count = row
+            eid, name, etype, freq, count, did = row
             if eid not in nodes_map:
                 nodes_map[eid] = {
                     "id": eid,
@@ -225,9 +227,15 @@ class KuzuViewRepo:
                     "size": freq or 1,
                     "source_image_id": "",
                     "mention_count": count or 1,
+                    "document_id": did or "",
+                    "document_ids": [did] if did else [],
                 }
             else:
                 nodes_map[eid]["mention_count"] = nodes_map[eid]["mention_count"] + (count or 1)
+                if did and did not in nodes_map[eid]["document_ids"]:
+                    nodes_map[eid]["document_ids"].append(did)
+                    if not nodes_map[eid].get("document_id"):
+                        nodes_map[eid]["document_id"] = did
 
         entity_ids = set(nodes_map.keys())
         edges: list[dict] = self._get_co_occurrence_edges(entity_ids, document_ids)

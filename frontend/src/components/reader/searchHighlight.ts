@@ -7,12 +7,44 @@
 
 // Distinct from the annotation palette: a search mark is transient UI, not
 // something the reader saved, and the two appear together.
+export const SEARCH_MARK_TOKEN = "luminary-search-mark"
 export const SEARCH_MARK_CLASS =
-  "bg-sky-200 text-sky-950 dark:bg-sky-700 dark:text-sky-50 rounded-sm px-0.5"
+  `bg-sky-200 text-sky-950 dark:bg-sky-700 dark:text-sky-50 rounded-sm px-0.5 ${SEARCH_MARK_TOKEN}`
 
 // One character matches nearly everything and turns the page into a sea of
 // marks; two is the shortest term that still discriminates ("AI", "os").
 const MIN_TERM_LENGTH = 2
+
+function markNeedle(
+  content: string,
+  needle: string,
+  className: string,
+): { result: string; count: number } {
+  const lower = content.toLowerCase()
+  const lowerNeedle = needle.toLowerCase()
+  let result = ""
+  let cursor = 0
+  let insideTag = false
+  let i = 0
+  let count = 0
+
+  while (i < content.length) {
+    const ch = content[i]
+    if (ch === "<") insideTag = true
+    else if (ch === ">") insideTag = false
+
+    if (!insideTag && lower.startsWith(lowerNeedle, i)) {
+      result += content.slice(cursor, i)
+      result += `<mark class="${className}">${content.slice(i, i + needle.length)}</mark>`
+      i += needle.length
+      cursor = i
+      count++
+      continue
+    }
+    i++
+  }
+  return { result: result + content.slice(cursor), count }
+}
 
 /**
  * Wrap occurrences of `term` in <mark>, skipping anything inside an HTML tag.
@@ -30,28 +62,20 @@ export function applySearchTerm(
   const needle = term.trim()
   if (needle.length < MIN_TERM_LENGTH || !content) return content
 
-  const lower = content.toLowerCase()
-  const lowerNeedle = needle.toLowerCase()
-  let result = ""
-  let cursor = 0
-  let insideTag = false
-  let i = 0
+  // First try the full exact term
+  const exact = markNeedle(content, needle, className)
+  if (exact.count > 0) return exact.result
 
-  while (i < content.length) {
-    const ch = content[i]
-    if (ch === "<") insideTag = true
-    else if (ch === ">") insideTag = false
+  // If full term had no matches and contains multiple words, match individual words (>= 3 chars)
+  const words = needle.split(/\s+/).filter((w) => w.length >= 3)
+  if (words.length <= 1) return content
 
-    if (!insideTag && lower.startsWith(lowerNeedle, i)) {
-      result += content.slice(cursor, i)
-      result += `<mark class="${className}">${content.slice(i, i + needle.length)}</mark>`
-      i += needle.length
-      cursor = i
-      continue
-    }
-    i++
+  let current = content
+  const sortedWords = [...new Set(words)].sort((a, b) => b.length - a.length)
+  for (const word of sortedWords) {
+    current = markNeedle(current, word, className).result
   }
-  return result + content.slice(cursor)
+  return current
 }
 
 /**

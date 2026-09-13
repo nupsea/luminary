@@ -52,6 +52,11 @@ describe("applySearchTerm", () => {
     expect(out.startsWith("<mark")).toBe(true)
     expect(out.endsWith("</mark>")).toBe(true)
   })
+
+  it("falls back to highlighting individual keywords when full multi-word term is not present verbatim", () => {
+    const out = applySearchTerm("We use HNSW for nearest-neighbor search", "HNSW (Hierarchical Navigable Small World)")
+    expect(out).toContain(`<mark class="${SEARCH_MARK_CLASS}">HNSW</mark>`)
+  })
 })
 
 describe("orderHitsByDocument", () => {

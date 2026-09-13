@@ -127,7 +127,7 @@ export default function Learning() {
     searchParams.get("search") ?? undefined,
   )
 
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(() => (!docParam ? searchParams.get("search") ?? "" : ""))
   const [selectedTypes, setSelectedTypes] = useState<Set<ContentType>>(new Set())
   const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<SortOption>("newest")
@@ -135,6 +135,14 @@ export default function Learning() {
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
     incomingCollectionId ?? null,
   )
+
+  useEffect(() => {
+    if (!docParam && searchParams.has("search")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearch(searchParams.get("search") ?? "")
+    }
+  }, [docParam, searchParams])
+
   // Consume the store value once on mount so a subsequent visit to /library
   // (e.g. via the sidebar tab) lands unfiltered. The local selectedCollectionId
   // remains the source of truth from here on.

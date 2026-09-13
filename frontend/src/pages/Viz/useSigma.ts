@@ -113,7 +113,9 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
         defaultDrawNodeHover: (context, data, settings) =>
           drawDiscNodeHover(context, data, { ...settings, labelColor: { color: LABEL_COLOR } }),
         nodeProgramClasses: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           hexagon: NodeHexagonProgram as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           square: NodeSquareProgram as any,
         },
         allowInvalidContainer: true,
@@ -181,6 +183,8 @@ export function useSigma(opts: UseSigmaOptions): UseSigmaResult {
           source_image_id:
             (filteredGraph.getNodeAttribute(node, "source_image_id") as string | undefined) ??
             "",
+          document_id: filteredGraph.getNodeAttribute(node, "document_id") as string | undefined,
+          document_ids: filteredGraph.getNodeAttribute(node, "document_ids") as string[] | undefined,
         })
         event.preventSigmaDefault()
       })
