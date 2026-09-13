@@ -17,7 +17,7 @@ import {
   resolveReadingLayout,
   type ResolvedLayout,
 } from "./readingProfile"
-import { applySearchTerm, SEARCH_MARK_TOKEN, widenedListLimit } from "./searchHighlight"
+import { applySearchTerm, SEARCH_MARK_TOKEN, setActiveSearchMark, widenedListLimit } from "./searchHighlight"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
@@ -110,6 +110,8 @@ interface LazySectionProps {
   isCitedSection?: boolean
   /** True when this is the target section (e.g. from in-doc search hit). */
   isTargetSection?: boolean
+  /** True when this section has a search hit from FTS */
+  hasSearchHit?: boolean
 }
 
 
@@ -175,7 +177,7 @@ SpeakerTurns.displayName = "SpeakerTurns"
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
 const EMPTY_WORDS: string[] = []
 
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false, isTargetSection = false }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false, isTargetSection = false, hasSearchHit = false }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -190,7 +192,11 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
     () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
     [citationWords, body],
   )
-  const isTarget = isCitedSection || isTargetSection || citationRun.length > 0
+  const isTarget =
+    isCitedSection ||
+    isTargetSection ||
+    citationRun.length > 0 ||
+    (Boolean(searchTerm) && hasSearchHit)
 
   // A shortened section can hold the cited passage or search hit in the part that did not
   // arrive: a 47-section PDF cited text 11k characters into a section whose
@@ -493,6 +499,12 @@ interface ReadViewProps {
   citedSectionId?: string | null
   /** Nonce incremented on each citation reveal to force re-centering */
   citationTrigger?: number
+  /** Set of section IDs that contain search hits according to FTS */
+  searchHitSectionIds?: Set<string>
+  /** Active 0-based search match index to highlight and scroll into view */
+  searchMatchIndex?: number
+  /** Callback to report total search matches found and section ID of active match */
+  onSearchMatchReport?: (total: number, sectionId: string | null) => void
 }
 
 export function ReadView({
@@ -508,6 +520,9 @@ export function ReadView({
   citationWords = EMPTY_WORDS,
   citedSectionId,
   citationTrigger = 0,
+  searchHitSectionIds,
+  searchMatchIndex = 0,
+  onSearchMatchReport,
 }: ReadViewProps) {
   // The mark is transient by design: it answers "which words were the source"
   // on arrival and then gets out of the way. Kept in state rather than read
@@ -670,6 +685,27 @@ export function ReadView({
       cancel: (handle) => window.clearTimeout(handle),
     })
   }, [initialSectionId, activeCitation, searchTerm])
+
+  // Keep active search mark highlighted and centered, and report match stats
+  const onSearchMatchReportRef = useRef(onSearchMatchReport)
+  useEffect(() => {
+    onSearchMatchReportRef.current = onSearchMatchReport
+  })
+
+  useEffect(() => {
+    if (!searchTerm || !contentRef.current) return
+
+    const timer = setTimeout(() => {
+      if (!contentRef.current) return
+      const report = setActiveSearchMark(contentRef.current, searchMatchIndex)
+      onSearchMatchReportRef.current?.(report.total, report.sectionId)
+      if (report.activeEl) {
+        report.activeEl.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    }, 60)
+
+    return () => clearTimeout(timer)
+  }, [searchTerm, searchMatchIndex, sections])
 
   // Set initial active section once data loads
   useEffect(() => {
@@ -873,6 +909,7 @@ export function ReadView({
               citationWords={activeCitation}
               isCitedSection={Boolean(citedSectionId) && section.section_id === citedSectionId}
               isTargetSection={Boolean(initialSectionId) && section.section_id === initialSectionId}
+              hasSearchHit={searchHitSectionIds?.has(section.section_id) ?? false}
             />
           ))}
           

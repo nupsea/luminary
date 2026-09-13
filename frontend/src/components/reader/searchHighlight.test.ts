@@ -4,6 +4,7 @@ import {
   applySearchTerm,
   orderHitsByDocument,
   SEARCH_MARK_CLASS,
+  setActiveSearchMark,
   widenedListLimit,
 } from "./searchHighlight"
 
@@ -121,3 +122,46 @@ describe("widenedListLimit", () => {
     expect(widenedListLimit(40, -1, PAGE, MAX)).toBe(40)
   })
 })
+
+describe("setActiveSearchMark", () => {
+  it("returns zeros when no marks are found", () => {
+    const container = {
+      querySelectorAll: () => [],
+    } as unknown as HTMLElement
+    const res = setActiveSearchMark(container, 0)
+    expect(res.total).toBe(0)
+    expect(res.activeEl).toBeNull()
+    expect(res.sectionId).toBeNull()
+  })
+
+  it("adds active classes to target index and removes from others", () => {
+    const classSet1 = new Set(["bg-sky-200"])
+    const classSet2 = new Set(["bg-sky-200"])
+    const mark1 = {
+      classList: {
+        add: (...cls: string[]) => cls.forEach((c) => classSet1.add(c)),
+        remove: (...cls: string[]) => cls.forEach((c) => classSet1.delete(c)),
+      },
+      closest: () => ({ id: "read-sec-alpha" }),
+    } as unknown as HTMLElement
+    const mark2 = {
+      classList: {
+        add: (...cls: string[]) => cls.forEach((c) => classSet2.add(c)),
+        remove: (...cls: string[]) => cls.forEach((c) => classSet2.delete(c)),
+      },
+      closest: () => ({ id: "read-sec-beta" }),
+    } as unknown as HTMLElement
+
+    const container = {
+      querySelectorAll: () => [mark1, mark2],
+    } as unknown as HTMLElement
+
+    const res = setActiveSearchMark(container, 1)
+    expect(res.total).toBe(2)
+    expect(res.activeEl).toBe(mark2)
+    expect(res.sectionId).toBe("beta")
+    expect(classSet2.has("ring-amber-500")).toBe(true)
+    expect(classSet1.has("ring-amber-500")).toBe(false)
+  })
+})
+

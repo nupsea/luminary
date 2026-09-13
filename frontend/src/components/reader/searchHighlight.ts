@@ -11,6 +11,56 @@ export const SEARCH_MARK_TOKEN = "luminary-search-mark"
 export const SEARCH_MARK_CLASS =
   `bg-sky-200 text-sky-950 dark:bg-sky-700 dark:text-sky-50 rounded-sm px-0.5 ${SEARCH_MARK_TOKEN}`
 
+export const SEARCH_ACTIVE_MARK_TOKEN = "luminary-search-active-mark"
+
+/**
+ * Update DOM classes to reflect the currently active search mark and return its details.
+ */
+export function setActiveSearchMark(
+  container: HTMLElement,
+  activeIndex: number,
+): { activeEl: HTMLElement | null; total: number; sectionId: string | null } {
+  const marks = Array.from(container.querySelectorAll<HTMLElement>(`.${SEARCH_MARK_TOKEN}`))
+  const total = marks.length
+  if (total === 0) return { activeEl: null, total: 0, sectionId: null }
+
+  const clampedIndex = ((activeIndex % total) + total) % total
+  let targetSectionId: string | null = null
+
+  marks.forEach((el, idx) => {
+    if (idx === clampedIndex) {
+      el.classList.add(
+        SEARCH_ACTIVE_MARK_TOKEN,
+        "ring-2",
+        "ring-amber-500",
+        "bg-amber-300",
+        "dark:bg-amber-400",
+        "text-amber-950",
+      )
+      el.classList.remove("bg-sky-200", "dark:bg-sky-700", "text-sky-950", "dark:text-sky-50")
+      const sec = el.closest<HTMLElement>("[id^='read-sec-']")
+      if (sec) {
+        targetSectionId = sec.id.replace("read-sec-", "")
+      }
+    } else {
+      el.classList.remove(
+        SEARCH_ACTIVE_MARK_TOKEN,
+        "ring-2",
+        "ring-amber-500",
+        "bg-amber-300",
+        "dark:bg-amber-400",
+      )
+      el.classList.add("bg-sky-200", "dark:bg-sky-700", "text-sky-950", "dark:text-sky-50")
+    }
+  })
+
+  return {
+    activeEl: marks[clampedIndex] ?? null,
+    total,
+    sectionId: targetSectionId,
+  }
+}
+
 // One character matches nearly everything and turns the page into a sea of
 // marks; two is the shortest term that still discriminates ("AI", "os").
 const MIN_TERM_LENGTH = 2

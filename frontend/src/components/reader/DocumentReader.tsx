@@ -282,6 +282,8 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<DocumentSectionSearchResult[]>([])
   const [searchHitIndex, setSearchHitIndex] = useState(0)
+  const [searchMatchIndex, setSearchMatchIndex] = useState(0)
+  const [totalSearchMatches, setTotalSearchMatches] = useState(0)
   const [listLimit, setListLimit] = useState(200)
   // Initial query pushed into the in-doc search bar when the Tags tab fires
   // a tag click. Cleared on consumption so subsequent ⌘F opens fresh.
@@ -702,8 +704,24 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     setSearchOpen(false)
     setSearchResults([])
     setSearchHitIndex(0)
+    setSearchMatchIndex(0)
+    setTotalSearchMatches(0)
     setSearchTerm("")
   }, [])
+
+  const handleSearchMatchReport = useCallback((total: number, sectionId: string | null) => {
+    setTotalSearchMatches(total)
+    if (sectionId) {
+      const idx = searchResults.findIndex((r) => r.section_id === sectionId)
+      if (idx >= 0 && idx !== searchHitIndex) {
+        setSearchHitIndex(idx)
+      }
+      if (sectionId !== readSectionId) {
+        setReadSectionId(sectionId)
+        setActiveSectionId(sectionId)
+      }
+    }
+  }, [searchResults, searchHitIndex, readSectionId])
 
   // The search belongs to the document, not to one tab. The bar is rendered
   // once above both panes, so Sections and Read each keep it where the reader
@@ -1480,10 +1498,15 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 documentId={documentId}
                 initialQuery={pendingSearchQuery}
                 onConsumeInitialQuery={() => setPendingSearchQuery("")}
-                onQueryChange={setSearchTerm}
+                onQueryChange={(query) => {
+                  setSearchTerm(query)
+                  setSearchMatchIndex(0)
+                  setTotalSearchMatches(0)
+                }}
                 onResults={(results) => {
                   setSearchResults(orderHitsByDocument(results, sectionOrder))
                   setSearchHitIndex(0)
+                  setSearchMatchIndex(0)
                 }}
                 onClose={() => {
                   closeReaderSearch()
@@ -1491,14 +1514,24 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 }}
                 hitIndex={searchHitIndex}
                 totalHits={searchResults.length}
-                onPrev={() =>
-                  setSearchHitIndex((i) =>
-                    (i - 1 + searchResults.length) % searchResults.length,
-                  )
-                }
-                onNext={() =>
-                  setSearchHitIndex((i) => (i + 1) % searchResults.length)
-                }
+                matchIndex={searchMatchIndex}
+                totalMatches={leftTab === "read" ? totalSearchMatches : undefined}
+                onPrev={() => {
+                  if (leftTab === "read" && totalSearchMatches > 0) {
+                    setSearchMatchIndex((i) => (i - 1 + totalSearchMatches) % totalSearchMatches)
+                  } else if (searchResults.length > 0) {
+                    setSearchHitIndex((i) =>
+                      (i - 1 + searchResults.length) % searchResults.length,
+                    )
+                  }
+                }}
+                onNext={() => {
+                  if (leftTab === "read" && totalSearchMatches > 0) {
+                    setSearchMatchIndex((i) => (i + 1) % totalSearchMatches)
+                  } else if (searchResults.length > 0) {
+                    setSearchHitIndex((i) => (i + 1) % searchResults.length)
+                  }
+                }}
               />
             </div>
           )}
@@ -1548,6 +1581,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 searchTerm={searchOpen ? searchTerm : ""}
                 citationWords={citationWords}
                 citationTrigger={citationTrigger}
+                searchHitSectionIds={searchHitSectionIds}
+                searchMatchIndex={searchMatchIndex}
+                onSearchMatchReport={handleSearchMatchReport}
                 // The section the ACTIVE citation names, not the section the
                 // reader happened to mount on. `initialSectionId` (this
                 // component's own mount-time prop) is fixed for the reader's

@@ -27,6 +27,9 @@ interface InDocSearchBarProps {
   /** The settled query, so the reader can mark the term in the body it shows.
    * Fires with the debounced value, matching what was actually searched for. */
   onQueryChange?: (query: string) => void
+  /** When match-level stepping is active in ReadView */
+  matchIndex?: number
+  totalMatches?: number
 }
 
 export function InDocSearchBar({
@@ -40,6 +43,8 @@ export function InDocSearchBar({
   initialQuery,
   onConsumeInitialQuery,
   onQueryChange,
+  matchIndex,
+  totalMatches,
 }: InDocSearchBarProps) {
   const [inputValue, setInputValue] = useState(initialQuery ?? "")
   const [loading, setLoading] = useState(false)
@@ -118,29 +123,65 @@ export function InDocSearchBar({
           ref={inputRef}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              if (e.shiftKey) onPrev()
+              else onNext()
+            } else if (e.key === "Escape") {
+              e.preventDefault()
+              onClose()
+            }
+          }}
           placeholder="Search in document..."
           className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
-        {totalHits > 0 && (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            section {hitIndex + 1} of {totalHits}
-          </span>
-        )}
-        {totalHits > 0 && (
+        {(() => {
+          const hasMatches = totalMatches !== undefined && totalMatches > 0
+          const hasSectionHits = totalHits > 0
+          if (!hasMatches && !hasSectionHits) return null
+
+          const label = hasMatches
+            ? `${(matchIndex ?? 0) + 1} of ${totalMatches}${hasSectionHits ? ` (section ${hitIndex + 1} of ${totalHits})` : ""}`
+            : `section ${hitIndex + 1} of ${totalHits}`
+
+          return (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {label}
+            </span>
+          )
+        })()}
+        {(totalHits > 0 || (totalMatches !== undefined && totalMatches > 0)) && (
           <>
             <button
               onClick={onPrev}
-              title="Previous matching section"
+              title={
+                totalMatches !== undefined && totalMatches > 0
+                  ? "Previous match (Shift+Enter)"
+                  : "Previous matching section"
+              }
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Previous matching section"
+              aria-label={
+                totalMatches !== undefined && totalMatches > 0
+                  ? "Previous match"
+                  : "Previous matching section"
+              }
             >
               <ChevronUp size={12} />
             </button>
             <button
               onClick={onNext}
-              title="Next matching section"
+              title={
+                totalMatches !== undefined && totalMatches > 0
+                  ? "Next match (Enter)"
+                  : "Next matching section"
+              }
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Next matching section"
+              aria-label={
+                totalMatches !== undefined && totalMatches > 0
+                  ? "Next match"
+                  : "Next matching section"
+              }
             >
               <ChevronDown size={12} />
             </button>
