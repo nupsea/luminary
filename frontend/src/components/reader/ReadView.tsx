@@ -693,7 +693,7 @@ export function ReadView({
   })
 
   useEffect(() => {
-    if (!searchTerm || !contentRef.current) return
+    if (!searchTerm || !contentRef.current || activeCitation.length > 0) return
 
     const timer = setTimeout(() => {
       if (!contentRef.current) return
@@ -705,7 +705,7 @@ export function ReadView({
     }, 60)
 
     return () => clearTimeout(timer)
-  }, [searchTerm, searchMatchIndex, sections])
+  }, [searchTerm, searchMatchIndex, sections, activeCitation.length])
 
   // Set initial active section once data loads
   useEffect(() => {

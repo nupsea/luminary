@@ -711,6 +711,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   const handleSearchMatchReport = useCallback((total: number, sectionId: string | null) => {
     setTotalSearchMatches(total)
+    if (!searchOpen || citationWords.length > 0) return
     if (sectionId) {
       const idx = searchResults.findIndex((r) => r.section_id === sectionId)
       if (idx >= 0 && idx !== searchHitIndex) {
@@ -721,7 +722,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
         setActiveSectionId(sectionId)
       }
     }
-  }, [searchResults, searchHitIndex, readSectionId])
+  }, [searchResults, searchHitIndex, readSectionId, searchOpen, citationWords.length])
 
   // The search belongs to the document, not to one tab. The bar is rendered
   // once above both panes, so Sections and Read each keep it where the reader
@@ -800,7 +801,9 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // whatever a citation or resume link pointed at.
   const searchHitSectionId = searchResults[searchHitIndex]?.section_id ?? null
   const readTargetSectionId =
-    searchOpen && searchHitSectionId ? searchHitSectionId : readSectionId
+    searchOpen && searchHitSectionId && citationWords.length === 0
+      ? searchHitSectionId
+      : readSectionId
 
   function handleStudyClick(sid: string) {
     setPracticeSection({ id: sid, heading: sectionMap.get(sid)?.heading ?? "" })
@@ -1018,6 +1021,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // This is the whole reason to practise inside the reader: the answer and its
   // source end up on screen together.
   const revealCardSource = useCallback((sid: string) => {
+    closeReaderSearch()
     if (leftTab === "read" && readSectionId === sid) {
       // Already the read target, so the target effect will not re-fire; the
       // learner has usually scrolled away by now and is asking to go back.
@@ -1031,7 +1035,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       setLeftTab("read")
     }
     setReadSectionId(sid)
-  }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId])
+  }, [leftTab, readSectionId, pushHistory, setLeftTab, setReadSectionId, closeReaderSearch])
 
   // A citation clicked in the docked conversation is answered beside it rather
   // than by routing, so the marked passage is state and not only the arrival
@@ -1039,6 +1043,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // mount effects, which have long since fired by the time this changes.
   const revealCitation = useCallback((c: SourceCitation) => {
     if (c.document_id !== documentId) return false
+    closeReaderSearch()
     const target = buildCitationTarget(c)
     pushHistory()
     setInPlaceCitation({ against: initialCitationWords, words: target.words })
@@ -1052,9 +1057,10 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       if (c.section_id) setReadSectionId(c.section_id)
     }
     return true
-  }, [documentId, doc, initialCitationWords, pushHistory, setLeftTab, setReadSectionId])
+  }, [documentId, doc, initialCitationWords, pushHistory, setLeftTab, setReadSectionId, closeReaderSearch])
 
   const navigateToHighlight = useCallback((ann: AnnotationItem) => {
+    closeReaderSearch()
     pushHistory()
     if (doc?.format === "pdf" && ann.page_number) {
       setLeftTab("pdfview")
