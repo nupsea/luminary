@@ -4,6 +4,22 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5] - 2026-09-13
+
+### Fixed
+- **Knowledge Graph "Find in document" reliably navigates and centers on matching passages.**
+  Resolved missing document scoping on knowledge graph entity and diagram nodes,
+  allowing direct routing to `/library?doc=<id>&search=<term>`. Fixed reader race conditions
+  where previously saved reading positions overrode search targets, ensured lazy sections mount
+  their bodies eagerly when targeted so search highlights render immediately, added layout-shift
+  stabilization via `settleIntoView`, and added multi-token fallback search highlighting (PR #134).
+- **Flashcard deduplication and generation counts scoped to document.**
+  Scoped near-duplicate deduplication to the document boundary, preventing false dedup collisions
+  across different books while backfilling near-duplicates properly within document scope (PR #134).
+- **Voice input UI overlap and active listening indicators.**
+  Resolved text overlap between speech-to-text live transcripts and prompt input fields across
+  Chat, Notes, Feynman, and Teachback, and added smooth audio-wave pulsing animations (PR #134).
+
 ## [0.12.4] - 2026-09-12
 
 ### Fixed
