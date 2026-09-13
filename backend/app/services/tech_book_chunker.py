@@ -194,7 +194,7 @@ def chunk_mixed_content(
         separators=["\n\n", "\n", ". ", " ", ""],
     )
 
-    result: list[dict] = []
+    raw_items: list[dict] = []
     cursor = 0
 
     for block in code_blocks:
@@ -202,10 +202,11 @@ def chunk_mixed_content(
         prose_segment = section_text[cursor : block["start_pos"]]
         if prose_segment.strip():
             for prose_chunk in splitter.split_text(prose_segment):
-                if prose_chunk.strip():
-                    result.append(
+                p = prose_chunk.strip()
+                if p and not re.fullmatch(r"^[-*_=\s]+$", p):
+                    raw_items.append(
                         {
-                            "text": prose_chunk,
+                            "text": re.sub(r"^[.,;:!?]\s*", "", p),
                             "has_code": False,
                             "code_language": None,
                             "code_signature": None,
@@ -218,9 +219,10 @@ def chunk_mixed_content(
         if code_text:
             lang = block.get("language")
             sig = _parse_ast_signature(code_text, lang)
-            result.append(
+            raw_items.append(
                 {
                     "text": code_text,
+                    "code_content": code_text,
                     "has_code": True,
                     "code_language": lang,
                     "code_signature": sig,
@@ -234,10 +236,11 @@ def chunk_mixed_content(
     trailing_prose = section_text[cursor:]
     if trailing_prose.strip():
         for prose_chunk in splitter.split_text(trailing_prose):
-            if prose_chunk.strip():
-                result.append(
+            p = prose_chunk.strip()
+            if p and not re.fullmatch(r"^[-*_=\s]+$", p):
+                raw_items.append(
                     {
-                        "text": prose_chunk,
+                        "text": re.sub(r"^[.,;:!?]\s*", "", p),
                         "has_code": False,
                         "code_language": None,
                         "code_signature": None,
@@ -246,12 +249,13 @@ def chunk_mixed_content(
                 )
 
     # If no code blocks were found and no prose was produced, fall back to splitting the whole text
-    if not result and section_text.strip():
+    if not raw_items and section_text.strip():
         for prose_chunk in splitter.split_text(section_text):
-            if prose_chunk.strip():
-                result.append(
+            p = prose_chunk.strip()
+            if p and not re.fullmatch(r"^[-*_=\s]+$", p):
+                raw_items.append(
                     {
-                        "text": prose_chunk,
+                        "text": re.sub(r"^[.,;:!?]\s*", "", p),
                         "has_code": False,
                         "code_language": None,
                         "code_signature": None,
@@ -259,4 +263,57 @@ def chunk_mixed_content(
                     }
                 )
 
+    # Post-process consolidation:
+    # 1. Merge short prose lead-ins (< 150 chars) immediately preceding a code block
+    #    so the code block retains its introductory sentence and keywords.
+    # 2. Merge short prose lead-ins / headings (< 100 chars, e.g. "Design decisions at each step:")
+    #    into the following prose chunk if the combined size stays within budget.
+    result: list[dict] = []
+    i = 0
+    while i < len(raw_items):
+        item = raw_items[i]
+        # Case 1: Short prose lead-in preceding a code block
+        if (
+            not item["has_code"]
+            and len(item["text"]) < 150
+            and i + 1 < len(raw_items)
+            and raw_items[i + 1]["is_code_block"]
+        ):
+            nxt = raw_items[i + 1]
+            result.append(
+                {
+                    "text": f"{item['text']}\n\n{nxt['text']}",
+                    "code_content": nxt.get("code_content", nxt["text"]),
+                    "has_code": True,
+                    "code_language": nxt["code_language"],
+                    "code_signature": nxt["code_signature"],
+                    "is_code_block": True,
+                }
+            )
+            i += 2
+            continue
+
+        # Case 2: Short prose fragment preceding another prose chunk
+        if (
+            not item["has_code"]
+            and len(item["text"]) < 100
+            and i + 1 < len(raw_items)
+            and not raw_items[i + 1]["has_code"]
+            and len(item["text"]) + len(raw_items[i + 1]["text"]) <= int(chunk_size * 1.2)
+        ):
+            nxt = raw_items[i + 1]
+            raw_items[i + 1] = {
+                "text": f"{item['text']}\n\n{nxt['text']}",
+                "has_code": False,
+                "code_language": None,
+                "code_signature": None,
+                "is_code_block": False,
+            }
+            i += 1
+            continue
+
+        result.append(item)
+        i += 1
+
     return result
+

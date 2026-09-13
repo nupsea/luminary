@@ -441,3 +441,52 @@ async def test_get_code_snippets_returns_snippets(test_db):
     assert data[0]["language"] == "python"
     assert data[0]["signature"] == "def add(a, b)"
     assert "add" in data[0]["content"]
+
+
+def test_chunk_mixed_content_merges_lead_in_to_code_block():
+    """A short prose line immediately introducing a code block should be merged with it."""
+    text = (
+        "Here is an overview of the system architecture:\n\n"
+        "```text\n"
+        "+--------+     +--------+\n"
+        "| Step 1 | --> | Step 2 |\n"
+        "+--------+     +--------+\n"
+        "```\n\n"
+        "Following the diagram, we have detailed design decisions for each step."
+    )
+    chunks = chunk_mixed_content(text, "sec-1", "doc-1", 500, 80)
+    code_chunks = [c for c in chunks if c["is_code_block"]]
+    assert len(code_chunks) == 1
+    # Lead-in should be in the code chunk's text for retrieval context
+    assert "Here is an overview of the system architecture:" in code_chunks[0]["text"]
+    assert "+--------+" in code_chunks[0]["text"]
+    # Pure code content is preserved in code_content
+    assert code_chunks[0]["code_content"].startswith("+--------+")
+    assert "Here is an overview" not in code_chunks[0]["code_content"]
+
+
+def test_chunk_mixed_content_filters_noise_separators():
+    """Separator-only lines (like ---) should not be emitted as standalone chunks."""
+    text = (
+        "Part one content goes here in full detail.\n\n"
+        "---\n\n"
+        "Part two content continues with further details and explanations."
+    )
+    chunks = chunk_mixed_content(text, "sec-1", "doc-1", 500, 80)
+    for c in chunks:
+        assert c["text"].strip() != "---"
+        assert len(c["text"].strip()) > 3
+
+
+def test_chunk_mixed_content_merges_short_prose_fragments():
+    """Short prose fragments like subheadings should merge into the next prose chunk."""
+    text = (
+        "Design decisions at each step:\n\n"
+        "Step 1 requires fast ingestion and immediate caching to ensure low latency. "
+        "Step 2 handles asynchronous normalization and embedding generation."
+    )
+    chunks = chunk_mixed_content(text, "sec-1", "doc-1", 500, 80)
+    assert len(chunks) == 1
+    assert "Design decisions at each step:" in chunks[0]["text"]
+    assert "Step 1 requires fast ingestion" in chunks[0]["text"]
+

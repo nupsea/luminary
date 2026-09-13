@@ -37,7 +37,10 @@ _STYLE_RULES = (
     "short, plain, and specific. Do not open with a command verb and do not address "
     "the reader -- a question asks for something, it never assigns a task. "
     "Every question must be answerable from the material shown below; never ask about "
-    "something that is not there."
+    "something that is not there. "
+    "Ground questions strictly on what the text says -- do not attach an entity name to "
+    "general concepts or architectures unless the passage explicitly states that entity "
+    "uses or implements them."
 )
 
 SUGGESTION_SPEC = PromptSpec(

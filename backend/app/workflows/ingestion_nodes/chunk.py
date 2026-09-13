@@ -493,7 +493,7 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
                             section_id=section_model.id,
                             language=chunk_dict["code_language"],
                             signature=chunk_dict["code_signature"],
-                            content=chunk_dict["text"],
+                            content=chunk_dict.get("code_content", chunk_dict["text"]),
                         )
                     )
 
