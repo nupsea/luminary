@@ -8,7 +8,7 @@ export const CITATION_MARK_TOKEN = "luminary-citation-mark"
 /** Deliberately not the search mark's colour: both can be on screen at once. */
 export const CITATION_MARK_CLASS =
   `${CITATION_MARK_TOKEN} bg-amber-200 text-amber-950 dark:bg-amber-500/40 ` +
-  "dark:text-amber-50 rounded-sm px-0.5"
+  "dark:text-amber-50 rounded-sm px-0.5 ring-2 ring-amber-400/60 shadow-sm transition-all"
 
 /** Overlay fill for the PDF viewer, which draws rects rather than wrapping text. */
 export const CITATION_OVERLAY_COLOR = "rgba(251, 191, 36, 0.45)"

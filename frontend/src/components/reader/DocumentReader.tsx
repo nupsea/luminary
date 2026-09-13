@@ -222,6 +222,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // changes only when a citation actually does.
   const [inPlaceCitation, setInPlaceCitation] =
     useState<{ against: string[]; words: string[] } | null>(null)
+  const [citationTrigger, setCitationTrigger] = useState(0)
   const citationWords =
     inPlaceCitation?.against === initialCitationWords
       ? inPlaceCitation.words
@@ -461,10 +462,16 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
 
   // Explicit scroll when switching to the Read tab from a section.
   //
-  // Suppressed only for the section the reader arrived at with a citation; any
-  // section they pick afterwards scrolls normally.
+  // Suppressed when a citation owns the scroll (arrival or clicked in docked chat)
+  // because a citation marks an exact passage within the section, and scrolling
+  // the section to block: "start" pushes the cited mark off screen.
   useEffect(() => {
-    if (leftTab === "read" && readSectionId && !searchOpen && !(citationOwnsScroll && readSectionId === initialSectionId)) {
+    if (
+      leftTab === "read" &&
+      readSectionId &&
+      !searchOpen &&
+      citationWords.length === 0
+    ) {
       const timer = setTimeout(() => {
         const el = document.getElementById(`read-sec-${readSectionId}`)
         if (el) {
@@ -473,7 +480,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [leftTab, readSectionId, initialSectionId, citationOwnsScroll, searchOpen])
+  }, [leftTab, readSectionId, citationWords.length, searchOpen])
 
   // Keep activeSectionId in sync with whichever per-action state was most
   // recently touched. Priority: Feynman > Read > Goals > Note editor.
@@ -576,6 +583,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   const goToSection = useCallback((sid: string) => {
     const sec = sectionMap.get(sid)
     pushHistory({ tab: "sections", sectionId: sid, pdfPage: null })
+    setInPlaceCitation(null)
     setReadSectionId(sid)
     if (docFormat === "pdf" && sec && sec.page_start > 0) {
       setPdfViewVisited(true)
@@ -1015,6 +1023,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     const target = buildCitationTarget(c)
     pushHistory()
     setInPlaceCitation({ against: initialCitationWords, words: target.words })
+    setCitationTrigger((n) => n + 1)
     if (doc?.format === "pdf" && c.pdf_page_number) {
       setLeftTab("pdfview")
       setPdfViewVisited(true)
@@ -1537,6 +1546,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
                 sourceUrl={doc.source_url}
                 searchTerm={searchOpen ? searchTerm : ""}
                 citationWords={citationWords}
+                citationTrigger={citationTrigger}
                 // The section the ACTIVE citation names, not the section the
                 // reader happened to mount on. `initialSectionId` (this
                 // component's own mount-time prop) is fixed for the reader's

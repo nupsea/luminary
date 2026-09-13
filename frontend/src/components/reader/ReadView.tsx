@@ -184,7 +184,13 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const [loadingWhole, setLoadingWhole] = useState(false)
   const body = whole ?? section.content
   const stillShort = section.truncated && whole === null
-  const isTarget = isCitedSection || isTargetSection
+  // The citation run is computed whether or not this section is in view, because
+  // it decides whether the section must render at all.
+  const citationRun = useMemo(
+    () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
+    [citationWords, body],
+  )
+  const isTarget = isCitedSection || isTargetSection || citationRun.length > 0
 
   // A shortened section can hold the cited passage or search hit in the part that did not
   // arrive: a 47-section PDF cited text 11k characters into a section whose
@@ -221,12 +227,6 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
 
   const Tag = HeadingTag(section.level)
   const showHeading = hasAuthoredHeading(section)
-  // The citation run is computed whether or not this section is in view, because
-  // it decides whether the section must render at all.
-  const citationRun = useMemo(
-    () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
-    [citationWords, body],
-  )
   // One decision, used by the memo and the JSX alike. They were separate, so the
   // cited section computed its marked HTML and then rendered null anyway.
   const shouldRender = isVisible || isTarget
@@ -491,6 +491,8 @@ interface ReadViewProps {
   /** The section the citation names. Distinct from `initialSectionId`, which the
    *  reader also uses for search hits and history restores. */
   citedSectionId?: string | null
+  /** Nonce incremented on each citation reveal to force re-centering */
+  citationTrigger?: number
 }
 
 export function ReadView({
@@ -505,6 +507,7 @@ export function ReadView({
   searchTerm = "",
   citationWords = EMPTY_WORDS,
   citedSectionId,
+  citationTrigger = 0,
 }: ReadViewProps) {
   // The mark is transient by design: it answers "which words were the source"
   // on arrival and then gets out of the way. Kept in state rather than read
@@ -540,7 +543,7 @@ export function ReadView({
       schedule: (fn, ms) => window.setTimeout(fn, ms),
       cancel: (handle) => window.clearTimeout(handle),
     })
-  }, [activeCitation])
+  }, [activeCitation, citationTrigger, citedSectionId])
 
   const profile = useMemo(
     () => readingProfile({ content_type: contentType, structure_type: structureType }),
@@ -581,9 +584,10 @@ export function ReadView({
   // Derived rather than pushed into state by an effect, so the fetch below
   // asks for the right window on its first attempt instead of fetching twice.
   const targetIndex = useMemo(() => {
-    if (!initialSectionId || !sectionMeta) return -1
-    return sectionMeta.findIndex((m) => m.id === initialSectionId)
-  }, [initialSectionId, sectionMeta])
+    const targetId = citedSectionId || initialSectionId
+    if (!targetId || !sectionMeta) return -1
+    return sectionMeta.findIndex((m) => m.id === targetId)
+  }, [citedSectionId, initialSectionId, sectionMeta])
   const listLimit = widenedListLimit(scrolledLimit, targetIndex, SECTION_PAGE, MAX_SECTION_WINDOW)
 
   const { data: page, isLoading, error } = useQuery({
