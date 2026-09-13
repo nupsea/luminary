@@ -695,6 +695,8 @@ export function FeynmanPanel({
                       <div className="flex flex-col gap-1.5 self-end">
                         <VoiceRecordButton
                           size="sm"
+                          variant="icon"
+                          className="h-8 w-8 p-0 shrink-0"
                           onTranscribed={(text) => {
                             setInputText((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
                           }}
@@ -703,7 +705,7 @@ export function FeynmanPanel({
                         <button
                           onClick={() => void handleSend()}
                           disabled={sending || !inputText.trim() || sessionLoading || !!sessionError}
-                          className="rounded-md bg-primary p-2 text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                           aria-label="Send message"
                         >
                           {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

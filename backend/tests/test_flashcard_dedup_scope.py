@@ -79,9 +79,14 @@ async def test_document_in_no_collection_yields_no_members(session):
 async def test_note_cards_in_another_deck_become_comparable(session, monkeypatch):
     """The regression: a note card in deck 'search' was invisible to a document
     generating into deck 'default', so a near-duplicate question was created."""
-    await _collection_with(session, "col-1", [("doc-1", "document"), ("note-1", "note")])
-    session.add(_card("c1", "Deck-mate question", deck="default", document_id="doc-other"))
+    await _collection_with(
+        session,
+        "col-1",
+        [("doc-1", "document"), ("note-1", "note"), ("doc-col", "document")],
+    )
+    session.add(_card("c1", "Unrelated doc question", deck="default", document_id="doc-other"))
     session.add(_card("c2", "What does a Bi-encoder do?", deck="search", note_id="note-1"))
+    session.add(_card("c3", "Collection mate question", deck="default", document_id="doc-col"))
     await session.commit()
 
     captured: list[list[str]] = []
@@ -99,7 +104,12 @@ async def test_note_cards_in_another_deck_become_comparable(session, monkeypatch
 
     deck_only, _ = await _fetch_existing_embeddings("default", session)
     assert "What does a Bi-encoder do?" not in deck_only
+    assert "Unrelated doc question" in deck_only
+    assert "Collection mate question" in deck_only
 
     scoped, _ = await _fetch_existing_embeddings("default", session, document_id="doc-1")
     assert "What does a Bi-encoder do?" in scoped
-    assert "Deck-mate question" in scoped, "deck-based comparison must still apply"
+    assert "Collection mate question" in scoped
+    assert "Unrelated doc question" not in scoped, (
+        "unrelated documents outside the collection must not bleed into document scope"
+    )

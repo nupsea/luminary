@@ -1237,6 +1237,7 @@ export function ChatConversation({
             />
             <VoiceRecordButton
               size="default"
+              variant="icon"
               className="h-9 w-9 p-0 rounded-xl shrink-0"
               onTranscribed={(text) => {
                 setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))

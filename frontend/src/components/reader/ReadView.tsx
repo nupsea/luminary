@@ -17,7 +17,7 @@ import {
   resolveReadingLayout,
   type ResolvedLayout,
 } from "./readingProfile"
-import { applySearchTerm, widenedListLimit } from "./searchHighlight"
+import { applySearchTerm, SEARCH_MARK_TOKEN, widenedListLimit } from "./searchHighlight"
 import { hasAuthoredHeading, sectionTitle, usableSections } from "./sectionTitle"
 import { parseSpeakerTurns, type SpeakerTurn } from "./speakerTurns"
 import { useReaderPreferences } from "./useReaderPreferences"
@@ -108,6 +108,8 @@ interface LazySectionProps {
   citationWords?: string[]
   /** True when this is the section the citation names. */
   isCitedSection?: boolean
+  /** True when this is the target section (e.g. from in-doc search hit). */
+  isTargetSection?: boolean
 }
 
 
@@ -144,7 +146,6 @@ const HeadingTag = (level: number) => {
   return "h5"
 }
 
-// "opener" ignores depth: the heading marks a pause, not a rank.
 const HEADING_CLASS: Record<ResolvedLayout["headingStyle"], (level: number) => string> = {
   opener: () => "mb-8 mt-4 text-center text-2xl font-semibold tracking-wide text-foreground",
   hierarchy: (level: number) =>
@@ -174,7 +175,7 @@ SpeakerTurns.displayName = "SpeakerTurns"
 // This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
 const EMPTY_WORDS: string[] = []
 
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false }: LazySectionProps) => {
+const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false, isTargetSection = false }: LazySectionProps) => {
   const [isVisible, setIsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
@@ -183,13 +184,14 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const [loadingWhole, setLoadingWhole] = useState(false)
   const body = whole ?? section.content
   const stillShort = section.truncated && whole === null
+  const isTarget = isCitedSection || isTargetSection
 
-  // A shortened section can hold the cited passage in the part that did not
+  // A shortened section can hold the cited passage or search hit in the part that did not
   // arrive: a 47-section PDF cited text 11k characters into a section whose
   // inline copy stopped well before it, so nothing matched and nothing marked.
   // The rest is one call away and this is the one section worth spending it on.
   useEffect(() => {
-    if (!isCitedSection || !section.truncated || whole !== null) return
+    if (!isTarget || !section.truncated || whole !== null) return
     // No loading flag and no "already requested" ref: setting state synchronously
     // in an effect body cascades renders, and a ref latch would survive
     // StrictMode's second run and turn it into a no-op in dev only. `whole`
@@ -199,7 +201,7 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
       .then((s) => { if (!cancelled) setWhole(s.content) })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [isCitedSection, section.truncated, section.section_id, documentId, whole])
+  }, [isTarget, section.truncated, section.section_id, documentId, whole])
 
   useEffect(() => {
     const el = containerRef.current
@@ -227,7 +229,7 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   )
   // One decision, used by the memo and the JSX alike. They were separate, so the
   // cited section computed its marked HTML and then rendered null anyway.
-  const shouldRender = isVisible || isCitedSection
+  const shouldRender = isVisible || isTarget
   const highlighted = useMemo(() => {
     // Sections defer their body until scrolled into view. A citation is an
     // explicit request to see *this* passage, so the section holding it renders
@@ -647,15 +649,23 @@ export function ReadView({
   // which is exactly the "I have to scroll to find the highlight" report. The
   // mark is inside this section anyway, so centring it lands here too.
   useEffect(() => {
-    if (!initialSectionId || !sections || activeCitation.length > 0) return
-    const timer = setTimeout(() => {
-      const el = document.getElementById(`read-sec-${initialSectionId}`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" })
-      }
-    }, 200) // Slightly longer to ensure layout calculation is done
-    return () => clearTimeout(timer)
-  }, [initialSectionId, sections, activeCitation])
+    if (!initialSectionId || activeCitation.length > 0) return
+    return settleIntoView<Element>({
+      find: () => {
+        const sec = document.getElementById(`read-sec-${initialSectionId}`)
+        if (!sec) return null
+        return sec.querySelector(`.${SEARCH_MARK_TOKEN}`) ?? sec.querySelector("mark") ?? sec
+      },
+      distance: (el) => {
+        const rect = el.getBoundingClientRect()
+        const port = scrollPortOf(el)
+        return rect.top + rect.height / 2 - (port.top + port.height / 2)
+      },
+      centre: (el) => el.scrollIntoView({ behavior: "instant", block: "center" }),
+      schedule: (fn, ms) => window.setTimeout(fn, ms),
+      cancel: (handle) => window.clearTimeout(handle),
+    })
+  }, [initialSectionId, activeCitation, searchTerm])
 
   // Set initial active section once data loads
   useEffect(() => {
@@ -858,6 +868,7 @@ export function ReadView({
               searchTerm={searchTerm}
               citationWords={activeCitation}
               isCitedSection={Boolean(citedSectionId) && section.section_id === citedSectionId}
+              isTargetSection={Boolean(initialSectionId) && section.section_id === initialSectionId}
             />
           ))}
           

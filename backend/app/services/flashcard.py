@@ -561,17 +561,17 @@ async def _fetch_existing_embeddings(
 
     from app.services.embedder import get_embedding_service  # noqa: PLC0415
 
-    scope = FlashcardModel.deck == deck
     if note_id is not None:
         scope = FlashcardModel.note_id == note_id
     elif document_id is not None:
         member_ids = await _study_scope_member_ids(document_id, session)
         scope = or_(
-            scope,
             FlashcardModel.document_id == document_id,
             FlashcardModel.document_id.in_(member_ids) if member_ids else false(),
             FlashcardModel.note_id.in_(member_ids) if member_ids else false(),
         )
+    else:
+        scope = FlashcardModel.deck == deck
 
     result = await session.execute(select(FlashcardModel.question).where(scope))
     existing_questions = [row[0] for row in result.all()]

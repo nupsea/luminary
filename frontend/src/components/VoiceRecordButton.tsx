@@ -10,6 +10,7 @@ export interface VoiceRecordButtonProps {
   className?: string
   size?: "sm" | "default"
   title?: string
+  variant?: "default" | "pill" | "icon"
 }
 
 export function VoiceRecordButton({
@@ -19,6 +20,7 @@ export function VoiceRecordButton({
   className,
   size = "default",
   title = "Dictate with voice (Whisper)",
+  variant = "default",
 }: VoiceRecordButtonProps) {
   const { isRecording, isTranscribing, toggleRecording } = useAudioRecorder({
     onTranscribed,
@@ -29,6 +31,7 @@ export function VoiceRecordButton({
   const dictation = useCapability("dictation")
 
   const isSmall = size === "sm"
+  const isIcon = variant === "icon"
 
   if (!dictation.available) return null
 
@@ -38,35 +41,58 @@ export function VoiceRecordButton({
       onClick={toggleRecording}
       disabled={isTranscribing}
       title={isRecording ? "Stop recording" : title}
+      aria-label={isRecording ? "Stop recording" : title}
       className={cn(
-        "relative inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50",
-        isSmall ? "h-7 px-2 text-xs" : "h-8 px-2.5 text-xs",
+        "group relative inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50",
+        isIcon
+          ? isSmall
+            ? "h-7 w-7 shrink-0"
+            : "h-8 w-8 shrink-0"
+          : isSmall
+          ? "h-7 px-2.5 text-xs"
+          : "h-8 px-3 text-xs",
         isRecording
-          ? "border border-red-500/40 bg-red-500/10 text-red-600 animate-pulse hover:bg-red-500/20 dark:text-red-400"
+          ? "border border-rose-500/40 bg-rose-500/10 text-rose-600 shadow-[0_0_12px_rgba(244,63,94,0.12)] hover:bg-rose-500/20 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-400 dark:hover:bg-rose-950/60"
           : isTranscribing
-          ? "border border-border bg-muted/60 text-muted-foreground"
-          : "border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+          ? "border border-primary/30 bg-primary/10 text-primary"
+          : "border border-border/80 bg-background/80 text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground shadow-xs",
         className,
       )}
     >
       {isTranscribing ? (
         <>
-          <Loader2 size={isSmall ? 12 : 14} className="animate-spin text-primary" />
-          {label && <span>Transcribing...</span>}
+          <Loader2 size={isSmall ? 12 : 14} className="animate-spin text-primary shrink-0" />
+          {!isIcon && <span className="text-xs font-medium text-primary">Transcribing...</span>}
         </>
       ) : isRecording ? (
-        <>
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+        isIcon ? (
+          <>
+            <span className="flex h-3.5 items-center justify-center gap-[2px] px-0.5 group-hover:hidden" aria-hidden="true">
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-1" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-2" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-3" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-4" />
+            </span>
+            <Square size={isSmall ? 10 : 11} className="hidden group-hover:block fill-current text-rose-600 dark:text-rose-400" />
+          </>
+        ) : (
+          <span className="flex items-center gap-1.5 font-medium tracking-tight">
+            <span className="flex h-3.5 items-center gap-[2px] px-0.5" aria-hidden="true">
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-1" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-2" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-3" />
+              <span className="w-[2px] rounded-full bg-rose-500 dark:bg-rose-400 lum-voice-bar-4" />
+            </span>
+            <span className="text-xs">{recordingLabel}</span>
+            <span className="flex items-center justify-center rounded-sm bg-rose-500/20 p-0.5 text-rose-600 dark:text-rose-400 group-hover:bg-rose-500/30">
+              <Square size={isSmall ? 8 : 9} className="fill-current" />
+            </span>
           </span>
-          <Square size={isSmall ? 10 : 12} className="fill-current text-red-600 dark:text-red-400" />
-          <span>{recordingLabel}</span>
-        </>
+        )
       ) : (
         <>
-          <Mic size={isSmall ? 13 : 15} />
-          {label && <span>{label}</span>}
+          <Mic size={isSmall ? 13 : 15} className="shrink-0" />
+          {!isIcon && label && <span>{label}</span>}
         </>
       )}
     </button>

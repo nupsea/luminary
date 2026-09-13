@@ -629,7 +629,7 @@ async def _collect_with_backfill(
             seen.add(key)
             candidates.append(c)
             added += 1
-        if added == 0:
+        if added == 0 and attempts > 1:
             break
     if len(candidates) < count:
         logger.info(
@@ -846,7 +846,26 @@ async def generate(
                 "Include code examples in questions where appropriate.\n"
             )
 
+    from app.services.embedder import get_embedding_service  # noqa: PLC0415
+
+    _existing_qs, deck_q = await _fetch_existing_embeddings(
+        "default", session, document_id=document_id
+    )
+
+    embedder = None
+    try:
+        embedder = get_embedding_service()
+    except Exception:
+        logger.warning(
+            "Embedding dedup: failed to get embedding service; skipping dedup", exc_info=True
+        )
+
+    call_q: Any = None
+    call_a: Any = None
+    deduped = 0
+
     async def _batch(want: int, avoid: list[str]) -> list[dict]:
+        nonlocal call_q, call_a, deduped
         batch_prompt = flashcard_user_tmpl().format(
             count=want,
             difficulty=difficulty,
@@ -859,13 +878,44 @@ async def generate(
             model=model or _generation_model(), stream=False,
             response_format={"type": "json_object"},
         )
-        return await _screen_factuality(
+        screened = await _screen_factuality(
             _gate_cards(
                 _parse_llm_response(raw, document_id, expect="object"),
                 source_text=combined_text,
             ),
             combined_text,
         )
+        if not screened:
+            return []
+
+        cand_q = cand_a = None
+        if embedder is not None:
+            try:
+                cand_q, cand_a = await _encode_card_texts(embedder, screened)
+            except Exception:
+                logger.warning(
+                    "Embedding dedup: candidate encode failed; skipping dedup", exc_info=True
+                )
+
+        kept: list[dict] = []
+        for i, item in enumerate(screened):
+            question = str(item.get("question", "")).strip()
+            if cand_q is not None:
+                if (deck_q is not None and _is_near_duplicate(cand_q[i], deck_q)) or (
+                    call_q is not None
+                    and _repeats_this_call(cand_q[i], cand_a[i], call_q, call_a)
+                ):
+                    logger.info(
+                        "flashcard.generate: skipping near-duplicate question: %r",
+                        question[:80],
+                    )
+                    deduped += 1
+                    continue
+                call_q, call_a = _extend_pool(
+                    call_q, call_a, cand_q[i : i + 1], cand_a[i : i + 1]
+                )
+            kept.append(item)
+        return kept
 
     await session.commit()  # Release read locks to prevent WAL deadlocks during LLM call
 
@@ -885,63 +935,17 @@ async def generate(
 
     now = datetime.now(UTC)
 
-    from app.services.embedder import get_embedding_service  # noqa: PLC0415
-
-    _existing_qs, deck_q = await _fetch_existing_embeddings(
-        "default", session, document_id=document_id
-    )
-
     if not candidates:
         logger.warning(
             "flashcard.generate: 0 usable cards (model=%s)",
             model or _generation_model() or "default",
         )
 
-    # Encoded whenever there are candidates, not only when a deck exists to
-    # compare them against: an accepted card joins the call's own pool, so this
-    # is also how a batch is checked against ITSELF. Gating the encode on an
-    # existing deck meant the first generation on a document -- the one run with
-    # nothing to compare against -- was the one run that could hand back the same
-    # question twice.
-    if candidates:
-        try:
-            embedder = get_embedding_service()
-            cand_q, cand_a = await _encode_card_texts(embedder, candidates)
-        except Exception:
-            logger.warning(
-                "Embedding dedup: candidate encode failed; skipping dedup", exc_info=True
-            )
-            cand_q = cand_a = None
-    else:
-        cand_q = cand_a = None
-
-    call_q = call_a = None
-    deduped = 0
     flashcards: list[FlashcardModel] = []
-    for i, item in enumerate(candidates):
+    for item in candidates:
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         source_excerpt = str(item.get("source_excerpt", "")).strip()
-        if cand_q is not None:
-            # Two tests, two scopes: the deck is compared on questions alone,
-            # this call's own accepted cards on question AND answer. See
-            # `_repeats_this_call` for why the second scope is not widened.
-            if (deck_q is not None and _is_near_duplicate(cand_q[i], deck_q)) or (
-                call_q is not None
-                and _repeats_this_call(cand_q[i], cand_a[i], call_q, call_a)
-            ):
-                logger.info(
-                    "flashcard.generate: skipping near-duplicate question: %r",
-                    question[:80],
-                )
-                deduped += 1
-                continue
-            call_q, call_a = _extend_pool(
-                call_q, call_a, cand_q[i : i + 1], cand_a[i : i + 1]
-            )
-        # Derived from the card's own type or depth word, not asked for as a
-        # number: the prompt no longer names a taxonomy (I-28), and the level a
-        # type maps to is a decision this codebase owns rather than the model.
         card_bloom_level = bloom_from(item)
 
         card = FlashcardModel(
@@ -978,7 +982,7 @@ async def generate(
             "flashcard.generate: %d of %d candidates removed as near-duplicates of cards "
             "this document already has, or of each other",
             deduped,
-            len(candidates),
+            len(candidates) + deduped,
         )
 
     if flashcards:

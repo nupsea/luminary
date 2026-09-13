@@ -156,3 +156,14 @@ async def test_empty_query_returns_200_empty_list(_search_test_db):
         resp = await client.get("/documents/doc1/search?q=")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_search_multi_word_fallback(_search_test_db):
+    """Multi-word query where strict AND fails falls back to matching present terms."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/documents/doc1/search?q=brown+unicorn")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    assert data[0]["section_id"] == "sec1"

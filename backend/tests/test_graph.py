@@ -109,6 +109,9 @@ def test_get_graph_for_document(graph_svc: KuzuService):
     assert "e1" in node_ids
     assert "e2" in node_ids
     assert len(data["nodes"]) == 2
+    for n in data["nodes"]:
+        assert n["document_id"] == "d1"
+        assert n["document_ids"] == ["d1"]
 
 
 def test_get_graph_for_documents_merges(graph_svc: KuzuService):
@@ -120,9 +123,13 @@ def test_get_graph_for_documents_merges(graph_svc: KuzuService):
     graph_svc.add_mention("e2", "d2")
 
     data = graph_svc.get_graph_for_documents(["d1", "d2"])
-    node_ids = {n["id"] for n in data["nodes"]}
-    assert "e1" in node_ids
-    assert "e2" in node_ids
+    nodes_by_id = {n["id"]: n for n in data["nodes"]}
+    assert "e1" in nodes_by_id
+    assert "e2" in nodes_by_id
+    assert nodes_by_id["e1"]["document_id"] == "d1"
+    assert "d1" in nodes_by_id["e1"]["document_ids"]
+    assert nodes_by_id["e2"]["document_id"] == "d2"
+    assert "d2" in nodes_by_id["e2"]["document_ids"]
 
 
 def test_get_graph_for_documents_scopes_co_occurrence_edges(graph_svc: KuzuService):

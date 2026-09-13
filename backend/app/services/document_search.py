@@ -68,6 +68,18 @@ class DocumentSearchService:
                 )
             ).fetchall()
 
+            # Multi-word fallback: if strict AND yielded no hits, try OR so
+            # composite/parenthesized entity names still match
+            words = safe_query.split()
+            if not fts_rows and len(words) > 1:
+                or_query = " OR ".join(words)
+                fts_rows = (
+                    await session.execute(
+                        fts_sql,
+                        {"query": or_query, "doc_id": document_id, "inner_limit": limit * 4},
+                    )
+                ).fetchall()
+
             if not fts_rows:
                 return []
 

@@ -464,7 +464,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   // Suppressed only for the section the reader arrived at with a citation; any
   // section they pick afterwards scrolls normally.
   useEffect(() => {
-    if (leftTab === "read" && readSectionId && !(citationOwnsScroll && readSectionId === initialSectionId)) {
+    if (leftTab === "read" && readSectionId && !searchOpen && !(citationOwnsScroll && readSectionId === initialSectionId)) {
       const timer = setTimeout(() => {
         const el = document.getElementById(`read-sec-${readSectionId}`)
         if (el) {
@@ -473,7 +473,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [leftTab, readSectionId, initialSectionId, citationOwnsScroll])
+  }, [leftTab, readSectionId, initialSectionId, citationOwnsScroll, searchOpen])
 
   // Keep activeSectionId in sync with whichever per-action state was most
   // recently touched. Priority: Feynman > Read > Goals > Note editor.
@@ -727,9 +727,13 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
   useEffect(() => {
     const query = initialSearch?.trim()
     if (!query || !doc) return
+    if (doc.format === "pdf" && leftTab === "pdfview") {
+      // PDFViewer receives initialSearch prop directly and searches PDF natively
+      return
+    }
     openReaderSearch(query)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSearch, doc])
+  }, [initialSearch, doc, leftTab])
 
   // Tags-tab click -> open in-doc search with the tag's surface form prefilled.
   // Listens on window so the panel doesn't need a prop drilled through SummaryPanel.
@@ -1499,7 +1503,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
             }
             return (
               <div className={cn("flex-1 overflow-hidden", leftTab !== "pdfview" && "hidden")}>
-                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
+                <PDFViewer ref={pdfViewerRef} citationWords={citationWords} documentId={documentId} sections={doc.sections} pageLabels={doc.page_labels ?? undefined} initialPage={targetPdfPage} initialSearch={initialSearch} annotations={docAnnotations ?? []} highlightsVisible={highlightsVisible} onPageChange={handlePageChange} />
               </div>
             )
           })()}

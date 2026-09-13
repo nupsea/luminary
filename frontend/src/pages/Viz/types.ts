@@ -27,6 +27,8 @@ export interface GraphNode {
   source_image_id?: string // set for diagram-derived nodes
   note_id?: string // set for Note nodes
   outgoing_link_count?: number // set for Note nodes
+  document_id?: string // document where entity was extracted
+  document_ids?: string[] // all documents mentioning this entity
 }
 
 export interface GraphEdge {
@@ -50,6 +52,8 @@ export interface SelectedNodeInfo {
   screenX: number
   screenY: number
   source_image_id?: string // set for diagram-derived nodes
+  document_id?: string
+  document_ids?: string[]
 }
 
 export interface DocListItem {

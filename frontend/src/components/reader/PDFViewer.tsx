@@ -271,6 +271,7 @@ interface PDFViewerProps {
    */
   pageLabels?: Record<string, string>
   initialPage?: number  // navigate to this page after PDF loads (from citation deep-link)
+  initialSearch?: string // prefilled search query
   /** The cited passage as words, drawn on whichever page contains it. */
   citationWords?: string[]
   annotations?: AnnotationItem[]
@@ -287,7 +288,7 @@ type LoadStatus = "loading" | "error" | "ready"
 const EMPTY_WORDS: string[] = []
 
 export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
-  function PDFViewer({ documentId, sections, pageLabels, initialPage, citationWords = EMPTY_WORDS, annotations = [], highlightsVisible = true, onPageChange }, ref) {
+  function PDFViewer({ documentId, sections, pageLabels, initialPage, initialSearch, citationWords = EMPTY_WORDS, annotations = [], highlightsVisible = true, onPageChange }, ref) {
     const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
     // Read inside the page-render closure, which is not re-created per prop change.
     const citationWordsRef = useRef<string[]>(citationWords)
@@ -350,7 +351,7 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     sectionsRef.current = sections
 
     // ── Search state ──────────────────────────────────────────────────
-    const [searchOpen, setSearchOpen] = useState(false)
+    const [searchOpen, setSearchOpen] = useState(() => Boolean(initialSearch?.trim()))
     const [zoomOpen, setZoomOpen] = useState(false)
     const zoomPopoverRef = useRef<HTMLDivElement | null>(null)
     // What the box shows, and what the search actually runs on. They are
@@ -359,11 +360,20 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
     // pages, each clearing and redrawing the highlights 62 times as its batches
     // landed. The box stays instant; the search waits for a pause in typing,
     // the same way the page field already does.
-    const [searchInput, setSearchInput] = useState("")
-    const [searchQuery, setSearchQuery] = useState("")
+    const [searchInput, setSearchInput] = useState(() => initialSearch?.trim() ?? "")
+    const [searchQuery, setSearchQuery] = useState(() => initialSearch?.trim() ?? "")
     const [globalMatches, setGlobalMatches] = useState<PageMatch[]>([])
     const [globalMatchIndex, setGlobalMatchIndex] = useState(-1)
     const pageTextCacheRef = useRef<Map<number, string>>(new Map())
+
+    useEffect(() => {
+      const q = initialSearch?.trim()
+      if (q) {
+        setSearchInput(q)
+        setSearchQuery(q)
+        setSearchOpen(true)
+      }
+    }, [initialSearch])
     // Track how many pages have been extracted so far (for progressive search)
     const [extractedPageCount, setExtractedPageCount] = useState(0)
     // The numbers printed on the sheets, when the PDF says they differ from
@@ -844,12 +854,18 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
           const matches = buildGlobalMatches(pageTextCacheRef.current, query)
           setGlobalMatches(matches)
           // Set initial match index to first match if not yet set
-          setGlobalMatchIndex((prev) => (prev < 0 && matches.length > 0 ? 0 : prev))
+          setGlobalMatchIndex((prev) => {
+            if (prev < 0 && matches.length > 0) {
+              if (matches[0].page !== currentPage) goToPage(matches[0].page)
+              return 0
+            }
+            return prev
+          })
         }
         // Yield to main thread between batches to keep UI responsive
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
-    }, [extractPageText])
+    }, [extractPageText, currentPage, goToPage])
 
     // Settle the typed text before searching on it. 250ms matches the page
     // field: long enough that a word is typed as one query, short enough that
@@ -873,14 +889,23 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
       // Rebuild from cache first (instant for already-extracted pages)
       const cached = buildGlobalMatches(pageTextCacheRef.current, q)
       setGlobalMatches(cached)
-      if (cached.length > 0) setGlobalMatchIndex(0)
+      if (cached.length > 0) {
+        setGlobalMatchIndex(0)
+        if (cached[0].page !== currentPage) goToPage(cached[0].page)
+      }
 
       // Then progressively extract remaining pages. Once the whole document is
       // cached there is nothing to progress through, and running the batch loop
       // anyway republished the match list 62 times on a 600-page book -- for a
       // second search that changes none of them.
       if (pageTextCacheRef.current.size >= pdfDoc.numPages) {
-        setGlobalMatchIndex((prev) => (prev < 0 && cached.length > 0 ? 0 : prev))
+        setGlobalMatchIndex((prev) => {
+          if (prev < 0 && cached.length > 0) {
+            if (cached[0].page !== currentPage) goToPage(cached[0].page)
+            return 0
+          }
+          return prev
+        })
         return
       }
 
@@ -889,12 +914,18 @@ export const PDFViewer = forwardRef<PDFViewerHandle, PDFViewerProps>(
         if (!cancelled) {
           const all = buildGlobalMatches(pageTextCacheRef.current, q)
           setGlobalMatches(all)
-          setGlobalMatchIndex((prev) => (prev < 0 && all.length > 0 ? 0 : prev))
+          setGlobalMatchIndex((prev) => {
+            if (prev < 0 && all.length > 0) {
+              if (all[0].page !== currentPage) goToPage(all[0].page)
+              return 0
+            }
+            return prev
+          })
         }
       })()
 
       return () => { cancelled = true }
-    }, [searchQuery, searchOpen, pdfDoc, extractAllPages])
+    }, [searchQuery, searchOpen, pdfDoc, extractAllPages, currentPage, goToPage])
 
     // Size the page to the pane. Measured from the page itself rather than a
     // remembered number, so every mode stays correct after the panel is resized.

@@ -402,6 +402,8 @@ class KuzuTechRepo:
                         "size": int(row[3] or 1),
                         "source_image_id": row[4] or "",
                         "mention_count": int(row[3] or 1),
+                        "document_id": document_id,
+                        "document_ids": [document_id],
                     }
                 )
             return nodes
