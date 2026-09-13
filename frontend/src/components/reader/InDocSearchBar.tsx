@@ -123,7 +123,7 @@ export function InDocSearchBar({
         />
         {totalHits > 0 && (
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            sec {hitIndex + 1} of {totalHits}
+            section {hitIndex + 1} of {totalHits}
           </span>
         )}
         {totalHits > 0 && (
