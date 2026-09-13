@@ -123,24 +123,24 @@ export function InDocSearchBar({
         />
         {totalHits > 0 && (
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {hitIndex + 1} of {totalHits}
+            sec {hitIndex + 1} of {totalHits}
           </span>
         )}
         {totalHits > 0 && (
           <>
             <button
               onClick={onPrev}
-              title="Previous match"
+              title="Previous matching section"
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Previous match"
+              aria-label="Previous matching section"
             >
               <ChevronUp size={12} />
             </button>
             <button
               onClick={onNext}
-              title="Next match"
+              title="Next matching section"
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Next match"
+              aria-label="Next matching section"
             >
               <ChevronDown size={12} />
             </button>

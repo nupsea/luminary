@@ -653,7 +653,7 @@ export function ReadView({
   // which is exactly the "I have to scroll to find the highlight" report. The
   // mark is inside this section anyway, so centring it lands here too.
   useEffect(() => {
-    if (!initialSectionId || activeCitation.length > 0) return
+    if (!initialSectionId || (activeCitation.length > 0 && !searchTerm)) return
     return settleIntoView<Element>({
       find: () => {
         const sec = document.getElementById(`read-sec-${initialSectionId}`)

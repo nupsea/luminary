@@ -715,6 +715,7 @@ function DocumentReaderBase({ documentId, onBack, initialSectionId, initialChunk
     if (leftTab === "pdfview" && query === undefined) return
     if (leftTab !== "sections" && leftTab !== "read") setLeftTab("read")
     if (query !== undefined) setPendingSearchQuery(query)
+    setInPlaceCitation(null)
     setSearchOpen(true)
   }, [leftTab, setLeftTab])
 
