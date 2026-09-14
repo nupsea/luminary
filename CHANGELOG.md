@@ -4,6 +4,28 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.7] - 2026-09-14
+
+### Added
+- **Visual cover and thumbnail tiles in Library cards.** Replaced the small 2-line text notes in `DocumentCard` with rich visual media tiles:
+  - **YouTube videos**: Instant, zero-cost video thumbnails derived directly from the video URL.
+  - **PDF & EPUB books**: Rendered Page 0 cover images rasterized on-demand via PyMuPDF at 120 DPI, converted to lightweight WebP, and cached in `DATA_DIR/covers/` for subsequent instant streaming via `GET /documents/{id}/cover`.
+  - **Articles & Papers**: Automatic fallback to the earliest extracted non-decorative diagram or figure from `ImageModel`.
+  - **Procedural resonance banners**: Deterministic generative glassmorphism banners seeded by document type, domain facets, and the one-sentence summary for text-only documents.
+- **Universal study session revisit and history review.**
+  - Review completed practice sessions from the document Practice tab and global Session History, including per-card predictions, actual recall results, answers, and source excerpts.
+  - Added review mode in `RecallRunner` allowing seamless navigation across previously completed cards without altering FSRS scheduling.
+
+### Fixed
+- **Flashcard generation starvation on dense and single-section documents.**
+  - Extended chunk classification to supplement sparse concept chunks with content passages across the document, preventing starved prompt contexts and repetitive questions.
+  - Implemented resilient fallback to advance to next unused passages when initial passes yield zero cards.
+  - Scoped lexical duplicate excerpt checks to question content-token overlap, ensuring distinct concepts cited from the same passage are properly retained.
+  - Synchronized model diversity instructions across prompt specifications and snapshots.
+- **In-document search stepping and single-click citation navigation.**
+  - Implemented hybrid occurrence-stepping in-doc search with active match highlighting and section counters.
+  - Fixed citation navigation race conditions to ensure single-click citation navigation reliably scrolls, highlights, and centers passages while cleanly coordinating with in-doc search.
+
 ## [0.12.5] - 2026-09-13
 
 ### Fixed
