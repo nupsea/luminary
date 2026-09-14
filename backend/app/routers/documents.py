@@ -24,6 +24,7 @@ from app.models import (
     DocumentModel,
     EnrichmentJobModel,
     FlashcardModel,
+    ImageModel,
     LearningObjectiveModel,
     PredictionEventModel,
     ReadingPositionModel,
@@ -1419,6 +1420,95 @@ async def serve_document_file(document_id: str) -> FileResponse:
     }
     mime = mime_map.get(doc.format.lower(), "application/octet-stream")
     return FileResponse(str(fp), media_type=mime)
+
+
+def _render_cover_sync(fp: str, target: str) -> bool:
+    try:
+        import fitz
+        from PIL import Image
+
+        pdf = fitz.open(fp)
+        if len(pdf) == 0:
+            return False
+        page = pdf[0]
+        # 120 DPI gives crisp visual quality on cards while keeping file size ~30-50KB
+        pix = page.get_pixmap(dpi=120)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        if img.height > 600:
+            ratio = 600.0 / img.height
+            img = img.resize((int(img.width * ratio), 600), Image.Resampling.LANCZOS)
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(target_path, "WEBP", quality=80)
+        return True
+    except Exception as exc:
+        logger.warning("Failed to generate cover for %s: %s", fp, exc)
+        return False
+
+
+@router.get("/{document_id}/cover")
+async def get_document_cover(document_id: str) -> FileResponse:
+    """Serve or generate on-demand the cover / preview image for a document.
+
+    - For PDF / EPUB: renders page 0 via PyMuPDF (fitz) if not already cached.
+    - If images exist (e.g. from article extraction), serves the first diagram/figure.
+    - Returns 404 if no image can be produced for this document.
+    """
+    settings = get_settings()
+    covers_dir = Path(settings.DATA_DIR).expanduser() / "covers"
+    cached_cover = covers_dir / f"{document_id}.webp"
+    if cached_cover.is_file():
+        return FileResponse(str(cached_cover), media_type="image/webp")
+
+    async with get_session_factory()() as session:
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+        doc_format = (doc.format or "").lower()
+        file_path = doc.file_path
+
+        # 1. If PDF or EPUB, try rendering page 0
+        if doc_format in ("pdf", "epub") and file_path and Path(file_path).is_file():
+            success = await asyncio.to_thread(_render_cover_sync, file_path, str(cached_cover))
+            if success and cached_cover.is_file():
+                return FileResponse(str(cached_cover), media_type="image/webp")
+
+        # 2. If article/figures exist in ImageModel
+        img_row = (
+            await session.execute(
+                select(ImageModel.path)
+                .where(ImageModel.document_id == document_id)
+                .where((ImageModel.image_type != "decorative") | (ImageModel.image_type.is_(None)))
+                .order_by(ImageModel.page.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if img_row:
+            img_abs = (Path(settings.DATA_DIR).expanduser() / img_row).resolve()
+            if img_abs.is_file():
+                ext = img_abs.suffix.lstrip(".").lower()
+                valid_exts = ("png", "jpg", "jpeg", "webp")
+                media_type = f"image/{ext}" if ext in valid_exts else "image/png"
+                return FileResponse(str(img_abs), media_type=media_type)
+
+        # 3. Check for local mirrored article images
+        article_img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+        if article_img_dir.is_dir():
+            first_img = next(
+                (
+                    f
+                    for f in sorted(article_img_dir.iterdir())
+                    if f.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]
+                ),
+                None,
+            )
+            if first_img and first_img.is_file():
+                ext = first_img.suffix.lstrip(".").lower()
+                valid_exts = ("png", "jpg", "jpeg", "webp")
+                media_type = f"image/{ext}" if ext in valid_exts else "image/png"
+                return FileResponse(str(first_img), media_type=media_type)
+
+    raise HTTPException(status_code=404, detail="Cover image not available")
+
 
 
 @router.get("/{document_id}/pdf-meta", response_model=PDFMetaResponse)

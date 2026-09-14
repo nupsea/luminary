@@ -52,6 +52,7 @@ import {
   relativeDate,
 } from "./utils"
 import { FacetChips } from "./FacetChips"
+import { DocumentCoverTile } from "./DocumentCoverTile"
 
 import { apiPatch } from "@/lib/apiClient"
 import { toast } from "sonner"
@@ -629,11 +630,8 @@ export function DocumentCard({
         </span>
       )}
 
-      {doc.summary_one_sentence && (
-        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-          {doc.summary_one_sentence}
-        </p>
-      )}
+      {/* Visual cover / thumbnail / resonance tile */}
+      <DocumentCoverTile doc={doc} />
 
       {doc.flashcard_count > 0 && (
         <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">

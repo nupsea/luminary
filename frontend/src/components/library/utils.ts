@@ -35,6 +35,15 @@ export function isYouTubeDoc(doc: { source_url?: string | null }): boolean {
   return !!(doc.source_url?.includes("youtube") || doc.source_url?.includes("youtu.be"))
 }
 
+export function getYouTubeThumbnail(url: string | null | undefined): string | null {
+  if (!url) return null
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/)
+  if (match && match[1]) {
+    return `https://img.youtube.com/vi/${match[1]}/hqdefault.jpg`
+  }
+  return null
+}
+
 export function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
