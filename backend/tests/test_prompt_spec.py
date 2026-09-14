@@ -25,6 +25,7 @@ from app.services.prompt_spec import Accommodation, PromptSpec, describe, render
 FLASHCARD_RENDER = """\
 Write {count} {difficulty}-level flashcards from the text below.
 Difficulty: {difficulty_guidelines}
+DIVERSITY: Each card must test a distinctly different concept, claim, or mechanism. Do NOT write multiple cards that test the same underlying fact or premise from slightly different angles.
 {extra_instructions}Return a JSON object:
 {{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", \
 "depth": "fact|explain|use|relate|limit|build"}}]}}

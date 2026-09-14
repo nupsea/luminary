@@ -625,28 +625,35 @@ def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
     exc1_tokens = {w for w in re.sub(r"[^\w\s]", "", exc1).split() if len(w) > 2}
 
     for other in kept_cards:
-        exc2 = str(other.get("source_excerpt", "")).strip().lower()
-        if exc1 and exc2 and len(exc1) >= 15 and len(exc2) >= 15:
-            if exc1 == exc2:
-                return True
-            min_len = min(len(exc1), len(exc2))
-            if min_len >= 25 and (exc1 in exc2 or exc2 in exc1):
-                return True
-            exc2_tokens = {w for w in re.sub(r"[^\w\s]", "", exc2).split() if len(w) > 2}
-            if len(exc1_tokens) >= 5 and len(exc2_tokens) >= 5:
-                exc_sim = len(exc1_tokens & exc2_tokens) / len(exc1_tokens | exc2_tokens)
-                if exc_sim >= 0.60:
-                    return True
-
         q2_raw = re.sub(r"[^\w\s]", "", str(other.get("question", "")).lower()).split()
         tokens2 = {w for w in q2_raw if len(w) > 2}
+        content_tokens2 = {w for w in tokens2 if w not in _QUESTION_STOP_WORDS}
+
+        exc2 = str(other.get("source_excerpt", "")).strip().lower()
+        if exc1 and exc2 and len(exc1) >= 15 and len(exc2) >= 15:
+            min_len = min(len(exc1), len(exc2))
+            exc2_tokens = {w for w in re.sub(r"[^\w\s]", "", exc2).split() if len(w) > 2}
+            same_excerpt = (
+                exc1 == exc2
+                or (min_len >= 25 and (exc1 in exc2 or exc2 in exc1))
+                or (
+                    len(exc1_tokens) >= 5
+                    and len(exc2_tokens) >= 5
+                    and (len(exc1_tokens & exc2_tokens) / len(exc1_tokens | exc2_tokens)) >= 0.70
+                )
+            )
+            if same_excerpt and len(content_tokens1) >= 2 and len(content_tokens2) >= 2:
+                c_inter = len(content_tokens1 & content_tokens2)
+                c_union = len(content_tokens1 | content_tokens2)
+                if c_union > 0 and (c_inter / c_union) >= 0.35:
+                    return True
+
         if tokens1 and tokens2:
             intersection = len(tokens1 & tokens2)
             union = len(tokens1 | tokens2)
             if union > 0 and (intersection / union) >= 0.60:
                 return True
 
-        content_tokens2 = {w for w in tokens2 if w not in _QUESTION_STOP_WORDS}
         if len(content_tokens1) >= 3 and len(content_tokens2) >= 3:
             c_inter = len(content_tokens1 & content_tokens2)
             c_union = len(content_tokens1 | content_tokens2)
