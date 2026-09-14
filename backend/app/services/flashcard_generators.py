@@ -481,27 +481,12 @@ def _passage_not_yet_used(
 ) -> list[ChunkModel]:
     """The chunks a regeneration reads: the ones the current deck was not written from.
 
-    What a run can ask about is decided by the passage in its prompt, not by the
-    decoding. The classifier leaves a technical tutorial with 10 eligible chunks
-    out of 265, all of which fit the prompt budget, so every run read the same
-    1,679 characters and returned the same five topics -- deleting the deck first
-    changed nothing, because the input was identical.
-
     Preference order is the classifier's choice first, then the rest of the
     document, in reading order -- so successive regenerations sweep forward
     through the document instead of re-reading its opening. When every chunk has
     been used the preferred set is returned unchanged: a document whose material
     is exhausted must still produce a deck, and the near-duplicate filter is what
     stops the repeats reaching the user.
-
-    The replacement passage is held to the size of the one it replaces rather
-    than filled to `_CHUNK_CHAR_LIMIT`. More text is not free: measured on the
-    reported document over three runs each, the same unused material cut to the
-    previous passage's size passed the grounding gate 14 times in 15 and
-    delivered 4-5 cards a run, against 12 in 15 and 3-5 when it filled the
-    budget -- and both asked questions with nothing in common with the deck they
-    replaced, so the cap costs no novelty. The size is defensible on its own
-    terms too: that many characters already produced the deck being replaced.
     """
     fresh = [c for c in preferred if c.id not in already_used]
     if fresh:
@@ -510,15 +495,40 @@ def _passage_not_yet_used(
     if not rest:
         return preferred
 
-    budget = sum(len(c.text) for c in preferred)
+    used_indices = [
+        c.chunk_index for c in all_chunks
+        if c.id in already_used and c.chunk_index is not None
+    ]
+    if used_indices:
+        max_used = max(used_indices)
+        forward = [c for c in rest if c.chunk_index is not None and c.chunk_index > max_used]
+        backward = [c for c in rest if c.chunk_index is not None and c.chunk_index <= max_used]
+        sweep = forward + backward
+    else:
+        sweep = rest
+
+    from app.services.flashcard import _classify_chunk  # noqa: PLC0415
+    content_sweep = [
+        c for c in sweep
+        if len(c.text.strip()) >= 80 and _classify_chunk(c.text) != "transition"
+    ]
+    candidates = content_sweep if content_sweep else sweep
+
+    preferred_size = sum(len(c.text) for c in preferred)
+    budget = preferred_size
+    # When preferred was narrow (fewer than 2 chunks or <1500 chars), give the
+    # replacement enough room to find substantive facts.
+    if len(preferred) < 2 and budget < 1500:
+        budget = max(budget, 2000)
+
     capped: list[ChunkModel] = []
     size = 0
-    for chunk in rest:
+    for chunk in candidates:
         if capped and size + len(chunk.text) > budget:
             break
         capped.append(chunk)
         size += len(chunk.text)
-    return capped
+    return capped if capped else candidates[:1]
 
 
 async def _drop_near_duplicates(
@@ -567,6 +577,12 @@ async def _drop_near_duplicates(
     kept: list[dict] = []
     call_q = call_a = None
     for i, card in enumerate(cards):
+        if _is_lexical_duplicate(card, kept):
+            logger.info(
+                "flashcard.generate_from_notes: skipping lexical duplicate: %r",
+                str(card.get("question", ""))[:80],
+            )
+            continue
         if (deck_q is not None and _is_near_duplicate(q_vecs[i], deck_q)) or (
             call_q is not None and _repeats_this_call(q_vecs[i], a_vecs[i], call_q, call_a)
         ):
@@ -578,6 +594,74 @@ async def _drop_near_duplicates(
         call_q, call_a = _extend_pool(call_q, call_a, q_vecs[i : i + 1], a_vecs[i : i + 1])
         kept.append(card)
     return kept, len(cards) - len(kept)
+
+
+_QUESTION_STOP_WORDS = frozenset({
+    "what", "why", "how", "when", "where", "which", "who", "whom", "whose",
+    "does", "did", "are", "the", "and", "that", "this", "these", "those",
+    "for", "with", "from", "their", "its", "can", "could", "would", "might",
+    "may", "will", "should", "one", "two", "three", "between", "such",
+    "than", "more", "most", "also", "into", "over", "after", "before", "about",
+    "been", "have", "has", "had", "they", "them", "some", "lead", "other",
+})
+
+
+def _stem(word: str) -> str:
+    """Lightweight suffix stripping for token overlap."""
+    w = word.lower()
+    for suffix in ("ing", "tion", "tions", "ies", "ed", "es", "s", "ly", "ment"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    return w
+
+
+def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
+    """Return True if candidate card duplicates any card already kept in this call by excerpt or high token overlap."""
+    import re
+    q1_raw = re.sub(r"[^\w\s]", "", str(card.get("question", "")).lower()).split()
+    tokens1 = {w for w in q1_raw if len(w) > 2}
+    content_tokens1 = {w for w in tokens1 if w not in _QUESTION_STOP_WORDS}
+    exc1 = str(card.get("source_excerpt", "")).strip().lower()
+    exc1_tokens = {w for w in re.sub(r"[^\w\s]", "", exc1).split() if len(w) > 2}
+
+    for other in kept_cards:
+        exc2 = str(other.get("source_excerpt", "")).strip().lower()
+        if exc1 and exc2 and len(exc1) >= 15 and len(exc2) >= 15:
+            if exc1 == exc2:
+                return True
+            min_len = min(len(exc1), len(exc2))
+            if min_len >= 25 and (exc1 in exc2 or exc2 in exc1):
+                return True
+            exc2_tokens = {w for w in re.sub(r"[^\w\s]", "", exc2).split() if len(w) > 2}
+            if len(exc1_tokens) >= 5 and len(exc2_tokens) >= 5:
+                exc_sim = len(exc1_tokens & exc2_tokens) / len(exc1_tokens | exc2_tokens)
+                if exc_sim >= 0.60:
+                    return True
+
+        q2_raw = re.sub(r"[^\w\s]", "", str(other.get("question", "")).lower()).split()
+        tokens2 = {w for w in q2_raw if len(w) > 2}
+        if tokens1 and tokens2:
+            intersection = len(tokens1 & tokens2)
+            union = len(tokens1 | tokens2)
+            if union > 0 and (intersection / union) >= 0.60:
+                return True
+
+        content_tokens2 = {w for w in tokens2 if w not in _QUESTION_STOP_WORDS}
+        if len(content_tokens1) >= 3 and len(content_tokens2) >= 3:
+            c_inter = len(content_tokens1 & content_tokens2)
+            c_union = len(content_tokens1 | content_tokens2)
+            if c_union > 0 and (c_inter / c_union) >= 0.50:
+                return True
+
+        content_stems1 = {_stem(w) for w in content_tokens1}
+        content_stems2 = {_stem(w) for w in content_tokens2}
+        if len(content_stems1) >= 3 and len(content_stems2) >= 3:
+            s_inter = len(content_stems1 & content_stems2)
+            s_union = len(content_stems1 | content_stems2)
+            if s_inter >= 4 or (s_union > 0 and (s_inter / s_union) >= 0.45):
+                return True
+
+    return False
 
 
 async def _encode_card_texts(embedder: Any, cards: list[dict]) -> tuple[Any, Any]:
@@ -710,6 +794,7 @@ async def generate(
         _CHUNK_CHAR_LIMIT,
         _build_enriched_text,
         _build_text,
+        _classify_chunk,
         _fetch_chunks,
         _fetch_existing_embeddings,
         _filter_chunks_by_classification,
@@ -788,6 +873,19 @@ async def generate(
                 len(chunks),
                 genre,
             )
+            # If classified concept chunks are too narrow for the requested card count
+            # (e.g. only 1-2 chunks in a 100+ chunk document), supplement them with content
+            # chunks across the document so the generator does not starve or duplicate questions.
+            if len(eligible_chunks) < min(count, 5) and len(chunks) > len(eligible_chunks):
+                content_chunks = [
+                    c for c in chunks
+                    if c.id not in {ec.id for ec in eligible_chunks}
+                    and len(c.text.strip()) >= 80
+                    and _classify_chunk(c.text) != "transition"
+                ]
+                if content_chunks:
+                    needed = max(3, count) - len(eligible_chunks)
+                    eligible_chunks = eligible_chunks + content_chunks[:needed * 2]
         else:
             eligible_chunks = chunks
             logger.info(
@@ -900,6 +998,13 @@ async def generate(
         kept: list[dict] = []
         for i, item in enumerate(screened):
             question = str(item.get("question", "")).strip()
+            if _is_lexical_duplicate(item, kept):
+                logger.info(
+                    "flashcard.generate: skipping lexical duplicate: %r",
+                    question[:80],
+                )
+                deduped += 1
+                continue
             if cand_q is not None:
                 if (deck_q is not None and _is_near_duplicate(cand_q[i], deck_q)) or (
                     call_q is not None
@@ -931,6 +1036,47 @@ async def generate(
             span.set_attribute("flashcard.section_heading", section_heading)
 
         candidates = await _collect_with_backfill(count, _batch)
+
+        # Resilient fallback: if the initial passage yields 0 cards and there are
+        # unused chunks available in the document, advance to the next unused passage
+        # instead of returning empty to the learner.
+        if not candidates and not (context and context.strip()) and chunks:
+            tried_chunks = set(passage_chunk_ids)
+            attempts_left = 2
+            while not candidates and attempts_left > 0:
+                attempts_left -= 1
+                fallback_chunks = _passage_not_yet_used(
+                    chunks, chunks, (exclude_chunk_ids or set()) | tried_chunks
+                )
+                if not fallback_chunks or {c.id for c in fallback_chunks}.issubset(tried_chunks):
+                    break
+                if section_ctx:
+                    next_text, first_chunk_id, next_p_ids = _build_enriched_text(
+                        fallback_chunks, section_ctx
+                    )
+                else:
+                    next_text, first_chunk_id, next_p_ids = _build_text(fallback_chunks)
+                if not next_text or next_text == combined_text:
+                    break
+                combined_text = next_text
+                passage_chunk_ids = next_p_ids
+                eligible_chunks = fallback_chunks
+                chunk_classification = None
+                tried_chunks.update(passage_chunk_ids)
+                first_sec = fallback_chunks[0].section_id if fallback_chunks else None
+                if first_sec and first_sec in section_ctx:
+                    resolved_section_heading = _resolve_section_heading(
+                        fallback_chunks[0], section_ctx
+                    )
+                else:
+                    resolved_section_heading = None
+                logger.info(
+                    "flashcard.generate: retrying with fallback passage (%d chunks, %d chars)",
+                    len(fallback_chunks),
+                    len(combined_text),
+                )
+                candidates = await _collect_with_backfill(count, _batch)
+
         span.set_attribute("flashcard.generated_count", len(candidates))
 
     now = datetime.now(UTC)

@@ -83,8 +83,13 @@ class SessionListResponse(BaseModel):
 class SessionCardDetail(BaseModel):
     flashcard_id: str
     question: str
+    answer: str = ""
+    source_excerpt: str | None = None
+    section_heading: str | None = None
+    chunk_id: str | None = None
     rating: str
     is_correct: bool
+    predicted_rating: str | None = None
     reviewed_at: datetime
 
 

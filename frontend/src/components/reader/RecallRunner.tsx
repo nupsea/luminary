@@ -12,15 +12,17 @@
  * useStudySession.ts for what that rule is protecting).
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   ArrowRight,
+  BookOpen,
   Check,
   ChevronsUp,
   Loader2,
   Minus,
   Plus,
   RotateCcw,
+  RotateCw,
   Send,
   Text,
   X,
@@ -51,6 +53,7 @@ import {
   type Rating,
   type TeachbackResultItem,
   appendSessionCards,
+  fetchSessionCards,
   fetchSourceContext,
   reopenSession,
   submitReview,
@@ -161,6 +164,37 @@ export function RecallRunner({
   // run's own header said "4 of 3 reviewed" until this was a set of ids.
   const [countedCards, setCountedCards] = useState<Set<string>>(new Set())
   const [calibration, setCalibration] = useState<{ text: string; tone: CalibrationTone } | null>(null)
+  const [reviewedCards, setReviewedCards] = useState<ReviewedCardRecord[]>([])
+
+  useEffect(() => {
+    if (mode === "flashcard" && sessionId) {
+      void fetchSessionCards(sessionId)
+        .then((existing) => {
+          if (existing.length > 0) {
+            setReviewedCards((prev) => {
+              const map = new Map<string, ReviewedCardRecord>()
+              for (const item of existing) {
+                const cardInQueue = queue.find((q) => q.id === item.flashcard_id)
+                map.set(item.flashcard_id, {
+                  cardId: item.flashcard_id,
+                  question: item.question,
+                  answer: item.answer,
+                  sourceExcerpt: item.source_excerpt ?? "",
+                  sectionId: cardInQueue?.section_id ?? null,
+                  rating: item.rating as Rating,
+                  predicted: (item.predicted_rating as Rating) ?? null,
+                })
+              }
+              for (const p of prev) {
+                map.set(p.cardId, p)
+              }
+              return Array.from(map.values())
+            })
+          }
+        })
+        .catch(() => {})
+    }
+  }, [sessionId, mode, queue])
 
   // Run totals.
   const [correct, setCorrect] = useState(0)
@@ -308,6 +342,19 @@ export function RecallRunner({
     countCard(currentCard.id)
     if (rating !== "again") setCorrect((c) => c + 1)
 
+    setReviewedCards((prev) => [
+      ...prev.filter((r) => r.cardId !== currentCard.id),
+      {
+        cardId: currentCard.id,
+        question: currentCard.question,
+        answer: currentCard.answer,
+        sourceExcerpt: currentCard.source_excerpt,
+        sectionId: currentCard.section_id,
+        rating,
+        predicted,
+      },
+    ])
+
     if (predicted !== null) {
       const cal = calibrationMessage(predicted, rating)
       setPredictionsMade((n) => n + 1)
@@ -381,6 +428,8 @@ export function RecallRunner({
         pending={pending}
         results={results}
         onReAnswer={(cardId) => void reAnswer(cardId)}
+        reviewedCards={reviewedCards}
+        onJumpToSource={onJumpToSource}
         reviewed={reviewed}
         correct={correct}
         predictionsMade={predictionsMade}
@@ -712,6 +761,8 @@ function Readout({
   pending,
   results,
   onReAnswer,
+  reviewedCards,
+  onJumpToSource,
   reviewed,
   correct,
   predictionsMade,
@@ -729,6 +780,8 @@ function Readout({
   pending: PendingTeachback[]
   results: TeachbackResultItem[] | undefined
   onReAnswer: (cardId: string) => void
+  reviewedCards?: ReviewedCardRecord[]
+  onJumpToSource?: (sectionId: string) => void
   reviewed: number
   correct: number
   predictionsMade: number
@@ -803,6 +856,13 @@ function Readout({
 
         {mode === "teachback" && pending.length > 0 && (
           <TeachbackAttempts pending={pending} results={results} onReAnswer={onReAnswer} />
+        )}
+
+        {mode === "flashcard" && reviewedCards && reviewedCards.length > 0 && (
+          <RecallAttempts
+            cards={reviewedCards}
+            onJumpToSource={onJumpToSource ?? (() => {})}
+          />
         )}
 
         {!onAddMore && exhaustedNote && (
@@ -937,6 +997,107 @@ function TeachbackAttempts({
                   Attempt {attemptCount}
                 </span>
               )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+interface ReviewedCardRecord {
+  cardId: string
+  question: string
+  answer: string
+  sourceExcerpt: string
+  sectionId?: string | null
+  rating: Rating
+  predicted: Rating | null
+}
+
+function RecallAttempts({
+  cards,
+  onJumpToSource,
+}: {
+  cards: ReviewedCardRecord[]
+  onJumpToSource: (sectionId: string) => void
+}) {
+  const [showAnswerFor, setShowAnswerFor] = useState<Record<string, boolean>>({})
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs uppercase tracking-wider text-muted-foreground/70">
+        Questions reviewed this run
+      </p>
+      {cards.map((c) => {
+        const rating = c.rating
+        const Icon = RATING_ICONS[rating] ?? Check
+        const showingAnswer = showAnswerFor[c.cardId] ?? false
+
+        return (
+          <div
+            key={c.cardId}
+            className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground">{c.question}</p>
+
+              {showingAnswer && (
+                <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Answer
+                  </div>
+                  <MarkdownRenderer className="text-xs text-foreground leading-relaxed prose-p:my-1 prose-ul:my-1">
+                    {c.answer}
+                  </MarkdownRenderer>
+                  {c.sourceExcerpt && (
+                    <blockquote className="mt-2 border-l-2 border-primary/40 pl-2 text-[11px] italic text-muted-foreground">
+                      {c.sourceExcerpt}
+                    </blockquote>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                {c.predicted && (
+                  <span className="rounded bg-muted/40 px-1.5 py-0.5">
+                    Predicted: <strong className="capitalize">{c.predicted}</strong>
+                  </span>
+                )}
+                {c.sectionId && (
+                  <button
+                    type="button"
+                    onClick={() => onJumpToSource(c.sectionId!)}
+                    className="flex items-center gap-1 rounded bg-muted/40 px-1.5 py-0.5 hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <BookOpen size={10} />
+                    Jump to source
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <span
+                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${RATING_CLASS[rating]}`}
+              >
+                <Icon size={11} />
+                {RATING_LABELS[rating]}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setShowAnswerFor((prev) => ({
+                    ...prev,
+                    [c.cardId]: !showingAnswer,
+                  }))
+                }
+                className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                title={showingAnswer ? "Hide answer" : "Show answer"}
+              >
+                <RotateCw size={11} />
+                {showingAnswer ? "Hide" : "Answer"}
+              </button>
             </div>
           </div>
         )

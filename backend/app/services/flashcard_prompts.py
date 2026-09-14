@@ -156,6 +156,8 @@ FLASHCARD_USER_SPEC = PromptSpec(
     contract=(
         "Write {count} {difficulty}-level flashcards from the text below.\n"
         "Difficulty: {difficulty_guidelines}\n"
+        "DIVERSITY: Each card must test a distinctly different concept, claim, or mechanism. "
+        "Do NOT write multiple cards that test the same underlying fact or premise from slightly different angles.\n"
         "{extra_instructions}"
         "Return a JSON object:\n"
         '{{"flashcards": [{{"question": "...", "answer": "...", "source_excerpt": "...", '

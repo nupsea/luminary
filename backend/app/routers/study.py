@@ -1474,8 +1474,13 @@ async def get_session_cards(
         SessionCardDetail(
             flashcard_id=event.flashcard_id,
             question=card.question,
+            answer=card.answer or "",
+            source_excerpt=card.source_excerpt,
+            section_heading=card.section_heading,
+            chunk_id=card.chunk_id,
             rating=event.rating,
             is_correct=event.is_correct,
+            predicted_rating=getattr(event, "predicted_rating", None),
             reviewed_at=event.reviewed_at,
         )
         for event, card in rows

@@ -234,6 +234,35 @@ export async function appendSessionCards(
   return { added: data.added, plannedCount: data.planned_count }
 }
 
+export interface SessionCardDetail {
+  flashcard_id: string
+  question: string
+  answer: string
+  source_excerpt?: string | null
+  section_heading?: string | null
+  chunk_id?: string | null
+  rating: string
+  is_correct: boolean
+  predicted_rating?: string | null
+  reviewed_at: string
+}
+
+/**
+ * Fetch all cards reviewed in a study session, with their questions, answers,
+ * ratings, correctness, and predictions.
+ */
+export async function fetchSessionCards(
+  sessionId: string,
+): Promise<SessionCardDetail[]> {
+  const res = await fetch(
+    `${API_BASE}/study/sessions/${encodeURIComponent(sessionId)}/cards`,
+  )
+  if (!res.ok) {
+    throw new Error(`Failed to fetch cards for session ${sessionId}: ${res.status}`)
+  }
+  return res.json()
+}
+
 export interface MaterialHeadroom {
   total_chunks: number
   used_chunks: number

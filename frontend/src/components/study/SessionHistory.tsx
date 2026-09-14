@@ -173,7 +173,7 @@ export function SessionHistory({
               onDelete={(id) => deleteMutation.mutate(id)}
               isDeleting={deleteMutation.isPending}
               onResume={(id) => onResume(id, s.mode === "teachback" ? "teachback" : "flashcard")}
-              showChevron={false}
+              showChevron={true}
             />
           ))}
         </div>

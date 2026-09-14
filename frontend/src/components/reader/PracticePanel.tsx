@@ -22,7 +22,8 @@
 
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Brain, History, Loader2, MessageSquareQuote, X } from "lucide-react"
+import { Brain, ChevronDown, ChevronUp, History, Loader2, MessageSquareQuote, Trash2, X } from "lucide-react"
+import { toast } from "sonner"
 
 import { apiGet, apiPost } from "@/lib/apiClient"
 import type { Flashcard } from "@/lib/studyApi"
@@ -34,7 +35,14 @@ import {
   shouldClearPrivateModeOverride,
 } from "@/lib/chatSettingsUtils"
 import { fetchLLMSettings } from "@/lib/llmSettings"
-import { appendSessionCards, fetchMaterialHeadroom, fetchSessions } from "@/lib/studyApi"
+import {
+  appendSessionCards,
+  deleteStudySession,
+  fetchMaterialHeadroom,
+  fetchSessionCards,
+  fetchSessions,
+  fetchSessionTeachbackResults,
+} from "@/lib/studyApi"
 import {
   type PreparedStudySessionOutcome,
   type StudyMode,
@@ -237,6 +245,18 @@ export function PracticePanel({
     void qc.invalidateQueries({ queryKey: ["scoped-sessions", "document", documentId] })
   }
 
+  async function handleDiscardRun(sessionId: string) {
+    try {
+      await deleteStudySession(sessionId)
+      toast.success("Incomplete run discarded")
+      void qc.invalidateQueries({ queryKey: ["reader-open-run", documentId] })
+      void qc.invalidateQueries({ queryKey: ["reader-deck", documentId] })
+      void qc.invalidateQueries({ queryKey: ["scoped-sessions", "document", documentId] })
+    } catch {
+      toast.error("Failed to discard run")
+    }
+  }
+
   /**
    * Cards generated from the deck screen while a run is open on this document.
    *
@@ -371,30 +391,12 @@ export function PracticePanel({
             ) : (
               <>
                 {openRun && (
-                  <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
-                    <p
-                      data-testid="open-run"
-                      className="flex items-center gap-2 text-base font-medium text-foreground"
-                    >
-                      <History size={15} className="text-primary" />
-                      You left a {openRun.mode === "teachback" ? "teach-back" : "recall"} run open
-                      here.
-                    </p>
-                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                      {openRun.answered > 0
-                        ? `${openRun.answered} answered so far. Picking it up returns the cards it had left, and the explanations it already collected.`
-                        : "Picking it up returns the cards it had left, and the explanations it already collected."}
-                    </p>
-                    <button
-                      data-testid="resume-run"
-                      onClick={() => void start(openRun.mode, false, openRun.id)}
-                      disabled={starting !== null}
-                      className="mt-4 flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {starting !== null && <Loader2 size={14} className="animate-spin" />}
-                      Pick it back up
-                    </button>
-                  </div>
+                  <OpenRunBanner
+                    openRun={openRun}
+                    starting={starting}
+                    onStart={(m, ahead, id) => void start(m, ahead, id)}
+                    onDiscard={handleDiscardRun}
+                  />
                 )}
                 <DeckState
                   total={deckTotal}
@@ -563,5 +565,157 @@ function StartButton({
       </span>
       <span className="text-xs text-muted-foreground">{hint}</span>
     </button>
+  )
+}
+
+function OpenRunBanner({
+  openRun,
+  starting,
+  onStart,
+  onDiscard,
+}: {
+  openRun: { id: string; mode: StudyMode; answered: number }
+  starting: StudyMode | null
+  onStart: (mode: StudyMode, ahead: boolean, id: string) => void
+  onDiscard: (id: string) => Promise<void>
+}) {
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const [isDiscarding, setIsDiscarding] = useState(false)
+  const [peek, setPeek] = useState(false)
+
+  const { data: tbCards, isLoading: tbLoading } = useQuery({
+    queryKey: ["open-run-tb", openRun.id],
+    queryFn: () => fetchSessionTeachbackResults(openRun.id),
+    enabled: peek && openRun.mode === "teachback",
+  })
+
+  const { data: fcCards, isLoading: fcLoading } = useQuery({
+    queryKey: ["open-run-fc", openRun.id],
+    queryFn: () => fetchSessionCards(openRun.id),
+    enabled: peek && openRun.mode === "flashcard",
+  })
+
+  return (
+    <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p
+            data-testid="open-run"
+            className="flex items-center gap-2 text-base font-medium text-foreground"
+          >
+            <History size={15} className="text-primary" />
+            You left a {openRun.mode === "teachback" ? "teach-back" : "recall"} run open here.
+          </p>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+            {openRun.answered > 0
+              ? `${openRun.answered} answered so far. Picking it up returns the cards it had left, and the explanations it already collected.`
+              : "Picking it up returns the cards it had left, and the explanations it already collected."}
+          </p>
+        </div>
+      </div>
+
+      {peek && (
+        <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 text-xs">
+          {openRun.mode === "teachback" ? (
+            tbLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" /> Loading answers...
+              </div>
+            ) : !tbCards || tbCards.length === 0 ? (
+              <p className="text-muted-foreground">No questions answered yet in this run.</p>
+            ) : (
+              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-foreground">
+                {tbCards.map((r) => (
+                  <li key={r.id}>
+                    <span>{r.question}</span>
+                    {r.score != null && (
+                      <span className="ml-1.5 text-muted-foreground">({r.score}/100)</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )
+          ) : fcLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" /> Loading answers...
+            </div>
+          ) : !fcCards || fcCards.length === 0 ? (
+            <p className="text-muted-foreground">No cards reviewed yet in this run.</p>
+          ) : (
+            <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-foreground">
+              {fcCards.map((c) => (
+                <li key={c.flashcard_id}>
+                  <span>{c.question}</span>
+                  <span className="ml-1.5 font-medium uppercase text-muted-foreground">
+                    ({c.rating})
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button
+          data-testid="resume-run"
+          onClick={() => onStart(openRun.mode, false, openRun.id)}
+          disabled={starting !== null || isDiscarding}
+          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {starting !== null && <Loader2 size={14} className="animate-spin" />}
+          Pick it back up
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPeek((v) => !v)}
+          className="flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {peek ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {peek ? "Hide answers" : "Peek answers"}
+        </button>
+
+        {!confirmDiscard ? (
+          <button
+            type="button"
+            onClick={() => setConfirmDiscard(true)}
+            disabled={isDiscarding}
+            className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            title="Discard this incomplete run"
+          >
+            <Trash2 size={13} />
+            Discard run
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-destructive font-medium">Discard?</span>
+            <button
+              type="button"
+              onClick={async () => {
+                setIsDiscarding(true)
+                try {
+                  await onDiscard(openRun.id)
+                } finally {
+                  setIsDiscarding(false)
+                  setConfirmDiscard(false)
+                }
+              }}
+              disabled={isDiscarding}
+              className="rounded bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+            >
+              {isDiscarding ? <Loader2 size={11} className="animate-spin" /> : "Yes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDiscard(false)}
+              className="rounded border border-border bg-background px-2 py-1 text-xs hover:bg-muted"
+            >
+              No
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

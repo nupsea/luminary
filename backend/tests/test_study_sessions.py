@@ -243,6 +243,7 @@ async def test_session_cards_returns_review_events(test_db):
     assert resp.status_code == 200
     cards = resp.json()
     assert len(cards) == 2
+    assert all("answer" in c and c["answer"] is not None for c in cards)
     ratings = {c["rating"] for c in cards}
     assert ratings == {"good", "again"}
     correct_flags = {c["flashcard_id"]: c["is_correct"] for c in cards}

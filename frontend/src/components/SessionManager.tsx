@@ -27,6 +27,7 @@ import {
   type StudySessionItem,
   type TeachbackResultItem,
   deleteStudySession,
+  fetchSessionCards,
   fetchSessionTeachbackResults,
   fetchSessions,
   sessionLabel,
@@ -71,6 +72,12 @@ function ActiveSessionCard({
     queryKey: ["session-teachback-results", session.id],
     queryFn: () => fetchSessionTeachbackResults(session.id),
     enabled: expanded && isTeachback,
+  })
+
+  const { data: flashcardCards, isLoading: fcLoading } = useQuery({
+    queryKey: ["session-cards", session.id],
+    queryFn: () => fetchSessionCards(session.id),
+    enabled: expanded && !isTeachback,
   })
 
   return (
@@ -139,6 +146,32 @@ function ActiveSessionCard({
                       ({r.score}/100)
                     </span>
                   )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {expanded && !isTeachback && (
+        <div className="rounded-lg border border-border bg-background/50 p-3">
+          {fcLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" />
+              Loading contents...
+            </div>
+          ) : !flashcardCards || flashcardCards.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No cards reviewed yet in this session.
+            </p>
+          ) : (
+            <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-xs text-foreground">
+              {flashcardCards.map((c) => (
+                <li key={c.flashcard_id}>
+                  <span className="text-foreground">{c.question}</span>
+                  <span className="ml-2 text-[10px] uppercase font-medium text-muted-foreground">
+                    ({c.rating})
+                  </span>
                 </li>
               ))}
             </ol>

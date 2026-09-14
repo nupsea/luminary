@@ -9,21 +9,28 @@
 
 import { useQuery } from "@tanstack/react-query"
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
+  ChevronsUp,
   Clock,
   Layers,
   Loader2,
   MessageSquare,
+  Minus,
   PlayCircle,
+  RotateCcw,
   RotateCw,
   Trash2,
 } from "lucide-react"
 import { useState } from "react"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import {
+  type SessionCardDetail,
   type StudySessionItem,
   type TeachbackResultItem,
+  fetchSessionCards,
   fetchSessionTeachbackResults,
   scoreBadgeClass,
   sessionLabel,
@@ -88,6 +95,14 @@ export function SessionHistoryRow({
       if (!items) return session.has_pending_evaluations ? 2_000 : false
       return items.some((r) => r.status === "pending") ? 2_000 : false
     },
+  })
+
+  const { data: flashcardCards, isLoading: fcLoading } = useQuery<
+    SessionCardDetail[]
+  >({
+    queryKey: ["session-cards", session.id],
+    queryFn: () => fetchSessionCards(session.id),
+    enabled: isExpanded && !isTeachback,
   })
 
   return (
@@ -212,10 +227,28 @@ export function SessionHistoryRow({
       {isExpanded && (
         <div className="border-t border-border bg-muted/20 px-4 py-3">
           {!isTeachback ? (
-            <p className="py-1 text-sm text-muted-foreground">
-              {session.cards_reviewed} card{session.cards_reviewed === 1 ? "" : "s"} reviewed
-              {session.accuracy_pct != null && ` -- ${session.accuracy_pct}% correct`}
-            </p>
+            fcLoading ? (
+              <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" />
+                Loading cards...
+              </div>
+            ) : !flashcardCards || flashcardCards.length === 0 ? (
+              <p className="py-1 text-sm text-muted-foreground">
+                No cards reviewed in this session.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between pb-1 text-xs text-muted-foreground">
+                  <span>
+                    {session.cards_reviewed} card{session.cards_reviewed === 1 ? "" : "s"} reviewed
+                    {session.accuracy_pct != null && ` (${session.accuracy_pct}% accuracy)`}
+                  </span>
+                </div>
+                {flashcardCards.map((c) => (
+                  <FlashcardResultCard key={c.flashcard_id} card={c} />
+                ))}
+              </div>
+            )
           ) : tbLoading ? (
             <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
               <Loader2 size={12} className="animate-spin" />
@@ -309,6 +342,106 @@ function TeachbackResultCard({ result: r }: TeachbackResultCardProps) {
         >
           <RotateCw size={11} />
           {showAnswer ? "Evaluation" : "Answer"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const RATING_BADGE_CONFIG: Record<
+  string,
+  { label: string; icon: typeof Check; className: string }
+> = {
+  again: {
+    label: "Again",
+    icon: RotateCcw,
+    className:
+      "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800",
+  },
+  hard: {
+    label: "Hard",
+    icon: Minus,
+    className:
+      "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+  },
+  good: {
+    label: "Good",
+    icon: Check,
+    className:
+      "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800",
+  },
+  easy: {
+    label: "Easy",
+    icon: ChevronsUp,
+    className:
+      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  },
+}
+
+interface FlashcardResultCardProps {
+  card: SessionCardDetail
+}
+
+function FlashcardResultCard({ card: c }: FlashcardResultCardProps) {
+  const [showAnswer, setShowAnswer] = useState(false)
+  const ratingMeta = RATING_BADGE_CONFIG[c.rating.toLowerCase()] ?? {
+    label: c.rating,
+    icon: Check,
+    className: "bg-muted text-muted-foreground border-border",
+  }
+  const Icon = ratingMeta.icon
+
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-foreground">{c.question}</p>
+
+        {showAnswer && (
+          <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Answer
+            </div>
+            <MarkdownRenderer className="text-xs text-foreground leading-relaxed prose-p:my-1 prose-ul:my-1">
+              {c.answer || "No answer recorded."}
+            </MarkdownRenderer>
+            {c.source_excerpt && (
+              <blockquote className="mt-2 border-l-2 border-primary/40 pl-2 text-[11px] italic text-muted-foreground">
+                {c.source_excerpt}
+              </blockquote>
+            )}
+          </div>
+        )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          {c.section_heading && (
+            <span className="flex items-center gap-1 rounded bg-muted/40 px-1.5 py-0.5">
+              <BookOpen size={10} />
+              {c.section_heading}
+            </span>
+          )}
+          {c.predicted_rating && (
+            <span className="rounded bg-muted/40 px-1.5 py-0.5">
+              Predicted: <strong className="capitalize">{c.predicted_rating}</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <span
+          className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${ratingMeta.className}`}
+        >
+          <Icon size={11} />
+          {ratingMeta.label}
+        </span>
+        <button
+          type="button"
+          onClick={() => setShowAnswer((v) => !v)}
+          className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={showAnswer ? "Hide answer" : "Show answer"}
+        >
+          <RotateCw size={11} />
+          {showAnswer ? "Hide" : "Answer"}
         </button>
       </div>
     </div>
