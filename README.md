@@ -99,8 +99,9 @@ only said that you know.
 
 1. **Add something.** Library → Add Content. A PDF, EPUB, docx or audio file — or
    paste a web article or YouTube URL.
-2. **Wait for the summary card.** Usually under a minute. That means it is
-   indexed and ready.
+2. **Wait for the document card to enrich.** Usually under a minute. The card
+   displays its visual cover or diagram tile, metadata facets, and ready indicator
+   when it is indexed.
 3. **Ask it something.** Open the document and ask in the panel beside it —
    the answer arrives without leaving the page, and clicking a citation marks
    the passage it came from where it stands. `⌘K` searches everything from
@@ -174,10 +175,11 @@ nothing at all**, and will not even offer you a cloud model.
 
 | | |
 |---|---|
-| **Read** | Side-by-side PDF viewer, section navigation, dark-page mode, saved reading position, four-colour highlights |
+| **Library** | Visual media tiles (PDF/EPUB covers, YouTube thumbnails, article figure previews, procedural resonance banners), faceted metadata, collections, and reading progress |
+| **Read** | Side-by-side PDF viewer, in-document occurrence-stepping search, section navigation, dark-page mode, saved reading position, four-colour highlights |
 | **Ingest** | PDF, EPUB, docx, Markdown, txt, audio, video, web articles, YouTube, Kindle highlights |
 | **Ask** | Hybrid retrieval (vector + keyword + graph), Socratic mode, teach-back, optional web augmentation |
-| **Study** | Regular, cloze and code-trace cards; FSRS scheduling; three-phase sessions; prediction calibration |
+| **Study** | Regular, cloze and code-trace cards; FSRS scheduling; three-phase sessions; prediction calibration; revisit completed sessions |
 | **Notes** | Markdown editor with live preview, wiki-links, backlinks, Mermaid and Excalidraw |
 | **Dictate** | Speak instead of typing — into a note, a teach-back answer or a question. Transcribed on your machine by Whisper; nothing is uploaded |
 | **Track** | Mastery rings per document, "what's about to slip", study activity, time on task |
