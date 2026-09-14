@@ -616,7 +616,7 @@ def _stem(word: str) -> str:
 
 
 def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
-    """Return True if candidate card duplicates any card already kept in this call by excerpt or high token overlap."""
+    """Return True if candidate card duplicates any card already kept in this call."""
     import re
     q1_raw = re.sub(r"[^\w\s]", "", str(card.get("question", "")).lower()).split()
     tokens1 = {w for w in q1_raw if len(w) > 2}
