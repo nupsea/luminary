@@ -621,6 +621,7 @@ def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
     q1_raw = re.sub(r"[^\w\s]", "", str(card.get("question", "")).lower()).split()
     tokens1 = {w for w in q1_raw if len(w) > 2}
     content_tokens1 = {w for w in tokens1 if w not in _QUESTION_STOP_WORDS}
+    content_stems1 = {_stem(w) for w in content_tokens1}
     exc1 = str(card.get("source_excerpt", "")).strip().lower()
     exc1_tokens = {w for w in re.sub(r"[^\w\s]", "", exc1).split() if len(w) > 2}
 
@@ -628,6 +629,7 @@ def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
         q2_raw = re.sub(r"[^\w\s]", "", str(other.get("question", "")).lower()).split()
         tokens2 = {w for w in q2_raw if len(w) > 2}
         content_tokens2 = {w for w in tokens2 if w not in _QUESTION_STOP_WORDS}
+        content_stems2 = {_stem(w) for w in content_tokens2}
 
         exc2 = str(other.get("source_excerpt", "")).strip().lower()
         if exc1 and exc2 and len(exc1) >= 15 and len(exc2) >= 15:
@@ -642,10 +644,10 @@ def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
                     and (len(exc1_tokens & exc2_tokens) / len(exc1_tokens | exc2_tokens)) >= 0.70
                 )
             )
-            if same_excerpt and len(content_tokens1) >= 2 and len(content_tokens2) >= 2:
-                c_inter = len(content_tokens1 & content_tokens2)
-                c_union = len(content_tokens1 | content_tokens2)
-                if c_union > 0 and (c_inter / c_union) >= 0.35:
+            if same_excerpt and content_stems1 and content_stems2:
+                s_inter = len(content_stems1 & content_stems2)
+                s_union = len(content_stems1 | content_stems2)
+                if s_inter >= 2 or (s_union > 0 and (s_inter / s_union) >= 0.25):
                     return True
 
         if tokens1 and tokens2:
@@ -660,8 +662,6 @@ def _is_lexical_duplicate(card: dict, kept_cards: Sequence[dict]) -> bool:
             if c_union > 0 and (c_inter / c_union) >= 0.50:
                 return True
 
-        content_stems1 = {_stem(w) for w in content_tokens1}
-        content_stems2 = {_stem(w) for w in content_tokens2}
         if len(content_stems1) >= 3 and len(content_stems2) >= 3:
             s_inter = len(content_stems1 & content_stems2)
             s_union = len(content_stems1 | content_stems2)
