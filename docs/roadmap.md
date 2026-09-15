@@ -602,10 +602,15 @@ the environment and added back `HOME` — on Windows CPython does not start with
 now), and `report.rs` scrubbed only `HOME`, so every Windows bug report would have carried
 `C:\Users\<their name>` in every path unredacted.
 
-**No Windows payload exists yet.** `make stage` builds a macOS tree, `tauri.conf.json` targets
-`["app"]`, and the staged binary names are the only Windows-shaped thing in place
-(`python/python.exe`, `ollama/ollama.exe`). NSIS, `.msi`, AppImage and `.deb` targets are what
-remain, and `make ci` and `make smoke` green on Windows are the exit gate rather than any job above.
+**The installers are built; no first run has been seen yet.** `desktop-installers.yml` stages a
+Windows and a Linux tree through `scripts/desktop/`, builds a per-user NSIS `-setup.exe`, an
+AppImage and a `.deb`, installs each on a clean runner and waits for the shell's `ready` line
+(`verify_installed.sh`). Decided: NSIS over `.msi` (no admin prompt; `.msi` only if managed
+deployment is asked for), unsigned for now (SmartScreen warns), and the engine ships CPU, Vulkan
+and CUDA 13 runners without CUDA 12 (1.15 GB). The runners have no GPU, so what remains open is
+exactly what CI cannot see: a first run with no terminal on real Windows and Linux hardware, the
+CUDA and Vulkan paths on a real GPU, and a Windows install path long enough to hit `MAX_PATH`.
+Those, plus `make smoke` green on Windows, are the exit gate. Issue #24 closes with the first.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows

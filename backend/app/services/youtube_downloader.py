@@ -5,8 +5,10 @@ for system tools (see: ffmpeg use in ingestion.py).
 """
 
 import asyncio
+import importlib.util
 import json
 import logging
+import sys
 from pathlib import Path
 
 from app.services.components import resolve_tool
@@ -27,13 +29,22 @@ def is_youtube_url(url: str) -> bool:
     return any(url.startswith(p) for p in _YOUTUBE_URL_PREFIXES)
 
 
-def _ytdlp() -> str:
-    """Absolute path to yt-dlp, since the bundled app runs with a minimal PATH."""
-    return resolve_tool("yt-dlp") or "yt-dlp"
+def _ytdlp_argv() -> list[str]:
+    """How to start yt-dlp: as a module of this interpreter when it carries one.
+
+    The console script beside the interpreter records the build machine's
+    interpreter path. A unix shebang can be rewritten when the desktop bundle is
+    staged; a Windows launcher is an `.exe` with the path compiled in, dead once
+    the installer puts it anywhere else. `python -m yt_dlp` needs neither, and is
+    the same package the script would have run.
+    """
+    if importlib.util.find_spec("yt_dlp") is not None:
+        return [sys.executable, "-m", "yt_dlp"]
+    return [resolve_tool("yt-dlp") or "yt-dlp"]
 
 
 def check_ytdlp_available() -> bool:
-    return resolve_tool("yt-dlp") is not None
+    return importlib.util.find_spec("yt_dlp") is not None or resolve_tool("yt-dlp") is not None
 
 
 def check_ffmpeg_available() -> bool:
@@ -46,7 +57,7 @@ async def fetch_metadata(url: str) -> dict:
     Raises RuntimeError on non-zero exit or invalid JSON.
     """
     proc = await asyncio.create_subprocess_exec(
-        _ytdlp(),
+        *_ytdlp_argv(),
         "--dump-json",
         "--no-download",
         # `--` ends option parsing. Without it a URL beginning with "-" reaches
@@ -98,7 +109,7 @@ async def download_audio(url: str, dest_stem: Path) -> None:
     ffmpeg = resolve_tool("ffmpeg")
     location = ["--ffmpeg-location", str(Path(ffmpeg).parent)] if ffmpeg else []
     proc = await asyncio.create_subprocess_exec(
-        _ytdlp(),
+        *_ytdlp_argv(),
         "-x",
         "--audio-format",
         "wav",

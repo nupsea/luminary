@@ -17,6 +17,14 @@ pub const OLLAMA_BINARY: &str = "ollama/ollama.exe";
 #[cfg(not(windows))]
 pub const OLLAMA_BINARY: &str = "ollama/ollama";
 
+/// Where the model server's runner libraries sit. The macOS archive is flat,
+/// beside the binary; Windows and Linux are staged with `lib/ollama` next to
+/// it, a layout Ollama searches relative to its own executable on both.
+#[cfg(target_os = "macos")]
+pub const OLLAMA_LIBRARY_DIR: &str = "ollama";
+#[cfg(not(target_os = "macos"))]
+pub const OLLAMA_LIBRARY_DIR: &str = "ollama/lib/ollama";
+
 /// Every piece the shell needs before it is worth spawning anything.
 const REQUIRED: [&str; 4] = [
     "surface-manifest.json",
@@ -72,11 +80,16 @@ pub fn missing_pieces(stage: &Path) -> Vec<&'static str> {
         .collect()
 }
 
-/// Where the library lives: writable, outside the read-only signed bundle.
+/// Where the library lives: writable, outside the read-only install.
+///
+/// The local data directory, not the roaming one. They are the same directory
+/// on macOS and Linux; on Windows `app_data_dir` is `%APPDATA%`, which a domain
+/// profile copies to a server at every sign-in -- gigabytes of vectors and
+/// models, for a library that is only ever opened on this machine.
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
-        .app_data_dir()
+        .app_local_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {dir:?}: {e}"))?;
     Ok(dir)

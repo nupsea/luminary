@@ -200,7 +200,8 @@ _info "Installing dependencies (this pulls Python 3.13 and ~1.6GB of packages)..
 # Both flags are load-bearing. --no-default-groups drops dev/media (Phoenix,
 # pytest, whisper); --group full adds back yt-dlp and the tree-sitter grammars,
 # without which YouTube and code ingestion refuse everything offered to them.
-# Keep in step with scripts/macos/stage_python.sh, which builds the same profile.
+# Keep in step with install_shipping_dependencies in scripts/desktop/lib.sh,
+# which builds the same profile for every desktop installer.
 (
     cd "$APP_DIR/backend"
     UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV" sync --no-default-groups --group full --quiet

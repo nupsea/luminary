@@ -4,6 +4,15 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Windows and Linux installers.** A per-user setup `.exe`, an AppImage and a `.deb`, each built, installed and launched on a clean runner by `desktop-installers.yml`. The engine ships CPU, Vulkan and CUDA 13 runners; CUDA 12 would have added 1.15 GB.
+
+### Changed
+- **yt-dlp runs as `python -m yt_dlp`.** The console script records the build machine's interpreter path, and on Windows that path is compiled into an `.exe` no installed copy can use.
+- **What a desktop bundle ships is decided once, in `scripts/desktop/`.** The macOS scripts use the same dependency profile, prunes and import check as Windows and Linux.
+
 ## [0.12.8] - 2026-09-14
 
 ### Added

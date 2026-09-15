@@ -94,6 +94,30 @@ credentials. It exercises every step and gate, but the result is **not**
 distributable: Gatekeeper rejects ad-hoc signatures on any machine that did not
 build them.
 
+## Building the Windows and Linux installers
+
+`.github/workflows/desktop-installers.yml` builds, installs and launches both,
+on any push touching `scripts/desktop/`, `src-tauri/` or the workflow itself, and
+on demand from the Actions tab. It is not wired to a tag and attaches nothing to
+a release.
+
+| Artifact | Contents | Kept |
+|---|---|---|
+| `luminary-windows` | `Luminary_<v>_x64-setup.exe` | 7 days |
+| `luminary-linux` | `Luminary_<v>_amd64.AppImage`, `Luminary_<v>_amd64.deb` | 7 days |
+| `luminary-*-evidence` | Screenshot after launch, the app's log, the stage verifiers' logs | 7 days |
+
+The Windows installer is **unsigned**. SmartScreen shows "Windows protected your
+PC"; the user chooses More info, then Run anyway. Say so wherever the installer
+is handed out.
+
+On a Linux machine the same build runs locally:
+
+```bash
+make stage && make verify-stage
+make desktop-installer        # AppImage and .deb under src-tauri/target/release/bundle/
+```
+
 ## Testing a rebuilt DMG
 
 **Unmount the previous one first.** A mounted disk image keeps serving the inode
