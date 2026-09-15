@@ -6,7 +6,6 @@ import { apiGet, apiPost } from "@/lib/apiClient"
 import { renderPage } from "@/lib/pageRender"
 import { API_BASE } from "@/lib/config"
 import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
 import type { components } from "@/types/api"
 import { useResizablePanel } from "@/hooks/useResizablePanel"
 import { PanelResizer } from "./PanelResizer"
@@ -173,12 +172,24 @@ const SpeakerTurns = memo(({ turns }: { turns: SpeakerTurn[] }) => (
 ))
 SpeakerTurns.displayName = "SpeakerTurns"
 
-// LazySection renders heavy Markdown content only when it is near the viewport.
-// This allows 'bulky' books with 1000s of sections to load instantly and stay responsive.
+// LazySection renders section content with CSS contentVisibility to keep offscreen
+// rendering lightweight without collapsing layout height or causing cumulative layout shifts.
 const EMPTY_WORDS: string[] = []
 
-const LazySection = memo(({ documentId, section, annotations, highlightsVisible, images = [], spec, isLast, searchTerm = "", citationWords = EMPTY_WORDS, isCitedSection = false, isTargetSection = false, hasSearchHit = false }: LazySectionProps) => {
-  const [isVisible, setIsVisible] = useState(false)
+const LazySection = memo(({
+  documentId,
+  section,
+  annotations,
+  highlightsVisible,
+  images = [],
+  spec,
+  isLast,
+  searchTerm = "",
+  citationWords = EMPTY_WORDS,
+  isCitedSection = false,
+  isTargetSection = false,
+  hasSearchHit = false,
+}: LazySectionProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   // A section over the inline limit arrives shortened. Never silently: the rest
   // is one call away and the reader is told it is there.
@@ -186,8 +197,6 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   const [loadingWhole, setLoadingWhole] = useState(false)
   const body = whole ?? section.content
   const stillShort = section.truncated && whole === null
-  // The citation run is computed whether or not this section is in view, because
-  // it decides whether the section must render at all.
   const citationRun = useMemo(
     () => (citationWords.length > 0 ? longestPresentRun(citationWords, body) : []),
     [citationWords, body],
@@ -204,10 +213,6 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
   // The rest is one call away and this is the one section worth spending it on.
   useEffect(() => {
     if (!isTarget || !section.truncated || whole !== null) return
-    // No loading flag and no "already requested" ref: setting state synchronously
-    // in an effect body cascades renders, and a ref latch would survive
-    // StrictMode's second run and turn it into a no-op in dev only. `whole`
-    // stopping the repeat is enough, and a duplicate fetch is harmless.
     let cancelled = false
     void fetchWholeSection(documentId, section.section_id)
       .then((s) => { if (!cancelled) setWhole(s.content) })
@@ -215,55 +220,29 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
     return () => { cancelled = true }
   }, [isTarget, section.truncated, section.section_id, documentId, whole])
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true)
-          observer.disconnect()
-        }
-      },
-      { rootMargin: "600px" } // Load early before user scrolls to it
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
   const Tag = HeadingTag(section.level)
   const showHeading = hasAuthoredHeading(section)
-  // One decision, used by the memo and the JSX alike. They were separate, so the
-  // cited section computed its marked HTML and then rendered null anyway.
-  const shouldRender = isVisible || isTarget
+
   const highlighted = useMemo(() => {
-    // Sections defer their body until scrolled into view. A citation is an
-    // explicit request to see *this* passage, so the section holding it renders
-    // regardless: waiting for the scroll is circular, since the scroll targets a
-    // mark that only exists once the section has rendered. A 47-section PDF
-    // landed with the cited section showing its heading and 11 characters of
-    // nothing, and nothing was ever marked.
-    if (!shouldRender && citationRun.length === 0) return ""
     let marked = applyHighlights(body, highlightsVisible ? annotations : [])
     if (searchTerm) marked = applySearchTerm(marked, searchTerm)
-    // Matched against the normalised body but marked in the raw one, so the
-    // marker tolerates the paragraph breaks the chunk text collapsed.
     if (citationRun.length > 0) marked = markWords(marked, citationRun, CITATION_MARK_CLASS)
     return marked
-  }, [shouldRender, body, annotations, highlightsVisible, searchTerm, citationRun])
+  }, [body, annotations, highlightsVisible, searchTerm, citationRun])
 
   // Highlights are <mark> HTML the turn splitter would show as literal tags.
   const turns = useMemo(() => {
-    if (!shouldRender || !spec.speakerTurns) return null
+    if (!spec.speakerTurns) return null
     if (highlighted !== body) return null
     return parseSpeakerTurns(body)
-  }, [shouldRender, spec.speakerTurns, highlighted, body])
+  }, [spec.speakerTurns, highlighted, body])
 
   return (
     <div
       ref={containerRef}
       id={`read-sec-${section.section_id}`}
       data-section-id={section.section_id}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "0 300px" }}
       className={cn(
         "min-h-[100px]",
         spec.dividers && !isLast ? "mb-10 border-b border-border pb-8" : "mb-12",
@@ -274,48 +253,40 @@ const LazySection = memo(({ documentId, section, annotations, highlightsVisible,
           {section.heading}
         </Tag>
       )}
-      {shouldRender ? (
-        <div className="leading-relaxed anim-fade-in">
-          {turns ? (
-            <SpeakerTurns turns={turns} />
-          ) : (
-            // `prose` sets an absolute font-size, so size must be handed to
-            // this element rather than inherited.
-            <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
-              {highlighted}
-            </MarkdownRenderer>
-          )}
-          <SectionFigures images={images} />
-          {stillShort && (
-            <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              <p>
-                Showing the first {body.length.toLocaleString()} of{" "}
-                {section.content_chars.toLocaleString()} characters — this section is unusually
-                long.
-              </p>
-              <button
-                type="button"
-                disabled={loadingWhole}
-                onClick={() => {
-                  setLoadingWhole(true)
-                  void fetchWholeSection(documentId, section.section_id)
-                    .then((s) => setWhole(s.content))
-                    .finally(() => setLoadingWhole(false))
-                }}
-                className="mt-1 font-semibold text-foreground underline-offset-2 hover:underline disabled:opacity-50"
-              >
-                {loadingWhole ? "Loading…" : "Show the whole section"}
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2 py-4">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-[90%]" />
-          <Skeleton className="h-4 w-[95%]" />
-        </div>
-      )}
+      <div className="leading-relaxed anim-fade-in">
+        {turns ? (
+          <SpeakerTurns turns={turns} />
+        ) : (
+          // `prose` sets an absolute font-size, so size must be handed to
+          // this element rather than inherited.
+          <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
+            {highlighted}
+          </MarkdownRenderer>
+        )}
+        <SectionFigures images={images} />
+        {stillShort && (
+          <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <p>
+              Showing the first {body.length.toLocaleString()} of{" "}
+              {section.content_chars.toLocaleString()} characters — this section is unusually
+              long.
+            </p>
+            <button
+              type="button"
+              disabled={loadingWhole}
+              onClick={() => {
+                setLoadingWhole(true)
+                void fetchWholeSection(documentId, section.section_id)
+                  .then((s) => setWhole(s.content))
+                  .finally(() => setLoadingWhole(false))
+              }}
+              className="mt-1 font-semibold text-foreground underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {loadingWhole ? "Loading…" : "Show the whole section"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 })
@@ -544,16 +515,20 @@ export function ReadView({
   useEffect(() => {
     if (activeCitation.length === 0) return
     return settleIntoView<Element>({
-      find: () => document.querySelector(`.${CITATION_MARK_TOKEN}`),
+      find: () => {
+        if (citedSectionId) {
+          const sec = document.getElementById(`read-sec-${citedSectionId}`)
+          const mark = sec?.querySelector(`.${CITATION_MARK_TOKEN}`)
+          if (mark) return mark
+        }
+        return document.querySelector(`.${CITATION_MARK_TOKEN}`)
+      },
       distance: (el) => {
         const mark = el.getBoundingClientRect()
         const port = scrollPortOf(el)
         return mark.top + mark.height / 2 - (port.top + port.height / 2)
       },
-      // "instant", not "auto": the scroller carries `scroll-smooth`, and CSS wins
-      // over "auto", so every correction animated across up to forty thousand
-      // pixels at a fixed speed and the passage took eight seconds to arrive.
-      // Clicking a source is a jump, not a scroll.
+      // "instant", not "auto": clicking a source is a jump, not an animation.
       centre: (el) => el.scrollIntoView({ behavior: "instant", block: "center" }),
       schedule: (fn, ms) => window.setTimeout(fn, ms),
       cancel: (handle) => window.clearTimeout(handle),
@@ -857,7 +832,7 @@ export function ReadView({
       <div
         ref={contentRef}
         className={cn(
-          "relative flex-1 overflow-auto px-8 py-6 scroll-smooth",
+          "relative flex-1 overflow-auto px-8 py-6",
           spec.tinted && "bg-[#faf6ec] dark:bg-[#1b1917]",
         )}
       >

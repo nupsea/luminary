@@ -36,6 +36,17 @@ export const SETTLE_CONFIRM = 2
  */
 export const SETTLE_MAX_TICKS = 200
 
+export const SCROLL_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  " ",
+  "Spacebar",
+])
+
 export interface SettleDeps<T> {
   /** The mark, or null while it has yet to render. */
   find: () => T | null
@@ -48,17 +59,23 @@ export interface SettleDeps<T> {
   intervalMs?: number
   tolerancePx?: number
   maxTicks?: number
+  /**
+   * Event target to listen for user interactions that should cancel the loop.
+   * If not provided, defaults to `window` if running in a browser environment.
+   * Pass `null` explicitly to disable interaction listeners.
+   */
+  userEventsTarget?: EventTarget | null
 }
 
 /**
  * Centre the mark and keep it centred until it settles. Returns a cancel
  * function; calling it stops the loop.
  *
- * Two ways to stop other than the tick bound. Arrived: the mark is within
- * tolerance twice running. Stuck: the distance stops improving, which is what a
- * passage near the end of a document looks like -- it cannot reach the centre
- * because there is nothing left to scroll, and continuing to yank the scroller
- * every interval would fight the reader for control of the page.
+ * Exits when:
+ * 1. Arrived: the mark is within tolerance twice running.
+ * 2. Stuck: the distance stops improving (e.g. end of document).
+ * 3. User interaction: the user scrolls or interacts, immediately handing control back.
+ * 4. Bound: maxTicks elapsed.
  */
 export function settleIntoView<T>({
   find,
@@ -69,16 +86,54 @@ export function settleIntoView<T>({
   intervalMs = SETTLE_INTERVAL_MS,
   tolerancePx = SETTLE_TOLERANCE_PX,
   maxTicks = SETTLE_MAX_TICKS,
+  userEventsTarget,
 }: SettleDeps<T>): () => void {
   let handle: number | null = null
   let ticks = 0
   let arrived = 0
   let stalled = 0
   let previous: number | null = null
+  let cleanupListeners: (() => void) | null = null
 
   const stop = () => {
-    if (handle !== null) cancel(handle)
-    handle = null
+    if (handle !== null) {
+      cancel(handle)
+      handle = null
+    }
+    if (cleanupListeners) {
+      cleanupListeners()
+      cleanupListeners = null
+    }
+  }
+
+  const eventTarget =
+    userEventsTarget !== undefined
+      ? userEventsTarget
+      : typeof window !== "undefined"
+      ? window
+      : null
+
+  if (eventTarget && typeof eventTarget.addEventListener === "function") {
+    const onUserAction = () => {
+      stop()
+    }
+    const onKeyDown = (e: Event) => {
+      const key = "key" in e ? (e as { key: string }).key : undefined
+      if (key && SCROLL_KEYS.has(key)) {
+        stop()
+      }
+    }
+    eventTarget.addEventListener("wheel", onUserAction, { passive: true, capture: true })
+    eventTarget.addEventListener("touchmove", onUserAction, { passive: true, capture: true })
+    eventTarget.addEventListener("pointerdown", onUserAction, { passive: true, capture: true })
+    eventTarget.addEventListener("keydown", onKeyDown, { passive: true, capture: true })
+
+    cleanupListeners = () => {
+      eventTarget.removeEventListener("wheel", onUserAction, { capture: true })
+      eventTarget.removeEventListener("touchmove", onUserAction, { capture: true })
+      eventTarget.removeEventListener("pointerdown", onUserAction, { capture: true })
+      eventTarget.removeEventListener("keydown", onKeyDown, { capture: true })
+    }
   }
 
   const tick = () => {
@@ -87,9 +142,15 @@ export function settleIntoView<T>({
     if (target) {
       const offset = Math.abs(distance(target))
       if (offset <= tolerancePx) {
-        if (++arrived >= SETTLE_CONFIRM) return
+        if (++arrived >= SETTLE_CONFIRM) {
+          stop()
+          return
+        }
       } else if (previous !== null && Math.abs(previous - offset) <= tolerancePx) {
-        if (++stalled >= SETTLE_CONFIRM) return
+        if (++stalled >= SETTLE_CONFIRM) {
+          stop()
+          return
+        }
       } else {
         arrived = 0
         stalled = 0
@@ -97,7 +158,11 @@ export function settleIntoView<T>({
       }
       previous = offset
     }
-    if (++ticks < maxTicks) handle = schedule(tick, intervalMs)
+    if (++ticks < maxTicks) {
+      handle = schedule(tick, intervalMs)
+    } else {
+      stop()
+    }
   }
 
   handle = schedule(tick, intervalMs)
