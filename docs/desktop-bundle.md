@@ -243,9 +243,11 @@ bundle cannot quietly stop matching the hosts `host_support` offers a local mode
 
 **Windows console-script launchers are deleted, not rewritten.** uv's
 `Scripts/*.exe` carry the build machine's interpreter path inside the binary, so
-none survives installation. The backend runs yt-dlp as `python -m yt_dlp` and
-pip as `python -m pip`; a dead launcher left on the backend's `PATH` would be
-found by `shutil.which` and then fail.
+none survives installation, and the extensionless `scripts=` files some packages
+ship (jsonpatch, jsonpointer) name it in a shebang Windows cannot run. The whole
+directory is emptied; it stays because the shell still puts it on `PATH`. The
+backend runs yt-dlp as `python -m yt_dlp` and pip as `python -m pip`; a dead
+launcher left on the backend's `PATH` would be found by `shutil.which` and then fail.
 
 **CI launches what it built.** `desktop-installers.yml` installs each package on
 a clean runner and runs `verify_installed.sh`, which waits for the shell's

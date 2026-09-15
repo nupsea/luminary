@@ -83,7 +83,10 @@ if [ "$DESKTOP_OS" = windows ]; then
     # can be rewritten the way a unix shebang can. Nothing needs them: the backend
     # runs yt-dlp as `python -m yt_dlp` and pip as `python -m pip`. A dead launcher
     # left on the backend's PATH is worse than none, because `shutil.which` finds it.
-    rm -f "$PY_STAGE"/Scripts/*.exe
+    # Everything goes, not only *.exe: packages that ship plain `scripts=` files
+    # (jsonpatch, jsonpointer) leave extensionless ones whose shebang names the
+    # stage's own interpreter, which Windows cannot run either. The directory stays.
+    find "$PY_STAGE/Scripts" -mindepth 1 -delete 2>/dev/null || true
 else
     relocatable_shebangs "$PY" "$PY_STAGE/bin"
 fi

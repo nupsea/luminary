@@ -100,7 +100,7 @@ else
     _fail "python -m yt_dlp failed: $out"
 fi
 if [ "$DESKTOP_OS" = windows ]; then
-    launchers="$(ls "$STAGE"/python/Scripts/*.exe 2>/dev/null || true)"
+    launchers="$(find "$STAGE/python/Scripts" -mindepth 1 2>/dev/null || true)"
     [ -z "$launchers" ] && _pass "no dead console-script launchers" \
         || { _fail "launchers with an embedded build path remain:"; echo "$launchers" >&2; }
 else
