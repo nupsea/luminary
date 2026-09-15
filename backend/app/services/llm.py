@@ -357,9 +357,9 @@ class LLMService:
         if verdict.supported:
             return model
 
-        from app.exceptions import DependencyUnavailable  # noqa: PLC0415
+        from app.exceptions import LocalInferenceRefused  # noqa: PLC0415
 
-        raise DependencyUnavailable(
+        raise LocalInferenceRefused(
             verdict.message or "This system cannot run local models.",
             host=verdict.detail,
             reason=verdict.reason,

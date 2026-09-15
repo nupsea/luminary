@@ -1,27 +1,38 @@
-// The one question first run asks: answer here, or answer in the cloud.
+// The one question first run asks: Local, Hybrid or Cloud.
 //
-// It is asked before "add a document" because it is the only setting that changes
-// how the next five minutes feel, and because a stranger deciding whether to keep
-// Luminary meets the local arm's time-to-first-token before anything else.
+// Asked before "add a document" because it is the only setting that changes how
+// the next five minutes feel. It writes the same stored value Settings writes, and
+// both render the modes from `lib/engineModes`, so the two cannot describe one
+// choice in two wordings.
+//
+// All three modes are always offered: the choice is the user's. On a host that
+// cannot run a local model each option says what it will and will not do there,
+// and nothing is preselected or switched on the user's behalf.
 //
 // **No invented numbers.** The local side quotes `local_probe_seconds` when the
 // start-up probe measured this host and says nothing numeric when it did not --
-// null is not "fast". The cloud side quotes nothing at all, because nothing has
-// measured it on this machine yet; the receipt under the first answer supplies the
-// real figure, which is the honest place for it.
+// null is not "fast". The cloud side quotes nothing, because nothing has measured
+// it on this machine; the receipt under the first answer supplies the real figure.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cloud, HardDrive, Loader2 } from "lucide-react"
+import { Cloud, GitMerge, HardDrive, Loader2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
 import { apiGet, apiPatch } from "@/lib/apiClient"
 import { PROVIDER_SETUP, providerSetup } from "@/lib/engineOffer"
+import {
+  ALWAYS_LOCAL,
+  ENGINE_MODES,
+  type EngineMode,
+  type HostVerdict,
+} from "@/lib/engineModes"
 import { fetchRouting } from "@/lib/llmRouting"
 import { cn } from "@/lib/utils"
 
 interface LLMModeState {
-  mode: "private" | "hybrid" | "cloud"
+  mode: EngineMode
+  mode_chosen: boolean
   has_openai_key: boolean
   has_anthropic_key: boolean
   has_google_key: boolean
@@ -30,9 +41,11 @@ interface LLMModeState {
   keyring_available: boolean
 }
 
+const MODE_ICON = { private: HardDrive, hybrid: GitMerge, cloud: Cloud } as const
+
 export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   const queryClient = useQueryClient()
-  const [pick, setPick] = useState<"private" | "hybrid" | null>(null)
+  const [pick, setPick] = useState<EngineMode | null>(null)
   const [provider, setProvider] = useState<string>("anthropic")
   const [apiKey, setApiKey] = useState("")
 
@@ -41,11 +54,21 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
     queryKey: ["llm-settings"],
     queryFn: () => apiGet<LLMModeState>("/settings/llm"),
   })
+  const { data: host } = useQuery({
+    queryKey: ["host-support"],
+    queryFn: () => apiGet<HostVerdict>("/setup/host-support"),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
+
+  // A choice already made is shown as made; a default nobody chose is not.
+  const selected = pick ?? (llm?.mode_chosen ? llm.mode : null)
+  const selectedDef = ENGINE_MODES.find((m) => m.id === selected)
 
   const save = useMutation({
-    mutationFn: async (mode: "private" | "hybrid") => {
+    mutationFn: async (mode: EngineMode) => {
       const updates: Record<string, string> = { mode }
-      if (mode === "hybrid") {
+      if (mode !== "private") {
         updates["provider"] = provider
         if (apiKey.trim()) {
           const field =
@@ -73,65 +96,53 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
   const setup = providerSetup(provider)
   const hasAnyKey =
     llm?.has_openai_key || llm?.has_anthropic_key || llm?.has_google_key || false
+  const hostRefusesLocal = host?.supported === false
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold text-foreground">Where should answers come from?</h3>
-        <p className="text-xs text-muted-foreground">
-          Either way, your library, its index and your learner record stay on this machine.
-          Only a question and the passages retrieved for it can ever leave.
-        </p>
+        <h3 className="text-sm font-semibold text-foreground">Where should models run?</h3>
+        <p className="text-xs text-muted-foreground">{ALWAYS_LOCAL}</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setPick("private")}
-          aria-pressed={pick === "private"}
-          className={cn(
-            "flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors",
-            pick === "private"
-              ? "border-primary bg-primary/5"
-              : "border-border hover:border-muted-foreground",
-          )}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <HardDrive size={15} className="text-green-600" />
-            Answer on this machine
-          </span>
-          <span className="text-xs text-muted-foreground">
-            Nothing leaves, ever. No account, no key.
-            {probe !== null
-              ? ` This machine measured about ${probe.toFixed(0)}s for a local answer.`
-              : " Local answers are slower than a cloud model."}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setPick("hybrid")}
-          aria-pressed={pick === "hybrid"}
-          className={cn(
-            "flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors",
-            pick === "hybrid"
-              ? "border-primary bg-primary/5"
-              : "border-border hover:border-muted-foreground",
-          )}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Cloud size={15} className="text-blue-500" />
-            Answer with your API key
-          </span>
-          <span className="text-xs text-muted-foreground">
-            Faster and stronger answers. Reading, search, transcription and your
-            learner record still run here. Every answer shows what it cost and what
-            was sent.
-          </span>
-        </button>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {ENGINE_MODES.map((mode) => {
+          const Icon = MODE_ICON[mode.id]
+          return (
+            <button
+              key={mode.id}
+              type="button"
+              onClick={() => setPick(mode.id)}
+              aria-pressed={selected === mode.id}
+              className={cn(
+                "flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors",
+                selected === mode.id
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-muted-foreground",
+              )}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Icon size={15} className="text-muted-foreground" />
+                {mode.label}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {mode.summary}
+                {mode.id === "private" && !hostRefusesLocal && probe !== null
+                  ? ` This machine measured about ${probe.toFixed(0)}s for a local answer.`
+                  : ""}
+              </span>
+              <span className="text-[11px] text-muted-foreground">Sends: {mode.sends}</span>
+              {hostRefusesLocal && (
+                <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                  On this machine: {mode.onUnsupportedHost}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
-      {pick === "hybrid" && (
+      {selectedDef?.needsKey && (
         <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
           <div className="flex gap-2">
             <select
@@ -170,8 +181,7 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
           <p className="text-[11px] text-muted-foreground">
             {llm?.keyring_available === false
               ? "This install has no OS keychain, so the key is saved in your library database. Set it in the environment instead if that matters to you."
-              : "Stored in your OS keychain, never in the library."}{" "}
-            Skip this and Luminary keeps working locally.
+              : "Stored in your OS keychain, never in the library."}
           </p>
         </div>
       )}
@@ -179,8 +189,8 @@ export function EngineChoice({ onChosen }: { onChosen?: () => void }) {
       <div className="flex items-center gap-3">
         <button
           type="button"
-          disabled={pick === null || save.isPending}
-          onClick={() => pick && save.mutate(pick)}
+          disabled={selected === null || save.isPending}
+          onClick={() => selected && save.mutate(selected)}
           className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {save.isPending && <Loader2 size={14} className="animate-spin" />}

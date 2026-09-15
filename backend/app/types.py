@@ -286,6 +286,7 @@ class ChatState(TypedDict):
     doc_ids: list[str]
     scope: str  # 'single' | 'all'
     model: str | None
+    direct: bool  # ask model directly without library grounding
 
     # Set by classify_node
     intent: str | None  # IntentType | None

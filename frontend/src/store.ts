@@ -14,8 +14,6 @@ interface AppState {
   // when activeDocumentId points at an in-progress ingestion. Persisted so the
   // user's last good doc is restored across reloads.
   lastReadyDocumentId: string | null
-  llmMode: "private" | "cloud" | "hybrid"
-  currentProvider: string
   libraryView: "grid" | "list"
   // Library left-rail (Filters) open/closed state. Persisted; default closed.
   libraryFiltersOpen: boolean
@@ -53,7 +51,6 @@ interface AppState {
   setChatSidebarOpen: (open: boolean) => void
   setActiveDocument: (id: string | null) => void
   setLastReadyDocumentId: (id: string | null) => void
-  setLlmMode: (mode: "private" | "cloud" | "hybrid", provider: string) => void
   setLibraryView: (view: "grid" | "list") => void
   setLibraryFiltersOpen: (open: boolean) => void
   setNotesView: (view: "grid" | "list") => void
@@ -86,8 +83,6 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       activeDocumentId: null,
       lastReadyDocumentId: null,
-      llmMode: "private",
-      currentProvider: "openai",
       libraryView: "grid",
       // Open every app start so the rails are visible. Deliberately not persisted.
       libraryFiltersOpen: true,
@@ -113,7 +108,6 @@ export const useAppStore = create<AppState>()(
       setChatSidebarOpen: (open) => set({ chatSidebarOpen: open }),
       setActiveDocument: (id) => set({ activeDocumentId: id }),
       setLastReadyDocumentId: (id) => set({ lastReadyDocumentId: id }),
-      setLlmMode: (mode, provider) => set({ llmMode: mode, currentProvider: provider }),
       setLibraryView: (view) => set({ libraryView: view }),
       setLibraryFiltersOpen: (open) => set({ libraryFiltersOpen: open }),
       setNotesView: (view) => set({ notesView: view }),

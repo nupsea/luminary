@@ -45,6 +45,32 @@ class WorkRouting:
     # Set when resolution fell back -- a missing key, a host that cannot hold the
     # configured model. Reported, never swallowed.
     fallback_reason: str | None = None
+    # Set when the model this row resolves to is local and this host refuses local
+    # inference, so the work does not run at all under the current mode.
+    refused_reason: str | None = None
+
+
+NOT_RUN_ON_THIS_HOST = (
+    "This machine can't run a local model at a usable speed, so this work does not run "
+    "in the current mode."
+)
+
+
+def refusal(role: str) -> str | None:
+    """Why work in *role* does not run on this host, or None when it runs.
+
+    `LLMService._refuse_unsupported_local` refuses a local call on a host
+    `local_inference_support` does not support. Background callers treat every
+    failure as non-fatal, so without asking first that refusal is logged and the
+    work silently never happens. Keyed on the model resolution the call itself
+    uses, so this and the refusal cannot disagree.
+    """
+    model = resolve(role).model  # type: ignore[arg-type]
+    if not is_on_device(model):
+        return None
+    from app.host_support import local_inference_support  # noqa: PLC0415
+
+    return None if local_inference_support().supported else NOT_RUN_ON_THIS_HOST
 
 
 @dataclass(frozen=True)
@@ -94,6 +120,7 @@ def _routed(work_id: str, label: str, role: str, why: str) -> WorkRouting:
         routable=True,
         why=why,
         fallback_reason=choice.fallback_reason,
+        refused_reason=refusal(role),
     )
 
 
@@ -147,8 +174,8 @@ def routing_report() -> RoutingReport:
             "enrichment",
             "Summaries, tags and titles at ingest",
             "background",
-            "Background work stays on the machine in hybrid mode, so ingesting a "
-            "library never spends your quota.",
+            "Stays on this machine in Local and Hybrid mode, so ingesting a library "
+            "never spends your quota. Cloud mode sends document sections to your provider.",
         ),
         _routed(
             "figures",

@@ -87,6 +87,8 @@ export interface ChatMessage {
   web_sources?: WebSource[]
   source_citations?: SourceCitation[]
   transparency?: TransparencyInfo
+  // Set when the question was answered directly without document grounding
+  direct?: boolean
   // What this answer cost and what was sent for it.
   receipt?: AnswerReceipt
   // Non-fatal routing notice, e.g. answered locally because the cloud provider

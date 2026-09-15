@@ -43,9 +43,29 @@ from app.workflows.ingestion_nodes._shared import (
 logger = logging.getLogger(__name__)
 
 
+def _background_refusal(doc_id: str, work: str) -> bool:
+    """Whether this host refuses the background model under the current mode.
+
+    Every step below catches its failures as non-fatal, so an attempted call would
+    be refused, logged as a warning, and the document left without the work while
+    reporting complete. The refusal is shown once, in the host banner and the
+    routing table, and a mode change that lifts it repairs missing summaries.
+    """
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    if refusal("background") is None:
+        return False
+    logger.info(
+        "%s: not run, this host refuses the background model", work, extra={"doc_id": doc_id}
+    )
+    return True
+
+
 async def _run_pregenerate(doc_id: str) -> None:
     """Background task: pre-generate summaries and invalidate library cache."""
 
+    if _background_refusal(doc_id, "background summarize"):
+        return
     svc = get_summarization_service()
     try:
         await svc.generate_all_summaries(doc_id)
@@ -86,6 +106,8 @@ async def _run_progressive_summarization(doc_id: str) -> None:
     4. A final pregenerate() picks up 'detailed', assembled for free once every
        section has a summary -- one_sentence/executive are already cached.
     """
+    if _background_refusal(doc_id, "progressive summarize"):
+        return
     section_svc = get_section_summarizer_service()
     seed_inserted, rest_units, next_index = 0, [], 0
     try:
@@ -148,6 +170,8 @@ async def section_summarize_node(state: IngestionState) -> IngestionState:
     """
     doc_id = state["document_id"]
     logger.debug("node_start", extra={"node": "section_summarize", "doc_id": doc_id})
+    if _background_refusal(doc_id, "section_summarize_node"):
+        return {**state, "section_summary_count": 0}
     try:
         svc = get_section_summarizer_service()
         sections = await svc.qualifying_section_count(doc_id)
@@ -351,9 +375,10 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
     # tag writes never gate the doc becoming usable. Failures are logged and
     # do not propagate.
     try:
-        auto_tag_task = asyncio.create_task(enrich_document_tags(doc_id))
-        _background_tasks.add(auto_tag_task)
-        auto_tag_task.add_done_callback(_background_tasks.discard)
+        if not _background_refusal(doc_id, "auto-tag"):
+            auto_tag_task = asyncio.create_task(enrich_document_tags(doc_id))
+            _background_tasks.add(auto_tag_task)
+            auto_tag_task.add_done_callback(_background_tasks.discard)
     except Exception as exc:
         logger.warning(
             "enrichment_enqueue_node: auto-tag schedule failed (non-fatal): %s",

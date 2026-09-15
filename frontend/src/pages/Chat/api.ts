@@ -76,5 +76,6 @@ export function persistedToChatMessage(p: PersistedMessage): ChatMessage {
     web_sources: (extra["web_sources"] as WebSource[] | undefined) ?? undefined,
     source_citations: (extra["source_citations"] as SourceCitation[] | undefined) ?? undefined,
     transparency: (extra["transparency"] as TransparencyInfo | undefined) ?? undefined,
+    direct: (extra["direct"] as boolean | undefined) ?? undefined,
   }
 }
