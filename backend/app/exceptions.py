@@ -46,3 +46,12 @@ class DependencyUnavailable(LuminaryError):
     """A required local component (Ollama, ffmpeg, a model) is not usable."""
 
     status_code = 503
+
+
+class LocalInferenceRefused(DependencyUnavailable):
+    """A local model call on a host that cannot run one at a usable speed.
+
+    Its own type because it is a fact about the host under the chosen mode, not an
+    outage: retrying cannot succeed, so background work records it as skipped
+    rather than failed, and resumes when the mode changes.
+    """

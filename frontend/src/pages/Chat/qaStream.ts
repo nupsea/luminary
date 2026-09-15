@@ -126,19 +126,3 @@ export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers)
     }
   }
 }
-
-import { useAppStore } from "@/store"
-
-export function buildErrorMessage(errorCode: string, fallback: string): string {
-  if (errorCode === "llm_unavailable") {
-    const mode = useAppStore.getState().llmMode
-    return mode === "private"
-      ? "Ollama is not running. Start it with: ollama serve"
-      : "LLM service is unreachable. Please check your internet connection or settings."
-  }
-  // Every other code carries a server message that names the actual situation --
-  // still indexing, nothing in this document, search failed, empty library. The
-  // client used to answer all of them with "make sure a document has been
-  // ingested", which was wrong for a user holding 52 documents.
-  return fallback
-}

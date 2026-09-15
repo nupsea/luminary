@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy import func, select
 
 from app.database import get_session_factory
+from app.exceptions import DependencyUnavailable
 from app.models import DocumentModel, QAHistoryModel
 from app.services.graph import get_graph_service
 from app.services.intent import matches_summary_request
@@ -920,7 +921,9 @@ class QAService:
                         type(exc).__name__,
                         exc,
                     )
-                    if isinstance(exc, ValueError):
+                    if isinstance(exc, DependencyUnavailable):
+                        msg = exc.detail
+                    elif isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
                     elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."
@@ -1142,7 +1145,9 @@ class QAService:
                         type(exc).__name__,
                         exc,
                     )
-                    if isinstance(exc, ValueError):
+                    if isinstance(exc, DependencyUnavailable):
+                        msg = exc.detail
+                    elif isinstance(exc, ValueError):
                         msg = "LLM provider not configured. Add your API key in Settings."
                     elif isinstance(exc, LLMAuthenticationError):
                         msg = "LLM API key is invalid. Check your key in Settings."

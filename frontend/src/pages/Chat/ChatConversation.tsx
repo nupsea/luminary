@@ -29,6 +29,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 import { ChatSettingsDrawer } from "@/components/ChatSettingsDrawer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger } from "@/lib/logger"
+import { modelUnavailableMessage } from "@/lib/engineModes"
 import { useAppStore } from "@/store"
 import { PAGE_THREAD, preloadIsFor, threadOf } from "@/store/chatThreads"
 import { buildModelOptions, cloudOverrideAllowed, effectiveDefaultModel, shouldClearPrivateModeOverride } from "@/lib/chatSettingsUtils"
@@ -137,7 +138,6 @@ export function ChatConversation({
   )
   const sidebarOpen = useAppStore((s) => s.chatSidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setChatSidebarOpen)
-  const llmMode = useAppStore((s) => s.llmMode)
   const [hydratingSession, setHydratingSession] = useState(false)
   const [webEnabled, setWebEnabled] = useState(false)
   const [creativeEnabled, setCreativeEnabled] = useState(false)
@@ -617,14 +617,12 @@ export function ChatConversation({
             if (typeof payload["error"] === "string") {
               const errorCode = payload["error"] as string
               const fallbackMsg = (payload["message"] as string | undefined) ?? "An error occurred."
-              // Only llm_unavailable is reworded here, because the right wording
-              // depends on llmMode, which is client state. Retrieval failures
-              // carry a server message that names which of them happened.
+              // The server's message names what happened -- a host that cannot run
+              // a local model, a bad key, an unreachable provider -- so it is shown
+              // as sent rather than replaced with a guess from the mode.
               const errorMsg =
                 errorCode === "llm_unavailable"
-                  ? (llmMode === "private"
-                      ? "Ollama is not running. Start it with: ollama serve"
-                      : "LLM service is unreachable. Please check your internet connection or settings.")
+                  ? modelUnavailableMessage(payload["message"] as string | undefined)
                   : fallbackMsg
               setIsStreaming(false)
               setMessages((m) =>

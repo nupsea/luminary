@@ -15,11 +15,51 @@ from typing import Any
 from sqlalchemy import and_, case, func, or_, select, update
 
 from app.database import get_session_factory
+from app.exceptions import LocalInferenceRefused
 from app.models import DocumentModel, EnrichmentJobModel
 from app.services.components import component_for_model
 from app.services.llm import LLMUnavailableError, missing_model_from
 
 logger = logging.getLogger(__name__)
+
+# The model role each registered job type calls. Handlers catch model failures per
+# item, so a job whose model this host refuses would otherwise finish "done" having
+# written nothing. `test_every_registered_job_declares_its_model` fails on a job
+# type in neither set.
+JOB_MODEL_ROLE: dict[str, str] = {
+    "image_analyze": "vision",
+    "diagram_extract": "background",
+    "web_refs": "background",
+    "prerequisites": "background",
+    "concept_link": "background",
+}
+JOBS_WITHOUT_A_MODEL = frozenset({"image_extract"})
+
+
+def _refusal_for_job(job_type: str) -> str | None:
+    role = JOB_MODEL_ROLE.get(job_type)
+    if role is None:
+        return None
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    return refusal(role)
+
+
+async def _record_skip(job_id: str, message: str, *, refund_attempt: bool) -> None:
+    values: dict[str, object] = {
+        "status": "skipped",
+        "completed_at": datetime.now(UTC),
+        "error_message": message,
+    }
+    if refund_attempt:
+        # A refused call did no work, so it must not spend the retry budget that
+        # bounds real attempts.
+        values["attempts"] = EnrichmentJobModel.attempts - 1
+    async with get_session_factory()() as session:
+        await session.execute(
+            update(EnrichmentJobModel).where(EnrichmentJobModel.id == job_id).values(**values)
+        )
+        await session.commit()
 
 # Type alias: (document_id, job_id) -> None (raises on failure)
 JobHandler = Callable[[str, str], Coroutine[Any, Any, None]]
@@ -256,6 +296,18 @@ class EnrichmentQueueWorker:
     async def _run_job(self, job_id: str, document_id: str, job_type: str) -> None:
         handler = self._handlers.get(job_type)
 
+        refused = _refusal_for_job(job_type)
+        if refused is not None:
+            logger.info(
+                "EnrichmentQueueWorker: job skipped (host refuses its model) "
+                "job_id=%s doc=%s job_type=%s",
+                job_id,
+                document_id,
+                job_type,
+            )
+            await _record_skip(job_id, refused, refund_attempt=False)
+            return
+
         async with get_session_factory()() as session:
             await session.execute(
                 update(EnrichmentJobModel)
@@ -333,22 +385,19 @@ class EnrichmentQueueWorker:
                     job_type,
                     exc.__class__.__name__,
                 )
+            if status == "skipped":
+                await _record_skip(job_id, message, refund_attempt=True)
+                return
             async with get_session_factory()() as session:
-                values: dict[str, object] = {
-                    "status": status,
-                    "completed_at": datetime.now(UTC),
-                    "error_message": message,
-                }
-                if status == "skipped":
-                    # A refused call did no work, so it must not spend the
-                    # retry budget that bounds real attempts.
-                    values["attempts"] = EnrichmentJobModel.attempts - 1
                 await session.execute(
                     update(EnrichmentJobModel)
                     .where(EnrichmentJobModel.id == job_id)
-                    .values(**values)
+                    .values(status=status, completed_at=datetime.now(UTC), error_message=message)
                 )
                 await session.commit()
+            return
+        except LocalInferenceRefused as exc:
+            await _record_skip(job_id, exc.detail, refund_attempt=True)
             return
         except Exception as exc:
             logger.warning(

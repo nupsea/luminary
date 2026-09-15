@@ -616,11 +616,16 @@ never been measured. What this rung ships is the measurement: the `--no-graph` r
 the golden corpus, recorded with its provenance, so 0.16.0 decides port-or-delete on a number.
 Deleting the arm would answer the Windows lock too.
 
-**BYOK does not yet finish the job on an unsupported host.** The refusal covers background work, so
-ingest enrichment — summaries, tags, titles — is off even when a key is present, and a legacy laptop
-that pastes a key gets answers over an unenriched library. Enrichment is local by construction so a
-library build never spends quota (I-16), but on a host that cannot run the model, "stays local" means
-"does not happen". The choice moves to the user, defaults to off, and the receipt names which arm ran.
+**On a host that cannot run a local model, the chosen mode decides what runs, and the app says so.**
+Local, Hybrid and Cloud are one stored setting, asked once at first launch for every install path and
+changed in Settings; both render `lib/engineModes.ts`, and nothing switches the mode on the user's
+behalf. Hybrid keeps enrichment local, so on such a host it does not run: `llm_routing.refusal` is
+asked before background work, the enrichment worker records the job skipped rather than failed or
+empty, ingest skips summaries and tags, and the routing table and host banner name what is not run.
+Cloud mode is the opt-in that runs enrichment with the user's key and sends document sections to the
+provider; a mode change that lifts the refusal re-queues skipped jobs and repairs missing summaries.
+Not repaired by a switch: tags (the "retag all" action does it) and the domain and register
+classification written at ingest. Guarded by `tests/test_engine_mode_on_unsupported_host.py`.
 
 **What does not move on any platform.** Indexing, retrieval, transcription, entity extraction and the
 learner record stay local in every mode and are reported as such by `llm_routing.routing_report`. A

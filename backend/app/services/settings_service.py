@@ -405,6 +405,11 @@ def get_llm_error_message() -> str:
     """Return a descriptive error message based on the active LLM mode."""
     mode = _cache.get("llm_mode", "private")
     if mode == "private":
+        from app.host_support import local_inference_support  # noqa: PLC0415
+
+        verdict = local_inference_support()
+        if not verdict.supported and verdict.message:
+            return verdict.message
         return "Ollama is not running. Start it with: ollama serve"
     elif mode == "hybrid":
         return (

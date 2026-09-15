@@ -24,7 +24,6 @@ import { Loader2, Plus, RotateCcw } from "lucide-react"
 import { ApiError, apiPost } from "@/lib/apiClient"
 import { shortModelLabel } from "@/lib/chatSettingsUtils"
 import type { Flashcard } from "@/lib/studyApi"
-import { useAppStore } from "@/store"
 
 interface RegenerateResponse {
   cards: Flashcard[]
@@ -76,7 +75,6 @@ export function CardGenerator({
   const [replacing, setReplacing] = useState(false)
   const [confirmingReplace, setConfirmingReplace] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const llmMode = useAppStore((s) => s.llmMode)
 
   const scopeName = sectionHeading ? "this section" : "this document"
   const busy = generating || replacing
@@ -91,9 +89,7 @@ export function CardGenerator({
       }
       return `${fallback} (HTTP ${err.status})`
     }
-    return llmMode === "private"
-      ? `${fallback} Is Ollama running?`
-      : `${fallback} Check your internet connection or settings.`
+    return `${fallback} Check where answers come from in Settings, then try again.`
   }
 
   async function handleGenerate() {
