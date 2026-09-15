@@ -79,3 +79,33 @@ async def test_db_init_normalization_collision():
         assert new_tag[1] == 1
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upgrade_head_recovers_from_unknown_branch_revision(tmp_path):
+    from app.db_init import init_database
+
+    db_path = tmp_path / "test.db"
+    test_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+
+    # Initialize DB normally first
+    await init_database(test_engine)
+
+    # Inject an unknown future revision into alembic_version
+    async with test_engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE alembic_version SET version_num = 'unknown_future_rev'")
+        )
+
+    # Running init_database again should not crash with CommandError;
+    # it should recover and reset alembic_version to the current head.
+    await init_database(test_engine)
+
+    async with test_engine.begin() as conn:
+        row = (
+            await conn.execute(text("SELECT version_num FROM alembic_version"))
+        ).fetchone()
+        assert row is not None
+        assert row[0] != "unknown_future_rev"
+
+    await test_engine.dispose()
