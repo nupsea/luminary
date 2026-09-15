@@ -145,7 +145,7 @@ desktop-app: check-stage
 # only the interpreter's aliases -- the reason macOS copies with ditto instead
 # does not apply. Built and launched in CI by desktop-installers.yml.
 desktop-installer: check-stage
-	cd src-tauri && $(TAURI) build
+	cd src-tauri && $(TAURI) build $(TAURI_BUILD_FLAGS)
 
 # Sign and package locally with the ad-hoc identity. Exercises enumeration,
 # ordering and every gate; the result is not notarizable and Gatekeeper rejects

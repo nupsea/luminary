@@ -73,11 +73,13 @@ jobs:
 
       # NO_STRIP: linuxdeploy's bundled strip predates the ELF sections newer
       # toolchains emit and fails the bundle on them.
-      - name: Build the AppImage and .deb
+      # One bundle per step, the .deb first: an AppImage failure then cannot hide
+      # whether the .deb installs and opens. --verbose because tauri reports a
+      # failing linuxdeploy as "failed to run linuxdeploy" and nothing else.
+      - name: Build the .deb
         env:
           NO_STRIP: "true"
-          APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: make desktop-installer
+        run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles deb"
 
       - name: Install the .deb and open it
         run: |
@@ -86,6 +88,13 @@ jobs:
           exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
+
+      - name: Build the AppImage
+        if: ${{ !cancelled() }}
+        env:
+          NO_STRIP: "true"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles appimage"
 
       # Second launch, against the library the first one created.
       - name: Open the AppImage
@@ -174,7 +183,7 @@ jobs:
           bash scripts/desktop/verify_ollama.sh
 
       - name: Build the setup .exe
-        run: cd src-tauri && ../frontend/node_modules/.bin/tauri build
+        run: cd src-tauri && ../frontend/node_modules/.bin/tauri build --verbose
 
       - name: Install silently
         shell: pwsh
