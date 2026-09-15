@@ -65,26 +65,36 @@ planning unit.
 
 Rung numbers are ordering, not commitments. Several will split once scoped.
 
-The ladder was re-cut on 2026-09-05 to lead with experience rungs, and again on 2026-09-10 to put
-the platform rung ahead of Capture. The cost of the first trade is that feature rungs land on a
-suite with a live quarantine, so **a rung ships its smoke scripts with its endpoints (I-14) and adds
-nothing to the quarantine**. If the quarantine grows once, 0.15.0 moves back up the ladder.
+**1.0 is a production-grade local-first app on every host, reachable from the user's other
+devices.** Stability and architecture rungs come before feature rungs; a feature that only
+decorates the first run waits until after 1.0. Your own server, sync, mobile, Anki import and the
+encoder work are on the ladder, not after it.
 
-The second trade is the cheaper one. Every rung that lands after 0.13.0 adds surface to a Windows
-and a Linux build that already work; every rung that lands before it adds surface to fix later, on
-platforms no CI runner exercises. The Brief keeps its place ahead of it because it is the artefact a
-stranger meets, and a wider audience for an unfinished first run is not a wider audience.
+Feature rungs land on a suite with a live quarantine, so **a rung ships its smoke scripts with its
+endpoints (I-14) and adds nothing to the quarantine**. If the quarantine grows once, 0.15.0 moves
+back up the ladder.
+
+Every rung that lands after 0.13.0 adds surface to a Windows and a Linux build that already work;
+every rung that lands before it adds surface to fix later, on platforms no CI runner exercises.
+
+**One authentication mechanism, built in 0.14.0, serves capture, your own server and mobile.**
+Building it per consumer produces three trust models that disagree.
 
 | Rung | Theme | Exit gate |
 |---|---|---|
 | 0.10.0 | Smart Hybrid, and the privacy receipt | Time to first token measured on both arms from a cold install and reported as a pair; a test proves that only the question and its packed passages leave the machine |
 | 0.11.0 | The docked reader | A passage captured in the reader resolves back to its locus for page, video and web; no modal opens from the reader |
-| 0.12.0 | The Brief | Every claim in a Brief resolves to a chunk of that document, measured on the golden corpus against a floor that can come out red |
+| 0.12.0 | The Brief — **parked** | None; no rung waits on it |
 | 0.13.0 | Every host is a first-class host | First run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
-| 0.14.0 | Capture | Three source types round-trip from the browser to a readable document; an unpaired origin is refused |
+| 0.14.0 | Capture, and device pairing | Three source types round-trip from the browser to a readable document; an unpaired origin or a revoked device is refused |
 | 0.15.0 | Gates you can believe | `make ci` and `make smoke` both green, nothing quarantined to keep them so |
 | 0.16.0 | Stores that agree, ingest you can measure | A reprocess killed midway leaves no divergence between stores; every ingest path reports a measured fidelity number |
 | 0.17.0 | The re-embed rail | A full re-embed of a real library runs to completion, survives being killed, and resumes |
+| 0.18.0 | Your own server | A container reachable beyond loopback refuses every request without a device token; a CPU-only server builds an enriched library with a key |
+| 0.19.0 | Sync through storage the user controls | Two machines that reviewed the same deck offline converge with every review from both kept; a snapshot copied mid-write is refused on open |
+| 0.20.0 | Mobile capture and review | A phone reviews cards and takes notes with no connection, and both reach the library on reconnect with no review lost |
+| 0.21.0 | Anki import | No imported card shows a grounding verdict it did not earn; its schedule comes from FSRS state, not copied SM-2 intervals |
+| 0.22.0 | Encoders and languages | Non-English retrieval degradation measured on the current stack before any swap; a swap ships only through 0.17.0's rail |
 | 1.0.0 | The public release | Every rung's exit gate green together, on one build |
 
 **1.0.0 itself carries no new features.** Work not on a rung above is 1.1, not 1.0.
@@ -511,29 +521,16 @@ An entitlements plist may carry no XML comment — AMFI's parser rejects what `p
 **A rate of 1.0000 on the citation round-trip is a rubber stamp unless a deliberately unresolvable ref
 is in the same test and fails.** See `.claude/rules/common/verify-before-reporting.md`.
 
-### 3. The Brief — 0.12.0
+### 3. The Brief — 0.12.0, parked
 
-Ingest finishes and the document has already said what it contains: a one-sentence thesis, five claims
-it makes with a marker-resolved verbatim quote and locus each, three questions it answers, and what it
-does not cover. It renders in the existing Key Points tab and on the library card — no new surface.
+A per-document thesis and claims, each quoting its passage. **Parked: no rung waits on it and no work
+is scheduled before 1.0.** The thesis and claims are built and unmerged on `feat/the-brief`; that
+branch's copy of this section carries the support measurements and what was open.
 
-**The claims are safe by construction and the questions are not.** A claim's quote comes from
-`_resolve_marker_citations`, so it is verbatim because the excerpt is sliced from the chunk the marker
-names (I-33). The questions are the feature described in **#66**: `SuggestionService.get_grounding_passages`
-prefers `SectionSummaryModel.content`, so questions are generated from a paraphrase, presuppose framings
-the document never makes, and the answer that follows renders with a confidence chip and five source
-chips while being ungrounded. Moving that to first-run puts it where it does the most damage.
-
-Three things have to be true before the questions ship: generation reads chunk text, each question is
-validated by running retrieval and dropped when nothing scores, and the general-knowledge fallback in
-`QA_FACTUAL_SYSTEM_PROMPT` is suppressed for a question the product itself suggested.
-
-**"What it does not cover" is a claim about absence**, so it is only worth shipping if it can be wrong:
-test it against questions the document demonstrably does answer.
-
-Paired with the Brief, the first-run reward stops being a flashcard. `feynman_service` already grades an
-explanation against the chapter and returns a critique naming the page; that is the payoff, and the cards
-come after it as the consequence of being measured.
+If it is picked up, two constraints still hold. A claim that copies its quote passes any judge, so
+support is only quotable beside a near-copy rate. The suggested questions are #66:
+`SuggestionService.get_grounding_passages` prefers `SectionSummaryModel.content`, so each question
+must be generated from chunk text and validated by retrieval before it ships.
 
 ### 4. Every host is a first-class host — 0.13.0
 
@@ -634,17 +631,23 @@ provider would put document text rather than a question on the wire.
 seen Luminary; each host's verdict names the accelerator it actually has, proven by a platform-pinned
 test and a Windows CI job; `make smoke` green on Windows.
 
-### 5. Capture — 0.14.0
+### 5. Capture, and device pairing — 0.14.0
 
-**A library stays empty when filling it means opening the app and finding the file.** This is not the
-mobile rung and is much cheaper than it: the backend is already HTTP on :7820, so an extension needs a
-POST rather than an architecture. One click for a page, a PDF, a YouTube video or a selection with its
-source; a watch-folder for the desktop app; Markdown export shaped for Obsidian and a Zotero read path.
+**A library stays empty when filling it means opening the app and finding the file.** The backend is
+already HTTP on :7820, so an extension needs a POST rather than an architecture. One click for a page, a
+PDF, a YouTube video or a selection with its source; a watch-folder for the desktop app; Markdown export
+shaped for Obsidian and a Zotero read path.
 
 **Pairing ships with it, not after it.** The backend is unauthenticated on localhost and CSRF is
 deliberately open, so any page in any tab can already POST to :7820 — an extension turns a latent hole
 into a documented invitation. The gate is that an unpaired origin is refused, proven by a test that
 fails when pairing is removed.
+
+**Pairing is the device authentication 0.18.0 and 0.20.0 reuse, so it is per device, not per origin.**
+A one-time code shown by the desktop app is exchanged for a named, revocable token stored hashed. An
+origin allowlist would serve the extension and nothing after it. The app's own origin stays tokenless on
+loopback; any other origin needs a token. `TrustedHostMiddleware` in `main.py` pins loopback against DNS
+rebinding, and that pin may only widen when authentication is on.
 
 ### 6. Gates you can believe — 0.15.0
 
@@ -683,14 +686,42 @@ but the argument is about the machinery, not about the model. A resumable, resta
 the snapshot/restore format is the same work sync needs and the same work the OKF projection is (I-21).
 
 Proven against the current 384-dim embedder, where a wrong answer costs nothing. The multilingual swap then
-becomes a 1.x decision backed by the measurement nobody has taken: how far the current stack actually
+becomes 0.22.0's decision, backed by the measurement nobody has taken: how far the current stack actually
 degrades on non-English text.
 
-## After 1.0
+### 9. Your own server — 0.18.0
 
-Each of these needs a decision before it needs code, and none of them blocks a launch.
+**Luminary on the user's own cloud.** The container is most of it already: `Dockerfile` plus
+`LUMINARY_MODE=public` serves the SPA and the API on one port, and a compose volume holds the library.
+**What is missing is authentication, and 0.14.0 builds it.** `docker-compose.yml` binds `127.0.0.1`
+precisely because there is none, so until this rung ships, reaching the container from elsewhere is a
+tunnel the user owns and the docs say so.
 
-**Anki import.** Export already ships — `export_service.py` writes a `.apkg` through genanki for a
+**A server with no GPU is an unsupported host.** `host_support.local_inference_support` answers
+`container_without_accelerator` for a CPU-only container, so every local call is refused and
+enrichment does not happen. This rung depends on 0.13.0's BYOK enrichment choice; without it a
+reachable server serves an unenriched library.
+
+### 10. Sync through storage the user controls — 0.19.0
+
+iCloud Drive, OneDrive, Dropbox, Google Drive — storage the user already controls, so no account and no
+server. **The live stores cannot be the thing that syncs**: SQLite with WAL, LanceDB and Kuzu are all
+mid-write-sensitive, and a daemon copying a `-wal` or a Kuzu directory mid-write produces a corrupt library
+on the other machine. What syncs is the snapshot format from 0.17.0, with the live stores rebuilt from it.
+Conflict resolution is the reason this is a feature rather than a script: two machines that both studied
+offline have divergent FSRS state, and last-writer-wins silently discards a review session.
+
+### 11. Mobile capture and review — 0.20.0
+
+Note taking and flashcard review — the two things done away from a desk. Reading and ingest stay on the
+machine with the models. A phone that only works while the laptop is awake is not a client: against
+0.18.0's server it works online, and offline it needs on-device storage plus 0.19.0's sync.
+`surface-manifest.json` already declares each surface's mode, so a mobile build is a third mode rather
+than a fork. It authenticates with 0.14.0's device tokens.
+
+### 12. Anki import — 0.21.0
+
+Export already ships — `export_service.py` writes a `.apkg` through genanki for a
 collection's deck. There is no import path. The hard part is not the file format: a Luminary card carries
 `source_chunk_ids` and a per-card grounding verdict (I-34, I-35), and an imported card has no passage in the
 library to point at. Decide what grounding means for a card whose source is elsewhere — shown as ungrounded,
@@ -699,29 +730,7 @@ stops meaning anything. FSRS state is the second question: an Anki deck carries 
 v6 state is not the same shape, so importing intervals naively produces a schedule that looks continuous and
 is not.
 
-**Sync through a file-sync service.** iCloud Drive, OneDrive, Dropbox, Google Drive — storage the user already
-controls, so no account and no server. **The live stores cannot be the thing that syncs**: SQLite with WAL,
-LanceDB and Kuzu are all mid-write-sensitive, and a daemon copying a `-wal` or a Kuzu directory mid-write
-produces a corrupt library on the other machine. What syncs is the snapshot format from 0.17.0, with the live
-stores rebuilt from it. Conflict resolution is the open question and the reason this is a feature rather than
-a script: two machines that both studied offline have divergent FSRS state, and last-writer-wins silently
-discards a review session.
-
-**Luminary on the user's own cloud (BYOC).** The container is most of it already: `Dockerfile` plus
-`LUMINARY_MODE=public` serves the SPA and the API on one port, and a compose volume holds the library.
-**What is missing is authentication, and it is the whole feature.** `docker-compose.yml` binds
-`127.0.0.1` precisely because there is none, so "reachable from any device" means publishing an
-unauthenticated library to the internet. Until that exists, the container is a single-machine
-deployment and the docs say so; reaching it from elsewhere is a tunnel the user owns. One auth
-mechanism serves this, the mobile client below and the capture extension's pairing, which is the
-argument for building it once rather than three times.
-
-**A mobile client for capture and review.** Note taking and flashcard review — the two things done away from
-a desk. Reading and ingest stay on the machine with the models. The backend is already HTTP, so the surface
-exists; **there is no authentication**, and a phone reaching a laptop needs an answer to who is asking. A
-phone that only works while the laptop is awake is not a client, so the honest version needs on-device storage
-and a sync path, which is the entry above. `surface-manifest.json` already declares each surface's mode, so a
-mobile build is a third mode rather than a fork.
+### 13. Encoders and languages — 0.22.0
 
 **ONNX Runtime for the encoders.** Same gate as the swap below and for the same reason: a quantized
 ONNX embedder produces different vectors, so it is a full re-embed behind I-9 and cannot start before
