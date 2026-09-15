@@ -81,8 +81,26 @@ install_shipping_dependencies() {
     _info "$(grep -cE '^[a-zA-Z0-9]' "$req") packages"
 
     _step "Installing dependencies into the staged interpreter"
+    # `uv export` pins torch to the CPU build on Linux and Windows but does not
+    # carry the explicit index it comes from, so without this `torch==X+cpu` is
+    # looked up on PyPI alone and never found. unsafe-best-match lets the pinned
+    # PyPI packages resolve too; the exported hashes still fix every file. macOS
+    # takes torch from PyPI and is left exactly as it was.
+    local index_args=()
+    if [ "$DESKTOP_OS" != macos ]; then
+        local cpu_index
+        cpu_index="$("$py" - "$(native_path "$REPO_ROOT/backend/pyproject.toml")" <<'PYEOF'
+import sys, tomllib
+with open(sys.argv[1], "rb") as fh:
+    indexes = tomllib.load(fh)["tool"]["uv"]["index"]
+print(next(i["url"] for i in indexes if i["name"] == "pytorch-cpu"))
+PYEOF
+)" || _die "no pytorch-cpu index in backend/pyproject.toml"
+        index_args=(--extra-index-url "$cpu_index" --index-strategy unsafe-best-match)
+    fi
     # --system because this is not a venv: it is a private interpreter we own.
-    uv pip sync --python "$py" --system "$req"
+    # The +alternate form: macOS's bash 3.2 treats an empty array as unbound under set -u.
+    uv pip sync --python "$py" --system ${index_args[@]+"${index_args[@]}"} "$req"
 }
 
 # Third-party test suites are never executed from the bundle. `testing` is NOT
