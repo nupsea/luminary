@@ -1013,7 +1013,9 @@ def main() -> None:
     faithfulness_model: str | None = None
 
     answered = [
-        {**s, "contexts": s["ragas_contexts"]} for s in samples if s["answer"].strip()
+        {**s, "contexts": s["ragas_contexts"]}
+        for s in samples
+        if s["answer"].strip() and not (s.get("qa_response") or {}).get("direct")
     ]
 
     # NLI faithfulness runs on any generated answer, judge or not.
@@ -1052,6 +1054,8 @@ def main() -> None:
     if args.check_citations:
         citation_pairs: list[tuple[str, str]] = []
         for sample in samples:
+            if (sample.get("qa_response") or {}).get("direct"):
+                continue
             qa_resp = sample.get("qa_response") or {}
             answer_text = qa_resp.get("answer") or sample.get("answer", "")
             citation_pairs.extend(
@@ -1084,23 +1088,31 @@ def main() -> None:
     if needs_qa:
         # Provenance: which model authored the judged answers. "app-default"
         # means the product's own /qa pipeline default -- the shipped path.
-        answered_n = len(samples) - len(qa_empty)
+        grounded_samples = [
+            s for s in samples if not (s.get("qa_response") or {}).get("direct")
+        ]
+        grounded_empty = [
+            s for s in qa_empty if not (s.get("qa_response") or {}).get("direct")
+        ]
+        answered_n = len(grounded_samples) - len(grounded_empty)
         metrics["answer_model"] = args.model or "app-default"
         metrics["qa_failed_calls"] = qa_failed
         metrics["qa_not_found_calls"] = qa_not_found
         metrics["qa_answered_calls"] = answered_n
-        metrics["qa_total_calls"] = len(samples)
+        metrics["qa_total_calls"] = len(grounded_samples)
         # Every golden question was cross-verified as answerable from its own
         # source by two independent models, so a decline here is the product
         # failing to answer a question that has an answer -- not a hard question.
         # Nothing measured this before: the counts existed, the rate did not, so
         # a run could decline half the corpus and still report healthy HR@5.
-        metrics["answer_rate"] = answered_n / len(samples) if samples else None
+        metrics["answer_rate"] = (
+            answered_n / len(grounded_samples) if grounded_samples else None
+        )
         # Of the answers given, how many carried at least one source. An uncited
         # answer is unverifiable by the reader, which is the whole product claim.
         cited = sum(
             1
-            for s in samples
+            for s in grounded_samples
             if s["answer"].strip() and (s.get("qa_response") or {}).get("citations")
         )
         metrics["citation_coverage"] = cited / answered_n if answered_n else None
@@ -1109,7 +1121,7 @@ def main() -> None:
         # removals under include_context so the two are separable in one run.
         metrics["citations_dropped"] = sum(
             int((s.get("qa_response") or {}).get("citations_dropped") or 0)
-            for s in samples
+            for s in grounded_samples
         )
         uncited = answered_n - cited
         metrics["uncited_answers"] = uncited
@@ -1118,11 +1130,11 @@ def main() -> None:
         # citing differently or to the gate cutting differently.
         metrics["citations_proposed"] = sum(
             int((s.get("qa_response") or {}).get("citations_proposed") or 0)
-            for s in samples
+            for s in grounded_samples
         )
         metrics["citations_gated"] = sum(
             int((s.get("qa_response") or {}).get("citations_gated") or 0)
-            for s in samples
+            for s in grounded_samples
         )
     if faithfulness_model:
         metrics["faithfulness_model"] = faithfulness_model

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BookMarked, BookOpen, PanelLeft, PanelLeftClose, RefreshCw, Send, Settings, Sparkles, Trash2, WifiOff, X, Zap } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useBackNavigation } from "@/hooks/useBackNavigation"
@@ -141,6 +141,7 @@ export function ChatConversation({
   const [hydratingSession, setHydratingSession] = useState(false)
   const [webEnabled, setWebEnabled] = useState(false)
   const [creativeEnabled, setCreativeEnabled] = useState(false)
+  const [directEnabled, setDirectEnabled] = useState(false)
   const [webCallsUsed, setWebCallsUsed] = useState(0)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -477,7 +478,13 @@ export function ChatConversation({
     }
 
     const assistantId = crypto.randomUUID()
-    const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", text: "", isStreaming: true }
+    const assistantMsg: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      text: "",
+      isStreaming: true,
+      direct: directEnabled,
+    }
     // On retry the user turn is already in the thread and already persisted, so
     // reuse it -- re-adding would duplicate the question on the backend session.
     if (opts?.reuseUserTurn) {
@@ -516,6 +523,7 @@ export function ChatConversation({
           messages: historySlice.length > 0 ? historySlice : undefined,
           web_enabled: webEnabled,
           creative: creativeEnabled,
+          direct: directEnabled,
         }),
       })
       if (!res.ok || !res.body) throw new Error("QA request failed")
@@ -638,6 +646,7 @@ export function ChatConversation({
               const web_sources = (payload["web_sources"] as WebSource[] | undefined) ?? []
               const source_citations = (payload["source_citations"] as SourceCitation[] | undefined) ?? []
               const receipt = payload["receipt"] as AnswerReceipt | undefined
+              const isDirect = Boolean(payload["direct"] === true || directEnabled)
               const newWebCallsUsed = (payload["web_calls_used"] as number | undefined) ?? webCallsUsed
               setWebCallsUsed(newWebCallsUsed)
               setMessages((m) =>
@@ -656,6 +665,7 @@ export function ChatConversation({
                       web_sources,
                       source_citations,
                       receipt,
+                      direct: isDirect,
                     }
                     : msg,
                 ),
@@ -688,6 +698,7 @@ export function ChatConversation({
                     source_citations,
                     not_found,
                     transparency: transparencyAtDone,
+                    direct: isDirect,
                   },
                 })
                   .then(() => qc.invalidateQueries({ queryKey: ["chat-sessions"] }))
@@ -807,22 +818,27 @@ export function ChatConversation({
         )}
         {/* S186: Inline document scope combobox */}
         {!pinnedDocumentId && (
-        <DocumentScopeCombobox
-          docList={docList}
-          selectedDocId={selectedDocId}
-          onSelect={(docId) => {
-            docSelectorTouched.current = true
-            // Whenever the context (scope or selected book) changes mid-conversation,
-            // we start a new persisted chat. The user can undo from the toast.
-            if (docId === null) {
-              if (scope !== "all" || selectedDocId !== null) {
-                void switchContextWithUndo("all", null)
+        <div
+          className={`transition-opacity duration-200 ${directEnabled ? "opacity-40 pointer-events-none" : ""}`}
+          title={directEnabled ? "Document scope is inactive while Direct mode is on" : undefined}
+        >
+          <DocumentScopeCombobox
+            docList={docList}
+            selectedDocId={selectedDocId}
+            onSelect={(docId) => {
+              docSelectorTouched.current = true
+              // Whenever the context (scope or selected book) changes mid-conversation,
+              // we start a new persisted chat. The user can undo from the toast.
+              if (docId === null) {
+                if (scope !== "all" || selectedDocId !== null) {
+                  void switchContextWithUndo("all", null)
+                }
+              } else if (docId !== selectedDocId || scope === "all") {
+                void switchContextWithUndo("single", docId)
               }
-            } else if (docId !== selectedDocId || scope === "all") {
-              void switchContextWithUndo("single", docId)
-            }
-          }}
-        />
+            }}
+          />
+        </div>
         )}
 
         {/* Inline model indicator + per-conversation override */}
@@ -841,6 +857,25 @@ export function ChatConversation({
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Direct mode -- per-question toggle (ask model directly without grounding) */}
+          <button
+            onClick={() => setDirectEnabled((prev) => !prev)}
+            aria-pressed={directEnabled}
+            title={
+              directEnabled
+                ? "Direct mode is on: asking the model directly without library retrieval. Click for library-grounded answers."
+                : "Direct mode: ask the model directly without searching your library."
+            }
+            className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
+              directEnabled
+                ? "border-amber-400 bg-amber-50 text-amber-800 shadow-[0_0_0_3px_rgba(245,158,11,0.15)] dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-300"
+                : "border-border text-muted-foreground hover:border-amber-300 hover:bg-accent hover:text-foreground"
+            }`}
+          >
+            <Zap size={13} className={directEnabled ? "text-amber-500 fill-amber-500/20" : ""} />
+            Direct
+          </button>
+
           {/* Creative mode -- primary per-question toggle (grounded generative answers) */}
           <button
             onClick={() => setCreativeEnabled((prev) => !prev)}

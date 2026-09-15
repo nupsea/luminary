@@ -226,6 +226,16 @@ QA_CREATIVE_SYSTEM_PROMPT = (
 # (e.g. gpt-5) drop it harmlessly via litellm.drop_params.
 QA_CREATIVE_TEMPERATURE = 0.85
 
+# Direct mode: opt-in via the UI Direct toggle. Bypasses retrieval over the library
+# and sends the question straight to the selected model. Deliberately omits citation instructions
+# and the NOT_FOUND sentinel: direct answers are ungrounded general-knowledge responses.
+QA_DIRECT_SYSTEM_PROMPT = (
+    "You are Lumen, a knowledgeable learning companion. Answer the user's question directly "
+    "from your general knowledge. Be accurate, clear, and well-structured. "
+    "Write your answer in Markdown prose (use headings, bold text, lists, and code blocks). "
+    "Do not cite document passages or invent citation markers."
+)
+
 
 # Used only for factual intent: falls back to general knowledge with a disclaimer
 # when the document doesn't contain the answer.
@@ -804,6 +814,7 @@ class QAService:
         web_enabled: bool = False,
         socratic: bool = False,
         creative: bool = False,
+        direct: bool = False,
         include_context: bool = False,
     ) -> AsyncGenerator[str]:
         """Async generator of SSE event strings.
@@ -868,6 +879,7 @@ class QAService:
                     "doc_ids": document_ids or [],
                     "scope": scope,
                     "model": model,
+                    "direct": direct,
                     "intent": None,
                     "rewritten_question": None,
                     "chunks": [],
@@ -1017,21 +1029,31 @@ class QAService:
                 # called until iteration begins. The try/except must therefore cover both
                 # the generate() call AND the subsequent iteration loops.
                 system_prompt = result.get("_system_prompt") or ""
-                # Creative mode replaces the strict grounded prompt with the
-                # creative one and raises the temperature. The ground-truth path
-                # (creative=False) is untouched: same prompt, temperature=None.
                 llm_temperature: float | None = None
-                if creative and system_prompt:
-                    system_prompt = QA_CREATIVE_SYSTEM_PROMPT
-                    llm_temperature = QA_CREATIVE_TEMPERATURE
-                if socratic and system_prompt:
-                    system_prompt = (
-                        "Before answering, start with one probing question (1-2 sentences) "
-                        "that activates the user's prior knowledge about this topic. "
-                        "Format: [Your probing question?]\\n\\n"
-                        "[Full answer with citations below]\\n\\n"
-                        + system_prompt
-                    )
+                if direct:
+                    system_prompt = QA_DIRECT_SYSTEM_PROMPT
+                    if creative:
+                        llm_temperature = QA_CREATIVE_TEMPERATURE
+                    if socratic:
+                        system_prompt = (
+                            "Before answering, start with one probing question (1-2 sentences) "
+                            "that activates the user's prior knowledge about this topic. "
+                            "Format: [Your probing question?]\n\n"
+                            "[Full answer below]\n\n"
+                            + system_prompt
+                        )
+                else:
+                    if creative and system_prompt:
+                        system_prompt = QA_CREATIVE_SYSTEM_PROMPT
+                        llm_temperature = QA_CREATIVE_TEMPERATURE
+                    if socratic and system_prompt:
+                        system_prompt = (
+                            "Before answering, start with one probing question (1-2 sentences) "
+                            "that activates the user's prior knowledge about this topic. "
+                            "Format: [Your probing question?]\n\n"
+                            "[Full answer with citations below]\n\n"
+                            + system_prompt
+                        )
                 # Retrieval is already finished here -- the graph ran to completion
                 # and left `_llm_prompt` behind -- so the source chips can be on
                 # screen before the first token instead of after the last one. On
@@ -1165,58 +1187,62 @@ class QAService:
                     # LLM appended sentinel after a real answer — use the prose portion
                     full_text = prose_before
 
-                answer_text, citations, confidence = _split_response(full_text)
+                if direct:
+                    answer_text, _, confidence = _split_response(full_text)
+                    citations = []
+                else:
+                    answer_text, citations, confidence = _split_response(full_text)
 
-                scored_chunks_for_citation = [
-                    ScoredChunk(
-                        chunk_id=c.get("chunk_id", ""),
-                        document_id=c.get("document_id", ""),
-                        text=c.get("text", ""),
-                        section_heading=c.get("section_heading", ""),
-                        page=c.get("page", 0),
-                        score=c.get("score", 0.0),
-                        source=c.get("source", "vector"),  # type: ignore[arg-type]
+                    scored_chunks_for_citation = [
+                        ScoredChunk(
+                            chunk_id=c.get("chunk_id", ""),
+                            document_id=c.get("document_id", ""),
+                            text=c.get("text", ""),
+                            section_heading=c.get("section_heading", ""),
+                            page=c.get("page", 0),
+                            score=c.get("score", 0.0),
+                            source=c.get("source", "vector"),  # type: ignore[arg-type]
+                        )
+                        for c in chunks_returned
+                    ]
+                    chunk_doc_ids = list(
+                        {c["document_id"] for c in chunks_returned if c.get("document_id")}
                     )
-                    for c in chunks_returned
-                ]
-                chunk_doc_ids = list(
-                    {c["document_id"] for c in chunks_returned if c.get("document_id")}
-                )
-                doc_titles = await self._fetch_doc_titles(chunk_doc_ids)
+                    doc_titles = await self._fetch_doc_titles(chunk_doc_ids)
 
-                # Marker citations resolve against the chunks actually put in the
-                # prompt; anything still carrying a retyped excerpt falls back to
-                # verification against the grounding (I-33).
-                citations, citations_unresolved = _resolve_marker_citations(
-                    citations, result.get("cited_chunks") or [], doc_titles, answer_text
-                )
-                # The chunk a citation was resolved from cannot say where it sits:
-                # every vector row carries section_heading "" and page 0. Without
-                # this the chip renders with no section and "page 0" while the
-                # section row holds the real heading, and several chips on one
-                # answer become indistinguishable from each other.
-                await _fill_citation_locations(citations)
-                # Summary/graph routes ground on section_context with zero chunks,
-                # so both are the grounding an excerpt must be found in.
-                grounding_texts = [
-                    c.get("text", "") for c in chunks_returned if c.get("text")
-                ]
-                section_context_for_citations = result.get("section_context")
-                if section_context_for_citations and section_context_for_citations.strip():
-                    grounding_texts.append(section_context_for_citations)
-                before_drop = len(citations)
-                citations = _drop_ungrounded_citations(citations, grounding_texts)
-                citations_dropped = (before_drop - len(citations)) + citations_unresolved
-                # Relevance gate + cap, applied after both citation paths merge.
-                # Counted separately from citations_dropped: that is a grounding
-                # failure, this is a reference list the reader can actually use.
-                citations_proposed = len(citations)
-                citations = _gate_and_rank_citations(citations)
-                citations_gated = citations_proposed - len(citations)
+                    # Marker citations resolve against the chunks actually put in the
+                    # prompt; anything still carrying a retyped excerpt falls back to
+                    # verification against the grounding (I-33).
+                    citations, citations_unresolved = _resolve_marker_citations(
+                        citations, result.get("cited_chunks") or [], doc_titles, answer_text
+                    )
+                    # The chunk a citation was resolved from cannot say where it sits:
+                    # every vector row carries section_heading "" and page 0. Without
+                    # this the chip renders with no section and "page 0" while the
+                    # section row holds the real heading, and several chips on one
+                    # answer become indistinguishable from each other.
+                    await _fill_citation_locations(citations)
+                    # Summary/graph routes ground on section_context with zero chunks,
+                    # so both are the grounding an excerpt must be found in.
+                    grounding_texts = [
+                        c.get("text", "") for c in chunks_returned if c.get("text")
+                    ]
+                    section_context_for_citations = result.get("section_context")
+                    if section_context_for_citations and section_context_for_citations.strip():
+                        grounding_texts.append(section_context_for_citations)
+                    before_drop = len(citations)
+                    citations = _drop_ungrounded_citations(citations, grounding_texts)
+                    citations_dropped = (before_drop - len(citations)) + citations_unresolved
+                    # Relevance gate + cap, applied after both citation paths merge.
+                    # Counted separately from citations_dropped: that is a grounding
+                    # failure, this is a reference list the reader can actually use.
+                    citations_proposed = len(citations)
+                    citations = _gate_and_rank_citations(citations)
+                    citations_gated = citations_proposed - len(citations)
 
-                citations = _enrich_citation_titles(
-                    citations, scored_chunks_for_citation, doc_titles, scope
-                )
+                    citations = _enrich_citation_titles(
+                        citations, scored_chunks_for_citation, doc_titles, scope
+                    )
 
             else:
                 # Path A — pass-through: strategy node set answer directly
@@ -1242,7 +1268,13 @@ class QAService:
 
             # Persist Q&A history and yield final SSE event
             qa_id = await self._store_qa(
-                question, answer_text, citations, confidence, first_doc_id, scope, store_model
+                question,
+                answer_text,
+                citations,
+                confidence,
+                first_doc_id if not direct else None,
+                "direct" if direct else scope,
+                store_model,
             )
             final = {
                 "done": True,
@@ -1272,12 +1304,14 @@ class QAService:
                         round(ttft_seconds, 2) if ttft_seconds is not None else None
                     ),
                     "total_seconds": round(time.perf_counter() - t_start, 2),
-                    "passages_sent": result.get("_passages_sent"),
-                    "context_chars": result.get("_context_chars"),
-                    "context_budget_tokens": result.get("_context_budget"),
-                    "context_budget_reason": result.get("_budget_reason"),
+                    "passages_sent": 0 if direct else result.get("_passages_sent"),
+                    "context_chars": 0 if direct else result.get("_context_chars"),
+                    "context_budget_tokens": 0 if direct else result.get("_context_budget"),
+                    "context_budget_reason": "direct" if direct else result.get("_budget_reason"),
                 },
             }
+            if direct:
+                final["direct"] = True
             # Eval-only: the faithfulness NLI must score the answer against the
             # exact grounding it was generated from, not a parallel /search. UI
             # clients never set include_context, so normal chat payloads stay lean.
@@ -1285,21 +1319,27 @@ class QAService:
             # an answer on it with zero chunks, and omitting it scores a grounded
             # answer as if it hallucinated everything.
             if include_context:
-                context_texts = [
-                    c.get("text", "") for c in chunks_returned if c.get("text")
-                ]
-                section_context = result.get("section_context")
-                if section_context and section_context.strip():
-                    context_texts.append(section_context)
-                final["context_chunks"] = context_texts
-                # Eval-only: separates the two reasons an answer carries no source --
-                # the model named none, or the ones it named were ungrounded and
-                # removed. citation_coverage alone cannot tell those apart.
-                final["citations_dropped"] = citations_dropped
-                # How many chips the model proposed vs how many the relevance
-                # gate kept: coverage moving without this is uninterpretable.
-                final["citations_proposed"] = citations_proposed
-                final["citations_gated"] = citations_gated
+                if direct:
+                    final["context_chunks"] = []
+                    final["citations_dropped"] = 0
+                    final["citations_proposed"] = 0
+                    final["citations_gated"] = 0
+                else:
+                    context_texts = [
+                        c.get("text", "") for c in chunks_returned if c.get("text")
+                    ]
+                    section_context = result.get("section_context")
+                    if section_context and section_context.strip():
+                        context_texts.append(section_context)
+                    final["context_chunks"] = context_texts
+                    # Eval-only: separates the two reasons an answer carries no source --
+                    # the model named none, or the ones it named were ungrounded and
+                    # removed. citation_coverage alone cannot tell those apart.
+                    final["citations_dropped"] = citations_dropped
+                    # How many chips the model proposed vs how many the relevance
+                    # gate kept: coverage moving without this is uninterpretable.
+                    final["citations_proposed"] = citations_proposed
+                    final["citations_gated"] = citations_gated
             yield f"data: {json.dumps(final)}\n\n"
             logger.info(
                 "[perf] stream_answer total: %.2fs (question=%r)",

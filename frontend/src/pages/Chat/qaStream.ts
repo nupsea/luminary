@@ -20,6 +20,7 @@ export interface QaStreamRequest {
   messages?: { role: "user" | "assistant"; content: string }[]
   web_enabled: boolean
   creative?: boolean
+  direct?: boolean
 }
 
 export interface QaDoneEvent {
@@ -31,6 +32,7 @@ export interface QaDoneEvent {
   web_sources: WebSource[]
   source_citations: SourceCitation[]
   web_calls_used: number | undefined
+  direct?: boolean
 }
 
 export interface QaStreamHandlers {
@@ -115,6 +117,7 @@ export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers)
             web_sources: (payload["web_sources"] as WebSource[] | undefined) ?? [],
             source_citations: (payload["source_citations"] as SourceCitation[] | undefined) ?? [],
             web_calls_used: payload["web_calls_used"] as number | undefined,
+            direct: payload["direct"] === true,
           })
         }
       } catch {
