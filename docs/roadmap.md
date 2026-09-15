@@ -602,12 +602,14 @@ the environment and added back `HOME` — on Windows CPython does not start with
 now), and `report.rs` scrubbed only `HOME`, so every Windows bug report would have carried
 `C:\Users\<their name>` in every path unredacted.
 
-**The installers are built; no first run has been seen yet.** `desktop-installers.yml` stages a
-Windows and a Linux tree through `scripts/desktop/`, builds a per-user NSIS `-setup.exe`, an
-AppImage and a `.deb`, installs each on a clean runner and waits for the shell's `ready` line
-(`verify_installed.sh`). Decided: NSIS over `.msi` (no admin prompt; `.msi` only if managed
-deployment is asked for), unsigned for now (SmartScreen warns), and the engine ships CPU, Vulkan
-and CUDA 13 runners without CUDA 12 (1.15 GB). The runners have no GPU, so what remains open is
+**The `.deb` installs and opens on a clean runner; the AppImage and the Windows setup do not build.**
+`desktop-installers.yml` stages a Windows and a Linux tree through `scripts/desktop/`, builds a
+per-user NSIS `-setup.exe`, an AppImage and a `.deb`, installs each and waits for the shell's `ready`
+line (`verify_installed.sh`). Decided: NSIS over `.msi` (no admin prompt; `.msi` only if managed
+deployment is asked for), unsigned for now (SmartScreen warns). **The Windows stage is 2.28 GB and
+makensis fails past ~2 GB**, so this rung carries `lighter-install-plan.md`: CUDA 13 becomes an
+on-demand engine component, the encoders move to ONNX Runtime and torch leaves the bundle. The
+runners have no GPU, so what remains open is
 exactly what CI cannot see: a first run with no terminal on real Windows and Linux hardware, the
 CUDA and Vulkan paths on a real GPU, and a Windows install path long enough to hit `MAX_PATH`.
 Those, plus `make smoke` green on Windows, are the exit gate. Issue #24 closes with the first.
@@ -742,14 +744,13 @@ is not.
 
 ### 13. Encoders and languages — 0.22.0
 
-**ONNX Runtime for the encoders.** Same gate as the swap below and for the same reason: a quantized
-ONNX embedder produces different vectors, so it is a full re-embed behind I-9 and cannot start before
-0.17.0's rail exists. Two facts disqualify it as a size or speed win in the meantime. `optimum`,
-`sentence-transformers` and `gliner` each declare torch unconditionally, so adding ONNX *increases*
-the bundle until all three are replaced (`desktop-bundle.md`); and the encoders are not the
-bottleneck — bge-small and MiniLM run on CPU today with Metal idle beside them, while a slow host's
-~121s question is the 4B model at ~6 tok/s, served by Ollama, which already ships Metal, CUDA, ROCm
-and Vulkan. If it is taken up, `onnxruntime-directml` is the broadest Windows execution provider
+**fp32 ONNX Runtime for the encoders moved to 0.13.0** (`lighter-install-plan.md`), as a size change
+rather than a speed one: the same weights at fp32 measured cosine >= 0.99999982 against the shipped
+embedder with identical top-10 retrieval, so it is not a re-embed. **A quantized ONNX encoder still is**,
+and stays behind I-9 and 0.17.0's rail. Replacing only some of `optimum`, `sentence-transformers` and
+`gliner` *increases* the bundle, since each declares torch unconditionally — which is why the plan
+replaces all three. The encoders are not the latency bottleneck: a slow host's ~121s question is the
+4B model at ~6 tok/s, served by Ollama. For an accelerated encoder, `onnxruntime-directml` is the broadest Windows execution provider
 (NVIDIA, AMD, Intel Arc and Intel NPUs through one wheel) but publishes `win_amd64` only — Windows on
 ARM is not covered by it, so a Snapdragon NPU needs a different provider, not the same binary.
 
