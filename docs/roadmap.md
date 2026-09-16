@@ -606,13 +606,19 @@ now), and `report.rs` scrubbed only `HOME`, so every Windows bug report would ha
 `desktop-installers.yml` stages a Windows and a Linux tree through `scripts/desktop/`, builds a
 per-user NSIS `-setup.exe`, an AppImage and a `.deb`, installs each and waits for the shell's `ready`
 line (`verify_installed.sh`). Decided: NSIS over `.msi` (no admin prompt; `.msi` only if managed
-deployment is asked for), unsigned for now (SmartScreen warns). **The Windows stage is 2.28 GB and
-makensis fails past ~2 GB**, so this rung carries `lighter-install-plan.md`: CUDA 13 becomes an
-on-demand engine component, the encoders move to ONNX Runtime and torch leaves the bundle. The
-runners have no GPU, so what remains open is
-exactly what CI cannot see: a first run with no terminal on real Windows and Linux hardware, the
-CUDA and Vulkan paths on a real GPU, and a Windows install path long enough to hit `MAX_PATH`.
-Those, plus `make smoke` green on Windows, are the exit gate. Issue #24 closes with the first.
+deployment is asked for), unsigned for now (SmartScreen warns). **The Windows stage was 2.28 GB and
+makensis fails past ~2 GB**, so this rung carries `lighter-install-plan.md`. CUDA has since left the
+installer: it was 629 MB of that stage, Vulkan already serves every GPU vendor, and NVIDIA owners
+fetch the faster runner from `/setup/components` afterwards. That required moving the engine to
+`DATA_DIR` first -- Ollama resolves its runners from its own executable path with no environment
+override, so a downloaded runner has nowhere else to land. The encoder port to ONNX Runtime is now
+conditional on x86 numbers that do not exist yet; it is headroom, not the unblock.
+
+**None of that has been through `desktop-installers.yml` yet**, and CI is the only thing that can
+say whether the Windows setup now packs. Beyond it, what remains open is what CI cannot see at all:
+a first run with no terminal on real Windows and Linux hardware, the CUDA and Vulkan paths on a real
+GPU, and a Windows install path long enough to hit `MAX_PATH`. Those, plus `make smoke` green on
+Windows, are the exit gate. Issue #24 closes with the first.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows

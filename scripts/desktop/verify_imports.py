@@ -14,7 +14,7 @@ REQUIRED = [
     "sentence_transformers", "gliner", "lancedb", "pyarrow",
     "kuzu", "fitz", "PIL", "litellm", "langgraph", "keyring",
     "fastapi", "uvicorn", "alembic", "sqlalchemy", "aiosqlite",
-    "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip",
+    "yt_dlp", "trafilatura", "tree_sitter", "cloudscraper", "pip", "zstandard",
 ]  # fmt: skip
 
 # `av` and its dependants carry libx264/libx265 (GPL-2.0-or-later) inside their

@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Windows and Linux installers.** `desktop-installers.yml` stages and builds a `.deb`, an AppImage and a per-user NSIS setup `.exe`; only the `.deb` installs and opens so far, because the Windows stage is 2.28 GB and makensis fails past ~2 GB. The engine ships CPU, Vulkan and CUDA 13 runners; CUDA 12 would have added 1.15 GB.
+- **Windows and Linux installers.** `desktop-installers.yml` stages and builds a `.deb`, an AppImage and a per-user NSIS setup `.exe`; only the `.deb` installs and opens so far, because the Windows stage was 2.28 GB and makensis fails past ~2 GB.
+- **NVIDIA GPU acceleration is a download, not a payload.** The installer ships CPU and Vulkan runners only, which serve every GPU vendor; CUDA was 629 MB of the Windows stage and is what put it over the NSIS ceiling. NVIDIA owners are offered the faster CUDA runner from `/setup/components`.
+- **The engine runs from the library directory.** Ollama resolves its runners relative to its own executable with no environment override, and an installed tree is read-only on Linux, so the engine is copied to `DATA_DIR/engine` once per release and spawned there. macOS keeps running from the bundle.
+- **A component downloader that resumes and verifies.** `component_download.py` resumes with `Range`, checks sha256 before unpacking anything, and unpacks beside the target so a failure cannot replace a working runner with a partial one.
 - **A desktop stage has a size budget and a path-length budget.** `verify_stage.sh` fails a Windows stage over 1900 MB, or any stage path over 190 characters — what `MAX_PATH` leaves once the per-user install root is spent.
 
 ### Changed

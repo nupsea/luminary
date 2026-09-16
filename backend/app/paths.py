@@ -45,6 +45,16 @@ def spa_dist() -> Path:
     return app_root() / "frontend" / "dist"
 
 
+def engine_source_path() -> Path:
+    """Where the staged engine records the archive it came from.
+
+    Written by `scripts/desktop/stage_ollama.sh`, and absent in a source
+    checkout and in the macOS bundle -- neither of which offers a downloadable
+    runner. Its absence is the answer "nothing to offer here", never an error.
+    """
+    return app_root() / "ollama" / "engine-source.json"
+
+
 def alembic_ini() -> Path:
     return backend_root() / "alembic.ini"
 

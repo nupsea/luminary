@@ -87,5 +87,26 @@ compgen -G "$LIB/*ggml-cpu*" >/dev/null || _die "no CPU runners in $ASSET"
 # read-only on Linux. This file is what tells it whether that copy is current,
 # so a release bump replaces the copy instead of running last version's runners.
 printf '%s\n' "$OLLAMA_VERSION" > "$OL_STAGE/ENGINE_VERSION"
+
+# Where the CUDA runner that was just excluded can be fetched from later.
+# Ollama publishes no standalone CUDA asset -- it exists only inside this same
+# archive -- so the download is the whole thing and only cuda_v13 is kept. The
+# digest is the one verified above, pinned by the build rather than re-fetched
+# at install time, so the user's machine downloads exactly the archive this
+# installer was built from.
+cat > "$OL_STAGE/engine-source.json" <<JSON
+{
+  "version": "$OLLAMA_VERSION",
+  "asset": "$ASSET",
+  "url": "$BASE/$ASSET",
+  "sha256": "$expected",
+  "archive_bytes": $(wc -c < "$ARCHIVE" | tr -d ' '),
+  "runner": "cuda_v13",
+  "member_prefix": "lib/ollama/cuda_v13/"
+}
+JSON
+uv run --no-project --python "$PY_MINOR" python -c \
+    'import json,sys; json.load(open(sys.argv[1]))' "$(native_path "$OL_STAGE/engine-source.json")" \
+    || _die "engine-source.json is not valid JSON"
 du -sh "$OL_STAGE/$EXE" "$LIB"/*/ | sed 's|'"$OL_STAGE"'/||; s/^/    /'
 _info "ollama staged: $(du -sh "$OL_STAGE" | awk '{print $1}')"

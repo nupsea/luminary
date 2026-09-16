@@ -166,11 +166,30 @@ Windows broken until the next one lands; a red gate is reverted or descoped, nev
 |---|---|---|
 | 0. Measure | Windows stage breakdown from CI; ONNX speed on macOS arm64, Windows and Linux x86_64 with length-sorted batches and explicit thread counts; gliner's own ONNX fp32 against torch on the golden corpora; Ollama second-directory runner loading; CUDA redistribution terms; `evals/` independent of backend dependencies | every item answered with a recorded number or source line |
 | 1. Hygiene | declare scipy and scikit-learn; the payload rules above; size and path budgets; installer size reported in CI | `make ci`; Linux `.deb` and AppImage build and open in `desktop-installers.yml`; both budgets fired on purpose once |
-| 2. Engine to `DATA_DIR`, and one downloader | copy the engine tree to `DATA_DIR` on first launch and spawn from there; a resumable, sha256-verified, extract-to-temp-then-rename downloader behind `/setup/components`; `engine_runner` kind; installers drop `cuda_v13` | Windows NSIS builds, installs silently and opens; stage within the Phase 1 budget; engine runs from `DATA_DIR` on all three OSes; the verifier fired once against a corrupted artifact |
-| 3. CUDA component | pack build and publish, catalogue entry, driver-keyed offer | **redistribution terms read and recorded first**; on a GPU host (AWS g4dn): fresh install reports Vulkan, after the pack Ollama's discovery reports CUDA, offline first run still works |
+| 2. Engine to `DATA_DIR`, and one downloader | copy the engine tree to `DATA_DIR` on first launch and spawn from there; a resumable, sha256-verified, extract-to-temp-then-rename downloader behind `/setup/components`; `engine_runner` kind; installers drop `cuda_v13` | Windows NSIS builds, installs silently and opens; stage within the Phase 1 budget; engine runs from `DATA_DIR` on Windows and Linux, and from the bundle on macOS, which has no runner to fetch; the verifier fired once against a corrupted artifact |
+| 3. CUDA component | keep the offer to machines with an NVIDIA driver | on a GPU host (AWS g4dn): fresh install reports Vulkan, after the runner Ollama's discovery reports CUDA, offline first run still works |
 | 4. First run | GLiNER becomes an explicit opt-in component; resumable progress for the remaining weights; WebView2 install mode; `MIN_FREE_BYTES` and the model-size wording corrected; Windows install time measured | first run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
 | 5. Encoders on ORT, conditional | x86_64 speed measured in CI **before** any port; then embedder and reranker behind the existing seams; torch removed; GLiNER last | committed parity fixture (cosine >= 0.99999, identical top-10) in CI; `make eval` unchanged against a same-day baseline run twice; speed gate. A red x86 gate ends this phase and is recorded as the answer |
 | 6. Windows decisions | signing, updater | each recorded here, then built |
+
+### The CUDA runner is fetched from Ollama, not republished
+
+Ollama publishes no standalone CUDA asset. The v0.32.5 release carries seventeen files, and the
+runner exists only inside the two base archives -- `ollama-windows-amd64.zip` (1,457,824,795 bytes)
+and `ollama-linux-amd64.tar.zst` (1,422,353,729). ROCm and MLX ship separately; CUDA does not.
+
+So the download is the whole archive and only `lib/ollama/cuda_v13/` is kept out of it: 628.8 MB
+across 13 files on Windows, read from the zip's central directory. That costs the user about
+760 MB more than a purpose-built pack would, and in exchange there is no release asset to publish,
+no checksum to keep in step with each Ollama bump, and no NVIDIA redistribution question -- the
+user fetches NVIDIA's libraries from Ollama's own release, which is what Phase 3's blocking legal
+check existed to avoid. Revisit only if the download size proves painful in practice.
+
+Two details that decide whether the extraction works, both read from the real archives rather than
+assumed. Members are named `lib/ollama/cuda_v13/...` with no `./` prefix, in both. And the CUDA
+directory is mostly **symlinks** -- `libcublas.so.12 -> libcublas.so.12.8.5.5` -- stored *before*
+the file they point at. An extractor that keeps only regular files writes every real library and
+none of the sonames the loader resolves, which looks exactly like a successful install.
 
 **Speed gate.** ORT must be no slower than torch on each OS for ingest embedding and reranking, or
 Phase 5 does not ship.
