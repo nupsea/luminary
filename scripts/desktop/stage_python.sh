@@ -106,7 +106,7 @@ else
 fi
 
 prune_dependencies "$SITE"
-relink_sibling_libs "$SITE"
+relink_bundled_libs "$SITE"
 byte_compile "$PY" "$STDLIB"
 [ -d "$STAGE/backend" ] && byte_compile "$PY" "$STAGE/backend"
 

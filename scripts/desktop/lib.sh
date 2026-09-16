@@ -232,39 +232,99 @@ prune_dependencies() {
     find "$site" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
 }
 
-# A library that is loaded through someone else's RPATH carries no rpath itself:
-# auditwheel puts `$ORIGIN/../<pkg>.libs` on the extension module and Ollama puts
-# one on its executable, because RPATH is inherited by transitive loads. So the
-# loader resolves `pillow.libs/libfreetype -> libpng16-4a38ea05.so.16.53.0` and
-# `lib/ollama/libmtmd.so.0 -> libggml-base.so.0` from the parent that pulled them
-# in. linuxdeploy walks every ELF in the AppDir on its own, with no parent to
-# inherit from, so it reads both as missing dependencies and fails the AppImage --
-# on a stage that is correct and that the .deb ships working.
+# A library that is loaded through someone else's RPATH carries no rpath that
+# reaches its own dependencies: RPATH is inherited by transitive loads, so
+# auditwheel records `$ORIGIN/../<pkg>.libs` on the extension module alone and
+# Ollama records `$ORIGIN/lib/ollama` on the `ollama` executable alone. Whatever
+# they pull in resolves through that single entry -- `pillow.libs/libfreetype ->
+# libpng16-4a38ea05.so.16.53.0` beside it, `lib/ollama/vulkan/libggml-vulkan.so
+# -> libggml-base.so.0` a directory above it. linuxdeploy inspects every ELF in
+# the AppDir on its own, with no parent to inherit from, so it reads those as
+# missing dependencies and fails the AppImage -- on a stage that is correct and
+# that the .deb ships working.
 #
-# Recording `$ORIGIN` states the relationship the parent's RPATH already implied.
-# Only a library with no rpath of its own and a sibling that satisfies one of its
-# NEEDED entries is touched, so the directory searched first is the one holding
-# the very copies it means to load.
-relink_sibling_libs() {
-    local root="$1" lib dir need rpath patched=0
+# Recording the directory states what the parent's RPATH already implied. The
+# search runs from the library's own directory up to the root of the tree being
+# staged and no wider, which is the reach that RPATH had; a dependency the host
+# owns is never found there and so is left to the host. Entries are appended, so
+# whatever an rpath resolves today it still resolves the same way, and a library
+# already covering all of its NEEDED is not touched at all.
+relink_bundled_libs() {
+    local root="$1" lib dir need rpath target rel add new patched=0 examined=0
     [ "$DESKTOP_OS" = linux ] || return 0
     _step "Relinking libraries that rely on an inherited rpath"
     command -v patchelf >/dev/null 2>&1 || _die "patchelf is needed to stage on Linux"
     while IFS= read -r lib; do
+        examined=$((examined + 1))
+        dir="${lib%/*}"
         rpath="$(patchelf --print-rpath "$lib" 2>/dev/null)" || continue
-        if [ -n "$rpath" ]; then
-            continue
-        fi
-        dir="$(dirname "$lib")"
+        add=""
         while IFS= read -r need; do
-            if [ -e "$dir/$need" ]; then
-                patchelf --set-rpath '$ORIGIN' "$lib"
-                patched=$((patched + 1))
-                break
+            if [ -z "$need" ]; then
+                continue
+            fi
+            target="$(_holding_dir "$dir" "$root" "$need")" || continue
+            if _rpath_covers "$dir" "$rpath$add" "$need"; then
+                continue
+            fi
+            rel="$(realpath --relative-to="$dir" "$target")"
+            if [ "$rel" = "." ]; then
+                add="$add:\$ORIGIN"
+            else
+                add="$add:\$ORIGIN/$rel"
             fi
         done < <(patchelf --print-needed "$lib" 2>/dev/null)
+        if [ -z "$add" ]; then
+            continue
+        fi
+        if [ -n "$rpath" ]; then
+            new="$rpath$add"
+        else
+            new="${add#:}"
+        fi
+        # --force-rpath keeps a DT_RPATH a DT_RPATH: patchelf writes DT_RUNPATH by
+        # default, which is not inherited, and demoting one would cut off whatever
+        # was resolving through it.
+        if [ -n "$rpath" ] && objdump -p "$lib" 2>/dev/null | grep -q 'RPATH'; then
+            patchelf --force-rpath --set-rpath "$new" "$lib"
+        else
+            patchelf --set-rpath "$new" "$lib"
+        fi
+        patched=$((patched + 1))
+        _info "${lib#"$root"/}: rpath '$new'"
     done < <(find "$root" -type f \( -name '*.so' -o -name '*.so.*' \))
-    _info "gave $patched libraries an \$ORIGIN rpath"
+    _info "examined $examined libraries, relinked $patched"
+}
+
+# The directory holding $3, searched from $1 upwards but never above $2.
+_holding_dir() {
+    local dir="$1" root="$2" need="$3"
+    while :; do
+        if [ -e "$dir/$need" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+        if [ "$dir" = "$root" ] || [ "$dir" = "${dir%/*}" ]; then
+            return 1
+        fi
+        dir="${dir%/*}"
+    done
+}
+
+# Whether $2 already names a directory holding $3, with $ORIGIN read against $1.
+_rpath_covers() {
+    local dir="$1" entry
+    while IFS= read -r entry; do
+        if [ -z "$entry" ]; then
+            continue
+        fi
+        entry="${entry//\$\{ORIGIN\}/$dir}"
+        entry="${entry//\$ORIGIN/$dir}"
+        if [ -e "$entry/$3" ]; then
+            return 0
+        fi
+    done < <(printf '%s\n' "${2//:/$'\n'}")
+    return 1
 }
 
 # unchecked-hash, not the default timestamp invalidation: copying into a bundle

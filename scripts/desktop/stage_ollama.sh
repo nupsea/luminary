@@ -85,7 +85,7 @@ compgen -G "$LIB/*ggml-cpu*" >/dev/null || _die "no CPU runners in $ASSET"
 # linuxdeploy -- which inspects each one alone -- calls libggml-base.so.0 missing
 # and fails the AppImage. `verify_ollama.sh` runs the engine after this, so a
 # relink that broke it fails the stage rather than the bundle.
-relink_sibling_libs "$LIB"
+relink_bundled_libs "$LIB"
 
 # The shell copies this tree into the writable library directory on first launch
 # and spawns it from there (engine_dir in src-tauri/src/stage.rs): Ollama
