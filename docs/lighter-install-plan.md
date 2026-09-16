@@ -139,6 +139,7 @@ the assumption that the download succeeded.
 | Path budget in `verify_stage.sh` | install prefix `C:\Users\<name>\AppData\Local\...` is ~60 chars against `MAX_PATH` 260 | fails on any stage path over 190 chars |
 | Tracing packages out of the main set, if `telemetry.py` degrades without them | `PHOENIX_ENABLED` defaults to false, yet the OTLP gRPC exporter and instrumentation ship; `telemetry.py` imports `opentelemetry.trace` and `openinference.semconv` at module scope | `tests/test_telemetry.py`, measured size before and after |
 | `LINUXDEPLOY_EXCLUDED_LIBRARIES` for `libcuda`, `libnvidia-*`, `libvulkan` | linuxdeploy resolves every ELF in the AppDir; driver libraries must come from the host | AppImage build, then launched by `verify_installed.sh` |
+| `relink_vendored_libs()` gives every auditwheel-vendored library an `$ORIGIN` rpath | auditwheel records `$ORIGIN/../<pkg>.libs` as DT_RPATH on the *extension* and leaves the vendored libraries bare, because RPATH is inherited by transitive loads. linuxdeploy inspects each ELF alone, so `pillow.libs/libfreetype` reads as missing `libpng16-*.so.16` and the AppImage fails on a stage the `.deb` ships working | AppImage build; `patchelf` is required to stage on Linux |
 
 linuxdeploy also rewrites rpaths of payload libraries. Whether that breaks the runtime is decided by
 launching the AppImage, not by reasoning about it.
@@ -233,9 +234,9 @@ to be refactored to read from the new one, never duplicated beside it.
 To be done when the phases are green, not before — each item is live code until then.
 
 - Delete this file. It is a plan, and `docs/` carries only what exists.
-- Fold what outlives it into the permanent docs: the runner-discovery finding and the symlink trap
-  into `docs/desktop-bundle.md`, and anything that became a rule into `docs/invariants.md` via the
-  `invariant-capture` skill.
+- Fold what outlives it into the permanent docs: the runner-discovery finding, the symlink trap and
+  the auditwheel-versus-linuxdeploy rpath finding into `docs/desktop-bundle.md`, and anything that
+  became a rule into `docs/invariants.md` via the `invariant-capture` skill.
 - Reconcile `CHANGELOG.md` and `docs/roadmap.md` against what CI actually proved, not against what
   was intended.
 - If Phase 5 ends red, the torch pin, the `pytorch-cpu` index and the extra-index branch in

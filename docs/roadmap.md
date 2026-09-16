@@ -602,7 +602,7 @@ the environment and added back `HOME` — on Windows CPython does not start with
 now), and `report.rs` scrubbed only `HOME`, so every Windows bug report would have carried
 `C:\Users\<their name>` in every path unredacted.
 
-**The `.deb` installs and opens on a clean runner; the AppImage and the Windows setup do not build.**
+**The Windows setup packs and installs silently; the `.deb` installs and opens; the AppImage still does not build.**
 `desktop-installers.yml` stages a Windows and a Linux tree through `scripts/desktop/`, builds a
 per-user NSIS `-setup.exe`, an AppImage and a `.deb`, installs each and waits for the shell's `ready`
 line (`verify_installed.sh`). Decided: NSIS over `.msi` (no admin prompt; `.msi` only if managed
@@ -614,8 +614,16 @@ fetch the faster runner from `/setup/components` afterwards. That required movin
 override, so a downloaded runner has nowhere else to land. The encoder port to ONNX Runtime is now
 conditional on x86 numbers that do not exist yet; it is headroom, not the unblock.
 
-**None of that has been through `desktop-installers.yml` yet**, and CI is the only thing that can
-say whether the Windows setup now packs. Beyond it, what remains open is what CI cannot see at all:
+**Run `35059810356` is the first that put it through `desktop-installers.yml`, and the ceiling is
+cleared.** The Windows stage measured 1610 MB against the 1900 MB budget in `scripts/desktop/lib.sh`,
+makensis packed a 298.6 MB `-setup.exe`, and `/S` installed it; the staged engine served
+`/api/generate` with `libdirs=ollama`, so runner discovery follows the stage. The `.deb` (653.6 MB)
+installed and opened. Two things came back red and neither is the design: linuxdeploy refuses
+pillow's vendored `libfreetype`, whose `libpng16-*.so` is reachable only through the RPATH auditwheel
+records on the extension module and not on the library itself, and the Windows `Open the installed
+app` step died inside its own `find` before it could launch anything, printing nothing. Both are
+fixed on this branch, so **whether the installed Windows app opens is still unproven**, as is the
+AppImage. Beyond them, what remains open is what CI cannot see at all:
 a first run with no terminal on real Windows and Linux hardware, the CUDA and Vulkan paths on a real
 GPU, and a Windows install path long enough to hit `MAX_PATH`. Those, plus `make smoke` green on
 Windows, are the exit gate. Issue #24 closes with the first.
