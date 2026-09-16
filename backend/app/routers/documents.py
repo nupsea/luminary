@@ -109,9 +109,8 @@ from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
 from app.services.oreilly_service import (
-    download_and_launch_ingestion,
-    get_oreilly_cookies,
     is_oreilly_url,
+    start_oreilly_ingestion,
 )
 from app.services.parser import DocumentParser
 from app.services.remote_source import (
@@ -999,20 +998,7 @@ async def ingest_url(
 
     # 0. O'Reilly Learning book detection
     if is_oreilly_url(body.url):
-        if not get_oreilly_cookies():
-            raise HTTPException(
-                status_code=401,
-                detail=(
-                    "O'Reilly subscription cookies not configured. "
-                    "Please connect your O'Reilly subscription in Settings."
-                ),
-            )
-        doc_id = str(uuid.uuid4())
-        try:
-            return await download_and_launch_ingestion(doc_id, body.url, settings)
-        except Exception as exc:
-            logger.exception("O'Reilly book ingestion failed for %s", body.url)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await start_oreilly_ingestion(body.url, settings)
 
     # 1. Non-YouTube: a linked file if the URL resolves to one, else a web article
     if not is_youtube_url(body.url):

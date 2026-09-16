@@ -90,6 +90,21 @@ def test_parse_cookies_input():
         "sessionid": "token3",
     }
 
+    # 4. DevTools raw header with Cookie: prefix
+    devtools_str = "cookie: _abck=token1; bm_sz=token2; sessionid=token3"
+    assert parse_cookies_input(devtools_str) == {
+        "_abck": "token1",
+        "bm_sz": "token2",
+        "sessionid": "token3",
+    }
+
+    # 5. Multiline / tab-separated table paste
+    table_paste = "_abck\ttoken1\nsessionid\ttoken3"
+    assert parse_cookies_input(table_paste) == {
+        "_abck": "token1",
+        "sessionid": "token3",
+    }
+
 
 def test_process_chapter_html():
     raw = """

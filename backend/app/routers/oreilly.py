@@ -8,25 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
-from app.database import get_session_factory
-from app.models import DocumentModel
-from app.services.ingestion_jobs import get_ingestion_jobs
 from app.services.oreilly_service import (
     OreillyClient,
     delete_oreilly_cookies,
-    download_and_launch_ingestion,
     get_oreilly_cookies,
     parse_cookies_input,
     parse_oreilly_book_id,
     save_oreilly_cookies,
+    start_oreilly_ingestion,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,67 +157,8 @@ async def ingest_oreilly_book(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Download an O'Reilly book as an EPUB and ingest with local LLM processing."""
-    book_id = parse_oreilly_book_id(body.url)
-    if not book_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not extract an O'Reilly book identifier or ISBN from the provided URL.",
-        )
-
-    client = OreillyClient()
-    if not client.is_configured():
-        raise HTTPException(
-            status_code=401,
-            detail=(
-                "O'Reilly subscription cookies not configured. "
-                "Please connect your O'Reilly account first."
-            ),
-        )
-
-    try:
-        meta = await asyncio.to_thread(client.fetch_book_metadata, book_id)
-        book_title = meta.get("title") or f"O'Reilly Book {book_id}"
-    except Exception:
-        book_title = f"O'Reilly Book {book_id}"
-
-    doc_id = str(uuid.uuid4())
-    data_dir = Path(settings.DATA_DIR).expanduser()
-    raw_dir = data_dir / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    dest_epub = raw_dir / f"{doc_id}.epub"
-
-    async with get_session_factory()() as session:
-        doc = DocumentModel(
-            id=doc_id,
-            title=book_title,
-            format="epub",
-            content_type="technical",
-            word_count=0,
-            page_count=0,
-            file_path=str(dest_epub),
-            file_hash=None,
-            stage="parsing",
-            source_url=body.url,
-            tags=["oreilly", "tech_book"],
-        )
-        session.add(doc)
-        await session.commit()
-
-    # Launch background download and ingestion job
-    get_ingestion_jobs().launch(
-        doc_id,
-        download_and_launch_ingestion(
-            doc_id=doc_id,
-            book_id=book_id,
-            dest_path=dest_epub,
-            client=client,
-            selected_chapters=body.selected_chapters,
-        ),
+    return await start_oreilly_ingestion(
+        url=body.url,
+        settings=settings,
+        selected_chapters=body.selected_chapters,
     )
-
-    logger.info("O'Reilly book ingestion launched", extra={"doc_id": doc_id, "book_id": book_id})
-    return {
-        "document_id": doc_id,
-        "status": "processing",
-        "title": book_title,
-    }

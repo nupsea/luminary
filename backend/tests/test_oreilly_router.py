@@ -104,3 +104,28 @@ async def test_ingest_url_auto_detects_oreilly_unconfigured():
         # Without cookies configured, it immediately warns the user
         assert resp.status_code == 401
         assert "O'Reilly subscription cookies not configured" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_url_auto_detects_oreilly_configured():
+    transport = ASGITransport(app=app)
+    mock_result = {
+        "document_id": "test-doc-1234",
+        "status": "processing",
+        "title": "Designing Data-Intensive Applications",
+    }
+    with patch(
+        "app.routers.documents.start_oreilly_ingestion",
+        return_value=mock_result,
+    ) as mock_start:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/documents/ingest-url",
+                json={"url": "https://learning.oreilly.com/library/view/ddia/9781491903063/"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["document_id"] == "test-doc-1234"
+            assert data["status"] == "processing"
+            mock_start.assert_called_once()
+

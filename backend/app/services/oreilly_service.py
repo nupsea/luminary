@@ -15,6 +15,7 @@ import json
 import logging
 import mimetypes
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -134,6 +135,10 @@ def parse_cookies_input(cookie_input: str | dict | list) -> dict[str, str]:
         if not raw:
             return {}
 
+        # Strip optional "Cookie:" / "cookie:" header label
+        if raw.lower().startswith("cookie:"):
+            raw = raw[len("cookie:"):].strip()
+
         # Attempt JSON parse
         if raw.startswith(("[", "{")):
             try:
@@ -142,16 +147,23 @@ def parse_cookies_input(cookie_input: str | dict | list) -> dict[str, str]:
             except Exception:
                 logger.debug("Failed to parse cookie input as JSON, falling back to header parsing")
 
-        # Parse as HTTP Cookie header: key=value; key2=val2
+        # Parse as HTTP Cookie header or lines of key=value / key\tvalue
         cookies = {}
-        for part in raw.split(";"):
-            cleaned_part = part.strip()
-            if "=" in cleaned_part:
-                k, v = cleaned_part.split("=", 1)
+        parts = re.split(r"[;\n\r]+", raw)
+        for part in parts:
+            cleaned = part.strip()
+            if not cleaned:
+                continue
+            if "=" in cleaned:
+                k, v = cleaned.split("=", 1)
                 k = k.strip()
                 v = v.strip()
                 if k:
                     cookies[k] = v
+            elif "\t" in cleaned:
+                tokens = cleaned.split("\t")
+                if len(tokens) >= 2 and tokens[0].strip():
+                    cookies[tokens[0].strip()] = tokens[1].strip()
         return cookies
 
     return {}
@@ -564,3 +576,87 @@ async def download_and_launch_ingestion(
                 doc.stage = "error"
                 doc.error_message = f"O'Reilly download failed: {exc}"
                 await session.commit()
+
+
+async def start_oreilly_ingestion(
+    url: str,
+    settings: Any,
+    selected_chapters: list[int] | None = None,
+) -> dict[str, Any]:
+    """Validate session, parse book ID, create document, and launch background ingestion."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from app.database import get_session_factory  # noqa: PLC0415
+    from app.models import DocumentModel  # noqa: PLC0415
+    from app.services.ingestion_jobs import get_ingestion_jobs  # noqa: PLC0415
+
+    client = OreillyClient()
+    if not client.is_configured():
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "O'Reilly subscription cookies not configured. "
+                "Please connect your O'Reilly subscription in Settings."
+            ),
+        )
+
+    book_id = parse_oreilly_book_id(url)
+    if not book_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not extract O'Reilly book ID or ISBN from URL: {url}",
+        )
+
+    # Fetch metadata for book title
+    book_title = f"O'Reilly Book {book_id}"
+    try:
+        meta = await asyncio.to_thread(client.fetch_book_metadata, book_id)
+        book_title = meta.get("title") or book_title
+    except Exception as exc:
+        logger.warning(
+            "Could not fetch metadata for %s, proceeding with fallback title: %s",
+            book_id,
+            exc,
+        )
+
+    doc_id = str(uuid.uuid4())
+    data_dir = Path(settings.DATA_DIR).expanduser()
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    dest_epub = raw_dir / f"{doc_id}.epub"
+
+    async with get_session_factory()() as session:
+        doc = DocumentModel(
+            id=doc_id,
+            title=book_title,
+            format="epub",
+            content_type="technical",
+            word_count=0,
+            page_count=0,
+            file_path=str(dest_epub),
+            file_hash=None,
+            stage="parsing",
+            source_url=url,
+            tags=["oreilly", "tech_book"],
+        )
+        session.add(doc)
+        await session.commit()
+
+    get_ingestion_jobs().launch(
+        doc_id,
+        download_and_launch_ingestion(
+            doc_id=doc_id,
+            book_id=book_id,
+            dest_path=dest_epub,
+            client=client,
+            selected_chapters=selected_chapters,
+        ),
+    )
+
+    logger.info("O'Reilly book ingestion launched", extra={"doc_id": doc_id, "book_id": book_id})
+    return {
+        "document_id": doc_id,
+        "status": "processing",
+        "title": book_title,
+    }
+
