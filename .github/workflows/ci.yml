@@ -102,6 +102,12 @@ jobs:
           workspaces: src-tauri -> target
       - name: Check formatting
         run: cargo fmt --all --check
+      # tauri.windows.conf.json bundles build/stage, and tauri-build refuses to
+      # compile when a resource path is missing. This job tests the shell, not
+      # the installer, so an empty stage stands in for one.
+      - name: Placeholder stage
+        shell: bash
+        run: mkdir -p ../build/stage && touch ../build/stage/.placeholder
       - name: Build and test the desktop shell
         run: cargo test --workspace
       - name: Lint the desktop shell

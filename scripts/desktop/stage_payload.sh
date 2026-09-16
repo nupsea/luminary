@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Stage the application payload (backend source, SPA, manifest, licenses).
 #
-# $STAGE becomes Contents/Resources in the .app. The layout mirrors the repo
-# tree because backend/app resolves surface-manifest.json, frontend/dist,
-# alembic.ini and pyproject.toml via Path(__file__).resolve().parents[2] --
-# from <stage>/backend/app/config.py that is <stage>. Same contract as the
-# release tarball in .github/workflows/release.yml.
+# $STAGE becomes Contents/Resources in the macOS .app and the resource directory
+# of the Windows and Linux installs. The layout mirrors the repo tree because
+# backend/app resolves surface-manifest.json, frontend/dist, alembic.ini and
+# pyproject.toml via Path(__file__).resolve().parents[2] -- from
+# <stage>/backend/app/config.py that is <stage>. Same contract as the release
+# tarball in .github/workflows/release.yml.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -55,6 +56,6 @@ done
 # desktop user with full filesystem and network access. This guard fails the
 # build if it is ever reintroduced, rather than shipping it to an end user.
 ! [ -e "$STAGE/backend/app/routers/code_executor.py" ] || _die "code_executor leaked into the payload"
-! grep -rq "/Users/$(whoami)" "$STAGE/backend/app" || _die "personal path in payload"
+! grep -rqE "/(Users|home)/$(whoami)/" "$STAGE/backend/app" || _die "personal path in payload"
 
 _info "payload staged ($(du -sh "$STAGE/backend" "$STAGE/frontend" | awk '{print $1}' | paste -sd+ -))"

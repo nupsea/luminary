@@ -12,7 +12,7 @@ use luminary_host::{alive, executable_of, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::logging;
-use crate::stage::{OLLAMA_BINARY, PYTHON_BINARY};
+use crate::stage::{OLLAMA_BINARY, OLLAMA_LIBRARY_DIR, PYTHON_BINARY};
 
 /// Enough of a child's output to explain why it died, without turning the
 /// failure screen into a wall of text.
@@ -510,8 +510,7 @@ pub fn spawn_ollama(
         .arg("serve")
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_MODELS", &models)
-        // The runner libs sit beside the binary in the official tarball.
-        .env("OLLAMA_LIBRARY_PATH", stage.join("ollama"))
+        .env("OLLAMA_LIBRARY_PATH", stage.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
         .env(
             "OLLAMA_NUM_PARALLEL",

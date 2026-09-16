@@ -11,12 +11,22 @@
 // the other direction.
 
 import { useQuery } from "@tanstack/react-query"
-import { Cloud, HardDrive, Lock } from "lucide-react"
+import { Ban, Cloud, HardDrive, Lock } from "lucide-react"
 
 import { egressSummary, fetchRouting, type WorkRoutingItem } from "@/lib/llmRouting"
 import { cn } from "@/lib/utils"
 
 function EngineChip({ item }: { item: WorkRoutingItem }) {
+  // A refused row names a local model this host will not run, so "This machine"
+  // would state the opposite of what happens.
+  if (item.refused_reason) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+        <Ban size={11} />
+        Not run
+      </span>
+    )
+  }
   const Icon = item.on_device ? (item.routable ? HardDrive : Lock) : Cloud
   return (
     <span
@@ -51,10 +61,14 @@ function Row({ item }: { item: WorkRoutingItem }) {
           </span>
         )}
       </div>
-      {item.fallback_reason && (
-        <p className="text-[11px] text-amber-700 dark:text-amber-400">
-          Falling back: {item.fallback_reason}
-        </p>
+      {item.refused_reason ? (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">{item.refused_reason}</p>
+      ) : (
+        item.fallback_reason && (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400">
+            Falling back: {item.fallback_reason}
+          </p>
+        )
       )}
     </li>
   )

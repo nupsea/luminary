@@ -56,12 +56,14 @@ export function EngineOffer() {
           <h2 className="text-sm font-semibold text-foreground">
             Answers are being written on this machine
           </h2>
+          {/* What each mode sends is stated once, on its card in EngineChoice.
+              A summary here promised "the question and the passages -- and
+              nothing else", which Cloud mode does not keep. */}
           <p className="max-w-2xl text-xs text-muted-foreground">
             That is the default, and nothing here has ever left. It is also the slow
-            arm: a local model finishes an answer in tens of seconds. If you have an
-            Anthropic, OpenAI or Google key, Luminary can send the question and the
-            passages it retrieved — and nothing else — and answer in a few. Reading,
-            search, transcription and your learner record stay here either way.
+            arm: a local model finishes an answer in tens of seconds. With an
+            Anthropic, OpenAI or Google key, Hybrid or Cloud mode answers in a few,
+            and each says exactly what it sends before you choose it.
           </p>
         </div>
       </div>

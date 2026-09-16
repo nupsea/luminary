@@ -2,6 +2,8 @@
 // Owns the per-message ornaments: citations, web sources, transparency panel,
 // source-citation chips, and image thumbnails.
 
+import { Zap } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
 import { GapResultCard } from "@/components/GapResultCard"
 import type { GapCardData } from "@/components/GapResultCard"
@@ -73,16 +75,27 @@ export function MessageBubble({ msg, effectiveDocId, onQuizSubmit, navigateToCit
             <Skeleton className="h-4 w-40" />
           </div>
         ) : (
-          <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
-              [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
-              [&_ul]:text-sm [&_ul]:my-1 [&_ul]:pl-5 [&_ul]:list-disc
-              [&_li]:my-0.5
-              [&_strong]:font-semibold
-              [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
-              [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
-              [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
-            <MarkdownRenderer>{msg.text}</MarkdownRenderer>
-            {msg.isStreaming && <span className="animate-pulse">▍</span>}
+          <div>
+            {msg.role === "assistant" && msg.direct && (
+              <div
+                className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-500/30 dark:text-amber-300"
+                title="Answered directly from model general knowledge without searching your documents"
+              >
+                <Zap size={11} className="shrink-0 text-amber-500" />
+                <span>Direct model answer · Not grounded in library</span>
+              </div>
+            )}
+            <div className="[&_p]:text-sm [&_p]:leading-relaxed [&_p]:my-1
+                [&_ol]:text-sm [&_ol]:my-1 [&_ol]:pl-5 [&_ol]:list-decimal
+                [&_ul]:text-sm [&_ul]:my-1 [&_ul]:pl-5 [&_ul]:list-disc
+                [&_li]:my-0.5
+                [&_strong]:font-semibold
+                [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1
+                [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1
+                [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-1">
+              <MarkdownRenderer>{msg.text}</MarkdownRenderer>
+              {msg.isStreaming && <span className="animate-pulse">▍</span>}
+            </div>
           </div>
         )}
 

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import litellm
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.services.background import fire_and_forget, task_registry
 from app.services.settings_service import (
     get_llm_settings,
     get_rerank_enabled,
@@ -22,6 +23,8 @@ from app.services.settings_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+_background_tasks = task_registry(__name__)
 
 _OLLAMA_TIMEOUT = 3.0
 
@@ -64,7 +67,9 @@ class LLMSettingsResponse(BaseModel):
 class LLMSettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: str | None = None
+    # An unknown mode was stored as-is, and routing treats anything but private
+    # and hybrid as cloud.
+    mode: Literal["private", "hybrid", "cloud"] | None = None
     provider: str | None = None
     model: str | None = None
     # "" clears the override and falls back to the configured default.
@@ -208,6 +213,7 @@ class WorkRoutingItem(BaseModel):
     routable: bool
     why: str
     fallback_reason: str | None = None
+    refused_reason: str | None = None
 
 
 class RoutingResponse(BaseModel):
@@ -291,6 +297,9 @@ async def patch_llm_settings(
     db: AsyncSession = Depends(get_db),
 ) -> LLMSettingsResponse:
     """Update LLM mode, provider, model, or API keys. Null means 'do not change'."""
+    from app.services.llm_routing import refusal  # noqa: PLC0415
+
+    background_was_refused = refusal("background") is not None
     await update_llm_settings(
         db,
         mode=req.mode,
@@ -303,9 +312,30 @@ async def patch_llm_settings(
         anthropic_api_key=req.anthropic_api_key,
         google_api_key=req.google_api_key,
     )
+    if background_was_refused and refusal("background") is None:
+        await _resume_background_work()
     data = await get_llm_settings(db)
     cfg = get_settings()
     return await _build_response(data, cfg.OLLAMA_URL)
+
+
+async def _resume_background_work() -> None:
+    """Run the work the previous settings refused on this host.
+
+    Only on that transition: a mode change on a host that could already run it has
+    nothing owed, and must not start a library-wide summary pass as a side effect.
+    """
+    from app.services.enrichment_worker import requeue_skipped_jobs  # noqa: PLC0415
+    from app.services.section_summarizer import (  # noqa: PLC0415
+        resummarize_documents_missing_summaries,
+    )
+
+    await requeue_skipped_jobs()
+    fire_and_forget(
+        resummarize_documents_missing_summaries(),
+        _background_tasks,
+        label="summary repair after mode change",
+    )
 
 
 # Model list — fetches available models from each provider

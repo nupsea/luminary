@@ -21,6 +21,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
+from app.exceptions import DependencyUnavailable
 from app.models import (
     ChunkModel,
     DocumentModel,
@@ -589,7 +590,9 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
-            if isinstance(exc, ValueError):
+            if isinstance(exc, DependencyUnavailable):
+                msg = exc.detail
+            elif isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
             elif isinstance(exc, LLMAuthenticationError):
                 msg = "LLM API key is invalid. Check your key in Settings."

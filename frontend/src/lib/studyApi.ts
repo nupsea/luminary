@@ -393,7 +393,7 @@ export async function fetchSessions(
 
 export type Difficulty = "easy" | "medium" | "hard"
 
-import { useAppStore } from "@/store"
+import { modelUnavailableMessage } from "@/lib/engineModes"
 
 export async function generateDocumentFlashcards(
   documentId: string,
@@ -420,10 +420,7 @@ export async function generateDocumentFlashcards(
     }
     if (!msg) {
       if (res.status === 503) {
-        const mode = useAppStore.getState().llmMode
-        msg = mode === "private"
-          ? "Ollama is not running. Start it with: ollama serve"
-          : "LLM service is unreachable. Please check your internet connection or settings."
+        msg = modelUnavailableMessage(null)
       } else {
         msg = "Failed to generate flashcards"
       }

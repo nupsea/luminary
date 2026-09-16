@@ -1,25 +1,10 @@
-# Shared helpers for the macOS desktop-bundle scripts. Source, don't execute.
+# Helpers for the macOS desktop-bundle scripts. Source, don't execute.
+#
+# Paths, pins and the steps that decide what ships come from
+# scripts/desktop/lib.sh, shared with the Windows and Linux installers. Only what
+# a signed Mac bundle needs on top of that lives here.
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build}"
-STAGE="${STAGE:-$BUILD_DIR/stage}"
-export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$BUILD_DIR/pythons}"
-
-# Pinned deliberately. Bumping this changes every user's interpreter and
-# invalidates the CI cache key, so it is a reviewed decision, not a floating range.
-PBS_VERSION="${PBS_VERSION:-cpython-3.13.7-macos-aarch64-none}"
-PY_MINOR="3.13"
-
-# Pinned Ollama release. `ollama` spawns lib/ollama/llama-server, so the whole
-# tree ships, not just the driver binary.
-OLLAMA_VERSION="${OLLAMA_VERSION:-v0.32.5}"
-
-_step() { printf '\n\033[1;36m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
-_info() { printf '    %s\n' "$*"; }
-_warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*" >&2; }
-_die()  { printf '\033[1;31m  x %s\033[0m\n' "$*" >&2; exit 1; }
-
-staged_python() { echo "$STAGE/python/bin/python$PY_MINOR"; }
+source "$(dirname "${BASH_SOURCE[0]}")/../desktop/lib.sh"
 
 # Emit NUL-separated paths of every Mach-O file under $1.
 #

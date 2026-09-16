@@ -1,9 +1,10 @@
-# macOS desktop bundle
+# Desktop bundle
 
-How Luminary is packaged as a signed `.app` a user drags to Applications and
-opens — no terminal, no Homebrew, no separate Ollama install, no `.env`.
+How Luminary is packaged as an app a user installs and opens — no terminal, no
+Homebrew, no separate Ollama install, no `.env`: a signed `.app` on macOS, a
+setup `.exe` on Windows, an AppImage or `.deb` on Linux.
 
-Read this before changing `scripts/macos/`.
+Read this before changing `scripts/desktop/` or `scripts/macos/`.
 
 ## Layout
 
@@ -25,10 +26,17 @@ The tree mirrors the repo because `backend/app` resolves `surface-manifest.json`
 is `stage`. Same contract the release tarball already relies on
 (`.github/workflows/release.yml`).
 
-Everything writable lives in `~/Library/Application Support/sh.luminary.app/`:
+Everything writable lives in the app's local data directory:
 `luminary.db`, `vectors/`, `graph.kuzu`, `models/`, `ollama/models/`, `.env`.
-Nothing is ever written inside the bundle — it is read-only and code-signed, and
-a write would break the signature.
+That is `~/Library/Application Support/sh.luminary.app/` on macOS,
+`%LOCALAPPDATA%\sh.luminary.app\` on Windows and `~/.local/share/sh.luminary.app/`
+on Linux. **Local, never roaming**: `stage::data_dir` uses `app_local_data_dir`,
+because Windows' `%APPDATA%` is copied to a domain server at every sign-in. The
+two are the same directory on macOS and Linux.
+
+Nothing is ever written inside the install — the macOS bundle is code-signed and
+a write would break the signature, and the Windows and Linux install directories
+are not the app's to write.
 
 ## Shell
 
@@ -204,22 +212,78 @@ install instead. Do not add updater secrets to CI without adding the plugin that
 
 678 MB DMG (ULFO/LZFSE), measured on the v0.8.28 release artifact (678,401,570 bytes).
 
+## Windows and Linux installers
+
+The stage is the same tree. The installer puts it in the resource directory
+beside the executable, which `stage_dir` finds through `resource_dir()` as on
+macOS. Targets and `bundle.resources` come from `tauri.windows.conf.json` and
+`tauri.linux.conf.json`, which Tauri merges over `tauri.conf.json` on that
+platform only.
+
+| | Windows | Linux |
+|---|---|---|
+| Format | NSIS `-setup.exe`, per-user, no admin prompt | AppImage and `.deb` |
+| Interpreter | PBS `windows-x86_64-none`: `python/python.exe`, `Lib/site-packages` | PBS `linux-x86_64-gnu`, laid out as on macOS |
+| Engine | `ollama/ollama.exe` beside `ollama/lib/ollama/` | `ollama/ollama` beside `ollama/lib/ollama/` |
+| Signing | None; SmartScreen warns until a certificate exists | None |
+| Built by | `desktop-installers.yml` only — the shell cannot be compiled for Windows on a Mac | `desktop-installers.yml`, or `make stage desktop-installer` on Linux |
+
+**Linux builds on Ubuntu 22.04.** An AppImage runs only on a glibc at least as
+new as the one it was built against, and 22.04 is the oldest base with
+WebKitGTK 4.1.
+
+**The engine ships CPU, Vulkan and CUDA 13 runners — not CUDA 12.** Ollama's
+archive for these platforms is ~1.4 GB because it carries both CUDA generations;
+CUDA 12 alone is 1152 MB of the Windows zip. A GPU that CUDA 13 cannot serve —
+an older card, or a driver below its floor — runs through Vulkan, which Ollama
+enables by default and vendor drivers ship on Windows. AMD is Vulkan-only: ROCm
+is a separate archive. `stage_ollama.sh` checks the archive against the release's
+`sha256sum.txt` and fails the build if either kept runner is missing, so the
+bundle cannot quietly stop matching the hosts `host_support` offers a local model.
+
+**Windows console-script launchers are deleted, not rewritten.** uv's
+`Scripts/*.exe` carry the build machine's interpreter path inside the binary, so
+none survives installation, and the extensionless `scripts=` files some packages
+ship (jsonpatch, jsonpointer) name it in a shebang Windows cannot run. The whole
+directory is emptied; it stays because the shell still puts it on `PATH`. The
+backend runs yt-dlp as `python -m yt_dlp` and pip as `python -m pip`; a dead
+launcher left on the backend's `PATH` would be found by `shutil.which` and then fail.
+
+**CI launches what it built.** `desktop-installers.yml` installs each package on
+a clean runner and runs `verify_installed.sh`, which waits for the shell's
+`ready` line and fails on its failure line or on the engine not starting. The
+Linux job opens the `.deb` first and the AppImage second, against the library
+the first launch created. The runners have no GPU: this proves the install, the
+layout and the CPU path, never which accelerator a real machine gets.
+
 ## Scripts
+
+`scripts/desktop/` is shared by every platform and decides what ships;
+`scripts/macos/` adds what only a signed Mac bundle needs.
 
 | Script | Does |
 |---|---|
-| `stage_payload.sh` | Backend source, SPA, manifest, license notices. Strips `code_executor`. |
-| `stage_python.sh` | Relocatable interpreter + every dependency. |
-| `stage_ollama.sh` | Bundled inference server, thinned to arm64. |
-| `verify_stage.sh` | Relocatability + import + real boot of the staged backend. |
-| `verify_ollama.sh` | Structure + a real pull and generation. |
-| `sign.sh` | Inside-out signing. `--adhoc` for a run without a certificate. |
-| `verify_signed.sh` | Signature, arch, attribution and seal-intact gates. |
-| `dmg.sh` | Compressed disk image via `hdiutil`. |
-| `notarize.sh` | Notarize and staple one artifact. Run on the `.app` before `dmg.sh`, then on the DMG. |
-| `uninstall.sh` | Removes the app, logs and caches. Asks separately before the library, and keeps it by default. |
+| `desktop/lib.sh` | Pins, paths, and the shared steps: dependency profile, test-suite and dependency prunes, `.pth`, shebangs, byte-compiling. Sourced by every script. |
+| `desktop/verify_imports.py` | The required and forbidden import lists, run by every platform's stage verifier. |
+| `desktop/stage_payload.sh` | Backend source, SPA, manifest, license notices. Strips `code_executor`. |
+| `desktop/stage_python.sh` | Windows and Linux: relocatable interpreter + every dependency. |
+| `desktop/stage_ollama.sh` | Windows and Linux: checksummed engine, CPU + Vulkan + CUDA 13. |
+| `desktop/verify_stage.sh` | Windows and Linux: relocatability + import + real boot of the staged backend. |
+| `desktop/verify_ollama.sh` | Windows and Linux: structure + a real pull and generation. |
+| `desktop/verify_installed.sh` | Launches an installed app and waits for the shell's `ready` line. |
+| `macos/stage_python.sh` | macOS runtime: the shared steps plus arm64 thinning and hardlink breaking. |
+| `macos/stage_ollama.sh` | Bundled inference server, thinned to arm64. |
+| `macos/verify_stage.sh` | Relocatability, Mach-O linkage, import + real boot of the staged backend. |
+| `macos/verify_ollama.sh` | Structure + a real pull and generation. |
+| `macos/sign.sh` | Inside-out signing. `--adhoc` for a run without a certificate. |
+| `macos/verify_signed.sh` | Signature, arch, attribution and seal-intact gates. |
+| `macos/dmg.sh` | Compressed disk image via `hdiutil`. |
+| `macos/notarize.sh` | Notarize and staple one artifact. Run on the `.app` before `dmg.sh`, then on the DMG. |
+| `macos/uninstall.sh` | Removes the app, logs and caches. Asks separately before the library, and keeps it by default. |
 
-`make stage` runs all three staging steps; `make verify-stage` runs both verifiers.
+`make stage` runs all three staging steps for the host platform; `make
+verify-stage` runs both of its verifiers. No `make` exists on the Windows runner,
+so the workflow calls the scripts there directly.
 
 `uninstall.sh` is for the DMG install only. A `bootstrap.sh` install is removed
 with `luminary uninstall`, which also unregisters the login agent — and its
@@ -450,6 +514,7 @@ than `plutil`'s: the file lints clean and `codesign` then fails with
 
 - **Apple Silicon, macOS 14+.** `lancedb` publishes no macOS x86_64 wheel and
   `onnxruntime` cp313 ships only `macosx_14_0_arm64`.
+- **Windows and Linux are x86_64 only.** No arm64 installer is built for either.
 - **Model weights are not bundled.** ~3.5 GB of encoder and LLM weights are
   fetched on first run behind a progress UI.
 - **`torch` ships in v1.** `optimum`, `sentence-transformers` and `gliner` each

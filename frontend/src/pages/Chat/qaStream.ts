@@ -20,6 +20,7 @@ export interface QaStreamRequest {
   messages?: { role: "user" | "assistant"; content: string }[]
   web_enabled: boolean
   creative?: boolean
+  direct?: boolean
 }
 
 export interface QaDoneEvent {
@@ -31,6 +32,7 @@ export interface QaDoneEvent {
   web_sources: WebSource[]
   source_citations: SourceCitation[]
   web_calls_used: number | undefined
+  direct?: boolean
 }
 
 export interface QaStreamHandlers {
@@ -115,6 +117,7 @@ export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers)
             web_sources: (payload["web_sources"] as WebSource[] | undefined) ?? [],
             source_citations: (payload["source_citations"] as SourceCitation[] | undefined) ?? [],
             web_calls_used: payload["web_calls_used"] as number | undefined,
+            direct: payload["direct"] === true,
           })
         }
       } catch {
@@ -122,20 +125,4 @@ export async function streamQa(req: QaStreamRequest, handlers: QaStreamHandlers)
       }
     }
   }
-}
-
-import { useAppStore } from "@/store"
-
-export function buildErrorMessage(errorCode: string, fallback: string): string {
-  if (errorCode === "llm_unavailable") {
-    const mode = useAppStore.getState().llmMode
-    return mode === "private"
-      ? "Ollama is not running. Start it with: ollama serve"
-      : "LLM service is unreachable. Please check your internet connection or settings."
-  }
-  // Every other code carries a server message that names the actual situation --
-  // still indexing, nothing in this document, search failed, empty library. The
-  // client used to answer all of them with "make sure a document has been
-  // ingested", which was wrong for a user holding 52 documents.
-  return fallback
 }

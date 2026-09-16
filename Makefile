@@ -1,4 +1,4 @@
-.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-test
+.PHONY: require-docker require-compose-release docker-stop docker-down docker-run-host-ollama dev ci backend frontend build start stop lint test test-full test-concurrent test-perf test-e2e test-book-e2e test-book-content test-books-all test-v2 eval eval-intent eval-ingest eval-gen eval-variance prompt-dump eval-models eval-matrix eval-summary eval-routing eval-chat-routing eval-refusal eval-flashcards golden-flashcards eval-all eval-d2l eval-d2l-rerank eval-d2l-gen eval-topics golden-d2l golden-paper golden-legal golden-play golden-study golden-thoughts logs smoke smoke-clean docker-run-gpu measure-ttft verify-citation verify-dock luminary clean regen-api-types verify-router install release docker-build docker-run stage stage-payload stage-python stage-ollama verify-stage check-stage desktop-dev desktop-app desktop-adhoc desktop-installer desktop-test
 
 # Where the dev backend listens; `make dev` starts it here.
 BACKEND_URL ?= http://localhost:7820
@@ -48,24 +48,39 @@ frontend:
 install:
 	bash scripts/install.sh
 
-# --- macOS desktop bundle -----------------------------------------------
+# --- desktop bundle -------------------------------------------------------
 # Stage the payload, the relocatable Python runtime and the bundled inference
-# server into build/stage, which becomes Contents/Resources in the .app.
+# server into build/stage: Contents/Resources in the macOS .app, the resource
+# directory of the Windows and Linux installs. macOS keeps its own runtime and
+# engine scripts for the steps a signed bundle needs; what ships is decided once,
+# in scripts/desktop/. No `make` exists on the Windows runner, so
+# desktop-installers.yml calls the scripts directly there.
+
+ifeq ($(shell uname -s),Darwin)
+STAGE_SCRIPTS = scripts/macos
+STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama
+else ifeq ($(shell uname -s),Linux)
+STAGE_SCRIPTS = scripts/desktop
+STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama ollama/lib/ollama
+else
+STAGE_SCRIPTS = scripts/desktop
+STAGE_REQUIRED = surface-manifest.json python/python.exe backend/app frontend ollama/ollama.exe ollama/lib/ollama
+endif
 
 stage: stage-payload stage-python stage-ollama
 
 stage-payload:
-	bash scripts/macos/stage_payload.sh
+	bash scripts/desktop/stage_payload.sh
 
 stage-python:
-	bash scripts/macos/stage_python.sh
+	bash $(STAGE_SCRIPTS)/stage_python.sh
 
 stage-ollama:
-	bash scripts/macos/stage_ollama.sh
+	bash $(STAGE_SCRIPTS)/stage_ollama.sh
 
 verify-stage:
-	bash scripts/macos/verify_stage.sh
-	bash scripts/macos/verify_ollama.sh
+	bash $(STAGE_SCRIPTS)/verify_stage.sh
+	bash $(STAGE_SCRIPTS)/verify_ollama.sh
 
 # The desktop shell's own tests. Needs macOS: the crate does not build anywhere
 # else, which is why ordinary `make ci` (ubuntu) cannot cover it.
@@ -92,9 +107,9 @@ DESKTOP_APP = src-tauri/target/release/bundle/macos/Luminary.app
 
 TAURI = $(CURDIR)/frontend/node_modules/.bin/tauri
 
-# Everything the shell refuses to start without. Kept in step with REQUIRED in
-# src-tauri/src/stage.rs, which checks the same list at runtime.
-STAGE_REQUIRED = surface-manifest.json python/bin/python3.13 backend/app frontend ollama/ollama
+# STAGE_REQUIRED (per platform, above) is everything a working install needs.
+# Kept in step with REQUIRED in src-tauri/src/stage.rs, which checks the pieces
+# the shell cannot start without at runtime.
 
 # `ditto` copies a partial stage without complaint, producing an .app that
 # launches and then cannot start. Note this gate cannot catch the other route to
@@ -123,6 +138,14 @@ desktop-app: check-stage
 	cd src-tauri && $(TAURI) build --bundles app --config tauri.conf.json
 	ditto build/stage "$(DESKTOP_APP)/Contents/Resources"
 	@echo "built $(DESKTOP_APP)"
+
+# Linux AppImage and .deb (or the Windows setup .exe) from build/stage. Targets
+# and resources come from tauri.<platform>.conf.json, which Tauri merges over
+# tauri.conf.json. Its resource copier follows symlinks, which on Linux costs
+# only the interpreter's aliases -- the reason macOS copies with ditto instead
+# does not apply. Built and launched in CI by desktop-installers.yml.
+desktop-installer: check-stage
+	cd src-tauri && $(TAURI) build $(TAURI_BUILD_FLAGS)
 
 # Sign and package locally with the ad-hoc identity. Exercises enumeration,
 # ordering and every gate; the result is not notarizable and Gatekeeper rejects

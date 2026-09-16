@@ -1,0 +1,220 @@
+name: Desktop installers
+
+# Builds the Windows setup .exe and the Linux AppImage and .deb, installs each on
+# a clean runner and launches it the way a user does. Nothing here is attached
+# to a release: these join the tag release once a first run has also passed on
+# real hardware (docs/roadmap.md, 0.13.0).
+#
+# A workflow of its own rather than jobs in ci.yml: a build is most of an hour
+# per platform and downloads 1.4GB of Ollama, which no ordinary push should pay.
+# The runners have no GPU, so this proves the install, the layout and the CPU
+# path -- never which accelerator a real machine gets.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/desktop/**"
+      - "src-tauri/**"
+      - ".github/workflows/desktop-installers.yml"
+
+concurrency:
+  group: desktop-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    # The oldest base with WebKitGTK 4.1: an AppImage runs only on a glibc at
+    # least as new as the one it was built against.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # The stage is copied twice more by the bundler (AppDir and the .deb tree).
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf zstd xvfb imagemagick libfuse2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Cache the standalone interpreter
+        uses: actions/cache@v4
+        with:
+          path: build/pythons
+          key: pbs-cpython-3.13.7-linux-x86_64-gnu
+
+      - run: cd frontend && npm ci
+
+      - name: Stage payload, runtime and inference server
+        run: make stage
+
+      - name: Verify the stage
+        run: make verify-stage
+
+      # NO_STRIP: linuxdeploy's bundled strip predates the ELF sections newer
+      # toolchains emit and fails the bundle on them.
+      # One bundle per step, the .deb first: an AppImage failure then cannot hide
+      # whether the .deb installs and opens. --verbose because tauri reports a
+      # failing linuxdeploy as "failed to run linuxdeploy" and nothing else.
+      - name: Build the .deb
+        env:
+          NO_STRIP: "true"
+        run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles deb"
+
+      - name: Install the .deb and open it
+        run: |
+          deb="$(ls src-tauri/target/release/bundle/deb/*.deb)"
+          sudo apt-get install -y "./$deb"
+          exe="$(dpkg -L "$(dpkg-deb -f "$deb" Package)" | grep '^/usr/bin/' | head -1)"
+          SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
+            bash scripts/desktop/verify_installed.sh "$exe"
+
+      - name: Build the AppImage
+        if: ${{ !cancelled() }}
+        env:
+          NO_STRIP: "true"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles appimage"
+
+      # Second launch, against the library the first one created.
+      - name: Open the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+          chmod +x "$appimage"
+          SCREENSHOT=build/linux-appimage.png xvfb-run -a -s "-screen 0 1440x900x24" \
+            bash scripts/desktop/verify_installed.sh "$appimage"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-linux-evidence
+          path: |
+            build/*.png
+            build/*.log
+            build/installed-app.out
+            ~/.local/state/luminary/luminary.log
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Staging and installing are tens of thousands of small files, which
+      # Defender's real-time scan turns into a multiple of the job's time.
+      - name: Exclude the build and install paths from Defender's real-time scan
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Luminary"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\sh.luminary.app"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\uv"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Cache the standalone interpreter
+        uses: actions/cache@v4
+        with:
+          path: build/pythons
+          key: pbs-cpython-3.13.7-windows-x86_64-none
+
+      - run: cd frontend && npm ci
+
+      - name: Stage payload, runtime and inference server
+        run: |
+          bash scripts/desktop/stage_payload.sh
+          bash scripts/desktop/stage_python.sh
+          bash scripts/desktop/stage_ollama.sh
+
+      - name: Verify the stage
+        run: |
+          bash scripts/desktop/verify_stage.sh
+          bash scripts/desktop/verify_ollama.sh
+
+      - name: Build the setup .exe
+        run: cd src-tauri && ../frontend/node_modules/.bin/tauri build --verbose
+
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+
+      - name: Open the installed app
+        run: |
+          root="$(cygpath -u "$LOCALAPPDATA")"
+          exe="$(find "$root/Luminary" "$root/Programs/Luminary" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' 2>/dev/null | head -1)"
+          [ -n "$exe" ] || { echo "no installed executable found"; exit 1; }
+          echo "installed at $exe"
+          SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-windows
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-windows-evidence
+          path: |
+            build/*.png
+            build/*.log
+            build/installed-app.out
+            ~/AppData/Local/Luminary/Logs/luminary.log
+          retention-days: 7
