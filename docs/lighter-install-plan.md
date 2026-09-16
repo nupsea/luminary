@@ -103,11 +103,14 @@ the assumption that the download succeeded.
 - **It rides the existing catalogue.** `components.py` and `/setup/components` already offer downloads
   with size and licence shown first; the pack is a new kind, `engine_runner`, installed under
   `DATA_DIR`, since the install directory is never written.
-- **The artifact** is built in CI from the same checksummed Ollama archive `stage_ollama.sh` verifies,
-  published as a Luminary release asset per OS, keyed to `OLLAMA_VERSION`. Its sha256 is compiled into
-  the catalogue; the download resumes, is verified before extraction, and is extracted to a temporary
-  directory then renamed into place. A pack for another Ollama version is never loaded, so an Ollama bump
-  costs NVIDIA users a ~600 MB download — bump deliberately.
+- **The artifact is Ollama's own release archive, not a Luminary one.** Ollama publishes no standalone
+  CUDA asset, so there is nothing to mirror and no reason to republish; the whole archive is downloaded
+  and one directory is kept out of it. `stage_ollama.sh` records the URL, the sha256 it already verified
+  at stage time, and the member prefix in `ollama/engine-source.json`, and the catalogue reads that file
+  rather than carrying a compiled-in constant. The download resumes, is verified before extraction, and
+  is extracted to a temporary directory then renamed into place. The recorded version is the installed
+  engine's, so an Ollama bump costs NVIDIA users the download again — bump deliberately. See "The CUDA
+  runner is fetched from Ollama, not republished".
 - **Offered when a driver is present:** `host_support` already reads `nvcuda.dll` on Windows and
   `/proc/driver/nvidia/version` on Linux. **The accelerator the app reports comes from Ollama's own
   discovery line after loading, never from the pack being present** (0.13.0 exit gate).
@@ -121,9 +124,9 @@ the assumption that the download succeeded.
   `/usr`, AppImage entirely). **The engine tree is copied to `DATA_DIR` on first launch and spawned from
   there, and packs extract into it.** That is Phase 2, and the component design follows from it.
   Not yet verified by a real load from `DATA_DIR` — only from source.
-- **Open: redistribution terms.** The CUDA runtime libraries inside Ollama's archive are redistributable
-  with an application; republishing them as a separate download is checked against NVIDIA's terms
-  before the first asset is published.
+- **Closed: there is no redistribution question left.** It existed only because the original design
+  republished NVIDIA's libraries as a Luminary release asset. Fetching them from Ollama's own release
+  removes the act that needed checking, so `cuda_eula.txt` never needed reading.
 - macOS is unaffected (Metal).
 
 ## Payload rules that hold regardless
@@ -190,6 +193,54 @@ assumed. Members are named `lib/ollama/cuda_v13/...` with no `./` prefix, in bot
 directory is mostly **symlinks** -- `libcublas.so.12 -> libcublas.so.12.8.5.5` -- stored *before*
 the file they point at. An extractor that keeps only regular files writes every real library and
 none of the sonames the loader resolves, which looks exactly like a successful install.
+
+### What Phases 1 and 2 put in the tree
+
+The pieces a later phase builds on, so that nothing here has to be re-derived from the diff. Status
+of each phase is in `roadmap.md`; this is the inventory.
+
+| Piece | Where | What it is |
+|---|---|---|
+| `engine_dir()` / `relocate_engine()` | `src-tauri/src/stage.rs` | copies the engine to `DATA_DIR/engine` and spawns from there, keyed on the `ollama/ENGINE_VERSION` stamp. Copies aside and renames, so an interrupted copy cannot replace a working engine. `RELOCATE_ENGINE` is the one platform-dependent line; the mechanism compiles and is tested everywhere |
+| `ENGINE_VERSION`, `engine-source.json` | written by `scripts/desktop/stage_ollama.sh` | the stamp the shell compares against, and the archive record the catalogue reads. The JSON is validated as JSON at stage time; its absence means "nothing to offer here", never an error |
+| `download_verified()` | `backend/app/services/component_download.py` | resumable (`Range`, with 200/206/416 all handled), sha256 checked before the file is published, and the partial deleted on mismatch |
+| `extract_prefix()` | same file | zip and `.tar.zst`, one member prefix only, every path contained, symlinks deferred to a second pass |
+| `install_archive_subset()` | same file | the two composed, emitting the streaming progress events `/setup/components` already carries |
+| `engine_runner` kind | `backend/app/services/components.py` | `engine_source()`, `engine_lib_dir()`, the catalogue entry, install and removal. Offered only where `engine-source.json` exists, which is Windows and Linux |
+| size and path budgets | `scripts/desktop/lib.sh`, `verify_stage.sh` | fail the build above the per-OS byte budget or on any stage path over 190 chars. `scripts/macos/verify_stage.sh` reports size and is deliberately not gated — a DMG has neither ceiling |
+| `zstandard`, `scipy`, `scikit-learn` | `backend/pyproject.toml` | were transitive by accident; the Linux runner is a `.tar.zst` and clustering needs the other two |
+
+**What Phase 3 still needs.** `host_support._has_accelerator()` answers "any accelerator" and
+conflates NVIDIA with AMD (`_WINDOWS_DRIVER_DLLS` holds both; `/dev/kfd` is AMD's). The CUDA runner
+must be offered only where an NVIDIA driver is present, so a vendor-aware probe is needed — and that
+function carries an explicit warning against a second copy of the policy, so `_has_accelerator()` has
+to be refactored to read from the new one, never duplicated beside it.
+
+### Decisions taken, and what each one cost
+
+| Decision | Instead of | What it bought, and what it cost |
+|---|---|---|
+| Ship the packaging lever first, hold the encoder port | porting encoders to ORT first | the CUDA runner is 629 MB of the 751 MB Windows engine and carries no numerical risk; the port frees ~441 MiB and is red on the only OS measured |
+| Fetch the runner from Ollama's release | publishing a Luminary CUDA asset | no release asset, no per-bump checksum, and no NVIDIA redistribution check — which was Phase 3's blocker. Costs the user ~760 MB of download they discard |
+| Copy the engine to `DATA_DIR` | pointing Ollama at a second runner directory | Ollama v0.32.5 has no environment branch in runner discovery, so there was no second option. Costs ~122 MB of disk, once |
+| macOS keeps running from the bundle | relocating on all three, as the phase gate said | its archive carries Metal and there is no runner to fetch, so a copy would spend disk for nothing. The gate wording was amended rather than quietly missed |
+| Read `engine-source.json` at runtime | a compiled-in URL and checksum | the installed engine and the archive it came from can never disagree, because the stage writes both |
+| Small installer, fetch on first run | bundling weights | already the status quo; the first-run download is what Phase 4 attacks |
+| One encoder stack on every OS, if the port happens | ORT on Windows/Linux, torch on the dev Mac | the dev machine runs what users run |
+
+### Cleanup once this ships
+
+To be done when the phases are green, not before — each item is live code until then.
+
+- Delete this file. It is a plan, and `docs/` carries only what exists.
+- Fold what outlives it into the permanent docs: the runner-discovery finding and the symlink trap
+  into `docs/desktop-bundle.md`, and anything that became a rule into `docs/invariants.md` via the
+  `invariant-capture` skill.
+- Reconcile `CHANGELOG.md` and `docs/roadmap.md` against what CI actually proved, not against what
+  was intended.
+- If Phase 5 ends red, the torch pin, the `pytorch-cpu` index and the extra-index branch in
+  `scripts/desktop/lib.sh` stay; if it ends green they go in the same change that removes torch.
+- Retire whichever of the Phase 0 probe scripts and measurement arms no longer have a question.
 
 **Speed gate.** ORT must be no slower than torch on each OS for ingest embedding and reranking, or
 Phase 5 does not ship.
@@ -266,8 +317,9 @@ runs under `scripts/capped_run.sh`, which kills the process tree past `MEM_CAP_G
 | ORT slower on x86 | every ingest slower for every user | per-OS speed gate |
 | A torch consumer hidden behind a lazy import | `ImportError` on one code path only, after release | import grep gate, `FORBIDDEN` list, scipy/scikit-learn declared first |
 | Update re-downloads ~1.35 GB of encoder weights | first launch after update blocks on the embedder | stated in release notes; old weights removed only after the new ones load |
-| Pack corrupt or tampered | engine fails to load, or runs foreign code | compiled-in sha256, verify before extract, atomic rename |
-| Pack unreachable | NVIDIA host runs on Vulkan | degraded speed, never failure; reported as such |
+| Archive corrupt or tampered | engine fails to load, or runs foreign code | the sha256 `stage_ollama.sh` verified, carried in `engine-source.json`; checked before extraction, atomic rename, and the partial file deleted on mismatch so a retry never resumes onto bad bytes |
+| Archive unreachable | NVIDIA host runs on Vulkan | degraded speed, never failure; reported as such |
+| The runner's symlinks dropped on extraction | every real library present and none of the sonames the loader resolves — an install that reports success and cannot start | `extract_prefix` defers links to a second pass; `test_engine_runner_download.py` fails if a versioned soname arrives as anything but a link |
 | Stage creeps back toward 2 GB | installer stops building again | size budget in `verify_stage.sh` |
 | An fp32 file silently swapped for a quantized one | vectors leave the space; I-9 | parity fixture pins the file's sha256 |
 
