@@ -27,10 +27,30 @@ _pass() { printf '\033[1;32m  ok\033[0m   %s\n' "$*"; }
 
 _step "Structure"
 [ -x "$OL_STAGE/$EXE" ] && _pass "$EXE present" || _fail "no $EXE"
-for runner in cuda_v13 vulkan; do
-    [ -d "$LIB/$runner" ] && _pass "$runner runner present" || _fail "no $runner runner"
-done
-[ ! -e "$LIB/cuda_v12" ] && _pass "CUDA 12 left out" || _fail "CUDA 12 shipped"
+[ -d "$LIB/vulkan" ] && _pass "vulkan runner present" || _fail "no vulkan runner"
+# CUDA is a download, not a payload: it is 1.8GB of the archive and 629MB of it
+# is what put the Windows stage past what NSIS can pack. A staged CUDA runner
+# means the exclusion in stage_ollama.sh stopped matching.
+if compgen -G "$LIB/cuda_v*" >/dev/null; then
+    _fail "CUDA shipped in the installer: $(cd "$LIB" && echo cuda_v*)"
+else
+    _pass "CUDA left out (offered as a download instead)"
+fi
+[ -s "$OL_STAGE/ENGINE_VERSION" ] && _pass "stamped $(tr -d '\r\n' < "$OL_STAGE/ENGINE_VERSION")" \
+    || _fail "no ENGINE_VERSION; the shell cannot tell whether its copy is current"
+
+# Everything below runs from a COPY, because that is what the app runs: the
+# shell copies the engine into the writable library directory and spawns it from
+# there. Ollama finds its runners relative to its own executable, so a tree that
+# infers in place is not evidence that the relocated one does.
+_step "Relocating the engine the way the shell does"
+RELOC="$BUILD_DIR/engine-copy"
+rm -rf "$RELOC"
+mkdir -p "$RELOC"
+cp -a "$OL_STAGE" "$RELOC/ollama"
+OL_RUN="$RELOC/ollama"
+LIB_RUN="$OL_RUN/lib/ollama"
+_pass "copied to $OL_RUN"
 
 _step "Serving on 127.0.0.1:$PORT"
 mkdir -p "$MODELS_DIR"
@@ -44,8 +64,8 @@ fi
 env -i "${child_env[@]}" \
     OLLAMA_HOST="127.0.0.1:$PORT" \
     OLLAMA_MODELS="$(native_path "$MODELS_DIR")" \
-    OLLAMA_LIBRARY_PATH="$(native_path "$LIB")" \
-    "$OL_STAGE/$EXE" serve >"$LOG" 2>&1 &
+    OLLAMA_LIBRARY_PATH="$(native_path "$LIB_RUN")" \
+    "$OL_RUN/$EXE" serve >"$LOG" 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 
@@ -86,6 +106,7 @@ grep -iE 'inference compute|discover|no compatible GPUs|library=' "$LOG" | tail 
     || _info "no discovery line in $LOG"
 
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
+rm -rf "$RELOC"
 echo
 [ "$FAILED" = 0 ] && printf '\033[1;32mollama verified\033[0m\n' || printf '\033[1;31mollama verification FAILED\033[0m\n'
 exit "$FAILED"

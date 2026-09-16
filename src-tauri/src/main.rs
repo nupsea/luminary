@@ -202,12 +202,21 @@ fn boot(app: AppHandle, sup: Arc<Supervisor>) {
         state.ollama_port.store(ollama_port, Ordering::Relaxed);
     }
     // Non-fatal: the library, search and cloud routing all work without it.
-    if let Err(e) = supervisor::spawn_ollama(&sup, &stage, &data_dir, ollama_port) {
-        logging::write("shell", &format!("local model server unavailable: {e}"));
-        warn(
-            &app,
-            "The local AI engine did not start. Your library will open, but chat may be unavailable.",
-        );
+    let engine = {
+        let handle = app.clone();
+        stage::engine_dir(&stage, &data_dir, || {
+            progress(&handle, "engine", "Preparing the engine");
+        })
+    };
+    match engine.and_then(|dir| supervisor::spawn_ollama(&sup, &dir, &data_dir, ollama_port)) {
+        Ok(()) => {}
+        Err(e) => {
+            logging::write("shell", &format!("local model server unavailable: {e}"));
+            warn(
+                &app,
+                "The local AI engine did not start. Your library will open, but chat may be unavailable.",
+            );
+        }
     }
 
     progress(&app, "backend", "Opening your library");

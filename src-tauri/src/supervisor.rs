@@ -492,13 +492,15 @@ fn ollama_max_loaded_models(data_dir: &Path) -> u32 {
     }
 }
 
+/// `engine` is what `stage::engine_dir` returned, which is the stage itself on
+/// macOS and a writable copy of it elsewhere -- never the stage directly.
 pub fn spawn_ollama(
     sup: &Supervisor,
-    stage: &Path,
+    engine: &Path,
     data_dir: &Path,
     port: u16,
 ) -> Result<(), String> {
-    let binary = stage.join(OLLAMA_BINARY);
+    let binary = engine.join(OLLAMA_BINARY);
     if !binary.is_file() {
         return Err(format!("no ollama binary at {binary:?}"));
     }
@@ -510,7 +512,10 @@ pub fn spawn_ollama(
         .arg("serve")
         .env("OLLAMA_HOST", format!("127.0.0.1:{port}"))
         .env("OLLAMA_MODELS", &models)
-        .env("OLLAMA_LIBRARY_PATH", stage.join(OLLAMA_LIBRARY_DIR))
+        // Passed down to the runner child. It is not what makes `ollama serve`
+        // find its runners -- that is resolved from the executable's own path --
+        // so this must point into the same tree the binary was spawned from.
+        .env("OLLAMA_LIBRARY_PATH", engine.join(OLLAMA_LIBRARY_DIR))
         .env("OLLAMA_KEEP_ALIVE", "30m")
         .env(
             "OLLAMA_NUM_PARALLEL",

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Stage the bundled inference server for the Windows and Linux installers.
 #
-# Ollama's archive for these platforms is ~1.4GB because it carries two CUDA
-# generations. This keeps the CPU runners, Vulkan and CUDA 13, and leaves out
-# CUDA 12 (1.15GB of the Windows archive). A GPU that CUDA 13 cannot serve --
-# an older card, or a driver below its floor -- runs through Vulkan instead,
-# which vendor drivers ship on Windows and Mesa or the vendor packages provide
-# on Linux. AMD is Vulkan-only here: ROCm is a separate archive.
+# Ollama's archive for these platforms is ~1.4GB, almost all of it CUDA: two
+# generations at 1.15GB and 629MB. Neither is staged. What ships is the CPU
+# runners and Vulkan, which every GPU vendor serves -- NVIDIA and AMD through
+# their own drivers on Windows, Mesa or the vendor packages on Linux -- so a
+# GPU machine is accelerated out of the box without a gigabyte in the installer.
+#
+# NVIDIA owners are offered the CUDA runner as a download afterwards, which is
+# faster than Vulkan on that hardware. It installs into the engine copy in the
+# library directory, which is why the engine is relocated there at all.
+# 629MB is also what put the Windows stage over the ~2GB NSIS can pack.
 #
 # Layout: `ollama/ollama[.exe]` beside `ollama/lib/ollama/`, a place Ollama
 # searches relative to its own executable on both platforms (ml/path.go). Kept
@@ -47,21 +51,21 @@ if [ "$actual" != "$expected" ]; then
 fi
 _info "sha256 $actual"
 
-_step "Extracting the CPU, Vulkan and CUDA 13 runners"
+_step "Extracting the CPU and Vulkan runners"
 rm -rf "$OL_STAGE" "$TMP"
 mkdir -p "$OL_STAGE/lib" "$TMP"
-# CUDA 12 is excluded while extracting rather than deleted afterwards: it is over
-# a gigabyte of disk on a runner that also holds two copies of the stage.
+# CUDA is excluded while extracting rather than deleted afterwards: it is 1.8GB
+# of disk on a runner that also holds two copies of the stage.
 if [ "$DESKTOP_OS" = linux ]; then
     command -v unzstd >/dev/null || _die "unzstd not found (install zstd)"
-    tar --use-compress-program=unzstd --exclude='*cuda_v12*' -xf "$ARCHIVE" -C "$TMP"
+    tar --use-compress-program=unzstd --exclude='*cuda_v*' -xf "$ARCHIVE" -C "$TMP"
     mv "$TMP/bin/ollama" "$OL_STAGE/$EXE"
 else
     uv run --no-project --python "$PY_MINOR" python - "$(native_path "$ARCHIVE")" "$(native_path "$TMP")" <<'PYEOF'
 import sys, zipfile
 src, dest = sys.argv[1:]
 with zipfile.ZipFile(src) as z:
-    z.extractall(dest, members=[n for n in z.namelist() if "/cuda_v12/" not in n])
+    z.extractall(dest, members=[n for n in z.namelist() if "/cuda_v" not in n])
 PYEOF
     mv "$TMP/$EXE" "$OL_STAGE/$EXE"
 fi
@@ -71,9 +75,17 @@ rm -rf "$TMP"
 
 _step "Checking what was kept"
 [ -f "$OL_STAGE/$EXE" ] || _die "no $EXE in $ASSET"
-[ -d "$LIB/cuda_v13" ] || _die "no CUDA 13 runner in $ASSET"
-[ -d "$LIB/vulkan" ] || _die "no Vulkan runner in $ASSET; a GPU CUDA 13 cannot serve would fall to the CPU"
-[ ! -e "$LIB/cuda_v12" ] || _die "CUDA 12 was meant to be left out"
+[ -d "$LIB/vulkan" ] || _die "no Vulkan runner in $ASSET; with CUDA unstaged, every GPU would fall to the CPU"
+if compgen -G "$LIB/cuda_v*" >/dev/null; then
+    _die "CUDA was meant to be left out of the installer, found: $(cd "$LIB" && echo cuda_v*)"
+fi
 compgen -G "$LIB/*ggml-cpu*" >/dev/null || _die "no CPU runners in $ASSET"
+
+# The shell copies this tree into the writable library directory on first launch
+# and spawns it from there (engine_dir in src-tauri/src/stage.rs): Ollama
+# resolves its runners relative to its own executable, and an installed tree is
+# read-only on Linux. This file is what tells it whether that copy is current,
+# so a release bump replaces the copy instead of running last version's runners.
+printf '%s\n' "$OLLAMA_VERSION" > "$OL_STAGE/ENGINE_VERSION"
 du -sh "$OL_STAGE/$EXE" "$LIB"/*/ | sed 's|'"$OL_STAGE"'/||; s/^/    /'
 _info "ollama staged: $(du -sh "$OL_STAGE" | awk '{print $1}')"
