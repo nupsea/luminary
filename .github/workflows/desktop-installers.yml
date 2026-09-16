@@ -57,11 +57,13 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - name: Cache the standalone interpreter
-        uses: actions/cache@v4
-        with:
-          path: build/pythons
-          key: pbs-cpython-3.13.7-linux-x86_64-gnu
+      # No cache for build/pythons. `uv python install` fetches the interpreter in
+      # under two seconds, restoring the cache took longer than that, and the
+      # directory holds uv's minor-version link -- a reparse point on Windows that
+      # actions/cache restores as something `uv` then cannot remove:
+      # "failed to remove directory cpython-3.13-windows-x86_64-none:
+      # The directory name is invalid. (os error 267)". The cache paid nothing and
+      # cost the build.
 
       - run: cd frontend && npm ci
 
@@ -180,11 +182,13 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - name: Cache the standalone interpreter
-        uses: actions/cache@v4
-        with:
-          path: build/pythons
-          key: pbs-cpython-3.13.7-windows-x86_64-none
+      # No cache for build/pythons. `uv python install` fetches the interpreter in
+      # under two seconds, restoring the cache took longer than that, and the
+      # directory holds uv's minor-version link -- a reparse point on Windows that
+      # actions/cache restores as something `uv` then cannot remove:
+      # "failed to remove directory cpython-3.13-windows-x86_64-none:
+      # The directory name is invalid. (os error 267)". The cache paid nothing and
+      # cost the build.
 
       - run: cd frontend && npm ci
 

@@ -208,6 +208,7 @@ of each phase is in `roadmap.md`; this is the inventory.
 | `extract_prefix()` | same file | zip and `.tar.zst`, one member prefix only, every path contained, symlinks deferred to a second pass |
 | `install_archive_subset()` | same file | the two composed, emitting the streaming progress events `/setup/components` already carries |
 | `engine_runner` kind | `backend/app/services/components.py` | `engine_source()`, `engine_lib_dir()`, the catalogue entry, install and removal. Offered only where `engine-source.json` exists, which is Windows and Linux |
+| shipped-library resolution check | `scripts/desktop/verify_ollama.sh` | every `NEEDED` that the engine tree itself ships must resolve from inside that tree; one the host owns is skipped, because a CI runner has no Vulkan loader. This is the only gate that covers `vulkan/libggml-vulkan.so`, which no CPU-only runner ever loads. It reports the edge count, so a version that stops depending on anything fails as a dead check rather than passing |
 | size and path budgets | `scripts/desktop/lib.sh`, `verify_stage.sh` | fail the build above the per-OS byte budget or on any stage path over 190 chars. `scripts/macos/verify_stage.sh` reports size and is deliberately not gated — a DMG has neither ceiling |
 | `zstandard`, `scipy`, `scikit-learn` | `backend/pyproject.toml` | were transitive by accident; the Linux runner is a `.tar.zst` and clustering needs the other two |
 
@@ -228,6 +229,7 @@ to be refactored to read from the new one, never duplicated beside it.
 | Read `engine-source.json` at runtime | a compiled-in URL and checksum | the installed engine and the archive it came from can never disagree, because the stage writes both |
 | Small installer, fetch on first run | bundling weights | already the status quo; the first-run download is what Phase 4 attacks |
 | One encoder stack on every OS, if the port happens | ORT on Windows/Linux, torch on the dev Mac | the dev machine runs what users run |
+| No CI cache for `build/pythons` | caching the standalone interpreter between runs | `uv python install` fetches it in under two seconds and restoring the cache took longer than that, while the directory holds uv's minor-version link -- a reparse point on Windows that `actions/cache` restores as something uv cannot remove (`failed to remove directory cpython-3.13-windows-x86_64-none: The directory name is invalid. (os error 267)`). The cache paid nothing and cost a red Windows build. `release-macos-app.yml` still caches it, where POSIX symlinks survive the round trip |
 
 ### Cleanup once this ships
 

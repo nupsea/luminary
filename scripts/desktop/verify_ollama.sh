@@ -52,6 +52,39 @@ OL_RUN="$RELOC/ollama"
 LIB_RUN="$OL_RUN/lib/ollama"
 _pass "copied to $OL_RUN"
 
+# The relink in stage_ollama.sh records the directory an inherited RPATH already
+# implied, and `vulkan/libggml-vulkan.so` -- the file it exists for -- is never
+# loaded on a CPU-only runner, so the generation below cannot exercise it. This
+# does, statically: a library the stage SHIPS must resolve from inside the tree.
+# One the host owns is skipped rather than failed, because a CI runner has no
+# Vulkan loader and `libvulkan.so.1` is legitimately absent here.
+#
+# `edges` is reported because a predicate that matches nothing is not a passing
+# check, it is a dead one: if the engine ever stops shipping a library that
+# another shipped library needs, this must say so rather than go quietly green.
+if [ "$DESKTOP_OS" = linux ]; then
+    _step "Resolving the engine's own libraries"
+    unresolved="" edges=0 seen=0
+    while IFS= read -r lib; do
+        seen=$((seen + 1))
+        while IFS= read -r need; do
+            [ -n "$need" ] || continue
+            find "$LIB_RUN" -name "$need" -print -quit 2>/dev/null | grep -q . || continue
+            edges=$((edges + 1))
+            if ldd "$lib" 2>/dev/null | awk -v n="$need" '$1 == n && /not found/ {found=1} END {exit !found}'; then
+                unresolved="$unresolved ${lib#"$OL_RUN"/} -> $need;"
+            fi
+        done < <(patchelf --print-needed "$lib" 2>/dev/null)
+    done < <(find "$LIB_RUN" -type f \( -name '*.so' -o -name '*.so.*' \))
+    if [ -n "$unresolved" ]; then
+        _fail "shipped libraries that do not resolve:$unresolved"
+    elif [ "$edges" = 0 ]; then
+        _fail "no shipped library depends on another ($seen examined); this check cannot fail, so it is not checking"
+    else
+        _pass "$seen libraries, $edges shipped dependencies, all resolve"
+    fi
+fi
+
 _step "Serving on 127.0.0.1:$PORT"
 mkdir -p "$MODELS_DIR"
 # The environment the shell gives it (supervisor.rs base_env), not ours.

@@ -17,8 +17,8 @@ case "$(uname -s)" in
     *) DESKTOP_OS=unsupported ;;
 esac
 
-# Pinned deliberately. Bumping this changes every user's interpreter and
-# invalidates the CI cache keys, so it is a reviewed decision, not a floating range.
+# Pinned deliberately. Bumping this changes every user's interpreter, so it is a
+# reviewed decision, not a floating range.
 PY_MINOR="3.13"
 PY_RELEASE="3.13.7"
 case "$DESKTOP_OS" in
