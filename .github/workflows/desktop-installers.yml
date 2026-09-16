@@ -208,11 +208,18 @@ jobs:
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
 
+      # `|| true`: the step runs under `-e -o pipefail`, one of the two roots does
+      # not exist, and find exits 1 on a missing path -- which killed this step
+      # before its own guard could report anything. It printed nothing at all.
       - name: Open the installed app
         run: |
           root="$(cygpath -u "$LOCALAPPDATA")"
-          exe="$(find "$root/Luminary" "$root/Programs/Luminary" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' 2>/dev/null | head -1)"
-          [ -n "$exe" ] || { echo "no installed executable found"; exit 1; }
+          exe="$(find "$root/Luminary" "$root/Programs/Luminary" -maxdepth 1 -iname '*.exe' ! -iname 'uninstall*' 2>/dev/null | head -1 || true)"
+          if [ -z "$exe" ]; then
+            echo "no installed executable under $root -- what the installer left:"
+            ls -la "$root/Luminary" "$root/Programs/Luminary" 2>&1 || true
+            exit 1
+          fi
           echo "installed at $exe"
           SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
 
