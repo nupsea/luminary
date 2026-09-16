@@ -76,11 +76,12 @@ The effective reranker is `settings.RERANK_MODEL` (MiniLM-L-12). `_RERANK_MODEL`
 
 ### Dependencies that move with it
 
-- **scipy and scikit-learn are undeclared.** `clustering_service.py` (HDBSCAN) and
-  `concept_nodes/build_hierarchy.py` (linkage) import them, but only sentence-transformers pulls them in.
-  Both imports are lazy, so removing sentence-transformers passes boot and the import smoke test and
-  fails at the first clustering run. Declare them directly before anything is removed, and add both to
-  `REQUIRED` in `scripts/desktop/verify_imports.py`.
+- **scipy and scikit-learn were undeclared** until the Phase 1 change. `clustering_service.py`
+  (HDBSCAN) and `concept_nodes/build_hierarchy.py` (linkage) import them, but only sentence-transformers
+  pulled them in. Both imports are lazy, so removing sentence-transformers would pass `make ci` and fail
+  at the first clustering run -- but not silently: both are already in `REQUIRED` in
+  `scripts/desktop/verify_imports.py`, so a stage built without them fails stage-verify, before any
+  installer is built. They are now direct dependencies in `backend/pyproject.toml`.
 - torch, transformers, sentence_transformers and gliner move to `FORBIDDEN` in the same file.
 - The torch pin, the `pytorch-cpu` index in `pyproject.toml` and the extra-index branch in
   `scripts/desktop/lib.sh` become dead code and go in the change that removes torch.
@@ -110,10 +111,16 @@ the assumption that the download succeeded.
 - **Offered when a driver is present:** `host_support` already reads `nvcuda.dll` on Windows and
   `/proc/driver/nvidia/version` on Linux. **The accelerator the app reports comes from Ollama's own
   discovery line after loading, never from the pack being present** (0.13.0 exit gate).
-- **Open: whether Ollama loads runners from a second directory.** `supervisor.rs` passes one
-  `OLLAMA_LIBRARY_PATH`. If Ollama searches only one tree, the engine's library directory has to live in
-  `DATA_DIR` as a whole, copied there on first launch. Phase 0 decides this from `discover/runner.go` at
-  v0.32.5 and a real load; the component design waits on it.
+- **Answered: Ollama does not load runners from a second directory, and does not read
+  `OLLAMA_LIBRARY_PATH` at all.** At v0.32.5 `ml.LibOllamaPath` is a package-level var computed once at
+  init from `os.Executable()`, and `libOllamaPathCandidates` consults only the executable directory, the
+  working directory and hardcoded relative paths — there is no environment branch in it.
+  `OLLAMA_LIBRARY_PATH` appears only where the server exports it to the `llama-server` child, so the one
+  `supervisor.rs` sets at spawn is inert; the current build works by accident of layout. A downloaded
+  runner therefore cannot be pointed at, and the installed stage is read-only on Linux (`.deb` under
+  `/usr`, AppImage entirely). **The engine tree is copied to `DATA_DIR` on first launch and spawned from
+  there, and packs extract into it.** That is Phase 2, and the component design follows from it.
+  Not yet verified by a real load from `DATA_DIR` — only from source.
 - **Open: redistribution terms.** The CUDA runtime libraries inside Ollama's archive are redistributable
   with an application; republishing them as a separate download is checked against NVIDIA's terms
   before the first asset is published.
@@ -141,26 +148,96 @@ launching the AppImage, not by reasoning about it.
 | WebView2 install mode | `downloadBootstrapper`, needs network during install | Windows 11 ships WebView2; Windows 10 without it cannot install offline. `embedBootstrapper` is the alternative |
 | Updater | none; every release is a full installer | tauri's updater replaces the installed tree; `DATA_DIR`, models and packs survive either way, so the layout above already allows it |
 | Install time | unmeasured; 37,681 files, Defender scans each | torch alone is 11,721 files on Windows; measure the silent-install step before and after |
-
 ## Phases
 
 Each phase ends on a gate that can come out red. A red Phase 0 answer re-opens this plan before code.
 
+**Re-ordered 2026-09-16, after Phase 0.** The original order put the encoder port before the CUDA
+component. Phase 0 measured the encoder port as the smaller and riskier lever of the two: ORT is
+slower on the only OS measured, and removing torch frees ~441 MiB, not the 518 MiB projected, because
+scipy and scikit-learn cannot leave with it. The CUDA runner is 629 MB of the 751 MB Windows engine
+and moving it out drops the stage under the NSIS ceiling on its own. So the packaging lever ships
+first and the encoder port becomes optional headroom, gated on x86 numbers that do not exist yet.
+
+**Every phase ends with all three installers building, installing and opening.** No phase leaves
+Windows broken until the next one lands; a red gate is reverted or descoped, never patched around.
+
 | Phase | Work | Gate |
 |---|---|---|
 | 0. Measure | Windows stage breakdown from CI; ONNX speed on macOS arm64, Windows and Linux x86_64 with length-sorted batches and explicit thread counts; gliner's own ONNX fp32 against torch on the golden corpora; Ollama second-directory runner loading; CUDA redistribution terms; `evals/` independent of backend dependencies | every item answered with a recorded number or source line |
-| 1. Hygiene | declare scipy and scikit-learn; the payload rules above; size and path budgets | `make ci`; Linux `.deb` and AppImage build and open in `desktop-installers.yml` |
-| 2. Embedder and reranker on ORT | torch still installed | committed parity fixture (cosine >= 0.99999, identical top-10) in CI; `make eval` unchanged against a same-day baseline run twice; speed gate |
-| 3. GLiNER on ORT | numpy processor and decoder | entity-agreement harness: identical (span, label) per chunk at 0.65 and 0.55, score diff < 1e-4 on the golden corpora, fired once against a deliberately broken port; resident memory measured |
-| 4. Remove torch | dependencies, index, `lib.sh` branch, `verify_imports.py` | `make ci`; `verify-stage` on all three OSes; no `torch`, `transformers`, `sentence_transformers` or `gliner` import under `backend/app` |
-| 5. CUDA component | pack build and publish, catalogue entry, shell discovery; installers drop `cuda_v13` | all three installers build, install and open; on a GPU host (AWS g4dn): fresh install reports Vulkan, after the pack Ollama's discovery reports CUDA, offline first run still works |
-| 6. Windows decisions | signing, WebView2 mode, updater | each recorded here, then built |
+| 1. Hygiene | declare scipy and scikit-learn; the payload rules above; size and path budgets; installer size reported in CI | `make ci`; Linux `.deb` and AppImage build and open in `desktop-installers.yml`; both budgets fired on purpose once |
+| 2. Engine to `DATA_DIR`, and one downloader | copy the engine tree to `DATA_DIR` on first launch and spawn from there; a resumable, sha256-verified, extract-to-temp-then-rename downloader behind `/setup/components`; `engine_runner` kind; installers drop `cuda_v13` | Windows NSIS builds, installs silently and opens; stage within the Phase 1 budget; engine runs from `DATA_DIR` on all three OSes; the verifier fired once against a corrupted artifact |
+| 3. CUDA component | pack build and publish, catalogue entry, driver-keyed offer | **redistribution terms read and recorded first**; on a GPU host (AWS g4dn): fresh install reports Vulkan, after the pack Ollama's discovery reports CUDA, offline first run still works |
+| 4. First run | GLiNER becomes an explicit opt-in component; resumable progress for the remaining weights; WebView2 install mode; `MIN_FREE_BYTES` and the model-size wording corrected; Windows install time measured | first run completes with no terminal on a Windows and a Linux machine that has never seen Luminary, and each is told the truth about its own accelerator |
+| 5. Encoders on ORT, conditional | x86_64 speed measured in CI **before** any port; then embedder and reranker behind the existing seams; torch removed; GLiNER last | committed parity fixture (cosine >= 0.99999, identical top-10) in CI; `make eval` unchanged against a same-day baseline run twice; speed gate. A red x86 gate ends this phase and is recorded as the answer |
+| 6. Windows decisions | signing, updater | each recorded here, then built |
 
-**Speed gate.** The probe that measured parity also read ONNX slower: 16.42 s against 7.37 s for 460
-embeddings, 18.89 s against 10.68 s for 600 rerank pairs, on Apple Silicon. That probe used unsorted
-batches and default threads while sentence-transformers sorts by length, so the number is not yet a
-finding. ORT must be no slower than torch on each OS for ingest embedding and reranking, or Phase 2 does
-not ship.
+**Speed gate.** ORT must be no slower than torch on each OS for ingest embedding and reranking, or
+Phase 5 does not ship.
+
+macOS arm64, embedder only, 460 chunks, batch 128, `max_len` 512, 12 intra-op threads, median of
+four repeats, each pipeline timed end to end in one region:
+
+| pipeline | median | emb/s |
+|---|---|---|
+| shipped sentence-transformers | 6.68 s | 68.8 |
+| ORT fp32, BERT-fused graph, token-length-sorted batches | 6.86 s | 67.1 |
+| torch, same token-length-sorted batches | 3.95 s | 116.4 |
+
+**Against the shipped path ORT is 2.6% slower; against torch in the same pipeline it is 1.73x
+slower. The gate as written compares against torch, so macOS is red.** The two readings differ
+because sentence-transformers sorts by character length, not token length: its four batches pad to
+widths 308/298/258/134, or 120,776 padded tokens, where token-sorted batches pad to 95/126/191/308,
+or 76,144. Fixing that sort is a 1.69x win on the torch path we ship today and owes nothing to this
+plan.
+
+Forward pass alone, both engines handed identical pre-tokenised batches, so neither tokenisation
+(17 ms) nor padding (4 ms) is inside the number: torch 3.94 s, ORT unfused 8.41 s, ORT fused 7.05 s.
+`ORT_ENABLE_ALL` does not fuse attention on its own -- the optimised graph holds 0 `Attention`, 60
+`Transpose` and 180 `MatMul` nodes. The offline pass (`onnxruntime.transformers.optimizer
+--model_type bert --num_heads 12 --hidden_size 384`, a build-time step needing `onnx` and `sympy`,
+133 MB output) fuses 12 `Attention`, 24 `SkipLayerNormalization` and 1 `EmbedLayerNormalization`
+and is worth 1.19x. **The graph shipped must be the fused one; the stock HF export leaves 19% on
+the floor.** The residual 1.79x is kernels: torch is built `BLAS_INFO=accelerate` and reaches AMX,
+ORT's MLAS uses NEON. Threads and the CPU arena are exhausted as levers -- 6 threads 8.64 s against
+12 threads 8.41 s, arena disabled 8.42 s.
+
+Parity held on every arm, minimum cosine 0.9999998. No chunk in this corpus
+reaches `max_len` (tokens median 120, p90 224, max 308), so long sequences are unexercised. Windows
+and Linux x86_64 are not measured and do not follow from this number: on x86 torch has no Accelerate
+equivalent, so the gap there is a separate question.
+
+**Rerank gate, macOS arm64.** Shaped like the shipped call: L-12 cross-encoder, 10 golden questions
+x `RERANK_DEPTH` 50 candidates, `batch_size` 32, 12 intra-op threads, median of three repeats.
+
+| pipeline | 500 pairs | per query |
+|---|---|---|
+| shipped `CrossEncoder.predict` | 8.76 s | 906 ms |
+| torch, token-length-sorted batches | 6.19 s | 601 ms |
+| ORT fp32 fused, token-length-sorted | 12.39 s | 1213 ms |
+
+**ORT is 1.41x slower than the shipped path and 2.00x slower than torch in the same pipeline, so
+rerank is red on macOS under either reading of the gate.** The embedder's escape route does not exist
+here: the shipped path pads 144,792 tokens against 107,812 token-sorted, a 1.34x waste worth 1.42x,
+and ORT hands all of it back and more. Rerank runs on the chat path, so the cost is +307 ms per query
+as the user feels it.
+
+Parity: maximum absolute logit delta against the shipped path 5.7e-6 for ORT and 3.8e-6 for
+token-sorted torch; top-5 order identical 10/10 for both. The candidates were sampled at random
+rather than retrieved, so every logit sits near -11.2 inside a 0.25 spread and adjacent gaps are
+about 5e-3 -- three orders above the disagreement, so the ordering result stands, but this is not a
+parity test on realistic candidate sets.
+
+The reranker has no ONNX export on the hub; it was exported here with `torch.onnx.export` (opset 17,
+dynamic batch and sequence axes) and then fused by the same BERT pass, which is a second build-time
+step needing torch, `onnx` and `sympy`.
+
+**CoreML is not an option for this graph.** `CoreMLExecutionProvider` splits the 623-node bge-small
+graph into 97 partitions and compiles each partition per distinct input shape. Dynamic batch widths make
+every batch a new shape, so compiled models accumulate with nothing freeing them: on 2026-09-16 the arm
+reached about 50 GB resident and was killed before it printed a single number. A fixed input width would
+be the only way to probe it, and it would change what is being measured. Any execution-provider probe
+runs under `scripts/capped_run.sh`, which kills the process tree past `MEM_CAP_GB` (default 12).
 
 ## Risks
 

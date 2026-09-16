@@ -122,6 +122,34 @@ newer="$(find "$STAGE" -type f -newer "$MARKER" 2>/dev/null | head -5)"
     || { _fail "files written inside the stage during boot:"; echo "$newer" >&2; }
 rm -f "$MARKER"
 
+_step "8. Stage size"
+size_mb="$(du -sm "$STAGE" | cut -f1)"
+if [ -z "$STAGE_SIZE_BUDGET_MB" ]; then
+    _pass "${size_mb}MB (no budget on $DESKTOP_OS -- reported so growth is visible)"
+elif [ "$size_mb" -le "$STAGE_SIZE_BUDGET_MB" ]; then
+    _pass "${size_mb}MB, within the ${STAGE_SIZE_BUDGET_MB}MB budget"
+else
+    _fail "stage is ${size_mb}MB, over the ${STAGE_SIZE_BUDGET_MB}MB budget by $((size_mb - STAGE_SIZE_BUDGET_MB))MB"
+    echo "  the largest directories:" >&2
+    # staged_site, not a literal path: Windows stages python/Lib/site-packages
+    # where unix stages python/lib/python3.13/site-packages.
+    du -sm "$STAGE"/* "$(staged_site)"/* 2>/dev/null | sort -rn | head -12 >&2
+fi
+
+_step "9. Path lengths"
+# Relative to the stage root, because that is what gets appended to the install
+# directory on the user's machine.
+long="$(cd "$STAGE" && find . -mindepth 1 | sed 's|^\./||' \
+    | awk -v n="$STAGE_PATH_BUDGET" 'length($0) > n { print length($0), $0 }' | sort -rn)"
+if [ -z "$long" ]; then
+    longest="$(cd "$STAGE" && find . -mindepth 1 | sed 's|^\./||' | awk '{ print length($0) }' \
+        | sort -rn | head -1)"
+    _pass "longest path ${longest} chars, within the ${STAGE_PATH_BUDGET} budget"
+else
+    _fail "$(echo "$long" | wc -l | tr -d ' ') path(s) over ${STAGE_PATH_BUDGET} chars:"
+    echo "$long" | head -10 >&2
+fi
+
 echo
 [ "$FAILED" = 0 ] && printf '\033[1;32mstage verified\033[0m\n' || printf '\033[1;31mstage verification FAILED\033[0m\n'
 exit "$FAILED"

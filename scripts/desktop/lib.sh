@@ -33,6 +33,28 @@ PBS_VERSION="${PBS_VERSION:-cpython-$PY_RELEASE-$_pbs_platform}"
 # Pinned Ollama release, the same on every platform.
 OLLAMA_VERSION="${OLLAMA_VERSION:-v0.32.5}"
 
+# Stage budgets, enforced by verify_stage.sh. Both exist because a stage that
+# grows past a tool's limit fails in the tool's own words, not ours: makensis
+# says "Internal compiler error #12345: error mmapping datablock" and nothing
+# about size.
+#
+# Size, Windows only: NSIS cannot pack much past 2GB. A 2.28GB stage failed; the
+# hard ceiling is ~2048MB. 1900 leaves room for the installer's own overhead
+# without leaving room to drift back. Linux has no equivalent ceiling and no
+# failure case to bracket a number with, so it reports its size and does not
+# gate on it -- give it a budget when something actually breaks at a known size.
+case "$DESKTOP_OS" in
+    windows) STAGE_SIZE_BUDGET_MB="${STAGE_SIZE_BUDGET_MB:-1900}" ;;
+    *) STAGE_SIZE_BUDGET_MB="${STAGE_SIZE_BUDGET_MB:-}" ;;
+esac
+
+# Path length, every OS: Windows MAX_PATH is 260 and the per-user install root
+# `C:\Users\<name>\AppData\Local\Luminary\` spends about 60 of it, so a stage
+# path over ~190 cannot be written on a user's machine even though it staged
+# fine on the build runner. Checked on Linux too because the two dependency
+# trees are the same packages and Linux CI is the cheaper signal.
+STAGE_PATH_BUDGET="${STAGE_PATH_BUDGET:-190}"
+
 _step() { printf '\n\033[1;36m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 _info() { printf '    %s\n' "$*"; }
 _warn() { printf '\033[1;33m  ! %s\033[0m\n' "$*" >&2; }
@@ -186,6 +208,26 @@ prune_dependencies() {
     # outright and cascades into lancedb, sentence-transformers and gliner.
     rm -f "$site/pyarrow"/libarrow_flight*.dylib "$site/pyarrow"/libarrow_flight.so* \
           "$site/pyarrow"/arrow_flight.dll
+    # Remove the rest of Flight in the same breath. `libarrow_flight*` never
+    # matched `libarrow_python_flight*`, so the extension survived while the
+    # library it links did not -- and linuxdeploy walks those dependencies and
+    # fails the AppImage on the dangling one. Nothing but _flight links
+    # libarrow_python_flight, and `flight` is optional at import (pyarrow reaches
+    # for it only in show_info(), behind _module_is_available).
+    rm -f "$site/pyarrow"/libarrow_python_flight*.dylib \
+          "$site/pyarrow"/libarrow_python_flight.so* \
+          "$site/pyarrow"/arrow_python_flight.dll \
+          "$site/pyarrow"/_flight.cpython-*.so "$site/pyarrow"/_flight*.pyd \
+          "$site/pyarrow"/_flight.pyx "$site/pyarrow"/flight.py
+    # The proxy admin UI: a Next.js build, 17MB of .js/.png/.html and not one
+    # .py. NOT _experimental itself -- proxy/guardrails imports
+    # _experimental.mcp_server, the same trap as litellm/proxy above.
+    rm -rf "$site/litellm/proxy/_experimental/out"
+    # Benchmark fixtures, and the source of the two longest paths in the stage
+    # (197 and 185 chars, against the STAGE_PATH_BUDGET of 190). Its only .py is a pytest
+    # file that nothing imports; prune_test_suites misses it because the
+    # directory is not named test/tests.
+    rm -rf "$site/litellm/proxy/guardrails/guardrail_hooks"/*/guardrail_benchmarks
     find "$site" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
     find "$site" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
 }

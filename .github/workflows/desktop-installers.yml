@@ -89,11 +89,17 @@ jobs:
           SCREENSHOT=build/linux-deb.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$exe"
 
+      # LINUXDEPLOY_EXCLUDED_LIBRARIES: linuxdeploy walks every native dependency
+      # and copies it in. Driver libraries must not be copied -- they belong to
+      # the host, and a bundled libcuda/libvulkan binds the AppImage to whatever
+      # the runner happened to have. The engine's own runners are staged
+      # separately and are not linuxdeploy's to resolve.
       - name: Build the AppImage
         if: ${{ !cancelled() }}
         env:
           NO_STRIP: "true"
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          LINUXDEPLOY_EXCLUDED_LIBRARIES: "libcuda.so.1;libnvidia-ml.so.1;libvulkan.so.1"
         run: make desktop-installer TAURI_BUILD_FLAGS="--verbose --bundles appimage"
 
       # Second launch, against the library the first one created.
@@ -105,6 +111,17 @@ jobs:
           chmod +x "$appimage"
           SCREENSHOT=build/linux-appimage.png xvfb-run -a -s "-screen 0 1440x900x24" \
             bash scripts/desktop/verify_installed.sh "$appimage"
+
+      # The stage budget in verify_stage.sh gates the input; this is the output,
+      # and it is what a user actually downloads. Printed rather than gated:
+      # there is no Linux packaging ceiling to bracket a budget against yet.
+      - name: Report installer sizes
+        if: ${{ !cancelled() }}
+        run: |
+          du -sm build/stage | awk '{print "stage: " $1 "MB"}'
+          ls -l src-tauri/target/release/bundle/deb/*.deb \
+                src-tauri/target/release/bundle/appimage/*.AppImage 2>/dev/null \
+            | awk '{printf "%s: %.1fMB\n", $NF, $5/1048576}'
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -198,6 +215,16 @@ jobs:
           [ -n "$exe" ] || { echo "no installed executable found"; exit 1; }
           echo "installed at $exe"
           SCREENSHOT=build/windows.png bash scripts/desktop/verify_installed.sh "$exe"
+
+      # The number that decides whether makensis can pack this at all. The stage
+      # budget in verify_stage.sh gates the input before the build; this records
+      # what came out, so the two can be compared across runs.
+      - name: Report installer size
+        if: ${{ !cancelled() }}
+        run: |
+          du -sm build/stage | awk '{print "stage: " $1 "MB"}'
+          ls -l src-tauri/target/release/bundle/nsis/*-setup.exe 2>/dev/null \
+            | awk '{printf "%s: %.1fMB\n", $NF, $5/1048576}'
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

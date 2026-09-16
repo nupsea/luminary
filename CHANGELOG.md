@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Windows and Linux installers.** A per-user setup `.exe`, an AppImage and a `.deb`, each built, installed and launched on a clean runner by `desktop-installers.yml`. The engine ships CPU, Vulkan and CUDA 13 runners; CUDA 12 would have added 1.15 GB.
+- **Windows and Linux installers.** `desktop-installers.yml` stages and builds a `.deb`, an AppImage and a per-user NSIS setup `.exe`; only the `.deb` installs and opens so far, because the Windows stage is 2.28 GB and makensis fails past ~2 GB. The engine ships CPU, Vulkan and CUDA 13 runners; CUDA 12 would have added 1.15 GB.
+- **A desktop stage has a size budget and a path-length budget.** `verify_stage.sh` fails a Windows stage over 1900 MB, or any stage path over 190 characters — what `MAX_PATH` leaves once the per-user install root is spent.
 
 ### Changed
 - **yt-dlp runs as `python -m yt_dlp`.** The console script records the build machine's interpreter path, and on Windows that path is compiled into an `.exe` no installed copy can use.

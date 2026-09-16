@@ -138,6 +138,14 @@ if newer="$(find "$STAGE" -type f -newer "$STAGE/surface-manifest.json" ! -path 
         || { _fail "files written inside the stage during boot:"; echo "$newer" >&2; }
 fi
 
+_step "9. Stage size"
+# Reported, never gated, and there is deliberately no path-length step here.
+# The two budgets in scripts/desktop/lib.sh exist for Windows: NSIS cannot pack
+# past ~2GB, and MAX_PATH is 260. A DMG has neither ceiling and APFS takes
+# paths far longer than anything we stage, so a budget here would be a number
+# with no failure case behind it. macOS still gets the payload prunes.
+_pass "$(du -sm "$STAGE" | cut -f1)MB (no budget on macOS -- reported so growth is visible)"
+
 echo
 [ "$FAILED" = 0 ] && printf '\033[1;32mstage verified\033[0m\n' || printf '\033[1;31mstage verification FAILED\033[0m\n'
 exit "$FAILED"
