@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.host_support import UNSUPPORTED_MESSAGE, local_inference_support
+from app.host_support import UNSUPPORTED_MESSAGE, has_nvidia_accelerator, local_inference_support
 
 
 @pytest.fixture
@@ -186,6 +186,43 @@ def test_nvidia_smi_on_path_is_enough_when_the_driver_is_elsewhere(probe, monkey
         "shutil.which", lambda name: r"C:\nv\nvidia-smi.exe" if name == "nvidia-smi" else None
     )
     assert probe().supported is True
+
+
+# `has_nvidia_accelerator` is the narrower probe the CUDA-pack offer gates on
+# (docs/lighter-install-plan.md Phase 3): the download is NVIDIA-only, so an AMD
+# driver -- which `_has_accelerator` correctly accepts for "run inference at
+# all" -- must not make this one say yes. Fired on purpose in both directions.
+
+
+def test_has_nvidia_accelerator_is_false_for_an_amd_only_driver(monkeypatch, tmp_path):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("SYSTEMROOT", str(tmp_path))
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "amdhip64.dll").write_bytes(b"")
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    assert has_nvidia_accelerator() is False
+
+
+def test_has_nvidia_accelerator_is_true_for_the_nvidia_driver(monkeypatch, tmp_path):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("SYSTEMROOT", str(tmp_path))
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "nvcuda.dll").write_bytes(b"")
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    assert has_nvidia_accelerator() is True
+
+
+def test_has_nvidia_accelerator_is_false_on_darwin_even_for_apple_silicon(monkeypatch):
+    # Apple Silicon is Metal; no Mac has shipped an NVIDIA GPU since 2021.
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
+
+    assert has_nvidia_accelerator() is False
 
 
 def test_docker_alone_never_decides_it():

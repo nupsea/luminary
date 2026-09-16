@@ -621,12 +621,18 @@ makensis packed a 298.6 MB `-setup.exe`, and `/S` installed it; the staged engin
 installed and opened. Two things came back red and neither is the design: linuxdeploy refuses
 pillow's vendored `libfreetype`, whose `libpng16-*.so` is reachable only through the RPATH auditwheel
 records on the extension module and not on the library itself, and the Windows `Open the installed
-app` step died inside its own `find` before it could launch anything, printing nothing. Both are
-fixed on this branch, so **whether the installed Windows app opens is still unproven**, as is the
-AppImage. Beyond them, what remains open is what CI cannot see at all:
-a first run with no terminal on real Windows and Linux hardware, the CUDA and Vulkan paths on a real
-GPU, and a Windows install path long enough to hit `MAX_PATH`. Those, plus `make smoke` green on
-Windows, are the exit gate. Issue #24 closes with the first.
+app` step died inside its own `find` before it could launch anything, printing nothing. **Both are
+fixed and confirmed on run `35080491067`**: Windows (all 17 steps, including "Open the installed
+app") and Linux (all 19, including building and opening the AppImage) are both green, and the
+Linux job's new shipped-library resolution check reported a real, non-zero edge count (23
+libraries, 33 shipped dependencies, all resolving) rather than a check with nothing to fail.
+`host_support.py` now splits `has_nvidia_accelerator()` from `_has_amd_accelerator()` --
+`_WINDOWS_DRIVER_DLLS` used to hold both vendors' DLLs and `/dev/kfd` is AMD's, not NVIDIA's -- and
+`components.catalogue()` calls the NVIDIA-only probe before offering the CUDA runner, so an AMD or
+CPU-only host with a staged engine source never sees a download it cannot use. What remains open is
+what CI cannot see at all: a first run with no terminal on real Windows and Linux hardware, the CUDA
+and Vulkan paths on a real GPU (AWS g4dn), and a Windows install path long enough to hit `MAX_PATH`.
+Those, plus `make smoke` green on Windows, are the exit gate. Issue #24 closes with the first.
 
 **A Kuzu lock cannot go stale is a POSIX statement.** `flock` is advisory and released by the kernel
 when the holder dies, which is why this repo forbids a lockfile or any lock-clearing logic. Windows

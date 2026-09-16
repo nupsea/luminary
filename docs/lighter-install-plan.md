@@ -212,11 +212,18 @@ of each phase is in `roadmap.md`; this is the inventory.
 | size and path budgets | `scripts/desktop/lib.sh`, `verify_stage.sh` | fail the build above the per-OS byte budget or on any stage path over 190 chars. `scripts/macos/verify_stage.sh` reports size and is deliberately not gated — a DMG has neither ceiling |
 | `zstandard`, `scipy`, `scikit-learn` | `backend/pyproject.toml` | were transitive by accident; the Linux runner is a `.tar.zst` and clustering needs the other two |
 
-**What Phase 3 still needs.** `host_support._has_accelerator()` answers "any accelerator" and
-conflates NVIDIA with AMD (`_WINDOWS_DRIVER_DLLS` holds both; `/dev/kfd` is AMD's). The CUDA runner
-must be offered only where an NVIDIA driver is present, so a vendor-aware probe is needed — and that
-function carries an explicit warning against a second copy of the policy, so `_has_accelerator()` has
-to be refactored to read from the new one, never duplicated beside it.
+**Done: the vendor-aware probe, and the catalogue gate.** `host_support._has_accelerator()` answered
+"any accelerator" and conflated NVIDIA with AMD (`_WINDOWS_DRIVER_DLLS` held both; `/dev/kfd` is
+AMD's). `has_nvidia_accelerator()` is now split out — same probes, composed by `_has_accelerator()`
+with `_has_amd_accelerator()` rather than duplicated beside it — and `components.catalogue()` calls
+it directly before appending the `cuda_runner` entry, so an AMD or CPU-only host with a staged engine
+source never sees the offer. Covered by `test_host_support.py` (fired once against a deliberately
+conflated version to confirm the tests discriminate) and
+`test_engine_runner_download.py::test_the_runner_is_withheld_from_a_host_with_no_nvidia_driver`.
+
+**What Phase 3 still needs.** The AWS g4dn hardware gate: fresh install reports Vulkan, the pack
+makes Ollama's own discovery line report CUDA, offline first run still works. Nothing above has run
+on real NVIDIA hardware yet.
 
 ### Decisions taken, and what each one cost
 

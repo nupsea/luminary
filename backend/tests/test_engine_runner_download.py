@@ -395,6 +395,7 @@ def test_an_incomplete_engine_source_is_ignored_not_half_offered(tmp_path, monke
 
 def test_the_runner_is_offered_when_the_stage_recorded_its_source(tmp_path, monkeypatch):
     _write_source(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.host_support.has_nvidia_accelerator", lambda: True)
 
     comp = components.get_component("cuda_runner")
     assert comp is not None
@@ -403,3 +404,12 @@ def test_the_runner_is_offered_when_the_stage_recorded_its_source(tmp_path, monk
     assert comp.default is False, "a 1.4GB download must never be a default"
     assert "NVIDIA" in comp.licence
     assert comp.size_bytes == 1422000000
+
+
+def test_the_runner_is_withheld_from_a_host_with_no_nvidia_driver(tmp_path, monkeypatch):
+    # An AMD or CPU-only box gets Vulkan for free; offering a CUDA download it
+    # cannot use is the AMD/NVIDIA conflation host_support.py exists to avoid.
+    _write_source(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.host_support.has_nvidia_accelerator", lambda: False)
+
+    assert "cuda_runner" not in [c.id for c in components.catalogue()]

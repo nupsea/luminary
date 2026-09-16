@@ -85,29 +85,54 @@ def _in_container() -> bool:
 # asks the same question the inference server will ask, rather than a proxy for
 # it: `nvcuda.dll` ships with the NVIDIA display driver and `amdhip64.dll` with
 # AMD's HIP runtime, and neither is present on a machine whose GPU the runner
-# cannot use.
-_WINDOWS_DRIVER_DLLS = ("nvcuda.dll", "amdhip64.dll")
+# cannot use. Windows has no `/dev`, so a device-node check can only ever answer
+# False here -- which refused every Windows machine, an RTX 4090 included, until
+# these existed. There is no CI runner on this platform, so nothing but a
+# platform-pinned test guards them.
 
 
-def _windows_has_accelerator() -> bool:
-    """Whether a Windows host has a driver the local runner can reach.
-
-    Windows has no `/dev`, so the device-node check below can only ever answer
-    False here -- which refused every Windows machine, an RTX 4090 included,
-    until this branch existed. There is no CI runner on this platform, so nothing
-    but a platform-pinned test guards it.
-
-    Windows on ARM has neither library: Ollama serves a Snapdragon on the CPU,
-    and the Adreno GPU and Hexagon NPU are not paths it takes. Refusing there is
-    the policy working, not a second blind spot.
-    """
+def _windows_system32() -> Path:
     # Python upper-cases every environment key on Windows, so this is the name
     # the variable actually has in `os.environ` there.
-    system32 = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32"
-    if any((system32 / dll).exists() for dll in _WINDOWS_DRIVER_DLLS):
+    return Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32"
+
+
+def has_nvidia_accelerator() -> bool:
+    """Whether this host can reach an NVIDIA GPU specifically.
+
+    Split out from `_has_accelerator()` for the CUDA runner pack: that download
+    is NVIDIA-only (AMD and everything else already gets Vulkan for free in the
+    base install), so offering it needs the vendor, not just "some accelerator".
+    Same probes `_has_accelerator` uses, never a second copy of the policy --
+    Phase 3's `engine_runner` catalogue offer calls this directly.
+    """
+    if os.environ.get("CUDA_VISIBLE_DEVICES", "").strip() not in ("", "-1"):
         return True
-    # A machine whose driver sits outside SystemRoot still puts this on PATH.
-    return shutil.which("nvidia-smi") is not None
+    if platform.system() == "Windows":
+        if (_windows_system32() / "nvcuda.dll").exists():
+            return True
+        # A machine whose driver sits outside SystemRoot still puts this on PATH.
+        return shutil.which("nvidia-smi") is not None
+    if platform.system() == "Darwin":
+        # No Mac has shipped an NVIDIA GPU since 2021; Apple Silicon is Metal.
+        return False
+    for node in ("/dev/nvidiactl", "/proc/driver/nvidia/version"):
+        if Path(node).exists():
+            return True
+    return any(Path("/dev").glob("nvidia[0-9]*"))
+
+
+def _has_amd_accelerator() -> bool:
+    """AMD's own probes: its Windows HIP runtime, and the ROCm kernel-fusion-driver
+    node on Linux -- distinct from the NVIDIA nodes `has_nvidia_accelerator` checks.
+
+    Windows on ARM has neither library: Ollama serves a Snapdragon on the CPU, and
+    the Adreno GPU and Hexagon NPU are not paths it takes. Refusing there is the
+    policy working, not a second blind spot.
+    """
+    if platform.system() == "Windows":
+        return (_windows_system32() / "amdhip64.dll").exists()
+    return Path("/dev/kfd").exists()
 
 
 def _has_accelerator() -> bool:
@@ -115,12 +140,12 @@ def _has_accelerator() -> bool:
 
     Deliberately a device check rather than a benchmark: it answers the same way
     before any model is pulled, which is when a user needs to be told. Apple
-    Silicon always has Metal. Windows is a driver-library check, everywhere else
-    an NVIDIA or AMD device node -- and inside a container those are only present
-    when the host passed them through, which is exactly the distinction that
-    separates a fast Linux container from Docker Desktop on a Mac.
+    Silicon always has Metal. Everywhere else this is NVIDIA or AMD, each its own
+    probe -- and inside a container those are only present when the host passed
+    them through, which is exactly the distinction that separates a fast Linux
+    container from Docker Desktop on a Mac.
 
-    One probe with a branch per platform. A second copy of the policy would
+    One probe with a branch per vendor. A second copy of either policy would
     eventually disagree with this one, and the copy a user meets is the one that
     has to be right.
     """
@@ -128,14 +153,7 @@ def _has_accelerator() -> bool:
         # Metal, and only on Apple Silicon. An Intel Mac's integrated or AMD GPU
         # is not a path the local runner uses.
         return platform.machine() in ("arm64", "aarch64")
-    if os.environ.get("CUDA_VISIBLE_DEVICES", "").strip() not in ("", "-1"):
-        return True
-    if platform.system() == "Windows":
-        return _windows_has_accelerator()
-    for node in ("/dev/nvidiactl", "/proc/driver/nvidia/version", "/dev/kfd"):
-        if Path(node).exists():
-            return True
-    return any(Path("/dev").glob("nvidia[0-9]*"))
+    return has_nvidia_accelerator() or _has_amd_accelerator()
 
 
 def local_inference_support() -> HostSupport:

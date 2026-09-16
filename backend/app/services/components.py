@@ -212,9 +212,17 @@ def catalogue() -> tuple[Component, ...]:
         ),
     )
     # Appended rather than listed above: it exists only where the stage recorded
-    # an archive to fetch it from, which is Windows and Linux.
+    # an archive to fetch it from (Windows and Linux), and only offered to a host
+    # that can use it -- CUDA is NVIDIA-only, so an AMD or CPU-only box gets
+    # Vulkan for free and never sees a download it cannot benefit from.
     source = engine_source()
-    return entries if source is None else (*entries, _engine_runner_component(source))
+    if source is None:
+        return entries
+    from app.host_support import has_nvidia_accelerator  # noqa: PLC0415
+
+    if not has_nvidia_accelerator():
+        return entries
+    return (*entries, _engine_runner_component(source))
 
 
 # The id a registry model gets when it is not one of the catalogue's current
