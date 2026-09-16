@@ -106,6 +106,7 @@ else
 fi
 
 prune_dependencies "$SITE"
+relink_vendored_libs "$SITE"
 byte_compile "$PY" "$STDLIB"
 [ -d "$STAGE/backend" ] && byte_compile "$PY" "$STAGE/backend"
 

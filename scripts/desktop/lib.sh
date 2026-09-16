@@ -232,6 +232,39 @@ prune_dependencies() {
     find "$site" -name '*.dist-info' -type d -exec rm -rf {}/RECORD \; 2>/dev/null || true
 }
 
+# auditwheel repairs a wheel by giving the EXTENSION module a DT_RPATH of
+# `$ORIGIN/../<pkg>.libs` and leaving the vendored libraries themselves with no
+# rpath at all: RPATH is inherited by transitive loads, so the loader still
+# resolves `pillow.libs/libfreetype -> libpng16-4a38ea05.so.16.53.0` when PIL
+# pulls it in. linuxdeploy walks every ELF in the AppDir on its own, with no
+# parent to inherit from, so it reads that as a missing dependency and fails the
+# AppImage -- on a stage that is correct and that the .deb ships working.
+# Recording `$ORIGIN` on each vendored library states the relationship the
+# extension's RPATH already implied. Only libraries with no rpath and a sibling
+# that satisfies one of their NEEDED entries are touched, and the names in these
+# directories are hash-mangled, so `$ORIGIN` can never shadow a system library.
+relink_vendored_libs() {
+    local site="$1" lib dir need rpath patched=0
+    [ "$DESKTOP_OS" = linux ] || return 0
+    _step "Relinking vendored libraries"
+    command -v patchelf >/dev/null 2>&1 || _die "patchelf is needed to stage on Linux"
+    while IFS= read -r lib; do
+        rpath="$(patchelf --print-rpath "$lib" 2>/dev/null)" || continue
+        if [ -n "$rpath" ]; then
+            continue
+        fi
+        dir="$(dirname "$lib")"
+        while IFS= read -r need; do
+            if [ -e "$dir/$need" ]; then
+                patchelf --set-rpath '$ORIGIN' "$lib"
+                patched=$((patched + 1))
+                break
+            fi
+        done < <(patchelf --print-needed "$lib" 2>/dev/null)
+    done < <(find "$site" -type f \( -name '*.so' -o -name '*.so.*' \))
+    _info "gave $patched vendored libraries an \$ORIGIN rpath"
+}
+
 # unchecked-hash, not the default timestamp invalidation: copying into a bundle
 # or an installer rewrites mtimes, which would invalidate every .pyc and send a
 # read-only install trying to rewrite them at import time.
