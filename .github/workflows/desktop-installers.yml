@@ -241,6 +241,15 @@ jobs:
           retention-days: 7
           compression-level: 0
 
+      # The workspace is on D: and the app writes its log under C:, so
+      # upload-artifact has no common root for the two and refuses the whole
+      # upload. Copied into the workspace instead of uploaded from where it lies.
+      - name: Collect the app log
+        if: always()
+        run: |
+          mkdir -p build
+          cp -f "$(cygpath -u "$LOCALAPPDATA")/Luminary/Logs/luminary.log" build/ || true
+
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -250,5 +259,4 @@ jobs:
             build/*.png
             build/*.log
             build/installed-app.out
-            ~/AppData/Local/Luminary/Logs/luminary.log
           retention-days: 7
