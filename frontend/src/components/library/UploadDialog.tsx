@@ -19,6 +19,8 @@ import {
 import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
 import { capabilityOf, useCapabilities } from "@/hooks/useSetup"
 import type { CapabilityKey } from "@/lib/setupApi"
+import { fetchOreillyStatus, isOreillyUrl } from "@/lib/oreillyApi"
+import { OreillyConnectModal } from "@/components/library/OreillyConnectModal"
 
 import {
   type Rejection,
@@ -258,6 +260,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
   const { data: collectionTree } = useQuery({
     queryKey: ["collections-tree"],
     queryFn: () => apiGet<CollectionTreeItem[]>("/collections/tree"),
+    enabled: open,
+  })
+
+  const [oreillyModalOpen, setOreillyModalOpen] = useState(false)
+  const { data: oreillyStatus } = useQuery({
+    queryKey: ["oreilly-status"],
+    queryFn: fetchOreillyStatus,
     enabled: open,
   })
 
@@ -517,6 +526,13 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
       return
     }
     setUrlError("")
+
+    // If an O'Reilly URL is entered and not yet connected, open the connect modal
+    if (isOreillyUrl(urlValue) && !(oreillyStatus?.configured && oreillyStatus?.valid)) {
+      setOreillyModalOpen(true)
+      return
+    }
+
     uploadStartRef.current = Date.now()
     setMode("uploading")
     setDocTitle(urlValue)
@@ -537,6 +553,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Couldn't add the document."
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
+      if (isOreillyUrl(urlValue) && errMsg.toLowerCase().includes("cookie")) {
+        setOreillyModalOpen(true)
+        setMode("idle")
+        return
+      }
       setMode("error")
       setErrorMessage(errMsg)
       setErrorComponents(err instanceof ComponentsRequiredError ? err.components : [])
@@ -690,9 +711,30 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   {urlError && (
                     <p className="mt-1 text-xs text-red-600">{urlError}</p>
                   )}
+                  {url && isOreillyUrl(url) && (
+                    <div className="mt-2">
+                      {oreillyStatus?.configured && oreillyStatus?.valid ? (
+                        <div className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                          O'Reilly Book detected — Subscription Connected ({oreillyStatus.user ?? "Subscriber"})
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between rounded-md bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 text-xs text-red-300">
+                          <span>O'Reilly Book detected — Subscription cookies needed</span>
+                          <button
+                            type="button"
+                            onClick={() => setOreillyModalOpen(true)}
+                            className="font-medium text-red-400 hover:underline ml-2"
+                          >
+                            Connect
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {!url && !urlError && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Articles are extracted to Markdown. YouTube videos are transcribed. All processing is local.
+                      Articles are extracted to Markdown. YouTube videos and O'Reilly books are automatically detected. All processing is local.
                     </p>
                   )}
                 </div>
@@ -864,6 +906,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           </>
         )}
       </div>
+
+      <OreillyConnectModal
+        open={oreillyModalOpen}
+        onClose={() => setOreillyModalOpen(false)}
+        onSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: ["oreilly-status"] })
+          if (url.trim()) {
+            void handleUrlSubmit()
+          }
+        }}
+      />
     </div>
   )
 }

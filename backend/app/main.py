@@ -45,6 +45,7 @@ from app.routers.mastery import router as mastery_router
 from app.routers.model_lab import router as model_lab_router
 from app.routers.monitoring import router as monitoring_router
 from app.routers.notes import router as notes_router
+from app.routers.oreilly import router as oreilly_router
 from app.routers.pomodoro import router as pomodoro_router
 from app.routers.progress import router as progress_router
 from app.routers.qa import router as qa_router
@@ -526,6 +527,7 @@ ROUTER_REGISTRY = {
     "model_lab": model_lab_router,
     "monitoring": monitoring_router,
     "notes": notes_router,
+    "oreilly": oreilly_router,
     "pomodoro": pomodoro_router,
     "progress": progress_router,
     "qa": qa_router,
