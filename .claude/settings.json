@@ -26,6 +26,11 @@
             "type": "command",
             "command": "cmd=$(jq -r '.tool_input.command // \"\"'); case \"$cmd\" in *\"pip install\"*|*\"pip3 install\"*|*\"poetry add\"*|*\"poetry install\"*|*\"poetry run\"*) echo 'BLOCK: this repo is uv-only (I-15). Use: uv add <package>. Note uv pip install bypasses uv.lock and is also disallowed.' >&2; exit 2;; esac; exit 0",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); case \"$cmd\" in *capped_run.sh*|*MEM_CAP_GB*) exit 0;; esac; case \"$cmd\" in *CoreMLExecutionProvider*) echo 'BLOCK: the CoreML execution provider recompiles the graph per input shape; on 2026-09-16 an unwrapped encoder probe grew to ~50GB and wedged the host. Use CPUExecutionProvider, or run it as: MEM_CAP_GB=12 scripts/capped_run.sh <command>.' >&2; exit 2;; esac; case \"$cmd\" in *python*) case \"$cmd\" in *probe*|*scratchpad*) echo 'BLOCK: local probe scripts run under a memory ceiling. Re-run as: MEM_CAP_GB=12 scripts/capped_run.sh <command>.' >&2; exit 2;; esac;; esac; exit 0",
+            "timeout": 5000
           }
         ]
       }

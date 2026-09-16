@@ -103,4 +103,60 @@ describe("settleIntoView", () => {
     expect(clock.pending()).toBe(0)
     expect(mark.state.centred).toBe(0)
   })
+
+  it("aborts immediately when user scrolls via wheel", () => {
+    const clock = fakeClock()
+    const mark = scriptedMark([600, 600, 600])
+    const target = new EventTarget()
+    settleIntoView({
+      ...mark.deps,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      userEventsTarget: target,
+    })
+    expect(clock.pending()).toBe(1)
+    target.dispatchEvent(new Event("wheel"))
+    expect(clock.pending()).toBe(0)
+    expect(mark.state.centred).toBe(0)
+  })
+
+  it("aborts immediately when user touches or clicks", () => {
+    const clock = fakeClock()
+    const mark = scriptedMark([600, 600, 600])
+    const target = new EventTarget()
+    settleIntoView({
+      ...mark.deps,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      userEventsTarget: target,
+    })
+    expect(clock.pending()).toBe(1)
+    target.dispatchEvent(new Event("pointerdown"))
+    expect(clock.pending()).toBe(0)
+  })
+
+  it("aborts immediately on navigation keydown and ignores non-navigation keys", () => {
+    const clock = fakeClock()
+    const mark = scriptedMark([600, 600, 600])
+    const target = new EventTarget()
+    settleIntoView({
+      ...mark.deps,
+      schedule: clock.schedule,
+      cancel: clock.cancel,
+      userEventsTarget: target,
+    })
+    expect(clock.pending()).toBe(1)
+    // Non-navigation key
+    const typingEvent = new Event("keydown")
+    Object.defineProperty(typingEvent, "key", { value: "a" })
+    target.dispatchEvent(typingEvent)
+    expect(clock.pending()).toBe(1)
+
+    // Navigation key
+    const navEvent = new Event("keydown")
+    Object.defineProperty(navEvent, "key", { value: "ArrowDown" })
+    target.dispatchEvent(navEvent)
+    expect(clock.pending()).toBe(0)
+  })
 })
+
