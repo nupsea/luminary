@@ -81,6 +81,12 @@ if compgen -G "$LIB/cuda_v*" >/dev/null; then
 fi
 compgen -G "$LIB/*ggml-cpu*" >/dev/null || _die "no CPU runners in $ASSET"
 
+# The engine's libraries load each other through the rpath on `ollama` itself, so
+# linuxdeploy -- which inspects each one alone -- calls libggml-base.so.0 missing
+# and fails the AppImage. `verify_ollama.sh` runs the engine after this, so a
+# relink that broke it fails the stage rather than the bundle.
+relink_sibling_libs "$LIB"
+
 # The shell copies this tree into the writable library directory on first launch
 # and spawns it from there (engine_dir in src-tauri/src/stage.rs): Ollama
 # resolves its runners relative to its own executable, and an installed tree is
