@@ -9,6 +9,7 @@ bytes.
 import hashlib
 import io
 import json
+import os
 import tarfile
 import zipfile
 
@@ -262,6 +263,11 @@ def test_a_symlink_that_escapes_the_target_is_refused(tmp_path):
         extract_prefix(tmp_path / "evil.tar.zst", RUNNER_PREFIX, tmp_path / "out")
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows has no executable bit -- chmod there only toggles read-only -- and "
+    "the archive this guards is the .tar.zst one, which only Linux hosts fetch.",
+)
 def test_a_runner_keeps_its_executable_bit(tmp_path):
     _tar_zst_archive(tmp_path / "a.tar.zst", {f"{RUNNER_PREFIX}libggml-cuda.so": b"runner"})
     into = tmp_path / "out"
