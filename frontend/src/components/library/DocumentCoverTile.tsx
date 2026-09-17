@@ -198,6 +198,15 @@ export function DocumentCoverTile({ doc, className }: DocumentCoverTileProps) {
             <div className="absolute inset-0 animate-pulse bg-muted/70" />
           )}
 
+          {/* Ambient blurred backdrop for portrait book covers */}
+          <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+            <img
+              src={candidateUrl}
+              alt=""
+              className="h-full w-full object-cover blur-xl scale-125 opacity-35 dark:opacity-25"
+            />
+          </div>
+
           <img
             src={candidateUrl}
             alt={doc.title}
@@ -205,13 +214,13 @@ export function DocumentCoverTile({ doc, className }: DocumentCoverTileProps) {
             onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
             className={cn(
-              "h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105 group-hover:brightness-[1.03]",
+              "relative z-10 h-full w-full object-contain p-1 drop-shadow-sm transition-transform duration-500 ease-out group-hover:scale-105 group-hover:brightness-[1.03]",
               imageLoaded ? "opacity-100" : "opacity-0",
             )}
           />
 
           {/* Frosted subtle glass bottom badge with format or duration */}
-          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-medium backdrop-blur-sm shadow-sm opacity-90 transition-opacity group-hover:opacity-100">
+          <div className="absolute bottom-1.5 right-1.5 z-20 flex items-center gap-1 rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-medium backdrop-blur-sm shadow-sm opacity-90 transition-opacity group-hover:opacity-100">
             <span>{isYouTube ? "YouTube" : doc.format.toUpperCase()}</span>
           </div>
         </>

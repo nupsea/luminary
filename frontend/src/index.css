@@ -429,7 +429,7 @@ html {
 /* Publication-grade EPUB reader typography & diagrams */
 .epub-reader-content figure,
 .epub-reader-content .figure {
-  margin: 2rem auto;
+  margin: 1.75rem auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -440,13 +440,24 @@ html {
 .epub-reader-content figure img,
 .epub-reader-content .figure img,
 .epub-reader-content img {
-  max-width: 100%;
+  max-width: min(100%, 540px);
+  max-height: 440px;
+  width: auto;
   height: auto;
+  object-fit: contain;
   border-radius: var(--radius-md);
   margin: 0 auto;
   display: block;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid hsl(var(--border) / 0.8);
   background-color: hsl(var(--card));
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: zoom-in;
+}
+
+.epub-reader-content figure img:hover,
+.epub-reader-content .figure img:hover,
+.epub-reader-content img:hover {
   box-shadow: var(--shadow-md);
 }
 

@@ -1454,11 +1454,86 @@ def _render_cover_sync(fp: str, target: str) -> bool:
         return False
 
 
+def _extract_epub_cover_sync(fp: str, target: str) -> bool:
+    """Extract embedded cover image from an EPUB archive and cache as WEBP."""
+    try:
+        import re
+        import zipfile
+        from io import BytesIO
+
+        from PIL import Image
+
+        with zipfile.ZipFile(fp) as zf:
+            namelist = zf.namelist()
+            valid_exts = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+            candidate_name = None
+
+            # 1. Direct match: image file with 'cover' in its name
+            for name in namelist:
+                name_lower = name.lower()
+                if any(name_lower.endswith(ext) for ext in valid_exts) and "cover" in name_lower:
+                    candidate_name = name
+                    break
+
+            # 2. OPF metadata match: look for cover-image property or meta name="cover"
+            if not candidate_name:
+                opf_names = [n for n in namelist if n.lower().endswith(".opf")]
+                for opf_name in opf_names:
+                    try:
+                        opf_content = zf.read(opf_name).decode("utf-8", errors="replace")
+                        # Look for properties="cover-image" href="..."
+                        m_prop = re.search(
+                            r'<item[^>]+properties=["\'][^"\']*cover-image[^"\']*["\'][^>]+href=["\']([^"\']+)["\']',
+                            opf_content,
+                            re.IGNORECASE,
+                        )
+                        if not m_prop:
+                            m_prop = re.search(
+                                r'<item[^>]+href=["\']([^"\']+)["\'][^>]+properties=["\'][^"\']*cover-image',
+                                opf_content,
+                                re.IGNORECASE,
+                            )
+                        if m_prop:
+                            href = m_prop.group(1).lstrip("/")
+                            base = str(Path(opf_name).parent)
+                            resolved = f"{base}/{href}" if base and base != "." else href
+                            if resolved in namelist:
+                                candidate_name = resolved
+                                break
+                    except Exception as opf_err:
+                        logger.debug("OPF parse skipped: %s", opf_err)
+
+            # 3. Fallback: first raster image
+            if not candidate_name:
+                for name in namelist:
+                    if any(name.lower().endswith(ext) for ext in valid_exts):
+                        candidate_name = name
+                        break
+
+            if candidate_name:
+                raw_bytes = zf.read(candidate_name)
+                img = Image.open(BytesIO(raw_bytes))
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                if img.height > 600:
+                    ratio = 600.0 / img.height
+                    img = img.resize((int(img.width * ratio), 600), Image.Resampling.LANCZOS)
+                target_path = Path(target)
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                img.save(target_path, "WEBP", quality=85)
+                return True
+    except Exception as exc:
+        logger.warning("Failed to extract EPUB cover for %s: %s", fp, exc)
+    return False
+
+
 @router.get("/{document_id}/cover")
 async def get_document_cover(document_id: str) -> FileResponse:
     """Serve or generate on-demand the cover / preview image for a document.
 
-    - For PDF / EPUB: renders page 0 via PyMuPDF (fitz) if not already cached.
+    - For EPUB: extracts the embedded cover image from the archive.
+    - For PDF: renders page 0 via PyMuPDF (fitz) if not already cached.
     - If images exist (e.g. from article extraction), serves the first diagram/figure.
     - Returns 404 if no image can be produced for this document.
     """
@@ -1473,7 +1548,15 @@ async def get_document_cover(document_id: str) -> FileResponse:
         doc_format = (doc.format or "").lower()
         file_path = doc.file_path
 
-        # 1. If PDF or EPUB, try rendering page 0
+        # 1. For EPUB, extract the real embedded cover image first
+        if doc_format == "epub" and file_path and Path(file_path).is_file():
+            success = await asyncio.to_thread(
+                _extract_epub_cover_sync, file_path, str(cached_cover)
+            )
+            if success and cached_cover.is_file():
+                return FileResponse(str(cached_cover), media_type="image/webp")
+
+        # 2. For PDF (or EPUB fallback), try rendering page 0
         if doc_format in ("pdf", "epub") and file_path and Path(file_path).is_file():
             success = await asyncio.to_thread(_render_cover_sync, file_path, str(cached_cover))
             if success and cached_cover.is_file():
