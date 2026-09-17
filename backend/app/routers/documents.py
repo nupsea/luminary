@@ -110,10 +110,7 @@ from app.services.llm_admission import paused_for_interaction
 from app.services.naming import normalize_tag_slug
 from app.services.notes_service import sync_document_tag_index
 from app.services.objective_tracker import get_objective_tracker_service
-from app.services.oreilly_service import (
-    is_oreilly_url,
-    start_oreilly_ingestion,
-)
+from app.services.oreilly_service import is_oreilly_url
 from app.services.parser import DocumentParser
 from app.services.remote_source import (
     RemoteDocument,
@@ -133,6 +130,7 @@ from app.workflows.ingestion import (
     run_ingestion,
 )
 from app.workflows.ingestion_nodes._shared import _persist_extraction_report
+from app.workflows.oreilly_ingestion import start_oreilly_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +155,7 @@ WIRE_PREVIEW_CHARS = 1200
 
 def _wire_preview(preview: str | None) -> str:
     return (preview or "")[:WIRE_PREVIEW_CHARS]
+
 
 _parser = DocumentParser()
 
@@ -237,9 +236,7 @@ async def list_documents(
     ),
     sort: Literal[
         "newest", "oldest", "alphabetical", "most-studied", "last_accessed", "weakest-first"
-    ] = Query(
-        default="newest"
-    ),
+    ] = Query(default="newest"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> DocumentListResponse:
@@ -717,9 +714,7 @@ async def detect_document_type(file: UploadFile = File(...)):
         )
         return {"content_type": content_type, "detected": True}
     except TimeoutError:
-        logger.info(
-            "detect-type gave up on %s after %ss", file.filename, _DETECT_TIMEOUT_SECONDS
-        )
+        logger.info("detect-type gave up on %s after %ss", file.filename, _DETECT_TIMEOUT_SECONDS)
         return {"content_type": None, "detected": False}
     except Exception as exc:
         # A detection failure must not block the upload: the pipeline classifies
@@ -785,7 +780,6 @@ async def ingest_document(
                     }
                 missing = [m for m in PREGENERATE_MODES if m not in existing_modes]
                 if missing:
-
                     task = asyncio.create_task(_ingestion_module._run_pregenerate(existing.id))
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
@@ -866,9 +860,7 @@ async def ingest_document(
         session.add(doc)
         await session.commit()
 
-    get_ingestion_jobs().launch(
-        doc_id, run_ingestion(doc_id, str(dest), fmt, content_type)
-    )
+    get_ingestion_jobs().launch(doc_id, run_ingestion(doc_id, str(dest), fmt, content_type))
     logger.info("Ingestion started", extra={"doc_id": doc_id})
     return {"document_id": doc_id, "status": "processing"}
 
@@ -932,9 +924,7 @@ async def ingest_kindle(
             # Document row must exist in SQLite before the background ingestion job starts.
             session.add(doc)
             await session.flush()
-            await sync_document_tag_index(
-                doc_id, doc.tags, session, record_manual_provenance=True
-            )
+            await sync_document_tag_index(doc_id, doc.tags, session, record_manual_provenance=True)
             await session.commit()
 
         get_ingestion_jobs().launch(
@@ -1004,7 +994,6 @@ async def ingest_url(
 
     # 1. Non-YouTube: a linked file if the URL resolves to one, else a web article
     if not is_youtube_url(body.url):
-
         doc_id = str(uuid.uuid4())
         try:
             remote = await fetch_remote_document(body.url)
@@ -1014,9 +1003,7 @@ async def ingest_url(
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         except httpx.HTTPError as exc:
             logger.warning("Could not reach %s: %s", body.url, exc)
-            raise HTTPException(
-                status_code=400, detail=f"Could not fetch that URL: {exc}"
-            ) from exc
+            raise HTTPException(status_code=400, detail=f"Could not fetch that URL: {exc}") from exc
 
         if remote is not None:
             return await _ingest_remote_pdf(doc_id, remote, settings)
@@ -1603,7 +1590,6 @@ async def get_document_cover(document_id: str) -> FileResponse:
     raise HTTPException(status_code=404, detail="Cover image not available")
 
 
-
 @router.get("/{document_id}/pdf-meta", response_model=PDFMetaResponse)
 async def get_pdf_meta(document_id: str) -> PDFMetaResponse:
     """Return PDF metadata: page count and whether a TOC (sections) exists.
@@ -1817,7 +1803,6 @@ async def patch_document(document_id: str, body: PatchDocumentRequest):
         if body.title is not None:
             doc.title = body.title
         if body.tags is not None:
-
             doc.tags = [normalize_tag_slug(t) for t in body.tags if normalize_tag_slug(t)]
             await sync_document_tag_index(
                 document_id, doc.tags, session, record_manual_provenance=True
@@ -1872,9 +1857,7 @@ async def retag_all_documents():
     """
     async with get_session_factory()() as session:
         rows = (
-            await session.execute(
-                select(DocumentModel.id).where(DocumentModel.stage == "complete")
-            )
+            await session.execute(select(DocumentModel.id).where(DocumentModel.stage == "complete"))
         ).all()
     doc_ids = [r[0] for r in rows]
     for did in doc_ids:
@@ -2089,7 +2072,6 @@ async def get_document_diagnostics(document_id: str):
 
     # Kuzu entity and edge counts (0 if graph unavailable)
     try:
-
         entity_count, edge_count = await asyncio.to_thread(
             _graph_module.get_graph_service().count_for_document, document_id
         )
@@ -2250,9 +2232,7 @@ async def update_objective(
     """
     async with get_session_factory()() as session:
         await get_or_404(session, DocumentModel, document_id, name="Document")
-        obj = await get_or_404(
-            session, LearningObjectiveModel, objective_id, name="Objective"
-        )
+        obj = await get_or_404(session, LearningObjectiveModel, objective_id, name="Objective")
         if obj.document_id != document_id:
             raise HTTPException(status_code=404, detail="Objective not found in document")
         obj.covered = payload.covered

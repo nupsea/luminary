@@ -87,9 +87,7 @@ async def test_merge_rewrites_both_notes_and_documents(test_db):
         # Create the target canonical tag (source already exists via the writes above).
         await c.post("/tags", json={"id": tgt, "display_name": tgt})
 
-        m_resp = await c.post(
-            "/tags/merge", json={"source_tag_id": src, "target_tag_id": tgt}
-        )
+        m_resp = await c.post("/tags/merge", json={"source_tag_id": src, "target_tag_id": tgt})
         assert m_resp.status_code == 200, m_resp.text
         body = m_resp.json()
         assert body["affected_notes"] == 1

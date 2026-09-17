@@ -61,9 +61,7 @@ _UNAMBIGUOUS_HINT = re.compile(
     re.I,
 )
 
-_FURNITURE_HINT = re.compile(
-    f"{_UNAMBIGUOUS_HINT.pattern}|{_AMBIGUOUS_HINT.pattern}", re.I
-)
+_FURNITURE_HINT = re.compile(f"{_UNAMBIGUOUS_HINT.pattern}|{_AMBIGUOUS_HINT.pattern}", re.I)
 
 # A region must hold at least this much text to be believed. Bracketing cases: a
 # 60-word <main> on a page whose prose sits in a sibling div is a mis-pick and the

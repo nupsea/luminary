@@ -258,9 +258,7 @@ async def get_metrics(
     Phoenix spans, plus a 7-day QA activity trend from SQLite (available even
     when tracing is off)."""
     settings = get_settings()
-    phoenix_available = (
-        await _check_phoenix_running() if settings.PHOENIX_ENABLED else False
-    )
+    phoenix_available = await _check_phoenix_running() if settings.PHOENIX_ENABLED else False
 
     spans: list[TraceItem] = []
     if phoenix_available:
@@ -276,9 +274,7 @@ async def get_metrics(
             llm_calls += 1
             try:
                 llm_prompt_tokens += int(s.attributes.get("llm.token_count.prompt") or 0)
-                llm_completion_tokens += int(
-                    s.attributes.get("llm.token_count.completion") or 0
-                )
+                llm_completion_tokens += int(s.attributes.get("llm.token_count.completion") or 0)
             except (TypeError, ValueError):
                 pass
 
@@ -333,5 +329,3 @@ async def get_model_usage(
     )
     rows = result.all()
     return [ModelUsageItem(model=row.model_used, call_count=row.call_count) for row in rows]
-
-

@@ -84,11 +84,13 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
     monkeypatch.setattr(
         run_eval,
         "post_qa",
-        lambda url, question, model, doc_id: qa_calls.append(question)
-        or {
-            "answer": f"GENERATED::{question}",
-            "context_chunks": ["grounding chunk"],
-        },
+        lambda url, question, model, doc_id: (
+            qa_calls.append(question)
+            or {
+                "answer": f"GENERATED::{question}",
+                "context_chunks": ["grounding chunk"],
+            }
+        ),
     )
 
     class _FakeGenerationEval:
@@ -109,9 +111,12 @@ def test_judge_scores_generated_answers_not_golden(monkeypatch):
         "argv",
         [
             "run_eval.py",
-            "--dataset", "book",
-            "--backend-url", "http://test",
-            "--judge-model", "ollama/fake-judge",
+            "--dataset",
+            "book",
+            "--backend-url",
+            "http://test",
+            "--judge-model",
+            "ollama/fake-judge",
         ],
     )
 
@@ -210,9 +215,12 @@ def test_judge_skipped_when_qa_returns_nothing(monkeypatch):
         "argv",
         [
             "run_eval.py",
-            "--dataset", "book",
-            "--backend-url", "http://test",
-            "--judge-model", "ollama/fake-judge",
+            "--dataset",
+            "book",
+            "--backend-url",
+            "http://test",
+            "--judge-model",
+            "ollama/fake-judge",
         ],
     )
 
@@ -243,16 +251,27 @@ def test_not_found_counts_as_declined_not_failed(monkeypatch):
         def run(self, samples, judge_model):
             judged_batches.append(samples)
             return {
-                "faithfulness": 0.8, "answer_relevance": 0.7,
-                "context_precision": None, "context_recall": None,
-                "judge_failed_calls": 0, "judge_total_calls": 2,
+                "faithfulness": 0.8,
+                "answer_relevance": 0.7,
+                "context_precision": None,
+                "context_recall": None,
+                "judge_failed_calls": 0,
+                "judge_total_calls": 2,
             }
 
     monkeypatch.setattr(run_eval, "GenerationEval", _CaptureGenerationEval)
     monkeypatch.setattr(
-        sys, "argv",
-        ["run_eval.py", "--dataset", "book", "--backend-url", "http://test",
-         "--judge-model", "ollama/fake-judge"],
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--dataset",
+            "book",
+            "--backend-url",
+            "http://test",
+            "--judge-model",
+            "ollama/fake-judge",
+        ],
     )
 
     run_eval.main()

@@ -133,8 +133,12 @@ async def test_delete_with_aliases(repo: TagRepo) -> None:
     from sqlalchemy import select  # noqa: PLC0415
 
     rows = (
-        await repo.session.execute(
-            select(TagAliasModel).where(TagAliasModel.canonical_tag_id == "src")
+        (
+            await repo.session.execute(
+                select(TagAliasModel).where(TagAliasModel.canonical_tag_id == "src")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []

@@ -79,7 +79,9 @@ async def test_a_partly_supported_answer_is_not_a_pass():
 @pytest.mark.asyncio
 async def test_an_unreachable_checker_yields_unverifiable_not_a_pass():
     verdict = await check_answer(
-        "q", "a", _PASSAGE,
+        "q",
+        "a",
+        _PASSAGE,
         checker="ollama/qwen2.5:14b-instruct",
         llm=_llm(raises=ConnectionError("ollama is down")),
     )
@@ -89,7 +91,9 @@ async def test_an_unreachable_checker_yields_unverifiable_not_a_pass():
 @pytest.mark.asyncio
 async def test_garbage_from_the_checker_yields_unverifiable_not_a_pass():
     verdict = await check_answer(
-        "q", "a", _PASSAGE,
+        "q",
+        "a",
+        _PASSAGE,
         checker="ollama/qwen2.5:14b-instruct",
         llm=_llm("I think it is probably fine"),
     )

@@ -140,9 +140,7 @@ def _rows(run_dict: dict[str, Any]) -> list[MetricRow]:
                 tier=tier(key),
                 values=values,
                 identical=(
-                    len(present) > 1
-                    and len(set(present)) == 1
-                    and len(present) == len(models)
+                    len(present) > 1 and len(set(present)) == 1 and len(present) == len(models)
                 ),
             )
         )
@@ -164,8 +162,7 @@ def _view(run: model_lab.MatrixRun) -> RunView:
             ArmView(
                 model=arm["model"],
                 tasks=[
-                    TaskRunView(**{k: t[k] for k in TaskRunView.model_fields})
-                    for t in arm["tasks"]
+                    TaskRunView(**{k: t[k] for k in TaskRunView.model_fields}) for t in arm["tasks"]
                 ],
                 metrics=arm["metrics"],
                 failed_tasks=arm["failed_tasks"],

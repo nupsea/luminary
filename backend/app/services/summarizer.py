@@ -179,29 +179,31 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
 }
 
 
-_NOISE_HEADINGS = frozenset({
-    "praise",
-    "praise for the book",
-    "foreword",
-    "preface",
-    "acknowledgments",
-    "acknowledgements",
-    "how to contact us",
-    "conventions used in this book",
-    "table of contents",
-    "about the author",
-    "about the authors",
-    "colophon",
-    "dedication",
-    "copyright",
-    "index",
-    "using code examples",
-    "prerequisites",
-    "what this book is about",
-    "who this book is for",
-    "who this book is not for",
-    "navigating this book",
-})
+_NOISE_HEADINGS = frozenset(
+    {
+        "praise",
+        "praise for the book",
+        "foreword",
+        "preface",
+        "acknowledgments",
+        "acknowledgements",
+        "how to contact us",
+        "conventions used in this book",
+        "table of contents",
+        "about the author",
+        "about the authors",
+        "colophon",
+        "dedication",
+        "copyright",
+        "index",
+        "using code examples",
+        "prerequisites",
+        "what this book is about",
+        "who this book is for",
+        "who this book is not for",
+        "navigating this book",
+    }
+)
 
 _NOISE_PREFIXES = (
     "praise for",

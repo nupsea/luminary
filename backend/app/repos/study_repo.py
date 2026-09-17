@@ -45,9 +45,7 @@ class StudyRepo:
     # -- StudySession lifecycle -------------------------------------------
 
     async def get_session_or_404(self, session_id: str) -> StudySessionModel:
-        return await get_or_404(
-            self.session, StudySessionModel, session_id, name="Session"
-        )
+        return await get_or_404(self.session, StudySessionModel, session_id, name="Session")
 
     async def find_open_session(
         self,
@@ -99,9 +97,7 @@ class StudyRepo:
         await self.session.refresh(sess)
         return sess
 
-    def append_planned_cards(
-        self, sess: StudySessionModel, card_ids: list[str]
-    ) -> int:
+    def append_planned_cards(self, sess: StudySessionModel, card_ids: list[str]) -> int:
         """Add cards to a session's planned queue. Returns how many were new.
 
         Order is preserved and existing members are skipped, so a card already
@@ -134,14 +130,10 @@ class StudyRepo:
         a single transaction. Used by DELETE /sessions/{id}."""
         sess = await self.get_session_or_404(session_id)
         await self.session.execute(
-            sa_delete(ReviewEventModel).where(
-                ReviewEventModel.session_id == session_id
-            )
+            sa_delete(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
         )
         await self.session.execute(
-            sa_delete(TeachbackResultModel).where(
-                TeachbackResultModel.session_id == session_id
-            )
+            sa_delete(TeachbackResultModel).where(TeachbackResultModel.session_id == session_id)
         )
         await self.session.delete(sess)
         await self.session.commit()
@@ -186,11 +178,9 @@ class StudyRepo:
             return 0
 
         rows = (
-            (
-                await self.session.execute(
-                    select(StudySessionModel).where(or_(*scopes))
-                )
-            ).scalars().all()
+            (await self.session.execute(select(StudySessionModel).where(or_(*scopes))))
+            .scalars()
+            .all()
             if scopes
             else []
         )
@@ -203,13 +193,17 @@ class StudyRepo:
             gone = set(deleted_card_ids)
             seen = {s.id for s, _plan in planned_runs}
             spill = (
-                await self.session.execute(
-                    select(StudySessionModel).where(
-                        StudySessionModel.collection_id.is_not(None),
-                        StudySessionModel.document_id.is_(None),
+                (
+                    await self.session.execute(
+                        select(StudySessionModel).where(
+                            StudySessionModel.collection_id.is_not(None),
+                            StudySessionModel.document_id.is_(None),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             planned_runs += [
                 (s, plan)
                 for s, plan in ((s, list(s.planned_card_ids or [])) for s in spill)
@@ -234,9 +228,7 @@ class StudyRepo:
             return 0
 
         await self.session.execute(
-            sa_delete(TeachbackResultModel).where(
-                TeachbackResultModel.session_id.in_(dead_ids)
-            )
+            sa_delete(TeachbackResultModel).where(TeachbackResultModel.session_id.in_(dead_ids))
         )
         await self.session.execute(
             sa_delete(StudySessionModel).where(StudySessionModel.id.in_(dead_ids))
@@ -246,13 +238,9 @@ class StudyRepo:
 
     # -- Review events / teachback results --------------------------------
 
-    async def list_review_events(
-        self, session_id: str
-    ) -> Sequence[ReviewEventModel]:
+    async def list_review_events(self, session_id: str) -> Sequence[ReviewEventModel]:
         result = await self.session.execute(
-            select(ReviewEventModel).where(
-                ReviewEventModel.session_id == session_id
-            )
+            select(ReviewEventModel).where(ReviewEventModel.session_id == session_id)
         )
         return result.scalars().all()
 
@@ -290,9 +278,7 @@ class StudyRepo:
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
-    async def chunk_section_headings(
-        self, chunk_ids: Sequence[str]
-    ) -> dict[str, str | None]:
+    async def chunk_section_headings(self, chunk_ids: Sequence[str]) -> dict[str, str | None]:
         """Map chunk_id -> section heading. Used for source-panel context
         in /due, /session-plan, and /gaps."""
         if not chunk_ids:
@@ -305,17 +291,13 @@ class StudyRepo:
         result = await self.session.execute(stmt)
         return dict(result.all())
 
-    async def chunk_section_id_map(
-        self, chunk_ids: Sequence[str]
-    ) -> dict[str, str | None]:
+    async def chunk_section_id_map(self, chunk_ids: Sequence[str]) -> dict[str, str | None]:
         """Map chunk_id -> section_id (no heading join). Used by /due for
         the SourcePanel."""
         if not chunk_ids:
             return {}
         result = await self.session.execute(
-            select(ChunkModel.id, ChunkModel.section_id).where(
-                ChunkModel.id.in_(chunk_ids)
-            )
+            select(ChunkModel.id, ChunkModel.section_id).where(ChunkModel.id.in_(chunk_ids))
         )
         return dict(result.all())
 

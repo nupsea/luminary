@@ -399,13 +399,7 @@ class LanceDBService:
             table = self._get_table()
             # search() with no query vector is a plain filtered scan; limit must be
             # explicit (default is 10) so we don't truncate the evidence set.
-            rows = (
-                table.search()
-                .where(pred)
-                .select(["vector"])
-                .limit(len(chunk_ids))
-                .to_list()
-            )
+            rows = table.search().where(pred).select(["vector"]).limit(len(chunk_ids)).to_list()
             vectors = [r["vector"] for r in rows if r.get("vector") is not None]
             if not vectors:
                 return None

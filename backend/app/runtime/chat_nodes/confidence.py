@@ -103,7 +103,6 @@ async def augment_node(state: ChatState) -> dict:
             # Complementary: Kuzu entity graph relationships
             entity_names = _extract_entities_from_question(question)
             try:
-
                 conn = _graph_module.get_graph_service()._conn
                 for name in entity_names[:5]:
                     new_section_lines.extend(_query_kuzu_for_entity(conn, name))
@@ -205,7 +204,6 @@ async def web_augment_node(state: ChatState) -> dict:
 
     question = state.get("rewritten_question") or state["question"]
     logger.info("web_augment_node: fetching web snippets for query=%r", question[:60])
-
 
     snippets: list[dict] = []
     try:

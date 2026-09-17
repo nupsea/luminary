@@ -355,12 +355,8 @@ class LearningGoalsService:
         correct_count = 0
         total_events = 0
         for sess in sessions:
-            window_start = (
-                _as_utc(sess.started_at) if sess.started_at is not None else None
-            )
-            window_end = (
-                _as_utc(sess.completed_at) if sess.completed_at is not None else None
-            )
+            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
+            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
             stmt = select(ReviewEventModel).where(
@@ -404,12 +400,8 @@ class LearningGoalsService:
         sessions_completed = len(sessions)
         notes_created = 0
         for sess in sessions:
-            window_start = (
-                _as_utc(sess.started_at) if sess.started_at is not None else None
-            )
-            window_end = (
-                _as_utc(sess.completed_at) if sess.completed_at is not None else None
-            )
+            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
+            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
             cnt = (
@@ -432,12 +424,8 @@ class LearningGoalsService:
         sessions_completed = len(sessions)
         turns = 0
         for sess in sessions:
-            window_start = (
-                _as_utc(sess.started_at) if sess.started_at is not None else None
-            )
-            window_end = (
-                _as_utc(sess.completed_at) if sess.completed_at is not None else None
-            )
+            window_start = _as_utc(sess.started_at) if sess.started_at is not None else None
+            window_end = _as_utc(sess.completed_at) if sess.completed_at is not None else None
             if window_start is None or window_end is None:
                 continue
             cnt = (

@@ -116,9 +116,7 @@ def test_every_declared_card_type_maps_to_a_level():
 
     from app.services.flashcard_prompts import TECH_FLASHCARD_SYSTEM, TYPE_TO_BLOOM
 
-    match = re.search(
-        r"flashcard types:\s*(.+?)\.\s", TECH_FLASHCARD_SYSTEM.replace("\n", " ")
-    )
+    match = re.search(r"flashcard types:\s*(.+?)\.\s", TECH_FLASHCARD_SYSTEM.replace("\n", " "))
     assert match, "the technical prompt no longer lists its card types"
     declared = {t.strip() for t in match.group(1).split(",") if t.strip()}
     assert declared <= set(TYPE_TO_BLOOM), (

@@ -593,9 +593,7 @@ async def test_keychain_key_preferred_over_env(test_db, monkeypatch):
     monkeypatch.setattr(
         config_module,
         "get_settings",
-        lambda: SimpleNamespace(
-            OPENAI_API_KEY="sk-env", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""
-        ),
+        lambda: SimpleNamespace(OPENAI_API_KEY="sk-env", ANTHROPIC_API_KEY="", GOOGLE_API_KEY=""),
     )
     svc_module._cache.update(
         {

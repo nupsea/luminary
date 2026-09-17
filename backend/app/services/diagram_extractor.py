@@ -131,7 +131,6 @@ class DiagramExtractorService:
         do not create duplicate nodes.
         """
 
-
         async with get_session_factory()() as session:
             result = await session.execute(
                 select(ImageModel).where(

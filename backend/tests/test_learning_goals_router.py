@@ -63,9 +63,7 @@ async def test_post_goal_returns_active(test_db):
 @pytest.mark.asyncio
 async def test_post_goal_invalid_type_returns_422(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        resp = await c.post(
-            "/goals", json={"title": "x", "goal_type": "bogus"}
-        )
+        resp = await c.post("/goals", json={"title": "x", "goal_type": "bogus"})
     assert resp.status_code == 422
 
 

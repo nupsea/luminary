@@ -75,8 +75,12 @@ def _resolve_dates(q: str, now: date) -> tuple[date | None, date | None, str | N
     m = _PAST_N.search(ql)
     if m:
         n, unit = int(m.group(1)), m.group(2)
-        delta = {"day": timedelta(days=n), "week": timedelta(weeks=n),
-                 "month": timedelta(days=30 * n), "year": timedelta(days=365 * n)}[unit]
+        delta = {
+            "day": timedelta(days=n),
+            "week": timedelta(weeks=n),
+            "month": timedelta(days=30 * n),
+            "year": timedelta(days=365 * n),
+        }[unit]
         return now - delta, now, m.group(0)
     # "<month> <year>" or bare "<month>" (this year) or bare "<year>"
     mw = _MONTH_WORD.search(ql)

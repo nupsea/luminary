@@ -277,10 +277,9 @@ def test_offline_first_run_fails_fast_with_an_actionable_message(monkeypatch):
     monkeypatch.setattr(model_prefetch, "hub_reachable", lambda *a, **k: False)
 
     called: list = []
-    monkeypatch.setattr(
-        model_prefetch, "prefetch", lambda *a, **k: called.append(a) or {}
-    )
+    monkeypatch.setattr(model_prefetch, "prefetch", lambda *a, **k: called.append(a) or {})
     for name in ("_load_embedder", "_load_ner", "_load_reranker", "_warm_llm"):
+
         async def _noop():
             return None
 

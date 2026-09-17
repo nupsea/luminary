@@ -234,8 +234,7 @@ async def test_ingest_fiction(integration_db, monkeypatch):
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None, "DocumentModel should exist"
     assert doc.stage == "complete", (
-        f"Expected stage='complete', got '{doc.stage}' "
-        f"(error_message={doc.error_message!r})"
+        f"Expected stage='complete', got '{doc.stage}' (error_message={doc.error_message!r})"
     )
 
     # 2. At least 5 chunks should be in the database
@@ -266,8 +265,7 @@ async def test_ingest_technical(integration_db, monkeypatch):
         doc = await session.get(DocumentModel, doc_id)
     assert doc is not None, "DocumentModel should exist"
     assert doc.stage == "complete", (
-        f"Expected stage='complete', got '{doc.stage}' "
-        f"(error_message={doc.error_message!r})"
+        f"Expected stage='complete', got '{doc.stage}' (error_message={doc.error_message!r})"
     )
 
     # 2. At least 5 chunks should be in the database

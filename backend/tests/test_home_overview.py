@@ -36,6 +36,7 @@ async def test_db(tmp_path, monkeypatch):
     # Clean up note creation background tasks to avoid engine.dispose hang
 
     from app.routers.notes import _background_tasks
+
     await drain_background_tasks(_background_tasks)
 
     db_module._engine = orig_engine
@@ -279,9 +280,9 @@ async def _set_activity_age(factory, member_type: str, member_id: str, days_ago:
 @pytest.mark.anyio
 async def test_continue_reading_skips_unfinished_and_unstarted(test_db):
     """Three docs:
-      - started + not finished -> appears
-      - started + finished       -> filtered
-      - never started (0% read)  -> filtered (need read_count > 0)."""
+    - started + not finished -> appears
+    - started + finished       -> filtered
+    - never started (0% read)  -> filtered (need read_count > 0)."""
     _, factory = test_db
     started_id, done_id, untouched_id = (str(uuid.uuid4()) for _ in range(3))
     async with factory() as s:

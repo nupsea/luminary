@@ -165,11 +165,8 @@ async def keep_warm_loop() -> None:
     settings = get_settings()
     if not local_inference_is_slow():
         logger.info(
-            "Keep-warm off: the first local generation took %s at start-up "
-            "(threshold %.0fs)",
-            "unmeasured"
-            if _measured_probe_seconds is None
-            else f"{_measured_probe_seconds:.1f}s",
+            "Keep-warm off: the first local generation took %s at start-up (threshold %.0fs)",
+            "unmeasured" if _measured_probe_seconds is None else f"{_measured_probe_seconds:.1f}s",
             settings.LLM_KEEP_WARM_ABOVE_SECONDS,
         )
         return

@@ -17,9 +17,7 @@ from typing import Literal
 # "missing" is not a failure: the component simply has not been installed yet,
 # and there is an action for it. Reporting that as failed put a warning icon and
 # a raw exception in front of a user whose install was working correctly.
-State = Literal[
-    "pending", "downloading", "loading", "ready", "failed", "skipped", "missing"
-]
+State = Literal["pending", "downloading", "loading", "ready", "failed", "skipped", "missing"]
 
 # `required` decides what the user waits for. Everything else finishes in the
 # background while they use the app: the entity model alone is 1.1GB, and
@@ -76,8 +74,7 @@ class StartupStatus:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._phases = {
-            key: Phase(key=key, label=label, required=required)
-            for key, label, required in _PHASES
+            key: Phase(key=key, label=label, required=required) for key, label, required in _PHASES
         }
         self._started_at = time.time()
         self._offline = False
@@ -121,15 +118,11 @@ class StartupStatus:
     def snapshot(self) -> dict:
         with self._lock:
             phases = [p.as_dict() for p in self._phases.values()]
-            required_ready = all(
-                p.state in _SATISFIED for p in self._phases.values() if p.required
-            )
+            required_ready = all(p.state in _SATISFIED for p in self._phases.values() if p.required)
             failed = [p.key for p in self._phases.values() if p.state == "failed"]
             missing = [p.key for p in self._phases.values() if p.state == "missing"]
             # Nothing left in flight, even if optional pieces are uninstalled.
-            settled = all(
-                p.state in (*_SATISFIED, "missing") for p in self._phases.values()
-            )
+            settled = all(p.state in (*_SATISFIED, "missing") for p in self._phases.values())
             busy = any(p.state in ("downloading", "loading") for p in self._phases.values())
             db_ready = self._phases["db"].state in _SATISFIED
             offline = self._offline

@@ -79,6 +79,7 @@ def unit_text_cap(unit_count: int) -> int:
         return TEXT_HARD_CAP
     return max(MIN_UNIT_CHARS, min(TEXT_HARD_CAP, TOTAL_TEXT_BUDGET // unit_count))
 
+
 # Case-insensitive signals that indicate a metadata/legal section
 _METADATA_SIGNALS = [
     "project gutenberg",
@@ -156,9 +157,7 @@ class SectionSummarizerService:
 
         async with get_session_factory()() as session:
             stale = await session.execute(
-                delete(SectionSummaryModel).where(
-                    SectionSummaryModel.document_id == document_id
-                )
+                delete(SectionSummaryModel).where(SectionSummaryModel.document_id == document_id)
             )
             await session.commit()
         if stale.rowcount:
@@ -385,8 +384,6 @@ class SectionSummarizerService:
         Non-fatal: exceptions are logged and swallowed.
         """
         try:
-
-
             async with get_session_factory()() as session:
                 dup_result = await session.execute(
                     select(func.count(EnrichmentJobModel.id)).where(
@@ -419,16 +416,10 @@ class SectionSummarizerService:
                 exc,
             )
 
-
-
-
-
-
     def _as_units(self, sections: list[SectionModel]) -> list[dict]:
         """One unit per section, so every section gets its own summary."""
         return [
-            {"heading": s.heading, "text": section_text(s), "section_id": s.id}
-            for s in sections
+            {"heading": s.heading, "text": section_text(s), "section_id": s.id} for s in sections
         ]
 
     def _group_sections(self, sections: list[SectionModel]) -> list[dict]:

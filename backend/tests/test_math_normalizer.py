@@ -48,10 +48,7 @@ def test_normalize_ffn_and_positional_encoding():
     ffn_res = normalize_paper_math(ffn_raw)
     assert r"\text{FFN}(x) = \max(0, x W_1 + b_1) W_2 + b_2 \tag{2}" in ffn_res
 
-    pe_raw = (
-        "PE(pos,2i) = sin(pos/100002i/dmodel)\n\n"
-        "PE(pos,2i+1) = cos(pos/100002i/dmodel)"
-    )
+    pe_raw = "PE(pos,2i) = sin(pos/100002i/dmodel)\n\nPE(pos,2i+1) = cos(pos/100002i/dmodel)"
     pe_res = normalize_paper_math(pe_raw)
     expected_pe = (
         r"\text{PE}_{(pos, 2i)} &= "

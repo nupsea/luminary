@@ -1,5 +1,3 @@
-
-
 class TestChapterSplitting:
     """A Gutenberg EPUB packs many chapters into one XHTML file.
 
@@ -91,8 +89,8 @@ class TestEpubSanitization:
             '<div data-type="note"><p>Important note</p></div>'
             '<figure id="fig1">'
             '<img src="data:image/png;base64,iVBORw0KGgoA" alt="Diagram" />'
-            '<figcaption>Figure 1. Diagram</figcaption>'
-            '</figure>'
+            "<figcaption>Figure 1. Diagram</figcaption>"
+            "</figure>"
             '<script>alert("bad")</script>'
         )
 
@@ -102,4 +100,3 @@ class TestEpubSanitization:
         assert "<figcaption>Figure 1. Diagram</figcaption>" in cleaned
         assert 'data-type="note"' in cleaned
         assert "<script>" not in cleaned
-

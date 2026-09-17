@@ -174,9 +174,7 @@ async def refresh_document_references(document_id: str) -> dict:
     # Count valid/invalid from the newly persisted refs (include_invalid=True
     # so the count reflects all rows).
     async with get_session_factory()() as session:
-        rows = await ReferenceRepo(session).list_for_document(
-            document_id, include_invalid=True
-        )
+        rows = await ReferenceRepo(session).list_for_document(document_id, include_invalid=True)
 
     valid = sum(1 for r in rows if r.is_valid is True)
     invalid = sum(1 for r in rows if r.is_valid is False)

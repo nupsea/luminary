@@ -344,10 +344,22 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
         "section_summary_count": None,
         "audio_duration_seconds": 130.0,
         "_audio_chunks": [
-            {"id": str(uuid.uuid4()), "document_id": doc_id, "text": "opening remarks",
-             "index": 0, "start_time": 0.0, "end_time": 62.5},
-            {"id": str(uuid.uuid4()), "document_id": doc_id, "text": "the main argument",
-             "index": 1, "start_time": 62.5, "end_time": 130.0},
+            {
+                "id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "text": "opening remarks",
+                "index": 0,
+                "start_time": 0.0,
+                "end_time": 62.5,
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "text": "the main argument",
+                "index": 1,
+                "start_time": 62.5,
+                "end_time": 130.0,
+            },
         ],
     }
 
@@ -356,10 +368,14 @@ async def test_transcript_chunks_keep_the_moment_they_came_from(test_db):
 
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(ChunkModel)
-                .where(ChunkModel.document_id == doc_id)
-                .order_by(ChunkModel.chunk_index)
+            (
+                await session.execute(
+                    select(ChunkModel)
+                    .where(ChunkModel.document_id == doc_id)
+                    .order_by(ChunkModel.chunk_index)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert [(r.start_time, r.end_time) for r in rows] == [(0.0, 62.5), (62.5, 130.0)]

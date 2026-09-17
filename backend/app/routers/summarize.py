@@ -92,9 +92,7 @@ async def get_cached_summaries(document_id: str) -> dict:
                 mode == "detailed"
                 and (len(content) > 60_000 or content.startswith("## Praise for"))
             ) or (
-                mode == "executive"
-                and len(content) < 600
-                and "### Key Takeaways" not in content
+                mode == "executive" and len(content) < 600 and "### Key Takeaways" not in content
             ):
                 needs_refresh = True
 

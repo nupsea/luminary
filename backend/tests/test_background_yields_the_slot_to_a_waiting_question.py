@@ -35,9 +35,7 @@ from app.services.llm_admission import (
 def pressure(monkeypatch):
     """Drive `under_interactive_pressure()` from the test."""
     state = {"on": False}
-    monkeypatch.setattr(
-        llm_admission, "under_interactive_pressure", lambda: state["on"]
-    )
+    monkeypatch.setattr(llm_admission, "under_interactive_pressure", lambda: state["on"])
     monkeypatch.setattr(llm_admission, "_POLL_SECONDS", 0.01)
     return state
 
@@ -87,9 +85,7 @@ class TestAQueuedCallIsNeverAbandoned:
     rather than simply counting pressure."""
 
     @pytest.mark.asyncio
-    async def test_pressure_present_for_the_whole_call_does_not_abandon_it(
-        self, pressure
-    ):
+    async def test_pressure_present_for_the_whole_call_does_not_abandon_it(self, pressure):
         """A call waiting in admission behind a long question is blocking nobody.
         Abandoning it would degrade suggestions on every host where a question
         outlasts the window."""
@@ -99,9 +95,7 @@ class TestAQueuedCallIsNeverAbandoned:
             await asyncio.sleep(0.3)
             return "suggestions"
 
-        assert await run_yielding_to_interactive(queued(), after_seconds=0.05) == (
-            "suggestions"
-        )
+        assert await run_yielding_to_interactive(queued(), after_seconds=0.05) == ("suggestions")
 
     @pytest.mark.asyncio
     async def test_it_arms_only_after_pressure_clears(self, pressure):
@@ -125,9 +119,7 @@ class TestAQueuedCallIsNeverAbandoned:
 
 class TestAQuickHostIsUntouched:
     @pytest.mark.asyncio
-    async def test_a_call_that_finishes_inside_the_window_is_never_abandoned(
-        self, pressure
-    ):
+    async def test_a_call_that_finishes_inside_the_window_is_never_abandoned(self, pressure):
         """The structural guarantee: a host whose suggestions call completes
         before the window elapses cannot abandon one, whatever the user does."""
 
@@ -139,18 +131,14 @@ class TestAQuickHostIsUntouched:
             pressure["on"] = True
 
         asyncio.create_task(ask_immediately())
-        assert await run_yielding_to_interactive(quick(), after_seconds=5.0) == (
-            "suggestions"
-        )
+        assert await run_yielding_to_interactive(quick(), after_seconds=5.0) == ("suggestions")
 
     @pytest.mark.asyncio
     async def test_no_pressure_at_all_returns_the_result(self, pressure):
         async def quick():
             return "suggestions"
 
-        assert await run_yielding_to_interactive(quick(), after_seconds=0.05) == (
-            "suggestions"
-        )
+        assert await run_yielding_to_interactive(quick(), after_seconds=0.05) == ("suggestions")
 
     @pytest.mark.asyncio
     async def test_the_error_still_reaches_the_caller(self, pressure):

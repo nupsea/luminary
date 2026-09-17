@@ -77,8 +77,10 @@ VISION_SPEC = PromptSpec(
     ),
 )
 
+
 def _vision_prompt() -> str:
     return render_for(VISION_SPEC, "vision")
+
 
 _CONTEXT_TMPL = "Document context:\n{context}\n\n"
 
@@ -213,9 +215,7 @@ def _merge_labels(parsed: dict) -> str:
                 seen.setdefault(text, None)
         clean = list(seen)
         if clean:
-            description = (
-                f"{description} Visible labels: {', '.join(clean[:_MAX_LABELS])}.".strip()
-            )
+            description = f"{description} Visible labels: {', '.join(clean[:_MAX_LABELS])}.".strip()
     return description
 
 
@@ -244,7 +244,6 @@ async def _call_vision_llm(image_path: Path, settings: object, context: str = ""
         models_to_try.append(default_model)
 
     # Resize large images to reduce inference time and avoid timeouts.
-
 
     img = _PILImage.open(image_path)
     if max(img.size) > 1024:
@@ -352,7 +351,6 @@ class ImageEnricherService:
         from sqlalchemy import text as _text
         from sqlalchemy import update as _update
 
-
         settings = _config_module.get_settings()
         data_dir = Path(settings.DATA_DIR).expanduser()
 
@@ -392,7 +390,6 @@ class ImageEnricherService:
 
             async with _get_enrich_sem():
                 try:
-
                     pil_img = _PILImage.open(str(abs_path))
 
                     if _is_decorative(pil_img):
@@ -506,8 +503,6 @@ async def image_analyze_handler(document_id: str, job_id: str) -> None:
     ]
     try:
         from datetime import datetime as _dt
-
-
 
         async with _database_module.get_session_factory()() as session:
             # Check if any qualifying diagram images exist for this document

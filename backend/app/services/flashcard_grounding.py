@@ -62,9 +62,7 @@ def contiguous_runs(chunks: Sequence[ChunkModel]) -> list[list[ChunkModel]]:
     return runs
 
 
-def run_containing(
-    runs: Sequence[Sequence[ChunkModel]], excerpt: str
-) -> list[ChunkModel] | None:
+def run_containing(runs: Sequence[Sequence[ChunkModel]], excerpt: str) -> list[ChunkModel] | None:
     """The one run whose text really contains `excerpt`, or None.
 
     This is what makes a card's own passage recoverable out of the batch's. Every
@@ -127,9 +125,7 @@ async def _document_text(document_id: str, session: AsyncSession) -> str:
     return "\n".join(t for t in rows.scalars().all() if t)
 
 
-async def audit_grounding(
-    session: AsyncSession, document_id: str | None = None
-) -> dict[str, int]:
+async def audit_grounding(session: AsyncSession, document_id: str | None = None) -> dict[str, int]:
     """Recompute and persist the grounding verdict for a deck.
 
     *document_id* limits the audit to one document; omitting it audits the library.
@@ -247,17 +243,13 @@ async def audit_factuality(
             # likely re-ingested. Not judged, and not counted as a verdict.
             skipped += 1
             continue
-        verdict = await check_answer(
-            card.question, card.answer, passage, checker=checker, llm=llm
-        )
+        verdict = await check_answer(card.question, card.answer, passage, checker=checker, llm=llm)
         card.factuality = verdict
         counts[verdict] += 1
 
     if counts:
         await session.commit()
-    left = len(
-        (await session.execute(remaining_stmt)).scalars().all()
-    )
+    left = len((await session.execute(remaining_stmt)).scalars().all())
     logger.info(
         "flashcard factuality audit: %d judged, %d skipped, %d left, %s",
         sum(counts.values()),

@@ -95,7 +95,9 @@ async def test_get_document_cover_from_image_model(test_db):
     images_dir = tmp_path / "images" / doc_id
     images_dir.mkdir(parents=True, exist_ok=True)
     img_file = images_dir / "diagram.png"
-    img_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+    img_file.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
 
     async with factory() as session:
         doc = DocumentModel(
@@ -178,4 +180,3 @@ async def test_get_document_cover_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/documents/{uuid.uuid4()}/cover")
         assert resp.status_code == 404
-

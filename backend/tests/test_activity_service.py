@@ -136,17 +136,13 @@ async def test_flashcard_event_has_no_debounce(factory):
     doc_id = str(uuid.uuid4())
     async with factory() as s:
         assert (
-            await ActivityService(s).record_flashcard_event(
-                document_id=doc_id, note_id=None
-            )
+            await ActivityService(s).record_flashcard_event(document_id=doc_id, note_id=None)
             is True
         )
         first = await _last_at(s, "document", doc_id)
         await asyncio.sleep(0.01)
         assert (
-            await ActivityService(s).record_flashcard_event(
-                document_id=doc_id, note_id=None
-            )
+            await ActivityService(s).record_flashcard_event(document_id=doc_id, note_id=None)
             is True
         )
         second = await _last_at(s, "document", doc_id)
@@ -158,9 +154,7 @@ async def test_flashcard_event_prefers_document_when_both_set(factory):
     doc_id = str(uuid.uuid4())
     note_id = str(uuid.uuid4())
     async with factory() as s:
-        await ActivityService(s).record_flashcard_event(
-            document_id=doc_id, note_id=note_id
-        )
+        await ActivityService(s).record_flashcard_event(document_id=doc_id, note_id=note_id)
         assert (await _last_at(s, "document", doc_id)) is not None
         assert (await _last_at(s, "note", note_id)) is None
 
@@ -169,8 +163,5 @@ async def test_flashcard_event_prefers_document_when_both_set(factory):
 async def test_flashcard_event_returns_false_when_both_none(factory):
     async with factory() as s:
         assert (
-            await ActivityService(s).record_flashcard_event(
-                document_id=None, note_id=None
-            )
-            is False
+            await ActivityService(s).record_flashcard_event(document_id=None, note_id=None) is False
         )

@@ -169,9 +169,7 @@ def _enrich_citation_titles(
 # the routing set, or the two disagree -- "Recap the document" counted as summary
 # intent here while routing sent it to search, because the lists were maintained
 # separately and drifted.
-_LOOSE_SUMMARY_KEYWORDS: frozenset[str] = frozenset(
-    {"brief", "briefly", "summaries", "main idea"}
-)
+_LOOSE_SUMMARY_KEYWORDS: frozenset[str] = frozenset({"brief", "briefly", "summaries", "main idea"})
 
 
 def _should_use_summary(question: str) -> bool:
@@ -279,7 +277,7 @@ def _salvage_truncated_answer(json_text: str) -> str:
     m = re.search(r'"answer"\s*:\s*"', json_text)
     if not m:
         return ""
-    body = json_text[m.end():]
+    body = json_text[m.end() :]
     out: list[str] = []
     escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
     i = 0
@@ -307,6 +305,7 @@ _CITATION_HEADING_RE = re.compile(
 def _is_placeholder_citation(c: dict) -> bool:
     """True when a citation is just the prompt's format example echoed back
     (empty or "..." title AND excerpt) — no real reference content."""
+
     def _blank(v: object) -> bool:
         return not str(v or "").strip().strip(".").strip()
 
@@ -362,11 +361,61 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])[\"'”’)\]]*\s+")
 # which sentence gets shown. Kept deliberately small and domain-neutral.
 _EXCERPT_STOPWORDS = frozenset(
     [
-        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for", "from",
-        "had", "has", "have", "he", "her", "his", "i", "in", "into", "is", "it", "its",
-        "of", "on", "or", "she", "that", "the", "their", "them", "then", "there", "these",
-        "they", "this", "to", "was", "were", "what", "when", "which", "who", "will",
-        "with", "you", "your", "not", "no", "do", "does", "did", "so", "if"
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "but",
+        "by",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "he",
+        "her",
+        "his",
+        "i",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "she",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "which",
+        "who",
+        "will",
+        "with",
+        "you",
+        "your",
+        "not",
+        "no",
+        "do",
+        "does",
+        "did",
+        "so",
+        "if",
     ]
 )
 
@@ -436,6 +485,7 @@ def _excerpt_from_chunk(
     if not target and not hint_tokens:
         best = 0
     else:
+
         def score(sentence: str) -> float:
             tokens = _content_tokens(sentence)
             if not tokens:
@@ -503,9 +553,7 @@ def _resolve_marker_citations(
         idx = int(m.group(1)) if m else 0
         if not 1 <= idx <= len(cited_chunks):
             unresolved += 1
-            logger.warning(
-                "qa: dropped citation naming a source that does not exist: %r", raw
-            )
+            logger.warning("qa: dropped citation naming a source that does not exist: %r", raw)
             continue
         chunk = cited_chunks[idx - 1]
         # Two markers pointing at one chunk are one source, not two chips.
@@ -567,9 +615,7 @@ def _gate_and_rank_citations(citations: list[dict]) -> list[dict]:
     return out
 
 
-def _drop_ungrounded_citations(
-    citations: list[dict], grounding_texts: list[str]
-) -> list[dict]:
+def _drop_ungrounded_citations(citations: list[dict], grounding_texts: list[str]) -> list[dict]:
     """Drop citations whose excerpt does not occur in the answer's grounding.
 
     Verified against the grounding the answer was generated from, not the whole
@@ -922,9 +968,7 @@ class QAService:
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
-                    elif isinstance(
-                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
-                    ):
+                    elif isinstance(exc, (LLMServiceUnavailableError, LLMAPIConnectionError)):
                         msg = (
                             "LLM unreachable. Check your network or Settings"
                             " — if using Ollama, run: ollama serve"
@@ -1029,8 +1073,7 @@ class QAService:
                         "Before answering, start with one probing question (1-2 sentences) "
                         "that activates the user's prior knowledge about this topic. "
                         "Format: [Your probing question?]\\n\\n"
-                        "[Full answer with citations below]\\n\\n"
-                        + system_prompt
+                        "[Full answer with citations below]\\n\\n" + system_prompt
                     )
                 # Retrieval is already finished here -- the graph ran to completion
                 # and left `_llm_prompt` behind -- so the source chips can be on
@@ -1074,9 +1117,7 @@ class QAService:
                     async for token in token_gen:
                         if not ttft_logged:
                             ttft_seconds = time.perf_counter() - t_llm
-                            logger.info(
-                                "[perf] LLM time-to-first-token: %.2fs", ttft_seconds
-                            )
+                            logger.info("[perf] LLM time-to-first-token: %.2fs", ttft_seconds)
                             ttft_logged = True
                         collected.append(token)
                         full_text_so_far += token
@@ -1110,9 +1151,7 @@ class QAService:
                         # Stream ended with no marker — flush the held-back tail.
                         yield f"data: {json.dumps({'token': full_text_so_far[emitted:]})}\n\n"
 
-                    logger.info(
-                        "[perf] LLM streaming complete: %.2fs", time.perf_counter() - t_llm
-                    )
+                    logger.info("[perf] LLM streaming complete: %.2fs", time.perf_counter() - t_llm)
 
                 except Exception as exc:
                     logger.warning(
@@ -1134,9 +1173,7 @@ class QAService:
                             f"Model not found ({type(exc).__name__})."
                             " Check the model name in Settings."
                         )
-                    elif isinstance(
-                        exc, (LLMServiceUnavailableError, LLMAPIConnectionError)
-                    ):
+                    elif isinstance(exc, (LLMServiceUnavailableError, LLMAPIConnectionError)):
                         msg = (
                             "LLM unreachable. Check your network or Settings"
                             " — if using Ollama, run: ollama serve"
@@ -1198,9 +1235,7 @@ class QAService:
                 await _fill_citation_locations(citations)
                 # Summary/graph routes ground on section_context with zero chunks,
                 # so both are the grounding an excerpt must be found in.
-                grounding_texts = [
-                    c.get("text", "") for c in chunks_returned if c.get("text")
-                ]
+                grounding_texts = [c.get("text", "") for c in chunks_returned if c.get("text")]
                 section_context_for_citations = result.get("section_context")
                 if section_context_for_citations and section_context_for_citations.strip():
                     grounding_texts.append(section_context_for_citations)
@@ -1268,9 +1303,7 @@ class QAService:
                 "receipt": {
                     "engine": "local" if is_on_device(store_model) else "cloud",
                     "model": store_model,
-                    "ttft_seconds": (
-                        round(ttft_seconds, 2) if ttft_seconds is not None else None
-                    ),
+                    "ttft_seconds": (round(ttft_seconds, 2) if ttft_seconds is not None else None),
                     "total_seconds": round(time.perf_counter() - t_start, 2),
                     "passages_sent": result.get("_passages_sent"),
                     "context_chars": result.get("_context_chars"),
@@ -1285,9 +1318,7 @@ class QAService:
             # an answer on it with zero chunks, and omitting it scores a grounded
             # answer as if it hallucinated everything.
             if include_context:
-                context_texts = [
-                    c.get("text", "") for c in chunks_returned if c.get("text")
-                ]
+                context_texts = [c.get("text", "") for c in chunks_returned if c.get("text")]
                 section_context = result.get("section_context")
                 if section_context and section_context.strip():
                     context_texts.append(section_context)

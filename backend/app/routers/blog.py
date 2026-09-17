@@ -300,10 +300,7 @@ async def list_drafts(
         (n.id, n.title, n.content, n.updated_at.isoformat() if n.updated_at else None)
         for n in notes
     ]
-    return [
-        BlogDraftSummary(**d)
-        for d in blog_service.unpublished_notes(rows, _content_dir(kind))
-    ]
+    return [BlogDraftSummary(**d) for d in blog_service.unpublished_notes(rows, _content_dir(kind))]
 
 
 @router.get("/posts", response_model=list[BlogPostSummary])
@@ -499,9 +496,7 @@ async def live_preview(
     )
     # The edited body references /<kind>/<real-slug>/...; rewrite to the preview
     # slug so its assets resolve under the preview asset dir.
-    body = req.markdown.replace(
-        f"/{kind}/{blog_service.slugify(req.slug)}/", f"/{kind}/{pslug}/"
-    )
+    body = req.markdown.replace(f"/{kind}/{blog_service.slugify(req.slug)}/", f"/{kind}/{pslug}/")
     blog_service.write_text_file(_content_dir(kind) / f"{pslug}.md", f"{frontmatter}\n\n{body}\n")
     try:
         _write_assets(pslug, note.content, req.mermaid_svgs, kind)

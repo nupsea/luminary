@@ -336,7 +336,6 @@ async def _hyde_expand(query: str, timeout: float = _HYDE_TIMEOUT_S) -> str:
     still gets standard hybrid retrieval.
     """
     try:
-
         llm = _llm_module.get_llm_service()
         result = await llm.generate(
             prompt=f"Question: {query}\n\nAnswer:",
@@ -405,8 +404,7 @@ async def _graph_expand(query: str) -> str:
         def _lookup_aliases(name: str) -> str:
             with graph._lock:
                 result = graph._conn.execute(
-                    "MATCH (e:Entity) WHERE toLower(e.name) = $name"
-                    " RETURN e.aliases LIMIT 1",
+                    "MATCH (e:Entity) WHERE toLower(e.name) = $name RETURN e.aliases LIMIT 1",
                     {"name": name},
                 )
                 if not result.has_next():

@@ -57,13 +57,13 @@ SUGGESTION_SPEC = PromptSpec(
     accommodations=(NO_FENCES,),
 )
 
+
 def _system_prompt() -> str:
     return render_for(SUGGESTION_SPEC, "background")
 
+
 _USER_PROMPT = (
-    "Passages from the document:\n{passages}\n\n"
-    "Key entities: {entities}\n\n"
-    "Write the 6 questions."
+    "Passages from the document:\n{passages}\n\nKey entities: {entities}\n\nWrite the 6 questions."
 )
 
 CROSS_DOC_SUGGESTION_SPEC = PromptSpec(
@@ -80,6 +80,7 @@ CROSS_DOC_SUGGESTION_SPEC = PromptSpec(
     accommodations=(NO_FENCES,),
 )
 
+
 def _cross_doc_system() -> str:
     return render_for(CROSS_DOC_SUGGESTION_SPEC, "background")
 
@@ -88,17 +89,82 @@ def _cross_doc_system() -> str:
 # topics they covered -- see _history_topics.
 _TOPIC_STOPWORDS: frozenset[str] = frozenset(
     {
-        "what", "when", "where", "which", "whose", "does", "define", "extent",
-        "that", "this", "these", "those", "there", "their", "them", "they",
-        "with", "from", "into", "about", "would", "could", "should", "have",
-        "been", "being", "then", "than", "some", "such", "used", "using",
-        "your", "ways", "role", "make", "makes", "made", "given", "specific",
-        "between", "within", "across", "under", "over", "more", "most", "less",
-        "other", "another", "each", "both", "also", "however", "while",
-        "explain", "describe", "discuss", "compare", "contrast", "evaluate",
-        "assess", "critique", "analyze", "analyse", "summarize", "summarise",
-        "important", "significance", "significant", "influence", "impact",
-        "advantages", "disadvantages", "effectively", "effective",
+        "what",
+        "when",
+        "where",
+        "which",
+        "whose",
+        "does",
+        "define",
+        "extent",
+        "that",
+        "this",
+        "these",
+        "those",
+        "there",
+        "their",
+        "them",
+        "they",
+        "with",
+        "from",
+        "into",
+        "about",
+        "would",
+        "could",
+        "should",
+        "have",
+        "been",
+        "being",
+        "then",
+        "than",
+        "some",
+        "such",
+        "used",
+        "using",
+        "your",
+        "ways",
+        "role",
+        "make",
+        "makes",
+        "made",
+        "given",
+        "specific",
+        "between",
+        "within",
+        "across",
+        "under",
+        "over",
+        "more",
+        "most",
+        "less",
+        "other",
+        "another",
+        "each",
+        "both",
+        "also",
+        "however",
+        "while",
+        "explain",
+        "describe",
+        "discuss",
+        "compare",
+        "contrast",
+        "evaluate",
+        "assess",
+        "critique",
+        "analyze",
+        "analyse",
+        "summarize",
+        "summarise",
+        "important",
+        "significance",
+        "significant",
+        "influence",
+        "impact",
+        "advantages",
+        "disadvantages",
+        "effectively",
+        "effective",
     }
 )
 

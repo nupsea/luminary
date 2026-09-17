@@ -174,11 +174,7 @@ def render(spec: PromptSpec, profile: ModelProfile | None) -> str:
     """The prompt this model gets: the contract, then only what it still needs."""
     bare, dropped = withheld()
     parts = [spec.contract.rstrip()]
-    parts.extend(
-        a.text.strip()
-        for a in spec.accommodations
-        if _applied(a, profile, bare, dropped)
-    )
+    parts.extend(a.text.strip() for a in spec.accommodations if _applied(a, profile, bare, dropped))
     return "\n".join(p for p in parts if p) + "\n"
 
 

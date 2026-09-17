@@ -182,9 +182,7 @@ async def test_delete_cancels_in_flight_ingestion(test_db):
     assert get_ingestion_jobs().is_running(doc_id) is False
 
     async with factory() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == doc_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         assert result.scalar_one_or_none() is None
 
 
@@ -215,7 +213,5 @@ async def test_delete_without_running_ingestion_still_succeeds(test_db):
     assert resp.status_code == 204
 
     async with factory() as session:
-        result = await session.execute(
-            select(DocumentModel).where(DocumentModel.id == doc_id)
-        )
+        result = await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
         assert result.scalar_one_or_none() is None

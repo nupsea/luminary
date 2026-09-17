@@ -21,8 +21,8 @@ from app.services.oreilly_service import (
     parse_cookies_input,
     parse_oreilly_book_id,
     save_oreilly_cookies,
-    start_oreilly_ingestion,
 )
+from app.workflows.oreilly_ingestion import start_oreilly_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +129,7 @@ async def preview_oreilly_book(body: OreillyPreviewRequest) -> dict[str, Any]:
         chapters = await asyncio.to_thread(client.fetch_chapter_list, book_id)
     except Exception as exc:
         logger.exception("Failed to preview O'Reilly book %s", book_id)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to fetch book preview: {exc}"
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"Failed to fetch book preview: {exc}") from exc
 
     return {
         "book_id": book_id,

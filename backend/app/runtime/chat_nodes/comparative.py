@@ -88,7 +88,6 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
 
     # Kuzu entity → document lookup
     try:
-
         conn = _graph_module.get_graph_service()._conn
         r = conn.execute(
             "MATCH (e:Entity)-[:MENTIONED_IN]->(d:Document)"
@@ -116,7 +115,6 @@ async def _resolve_side_to_docs(side_name: str, scope_doc_ids: list[str] | None)
 
     # Document title search — catches cases where the side name appears in a title
     try:
-
         async with get_session_factory()() as session:
             rows = await session.execute(
                 select(DocumentModel.id).where(
@@ -202,9 +200,7 @@ async def comparative_node(state: ChatState) -> dict:
             query = topic if side_docs else f"{side} {topic}"
             filter_ids = side_docs or effective_doc_ids
             try:
-                chunks = await retriever.retrieve(
-                    query, filter_ids, k=fetch_k, rerank=rerank
-                )
+                chunks = await retriever.retrieve(query, filter_ids, k=fetch_k, rerank=rerank)
                 return [_chunk_to_dict(c) for c in chunks]
             except Exception:
                 logger.warning(

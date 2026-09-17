@@ -58,9 +58,7 @@ def test_a_display_folio_does_not_become_a_heading(tmp_path):
 
     headings = [s.heading for s in parsed.sections]
     assert "27" not in headings, f"page number became a section heading: {headings}"
-    assert any("Nature of Bread" in h for h in headings), (
-        f"the real heading was lost: {headings}"
-    )
+    assert any("Nature of Bread" in h for h in headings), f"the real heading was lost: {headings}"
 
 
 def test_the_folio_text_is_still_present(tmp_path):

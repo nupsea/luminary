@@ -340,4 +340,3 @@ class TestEpubDocumentSplitting:
         assert "Figure 1-1. Basic RAG Architecture" in text
         assert "Introduction." in text
         assert "Next paragraph." in text
-

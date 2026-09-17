@@ -185,6 +185,7 @@ def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str
             out.append((heading, body))
     return out
 
+
 # Kindle clippings separator
 _KINDLE_SEP = "=========="
 # Highlight/note header: "- Your Highlight on page X | Added on Date"
@@ -409,9 +410,7 @@ def _is_page_furniture(block: dict, page_height: float) -> bool:
     in_margin = bottom <= margin or top >= page_height - margin
     if not in_margin:
         return False
-    text = " ".join(
-        _join_spans(line.get("spans", [])) for line in block.get("lines", [])
-    ).strip()
+    text = " ".join(_join_spans(line.get("spans", [])) for line in block.get("lines", [])).strip()
     return 0 < len(text) <= _FURNITURE_MAX_CHARS
 
 
@@ -597,9 +596,7 @@ class DocumentParser:
                 raw_parts.append(text)
                 sections.append(
                     Section(
-                        heading=_usable_heading(
-                            ti, doc[max(0, pg - 1)], body_avg, text
-                        ),
+                        heading=_usable_heading(ti, doc[max(0, pg - 1)], body_avg, text),
                         level=lv,
                         text=text,
                         page_start=pg,

@@ -8,14 +8,12 @@ for Luminary's native local ingestion pipeline.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import html
 import json
 import logging
 import mimetypes
 import re
-import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -157,7 +155,7 @@ def parse_cookies_input(cookie_input: str | dict | list) -> dict[str, str]:
 
         # Strip optional "Cookie:" / "cookie:" header label
         if raw.lower().startswith("cookie:"):
-            raw = raw[len("cookie:"):].strip()
+            raw = raw[len("cookie:") :].strip()
 
         # Attempt JSON parse
         if raw.startswith(("[", "{")):
@@ -347,15 +345,17 @@ class OreillyClient:
                 if not filename:
                     filename = f"chapter_{len(chapters) + 1}.xhtml"
 
-                chapters.append({
-                    "title": ch.get("title", f"Chapter {len(chapters) + 1}"),
-                    "filename": filename,
-                    "content_url": ch.get("content_url", ""),
-                    "images": (ch.get("related_assets") or {}).get("images", []),
-                    "virtual_pages": ch.get("virtual_pages"),
-                    "minutes_required": ch.get("minutes_required"),
-                    "order": len(chapters),
-                })
+                chapters.append(
+                    {
+                        "title": ch.get("title", f"Chapter {len(chapters) + 1}"),
+                        "filename": filename,
+                        "content_url": ch.get("content_url", ""),
+                        "images": (ch.get("related_assets") or {}).get("images", []),
+                        "virtual_pages": ch.get("virtual_pages"),
+                        "minutes_required": ch.get("minutes_required"),
+                        "order": len(chapters),
+                    }
+                )
             url = data.get("next")
 
         return chapters
@@ -471,7 +471,7 @@ def build_epub(
         # Wrap content in basic XHTML envelope
         ch.content = (
             f'<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" lang="en">\n'
-            f'<head><title>{html.escape(ch_title)}</title></head>\n'
+            f"<head><title>{html.escape(ch_title)}</title></head>\n"
             f"<body>\n{ch_html}\n</body>\n</html>"
         )
         book.add_item(ch)
@@ -565,142 +565,3 @@ def download_oreilly_book_to_epub(
         cover_bytes=cover_bytes,
     )
     return epub_path, meta
-
-
-async def download_and_launch_ingestion(
-    doc_id: str,
-    book_id: str,
-    dest_path: Path,
-    client: OreillyClient,
-    selected_chapters: list[int] | None = None,
-) -> None:
-    """Download chapters, compile EPUB, and trigger local LLM ingestion pipeline."""
-    from app.database import get_session_factory  # noqa: PLC0415
-    from app.models import DocumentModel  # noqa: PLC0415
-    from app.workflows.ingestion import run_ingestion  # noqa: PLC0415
-
-    try:
-        await asyncio.to_thread(
-            download_oreilly_book_to_epub,
-            book_id=book_id,
-            dest_path=dest_path,
-            client=client,
-            selected_chapter_indices=selected_chapters,
-        )
-        await run_ingestion(doc_id, str(dest_path), "epub", "technical")
-    except Exception as exc:
-        logger.exception("O'Reilly book download or ingestion failed for %s", book_id)
-        async with get_session_factory()() as session:
-            doc = await session.get(DocumentModel, doc_id)
-            if doc:
-                doc.stage = "error"
-                doc.error_message = f"O'Reilly download failed: {exc}"
-                await session.commit()
-
-
-async def start_oreilly_ingestion(
-    url: str,
-    settings: Any,
-    selected_chapters: list[int] | None = None,
-) -> dict[str, Any]:
-    """Validate session, parse book ID, create document, and launch background ingestion."""
-    from fastapi import HTTPException  # noqa: PLC0415
-
-    from app.database import get_session_factory  # noqa: PLC0415
-    from app.models import DocumentModel  # noqa: PLC0415
-    from app.services.ingestion_jobs import get_ingestion_jobs  # noqa: PLC0415
-
-    client = OreillyClient()
-    if not client.is_configured():
-        raise HTTPException(
-            status_code=401,
-            detail=(
-                "O'Reilly subscription cookies not configured. "
-                "Please connect your O'Reilly subscription in Settings."
-            ),
-        )
-
-    book_id = parse_oreilly_book_id(url)
-    if not book_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not extract O'Reilly book ID or ISBN from URL: {url}",
-        )
-
-    # Fetch metadata for book title
-    book_title = f"O'Reilly Book {book_id}"
-    try:
-        meta = await asyncio.to_thread(client.fetch_book_metadata, book_id)
-        book_title = meta.get("title") or book_title
-    except Exception as exc:
-        logger.warning(
-            "Could not fetch metadata for %s, proceeding with fallback title: %s",
-            book_id,
-            exc,
-        )
-
-    # Detect if a specific chapter was requested in the URL
-    target_chapter = parse_oreilly_target_chapter(url) if selected_chapters is None else None
-    matched_chapter_title: str | None = None
-
-    if target_chapter:
-        try:
-            all_chapters = await asyncio.to_thread(client.fetch_chapter_list, book_id)
-            target_norm = target_chapter.lower().replace(".xhtml", ".html")
-            for idx, ch in enumerate(all_chapters):
-                fn = ch.get("filename", "").lower().replace(".xhtml", ".html")
-                ref = ch.get("reference_id", "").lower().replace(".xhtml", ".html")
-                if fn == target_norm or ref.endswith(target_norm):
-                    selected_chapters = [idx]
-                    matched_chapter_title = ch.get("title")
-                    break
-        except Exception as exc:
-            logger.warning("Could not resolve chapter %s for %s: %s", target_chapter, book_id, exc)
-
-    if matched_chapter_title:
-        book_title = f"{book_title} — {matched_chapter_title}"
-        doc_tags = ["oreilly", "tech_chapter"]
-    else:
-        doc_tags = ["oreilly", "tech_book"]
-
-    doc_id = str(uuid.uuid4())
-    data_dir = Path(settings.DATA_DIR).expanduser()
-    raw_dir = data_dir / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    dest_epub = raw_dir / f"{doc_id}.epub"
-
-    async with get_session_factory()() as session:
-        doc = DocumentModel(
-            id=doc_id,
-            title=book_title,
-            format="epub",
-            content_type="technical",
-            word_count=0,
-            page_count=0,
-            file_path=str(dest_epub),
-            file_hash=None,
-            stage="parsing",
-            source_url=url,
-            tags=doc_tags,
-        )
-        session.add(doc)
-        await session.commit()
-
-    get_ingestion_jobs().launch(
-        doc_id,
-        download_and_launch_ingestion(
-            doc_id=doc_id,
-            book_id=book_id,
-            dest_path=dest_epub,
-            client=client,
-            selected_chapters=selected_chapters,
-        ),
-    )
-
-    logger.info("O'Reilly book ingestion launched", extra={"doc_id": doc_id, "book_id": book_id})
-    return {
-        "document_id": doc_id,
-        "status": "processing",
-        "title": book_title,
-    }
-

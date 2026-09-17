@@ -476,9 +476,7 @@ async def test_get_cached_refreshes_legacy_bloated_detailed(test_db):
             )
         await session.commit()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/summarize/{doc_id}/cached")
         assert resp.status_code == 200
         data = resp.json()
@@ -487,6 +485,3 @@ async def test_get_cached_refreshes_legacy_bloated_detailed(test_db):
         assert len(refreshed_content) < 5000
         assert "Bloated content" not in refreshed_content
         assert "Section 1" in refreshed_content
-
-
-

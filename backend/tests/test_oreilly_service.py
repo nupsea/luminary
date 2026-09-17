@@ -66,7 +66,9 @@ def test_parse_oreilly_book_id():
 def test_upgrade_cover_url():
     # Strips existing width and adds 1200w
     url = "https://learning.oreilly.com/library/cover/9781491903063/400w/"
-    assert upgrade_cover_url(url) == "https://learning.oreilly.com/library/cover/9781491903063/1200w/"
+    assert (
+        upgrade_cover_url(url) == "https://learning.oreilly.com/library/cover/9781491903063/1200w/"
+    )
 
     # Adds 1200w to base cover
     url_base = "https://learning.oreilly.com/covers/urn:orm:book:9781491903063"

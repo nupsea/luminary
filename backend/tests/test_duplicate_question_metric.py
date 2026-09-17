@@ -42,10 +42,12 @@ async def test_a_repeated_question_is_counted():
 async def test_distinct_questions_are_not_counted_as_repeats():
     """The other direction: a model that does its job must not be penalised."""
     before = _count()
-    pool = iter([
-        [{"question": "What is a B-tree?", "answer": "An index structure."}],
-        [{"question": "What is a hash index?", "answer": "A lookup structure."}],
-    ])
+    pool = iter(
+        [
+            [{"question": "What is a B-tree?", "answer": "An index structure."}],
+            [{"question": "What is a hash index?", "answer": "A lookup structure."}],
+        ]
+    )
 
     async def distinct(want: int, avoid: list[str]) -> list[dict]:
         return next(pool, [])

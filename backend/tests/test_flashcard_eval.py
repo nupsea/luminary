@@ -43,10 +43,12 @@ def test_score_flashcards_takes_atomicity_from_the_answer_not_the_judge():
         {"question": "q1", "answer": "One single assertion."},
         {"question": "q2", "answer": "Lead in.\n- first fact\n- second fact"},
     ]
-    judgments = iter([
-        {"factuality": "yes", "atomic": True, "clarity": 5},
-        {"factuality": "partial", "atomic": True, "clarity": 3},
-    ])
+    judgments = iter(
+        [
+            {"factuality": "yes", "atomic": True, "clarity": 5},
+            {"factuality": "partial", "atomic": True, "clarity": 3},
+        ]
+    )
     metrics = score_flashcards(cards, "source", judge=lambda card, chunk: next(judgments))
     assert metrics["factuality"] == pytest.approx(0.75)
     assert metrics["atomicity"] == pytest.approx(0.5), (

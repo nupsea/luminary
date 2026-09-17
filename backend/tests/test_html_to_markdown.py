@@ -69,8 +69,7 @@ class TestLists:
 class TestBlocks:
     def test_table_becomes_a_markdown_table(self):
         out = _md(
-            "<table><tr><th>Model</th><th>Score</th></tr>"
-            "<tr><td>A</td><td>0.91</td></tr></table>"
+            "<table><tr><th>Model</th><th>Score</th></tr><tr><td>A</td><td>0.91</td></tr></table>"
         )
         assert "| Model | Score |" in out
         assert "| A | 0.91 |" in out

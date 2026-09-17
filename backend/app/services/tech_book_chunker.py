@@ -11,6 +11,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
 def _splitter_cls():
     """Import lazily: `langchain_text_splitters` pulls in sentence-transformers
     and therefore torch at module scope, which cost 5.4s of every cold start
@@ -316,4 +317,3 @@ def chunk_mixed_content(
         i += 1
 
     return result
-

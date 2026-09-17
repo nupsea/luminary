@@ -37,9 +37,7 @@ class _FakeExtractor:
 @pytest.fixture
 def patched(monkeypatch):
     def _install(extractor, threshold=180):
-        monkeypatch.setattr(
-            model_reaper.get_settings(), "NER_IDLE_RELEASE_SECONDS", threshold
-        )
+        monkeypatch.setattr(model_reaper.get_settings(), "NER_IDLE_RELEASE_SECONDS", threshold)
         import app.services.ner as ner
 
         monkeypatch.setattr(ner, "get_entity_extractor", lambda: extractor)

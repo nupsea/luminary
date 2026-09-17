@@ -60,9 +60,7 @@ def test_a_real_typo_is_still_rejected(tmp_path, monkeypatch):
 def test_an_env_key_from_another_version_does_not_block_startup(tmp_path, monkeypatch):
     """`.env` outlives the binary reading it. Under the extra="forbid" default
     a key from another version stops the app from starting."""
-    (tmp_path / ".env").write_text(
-        "A_SETTING_FROM_THE_FUTURE=2\nENRICHMENT_VISION_CONCURRENCY=2\n"
-    )
+    (tmp_path / ".env").write_text("A_SETTING_FROM_THE_FUTURE=2\nENRICHMENT_VISION_CONCURRENCY=2\n")
     monkeypatch.chdir(tmp_path)
 
     settings = Settings()

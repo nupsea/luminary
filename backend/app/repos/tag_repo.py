@@ -139,9 +139,7 @@ class TagRepo:
         await self.session.execute(
             delete(TagAliasModel).where(TagAliasModel.canonical_tag_id == tag_id)
         )
-        await self.session.execute(
-            delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id)
-        )
+        await self.session.execute(delete(CanonicalTagModel).where(CanonicalTagModel.id == tag_id))
         await self.session.commit()
 
 

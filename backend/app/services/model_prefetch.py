@@ -190,9 +190,7 @@ def prefetch(to_fetch: list[ModelSpec], status) -> dict[str, str]:
     def _report() -> None:
         while not stop.wait(1.0):
             for spec in to_fetch:
-                status.set_progress(
-                    spec.key, _dir_size(cache_dir(spec)), spec.size_bytes
-                )
+                status.set_progress(spec.key, _dir_size(cache_dir(spec)), spec.size_bytes)
 
     reporter = threading.Thread(target=_report, name="prefetch-progress", daemon=True)
     reporter.start()

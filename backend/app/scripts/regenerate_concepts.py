@@ -58,7 +58,8 @@ async def _run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Regenerate the Concept layer.")
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="run the node pipeline without persisting; dump diagnostics for inspection",
     )
     args = parser.parse_args()

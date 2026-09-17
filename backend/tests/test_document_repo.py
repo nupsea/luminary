@@ -67,12 +67,8 @@ async def test_find_by_file_hash(repo: DocumentRepo) -> None:
 @pytest.mark.asyncio
 async def test_sections_for_document_orders_by_order(repo: DocumentRepo) -> None:
     repo.session.add(_make_doc(id="d1"))
-    repo.session.add(
-        SectionModel(id="s2", document_id="d1", heading="B", level=1, section_order=2)
-    )
-    repo.session.add(
-        SectionModel(id="s1", document_id="d1", heading="A", level=1, section_order=1)
-    )
+    repo.session.add(SectionModel(id="s2", document_id="d1", heading="B", level=1, section_order=2))
+    repo.session.add(SectionModel(id="s1", document_id="d1", heading="A", level=1, section_order=1))
     await repo.session.commit()
     sections = await repo.sections_for_document("d1")
     assert [s.id for s in sections] == ["s1", "s2"]
@@ -81,12 +77,8 @@ async def test_sections_for_document_orders_by_order(repo: DocumentRepo) -> None
 @pytest.mark.asyncio
 async def test_chunks_for_document_orders_by_index(repo: DocumentRepo) -> None:
     repo.session.add(_make_doc(id="d1"))
-    repo.session.add(
-        ChunkModel(id="c2", document_id="d1", text="b", chunk_index=2)
-    )
-    repo.session.add(
-        ChunkModel(id="c1", document_id="d1", text="a", chunk_index=1)
-    )
+    repo.session.add(ChunkModel(id="c2", document_id="d1", text="b", chunk_index=2))
+    repo.session.add(ChunkModel(id="c1", document_id="d1", text="a", chunk_index=1))
     await repo.session.commit()
     chunks = await repo.chunks_for_document("d1")
     assert [c.id for c in chunks] == ["c1", "c2"]

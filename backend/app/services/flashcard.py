@@ -366,9 +366,7 @@ def _build_text(chunks: list[ChunkModel]) -> tuple[str, str, list[str]]:
     # arbitrary cut.
     windows = _sample_windows(chunks, _CHUNK_CHAR_LIMIT)
     used = [c.id for window in windows for c in window]
-    combined = "\n\n[...]\n\n".join(
-        "\n\n".join(c.text for c in window) for window in windows
-    )
+    combined = "\n\n[...]\n\n".join("\n\n".join(c.text for c in window) for window in windows)
     # dict.fromkeys rather than set(): the order is the reading order of the
     # passage, and rebuilding it out of order breaks any quote spanning a seam.
     return combined, chunks[0].id, list(dict.fromkeys(used))
@@ -706,7 +704,14 @@ class FlashcardService(FlashcardSearchService):
         from app.services.flashcard_generators import generate as _gen  # noqa: PLC0415
 
         return await _gen(
-            document_id, scope, section_heading, count, session, difficulty, context, model,
+            document_id,
+            scope,
+            section_heading,
+            count,
+            session,
+            difficulty,
+            context,
+            model,
             exclude_chunk_ids=exclude_chunk_ids,
         )
 
@@ -737,9 +742,7 @@ class FlashcardService(FlashcardSearchService):
         from app.repos.flashcard_repo import FlashcardRepo  # noqa: PLC0415
 
         doc = (
-            await session.execute(
-                select(DocumentModel).where(DocumentModel.id == document_id)
-            )
+            await session.execute(select(DocumentModel).where(DocumentModel.id == document_id))
         ).scalar_one_or_none()
         content_type = doc.content_type if doc else "unknown"
 
@@ -761,15 +764,11 @@ class FlashcardService(FlashcardSearchService):
         else:
             # The same reader `generate` uses, so a book's skipped front matter
             # is not counted as material anyone can be questioned on.
-            chunks = await _fetch_chunks(
-                document_id, "full", None, session, content_type
-            )
+            chunks = await _fetch_chunks(document_id, "full", None, session, content_type)
             decks = list(
                 (
                     await session.execute(
-                        select(FlashcardModel).where(
-                            FlashcardModel.document_id == document_id
-                        )
+                        select(FlashcardModel).where(FlashcardModel.document_id == document_id)
                     )
                 )
                 .scalars()
@@ -893,9 +892,7 @@ class FlashcardService(FlashcardSearchService):
                 "flashcard.regenerate: no usable cards; keeping the existing deck",
                 extra={**source, "kept": len(previous_ids)},
             )
-            return RegenerateResult(
-                cards=[], requested=requested, replaced=0, kept_previous=True
-            )
+            return RegenerateResult(cards=[], requested=requested, replaced=0, kept_previous=True)
 
         for card_id in previous_ids:
             await _delete_flashcard_fts(card_id, session)
@@ -959,9 +956,7 @@ class FlashcardService(FlashcardSearchService):
             generate_from_collection as _gen,
         )
 
-        return await _gen(
-            collection_id, count_per_note, difficulty, session, force_regenerate
-        )
+        return await _gen(collection_id, count_per_note, difficulty, session, force_regenerate)
 
     async def _run_gap_generation(
         self,
@@ -989,8 +984,10 @@ class FlashcardService(FlashcardSearchService):
             async with semaphore:
                 prompt = GAP_FLASHCARD_USER_TMPL.format(gap=gap)
                 raw = await llm.generate(
-                    prompt, system=GAP_FLASHCARD_SYSTEM,
-                    model=_get_generation_model(), stream=False,
+                    prompt,
+                    system=GAP_FLASHCARD_SYSTEM,
+                    model=_get_generation_model(),
+                    stream=False,
                 )
                 item = _parse_gap_flashcard(raw, gap)
                 if item is None:
@@ -1045,9 +1042,7 @@ class FlashcardService(FlashcardSearchService):
             ids.append(card.id)
         if cards:
             await session.commit()
-            logger.info(
-                "%s: created %d flashcards from %d gaps", log_prefix, len(cards), len(gaps)
-            )
+            logger.info("%s: created %d flashcards from %d gaps", log_prefix, len(cards), len(gaps))
         return len(cards), ids
 
     async def generate_from_gaps(
@@ -1121,9 +1116,7 @@ class FlashcardService(FlashcardSearchService):
             generate_technical as _gen_technical,
         )
 
-        return await _gen_technical(
-            document_id, scope, section_heading, count, session, model
-        )
+        return await _gen_technical(document_id, scope, section_heading, count, session, model)
 
     async def generate_cloze(
         self,

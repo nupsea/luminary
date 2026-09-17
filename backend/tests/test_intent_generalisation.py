@@ -73,7 +73,7 @@ def test_relational_phrasings_route_by_shape_not_subject(template):
 
 @pytest.mark.parametrize("question", SUMMARY_TEMPLATES)
 def test_summary_phrasings_route_by_shape(question):
-    """"What is <this|that> <any noun> about" is matched as a shape. The noun is
+    """ "What is <this|that> <any noun> about" is matched as a shape. The noun is
     whatever the user calls their document, so it cannot be enumerated."""
     assert classify_intent_heuristic(question)[0] == "summary", question
 
@@ -148,9 +148,7 @@ def test_negation_stops_at_its_own_clause():
     exactly the one the sentence makes. Reaching past the clause boundary would
     turn every apologetic preamble into a suppression."""
     assert (
-        classify_intent_heuristic(
-            "I don't understand this document, can you summarize it?"
-        )[0]
+        classify_intent_heuristic("I don't understand this document, can you summarize it?")[0]
         == "summary"
     )
     assert (
@@ -162,9 +160,7 @@ def test_negation_stops_at_its_own_clause():
 def test_one_negated_mention_does_not_cancel_a_second_real_one():
     """Every occurrence has to be negated for the mention to be suppressed."""
     assert (
-        classify_intent_heuristic(
-            "No summary of chapter 1, give me the summary of chapter 2"
-        )[0]
+        classify_intent_heuristic("No summary of chapter 1, give me the summary of chapter 2")[0]
         == "summary"
     )
 
@@ -173,9 +169,9 @@ def test_negation_far_from_the_keyword_does_not_reach_it():
     """Five words inside one clause, not the whole sentence: a negation about
     something else earlier on must not silence a request made later."""
     assert (
-        classify_intent_heuristic(
-            "I do not have much time this afternoon so give me an overview"
-        )[0]
+        classify_intent_heuristic("I do not have much time this afternoon so give me an overview")[
+            0
+        ]
         == "summary"
     )
 
@@ -239,9 +235,7 @@ def test_a_relation_without_the_word_connect_still_routes_relational(template):
         assert classify_intent_heuristic(question)[0] == "relational", question
 
 
-@pytest.mark.parametrize(
-    "template", COMPARATIVE_SHAPE_TEMPLATES + RELATIONAL_SHAPE_TEMPLATES
-)
+@pytest.mark.parametrize("template", COMPARATIVE_SHAPE_TEMPLATES + RELATIONAL_SHAPE_TEMPLATES)
 def test_shape_routes_do_not_depend_on_their_subjects(template):
     routes = {classify_intent_heuristic(q)[0] for q in _instantiate(template)}
     assert len(routes) == 1, f"{template} routed {routes} depending on its subjects"

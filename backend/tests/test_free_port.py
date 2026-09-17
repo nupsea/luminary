@@ -70,9 +70,7 @@ def listener_and_client():
             except OSError:
                 time.sleep(0.1)
     """)
-    assert _wait_until(
-        lambda: _can_connect(port)
-    ), "listener never came up"
+    assert _wait_until(lambda: _can_connect(port)), "listener never came up"
 
     client = _spawn(f"""
         import socket, time
@@ -102,8 +100,11 @@ def test_frees_the_listener_and_spares_the_client(listener_and_client):
     port, listener, client = listener_and_client
 
     subprocess.run(
-        ["sh", str(FREE_PORT_SH), str(port)], check=True, timeout=60,
-        capture_output=True, text=True,
+        ["sh", str(FREE_PORT_SH), str(port)],
+        check=True,
+        timeout=60,
+        capture_output=True,
+        text=True,
     )
 
     assert listener.poll() is not None, "the listener holding the port was not stopped"
@@ -119,8 +120,11 @@ def test_reports_a_free_port_without_signalling_anything(listener_and_client):
     unused = _free_tcp_port()
 
     result = subprocess.run(
-        ["sh", str(FREE_PORT_SH), str(unused)], check=True, timeout=60,
-        capture_output=True, text=True,
+        ["sh", str(FREE_PORT_SH), str(unused)],
+        check=True,
+        timeout=60,
+        capture_output=True,
+        text=True,
     )
 
     assert "nothing listening" in result.stdout

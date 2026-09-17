@@ -29,10 +29,14 @@ _MULTIHEAD_RE = re.compile(
 )
 _MULTIHEAD_TEX = (
     "$$\n"
-    r"\begin{aligned}" "\n"
-    r"\text{MultiHead}(Q, K, V) &= \text{Concat}(\text{head}_1, \dots, \text{head}_h) W^O \\" "\n"
-    r"\text{where}\quad \text{head}_i &= \text{Attention}(Q W_i^Q, K W_i^K, V W_i^V)" "\n"
-    r"\end{aligned}" "\n"
+    r"\begin{aligned}"
+    "\n"
+    r"\text{MultiHead}(Q, K, V) &= \text{Concat}(\text{head}_1, \dots, \text{head}_h) W^O \\"
+    "\n"
+    r"\text{where}\quad \text{head}_i &= \text{Attention}(Q W_i^Q, K W_i^K, V W_i^V)"
+    "\n"
+    r"\end{aligned}"
+    "\n"
     "$$"
 )
 
@@ -69,17 +73,19 @@ _PE_RE = re.compile(
 )
 _PE_TEX = (
     "$$\n"
-    r"\begin{aligned}" "\n"
-    r"\text{PE}_{(pos, 2i)} &= \sin\left(\frac{pos}{10000^{2i / d_{\text{model}}}}\right) \\" "\n"
-    r"\text{PE}_{(pos, 2i+1)} &= \cos\left(\frac{pos}{10000^{2i / d_{\text{model}}}}\right)" "\n"
-    r"\end{aligned}" "\n"
+    r"\begin{aligned}"
+    "\n"
+    r"\text{PE}_{(pos, 2i)} &= \sin\left(\frac{pos}{10000^{2i / d_{\text{model}}}}\right) \\"
+    "\n"
+    r"\text{PE}_{(pos, 2i+1)} &= \cos\left(\frac{pos}{10000^{2i / d_{\text{model}}}}\right)"
+    "\n"
+    r"\end{aligned}"
+    "\n"
     "$$"
 )
 
 # 6. Summation footnote / dot-product variance
-_SUM_RE = re.compile(
-    r"Then\s+their\s+dot\s+product,\s+q\s*·\s*k\s*=\s*Pdk(?:\s*\n+\s*i=1\s+qiki)?"
-)
+_SUM_RE = re.compile(r"Then\s+their\s+dot\s+product,\s+q\s*·\s*k\s*=\s*Pdk(?:\s*\n+\s*i=1\s+qiki)?")
 _SUM_TEX = r"Then their dot product, $q \cdot k = \sum_{i=1}^{d_k} q_i k_i$"
 
 # 7. Generic isolated fractions: (number)\n√(variable)

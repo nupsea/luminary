@@ -407,9 +407,10 @@ async def install_ollama_model(model: str) -> AsyncIterator[dict]:
     payload = {"model": model, "stream": True}
 
     timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST", f"{settings.OLLAMA_URL}/api/pull", json=payload
-    ) as resp:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream("POST", f"{settings.OLLAMA_URL}/api/pull", json=payload) as resp,
+    ):
         if resp.status_code != 200:
             body = (await resp.aread()).decode(errors="replace")[:200]
             yield {"state": "failed", "detail": f"{resp.status_code}: {body}"}
@@ -457,8 +458,15 @@ async def install_python_extra(comp: Component) -> AsyncIterator[dict]:
     target.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, "-m", "pip", "install",
-        "--upgrade", "--target", str(target), "--no-input", "--disable-pip-version-check",
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--target",
+        str(target),
+        "--no-input",
+        "--disable-pip-version-check",
         *comp.packages,
     ]
     yield {"state": "downloading", "detail": f"Installing {', '.join(comp.packages)}"}

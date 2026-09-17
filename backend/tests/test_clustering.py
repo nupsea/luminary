@@ -425,9 +425,7 @@ async def test_batch_accept_creates_collections(test_db):
     async with factory() as session:
         for i, (cid, expected_note_ids) in enumerate(zip(created_ids, [note_ids_a, note_ids_b])):
             col = (
-                await session.execute(
-                    select(CollectionModel).where(CollectionModel.id == cid)
-                )
+                await session.execute(select(CollectionModel).where(CollectionModel.id == cid))
             ).scalar_one()
             assert col is not None
 
@@ -541,9 +539,7 @@ async def test_batch_accept_endpoint(test_db):
     async with factory() as session:
         col = (
             await session.execute(
-                select(CollectionModel).where(
-                    CollectionModel.id == data["collection_ids"][0]
-                )
+                select(CollectionModel).where(CollectionModel.id == data["collection_ids"][0])
             )
         ).scalar_one()
         assert col.name == "RENAMED"  # S201: normalize_collection_name applied

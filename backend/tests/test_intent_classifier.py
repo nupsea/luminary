@@ -241,7 +241,7 @@ async def test_interactive_modes_still_reachable_by_keyword():
 
 
 def test_comparison_of_named_subjects_beats_a_question_opener():
-    """"How are X and Y different?" is a comparison that happens to open with
+    """ "How are X and Y different?" is a comparison that happens to open with
     "how are". The opener is a relational keyword, so first-match-wins routed it
     to relational before any comparison word was considered."""
     assert classify_intent_heuristic("How are Penelope and Minerva different?")[0] == (
@@ -258,7 +258,7 @@ def test_similarities_between_is_not_ties_between():
 
 
 def test_more_specific_keyword_wins_over_a_shorter_one():
-    """"how do they differ" and "how do" both match; the longer, more specific
+    """ "how do they differ" and "how do" both match; the longer, more specific
     keyword decides, so set order no longer arbitrates between equal confidences."""
     assert classify_intent_heuristic("How do they differ?")[0] == "comparative"
 

@@ -45,8 +45,11 @@ def test_render_frontmatter_optional_fields_and_escaping():
     assert 'title: "He said \\"hi\\""' in fm
     assert "updatedDate" not in fm
     fm2 = blog_service.render_frontmatter(
-        title="t", description="d", pub_date="Jun 15 2026",
-        updated_date="Jun 16 2026", hero_image="/blog/x/h.png",
+        title="t",
+        description="d",
+        pub_date="Jun 15 2026",
+        updated_date="Jun 16 2026",
+        hero_image="/blog/x/h.png",
     )
     assert "updatedDate" in fm2 and "heroImage" in fm2
 
@@ -113,9 +116,7 @@ async def test_git_add_commit_no_push(tmp_path):
     ).stdout
     assert "blog: post" in log
     # never configured a remote -> nothing was pushed
-    remotes = subprocess.run(
-        ["git", "remote"], cwd=repo, capture_output=True, text=True
-    ).stdout
+    remotes = subprocess.run(["git", "remote"], cwd=repo, capture_output=True, text=True).stdout
     assert remotes.strip() == ""
 
 
@@ -455,9 +456,9 @@ def _collect(client, note_id: str, name: str) -> None:
     """Put a note in a collection with this name, creating it if needed."""
     tree = client.get("/collections/tree").json()
     existing = {c["name"].lower(): c["id"] for c in tree}
-    cid = existing.get(name.lower()) or client.post(
-        "/collections", json={"name": name}
-    ).json()["id"]
+    cid = (
+        existing.get(name.lower()) or client.post("/collections", json={"name": name}).json()["id"]
+    )
     client.post(
         f"/collections/{cid}/members",
         json={"member_ids": [note_id], "member_type": "note"},
@@ -490,9 +491,7 @@ def test_a_note_outside_the_collection_is_not_a_draft(client, blog_repo):
 
 def test_publishing_a_draft_removes_it_from_the_list(client, blog_repo):
     """The whole point: the list has to empty out as you ship."""
-    note_id = client.post(
-        "/notes", json={"content": "# Ship Me\n\nbody", "tags": []}
-    ).json()["id"]
+    note_id = client.post("/notes", json={"content": "# Ship Me\n\nbody", "tags": []}).json()["id"]
     _collect(client, note_id, "BLOG")
     assert any(d["note_id"] == note_id for d in client.get("/blog/drafts").json())
 
@@ -517,9 +516,9 @@ def test_drafts_are_isolated_per_kind(client, blog_repo):
     """A BLOG note is not a thoughts draft; `kind` selects both the collection
     and the content directory it is checked against."""
     (blog_repo / "src/content/thoughts").mkdir(parents=True, exist_ok=True)
-    note_id = client.post(
-        "/notes", json={"content": "# Blog Only\n\nbody", "tags": []}
-    ).json()["id"]
+    note_id = client.post("/notes", json={"content": "# Blog Only\n\nbody", "tags": []}).json()[
+        "id"
+    ]
     _collect(client, note_id, "BLOG")
 
     assert any(d["note_id"] == note_id for d in client.get("/blog/drafts").json())

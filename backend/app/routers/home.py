@@ -558,8 +558,7 @@ async def _fetch_weekly_stats(session: AsyncSession) -> WeeklyStats:
     cards_row = (
         await session.execute(
             text(
-                "SELECT COUNT(*) FROM review_events "
-                "WHERE reviewed_at >= datetime('now', '-7 days')"
+                "SELECT COUNT(*) FROM review_events WHERE reviewed_at >= datetime('now', '-7 days')"
             )
         )
     ).first()

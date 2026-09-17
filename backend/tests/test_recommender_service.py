@@ -50,8 +50,12 @@ def _card(card_id: str, *, slug: str | None = None, due_days_ago: float | None =
 
 def _concept(slug: str, mastery: float, *, status: str = "confirmed", kind: str = "concept"):
     return ConceptModel(
-        id=str(uuid.uuid4()), slug=slug, label=slug.replace("-", " "),
-        mastery=mastery, status=status, kind=kind,
+        id=str(uuid.uuid4()),
+        slug=slug,
+        label=slug.replace("-", " "),
+        mastery=mastery,
+        status=status,
+        kind=kind,
     )
 
 
@@ -82,19 +86,21 @@ def _misconception(card_id: str, *, days_ago: float = 3.0, status: str = "open")
 
 def _stalled_doc(doc_id: str, *, days_ago: float, read: int, total: int):
     rows = [
-        DocumentModel(id=doc_id, title="Stalled Book", format="txt",
-                      content_type="book", file_path="/x"),
-        ContentActivityModel(member_type="document", member_id=doc_id,
-                             last_meaningful_at=_naive(days_ago)),
+        DocumentModel(
+            id=doc_id, title="Stalled Book", format="txt", content_type="book", file_path="/x"
+        ),
+        ContentActivityModel(
+            member_type="document", member_id=doc_id, last_meaningful_at=_naive(days_ago)
+        ),
     ]
     rows += [
-        SectionModel(id=f"{doc_id}-s{i}", document_id=doc_id, heading=f"h{i}",
-                     level=1, section_order=i)
+        SectionModel(
+            id=f"{doc_id}-s{i}", document_id=doc_id, heading=f"h{i}", level=1, section_order=i
+        )
         for i in range(total)
     ]
     rows += [
-        ReadingProgressModel(id=f"{doc_id}-rp{i}", document_id=doc_id,
-                             section_id=f"{doc_id}-s{i}")
+        ReadingProgressModel(id=f"{doc_id}-rp{i}", document_id=doc_id, section_id=f"{doc_id}-s{i}")
         for i in range(read)
     ]
     return rows

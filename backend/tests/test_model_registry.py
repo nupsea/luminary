@@ -90,6 +90,7 @@ def test_an_explicit_override_still_wins_for_generation(monkeypatch):
 def test_a_missing_cloud_key_falls_back_locally_with_a_reason(monkeypatch):
     """Refusing here would take ingestion down for a configuration problem the
     user can see in Settings. The fallback is reported, not swallowed."""
+
     def _raise(*, background: bool = False):
         raise ValueError("cloud routing is active but the API key is missing")
 
@@ -112,8 +113,10 @@ def test_resident_models_is_the_set_a_memory_profile_constrains():
 
 
 def test_a_profile_carries_both_footprint_and_capability():
-    profile = REGISTRY[default_chat_model()] if default_chat_model() in REGISTRY else next(
-        iter(REGISTRY.values())
+    profile = (
+        REGISTRY[default_chat_model()]
+        if default_chat_model() in REGISTRY
+        else next(iter(REGISTRY.values()))
     )
     assert profile.resident_gb > 0
     assert profile.min_ram_gb > 0

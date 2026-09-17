@@ -91,9 +91,7 @@ class TestTheWindowIsAPropertyOfTheModel:
 
     def test_an_unregistered_model_falls_back_rather_than_failing(self):
         """A user may point Settings at any model Ollama holds."""
-        assert context_window_for("ollama/not-in-the-registry") == (
-            get_settings().OLLAMA_NUM_CTX
-        )
+        assert context_window_for("ollama/not-in-the-registry") == (get_settings().OLLAMA_NUM_CTX)
 
     def test_it_is_a_pure_function_of_the_model(self):
         """Two call sites cannot disagree, because there is nothing else to vary."""

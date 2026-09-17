@@ -65,7 +65,6 @@ def _splitter_cls():
     return RecursiveCharacterTextSplitter
 
 
-
 async def _run_objective_extraction(doc_id: str, sections: list[tuple[str, str, str]]) -> None:
     """Background task: extract and store learning objectives for qualifying sections.
 
@@ -347,7 +346,6 @@ async def _chunk_tech_book(state: IngestionState, pd: dict | None, doc_id: str) 
     4. Store extracted code blocks in CodeSnippetModel with language and AST signature.
     """
 
-
     content_type = state.get("content_type") or "tech_book"
     cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
 
@@ -542,7 +540,6 @@ async def _chunk_conversation(
     Creates SectionModel rows so the Read view can display conversation content.
     """
 
-
     raw_text = (pd["raw_text"] if pd else "") or ""
     raw_sections = pd["sections"] if pd else []
     chunker = ConversationChunker()
@@ -658,7 +655,6 @@ async def _chunk_conversation(
         },
     )
     return {**state, "chunks": chunks, "status": "embedding"}
-
 
 
 async def chunk_node(state: IngestionState) -> IngestionState:
@@ -884,9 +880,7 @@ async def _chunk_paper(state: IngestionState, pd: dict | None, doc_id: str) -> I
                             speaker=None,
                             chunk_index=chunk_idx,
                             pdf_page_number=chunk_pdf_page,
-                            pdf_page_label=_printed_label_for(
-                                paper_page_labels, chunk_pdf_page
-                            ),
+                            pdf_page_label=_printed_label_for(paper_page_labels, chunk_pdf_page),
                             context_header=context_header,
                         )
                     )
@@ -931,9 +925,7 @@ async def _chunk_generic(
     unrecognised or malformed document still ingests instead of failing.
     """
     cfg = DocumentProfile.from_legacy(content_type, state.get("is_technical")).chunk_config
-    splitter = _splitter_cls()(
-        chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"]
-    )
+    splitter = _splitter_cls()(chunk_size=cfg["chunk_size"], chunk_overlap=cfg["chunk_overlap"])
     chunks = []
     async with get_session_factory()() as session:
         raw_sections = pd["sections"] if pd else []
@@ -996,9 +988,7 @@ async def _chunk_generic(
                         speaker=None,
                         chunk_index=chunk_idx,
                         pdf_page_number=chunk_pdf_page,
-                        pdf_page_label=_printed_label_for(
-                            generic_page_labels, chunk_pdf_page
-                        ),
+                        pdf_page_label=_printed_label_for(generic_page_labels, chunk_pdf_page),
                     )
                 )
                 chunks.append(
@@ -1017,5 +1007,3 @@ async def _chunk_generic(
         extra={"doc_id": doc_id, "num_chunks": len(chunks)},
     )
     return {**state, "chunks": chunks, "status": "embedding"}
-
-

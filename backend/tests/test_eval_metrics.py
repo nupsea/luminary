@@ -443,9 +443,7 @@ def test_ndcg_graded_perfect_order():
         {"hint": ["primary passage"], "grade": 2},
         {"hint": ["secondary passage"], "grade": 1},
     ]
-    samples = [
-        _graded_sample(relevance, ["has primary passage", "has secondary passage", "junk"])
-    ]
+    samples = [_graded_sample(relevance, ["has primary passage", "has secondary passage", "junk"])]
     assert compute_ndcg_10(samples) == pytest.approx(1.0)
 
 
@@ -454,9 +452,7 @@ def test_ndcg_graded_inverted_order_penalised():
         {"hint": ["primary passage"], "grade": 2},
         {"hint": ["secondary passage"], "grade": 1},
     ]
-    samples = [
-        _graded_sample(relevance, ["has secondary passage", "has primary passage", "junk"])
-    ]
+    samples = [_graded_sample(relevance, ["has secondary passage", "has primary passage", "junk"])]
     dcg = 1.0 / 1.0 + 2.0 / 1.5849625
     idcg = 2.0 / 1.0 + 1.0 / 1.5849625
     assert compute_ndcg_10(samples) == pytest.approx(dcg / idcg, rel=1e-6)

@@ -79,8 +79,6 @@ class LearningObjectiveExtractorService:
         if not section_objectives:
             return
 
-
-
         async with get_session_factory()() as session:
             await session.execute(
                 delete(LearningObjectiveModel).where(

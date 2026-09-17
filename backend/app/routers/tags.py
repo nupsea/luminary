@@ -256,9 +256,7 @@ async def get_tag_tree(
         tag = tag_by_id.get(tag_id)
         if tag is None:
             return None
-        inclusive_scoped = _compute_inclusive_count(
-            tag_id, scoped_count_by_id, children_by_parent
-        )
+        inclusive_scoped = _compute_inclusive_count(tag_id, scoped_count_by_id, children_by_parent)
         if scope != "all" and inclusive_scoped == 0:
             return None
         children: list[TagTreeItem] = []
@@ -267,9 +265,7 @@ async def get_tag_tree(
                 child = build_node(child_id, tag_id, depth + 1)
                 if child is not None:
                     children.append(child)
-        inclusive_global = _compute_inclusive_count(
-            tag_id, global_count_by_id, children_by_parent
-        )
+        inclusive_global = _compute_inclusive_count(tag_id, global_count_by_id, children_by_parent)
         return TagTreeItem(
             id=tag_id,
             display_name=tag.display_name,
@@ -551,9 +547,7 @@ async def accept_normalization_suggestion(
         session.expire_all()
     except Exception as exc:
         await session.rollback()
-        raise HTTPException(
-            status_code=500, detail="Merge failed -- rolled back"
-        ) from exc
+        raise HTTPException(status_code=500, detail="Merge failed -- rolled back") from exc
 
     invalidate_tag_graph_cache()
     logger.info(

@@ -239,9 +239,9 @@ async def audit_card_factuality(
     sample scored 0.3333 and the number was an artefact of the reconstruction.
     Bounded and resumable: keep calling while `remaining` is above zero.
     """
-    return FactualityReport(**await audit_factuality(
-        session, limit=req.limit, document_id=req.document_id
-    ))
+    return FactualityReport(
+        **await audit_factuality(session, limit=req.limit, document_id=req.document_id)
+    )
 
 
 @router.post("/repair", response_model=RepairReport)
@@ -560,12 +560,16 @@ async def generate_cloze_flashcards(
 async def _used_chunk_ids(document_id: str, session: AsyncSession) -> set[str]:
     """Chunks some card of this document was written from."""
     rows = (
-        await session.execute(
-            select(FlashcardModel.source_chunk_ids).where(
-                FlashcardModel.document_id == document_id
+        (
+            await session.execute(
+                select(FlashcardModel.source_chunk_ids).where(
+                    FlashcardModel.document_id == document_id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {cid for row in rows for cid in (row or []) if isinstance(cid, str)}
 
 
@@ -769,9 +773,7 @@ async def get_material_headroom(
     question it produces -- and a button that answers with an error afterwards
     is worse than no button.
     """
-    headroom = await service.material_headroom(
-        session, document_id, section_id=section_id
-    )
+    headroom = await service.material_headroom(session, document_id, section_id=section_id)
     return MaterialHeadroomResponse(**asdict(headroom))
 
 
@@ -789,9 +791,7 @@ async def list_flashcards(
       bloom_level_min -- only cards with bloom_level >= this value (null bloom cards excluded)
     """
     if section_id is not None:
-        rows = await repo.list_for_section(
-            document_id, section_id, bloom_level_min=bloom_level_min
-        )
+        rows = await repo.list_for_section(document_id, section_id, bloom_level_min=bloom_level_min)
         return [_to_response(card, section_id=sid) for card, sid in rows]
 
     cards = await repo.list_for_document(document_id, bloom_level_min=bloom_level_min)
@@ -876,9 +876,7 @@ async def bulk_delete_flashcards(
     for card_id in existing:
         await _delete_flashcard_fts(card_id, session)
     await repo.delete_by_ids(existing)
-    sessions_removed = await _purge_emptied_runs(
-        session, existing, document_ids=document_ids
-    )
+    sessions_removed = await _purge_emptied_runs(session, existing, document_ids=document_ids)
     logger.info(
         "Bulk deleted flashcards",
         extra={"count": len(existing), "sessions_removed": sessions_removed},
@@ -902,9 +900,7 @@ async def delete_all_document_flashcards(
         await _delete_flashcard_fts(card_id, session)
     if ids:
         await repo.delete_for_document(document_id)
-    sessions_removed = await _purge_emptied_runs(
-        session, ids, document_ids=[document_id]
-    )
+    sessions_removed = await _purge_emptied_runs(session, ids, document_ids=[document_id])
     logger.info(
         "Deleted all flashcards for document",
         extra={
@@ -983,7 +979,6 @@ async def review_flashcard(
 
     # Fire-and-forget coverage update -- does not block the review response.
     if card.document_id:
-
         _tracker = get_objective_tracker_service()
         _task = asyncio.create_task(_tracker.update_coverage(card.document_id))
         _background_tasks.add(_task)
@@ -992,7 +987,6 @@ async def review_flashcard(
     # Fire-and-forget XP award for the review.
     async def _award_review_xp() -> None:
         try:
-
             async with get_session_factory()() as xp_session:
                 svc = EngagementService(xp_session)
                 await svc.award_flashcard_xp(req.rating, card_id)

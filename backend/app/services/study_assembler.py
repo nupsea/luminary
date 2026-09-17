@@ -77,21 +77,29 @@ async def _material_ids(
         return [], [scope_ref]
     if scope_type == "collection":
         doc_ids = (
-            await session.execute(
-                select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id == scope_ref,
-                    CollectionMemberModel.member_type == "document",
+            (
+                await session.execute(
+                    select(CollectionMemberModel.member_id).where(
+                        CollectionMemberModel.collection_id == scope_ref,
+                        CollectionMemberModel.member_type == "document",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         note_ids = (
-            await session.execute(
-                select(CollectionMemberModel.member_id).where(
-                    CollectionMemberModel.collection_id == scope_ref,
-                    CollectionMemberModel.member_type == "note",
+            (
+                await session.execute(
+                    select(CollectionMemberModel.member_id).where(
+                        CollectionMemberModel.collection_id == scope_ref,
+                        CollectionMemberModel.member_type == "note",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(doc_ids), list(note_ids)
     return [], []
 
@@ -285,8 +293,12 @@ async def _topic_mix(session: AsyncSession, concept_ids: list[str], limit: int =
     if not concept_ids:
         return []
     rows = (
-        await session.execute(
-            select(ConceptModel.label).where(ConceptModel.id.in_(concept_ids[:limit]))
+        (
+            await session.execute(
+                select(ConceptModel.label).where(ConceptModel.id.in_(concept_ids[:limit]))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)

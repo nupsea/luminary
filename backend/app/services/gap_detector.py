@@ -75,7 +75,6 @@ class GapDetectorService:
             LLMUnavailableError: if the LLM is unreachable
         """
         if session is None:
-
             async with _database_module.get_session_factory()() as s:
                 return await self.detect_gaps(note_ids, document_id, k=k, session=s)
 
@@ -86,7 +85,6 @@ class GapDetectorService:
 
         notes_text = "\n\n".join(n.content for n in notes)[:_NOTES_CAP]
         query_used = notes_text[:200]
-
 
         chunks = await _retriever_module.get_retriever().retrieve(query_used, [document_id], k=k)
         book_context = "\n\n".join(c.text for c in chunks)[:_BOOK_CAP]
@@ -126,7 +124,6 @@ class GapDetectorService:
         # identify weak concepts (in notes but mastery < 0.3)
         weak: list[str] = []
         try:
-
             mastery_svc = get_mastery_service()
             for concept in covered:
                 cm = await mastery_svc.compute_mastery(concept, [document_id], session)

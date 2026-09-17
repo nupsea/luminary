@@ -29,9 +29,7 @@ class ActivityService:
         """Bump when a doc has been opened AND scrolled past 10%. Caller is
         expected to gate on the 10% threshold; this only handles debouncing.
         Returns True if a write actually happened."""
-        return await self._bump_if_stale(
-            "document", document_id, self.DOC_READ_DEBOUNCE
-        )
+        return await self._bump_if_stale("document", document_id, self.DOC_READ_DEBOUNCE)
 
     async def record_document_added(self, document_id: str) -> bool:
         """Bump when a document finishes ingesting.
@@ -48,9 +46,7 @@ class ActivityService:
         """Bump on a meaningful note edit (content change, not a pure open)."""
         return await self._bump_if_stale("note", note_id, self.NOTE_EDIT_DEBOUNCE)
 
-    async def record_flashcard_event(
-        self, *, document_id: str | None, note_id: str | None
-    ) -> bool:
+    async def record_flashcard_event(self, *, document_id: str | None, note_id: str | None) -> bool:
         """Bump on flashcard create or grade. No debounce: review cadence is
         slow enough that every event is meaningful. document_id wins when both
         are set (note-sourced cards still attach to the doc activity if linked).
@@ -65,9 +61,7 @@ class ActivityService:
 
     # -- internals ---------------------------------------------------------
 
-    async def _bump_if_stale(
-        self, member_type: str, member_id: str, debounce: timedelta
-    ) -> bool:
+    async def _bump_if_stale(self, member_type: str, member_id: str, debounce: timedelta) -> bool:
         cutoff = datetime.now(UTC) - debounce
         existing = (
             await self.session.execute(

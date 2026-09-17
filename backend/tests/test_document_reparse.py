@@ -66,9 +66,7 @@ async def _seed(factory, tmp_path, *, with_url: bool) -> str:
             )
         )
         s.add(
-            ChunkModel(
-                id="chunk1", document_id=doc_id, section_id="sec1", text="t", chunk_index=0
-            )
+            ChunkModel(id="chunk1", document_id=doc_id, section_id="sec1", text="t", chunk_index=0)
         )
         s.add(
             AnnotationModel(

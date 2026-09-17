@@ -32,15 +32,12 @@ class ReferenceRepo:
         )
         if not include_invalid:
             query = query.where(
-                (WebReferenceModel.is_valid.is_(None))
-                | (WebReferenceModel.is_valid == True)  # noqa: E712
+                (WebReferenceModel.is_valid.is_(None)) | (WebReferenceModel.is_valid == True)  # noqa: E712
             )
         result = await self.session.execute(query)
         return result.scalars().all()
 
-    async def list_for_section(
-        self, section_id: str
-    ) -> Sequence[WebReferenceModel]:
+    async def list_for_section(self, section_id: str) -> Sequence[WebReferenceModel]:
         result = await self.session.execute(
             select(WebReferenceModel)
             .where(WebReferenceModel.section_id == section_id)
@@ -50,9 +47,7 @@ class ReferenceRepo:
 
     async def delete_all_for_document(self, document_id: str) -> None:
         existing = await self.session.execute(
-            select(WebReferenceModel).where(
-                WebReferenceModel.document_id == document_id
-            )
+            select(WebReferenceModel).where(WebReferenceModel.document_id == document_id)
         )
         for row in existing.scalars().all():
             await self.session.delete(row)

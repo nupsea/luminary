@@ -88,9 +88,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
                     DocumentModel.title,
                     DocumentModel.content_type,
                     DocumentModel.is_technical,
-                ).where(
-                    DocumentModel.id == doc_id
-                )
+                ).where(DocumentModel.id == doc_id)
             )
         ).first()
         if doc_row is None:
@@ -101,9 +99,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
 
         chunk_rows = (
             await session.execute(
-                select(ChunkModel.id, ChunkModel.text).where(
-                    ChunkModel.document_id == doc_id
-                )
+                select(ChunkModel.id, ChunkModel.text).where(ChunkModel.document_id == doc_id)
             )
         ).all()
         if not chunk_rows:
@@ -130,9 +126,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             graph = get_graph_service()
         else:
             try:
-                existing_by_type = get_graph_service().get_entities_by_type_for_document(
-                    doc_id
-                )
+                existing_by_type = get_graph_service().get_entities_by_type_for_document(doc_id)
             except Exception as exc:  # pragma: no cover -- defensive concurrency guard
                 logger.warning(
                     "reindex_entities: Kuzu unavailable, using empty canonical pool",
@@ -192,9 +186,7 @@ async def reindex_document(doc_id: str, rebuild_graph: bool = False) -> dict[str
             tail = build_entity_tail(canonicals) if canonicals else ""
             chunk["entities_text"] = tail or None
             await session.execute(
-                sa_update(ChunkModel)
-                .where(ChunkModel.id == cid)
-                .values(entities_text=tail or None)
+                sa_update(ChunkModel).where(ChunkModel.id == cid).values(entities_text=tail or None)
             )
             if canonicals:
                 metrics["chunks_updated"] += 1
@@ -294,9 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--document-id", dest="document_id", help="Reindex a single document by id")
-    group.add_argument(
-        "--all", action="store_true", help="Reindex every document in the catalog"
-    )
+    group.add_argument("--all", action="store_true", help="Reindex every document in the catalog")
     parser.add_argument(
         "--rebuild-graph",
         action="store_true",

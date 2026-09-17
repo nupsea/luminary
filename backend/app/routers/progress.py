@@ -46,6 +46,6 @@ async def get_notes_timeline(
     session: AsyncSession = Depends(get_db),
 ) -> NotesTimelineResponse:
     """Notes created per month, grouped in SQL."""
-    return await ProgressService(
-        session, tz_offset_minutes=tz_offset_minutes
-    ).notes_timeline(months=months)
+    return await ProgressService(session, tz_offset_minutes=tz_offset_minutes).notes_timeline(
+        months=months
+    )

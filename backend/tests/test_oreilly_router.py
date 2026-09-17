@@ -128,4 +128,3 @@ async def test_ingest_url_auto_detects_oreilly_configured():
             assert data["document_id"] == "test-doc-1234"
             assert data["status"] == "processing"
             mock_start.assert_called_once()
-

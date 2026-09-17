@@ -135,9 +135,7 @@ class MasteryService:
         )
         return result.scalar_one() or 0
 
-    async def recompute_for_concepts(
-        self, session: AsyncSession, concept_ids: list[str]
-    ) -> None:
+    async def recompute_for_concepts(self, session: AsyncSession, concept_ids: list[str]) -> None:
         """Write the grounded, by-concept_id mastery to concepts.mastery (I-19).
 
         This is the assessment-pipeline writer: it reads a concept's MAPPED cards
@@ -156,7 +154,9 @@ class MasteryService:
                     await session.execute(
                         select(FlashcardModel).where(FlashcardModel.concept_id == cid)
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
             if not cards:
                 continue

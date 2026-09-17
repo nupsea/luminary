@@ -112,8 +112,8 @@ def test_parse_epub_preserves_code_and_figures(tmp_path):
         item1.get_content.return_value = (
             b"<h1>Python Chapter</h1>"
             b"<p>Here is an example code snippet:</p>"
-            b"<pre><code class=\"language-python\">def solve():\n    return 42</code></pre>"
-            b"<figure><img src=\"images/fig1.png\" alt=\"Architecture\" />"
+            b'<pre><code class="language-python">def solve():\n    return 42</code></pre>'
+            b'<figure><img src="images/fig1.png" alt="Architecture" />'
             b"<h6>Figure 1. Architecture diagram</h6></figure>"
             b"<p>Concluding explanation with some `inline_var` text.</p>"
         )

@@ -180,7 +180,7 @@ def test_every_registered_spec_renders_and_justifies_itself(task):
 
 
 def test_the_shared_format_accommodation_is_one_object_not_a_copied_sentence():
-    """"No explanation, no preamble, no markdown fences" appeared in five
+    """ "No explanation, no preamble, no markdown fences" appeared in five
     prompts. One observation, one accommodation: copying the sentence is what
     made it look like part of each task's contract."""
     from app.services.prompt_spec import NO_FENCES

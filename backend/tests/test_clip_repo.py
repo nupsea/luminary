@@ -39,12 +39,20 @@ async def test_create_assigns_id_and_timestamps(repo: ClipRepo) -> None:
 @pytest.mark.asyncio
 async def test_list_orders_newest_first(repo: ClipRepo) -> None:
     a = await repo.create(
-        document_id="d", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="A", user_note="",
+        document_id="d",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="A",
+        user_note="",
     )
     b = await repo.create(
-        document_id="d", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="B", user_note="",
+        document_id="d",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="B",
+        user_note="",
     )
     rows = await repo.list()
     ids = [r.id for r in rows]
@@ -54,12 +62,20 @@ async def test_list_orders_newest_first(repo: ClipRepo) -> None:
 @pytest.mark.asyncio
 async def test_list_filters_by_document(repo: ClipRepo) -> None:
     await repo.create(
-        document_id="x", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="X-only", user_note="",
+        document_id="x",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="X-only",
+        user_note="",
     )
     await repo.create(
-        document_id="y", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="Y-only", user_note="",
+        document_id="y",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="Y-only",
+        user_note="",
     )
     rows = await repo.list(document_id="x")
     assert len(rows) == 1 and rows[0].selected_text == "X-only"
@@ -75,8 +91,12 @@ async def test_get_or_404_missing_raises(repo: ClipRepo) -> None:
 @pytest.mark.asyncio
 async def test_update_note_persists_and_bumps_updated_at(repo: ClipRepo) -> None:
     clip = await repo.create(
-        document_id="d", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="t", user_note="",
+        document_id="d",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="t",
+        user_note="",
     )
     original_updated_at = clip.updated_at
     updated = await repo.update_note(clip.id, user_note="annotated")
@@ -87,8 +107,12 @@ async def test_update_note_persists_and_bumps_updated_at(repo: ClipRepo) -> None
 @pytest.mark.asyncio
 async def test_delete_then_get_404(repo: ClipRepo) -> None:
     clip = await repo.create(
-        document_id="d", section_id=None, section_heading=None,
-        pdf_page_number=None, selected_text="t", user_note="",
+        document_id="d",
+        section_id=None,
+        section_heading=None,
+        pdf_page_number=None,
+        selected_text="t",
+        user_note="",
     )
     await repo.delete(clip.id)
     with pytest.raises(NotFound) as excinfo:

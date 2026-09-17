@@ -48,7 +48,11 @@ async def _seed(factory):
     async with factory() as s:
         s.add(
             ConceptModel(
-                id="c1", slug="c-1", label="Partitioning", kind="concept", status="proposed",
+                id="c1",
+                slug="c-1",
+                label="Partitioning",
+                kind="concept",
+                status="proposed",
                 level=2,
                 evidence_json=[{"chunk_ids": ["ch1"], "document_ids": ["d1"], "members": ["p"]}],
             )
@@ -60,8 +64,10 @@ async def _seed(factory):
         )
         s.add(
             ChunkModel(
-                id="ch1", document_id="d1",
-                text="Partitioning splits data across nodes for scale.", chunk_index=0,
+                id="ch1",
+                document_id="d1",
+                text="Partitioning splits data across nodes for scale.",
+                chunk_index=0,
             )
         )
         await s.commit()

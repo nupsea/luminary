@@ -134,9 +134,7 @@ async def test_relink_repairs_dataset(test_db):
         rows = (
             (
                 await session.execute(
-                    select(GoldenQuestionModel).where(
-                        GoldenQuestionModel.dataset_id == dataset_id
-                    )
+                    select(GoldenQuestionModel).where(GoldenQuestionModel.dataset_id == dataset_id)
                 )
             )
             .scalars()

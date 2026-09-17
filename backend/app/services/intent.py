@@ -36,9 +36,7 @@ _VALID_INTENTS: frozenset[str] = frozenset(
 # it gives is a misfire: a plain question ("To what extent can Lloyd's algorithm
 # ...") came back as teach_back and was graded as an explanation the user never
 # wrote, producing an empty "what you got right / misconceptions / gaps" card.
-_MODE_INTENTS: frozenset[str] = frozenset(
-    {"teach_back", "socratic", "notes", "notes_gap"}
-)
+_MODE_INTENTS: frozenset[str] = frozenset({"teach_back", "socratic", "notes", "notes_gap"})
 
 _LLM_SELECTABLE_INTENTS: frozenset[str] = _VALID_INTENTS - _MODE_INTENTS
 
@@ -668,8 +666,7 @@ async def _llm_classify_fallback(question: str, default: str, scope: str = "all"
             messages=[
                 {
                     "role": "system",
-                    "content": f"{scope_hint} "
-                    + render_for(INTENT_CLASSIFY_SPEC, "chat"),
+                    "content": f"{scope_hint} " + render_for(INTENT_CLASSIFY_SPEC, "chat"),
                 },
                 {"role": "user", "content": question},
             ],

@@ -111,6 +111,7 @@ def _install_fake_generation_modules(monkeypatch, evaluate_func) -> None:
     monkeypatch.setitem(sys.modules, "ragas.run_config", ragas_run_config_mod)
 
     import evals.lib.runners as _runners_mod  # noqa: PLC0415
+
     # Reset the embeddings cache so this test gets fresh fakes (some other
     # test may have populated it with real instances).
     monkeypatch.setattr(_runners_mod, "_CACHED_EMBEDDINGS", None)
@@ -145,9 +146,7 @@ def test_generation_eval_metrics_flow_from_ragas_to_dict(monkeypatch):
     _install_fake_generation_modules(monkeypatch, _fake_evaluate)
     # full_metrics=True opts back into context_precision/context_recall, which
     # are skipped in the default fast/reliable path.
-    out = GenerationEval().run(
-        _SAMPLES, judge_model="ollama/test-model", full_metrics=True
-    )
+    out = GenerationEval().run(_SAMPLES, judge_model="ollama/test-model", full_metrics=True)
 
     assert mock_eval.called
     assert out["faithfulness"] == pytest.approx(0.80)
@@ -158,6 +157,7 @@ def test_generation_eval_metrics_flow_from_ragas_to_dict(monkeypatch):
 
 def test_generation_eval_graceful_skip_on_judge_unreachable(monkeypatch):
     """When the judge raises (e.g. Ollama down), all metrics are None."""
+
     def _raise_connection_error(**kwargs):
         raise ConnectionRefusedError("ollama down")
 

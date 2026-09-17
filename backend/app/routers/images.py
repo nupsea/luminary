@@ -96,9 +96,8 @@ async def upload_note_image(file: UploadFile = File(...)) -> UploadResponse:
     content_type = file.content_type or ""
     filename = file.filename or "asset"
     ext = Path(filename).suffix.lower()
-    is_excalidraw_scene = (
-        content_type in {"application/json", "text/json"}
-        and filename.endswith(".excalidraw.json")
+    is_excalidraw_scene = content_type in {"application/json", "text/json"} and filename.endswith(
+        ".excalidraw.json"
     )
     if not content_type.startswith("image/") and not is_excalidraw_scene:
         raise HTTPException(

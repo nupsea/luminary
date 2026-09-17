@@ -298,9 +298,7 @@ async def test_retrieve_without_rerank_pool_respects_k():
         patch.object(retriever, "keyword_search", new=AsyncMock(return_value=pool)) as mock_kw,
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
-        results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=200, graph_expand=False
-        )
+        results = await retriever.retrieve("q", document_ids=["doc-1"], k=200, graph_expand=False)
 
     assert mock_vec.call_args[0][2] == 200
     assert mock_kw.call_args.kwargs["k"] == 200
@@ -396,8 +394,13 @@ async def test_a_single_leg_strategy_honours_rerank(strategy):
         patch("app.services.retriever._expand_context", new=AsyncMock(side_effect=lambda r, k: r)),
     ):
         results = await retriever.retrieve(
-            "q", document_ids=["doc-1"], k=5, rerank=True, rerank_blend=0.0,
-            graph_expand=False, strategy=strategy,
+            "q",
+            document_ids=["doc-1"],
+            k=5,
+            rerank=True,
+            rerank_blend=0.0,
+            graph_expand=False,
+            strategy=strategy,
         )
 
     mock_reranker.score.assert_called_once()

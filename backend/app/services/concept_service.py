@@ -44,9 +44,7 @@ class ConceptService:
         slug = base
         n = 2
         while True:
-            exists = await session.execute(
-                select(ConceptModel.id).where(ConceptModel.slug == slug)
-            )
+            exists = await session.execute(select(ConceptModel.id).where(ConceptModel.slug == slug))
             if exists.scalar_one_or_none() is None:
                 return slug
             slug = f"{base}-{n}"
@@ -248,9 +246,7 @@ class ConceptService:
             return None
         row.kind = kind
         try:
-            get_graph_service().upsert_concept_node(
-                row.id, row.slug, row.label, kind, row.status
-            )
+            get_graph_service().upsert_concept_node(row.id, row.slug, row.label, kind, row.status)
         except Exception:
             logger.debug("reclassify: Kuzu update failed for %s", concept_id, exc_info=True)
         await self._record_override(
@@ -288,10 +284,14 @@ class ConceptService:
             return None
         # reassign the source's mapped cards to the target
         cards = (
-            await session.execute(
-                select(FlashcardModel).where(FlashcardModel.concept_id == source_id)
+            (
+                await session.execute(
+                    select(FlashcardModel).where(FlashcardModel.concept_id == source_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for c in cards:
             c.concept_id = target_id
             c.concept_slug = target.slug  # keep the durable binding pointed at the survivor
@@ -314,15 +314,21 @@ class ConceptService:
         from app.models import OverrideModel  # noqa: PLC0415
 
         overrides = (
-            await session.execute(select(OverrideModel).order_by(OverrideModel.created_at.asc()))
-        ).scalars().all()
+            (await session.execute(select(OverrideModel).order_by(OverrideModel.created_at.asc())))
+            .scalars()
+            .all()
+        )
         applied = 0
         for ov in overrides:
             row = (
-                await session.execute(
-                    select(ConceptModel).where(ConceptModel.slug == ov.target_key)
+                (
+                    await session.execute(
+                        select(ConceptModel).where(ConceptModel.slug == ov.target_key)
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             payload = ov.payload_json or {}
             if ov.kind == "reject_concept":
                 if row is not None:
@@ -341,10 +347,14 @@ class ConceptService:
                 applied += 1
             elif ov.kind == "merge":
                 target = (
-                    await session.execute(
-                        select(ConceptModel).where(ConceptModel.slug == payload.get("into"))
+                    (
+                        await session.execute(
+                            select(ConceptModel).where(ConceptModel.slug == payload.get("into"))
+                        )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
                 if target is not None:
                     await self.merge_concepts(session, row.id, target.id)
                     applied += 1

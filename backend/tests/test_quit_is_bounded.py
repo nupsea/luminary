@@ -37,9 +37,7 @@ def stdlib_executor_join(monkeypatch):
         "conftest no longer wraps shutdown_default_executor; this test needs the "
         "stdlib method to prove app.main is what bounds the quit"
     )
-    monkeypatch.setattr(
-        asyncio.base_events.BaseEventLoop, "shutdown_default_executor", original
-    )
+    monkeypatch.setattr(asyncio.base_events.BaseEventLoop, "shutdown_default_executor", original)
 
 
 def _quit_seconds_with_thread_work_in_flight() -> float:
@@ -56,9 +54,7 @@ def _quit_seconds_with_thread_work_in_flight() -> float:
     return time.monotonic() - started
 
 
-def test_quit_does_not_wait_out_background_thread_work(
-    stdlib_executor_join, monkeypatch
-):
+def test_quit_does_not_wait_out_background_thread_work(stdlib_executor_join, monkeypatch):
     monkeypatch.setattr(main_module, "_EXECUTOR_RELEASE_GRACE_S", _GRACE_S)
 
     elapsed = _quit_seconds_with_thread_work_in_flight()

@@ -232,21 +232,25 @@ async def test_only_the_first_attempt_reschedules_the_card(test_db):
 
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(TeachbackResultModel).where(
-                    TeachbackResultModel.session_id == sess.id
+            (
+                await session.execute(
+                    select(TeachbackResultModel).where(TeachbackResultModel.session_id == sess.id)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         events = (
-            await session.execute(
-                select(ReviewEventModel).where(ReviewEventModel.session_id == sess.id)
+            (
+                await session.execute(
+                    select(ReviewEventModel).where(ReviewEventModel.session_id == sess.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         graded = (
-            await session.execute(
-                select(FlashcardModel).where(FlashcardModel.id == card.id)
-            )
+            await session.execute(select(FlashcardModel).where(FlashcardModel.id == card.id))
         ).scalar_one()
 
     # Both attempts scored and stored...
@@ -281,9 +285,7 @@ async def test_appending_cards_extends_the_planned_queue(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            f"/study/sessions/{sess.id}/cards", json={"card_ids": [added.id]}
-        )
+        resp = await client.post(f"/study/sessions/{sess.id}/cards", json={"card_ids": [added.id]})
         assert resp.status_code == 200, resp.text
         assert resp.json() == {
             "session_id": sess.id,
@@ -321,9 +323,7 @@ async def test_appending_the_same_card_twice_queues_it_once(test_db):
         await session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            f"/study/sessions/{sess.id}/cards", json={"card_ids": [card.id]}
-        )
+        resp = await client.post(f"/study/sessions/{sess.id}/cards", json={"card_ids": [card.id]})
 
     assert resp.status_code == 200
     assert resp.json()["added"] == 0
@@ -365,9 +365,7 @@ async def test_appending_an_unknown_card_is_dropped(test_db):
 
 async def test_appending_to_a_session_that_is_gone_is_a_404(test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            f"/study/sessions/{uuid.uuid4()}/cards", json={"card_ids": []}
-        )
+        resp = await client.post(f"/study/sessions/{uuid.uuid4()}/cards", json={"card_ids": []})
     assert resp.status_code == 404
 
 
@@ -394,9 +392,7 @@ def test_list_fields_are_normalised_to_strings(label, raw_value, expected):
     from app.routers.study import _parse_teachback_response
 
     parsed = _parse_teachback_response(
-        json.dumps(
-            {"accuracy": 50, "completeness": 50, "misconceptions": raw_value}
-        )
+        json.dumps({"accuracy": 50, "completeness": 50, "misconceptions": raw_value})
     )
     assert parsed is not None, label
     assert parsed["misconceptions"] == expected, label
@@ -428,12 +424,23 @@ def test_a_card_graded_twice_is_one_card_reviewed():
 
     now = datetime.now(UTC)
     events = [
-        ReviewEventModel(id="e1", session_id="s", flashcard_id="a",
-                         is_correct=False, reviewed_at=now),
-        ReviewEventModel(id="e2", session_id="s", flashcard_id="a",
-                         is_correct=True, reviewed_at=now + timedelta(seconds=30)),
-        ReviewEventModel(id="e3", session_id="s", flashcard_id="b",
-                         is_correct=True, reviewed_at=now + timedelta(seconds=60)),
+        ReviewEventModel(
+            id="e1", session_id="s", flashcard_id="a", is_correct=False, reviewed_at=now
+        ),
+        ReviewEventModel(
+            id="e2",
+            session_id="s",
+            flashcard_id="a",
+            is_correct=True,
+            reviewed_at=now + timedelta(seconds=30),
+        ),
+        ReviewEventModel(
+            id="e3",
+            session_id="s",
+            flashcard_id="b",
+            is_correct=True,
+            reviewed_at=now + timedelta(seconds=60),
+        ),
     ]
 
     latest = _latest_event_per_card(events)
@@ -450,10 +457,16 @@ def test_the_latest_event_wins_regardless_of_query_order():
     from app.routers.study import _latest_event_per_card
 
     now = datetime.now(UTC)
-    later = ReviewEventModel(id="e2", session_id="s", flashcard_id="a",
-                             is_correct=False, reviewed_at=now + timedelta(seconds=30))
-    earlier = ReviewEventModel(id="e1", session_id="s", flashcard_id="a",
-                               is_correct=True, reviewed_at=now)
+    later = ReviewEventModel(
+        id="e2",
+        session_id="s",
+        flashcard_id="a",
+        is_correct=False,
+        reviewed_at=now + timedelta(seconds=30),
+    )
+    earlier = ReviewEventModel(
+        id="e1", session_id="s", flashcard_id="a", is_correct=True, reviewed_at=now
+    )
 
     latest = _latest_event_per_card([later, earlier])
 

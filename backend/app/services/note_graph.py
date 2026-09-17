@@ -38,6 +38,7 @@ def _log_graph_failure(operation: str, exc: Exception) -> None:
         return
     logger.warning("%s failed (non-fatal): %s", operation, exc, exc_info=True)
 
+
 _note_graph_service: "NoteGraphService | None" = None
 
 
@@ -122,7 +123,6 @@ class NoteGraphService:
     ) -> list[dict]:
         """Run GLiNER extraction (slow) outside the Kuzu lock."""
         try:
-
             extractor = _ner_module.get_entity_extractor()
             chunks = [{"id": note_id, "document_id": document_id or "", "text": content}]
             return extractor.extract(chunks, content_type="unknown")
