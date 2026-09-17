@@ -4,7 +4,7 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.10] - 2026-09-18
 
 ### Added
 - **O'Reilly Learning books ingest from their URL for subscribers.** Paste a book or chapter link; the session cookie is stored owner-only in `DATA_DIR`, and a book missing any chapter fails rather than ingesting as complete.
