@@ -1493,13 +1493,8 @@ def _extract_epub_cover_sync(fp: str, target: str) -> bool:
                     except Exception as opf_err:
                         logger.debug("OPF parse skipped: %s", opf_err)
 
-            # 3. Fallback: first raster image
-            if not candidate_name:
-                for name in namelist:
-                    if any(name.lower().endswith(ext) for ext in valid_exts):
-                        candidate_name = name
-                        break
-
+            # No declared cover: fall through to the page render rather than
+            # promoting whichever figure happens to be first in the archive.
             if candidate_name:
                 raw_bytes = zf.read(candidate_name)
                 img = Image.open(BytesIO(raw_bytes))
@@ -1717,9 +1712,27 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
     )
 
 
+def _read_epub_image_sync(epub_path: str, clean_path: str) -> tuple[bytes, str] | None:
+    """An image entry of an EPUB archive, by relative path or else by base name."""
+    filename = clean_path.rsplit("/", maxsplit=1)[-1].lower()
+    with zipfile.ZipFile(epub_path, "r") as z:
+        names = z.namelist()
+        matched = next((n for n in names if n == clean_path or n.endswith("/" + clean_path)), None)
+        if matched is None:
+            matched = next((n for n in names if n.split("/")[-1].lower() == filename), None)
+        if matched is None:
+            return None
+        mime, _ = mimetypes.guess_type(matched)
+        # Only images: an archive's XHTML served from the API origin would run
+        # as a page there.
+        if not mime or not mime.startswith("image/"):
+            return None
+        return z.read(matched), mime
+
+
 @router.api_route("/{document_id}/asset/{asset_path:path}", methods=["GET", "HEAD"])
 async def get_document_asset(document_id: str, asset_path: str) -> Response:
-    """Serve an embedded image or asset from a document (e.g. EPUB zip archive or local images)."""
+    """Serve an embedded image from a document (its EPUB archive or extracted images)."""
     async with get_session_factory()() as session:
         doc = await get_or_404(session, DocumentModel, document_id, name="Document")
 
@@ -1729,43 +1742,31 @@ async def get_document_asset(document_id: str, asset_path: str) -> Response:
 
     filename = clean_path.split("/")[-1]
 
-    # 1. If EPUB, extract directly from the EPUB archive
-    if doc.format.lower() == "epub" and doc.file_path:
-        fp = Path(doc.file_path)
-        if fp.is_file():
-            try:
-                with zipfile.ZipFile(fp, "r") as z:
-                    names = z.namelist()
-                    matched_entry = None
-                    for name in names:
-                        if name == clean_path or name.endswith("/" + clean_path):
-                            matched_entry = name
-                            break
-                    if not matched_entry:
-                        for name in names:
-                            if name.split("/")[-1].lower() == filename.lower():
-                                matched_entry = name
-                                break
-                    if matched_entry:
-                        data = z.read(matched_entry)
-                        mime, _ = mimetypes.guess_type(matched_entry)
-                        return Response(
-                            content=data,
-                            media_type=mime or "image/png",
-                            headers={"Cache-Control": "public, max-age=86400"},
-                        )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to extract asset %s from EPUB %s: %s", clean_path, document_id, exc
-                )
+    if (doc.format or "").lower() == "epub" and doc.file_path and Path(doc.file_path).is_file():
+        try:
+            found = await asyncio.to_thread(_read_epub_image_sync, doc.file_path, clean_path)
+        except (zipfile.BadZipFile, OSError) as exc:
+            logger.warning("Failed to read asset %s from EPUB %s: %s", clean_path, document_id, exc)
+            found = None
+        if found is not None:
+            data, mime = found
+            return Response(
+                content=data,
+                media_type=mime,
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
 
-    # 2. Check in DATA_DIR/images/{document_id}/
     settings = get_settings()
     img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
     candidate = (img_dir / filename).resolve()
-    if candidate.is_relative_to(img_dir) and candidate.is_file():
-        mime, _ = mimetypes.guess_type(candidate.name)
-        return FileResponse(str(candidate), media_type=mime or "image/png")
+    mime, _ = mimetypes.guess_type(candidate.name)
+    if (
+        candidate.is_relative_to(img_dir)
+        and candidate.is_file()
+        and mime is not None
+        and mime.startswith("image/")
+    ):
+        return FileResponse(str(candidate), media_type=mime)
 
     raise HTTPException(status_code=404, detail="Asset not found")
 

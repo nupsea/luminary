@@ -59,29 +59,51 @@ class TestChapterSplitting:
         soup = BeautifulSoup("<body><p>Just prose, no headings.</p></body>", "html.parser")
         assert len(_split_soup_on_headings(soup)) == 1
 
-    def test_single_h1_with_multiple_h2_sections_stays_together(self):
-        """A technical chapter with 1 H1 and several H2 subsections should stay together."""
-        from bs4 import BeautifulSoup
+    def test_the_books_toc_decides_what_a_chapter_is(self, tmp_path):
+        """A file the TOC lists once is one chapter; a file it points into twice is split.
 
-        from app.services.epub_service import _split_soup_on_headings
+        Heading levels alone cannot tell a technical chapter (<h1> over <h2>
+        sections) from a Gutenberg file (<h1> title over <h2> chapters).
+        """
+        from ebooklib import epub
 
-        soup = BeautifulSoup(
-            "<body><h1>Chapter 1. Introduction</h1>"
-            "<p>Intro text</p>"
-            "<h2>1.1 Background</h2>"
-            "<p>Background text</p>"
-            "<h2>1.2 Architecture</h2>"
-            "<p>Arch text</p></body>",
-            "html.parser",
+        from app.services.epub_service import EpubService
+
+        book = epub.EpubBook()
+        book.set_identifier("toc-test")
+        book.set_title("TOC test")
+        tech = epub.EpubHtml(title="Intro", file_name="ch01.xhtml")
+        tech.content = (
+            "<html><body><h1>Chapter 1. Introduction</h1><p>Intro text here.</p>"
+            "<h2>1.1 Background</h2><p>Background text.</p>"
+            "<h2>1.2 Architecture</h2><p>Arch text.</p></body></html>"
         )
-        units = _split_soup_on_headings(soup)
-        assert len(units) == 1
-        assert units[0]["title"] == "Chapter 1. Introduction"
-        assert "Background text" in units[0]["html"]
-        assert "Arch text" in units[0]["html"]
+        packed = epub.EpubHtml(title="Stories", file_name="stories.xhtml")
+        packed.content = (
+            "<html><body><h1>STORIES</h1>"
+            '<h2 id="s1">CHAPTER 2. One.</h2><p>First story.</p>'
+            '<h2 id="s2">CHAPTER 3. Two.</h2><p>Second story.</p></body></html>'
+        )
+        for item in (tech, packed):
+            book.add_item(item)
+        book.toc = (
+            epub.Link("ch01.xhtml", "Chapter 1", "c1"),
+            epub.Link("stories.xhtml#s1", "Chapter 2", "c2"),
+            epub.Link("stories.xhtml#s2", "Chapter 3", "c3"),
+        )
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = ["nav", tech, packed]
+        path = tmp_path / "toc.epub"
+        epub.write_epub(str(path), book)
 
+        titles = [c["title"] for c in EpubService().get_toc(str(path))]
 
-class TestEpubSanitization:
+        assert titles.count("Intro") + titles.count("Chapter 1. Introduction") == 1
+        assert "1.1 Background" not in titles
+        assert "CHAPTER 2. One." in titles
+        assert "CHAPTER 3. Two." in titles
+
     def test_sanitize_html_preserves_images_figures_and_callouts(self):
         from app.services.epub_service import EpubService
 
@@ -100,3 +122,17 @@ class TestEpubSanitization:
         assert "<figcaption>Figure 1. Diagram</figcaption>" in cleaned
         assert 'data-type="note"' in cleaned
         assert "<script>" not in cleaned
+
+    def test_a_heading_wrapped_in_a_header_does_not_drop_the_body(self):
+        from bs4 import BeautifulSoup
+
+        from app.services.epub_service import _split_soup_on_headings
+
+        soup = BeautifulSoup(
+            "<body><section><header><h1>Chapter 3</h1></header>"
+            "<p>The whole chapter body.</p><h2>Part</h2><p>More body.</p></section></body>",
+            "html.parser",
+        )
+        html = "".join(u["html"] for u in _split_soup_on_headings(soup))
+        assert "The whole chapter body." in html
+        assert "More body." in html

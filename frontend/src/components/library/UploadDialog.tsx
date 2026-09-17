@@ -525,7 +525,9 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
-  async function handleUrlSubmit() {
+  // `oreillyConnected` is passed by the connect modal: its success lands before the
+  // status query refetches, so the cached status would reopen the modal.
+  async function handleUrlSubmit({ oreillyConnected = false }: { oreillyConnected?: boolean } = {}) {
     const urlValue = url.trim()
     if (!urlValue) {
       setUrlError("Enter a URL")
@@ -534,7 +536,8 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setUrlError("")
 
     // If an O'Reilly URL is entered and not yet connected, open the connect modal
-    if (isOreillyUrl(urlValue) && !(oreillyStatus?.configured && oreillyStatus?.valid)) {
+    const connected = oreillyConnected || (oreillyStatus?.configured && oreillyStatus?.valid)
+    if (isOreillyUrl(urlValue) && !connected) {
       setOreillyModalOpen(true)
       return
     }
@@ -945,7 +948,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
         onSuccess={() => {
           void queryClient.invalidateQueries({ queryKey: ["oreilly-status"] })
           if (url.trim()) {
-            void handleUrlSubmit()
+            void handleUrlSubmit({ oreillyConnected: true })
           }
         }}
       />

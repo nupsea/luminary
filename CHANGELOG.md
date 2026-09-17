@@ -4,6 +4,16 @@ All notable changes to Luminary are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **O'Reilly Learning books ingest from their URL for subscribers.** Paste a book or chapter link; the session cookie is stored owner-only in `DATA_DIR`, and a book missing any chapter fails rather than ingesting as complete.
+- **EPUB figures render in the reader**, served by `GET /documents/{id}/asset/{path}` (images only), and EPUB covers come from the archive's declared cover.
+- **Key Points and Detailed summaries are assembled from section summaries** without an LLM call; Regenerate still asks the LLM. The detailed summary keeps every authored section whole and omits only publisher boilerplate.
+
+### Fixed
+- **An EPUB chapter the book's TOC lists once is served as one chapter** instead of one per sub-heading; files the TOC points into several times (Gutenberg) still split.
+
 ## [0.12.8] - 2026-09-14
 
 ### Added

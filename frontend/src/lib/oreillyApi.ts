@@ -29,14 +29,21 @@ export interface OreillyIngestResult {
   title: string
 }
 
+// Mirrors is_oreilly_url in oreilly_service.py: match the host, never a substring,
+// so an article URL that merely mentions O'Reilly still ingests as an article.
 export function isOreillyUrl(url: string): boolean {
-  if (!url) return false
-  const lower = url.trim().toLowerCase()
-  return (
-    lower.includes("learning.oreilly.com") ||
-    lower.includes("oreilly.com/library/view") ||
-    lower.startsWith("urn:orm:book:")
-  )
+  const raw = url?.trim() ?? ""
+  if (!raw) return false
+  if (raw.toLowerCase().startsWith("urn:orm:book:")) return true
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return false
+  }
+  const host = parsed.hostname.toLowerCase()
+  if (host === "learning.oreilly.com") return true
+  return (host === "oreilly.com" || host === "www.oreilly.com") && parsed.pathname.startsWith("/library/view/")
 }
 
 export function parseOreillyChapter(url: string): string | null {

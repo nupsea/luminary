@@ -7,14 +7,19 @@ from ebooklib import epub
 
 from app.services.oreilly_service import (
     OreillyClient,
+    OreillyDownloadError,
     build_epub,
+    delete_oreilly_cookies,
+    download_oreilly_book_to_epub,
     is_oreilly_url,
     parse_cookies_input,
     parse_oreilly_book_id,
     parse_oreilly_target_chapter,
     process_chapter_html,
+    save_oreilly_cookies,
     upgrade_cover_url,
 )
+from app.services.parser import DocumentParser
 
 
 def test_parse_oreilly_target_chapter():
@@ -36,6 +41,8 @@ def test_is_oreilly_url():
     assert is_oreilly_url("urn:orm:book:9781491903063")
     assert not is_oreilly_url("https://youtube.com/watch?v=123")
     assert not is_oreilly_url("https://example.com/article")
+    assert not is_oreilly_url("https://example.com/review?via=learning.oreilly.com")
+    assert not is_oreilly_url("https://www.oreilly.com/radar/some-article/")
     assert not is_oreilly_url("")
 
 
@@ -137,12 +144,27 @@ def test_process_chapter_html():
       </body>
     </html>
     """
-    cleaned, images = process_chapter_html(raw, "9781491903063")
+    chapter_url = (
+        "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:9781491903063/files/ch01.html"
+    )
+    cleaned, images = process_chapter_html(raw, "9781491903063", chapter_url)
     assert "Chapter 1: Foundations" in cleaned
     assert "Header to ignore" not in cleaned
-    assert "images/ch01_fig1.png" in cleaned
-    assert "images/diagram.svg" in cleaned
-    assert len(images) == 2
+    assert set(images) == {
+        "https://learning.oreilly.com/assets/ch01_fig1.png",
+        # Relative to the chapter's own URL, not the site root.
+        "https://learning.oreilly.com/api/v2/epubs/urn:orm:book:9781491903063/files/diagram.svg",
+    }
+    for local in images.values():
+        assert f"images/{local}" in cleaned
+
+
+def test_figures_sharing_a_base_name_keep_separate_files():
+    """Two chapters' "figure1.png" used to collapse into one file and show one figure twice."""
+    html = '<div id="sbo-rt-content"><img src="figs/figure1.png"/></div>'
+    _, first = process_chapter_html(html, "b1", "https://learning.oreilly.com/x/ch01/index.html")
+    _, second = process_chapter_html(html, "b1", "https://learning.oreilly.com/x/ch02/index.html")
+    assert len(set(first.values()) | set(second.values())) == 2
 
 
 def test_build_epub(tmp_path: Path):
@@ -157,10 +179,12 @@ def test_build_epub(tmp_path: Path):
         (
             "Chapter 1: Reliable, Scalable, and Maintainable",
             "<h1>Chapter 1</h1><p>Systems are reliable.</p>",
+            "ch01.xhtml",
         ),
         (
             "Chapter 2: Data Models and Query Languages",
-            "<h1>Chapter 2</h1><p>Relational vs Document.</p>",
+            '<h1>Chapter 2</h1><p>Relational vs <a href="ch01.xhtml#x">Document</a>.</p>',
+            "ch02.xhtml",
         ),
     ]
     images = {"diagram.png": b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"}
@@ -181,6 +205,70 @@ def test_build_epub(tmp_path: Path):
     # 2 chapters + nav + ncx
     html_items = [it for it in book.get_items() if it.get_type() == 9]  # 9 = ITEM_DOCUMENT
     assert len(html_items) >= 2
+    # Chapters keep their source names, so the book's own cross-references resolve.
+    assert {"ch01.xhtml", "ch02.xhtml"} <= {it.get_name() for it in html_items}
+
+
+class _FakeClient:
+    def __init__(self, failing: set[str]):
+        self.failing = failing
+
+    def fetch_book_metadata(self, book_id):
+        return {"id": book_id, "title": "Book", "authors": [], "cover_url": ""}
+
+    def fetch_chapter_list(self, book_id):
+        return [
+            {
+                "title": t,
+                "filename": f"{t}.html",
+                "content_url": f"https://learning.oreilly.com/{t}.html",
+            }
+            for t in ("ch01", "ch02", "ch03")
+        ]
+
+    def fetch_chapter_html(self, url):
+        if any(name in url for name in self.failing):
+            raise ConnectionError("reset")
+        return (
+            '<div id="sbo-rt-content"><h1>Title</h1>'
+            "<p>Body. The parser keeps only sections of fifty characters or more.</p></div>"
+        )
+
+    def fetch_bytes(self, url):
+        return b""
+
+
+def test_a_book_missing_a_chapter_is_not_ingested(tmp_path: Path):
+    """A skipped chapter used to leave a book that ingested as complete without it."""
+    dest = tmp_path / "book.epub"
+    with pytest.raises(OreillyDownloadError, match="1 of 3 chapters"):
+        download_oreilly_book_to_epub("b1", dest, _FakeClient(failing={"ch02"}))
+    assert not dest.exists()
+
+    path, _ = download_oreilly_book_to_epub("b1", dest, _FakeClient(failing=set()))
+    parsed = DocumentParser().parse(path, "epub")
+    # Every chapter must reach the parser as a document, not only exist in the archive.
+    assert sum("Body." in s.text for s in parsed.sections) == 3
+
+
+def test_links_into_the_book_point_at_the_stored_chapter():
+    html = (
+        '<div id="sbo-rt-content"><a href="/library/view/x/b1/ch04.html#sec2">see</a>'
+        '<a href="https://example.com/">out</a></div>'
+    )
+    cleaned, _ = process_chapter_html(html, "b1")
+    assert 'href="ch04.xhtml#sec2"' in cleaned
+    assert 'href="https://example.com/"' in cleaned
+
+
+def test_saved_cookies_are_owner_only():
+    save_oreilly_cookies({"sessionid": "secret"})
+    from app.services.oreilly_service import _cookies_file_path
+
+    try:
+        assert _cookies_file_path().stat().st_mode & 0o777 == 0o600
+    finally:
+        delete_oreilly_cookies()
 
 
 @pytest.mark.asyncio

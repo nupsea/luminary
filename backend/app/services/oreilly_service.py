@@ -9,20 +9,23 @@ for Luminary's native local ingestion pipeline.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import html
 import json
 import logging
 import mimetypes
+import os
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 from ebooklib import epub
 
 from app.config import get_settings
+from app.exceptions import LuminaryError
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +50,27 @@ _OREILLY_URL_PATTERN = re.compile(
 _COVER_WIDTH_RE = re.compile(r"/\d+w/?$")
 _HIGH_RES_COVER_WIDTH = "1200w"
 
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+class OreillyDownloadError(LuminaryError):
+    """The book could not be downloaded whole; nothing partial is ingested."""
+
+    status_code = 502
+
 
 def is_oreilly_url(url: str) -> bool:
     """Return True if the URL points to an O'Reilly Learning resource."""
     if not url:
         return False
-    u = url.strip().lower()
-    return "learning.oreilly.com" in u or "oreilly.com/library/view" in u or "urn:orm:book:" in u
+    raw = url.strip()
+    if raw.lower().startswith("urn:orm:book:"):
+        return True
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if host == "learning.oreilly.com":
+        return True
+    return host in {"oreilly.com", "www.oreilly.com"} and parsed.path.startswith("/library/view/")
 
 
 def parse_oreilly_book_id(url_or_id: str) -> str | None:
@@ -211,7 +228,13 @@ def save_oreilly_cookies(cookies: dict[str, str]) -> None:
     """Save O'Reilly cookies to local storage."""
     path = _cookies_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
+    # Session cookies are a login credential: owner-only, including when the
+    # file already exists with wider permissions.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(cookies, indent=2))
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
     logger.info("Saved O'Reilly cookies (%d entries)", len(cookies))
 
 
@@ -311,8 +334,6 @@ class OreillyClient:
                     if r.get("archive_id") == book_id or r.get("ourn", "").endswith(f":{book_id}"):
                         match = r
                         break
-                if not match and results:
-                    match = results[0]
                 if match:
                     meta["title"] = match.get("title") or meta["title"]
                     meta["authors"] = match.get("authors", [])
@@ -375,11 +396,50 @@ class OreillyClient:
         return resp.content
 
 
-def process_chapter_html(raw_html: str, book_id: str) -> tuple[str, list[str]]:
+def _asset_name(url: str) -> str:
+    """A local file name for a remote asset, unique per source URL.
+
+    Figures from different chapters routinely share a base name ("figure1.png");
+    keyed by base name alone, the last download silently replaced the others.
+    """
+    base = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or "asset"
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]  # noqa: S324 - a name, not a MAC
+    return f"{digest}-{_UNSAFE_FILENAME_CHARS.sub('_', base)}"
+
+
+def _chapter_file_name(filename: str, index: int, taken: set[str]) -> str:
+    """The chapter's own name as .xhtml, so the book's cross-references still resolve.
+
+    The suffix matters: ebooklib types a `.html` item as text/html rather than a
+    document, and the parser only reads documents, so the chapter would vanish.
+    """
+    stem = _UNSAFE_FILENAME_CHARS.sub("_", Path(filename).stem) if filename else ""
+    name = f"{stem}.xhtml" if stem else f"chapter_{index + 1:03d}.xhtml"
+    if name in taken:
+        name = f"{Path(name).stem}_{index + 1:03d}.xhtml"
+    taken.add(name)
+    return name
+
+
+def _in_book_href(href: str, book_id: str) -> str:
+    """A link into the same book, pointed at the chapter file the EPUB stores."""
+    path, sep, fragment = href.rsplit(book_id, maxsplit=1)[-1].partition("#")
+    name = Path(path).name
+    if name:
+        name = f"{_UNSAFE_FILENAME_CHARS.sub('_', Path(name).stem)}.xhtml"
+    return f"{name}{sep}{fragment}"
+
+
+def process_chapter_html(
+    raw_html: str, book_id: str, chapter_url: str | None = None
+) -> tuple[str, dict[str, str]]:
     """Clean chapter HTML, extract main content, and locate referenced images.
 
+    Image sources are resolved against the chapter's own URL, since a relative
+    `src` is relative to the page that contains it.
+
     Returns:
-        (cleaned_html, list_of_image_src_urls)
+        (cleaned_html, {absolute_image_url: local_file_name})
     """
     soup = BeautifulSoup(raw_html, "html.parser")
     content_div = soup.find("div", id="sbo-rt-content")
@@ -397,31 +457,30 @@ def process_chapter_html(raw_html: str, book_id: str) -> tuple[str, list[str]]:
             else:
                 img_tag.replace_with(new_img)
 
-    # Rewrite image links to relative images/ directory and record URLs
-    images_found: list[str] = []
+    base = chapter_url or f"{_BASE_URL}/"
+    images_found: dict[str, str] = {}
     for img in content_div.find_all("img"):
         src = img.get("src", "")
-        if not src:
+        if not src or src.startswith("data:"):
             continue
-        filename = unquote(src.split("/")[-1])
-        img["src"] = f"images/{filename}"
-        images_found.append(src)
+        absolute = urljoin(base, src)
+        local = images_found.setdefault(absolute, _asset_name(absolute))
+        img["src"] = f"images/{local}"
 
-    # Rewrite hrefs
+    # Links into the same book become relative, pointing at the chapter file
     for a in content_div.find_all("a", href=True):
         href = a["href"]
         if href.startswith("mailto:") or href.startswith("#"):
             continue
         if book_id in href:
-            path = href.split(book_id)[-1].lstrip("/")
-            a["href"] = path
+            a["href"] = _in_book_href(href, book_id)
 
     return str(content_div), images_found
 
 
 def build_epub(
     book_meta: dict[str, Any],
-    chapters_content: list[tuple[str, str]],  # [(title, xhtml_content)]
+    chapters_content: list[tuple[str, str, str]],  # [(title, xhtml_content, file_name)]
     images_data: dict[str, bytes],  # {filename: image_bytes}
     dest_path: Path,
     cover_bytes: bytes | None = None,
@@ -461,17 +520,12 @@ def build_epub(
 
     # Add chapters
     epub_chapters: list[epub.EpubHtml] = []
-    for i, (ch_title, ch_html) in enumerate(chapters_content):
-        filename = f"chapter_{i + 1:03d}.xhtml"
-        ch = epub.EpubHtml(
-            title=ch_title or f"Chapter {i + 1}",
-            file_name=filename,
-            lang="en",
-        )
+    for ch_title, ch_html, filename in chapters_content:
+        ch = epub.EpubHtml(title=ch_title, file_name=filename, lang="en")
         # Wrap content in basic XHTML envelope
         ch.content = (
             f'<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" lang="en">\n'
-            f"<head><title>{html.escape(ch_title)}</title></head>\n"
+            f"<head><title>{html.escape(ch_title or '')}</title></head>\n"
             f"<body>\n{ch_html}\n</body>\n</html>"
         )
         book.add_item(ch)
@@ -515,7 +569,7 @@ def download_oreilly_book_to_epub(
     all_chapters = client.fetch_chapter_list(book_id)
     if not all_chapters:
         msg = f"No chapters found for O'Reilly book {book_id}. Session may have expired."
-        raise RuntimeError(msg)
+        raise OreillyDownloadError(msg)
 
     # Filter chapters if selective ingestion was requested
     if selected_chapter_indices is not None:
@@ -524,38 +578,51 @@ def download_oreilly_book_to_epub(
     else:
         target_chapters = all_chapters
 
-    chapters_content: list[tuple[str, str]] = []
-    images_to_fetch: set[str] = set()
+    chapters_content: list[tuple[str, str, str]] = []
+    images_to_fetch: dict[str, str] = {}
+    failed: list[str] = []
+    taken_names: set[str] = set()
 
-    for ch in target_chapters:
+    for index, ch in enumerate(target_chapters):
+        title = ch.get("title") or ""
         content_url = ch.get("content_url")
         if not content_url:
+            failed.append(title or f"#{index + 1}")
             continue
         try:
             raw_html = client.fetch_chapter_html(content_url)
-            cleaned_html, img_urls = process_chapter_html(raw_html, book_id)
-            chapters_content.append((ch.get("title", ""), cleaned_html))
-            images_to_fetch.update(img_urls)
         except Exception as exc:
-            logger.warning("Failed to fetch chapter '%s': %s", ch.get("title"), exc)
+            logger.warning("Failed to fetch chapter '%s': %s", title, exc)
+            failed.append(title or f"#{index + 1}")
+            continue
+        cleaned_html, images = process_chapter_html(raw_html, book_id, content_url)
+        file_name = _chapter_file_name(ch.get("filename", ""), index, taken_names)
+        chapters_content.append((title, cleaned_html, file_name))
+        images_to_fetch.update(images)
 
-    if not chapters_content:
-        raise RuntimeError(f"Failed to download any chapters for O'Reilly book {book_id}")
+    # A book missing chapters would ingest as complete and answer as if whole.
+    if failed:
+        raise OreillyDownloadError(
+            f"Could not download {len(failed)} of {len(target_chapters)} chapters "
+            f"of O'Reilly book {book_id}: {', '.join(failed[:5])}"
+            + (" ..." if len(failed) > 5 else "")
+        )
 
-    # Download referenced images
+    # A missing figure leaves a broken image in the reader but loses no text, so
+    # it is reported rather than fatal.
     images_data: dict[str, bytes] = {}
-    for img_url in images_to_fetch:
+    for img_url, local_name in images_to_fetch.items():
         try:
-            # Construct full URL if relative
-            if img_url.startswith("http"):
-                full_url = img_url
-            else:
-                full_url = f"{_BASE_URL}/{img_url.lstrip('/')}"
-            fname = unquote(img_url.split("/")[-1])
-            img_bytes = client.fetch_bytes(full_url)
-            images_data[fname] = img_bytes
+            images_data[local_name] = client.fetch_bytes(img_url)
         except Exception as exc:
-            logger.debug("Could not download figure %s: %s", img_url, exc)
+            logger.warning("Could not download figure %s: %s", img_url, exc)
+    if len(images_data) < len(images_to_fetch):
+        logger.warning(
+            "O'Reilly book %s: %d of %d figures could not be downloaded",
+            book_id,
+            len(images_to_fetch) - len(images_data),
+            len(images_to_fetch),
+        )
 
     epub_path = build_epub(
         book_meta=meta,

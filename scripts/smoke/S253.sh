@@ -5,6 +5,7 @@
 #   1. GET /oreilly/status responds with 200 and valid JSON
 #   2. POST /oreilly/cookies refuses invalid cookie payload with 400
 #   3. POST /documents/ingest-url with O'Reilly URL without cookies is refused 401
+#      (skipped when a session is stored)
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:7820}"
@@ -30,13 +31,16 @@ INVALID_COOKIE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/orei
     -d '{"cookies": ""}')
 check "POST /oreilly/cookies empty input refused" "400" "$INVALID_COOKIE_CODE"
 
-INGEST_URL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/documents/ingest-url" \
-    -H "Content-Type: application/json" \
-    -d '{"url": "https://learning.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/"}')
-if [ "$INGEST_URL_CODE" = "200" ] || [ "$INGEST_URL_CODE" = "401" ]; then
-    check "POST /documents/ingest-url handled O'Reilly book" "OK" "OK"
+# 3. ingest-url routes O'Reilly URLs. Only checked with no session stored: with
+# one, this request would download and ingest a whole book into the library.
+CONFIGURED=$(curl -s "$BASE/oreilly/status" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("configured"))')
+if [ "$CONFIGURED" = "False" ]; then
+    INGEST_URL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/documents/ingest-url" \
+        -H "Content-Type: application/json" \
+        -d '{"url": "https://learning.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/"}')
+    check "POST /documents/ingest-url routes O'Reilly URL (no session -> 401)" "401" "$INGEST_URL_CODE"
 else
-    check "POST /documents/ingest-url handled O'Reilly book" "200 or 401" "$INGEST_URL_CODE"
+    echo "SKIP: ingest-url O'Reilly routing (a session is stored; would ingest a real book)"
 fi
 
 if [ "$FAIL" -ne 0 ]; then

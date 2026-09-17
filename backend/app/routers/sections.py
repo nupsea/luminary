@@ -9,7 +9,6 @@ from app.database import get_session_factory
 from app.exceptions import NotFound
 from app.models import SectionModel
 from app.repos.document_repo import DocumentRepo
-from app.services.math_normalizer import normalize_paper_math
 
 logger = logging.getLogger(__name__)
 
@@ -20,19 +19,16 @@ _SETEXT_UNDERLINE_RE = re.compile(r"^[ \t]*(-{1,}|={1,})[ \t]*$")
 
 
 def _reader_safe(text: str) -> str:
-    """Neutralise markdown that document text triggers by accident and format math formulas.
+    """Neutralise markdown that document text triggers by accident.
 
     Extracted PDF text is rendered as markdown, so a line of dashes directly
     under a line of prose becomes a setext heading -- a hyphen left alone on its
     own line by the PDF text layer silently promoted whole sentences to <h2>.
     Inserting a blank line demotes it to a horizontal rule, which is what a
     reader would expect, and leaves deliberate rules and lists untouched.
-
-    Also normalizes fractured mathematical formulas into clean LaTeX/KaTeX delimiters.
     """
     if not text:
         return text
-    text = normalize_paper_math(text)
     lines = text.split("\n")
     out: list[str] = []
     for line in lines:

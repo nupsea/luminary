@@ -11,6 +11,7 @@ import base64
 import logging
 import math
 from collections import Counter
+from collections.abc import Callable
 from functools import lru_cache
 from urllib.parse import unquote
 
@@ -58,9 +59,15 @@ _ALLOWED_TAGS = [
 ]
 
 # Allow safe, non-event attributes on whitelisted tags
-_ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
-    "a": ["href", "title", "id", "class", "name"],
-    "img": ["src", "alt", "title", "width", "height", "class", "loading"],
+_ALLOWED_ATTRIBUTES: dict[str, list[str] | Callable[[str, str, str], bool]] = {
+    "a": lambda _tag, name, value: (
+        name in {"title", "id", "class", "name"}
+        or (name == "href" and not value.strip().lower().startswith("data:"))
+    ),
+    "img": lambda _tag, name, value: (
+        name in {"alt", "title", "width", "height", "class", "loading"}
+        or (name == "src" and _is_inline_image(value))
+    ),
     "figure": ["class", "id", "data-type"],
     "figcaption": ["class", "id"],
     "td": ["colspan", "rowspan", "class"],
@@ -101,41 +108,54 @@ def _extract_chapter_title(soup: BeautifulSoup) -> str:
     return ""
 
 
+_INLINE_IMAGE_PREFIXES = (
+    "data:image/png;",
+    "data:image/jpeg;",
+    "data:image/gif;",
+    "data:image/webp;",
+    "data:image/svg+xml;",
+)
+
+
+def _is_inline_image(src: str) -> bool:
+    """Only images this service inlined from the EPUB itself may render.
+
+    `data:` is an allowed protocol so inlined figures survive bleach, which also
+    let `<a href="data:text/html,...">` through; and a remote `src` in a book
+    would fetch from the network every time a chapter opens.
+    """
+    return src.strip().lower().startswith(_INLINE_IMAGE_PREFIXES)
+
+
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 
 
 def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
     """Split one document into a unit per heading, keeping fragments well-formed.
 
-    Finds the highest-level heading present (h1 if present, else h2, etc.).
-    If only one heading of that level exists, the whole chapter is kept intact.
-    If multiple headings of that level exist (Gutenberg EPUBs), it splits on them.
+    Splits the children of the element holding most headings; deeper-nested
+    headings are sub-headings of their block, not split points. Any split that
+    would leave text out of every unit keeps the document whole.
     """
     root = soup.body or soup
-    split_tag = None
-    for tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
-        candidates = root.find_all(tag)
-        if candidates:
-            split_tag = tag
-            break
+    whole = [
+        {
+            "title": _extract_chapter_title(soup),
+            "html": str(soup),
+            "word_count": _count_words(soup),
+        }
+    ]
+    headings = root.find_all(_HEADING_TAGS)
+    if not headings:
+        return whole
 
-    if not split_tag:
-        return [
-            {
-                "title": _extract_chapter_title(soup),
-                "html": str(soup),
-                "word_count": _count_words(soup),
-            }
-        ]
-
-    headings = root.find_all(split_tag)
     counts = Counter(id(h.parent) for h in headings)
     dominant = counts.most_common(1)[0][0]
     container = next(h.parent for h in headings if id(h.parent) == dominant)
     units: list[dict] = []
     current: dict | None = None
     for child in list(container.children):
-        if getattr(child, "name", None) == split_tag:
+        if getattr(child, "name", None) in _HEADING_TAGS:
             current = {"title": child.get_text(" ", strip=True), "nodes": [child]}
             units.append(current)
             continue
@@ -158,7 +178,29 @@ def _split_soup_on_headings(soup: BeautifulSoup) -> list[dict]:
                 "word_count": _count_words(BeautifulSoup(html, "html.parser")),
             }
         )
+    # Units are cut from one container. When the headings sit in a wrapper such
+    # as <header>, the chapter body lies outside it and would never be shown.
+    if sum(u["word_count"] for u in out) < _count_words(root):
+        return whole
     return out
+
+
+def _top_level_toc_entries(book: epub.EpubBook) -> Counter[str]:
+    """How many top-level TOC entries point into each document, by file name.
+
+    Heading levels cannot say what a chapter is: a Gutenberg file with one <h1>
+    title over <h2> chapters has the same shape as a technical chapter with <h2>
+    sections. The book's own TOC can -- Moby-Dick lists 135 chapters as anchors
+    inside a few files, a technical book lists one entry per chapter file.
+    """
+    entries: Counter[str] = Counter()
+    for entry in book.toc or []:
+        link = entry[0] if isinstance(entry, tuple) else entry
+        href = getattr(link, "href", "") or ""
+        name = unquote(href.split("#", 1)[0]).rsplit("/", 1)[-1]
+        if name:
+            entries[name] += 1
+    return entries
 
 
 def _count_words(soup: BeautifulSoup) -> int:
@@ -212,6 +254,7 @@ class EpubService:
         list so they cannot disagree about what chapter N is.
         """
         book = epub.read_epub(file_path, options={"ignore_ncx": False})
+        toc_entries = _top_level_toc_entries(book)
         units: list[dict] = []
 
         for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
@@ -223,7 +266,20 @@ class EpubService:
             except (UnicodeDecodeError, AttributeError):
                 html_str = ""
             soup = BeautifulSoup(html_str, "html.parser")
-            for unit in _split_soup_on_headings(soup):
+            # A file the TOC lists as exactly one chapter is read as one, so its
+            # sections are not each served as a chapter of their own. A file the
+            # TOC does not list keeps the heading split.
+            if toc_entries.get(item.get_name().rsplit("/", 1)[-1]) == 1:
+                file_units = [
+                    {
+                        "title": _extract_chapter_title(soup),
+                        "html": str(soup.body or soup),
+                        "word_count": _count_words(soup),
+                    }
+                ]
+            else:
+                file_units = _split_soup_on_headings(soup)
+            for unit in file_units:
                 # Skip near-empty items with no discernible title (cover pages)
                 if not unit["title"] and unit["word_count"] < 10:
                     continue

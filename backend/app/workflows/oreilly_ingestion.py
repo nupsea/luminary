@@ -6,11 +6,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
 from app.database import get_session_factory
+from app.exceptions import InvalidInput, LuminaryError
 from app.models import DocumentModel
 from app.services.ingestion_jobs import get_ingestion_jobs
+from app.services.naming import normalize_tag_slug
+from app.services.notes_service import sync_document_tag_index
 from app.services.oreilly_service import (
     OreillyClient,
     download_oreilly_book_to_epub,
@@ -20,6 +21,12 @@ from app.services.oreilly_service import (
 from app.workflows.ingestion import run_ingestion
 
 logger = logging.getLogger(__name__)
+
+
+class OreillyNotConnected(LuminaryError):
+    """No O'Reilly session is stored. The upload dialog opens its connect modal on 401."""
+
+    status_code = 401
 
 
 async def download_and_launch_ingestion(
@@ -38,15 +45,18 @@ async def download_and_launch_ingestion(
             client=client,
             selected_chapter_indices=selected_chapters,
         )
-        await run_ingestion(doc_id, str(dest_path), "epub", "technical")
     except Exception as exc:
-        logger.exception("O'Reilly book download or ingestion failed for %s", book_id)
+        logger.exception("O'Reilly book download failed for %s", book_id)
+        dest_path.unlink(missing_ok=True)
         async with get_session_factory()() as session:
             doc = await session.get(DocumentModel, doc_id)
             if doc:
                 doc.stage = "error"
                 doc.error_message = f"O'Reilly download failed: {exc}"
                 await session.commit()
+        return
+    # run_ingestion records its own failures on the document.
+    await run_ingestion(doc_id, str(dest_path), "epub", "technical")
 
 
 async def start_oreilly_ingestion(
@@ -57,20 +67,14 @@ async def start_oreilly_ingestion(
     """Validate session, parse book ID, create document, and launch background ingestion."""
     client = OreillyClient()
     if not client.is_configured():
-        raise HTTPException(
-            status_code=401,
-            detail=(
-                "O'Reilly subscription cookies not configured. "
-                "Please connect your O'Reilly subscription in Settings."
-            ),
+        raise OreillyNotConnected(
+            "O'Reilly subscription cookies not configured. "
+            "Please connect your O'Reilly subscription in Settings."
         )
 
     book_id = parse_oreilly_book_id(url)
     if not book_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not extract O'Reilly book ID or ISBN from URL: {url}",
-        )
+        raise InvalidInput(f"Could not extract O'Reilly book ID or ISBN from URL: {url}")
 
     # Fetch metadata for book title
     book_title = f"O'Reilly Book {book_id}"
@@ -104,9 +108,10 @@ async def start_oreilly_ingestion(
 
     if matched_chapter_title:
         book_title = f"{book_title} — {matched_chapter_title}"
-        doc_tags = ["oreilly", "tech_chapter"]
+        doc_tags = ["oreilly", "tech-chapter"]
     else:
-        doc_tags = ["oreilly", "tech_book"]
+        doc_tags = ["oreilly", "tech-book"]
+    doc_tags = [normalize_tag_slug(t) for t in doc_tags]
 
     doc_id = str(uuid.uuid4())
     data_dir = Path(settings.DATA_DIR).expanduser()
@@ -129,6 +134,8 @@ async def start_oreilly_ingestion(
             tags=doc_tags,
         )
         session.add(doc)
+        await session.flush()
+        await sync_document_tag_index(doc_id, doc.tags, session, record_manual_provenance=True)
         await session.commit()
 
     get_ingestion_jobs().launch(

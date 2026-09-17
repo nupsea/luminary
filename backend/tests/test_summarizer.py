@@ -398,25 +398,9 @@ async def test_force_refresh_bypasses_cache(test_db):
     assert done_payload.get("cached") is False
 
 
-@pytest.mark.asyncio
-async def test_build_assembled_summary_chapter_based(test_db):
-    """build_assembled_summary formats chapter takeaways and strips noise."""
-    _engine, factory, tmp_path = test_db
-    doc_id = str(uuid.uuid4())
-    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
-
+async def _insert_section_summaries(factory, doc_id, sections):
     async with factory() as session:
-        sections = [
-            (0, "Praise for the Book", "Reviewers love this book."),
-            (1, "Conventions Used in This Book", "Italics denote new terms."),
-            (2, "Chapter 1. Introduction to RAG", "RAG combines retrieval with LLM generation."),
-            (3, "How Does RAG Work?", "Query flow fetches documents then prompts LLM."),
-            (4, "Figure 1-1. Architecture", "Diagram of RAG stack."),
-            (5, "Chapter 2. Scaling RAG", "Scaling requires hybrid search and reranking."),
-            (6, "Hybrid Search", "Combines BM25 with dense vector embeddings."),
-            (7, "Index", "Index of terms."),
-        ]
-        for idx, heading, content in sections:
+        for idx, (heading, content) in enumerate(sections):
             session.add(
                 SectionSummaryModel(
                     id=str(uuid.uuid4()),
@@ -428,60 +412,129 @@ async def test_build_assembled_summary_chapter_based(test_db):
             )
         await session.commit()
 
-    svc = SummarizationService()
-    exec_summary = await svc.build_assembled_summary(doc_id, "executive")
-    assert exec_summary is not None
-    assert "Key Takeaways by Chapter" in exec_summary
-    assert "Chapter 1" in exec_summary
-    assert "Chapter 2" in exec_summary
-    assert "Praise" not in exec_summary
-    assert "Conventions" not in exec_summary
-    assert "Figure 1-1" not in exec_summary
 
-    detailed_summary = await svc.build_assembled_summary(doc_id, "detailed")
-    assert detailed_summary is not None
-    assert "## Chapter 1" in detailed_summary
-    assert "## Chapter 2" in detailed_summary
-    assert "Core Sections:" in detailed_summary
-    assert "Praise" not in detailed_summary
+_CHAPTERED = [
+    ("Praise for the Book", "Reviewers love this book."),
+    ("Preface", "This book grew out of a course on retrieval."),
+    ("Chapter 1. Introduction to RAG", "RAG combines retrieval with LLM generation."),
+    ("How Does RAG Work?", "Query flow fetches documents then prompts LLM."),
+    ("Figure 1-1. Architecture", "Diagram of RAG stack."),
+    ("", "An unlabelled passage about chunk overlap."),
+    ("Chapter 2. Scaling RAG", "Scaling requires hybrid search and reranking."),
+    ("Hybrid Search", "Combines BM25 with dense vector embeddings."),
+    ("Index", "Index of terms."),
+    ("A", "Terms under A."),
+]
 
 
 @pytest.mark.asyncio
-async def test_get_cached_refreshes_legacy_bloated_detailed(test_db):
-    """GET /summarize/{document_id}/cached replaces legacy 70KB raw dump."""
+async def test_assembled_detailed_keeps_every_authored_section_whole(test_db):
+    """Only publisher boilerplate is left out; nothing authored is cut or capped."""
     _engine, factory, tmp_path = test_db
     doc_id = str(uuid.uuid4())
     await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    many = [(f"Topic {i}", f"Finding number {i} is stated in full here.") for i in range(40)]
+    await _insert_section_summaries(factory, doc_id, _CHAPTERED[:6] + many + _CHAPTERED[6:])
 
+    detailed = await SummarizationService().build_assembled_summary(doc_id, "detailed")
+
+    assert detailed is not None
+    for heading, content in _CHAPTERED[1:8] + many:
+        assert content in detailed, f"{heading!r} lost"
+    assert "## Chapter 1. Introduction to RAG" in detailed
+    assert "### Hybrid Search" in detailed
+    for boilerplate in ("Reviewers love", "Index of terms", "Terms under A"):
+        assert boilerplate not in detailed
+
+
+@pytest.mark.asyncio
+async def test_a_single_letter_heading_is_only_boilerplate_inside_an_index(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    await _insert_section_summaries(
+        factory,
+        doc_id,
+        [
+            ("I", "A Scandal in Bohemia opens the collection."),
+            ("II", "The Red-Headed League follows."),
+            ("III", "A Case of Identity comes third."),
+        ],
+    )
+
+    detailed = await SummarizationService().build_assembled_summary(doc_id, "detailed")
+
+    assert detailed is not None
+    assert "A Scandal in Bohemia opens the collection." in detailed
+
+
+@pytest.mark.asyncio
+async def test_assembled_summaries_never_invent_a_heading(test_db):
+    """I-30: an unlabelled section gets no heading, not a numbered placeholder."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    await _insert_section_summaries(
+        factory, doc_id, [("", f"Unlabelled finding {i}.") for i in range(4)]
+    )
+
+    svc = SummarizationService()
+    detailed = await svc.build_assembled_summary(doc_id, "detailed")
+
+    assert detailed is not None
+    assert "#" not in detailed
+    assert "Section" not in detailed
+
+
+@pytest.mark.asyncio
+async def test_assembled_key_points_cover_every_chapter_or_defer_to_the_llm(test_db):
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    await _insert_section_summaries(factory, doc_id, _CHAPTERED)
+
+    svc = SummarizationService()
+    key_points = await svc.build_assembled_summary(doc_id, "executive")
+
+    assert key_points is not None
+    assert "**Chapter 1. Introduction to RAG**: RAG combines retrieval" in key_points
+    assert "**Chapter 2. Scaling RAG**: Scaling requires hybrid search" in key_points
+    for absent in ("Praise", "Preface", "Figure 1-1", "Index"):
+        assert absent not in key_points
+
+    flat_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, flat_id, ["doc body"], [5])
+    await _insert_section_summaries(
+        factory, flat_id, [(f"Topic {i}", f"Finding {i}.") for i in range(20)]
+    )
+    assert await svc.build_assembled_summary(flat_id, "executive") is None
+
+
+@pytest.mark.asyncio
+async def test_get_cached_does_not_rewrite_stored_summaries(test_db):
+    """Opening a document reads summaries; it never replaces one the user has."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+    stored = "- One idea.\n- Another idea."
     async with factory() as session:
-        # Seed legacy bloated summary
         session.add(
-            SummaryModel(
-                id=str(uuid.uuid4()),
-                document_id=doc_id,
-                mode="detailed",
-                content="## Praise for...\n" + ("Bloated content " * 6000),
-            )
+            SummaryModel(id=str(uuid.uuid4()), document_id=doc_id, mode="executive", content=stored)
         )
-        # Seed valid section summaries
-        for i in range(4):
-            session.add(
-                SectionSummaryModel(
-                    id=str(uuid.uuid4()),
-                    document_id=doc_id,
-                    heading=f"Section {i + 1}",
-                    content=f"Substance of section {i + 1}.",
-                    unit_index=i,
-                )
-            )
         await session.commit()
+    await _insert_section_summaries(factory, doc_id, _CHAPTERED)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/summarize/{doc_id}/cached")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "detailed" in data["summaries"]
-        refreshed_content = data["summaries"]["detailed"]["content"]
-        assert len(refreshed_content) < 5000
-        assert "Bloated content" not in refreshed_content
-        assert "Section 1" in refreshed_content
+
+    assert resp.status_code == 200
+    summaries = resp.json()["summaries"]
+    assert summaries["executive"]["content"] == stored
+    assert "detailed" not in summaries
+    async with factory() as session:
+        rows = (
+            (await session.execute(select(SummaryModel).where(SummaryModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
+    assert [r.content for r in rows] == [stored]
