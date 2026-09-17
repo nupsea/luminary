@@ -3,7 +3,7 @@ import { API_BASE } from "@/lib/config"
 import { isYouTubeDoc, getYouTubeThumbnail, CONTENT_TYPE_ICONS } from "./utils"
 import type { DocumentListItem } from "./types"
 import { cn } from "@/lib/utils"
-import { Sparkles, Quote } from "lucide-react"
+import { Sparkles } from "lucide-react"
 
 interface DocumentCoverTileProps {
   doc: DocumentListItem
@@ -34,18 +34,18 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
       case "tech_book":
       case "code":
         return {
-          from: "from-cyan-950/90",
-          via: "via-slate-900/90",
-          to: "to-indigo-950/90",
+          from: "from-cyan-950/95",
+          via: "via-slate-900/95",
+          to: "to-indigo-950/95",
           accent: "text-cyan-400",
           border: "border-cyan-500/20",
           glow: "rgba(6, 182, 212, 0.15)",
         }
       case "video":
         return {
-          from: "from-rose-950/90",
-          via: "via-slate-900/90",
-          to: "to-red-950/90",
+          from: "from-rose-950/95",
+          via: "via-slate-900/95",
+          to: "to-red-950/95",
           accent: "text-rose-400",
           border: "border-rose-500/20",
           glow: "rgba(244, 63, 94, 0.15)",
@@ -53,9 +53,9 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
       case "book":
       case "epub":
         return {
-          from: "from-amber-950/90",
-          via: "via-neutral-900/90",
-          to: "to-stone-900/90",
+          from: "from-amber-950/95",
+          via: "via-neutral-900/95",
+          to: "to-stone-900/95",
           accent: "text-amber-400",
           border: "border-amber-500/20",
           glow: "rgba(245, 158, 11, 0.15)",
@@ -63,18 +63,18 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
       case "paper":
       case "tech_article":
         return {
-          from: "from-emerald-950/90",
-          via: "via-slate-900/90",
-          to: "to-teal-950/90",
+          from: "from-emerald-950/95",
+          via: "via-slate-900/95",
+          to: "to-teal-950/95",
           accent: "text-emerald-400",
           border: "border-emerald-500/20",
           glow: "rgba(16, 185, 129, 0.15)",
         }
       default:
         return {
-          from: "from-violet-950/90",
-          via: "via-slate-900/90",
-          to: "to-slate-950/90",
+          from: "from-violet-950/95",
+          via: "via-slate-900/95",
+          to: "to-slate-950/95",
           accent: "text-violet-400",
           border: "border-violet-500/20",
           glow: "rgba(168, 85, 247, 0.15)",
@@ -85,10 +85,13 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
   // SVG grid pattern variation based on hash
   const patternSeed = hash % 3
 
+  // Description from summary_one_sentence
+  const description = doc.summary_one_sentence || ""
+
   return (
     <div
       className={cn(
-        "relative h-full w-full overflow-hidden p-3.5 flex flex-col justify-between select-none bg-gradient-to-br transition-all duration-300",
+        "relative h-full w-full overflow-hidden p-3 flex flex-col justify-between select-none bg-gradient-to-br transition-all duration-300",
         theme.from,
         theme.via,
         theme.to,
@@ -122,49 +125,59 @@ function ProceduralCoverTile({ doc }: { doc: DocumentListItem }) {
         <rect width="100%" height="100%" fill={`url(#grid-${doc.id})`} />
       </svg>
 
-      {/* Large watermark icon in background corner */}
+      {/* Watermark icon in background corner */}
       <Icon
         className={cn(
-          "absolute -bottom-4 -right-4 h-24 w-24 opacity-10 pointer-events-none transition-transform duration-500 group-hover:scale-110 group-hover:rotate-6",
+          "absolute -bottom-3 -right-3 h-20 w-20 opacity-10 pointer-events-none transition-transform duration-500 group-hover/tile:scale-110 group-hover/tile:rotate-6",
           theme.accent,
         )}
       />
 
-      {/* Top Header / Domain Accent */}
-      <div className="relative z-10 flex items-center gap-1.5">
-        <span className={cn("text-[10px] font-semibold uppercase tracking-wider", theme.accent)}>
-          {doc.facets?.domain || doc.content_type.replace("_", " ")}
+      {/* Top Header: Content type badge + Format pill */}
+      <div className="relative z-10 flex items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Icon size={12} className={cn("shrink-0", theme.accent)} />
+          <span className={cn("truncate text-[10px] font-bold uppercase tracking-wider", theme.accent)}>
+            {doc.facets?.domain || doc.content_type.replace("_", " ")}
+          </span>
+          {doc.facets?.form && (
+            <>
+              <span className="text-muted-foreground/40 text-[10px]">·</span>
+              <span className="truncate text-[10px] text-muted-foreground/80 capitalize">
+                {doc.facets.form}
+              </span>
+            </>
+          )}
+        </div>
+        <span className="shrink-0 rounded bg-background/60 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground backdrop-blur-sm border border-border/40">
+          {doc.format.toUpperCase()}
         </span>
-        {doc.facets?.form && (
-          <>
-            <span className="text-muted-foreground/50 text-[10px]">·</span>
-            <span className="text-[10px] text-muted-foreground capitalize">
-              {doc.facets.form}
-            </span>
-          </>
-        )}
       </div>
 
-      {/* Center content: Quote / Summary Resonance or Title glyph */}
-      <div className="relative z-10 my-auto">
-        {doc.summary_one_sentence ? (
-          <div className="flex items-start gap-1.5">
-            <Quote size={11} className={cn("shrink-0 mt-0.5 opacity-60", theme.accent)} />
-            <p className="line-clamp-2 text-xs font-normal leading-snug text-foreground/90 tracking-tight">
-              {doc.summary_one_sentence}
-            </p>
-          </div>
-        ) : (
-          <p className="line-clamp-2 text-xs font-medium text-foreground/75 italic">
-            {doc.title}
+      {/* Center content: Prominent Title + Brief Description */}
+      <div className="relative z-10 my-auto py-1">
+        <h3 className="line-clamp-2 text-sm font-bold leading-snug tracking-tight text-foreground/95 drop-shadow-sm group-hover/tile:text-foreground">
+          {doc.title}
+        </h3>
+        {description && (
+          <p className="line-clamp-2 mt-1 text-[11px] font-normal leading-relaxed text-foreground/75 drop-shadow-sm">
+            {description}
           </p>
         )}
       </div>
 
       {/* Bottom meta row */}
-      <div className="relative z-10 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>{doc.format.toUpperCase()}</span>
-        {doc.page_count > 0 && <span>{doc.page_count}p</span>}
+      <div className="relative z-10 flex items-center justify-between text-[10px] text-muted-foreground/80 font-medium">
+        <span>
+          {doc.page_count > 0
+            ? `${doc.page_count} pages`
+            : doc.word_count > 0
+              ? `${doc.word_count.toLocaleString()} words`
+              : doc.format.toUpperCase()}
+        </span>
+        {doc.audio_duration_seconds != null && (
+          <span>{Math.round(doc.audio_duration_seconds / 60)}m</span>
+        )}
       </div>
     </div>
   )

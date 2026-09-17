@@ -1,10 +1,10 @@
-import html
 import logging
 import re
 from collections import Counter
 from pathlib import Path
 
 import fitz  # PyMuPDF
+from bs4 import BeautifulSoup
 from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
@@ -13,60 +13,175 @@ from app.services.source_text import read_source_text
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
 
-# HTML tag stripper for EPUB content
+# HTML tag stripper fallback and whitespace normalizer
 _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_WHITESPACE = re.compile(r"\s+")
-
-# An EPUB may pack many chapters into one document, so sections come from
-# headings rather than files.
-_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
-# Block ends become paragraph breaks before tags are stripped; collapsing all
-# whitespace first would leave each chapter a single run-on line.
-_RE_EPUB_BLOCK_END = re.compile(
-    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article|figure|figcaption|aside)\s*>|<br\s*/?>",
-    re.IGNORECASE,
-)
-_RE_EPUB_IMG = re.compile(
-    r"<img\b[^>]*(?:alt|title)=([\"'])(.*?)\1[^>]*>",
-    re.IGNORECASE | re.DOTALL,
-)
 _RE_BLANK_RUN = re.compile(r"\n{3,}")
 _RE_INLINE_SPACE = re.compile(r"[ \t\r\f\v]+")
 
 
-def _epub_text(fragment: str) -> str:
-    """HTML fragment to reading text, with paragraph breaks and image descriptions preserved."""
-    text = _RE_EPUB_IMG.sub(
-        lambda m: f"\n[Figure: {m.group(2).strip()}]\n" if m.group(2).strip() else " ",
-        fragment,
-    )
-    text = _RE_EPUB_BLOCK_END.sub("\n\n", text)
-    text = _RE_HTML_TAGS.sub(" ", text)
-    text = html.unescape(text)
-    text = _RE_INLINE_SPACE.sub(" ", text)
-    text = "\n".join(line.strip() for line in text.split("\n"))
-    return _RE_BLANK_RUN.sub("\n\n", text).strip()
+def _epub_html_to_markdown(html_content: str) -> str:
+    """Convert EPUB XHTML fragment to rich Markdown.
+
+    Preserves:
+    - Code blocks (<pre><code>) with language tag, indentation, and formatting
+    - Inline code (<code>)
+    - Headings (<h1>..<h6>)
+    - Figures and images (<figure>, <img>) with captions and [Figure: ...] labels
+    - Lists (<ul>, <ol>, <li>)
+    - Tables (<table>)
+    - Blockquotes (<blockquote>)
+    - Paragraph breaks
+    """
+    if not html_content or not html_content.strip():
+        return ""
+    soup = BeautifulSoup(html_content, "html.parser")
+    for s in soup(["script", "style", "head", "meta", "link"]):
+        s.decompose()
+
+    # Preformatted code blocks: preserve exact indentation, newlines, and code fences
+    for pre in soup.find_all("pre"):
+        lang = pre.get("data-code-language", "") or pre.get("data-language", "")
+        if not lang:
+            code_tag = pre.find("code")
+            raw_cls = pre.get("class")
+            pre_cls = raw_cls if isinstance(raw_cls, list) else [raw_cls or ""]
+            tag_cls = (
+                code_tag.get("class")
+                if code_tag and isinstance(code_tag.get("class"), list)
+                else [code_tag.get("class") or ""]
+                if code_tag
+                else []
+            )
+            classes = " ".join(pre_cls + tag_cls)
+            m = re.search(
+                r"language-(\w+)|lang-(\w+)|python|bash|json|sql|javascript|typescript|"
+                r"yaml|rust|go|cpp|c\+\+|html|css",
+                classes,
+                re.IGNORECASE,
+            )
+            if m:
+                matched = m.group(1) or m.group(2) or m.group(0)
+                lang = matched.replace("language-", "").replace("lang-", "")
+        code_text = pre.get_text()
+        pre.replace_with(f"\n\n```{lang}\n{code_text.strip()}\n```\n\n")
+
+    # Inline code
+    for code in soup.find_all("code"):
+        code.replace_with(f"`{code.get_text()}`")
+
+    # Figures and images
+    for fig in soup.find_all("figure"):
+        img = fig.find("img")
+        caption = fig.find(["figcaption", "h6", "h5", "p"])
+        cap_text = caption.get_text().strip() if caption else ""
+        alt = (img.get("alt") if img else "") or ""
+        src = (img.get("src") if img else "") or ""
+        lines = []
+        if alt:
+            lines.append(f"[Figure: {alt}]")
+        if cap_text and cap_text != alt:
+            lines.append(cap_text)
+        caption_markdown = "\n".join(f"*{line}*" for line in lines) if lines else "*[Figure]*"
+        fig.replace_with(f"\n\n![{alt or cap_text or 'Figure'}]({src})\n{caption_markdown}\n\n")
+
+    for img in soup.find_all("img"):
+        alt = img.get("alt", "") or img.get("title", "")
+        src = img.get("src", "")
+        label = f"\n*[Figure: {alt}]*\n" if alt else ""
+        img.replace_with(f"\n\n![{alt or 'Figure'}]({src}){label}\n\n")
+
+    # Headings
+    for i in range(1, 7):
+        for h in soup.find_all(f"h{i}"):
+            prefix = "#" * i
+            h.replace_with(f"\n\n{prefix} {h.get_text().strip()}\n\n")
+
+    # Blockquotes
+    for bq in soup.find_all("blockquote"):
+        bq.replace_with(f"\n\n> {bq.get_text().strip()}\n\n")
+
+    # Unordered Lists
+    for ul in soup.find_all("ul"):
+        items = [f"- {li.get_text().strip()}" for li in ul.find_all("li", recursive=False)]
+        ul.replace_with("\n\n" + "\n".join(items) + "\n\n")
+
+    # Ordered Lists
+    for ol in soup.find_all("ol"):
+        items = [
+            f"{idx}. {li.get_text().strip()}"
+            for idx, li in enumerate(ol.find_all("li", recursive=False), 1)
+        ]
+        ol.replace_with("\n\n" + "\n".join(items) + "\n\n")
+
+    # Tables
+    for table in soup.find_all("table"):
+        rows = []
+        for tr in table.find_all("tr"):
+            cols = [td.get_text().strip().replace("\n", " ") for td in tr.find_all(["th", "td"])]
+            if cols:
+                rows.append("| " + " | ".join(cols) + " |")
+        if rows:
+            if len(rows) > 1:
+                cols_count = len(rows[0].split("|")) - 2
+                header_sep = "| " + " | ".join(["---"] * max(1, cols_count)) + " |"
+                rows.insert(1, header_sep)
+            table.replace_with("\n\n" + "\n".join(rows) + "\n\n")
+
+    # Paragraphs and line breaks
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    for p in soup.find_all("p"):
+        p.replace_with(f"\n\n{p.get_text().strip()}\n\n")
+
+    text = soup.get_text()
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# Backwards-compatible alias for plain text / extraction callers
+_epub_text = _epub_html_to_markdown
+
+
+_RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
 
 
 def _split_epub_document(raw_html: str, fallback_heading: str) -> list[tuple[str, str]]:
-    """Split one EPUB document into (heading, text) per heading tag it contains.
+    """Split one EPUB document into (heading, markdown) per heading tag it contains.
 
     Text before the first heading is kept under `fallback_heading` so front
-    matter is not dropped. A document with no headings yields a single entry.
+    matter is not dropped. Headings inside <figure>, <figcaption>, or <aside>
+    are ignored so captions do not fracture chapters.
     """
     matches = list(_RE_EPUB_HEADING.finditer(raw_html))
-    if not matches:
-        return [(fallback_heading, _epub_text(raw_html))]
+    valid_matches = []
+    for m in matches:
+        start = m.start()
+        last_open_fig = raw_html.rfind("<figure", 0, start)
+        last_close_fig = raw_html.rfind("</figure", 0, start)
+        if last_open_fig > last_close_fig:
+            continue
+        last_open_aside = raw_html.rfind("<aside", 0, start)
+        last_close_aside = raw_html.rfind("</aside", 0, start)
+        if last_open_aside > last_close_aside:
+            continue
+        valid_matches.append(m)
+
+    if not valid_matches:
+        md = _epub_html_to_markdown(raw_html)
+        return [(fallback_heading, md)] if md else []
 
     out: list[tuple[str, str]] = []
-    preamble = _epub_text(raw_html[: matches[0].start()])
+    preamble = _epub_html_to_markdown(raw_html[: valid_matches[0].start()])
     if preamble:
         out.append((fallback_heading, preamble))
 
-    for i, m in enumerate(matches):
-        heading = _epub_text(m.group(2)) or fallback_heading
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_html)
-        out.append((heading, _epub_text(raw_html[m.end() : end])))
+    for i, m in enumerate(valid_matches):
+        heading = _epub_html_to_markdown(m.group(2)).strip() or fallback_heading
+        heading = re.sub(r"^#+\s*", "", heading).strip()
+        end = valid_matches[i + 1].start() if i + 1 < len(valid_matches) else len(raw_html)
+        body = _epub_html_to_markdown(raw_html[m.end() : end])
+        if body:
+            out.append((heading, body))
     return out
 
 # Kindle clippings separator

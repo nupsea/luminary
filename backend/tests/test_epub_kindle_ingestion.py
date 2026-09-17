@@ -99,6 +99,43 @@ def test_parse_epub_extracts_chapters(tmp_path):
         assert "Chapter 1" in result.sections[0].heading
 
 
+def test_parse_epub_preserves_code_and_figures(tmp_path):
+    epub_path = tmp_path / "code_test.epub"
+    epub_path.write_bytes(b"fake epub content")
+
+    with patch("ebooklib.epub.read_epub") as mock_read:
+        mock_book = MagicMock()
+        mock_book.get_metadata.return_value = [("Code Book", {})]
+
+        item1 = MagicMock()
+        item1.get_name.return_value = "ch1.xhtml"
+        item1.get_content.return_value = (
+            b"<h1>Python Chapter</h1>"
+            b"<p>Here is an example code snippet:</p>"
+            b"<pre><code class=\"language-python\">def solve():\n    return 42</code></pre>"
+            b"<figure><img src=\"images/fig1.png\" alt=\"Architecture\" />"
+            b"<h6>Figure 1. Architecture diagram</h6></figure>"
+            b"<p>Concluding explanation with some `inline_var` text.</p>"
+        )
+
+        mock_book.get_items_of_type.return_value = [item1]
+        mock_read.return_value = mock_book
+
+        parser = DocumentParser()
+        result = parser.parse(epub_path, "epub")
+
+        assert len(result.sections) == 1
+        sec_text = result.sections[0].text
+        # Code fence with language and indentation preserved
+        assert "```python\ndef solve():\n    return 42\n```" in sec_text
+        # Figure preserved with label and markdown image
+        assert "![Architecture](images/fig1.png)" in sec_text
+        assert "[Figure: Architecture]" in sec_text
+        assert "Figure 1. Architecture diagram" in sec_text
+        # Inline code preserved
+        assert "`inline_var`" in sec_text
+
+
 # API endpoint tests
 
 

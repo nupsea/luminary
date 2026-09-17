@@ -22,7 +22,7 @@ from sqlalchemy import update as _update
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models import DocumentModel, EnrichmentJobModel, ImageModel
+from app.models import ChunkModel, DocumentModel, EnrichmentJobModel, ImageModel
 from app.repos._helpers import get_or_404
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ class ImageItem(BaseModel):
     id: str
     document_id: str
     chunk_id: str | None
+    section_id: str | None = None
     page: int
     path: str
     width: int
@@ -153,22 +154,25 @@ async def get_document_images(
 
         # Read-only list query scoped to this document; shares the same session as the
         # preceding get_or_404 check so both reads happen in a single connection.
+        # Outer-joins ChunkModel to associate images with their section for non-paginated formats.
         result = await session.execute(
-            select(ImageModel)
+            select(ImageModel, ChunkModel.section_id)
+            .outerjoin(ChunkModel, ChunkModel.id == ImageModel.chunk_id)
             .where(ImageModel.document_id == document_id)
             .order_by(ImageModel.page, ImageModel.created_at)
         )
-        all_images = result.scalars().all()
+        all_rows = result.all()
 
-    total = len(all_images)
+    total = len(all_rows)
     start = (page - 1) * page_size
-    page_images = all_images[start : start + page_size]
+    page_rows = all_rows[start : start + page_size]
     return ImageListResponse(
         items=[
             ImageItem(
                 id=img.id,
                 document_id=img.document_id,
                 chunk_id=img.chunk_id,
+                section_id=sec_id,
                 page=img.page,
                 path=img.path,
                 width=img.width,
@@ -178,7 +182,7 @@ async def get_document_images(
                 description=img.description,
                 created_at=img.created_at.isoformat(),
             )
-            for img in page_images
+            for img, sec_id in page_rows
         ],
         total=total,
         page=page,
