@@ -308,3 +308,49 @@ async def test_pdf_paginated_with_images_and_sections(test_db):
     assert img["id"] == image_id
     assert img["section_id"] == sec_id
     assert img["description"] == "Chess search tree diagram"
+
+
+@pytest.mark.asyncio
+async def test_document_asset_endpoint_serves_epub_images(test_db, tmp_path):
+    """Verify GET /documents/{id}/asset/{path} extracts and serves embedded EPUB images."""
+    import zipfile
+
+    factory = test_db
+    doc_id = str(uuid.uuid4())
+    fake_epub = tmp_path / f"{doc_id}.epub"
+
+    # Create a minimal valid zip with an embedded image
+    with zipfile.ZipFile(fake_epub, "w") as z:
+        z.writestr("EPUB/images/rag_arch.png", b"\x89PNG\r\n\x1a\nfake_image_data")
+
+    async with factory() as session:
+        session.add(
+            DocumentModel(
+                id=doc_id,
+                title="RAG Systems Book",
+                format="epub",
+                content_type="book",
+                word_count=500,
+                page_count=0,
+                file_path=str(fake_epub),
+                stage="complete",
+            )
+        )
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Match by relative subpath
+        resp1 = await client.get(f"/documents/{doc_id}/asset/images/rag_arch.png")
+        assert resp1.status_code == 200
+        assert resp1.content == b"\x89PNG\r\n\x1a\nfake_image_data"
+        assert "image/png" in resp1.headers.get("content-type", "")
+
+        # Match by base filename
+        resp2 = await client.get(f"/documents/{doc_id}/asset/rag_arch.png")
+        assert resp2.status_code == 200
+        assert resp2.content == b"\x89PNG\r\n\x1a\nfake_image_data"
+
+        # Missing asset returns 404
+        resp3 = await client.get(f"/documents/{doc_id}/asset/nonexistent.png")
+        assert resp3.status_code == 404

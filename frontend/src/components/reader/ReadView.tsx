@@ -259,7 +259,10 @@ const LazySection = memo(({
         ) : (
           // `prose` sets an absolute font-size, so size must be handed to
           // this element rather than inherited.
-          <MarkdownRenderer className={cn(spec.family, "text-[length:var(--reader-size)]")}>
+          <MarkdownRenderer
+            documentId={documentId}
+            className={cn(spec.family, "text-[length:var(--reader-size)]")}
+          >
             {highlighted}
           </MarkdownRenderer>
         )}

@@ -1,18 +1,20 @@
 import asyncio
 import hashlib
 import logging
+import mimetypes
 import re
 import shutil
 import sys
 import tempfile
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import case, func, select, text
 
 from app.config import Settings, get_settings
@@ -1727,6 +1729,59 @@ async def get_epub_chapter(document_id: str, chapter_index: int) -> EpubChapterR
         word_count=chapter["word_count"],
         section_ids=chapter["section_ids"],
     )
+
+
+@router.api_route("/{document_id}/asset/{asset_path:path}", methods=["GET", "HEAD"])
+async def get_document_asset(document_id: str, asset_path: str) -> Response:
+    """Serve an embedded image or asset from a document (e.g. EPUB zip archive or local images)."""
+    async with get_session_factory()() as session:
+        doc = await get_or_404(session, DocumentModel, document_id, name="Document")
+
+    clean_path = asset_path.lstrip("/").replace("\\", "/")
+    while clean_path.startswith("./") or clean_path.startswith("../"):
+        clean_path = re.sub(r"^\.\.?\/", "", clean_path)
+
+    filename = clean_path.split("/")[-1]
+
+    # 1. If EPUB, extract directly from the EPUB archive
+    if doc.format.lower() == "epub" and doc.file_path:
+        fp = Path(doc.file_path)
+        if fp.is_file():
+            try:
+                with zipfile.ZipFile(fp, "r") as z:
+                    names = z.namelist()
+                    matched_entry = None
+                    for name in names:
+                        if name == clean_path or name.endswith("/" + clean_path):
+                            matched_entry = name
+                            break
+                    if not matched_entry:
+                        for name in names:
+                            if name.split("/")[-1].lower() == filename.lower():
+                                matched_entry = name
+                                break
+                    if matched_entry:
+                        data = z.read(matched_entry)
+                        mime, _ = mimetypes.guess_type(matched_entry)
+                        return Response(
+                            content=data,
+                            media_type=mime or "image/png",
+                            headers={"Cache-Control": "public, max-age=86400"},
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to extract asset %s from EPUB %s: %s", clean_path, document_id, exc
+                )
+
+    # 2. Check in DATA_DIR/images/{document_id}/
+    settings = get_settings()
+    img_dir = (Path(settings.DATA_DIR).expanduser() / "images" / document_id).resolve()
+    candidate = (img_dir / filename).resolve()
+    if candidate.is_relative_to(img_dir) and candidate.is_file():
+        mime, _ = mimetypes.guess_type(candidate.name)
+        return FileResponse(str(candidate), media_type=mime or "image/png")
+
+    raise HTTPException(status_code=404, detail="Asset not found")
 
 
 @router.post("/bulk-delete", status_code=200)
