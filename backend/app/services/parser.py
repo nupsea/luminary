@@ -23,16 +23,24 @@ _RE_EPUB_HEADING = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.
 # Block ends become paragraph breaks before tags are stripped; collapsing all
 # whitespace first would leave each chapter a single run-on line.
 _RE_EPUB_BLOCK_END = re.compile(
-    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article)\s*>|<br\s*/?>",
+    r"</(?:p|div|h[1-6]|li|blockquote|tr|section|article|figure|figcaption|aside)\s*>|<br\s*/?>",
     re.IGNORECASE,
+)
+_RE_EPUB_IMG = re.compile(
+    r"<img\b[^>]*(?:alt|title)=([\"'])(.*?)\1[^>]*>",
+    re.IGNORECASE | re.DOTALL,
 )
 _RE_BLANK_RUN = re.compile(r"\n{3,}")
 _RE_INLINE_SPACE = re.compile(r"[ \t\r\f\v]+")
 
 
 def _epub_text(fragment: str) -> str:
-    """HTML fragment to reading text, with paragraph breaks preserved."""
-    text = _RE_EPUB_BLOCK_END.sub("\n\n", fragment)
+    """HTML fragment to reading text, with paragraph breaks and image descriptions preserved."""
+    text = _RE_EPUB_IMG.sub(
+        lambda m: f"\n[Figure: {m.group(2).strip()}]\n" if m.group(2).strip() else " ",
+        fragment,
+    )
+    text = _RE_EPUB_BLOCK_END.sub("\n\n", text)
     text = _RE_HTML_TAGS.sub(" ", text)
     text = html.unescape(text)
     text = _RE_INLINE_SPACE.sub(" ", text)
