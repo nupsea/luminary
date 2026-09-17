@@ -58,9 +58,11 @@ async def get_section_summaries(document_id: str) -> list[dict]:
 async def get_cached_summaries(document_id: str) -> dict:
     """Return which summary modes are already cached for this document.
 
-    The frontend calls this on document open to decide whether to show
-    a pre-loaded summary or a Generate button.
+    If a summary is missing or is an unreadable legacy dump/stub, attempts
+    fast assembly from pre-computed section summaries so the user gets an
+    instant, high-quality summary on open.
     """
+    svc = get_summarization_service()
     async with get_session_factory()() as session:
         # Custom projection + dedup-by-mode fold; the caller owns the fold logic so this stays
         # in the router rather than being wrapped in a SummaryRepo method.
@@ -76,6 +78,32 @@ async def get_cached_summaries(document_id: str) -> dict:
             if row.mode not in seen:
                 seen.add(row.mode)
                 summaries[row.mode] = {"id": row.id, "content": row.content}
+
+    # Automatically assemble and cache executive / detailed if missing or bad legacy
+    for mode in ("executive", "detailed"):
+        needs_refresh = False
+        if mode not in summaries:
+            needs_refresh = True
+        else:
+            content = summaries[mode]["content"]
+            # Detailed: old 220KB raw unreadable dump or starting with boilerplate
+            # Executive: old 3-bullet stub under 600 chars on large documents
+            if (
+                mode == "detailed"
+                and (len(content) > 60_000 or content.startswith("## Praise for"))
+            ) or (
+                mode == "executive"
+                and len(content) < 600
+                and "### Key Takeaways" not in content
+            ):
+                needs_refresh = True
+
+        if needs_refresh:
+            assembled = await svc.build_assembled_summary(document_id, mode)
+            if assembled:
+                summary_id = await svc._store_summary(document_id, mode, assembled)
+                summaries[mode] = {"id": summary_id, "content": assembled}
+
     return {"document_id": document_id, "summaries": summaries}
 
 

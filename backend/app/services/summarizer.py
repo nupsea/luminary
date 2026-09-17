@@ -15,6 +15,7 @@ To avoid re-running the LLM on every user request:
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -46,9 +47,10 @@ _MARKDOWN_INSTRUCTION = (
 MODE_INSTRUCTIONS: dict[str, str] = {
     "one_sentence": "Summarize in a single sentence of at most 30 words.",
     "executive": (
-        "Identify the 3 to 5 most important ideas that run through the entire work. "
-        "Write each as a concise bullet point. "
-        "Do NOT list individual chapter or passage summaries — synthesise across them. "
+        "Provide a concise executive overview, then synthesise the essential Key Points "
+        "across the entire work. List the key takeaways systematically covering each major "
+        "chapter, section, or overarching theme using bullet points with **bold topic titles**. "
+        "Be specific, concrete, and comprehensive. "
         "Ignore copyright notices, licensing terms, and distribution metadata. "
         f"{_MARKDOWN_INSTRUCTION}"
     ),
@@ -175,6 +177,78 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
         f"and how they relate to each other. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
     ),
 }
+
+
+_NOISE_HEADINGS = frozenset({
+    "praise",
+    "praise for the book",
+    "foreword",
+    "preface",
+    "acknowledgments",
+    "acknowledgements",
+    "how to contact us",
+    "conventions used in this book",
+    "table of contents",
+    "about the author",
+    "about the authors",
+    "colophon",
+    "dedication",
+    "copyright",
+    "index",
+    "using code examples",
+    "prerequisites",
+    "what this book is about",
+    "who this book is for",
+    "who this book is not for",
+    "navigating this book",
+})
+
+_NOISE_PREFIXES = (
+    "praise for",
+    "conventions",
+    "how to contact",
+    "about the author",
+    "colophon",
+)
+
+
+def _is_noise_heading(heading: str) -> bool:
+    """Return True if heading represents boilerplate, indexing, or non-content elements."""
+    h = heading.strip().lower()
+    if not h:
+        return False
+    if h in _NOISE_HEADINGS or any(h.startswith(prefix) for prefix in _NOISE_PREFIXES):
+        return True
+    if re.match(r"^[a-z]$", h):
+        return True
+    if re.match(r"^figure\s+\d+[\-\.]\d+", h):
+        return True
+    return h in {"note", "tip", "warning", "caution", "important"}
+
+
+def _clean_heading(heading: str, unit_index: int) -> str:
+    h = heading.strip()
+    return h if h else f"Section {unit_index + 1}"
+
+
+def _extract_takeaway_snippet(content: str, max_chars: int = 350) -> str:
+    """Extract a concise 1-2 sentence core takeaway from summary content."""
+    content = content.strip()
+    if not content:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", content)
+    result: list[str] = []
+    total_len = 0
+    for s_raw in sentences:
+        s = s_raw.strip()
+        if not s:
+            continue
+        result.append(s)
+        total_len += len(s)
+        if total_len >= 180 or len(result) >= 2:
+            break
+    snippet = " ".join(result)
+    return snippet if len(snippet) <= max_chars else snippet[: max_chars - 3] + "..."
 
 
 def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) -> list[str]:
@@ -489,6 +563,119 @@ class SummarizationService:
         parts = [f"## {row.heading}\n{row.content}" for row in qualifying]
         return "\n\n".join(parts)
 
+    async def build_assembled_summary(self, document_id: str, mode: str) -> str | None:
+        """Build a fast, structured Markdown summary directly from SectionSummaryModel rows.
+
+        For mode='executive' (Key Points):
+            Assembles a comprehensive overview and systematic key takeaways covering
+            every major chapter or section across the entire document.
+        For mode='detailed':
+            Assembles a clean, hierarchical chapter/section breakdown, stripping noise,
+            boilerplate, and index clutter.
+        """
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(SectionSummaryModel)
+                .where(SectionSummaryModel.document_id == document_id)
+                .order_by(SectionSummaryModel.unit_index)
+            )
+            rows = list(result.scalars().all())
+
+        if len(rows) < FAST_PATH_MIN_UNITS:
+            return None
+
+        # Filter out metadata/legal rows and noise headings
+        valid_rows = [
+            r
+            for r in rows
+            if not _is_metadata_section(r.heading, r.content) and not _is_noise_heading(r.heading)
+        ]
+        if not valid_rows:
+            valid_rows = [r for r in rows if not _is_metadata_section(r.heading, r.content)]
+        if not valid_rows:
+            return None
+
+        # Detect chapter or part structure
+        chapters: list[dict] = []
+        current_ch: dict | None = None
+        for r in valid_rows:
+            h = _clean_heading(r.heading, r.unit_index)
+            if re.match(r"^(chapter|part)\s+\d+", h, re.IGNORECASE) or (
+                "chapter" in h.lower() and len(h) < 60
+            ):
+                current_ch = {"heading": h, "sections": [r]}
+                chapters.append(current_ch)
+            elif current_ch is not None:
+                current_ch["sections"].append(r)
+
+        if mode == "executive":
+            lines: list[str] = []
+
+            # Find lead-in / primary thesis overview
+            first_meaningful = valid_rows[0]
+            for r in valid_rows:
+                if any(
+                    w in r.heading.lower()
+                    for w in ["intro", "overview", "chapter 1", "model architecture"]
+                ):
+                    first_meaningful = r
+                    break
+            lead_text = _extract_takeaway_snippet(first_meaningful.content, max_chars=450)
+            lines.append(f"### Executive Overview\n\n{lead_text}\n")
+
+            if chapters:
+                lines.append("### Key Takeaways by Chapter\n")
+                for ch in chapters:
+                    first_sec = ch["sections"][0]
+                    takeaway = _extract_takeaway_snippet(first_sec.content)
+
+                    sub_sections = [
+                        s for s in ch["sections"][1:] if not _is_noise_heading(s.heading)
+                    ]
+                    sub_names = [_clean_heading(s.heading, s.unit_index) for s in sub_sections[:3]]
+                    topics_suffix = f" *Key topics: {', '.join(sub_names)}.*" if sub_names else ""
+                    lines.append(f"- **{ch['heading']}**: {takeaway}{topics_suffix}\n")
+            else:
+                lines.append("### Key Takeaways\n")
+                for r in valid_rows[:15]:
+                    h = _clean_heading(r.heading, r.unit_index)
+                    if len(h) > 60:
+                        h = h[:57] + "..."
+                    takeaway = _extract_takeaway_snippet(r.content)
+                    lines.append(f"- **{h}**: {takeaway}\n")
+
+            return "\n".join(lines).strip()
+
+        if mode == "detailed":
+            lines = []
+            if chapters:
+                for ch in chapters:
+                    lines.append(f"## {ch['heading']}\n")
+                    first_sec = ch["sections"][0]
+                    if first_sec.content:
+                        lines.append(f"{first_sec.content.strip()}\n")
+
+                    sub_sections = [
+                        s for s in ch["sections"][1:] if not _is_noise_heading(s.heading)
+                    ]
+                    if sub_sections:
+                        lines.append("### Core Sections:\n")
+                        for s in sub_sections[:8]:
+                            s_heading = _clean_heading(s.heading, s.unit_index)
+                            s_content = s.content.strip() if s.content else ""
+                            s_takeaway = _extract_takeaway_snippet(s_content, max_chars=300)
+                            lines.append(f"- **{s_heading}**: {s_takeaway}")
+                        lines.append("")
+            else:
+                for r in valid_rows[:30]:
+                    h = _clean_heading(r.heading, r.unit_index)
+                    lines.append(f"## {h}\n")
+                    lines.append(f"{r.content.strip()}\n")
+
+            return "\n".join(lines).strip()
+
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -548,13 +735,18 @@ class SummarizationService:
                 # assembled per-section text with a paraphrase of it. Neither
                 # branch streams, so the summary is sent as one event exactly as
                 # the cache path above does.
+                assembled = await self.build_assembled_summary(document_id, mode)
                 text = (
-                    section_input
-                    if section_input is not None
-                    else await self._generate_detailed(
-                        _truncate_to_budget(input_text),
-                        model,
-                        await self._fetch_profile(document_id),
+                    assembled
+                    if assembled is not None
+                    else (
+                        section_input
+                        if section_input is not None
+                        else await self._generate_detailed(
+                            _truncate_to_budget(input_text),
+                            model,
+                            await self._fetch_profile(document_id),
+                        )
                     )
                 )
                 summary_id = await self._store_summary(document_id, mode, text)
@@ -562,6 +754,17 @@ class SummarizationService:
                 done_evt = {"done": True, "summary_id": summary_id, "cached": False}
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
+
+            # For executive summary on documents with section summaries: if not force-refreshing,
+            # assemble the comprehensive key points instantly!
+            if mode == "executive" and section_input is not None and not force_refresh:
+                assembled_exec = await self.build_assembled_summary(document_id, "executive")
+                if assembled_exec is not None:
+                    summary_id = await self._store_summary(document_id, mode, assembled_exec)
+                    yield f"data: {json.dumps({'token': assembled_exec})}\n\n"
+                    done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                    yield f"data: {json.dumps(done_evt)}\n\n"
+                    return
 
             llm = get_llm_service()
             system = _build_system_prompt(mode, await self._fetch_profile(document_id))
@@ -589,6 +792,21 @@ class SummarizationService:
                 extra={"document_id": document_id, "mode": mode},
                 exc_info=exc,
             )
+            # Reliable fallback: if LLM fails and assembled summary is possible, serve that!
+            if mode in ("executive", "detailed"):
+                try:
+                    fallback_assembled = await self.build_assembled_summary(document_id, mode)
+                    if fallback_assembled is not None:
+                        summary_id = await self._store_summary(
+                            document_id, mode, fallback_assembled
+                        )
+                        yield f"data: {json.dumps({'token': fallback_assembled})}\n\n"
+                        done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                        yield f"data: {json.dumps(done_evt)}\n\n"
+                        return
+                except Exception as fallback_exc:
+                    logger.debug("Assembled fallback failed: %s", fallback_exc)
+
             if isinstance(exc, ValueError):
                 msg = "LLM provider not configured. Add your API key in Settings."
             elif isinstance(exc, LLMAuthenticationError):
@@ -702,7 +920,8 @@ class SummarizationService:
             for mode in modes_needed:
                 try:
                     if mode in _ASSEMBLED_MODES and section_input is not None:
-                        text = section_input
+                        assembled = await self.build_assembled_summary(document_id, mode)
+                        text = assembled if assembled is not None else section_input
                     elif mode in _ASSEMBLED_MODES:
                         text = await self._generate_detailed(
                             _truncate_to_budget(input_text), model, profile
@@ -724,6 +943,19 @@ class SummarizationService:
                         extra={"document_id": document_id},
                     )
                 except Exception as exc:
+                    if mode == "executive" and section_input is not None:
+                        try:
+                            fallback = await self.build_assembled_summary(document_id, mode)
+                            if fallback is not None:
+                                await self._store_summary(document_id, mode, fallback)
+                                logger.info(
+                                    "pregenerate: stored mode=%s via assembled fallback",
+                                    mode,
+                                    extra={"document_id": document_id},
+                                )
+                                continue
+                        except Exception as fallback_exc:
+                            logger.debug("Pregenerate fallback failed: %s", fallback_exc)
                     logger.warning(
                         "pregenerate: mode=%s failed (non-fatal)",
                         mode,

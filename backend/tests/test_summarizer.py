@@ -16,7 +16,7 @@ import app.database as db_module
 from app.database import make_engine
 from app.db_init import create_all_tables
 from app.main import app
-from app.models import ChunkModel, DocumentModel, SummaryModel
+from app.models import ChunkModel, DocumentModel, SectionSummaryModel, SummaryModel
 from app.services.qa import QA_SYSTEM_PROMPT
 from app.services.summarizer import (
     GROUNDING_PREFIX,
@@ -396,5 +396,97 @@ async def test_force_refresh_bypasses_cache(test_db):
     assert mock_llm.call_count >= 2, "LLM not called on force_refresh=True"
     done_payload = json.loads(events[-1][len("data: ") :])
     assert done_payload.get("cached") is False
+
+
+@pytest.mark.asyncio
+async def test_build_assembled_summary_chapter_based(test_db):
+    """build_assembled_summary formats chapter takeaways and strips noise."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+
+    async with factory() as session:
+        sections = [
+            (0, "Praise for the Book", "Reviewers love this book."),
+            (1, "Conventions Used in This Book", "Italics denote new terms."),
+            (2, "Chapter 1. Introduction to RAG", "RAG combines retrieval with LLM generation."),
+            (3, "How Does RAG Work?", "Query flow fetches documents then prompts LLM."),
+            (4, "Figure 1-1. Architecture", "Diagram of RAG stack."),
+            (5, "Chapter 2. Scaling RAG", "Scaling requires hybrid search and reranking."),
+            (6, "Hybrid Search", "Combines BM25 with dense vector embeddings."),
+            (7, "Index", "Index of terms."),
+        ]
+        for idx, heading, content in sections:
+            session.add(
+                SectionSummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=heading,
+                    content=content,
+                    unit_index=idx,
+                )
+            )
+        await session.commit()
+
+    svc = SummarizationService()
+    exec_summary = await svc.build_assembled_summary(doc_id, "executive")
+    assert exec_summary is not None
+    assert "Key Takeaways by Chapter" in exec_summary
+    assert "Chapter 1" in exec_summary
+    assert "Chapter 2" in exec_summary
+    assert "Praise" not in exec_summary
+    assert "Conventions" not in exec_summary
+    assert "Figure 1-1" not in exec_summary
+
+    detailed_summary = await svc.build_assembled_summary(doc_id, "detailed")
+    assert detailed_summary is not None
+    assert "## Chapter 1" in detailed_summary
+    assert "## Chapter 2" in detailed_summary
+    assert "Core Sections:" in detailed_summary
+    assert "Praise" not in detailed_summary
+
+
+@pytest.mark.asyncio
+async def test_get_cached_refreshes_legacy_bloated_detailed(test_db):
+    """GET /summarize/{document_id}/cached replaces legacy 70KB raw dump."""
+    _engine, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    await _insert_doc_and_chunks(factory, tmp_path, doc_id, ["doc body"], [5])
+
+    async with factory() as session:
+        # Seed legacy bloated summary
+        session.add(
+            SummaryModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                mode="detailed",
+                content="## Praise for...\n" + ("Bloated content " * 6000),
+            )
+        )
+        # Seed valid section summaries
+        for i in range(4):
+            session.add(
+                SectionSummaryModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    heading=f"Section {i + 1}",
+                    content=f"Substance of section {i + 1}.",
+                    unit_index=i,
+                )
+            )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(f"/summarize/{doc_id}/cached")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "detailed" in data["summaries"]
+        refreshed_content = data["summaries"]["detailed"]["content"]
+        assert len(refreshed_content) < 5000
+        assert "Bloated content" not in refreshed_content
+        assert "Section 1" in refreshed_content
+
 
 

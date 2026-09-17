@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw } from "lucide-react"
+import { Check, Copy, Loader2, RefreshCw } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { MarkdownRenderer } from "@/components/MarkdownRenderer"
@@ -44,6 +44,7 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
   const [streaming, setStreaming] = useState<StreamingMap>({})
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [cacheLoading, setCacheLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -195,14 +196,35 @@ export function SummaryPanel({ documentId, contentType, form }: SummaryPanelProp
               {isStreaming && <span className="animate-pulse text-foreground">▍</span>}
             </div>
             {!isStreaming && (
-              <button
-                title="Regenerate summary (uses LLM -- may take a moment)"
-                onClick={() => void generateSummary(activeTab as SummaryMode, true)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <RefreshCw size={12} />
-                Regenerate
-              </button>
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  title="Copy summary to clipboard"
+                  onClick={() => {
+                    if (!currentSummary) return
+                    void navigator.clipboard.writeText(currentSummary)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {copied ? (
+                    <Check size={12} className="text-green-500" />
+                  ) : (
+                    <Copy size={12} />
+                  )}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+                <button
+                  type="button"
+                  title="Regenerate summary (uses LLM -- may take a moment)"
+                  onClick={() => void generateSummary(activeTab as SummaryMode, true)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <RefreshCw size={12} />
+                  Regenerate
+                </button>
+              </div>
             )}
           </div>
         ) : (
