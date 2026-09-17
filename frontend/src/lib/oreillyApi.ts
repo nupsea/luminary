@@ -39,6 +39,24 @@ export function isOreillyUrl(url: string): boolean {
   )
 }
 
+export function parseOreillyChapter(url: string): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    const segments = parsed.pathname.split("/").filter(Boolean)
+    if (segments.length >= 2) {
+      const last = segments[segments.length - 1]
+      if (last.endsWith(".html") || last.endsWith(".xhtml")) {
+        return last
+      }
+    }
+  } catch {
+    const match = url.match(/\/([^/?#]+\.(?:html|xhtml))(?:[?#]|$)/i)
+    if (match) return match[1]
+  }
+  return null
+}
+
 export async function fetchOreillyStatus(): Promise<OreillyStatus> {
   try {
     return await apiGet<OreillyStatus>("/oreilly/status")

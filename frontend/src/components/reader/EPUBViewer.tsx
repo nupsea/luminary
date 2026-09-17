@@ -230,7 +230,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
           <div className="flex-1 overflow-auto">
             <div
               className={cn(
-                "prose prose-sm dark:prose-invert max-w-none px-6 py-4",
+                "epub-reader-content prose prose-sm dark:prose-invert max-w-none px-6 py-4",
                 // Books use <pre> for verse, not only code. Prose pairs pale
                 // `pre` text with a dark background, which does not hold here.
                 "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",

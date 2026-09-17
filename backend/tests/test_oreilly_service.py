@@ -11,9 +11,23 @@ from app.services.oreilly_service import (
     is_oreilly_url,
     parse_cookies_input,
     parse_oreilly_book_id,
+    parse_oreilly_target_chapter,
     process_chapter_html,
     upgrade_cover_url,
 )
+
+
+def test_parse_oreilly_target_chapter():
+    url1 = "https://learning.oreilly.com/library/view/hands-on-rag-for/9798341621701/ch06.html#ch06"
+    assert parse_oreilly_target_chapter(url1) == "ch06.html"
+
+    url2 = "https://learning.oreilly.com/library/view/fluent-python-2nd/9781492056348/ch01.xhtml"
+    assert parse_oreilly_target_chapter(url2) == "ch01.xhtml"
+
+    url3 = "https://learning.oreilly.com/library/view/ddia/9781491903063/"
+    assert parse_oreilly_target_chapter(url3) is None
+
+    assert parse_oreilly_target_chapter("") is None
 
 
 def test_is_oreilly_url():

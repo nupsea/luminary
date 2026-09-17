@@ -60,3 +60,46 @@ class TestChapterSplitting:
 
         soup = BeautifulSoup("<body><p>Just prose, no headings.</p></body>", "html.parser")
         assert len(_split_soup_on_headings(soup)) == 1
+
+    def test_single_h1_with_multiple_h2_sections_stays_together(self):
+        """A technical chapter with 1 H1 and several H2 subsections should stay together."""
+        from bs4 import BeautifulSoup
+
+        from app.services.epub_service import _split_soup_on_headings
+
+        soup = BeautifulSoup(
+            "<body><h1>Chapter 1. Introduction</h1>"
+            "<p>Intro text</p>"
+            "<h2>1.1 Background</h2>"
+            "<p>Background text</p>"
+            "<h2>1.2 Architecture</h2>"
+            "<p>Arch text</p></body>",
+            "html.parser",
+        )
+        units = _split_soup_on_headings(soup)
+        assert len(units) == 1
+        assert units[0]["title"] == "Chapter 1. Introduction"
+        assert "Background text" in units[0]["html"]
+        assert "Arch text" in units[0]["html"]
+
+
+class TestEpubSanitization:
+    def test_sanitize_html_preserves_images_figures_and_callouts(self):
+        from app.services.epub_service import EpubService
+
+        raw_html = (
+            '<div data-type="note"><p>Important note</p></div>'
+            '<figure id="fig1">'
+            '<img src="data:image/png;base64,iVBORw0KGgoA" alt="Diagram" />'
+            '<figcaption>Figure 1. Diagram</figcaption>'
+            '</figure>'
+            '<script>alert("bad")</script>'
+        )
+
+        cleaned = EpubService.sanitize_html(raw_html)
+        assert "data:image/png;base64" in cleaned
+        assert "<figure" in cleaned
+        assert "<figcaption>Figure 1. Diagram</figcaption>" in cleaned
+        assert 'data-type="note"' in cleaned
+        assert "<script>" not in cleaned
+

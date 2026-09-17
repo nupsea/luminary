@@ -426,3 +426,125 @@ html {
   padding: 0.375rem 0.75rem;
 }
 
+/* Publication-grade EPUB reader typography & diagrams */
+.epub-reader-content figure,
+.epub-reader-content .figure {
+  margin: 2rem auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  clear: both;
+}
+
+.epub-reader-content figure img,
+.epub-reader-content .figure img,
+.epub-reader-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: 0 auto;
+  display: block;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  box-shadow: var(--shadow-md);
+}
+
+.epub-reader-content figure h6,
+.epub-reader-content .figure h6,
+.epub-reader-content figcaption,
+.epub-reader-content .caption {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.epub-reader-content figure h6 .label,
+.epub-reader-content figcaption .label {
+  font-weight: 600;
+  font-style: normal;
+  color: hsl(var(--foreground));
+}
+
+/* Callout blocks (notes, tips, warnings, sidebars) */
+.epub-reader-content [data-type="note"],
+.epub-reader-content .note {
+  border-left: 3px solid hsl(217 91% 60%);
+  background-color: hsl(217 91% 60% / 0.08);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+.epub-reader-content [data-type="tip"],
+.epub-reader-content .tip {
+  border-left: 3px solid hsl(142 71% 45%);
+  background-color: hsl(142 71% 45% / 0.08);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+.epub-reader-content [data-type="warning"],
+.epub-reader-content .warning {
+  border-left: 3px solid hsl(38 92% 50%);
+  background-color: hsl(38 92% 50% / 0.09);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+.epub-reader-content [data-type="sidebar"],
+.epub-reader-content .sidebar {
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted) / 0.3);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  margin: 1.75rem 0;
+}
+
+.epub-reader-content [data-type="programlisting"] pre,
+.epub-reader-content pre {
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.epub-reader-content h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.epub-reader-content h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+.epub-reader-content h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.epub-reader-content .label {
+  color: hsl(var(--primary));
+}
+

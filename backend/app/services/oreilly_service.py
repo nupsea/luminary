@@ -102,6 +102,26 @@ def parse_oreilly_book_id(url_or_id: str) -> str | None:
     return None
 
 
+def parse_oreilly_target_chapter(url: str) -> str | None:
+    """Extract specific chapter filename or identifier if present in URL.
+
+    Examples:
+        .../hands-on-rag-for/9798341621701/ch06.html#... -> "ch06.html"
+        .../fluent-python-2nd/9781492056348/ch01.html -> "ch01.html"
+        .../ddia/9781491903063/ -> None
+    """
+    if not url or "://" not in url:
+        return None
+    path_parts = [p for p in urlparse(url).path.split("/") if p]
+    if len(path_parts) >= 2:
+        last = path_parts[-1]
+        is_html = last.endswith((".html", ".xhtml"))
+        is_isbn = bool(re.match(r"^[0-9]{10,13}$", last.split(".")[0]))
+        if is_html and not is_isbn:
+            return last
+    return None
+
+
 def upgrade_cover_url(url: str) -> str:
     """Upgrade an O'Reilly cover URL to the 1200w high-resolution print variant."""
     if not url:
@@ -619,6 +639,30 @@ async def start_oreilly_ingestion(
             exc,
         )
 
+    # Detect if a specific chapter was requested in the URL
+    target_chapter = parse_oreilly_target_chapter(url) if selected_chapters is None else None
+    matched_chapter_title: str | None = None
+
+    if target_chapter:
+        try:
+            all_chapters = await asyncio.to_thread(client.fetch_chapter_list, book_id)
+            target_norm = target_chapter.lower().replace(".xhtml", ".html")
+            for idx, ch in enumerate(all_chapters):
+                fn = ch.get("filename", "").lower().replace(".xhtml", ".html")
+                ref = ch.get("reference_id", "").lower().replace(".xhtml", ".html")
+                if fn == target_norm or ref.endswith(target_norm):
+                    selected_chapters = [idx]
+                    matched_chapter_title = ch.get("title")
+                    break
+        except Exception as exc:
+            logger.warning("Could not resolve chapter %s for %s: %s", target_chapter, book_id, exc)
+
+    if matched_chapter_title:
+        book_title = f"{book_title} — {matched_chapter_title}"
+        doc_tags = ["oreilly", "tech_chapter"]
+    else:
+        doc_tags = ["oreilly", "tech_book"]
+
     doc_id = str(uuid.uuid4())
     data_dir = Path(settings.DATA_DIR).expanduser()
     raw_dir = data_dir / "raw"
@@ -637,7 +681,7 @@ async def start_oreilly_ingestion(
             file_hash=None,
             stage="parsing",
             source_url=url,
-            tags=["oreilly", "tech_book"],
+            tags=doc_tags,
         )
         session.add(doc)
         await session.commit()
