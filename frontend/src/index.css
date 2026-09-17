@@ -559,3 +559,15 @@ html {
   color: hsl(var(--primary));
 }
 
+/* KaTeX formula display styling in reader and markdown */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+  margin: 1.25rem 0 !important;
+}
+
+.katex {
+  text-rendering: auto;
+}
+

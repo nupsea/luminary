@@ -9,6 +9,7 @@ from docx import Document as DocxDocument
 from markdown_it import MarkdownIt
 
 from app.services.book_parser import BookParser
+from app.services.math_normalizer import normalize_paper_math
 from app.services.source_text import read_source_text
 from app.services.universal_parser import UniversalParser
 from app.types import ParsedDocument, Section
@@ -548,7 +549,7 @@ class DocumentParser:
                 # first child opens on its own page therefore owns no whole page
                 # and gets empty text; that prose goes to the child.
                 next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
-                page_end = min(next_page - 1, total_pages)
+                page_end = max(pg, min(next_page - 1 if next_page > pg else pg, total_pages))
 
                 texts: list[str] = []
                 # Index into `texts` at which each page after the first starts,
@@ -582,7 +583,7 @@ class DocumentParser:
                 # hard-wrapped, so joining lines alone leaves no boundary and
                 # the reader renders a whole chapter as one block.
                 joined = "\n\n".join(texts)
-                text = joined.strip()
+                text = normalize_paper_math(joined.strip())
                 # Offsets are measured on the joined string, then shifted by
                 # whatever the strip removed from the front, so they stay true to
                 # the text that is actually stored.

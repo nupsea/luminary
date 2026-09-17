@@ -26,4 +26,13 @@ describe("MarkdownRenderer image resolution", () => {
 
     expect(html).toContain(`src="${API_BASE}/images/local/doc-456/art.png"`)
   })
+
+  it("renders mathematical formulas with KaTeX", () => {
+    const md = "$$\n\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{Q K^T}{\\sqrt{d_k}}\\right) V \\tag{1}\n$$"
+    const html = renderToStaticMarkup(<MarkdownRenderer>{md}</MarkdownRenderer>)
+
+    expect(html).toContain("katex")
+    expect(html).toContain("katex-display")
+  })
 })
+
