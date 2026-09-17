@@ -27,9 +27,9 @@ OLLAMA_LOAD_TIMEOUT_DEFAULT_SECONDS = 300.0
 
 
 def test_the_warmup_timeout_is_not_stricter_than_ollama_s_own_load_budget():
-    assert (
-        Settings().LLM_WARMUP_TIMEOUT_SECONDS >= OLLAMA_LOAD_TIMEOUT_DEFAULT_SECONDS
-    ), "a client stricter than the server cancels loads the server would finish"
+    assert Settings().LLM_WARMUP_TIMEOUT_SECONDS >= OLLAMA_LOAD_TIMEOUT_DEFAULT_SECONDS, (
+        "a client stricter than the server cancels loads the server would finish"
+    )
 
 
 def test_the_warmup_does_not_hardcode_its_timeout():

@@ -77,8 +77,6 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     fire_and_forget(coro, _background_tasks, label="feynman background task")
 
 
-
-
 def _parse_gaps(raw: str) -> list[str]:
     """Extract the gaps JSON list from the end of a tutor response.
 

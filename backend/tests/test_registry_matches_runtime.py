@@ -81,6 +81,5 @@ def test_the_thinking_default_matches_the_runtime(model_id: str):
     declared = REGISTRY[model_id].thinking_default
     actual = "thinking" in caps
     assert declared == actual, (
-        f"{model_id}: registry says thinking_default={declared}, Ollama reports "
-        f"thinking={actual}"
+        f"{model_id}: registry says thinking_default={declared}, Ollama reports thinking={actual}"
     )

@@ -37,6 +37,7 @@ def _make_documents_response(doc_id: str, title: str, stage: str = "complete") -
 def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypatch):
     """ensure_ingested() must not call ingest_document() when the document already exists."""
     import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+
     monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     fake_doc_id = "doc-already-exists"
@@ -69,6 +70,7 @@ def test_ensure_ingested_skips_reingest_when_document_exists(tmp_path, monkeypat
 def test_ensure_ingested_calls_ingest_when_document_missing(tmp_path, monkeypatch):
     """ensure_ingested() must call ingest_document() when no matching document exists."""
     import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+
     monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     # GET /documents returns an empty list
@@ -101,6 +103,7 @@ def test_ensure_ingested_uses_manifest_cache_when_alive(tmp_path, monkeypatch):
     re-ingesting and without calling /documents or /ingest.
     """
     import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+
     monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     cached_id = "doc-from-cache"
@@ -129,6 +132,7 @@ def test_ensure_ingested_drops_stale_cache_and_falls_through(tmp_path, monkeypat
     to lookup/ingest so the next call can resolve a live document.
     """
     import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+
     monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     stale_id = "doc-stale"
@@ -152,6 +156,7 @@ def test_ensure_ingested_drops_stale_cache_and_falls_through(tmp_path, monkeypat
 def test_ensure_ingested_skips_incomplete_stage(tmp_path, monkeypatch):
     """ensure_ingested() must not use a document whose stage != 'complete'."""
     import evals.lib.manifest as manifest_mod  # noqa: PLC0415
+
     monkeypatch.setattr(manifest_mod, "MANIFEST_PATH", tmp_path / "manifest.json")
 
     # Document exists but is still processing

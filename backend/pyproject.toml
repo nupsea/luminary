@@ -63,6 +63,7 @@ dependencies = [
     # upgrade smuggled in as a size fix. Raise both halves together, and read the
     # index listing before raising the floor.
     "torch>=2.10.0,<2.11.0",
+    "curl-cffi>=0.7.0",
 ]
 
 

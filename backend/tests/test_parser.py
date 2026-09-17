@@ -325,3 +325,18 @@ class TestEpubDocumentSplitting:
 
         out = _split_epub_document("<p>Only prose here.</p>", "Chapter File")
         assert out == [("Chapter File", "Only prose here.")]
+
+    def test_figure_caption_and_alt_text_survive(self):
+        from app.services.parser import _epub_text
+
+        raw = (
+            "<p>Introduction.</p>"
+            "<figure><img src='fig1.png' alt='Basic RAG Architecture' />"
+            "<figcaption>Figure 1-1. Basic RAG Architecture</figcaption></figure>"
+            "<p>Next paragraph.</p>"
+        )
+        text = _epub_text(raw)
+        assert "[Figure: Basic RAG Architecture]" in text
+        assert "Figure 1-1. Basic RAG Architecture" in text
+        assert "Introduction." in text
+        assert "Next paragraph." in text

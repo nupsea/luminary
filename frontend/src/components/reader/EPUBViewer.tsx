@@ -10,7 +10,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw } from "lucide-react"
+import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RotateCcw, X } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -49,6 +49,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
     side: "right",
   })
   const [activeChapter, setActiveChapter] = useState(0)
+  const [zoomedImgSrc, setZoomedImgSrc] = useState<string | null>(null)
 
   // Fetch TOC — long stale time since EPUB structure never changes
   const {
@@ -88,8 +89,15 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
   /**
    * Keep the book's own links inside the book: chapter HTML is injected
    * verbatim, so its anchors would otherwise navigate the router away.
+   * Also captures diagram clicks to zoom in lightbox.
    */
   function handleContentClick(e: React.MouseEvent<HTMLDivElement>) {
+    const img = (e.target as HTMLElement).closest("img")
+    if (img && img.src) {
+      setZoomedImgSrc(img.src)
+      return
+    }
+
     const anchor = (e.target as HTMLElement).closest("a")
     if (!anchor) return
     const href = anchor.getAttribute("href")
@@ -230,7 +238,7 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
           <div className="flex-1 overflow-auto">
             <div
               className={cn(
-                "prose prose-sm dark:prose-invert max-w-none px-6 py-4",
+                "epub-reader-content prose prose-sm dark:prose-invert max-w-3xl mx-auto px-6 py-6",
                 // Books use <pre> for verse, not only code. Prose pairs pale
                 // `pre` text with a dark background, which does not hold here.
                 "prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border",
@@ -269,6 +277,30 @@ export function EPUBViewer({ documentId }: EPUBViewerProps) {
           </div>
         )}
       </div>
+
+      {/* High-resolution diagram lightbox */}
+      {zoomedImgSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+          onClick={() => setZoomedImgSrc(null)}
+        >
+          <div className="relative max-h-[92vh] max-w-[92vw] overflow-hidden rounded-lg border border-border/80 bg-background/95 p-2 shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setZoomedImgSrc(null)}
+              className="absolute top-3 right-3 rounded-full bg-background/80 p-1.5 text-muted-foreground hover:text-foreground backdrop-blur-sm shadow z-10"
+              title="Close"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={zoomedImgSrc}
+              alt="Expanded diagram"
+              className="max-h-[85vh] max-w-[85vw] object-contain rounded"
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

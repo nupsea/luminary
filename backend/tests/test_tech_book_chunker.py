@@ -489,4 +489,3 @@ def test_chunk_mixed_content_merges_short_prose_fragments():
     assert len(chunks) == 1
     assert "Design decisions at each step:" in chunks[0]["text"]
     assert "Step 1 requires fast ingestion" in chunks[0]["text"]
-

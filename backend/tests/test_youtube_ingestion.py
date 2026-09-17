@@ -418,9 +418,7 @@ async def test_download_passes_the_resolved_ffmpeg_location(monkeypatch, tmp_pat
     # Built through Path rather than hardcoded, so the expected separator
     # matches whatever the code under test normalizes to on this platform --
     # the mac-style prefix is arbitrary, the code's job is a real OS path.
-    monkeypatch.setattr(
-        yt, "resolve_tool", lambda name: str(Path("/opt/homebrew/bin") / name)
-    )
+    monkeypatch.setattr(yt, "resolve_tool", lambda name: str(Path("/opt/homebrew/bin") / name))
     monkeypatch.setattr(yt.asyncio, "create_subprocess_exec", _fake_exec)
 
     await yt.download_audio("https://youtu.be/x", tmp_path / "out")

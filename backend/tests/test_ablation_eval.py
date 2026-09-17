@@ -42,9 +42,7 @@ async def test_retriever_strategy_vector_skips_keyword_and_graph(monkeypatch):
     monkeypatch.setattr(retriever, "vector_search", fake_vector)
     monkeypatch.setattr(retriever, "keyword_search", fail_keyword)
 
-    rows = await retriever.retrieve(
-        "query", ["doc-1"], 5, strategy="vector", expand_context=False
-    )
+    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="vector", expand_context=False)
 
     assert calls == ["vector:query"]
     assert rows[0].chunk_id == "vector-1"
@@ -63,9 +61,7 @@ async def test_retriever_strategy_fts_skips_vector(monkeypatch):
     monkeypatch.setattr(retriever, "vector_search", fail_vector)
     monkeypatch.setattr(retriever, "keyword_search", fake_keyword)
 
-    rows = await retriever.retrieve(
-        "query", ["doc-1"], 5, strategy="fts", expand_context=False
-    )
+    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="fts", expand_context=False)
 
     assert rows[0].chunk_id == "keyword-1"
 
@@ -88,9 +84,7 @@ async def test_retriever_strategy_graph_expands_then_vector(monkeypatch):
     monkeypatch.setattr(retriever_module, "_graph_expand", fake_graph_expand)
     monkeypatch.setattr(retriever, "vector_search", fake_vector)
 
-    rows = await retriever.retrieve(
-        "query", ["doc-1"], 5, strategy="graph", expand_context=False
-    )
+    rows = await retriever.retrieve("query", ["doc-1"], 5, strategy="graph", expand_context=False)
 
     assert calls == ["graph:query", "vector:expanded query"]
     assert rows[0].chunk_id == "graph-1"
@@ -126,11 +120,13 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
         run_eval,
         "search_chunks",
         lambda *args, **kwargs: (
-            strategies_seen.append(kwargs.get("strategy", "rrf")),
-            expand_flags.append(kwargs.get("graph_expand", True)),
-            rerank_flags.append(bool(kwargs.get("rerank", False))),
-        )
-        and ["answer hint"],
+            (
+                strategies_seen.append(kwargs.get("strategy", "rrf")),
+                expand_flags.append(kwargs.get("graph_expand", True)),
+                rerank_flags.append(bool(kwargs.get("rerank", False))),
+            )
+            and ["answer hint"]
+        ),
     )
     monkeypatch.setattr(
         run_eval,
@@ -166,10 +162,19 @@ def test_run_eval_ablation_produces_one_metric_set_per_arm(monkeypatch):
     assert rerank_flags == [False, False, False, False, False, True, True, True, False]
     assert history_rows[0][0] == "ablation"
     assert set(history_rows[0][1]["ablation_metrics"]) == {
-        "vector", "fts", "graph", "rrf", "rrf-nogx",
-        "rrf+rerank-ce", "rrf+rerank", "rrf+rerank-nogx", "rrf-pool",
+        "vector",
+        "fts",
+        "graph",
+        "rrf",
+        "rrf-nogx",
+        "rrf+rerank-ce",
+        "rrf+rerank",
+        "rrf+rerank-nogx",
+        "rrf-pool",
     }
     assert history_rows[0][1]["ablation_metrics"]["rrf-pool"] == {
-        "recall_50": 1.0, "recall_100": 1.0, "recall_200": 1.0,
+        "recall_50": 1.0,
+        "recall_100": 1.0,
+        "recall_200": 1.0,
     }
     assert store_rows[0][0] == "ablation"

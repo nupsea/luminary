@@ -155,9 +155,7 @@ class FlashcardRepo:
 
     async def _delete_children_of(self, card_ids: Sequence[str]) -> None:
         for model in _CARD_CHILD_TABLES:
-            await self.session.execute(
-                delete(model).where(model.flashcard_id.in_(list(card_ids)))
-            )
+            await self.session.execute(delete(model).where(model.flashcard_id.in_(list(card_ids))))
 
     async def delete_by_id(self, card_id: str) -> None:
         await self._delete_children_of([card_id])

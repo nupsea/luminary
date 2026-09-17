@@ -27,9 +27,7 @@ PUBLIC_SURFACE_DISTRIBUTIONS = {
 GPL_GATED = {"youtube_ingest", "audio_transcribe"}
 
 
-@pytest.mark.parametrize(
-    "surface", sorted(set(PUBLIC_SURFACE_DISTRIBUTIONS) - GPL_GATED)
-)
+@pytest.mark.parametrize("surface", sorted(set(PUBLIC_SURFACE_DISTRIBUTIONS) - GPL_GATED))
 def test_an_ungated_public_surface_ships_in_the_public_image(surface):
     """Base dependencies are all the Docker image installs, so anything a
     public surface needs and is allowed to ship has to be there."""

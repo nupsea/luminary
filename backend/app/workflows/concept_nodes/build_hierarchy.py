@@ -181,7 +181,10 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
         sun = max(ents, key=lambda n: _cos(vec_of[n], cen))
         concepts.append(
             {
-                "level": LEVEL_CONCEPT, "label": "", "sun": sun, "entities": sorted(ents),
+                "level": LEVEL_CONCEPT,
+                "label": "",
+                "sun": sun,
+                "entities": sorted(ents),
                 "centroid": cen,
                 "salience": float(sum(_freq(n) for n in ents)),
                 "document_ids": _docs(idxs),
@@ -201,7 +204,8 @@ async def build_hierarchy(state: ConceptPipelineState) -> ConceptPipelineState:
     # thin, unrelated none). All-pairs-above-cutoff exploded to ~75k edges on bge-small.
     lateral = _knn_edges(
         [c["centroid"] for c in concepts],
-        cfg["concept_edge_cutoff"], cfg["concept_edge_top_k"],
+        cfg["concept_edge_cutoff"],
+        cfg["concept_edge_top_k"],
     )
 
     state["hierarchy"] = {"concepts": concepts}

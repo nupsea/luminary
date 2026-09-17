@@ -51,8 +51,12 @@ class MergeRequest(BaseModel):
 
 def _out(row: ConceptModel) -> ConceptOut:
     return ConceptOut(
-        id=row.id, slug=row.slug, label=row.label, kind=row.kind,
-        status=row.status, mastery=row.mastery,
+        id=row.id,
+        slug=row.slug,
+        label=row.label,
+        kind=row.kind,
+        status=row.status,
+        mastery=row.mastery,
     )
 
 
@@ -109,9 +113,7 @@ async def reject_concept(concept_id: str, session: AsyncSession = Depends(get_db
 
 
 @router.post("/merge", response_model=ConceptOut)
-async def merge_concepts(
-    req: MergeRequest, session: AsyncSession = Depends(get_db)
-) -> ConceptOut:
+async def merge_concepts(req: MergeRequest, session: AsyncSession = Depends(get_db)) -> ConceptOut:
     row = await get_concept_service().merge_concepts(session, req.source_id, req.target_id)
     if row is None:
         raise HTTPException(status_code=404, detail="source or target concept not found")
@@ -156,9 +158,7 @@ async def purge_junk_concepts(
             await svc.delete_concept(session, cid)
             deleted += 1
         await session.commit()
-    return PurgeJunkResponse(
-        dry_run=dry_run, matched=len(matches), deleted=deleted, labels=labels
-    )
+    return PurgeJunkResponse(dry_run=dry_run, matched=len(matches), deleted=deleted, labels=labels)
 
 
 # --- concept-layer rebuild (the UI's "make concepts") ---------------------------------
@@ -192,8 +192,10 @@ async def _run_regen() -> None:
         state = await run_pipeline(dry_run=False)
         persisted = state.get("diagnostics", {}).get("persist_concepts", {}).get("concepts", 0)
         _regen_state.update(
-            status="done", finished_at=datetime.now(UTC).isoformat(),
-            concepts=persisted, error=None,
+            status="done",
+            finished_at=datetime.now(UTC).isoformat(),
+            concepts=persisted,
+            error=None,
         )
     except Exception as exc:  # noqa: BLE001 -- surface any failure to the poller
         logger.warning("concept rebuild failed", exc_info=True)
@@ -209,8 +211,11 @@ async def regenerate_concepts() -> RegenStatus:
     if _regen_state["status"] == "running":
         raise HTTPException(status_code=409, detail="a concept rebuild is already running")
     _regen_state.update(
-        status="running", started_at=datetime.now(UTC).isoformat(),
-        finished_at=None, concepts=None, error=None,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        finished_at=None,
+        concepts=None,
+        error=None,
     )
     _regen_task = asyncio.create_task(_run_regen())  # keep a ref so it isn't GC'd mid-flight
     return RegenStatus(**_regen_state)
@@ -245,14 +250,16 @@ async def concepts_for_note(
                     FlashcardModel.concept_id.is_not(None),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
         if cid
     }
 
     text = f"{note.title or ''}\n{note.content or ''}".lower()
     candidates = (
-        await session.execute(select(ConceptModel).limit(_LEXICAL_SCAN_CAP))
-    ).scalars().all()
+        (await session.execute(select(ConceptModel).limit(_LEXICAL_SCAN_CAP))).scalars().all()
+    )
 
     out: list[ConceptModel] = []
     seen: set[str] = set()
@@ -265,8 +272,10 @@ async def concepts_for_note(
     missing = mapped_ids - seen
     if missing:
         extra = (
-            await session.execute(select(ConceptModel).where(ConceptModel.id.in_(missing)))
-        ).scalars().all()
+            (await session.execute(select(ConceptModel).where(ConceptModel.id.in_(missing))))
+            .scalars()
+            .all()
+        )
         out.extend(extra)
 
     out.sort(key=lambda c: c.mastery)  # weakest first

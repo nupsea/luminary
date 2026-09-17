@@ -101,8 +101,10 @@ async def test_persist_failed_run_appears_in_runs_list(test_db):
         await session.commit()
 
     await _persist_failed_run(
-        "failds", model_used="ollama/qwen2.5:14b-instruct",
-        eval_kind="generation", error="boom: judge exploded",
+        "failds",
+        model_used="ollama/qwen2.5:14b-instruct",
+        eval_kind="generation",
+        error="boom: judge exploded",
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -313,8 +315,9 @@ async def test_post_eval_run_extended_body_flags(golden_dir):
 
         return _Result()
 
-    with patch("app.routers.evals.asyncio.to_thread") as mock_thread, patch(
-        "app.routers.evals._validate_model_available", return_value=None
+    with (
+        patch("app.routers.evals.asyncio.to_thread") as mock_thread,
+        patch("app.routers.evals._validate_model_available", return_value=None),
     ):
         mock_thread.side_effect = AsyncMock(side_effect=lambda fn, *a, **kw: fn(*a, **kw))
 
@@ -369,7 +372,8 @@ def test_validate_model_accepts_ollama_implicit_latest(monkeypatch):
     from app.routers import evals as evals_mod
 
     monkeypatch.setattr(
-        evals_mod, "_ollama_models",
+        evals_mod,
+        "_ollama_models",
         lambda _s: ({"ollama/llama3.2:latest", "ollama/mistral:latest"}, None),
     )
     settings = get_settings()

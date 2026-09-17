@@ -243,8 +243,7 @@ class EnrichmentQueueWorker:
                 )
                 delay += random.uniform(0, delay * 0.25)  # noqa: S311
                 logger.info(
-                    "EnrichmentQueueWorker: LLM unavailable, retry %d/%d in %.1fs "
-                    "job_id=%s doc=%s",
+                    "EnrichmentQueueWorker: LLM unavailable, retry %d/%d in %.1fs job_id=%s doc=%s",
                     attempt,
                     _LLM_RETRY_MAX_ATTEMPTS - 1,
                     delay,

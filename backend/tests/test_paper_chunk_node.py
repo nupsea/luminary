@@ -101,11 +101,7 @@ async def test_paper_path_excludes_references_from_chunks(test_db):
             )
         ).scalar_one()
         chunks = (
-            (
-                await session.execute(
-                    select(ChunkModel).where(ChunkModel.section_id == refs.id)
-                )
-            )
+            (await session.execute(select(ChunkModel).where(ChunkModel.section_id == refs.id)))
             .scalars()
             .all()
         )

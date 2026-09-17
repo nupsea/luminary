@@ -42,19 +42,35 @@ async def test_db(tmp_path, monkeypatch):
 async def _seed_two_books_one_concept(factory):
     async with factory() as s:
         for did, title in (("bookA", "Relational DBs"), ("bookB", "Data Warehousing")):
-            s.add(DocumentModel(id=did, title=title, format="pdf",
-                                content_type="tech_book", file_path=f"/tmp/{did}.pdf"))
+            s.add(
+                DocumentModel(
+                    id=did,
+                    title=title,
+                    format="pdf",
+                    content_type="tech_book",
+                    file_path=f"/tmp/{did}.pdf",
+                )
+            )
         s.add(ChunkModel(id="chA", document_id="bookA", text=_TEXT_A, chunk_index=0))
         s.add(ChunkModel(id="chB", document_id="bookB", text=_TEXT_B, chunk_index=0))
-        s.add(ConceptModel(
-            id="c1", slug="c-data-modeling", label="data modeling", kind="concept",
-            origin="document", status="proposed", level=2,
-            evidence_json=[{
-                "document_ids": ["bookA", "bookB"],
-                "chunk_ids": ["chA", "chB"],
-                "members": ["data modeling", "normalization", "star schema"],
-            }],
-        ))
+        s.add(
+            ConceptModel(
+                id="c1",
+                slug="c-data-modeling",
+                label="data modeling",
+                kind="concept",
+                origin="document",
+                status="proposed",
+                level=2,
+                evidence_json=[
+                    {
+                        "document_ids": ["bookA", "bookB"],
+                        "chunk_ids": ["chA", "chB"],
+                        "members": ["data modeling", "normalization", "star schema"],
+                    }
+                ],
+            )
+        )
         await s.commit()
 
 
@@ -62,8 +78,8 @@ async def test_evidence_text_spans_both_documents(test_db):
     await _seed_two_books_one_concept(test_db)
     async with test_db() as s:
         text = await _concept_evidence_text(s, ["chA", "chB"])
-    assert "normalization" in text          # from bookA
-    assert "star schemas" in text           # from bookB
+    assert "normalization" in text  # from bookA
+    assert "star schemas" in text  # from bookB
 
 
 async def test_concept_generation_grounds_across_docs(test_db, monkeypatch):
@@ -71,22 +87,31 @@ async def test_concept_generation_grounds_across_docs(test_db, monkeypatch):
 
     captured: dict[str, str | None] = {}
 
-    async def fake_generate(self, document_id, scope, section_heading, count, session,
-                            difficulty="medium", context=None):
+    async def fake_generate(
+        self, document_id, scope, section_heading, count, session, difficulty="medium", context=None
+    ):
         captured["context"] = context
         now = datetime.now(UTC)
         return [
             FlashcardModel(
-                id=f"card{i}", document_id=document_id, chunk_id="chA", source="concept",
-                question=f"q{i}", answer=f"a{i}", fsrs_state="new", fsrs_stability=0.0,
-                fsrs_difficulty=0.0, due_date=now, reps=0, lapses=0, created_at=now,
+                id=f"card{i}",
+                document_id=document_id,
+                chunk_id="chA",
+                source="concept",
+                question=f"q{i}",
+                answer=f"a{i}",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=now,
+                reps=0,
+                lapses=0,
+                created_at=now,
             )
             for i in range(count)
         ]
 
-    monkeypatch.setattr(
-        "app.services.flashcard.FlashcardService.generate", fake_generate
-    )
+    monkeypatch.setattr("app.services.flashcard.FlashcardService.generate", fake_generate)
 
     async with test_db() as s:
         cards = await _generate_for_concepts(s, ["c1"], count=4)
@@ -103,19 +128,36 @@ async def test_concept_generation_grounds_across_docs(test_db, monkeypatch):
 async def test_falls_back_to_whole_doc_when_no_evidence_chunks(test_db, monkeypatch):
     """A concept with no captured chunk_ids still generates -- grounded in the primary doc."""
     async with test_db() as s:
-        s.add(DocumentModel(id="bookA", title="Relational DBs", format="pdf",
-                            content_type="tech_book", file_path="/tmp/a.pdf"))
-        s.add(ConceptModel(
-            id="c2", slug="c-x", label="indexing", kind="concept", origin="document",
-            status="proposed", level=2,
-            evidence_json=[{"document_ids": ["bookA"], "chunk_ids": [], "members": ["indexing"]}],
-        ))
+        s.add(
+            DocumentModel(
+                id="bookA",
+                title="Relational DBs",
+                format="pdf",
+                content_type="tech_book",
+                file_path="/tmp/a.pdf",
+            )
+        )
+        s.add(
+            ConceptModel(
+                id="c2",
+                slug="c-x",
+                label="indexing",
+                kind="concept",
+                origin="document",
+                status="proposed",
+                level=2,
+                evidence_json=[
+                    {"document_ids": ["bookA"], "chunk_ids": [], "members": ["indexing"]}
+                ],
+            )
+        )
         await s.commit()
 
     seen: dict[str, object] = {}
 
-    async def fake_generate(self, document_id, scope, section_heading, count, session,
-                            difficulty="medium", context=None):
+    async def fake_generate(
+        self, document_id, scope, section_heading, count, session, difficulty="medium", context=None
+    ):
         seen["context"] = context
         seen["document_id"] = document_id
         return []

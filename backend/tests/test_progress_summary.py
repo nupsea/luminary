@@ -224,7 +224,7 @@ async def test_notes_timeline_groups_in_sql(test_db):
 
 @pytest.mark.anyio
 async def test_time_on_luminary_is_absent_not_zero_before_anything_is_recorded(test_db):
-    """"Nothing recorded" and "you spent zero minutes" are opposite statements.
+    """ "Nothing recorded" and "you spent zero minutes" are opposite statements.
 
     A zero here would be the same defect this whole contract exists to prevent,
     on the one metric a reader is most likely to check on day one.

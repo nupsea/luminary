@@ -222,11 +222,15 @@ async def test_a_transcript_gets_sections_so_the_reader_can_show_it(test_db, mon
 
     async with factory() as session:
         sections = (
-            await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id))
-        ).scalars().all()
+            (await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
         chunks = (
-            await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id))
-        ).scalars().all()
+            (await session.execute(select(ChunkModel).where(ChunkModel.document_id == doc_id)))
+            .scalars()
+            .all()
+        )
 
     assert len(sections) == 3, "a transcript with no sections cannot be read"
     assert all(s.heading == "" for s in sections), "nothing may invent a heading (I-30)"

@@ -34,9 +34,7 @@ def test_retrieval_golden_entry_accepts_str_hint():
 
 
 def test_retrieval_golden_entry_accepts_list_hint():
-    entry = RetrievalGoldenEntry(
-        question="q", ground_truth_answer="a", context_hint=["a", "b"]
-    )
+    entry = RetrievalGoldenEntry(question="q", ground_truth_answer="a", context_hint=["a", "b"])
     assert entry.context_hint == ["a", "b"]
 
 
@@ -47,9 +45,7 @@ def test_retrieval_golden_entry_rejects_empty_list():
 
 def test_retrieval_golden_entry_rejects_non_str_element():
     with pytest.raises(ValidationError):
-        RetrievalGoldenEntry(
-            question="q", ground_truth_answer="a", context_hint=[1, "ok"]
-        )
+        RetrievalGoldenEntry(question="q", ground_truth_answer="a", context_hint=[1, "ok"])
 
 
 def test_retrieval_golden_entry_empty_str_becomes_empty_list():

@@ -100,9 +100,11 @@ def task_catalogue(
             argv=(
                 *backend_python,
                 "evals/run_intent_eval.py",
-                "--dataset", "intents_adversarial",
+                "--dataset",
+                "intents_adversarial",
                 "--llm-fallback",
-                "--backend-url", backend_url,
+                "--backend-url",
+                backend_url,
             ),
             cwd=REPO_ROOT,
             typical_seconds=60,
@@ -118,7 +120,8 @@ def task_catalogue(
                 *evals_python,
                 "run_flashcard_eval.py",
                 "--skip-judge",
-                "--backend-url", backend_url,
+                "--backend-url",
+                backend_url,
             ),
             cwd=EVALS_DIR,
             typical_seconds=300,
@@ -134,10 +137,12 @@ def task_catalogue(
             argv=(
                 *evals_python,
                 "run_summary_eval.py",
-                "--mode", "executive",
+                "--mode",
+                "executive",
                 "--skip-judge",
                 "--force-refresh",
-                "--backend-url", backend_url,
+                "--backend-url",
+                backend_url,
             ),
             cwd=EVALS_DIR,
             typical_seconds=180,
@@ -149,13 +154,16 @@ def task_catalogue(
         argv = [
             *evals_python,
             "run_eval.py",
-            "--dataset", dataset,
+            "--dataset",
+            dataset,
             "--generate",
             "--check-citations",
             # No judge: the judged tier never gates a swap, and on a one-model
             # machine it would be grading its own answers.
-            "--judge-model", "",
-            "--backend-url", backend_url,
+            "--judge-model",
+            "",
+            "--backend-url",
+            backend_url,
         ]
         if max_questions:
             argv += ["--max-questions", str(max_questions)]
@@ -221,9 +229,7 @@ class MatrixRun:
 
     @property
     def completed_units(self) -> int:
-        return sum(
-            1 for arm in self.arms for t in arm.tasks if t.status in ("complete", "failed")
-        )
+        return sum(1 for arm in self.arms for t in arm.tasks if t.status in ("complete", "failed"))
 
 
 _runs: dict[str, MatrixRun] = {}
@@ -347,9 +353,7 @@ async def _switch_model(model: str) -> str:
     from app.services import settings_service  # noqa: PLC0415
 
     async with get_session_factory()() as session:
-        await settings_service.update_llm_settings(
-            session, mode="private", local_chat_model=model
-        )
+        await settings_service.update_llm_settings(session, mode="private", local_chat_model=model)
     resolved = settings_service.get_local_chat_model()
     if resolved != model:
         raise RuntimeError(f"asked for {model}, backend resolved {resolved!r}")
@@ -609,9 +613,7 @@ async def start(
     if _current is not None:
         raise MatrixBusy("a model comparison is already running")
 
-    catalogue = task_catalogue(
-        backend_url, qa_datasets=qa_datasets, max_questions=max_questions
-    )
+    catalogue = task_catalogue(backend_url, qa_datasets=qa_datasets, max_questions=max_questions)
     unknown = [t for t in tasks if t not in catalogue]
     if unknown:
         raise ValueError(f"unknown task(s): {unknown}")

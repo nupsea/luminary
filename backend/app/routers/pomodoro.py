@@ -129,9 +129,7 @@ async def start_session(
 
 
 @router.post("/{session_id}/pause", response_model=SessionResponse)
-async def pause(
-    session_id: str, session: AsyncSession = Depends(get_db)
-) -> SessionResponse:
+async def pause(session_id: str, session: AsyncSession = Depends(get_db)) -> SessionResponse:
     svc = PomodoroService(session)
     try:
         row = await svc.pause_session(session_id)
@@ -143,9 +141,7 @@ async def pause(
 
 
 @router.post("/{session_id}/resume", response_model=SessionResponse)
-async def resume(
-    session_id: str, session: AsyncSession = Depends(get_db)
-) -> SessionResponse:
+async def resume(session_id: str, session: AsyncSession = Depends(get_db)) -> SessionResponse:
     svc = PomodoroService(session)
     try:
         row = await svc.resume_session(session_id)
@@ -157,9 +153,7 @@ async def resume(
 
 
 @router.post("/{session_id}/complete", response_model=SessionResponse)
-async def complete(
-    session_id: str, session: AsyncSession = Depends(get_db)
-) -> SessionResponse:
+async def complete(session_id: str, session: AsyncSession = Depends(get_db)) -> SessionResponse:
     svc = PomodoroService(session)
     try:
         row = await svc.complete_session(session_id)
@@ -171,9 +165,7 @@ async def complete(
 
 
 @router.post("/{session_id}/abandon", response_model=SessionResponse)
-async def abandon(
-    session_id: str, session: AsyncSession = Depends(get_db)
-) -> SessionResponse:
+async def abandon(session_id: str, session: AsyncSession = Depends(get_db)) -> SessionResponse:
     svc = PomodoroService(session)
     try:
         row = await svc.abandon_session(session_id)

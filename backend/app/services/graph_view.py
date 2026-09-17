@@ -447,4 +447,3 @@ class KuzuViewRepo:
             if row[0] in entity_ids and row[1] in entity_ids:
                 edges.append({"source": row[0], "target": row[1], "weight": row[2]})
         return edges
-

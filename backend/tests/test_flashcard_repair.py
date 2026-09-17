@@ -180,8 +180,7 @@ async def test_deleting_a_document_clears_its_cards_from_the_index(test_db):
         session.add(_card(card_id, doc_id))
         await session.execute(
             text(
-                "INSERT INTO flashcards_fts(flashcard_id, question, answer) "
-                "VALUES (:fid, 'q', 'a')"
+                "INSERT INTO flashcards_fts(flashcard_id, question, answer) VALUES (:fid, 'q', 'a')"
             ),
             {"fid": card_id},
         )

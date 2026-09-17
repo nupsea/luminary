@@ -281,11 +281,13 @@ def _seed_same_concept(svc: KuzuService) -> None:
     for e in ("e1", "e2", "e3", "e4"):
         svc.upsert_entity(e, e, "CONCEPT")
     # contradiction touching d1/d2
-    svc.add_same_concept_edge("e1", "e2", "d1", "d2", 0.9, contradiction=True,
-                              contradiction_note="A says X, B says Y")
+    svc.add_same_concept_edge(
+        "e1", "e2", "d1", "d2", 0.9, contradiction=True, contradiction_note="A says X, B says Y"
+    )
     # contradiction touching d3/d4 (unrelated to d1)
-    svc.add_same_concept_edge("e3", "e4", "d3", "d4", 0.8, contradiction=True,
-                              contradiction_note="C says P, D says Q")
+    svc.add_same_concept_edge(
+        "e3", "e4", "d3", "d4", 0.8, contradiction=True, contradiction_note="C says P, D says Q"
+    )
     # non-contradiction touching d1 — must be excluded
     svc.add_same_concept_edge("e1", "e3", "d1", "d3", 0.7, contradiction=False)
 

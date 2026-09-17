@@ -28,9 +28,7 @@ _MAX_BYTES = 200 * 1024 * 1024
 
 # Left to the article extractor. text/plain is here on purpose -- prose is often
 # served that way.
-_MARKUP_TYPES = frozenset(
-    {"text/html", "application/xhtml+xml", "text/plain", "text/markdown", ""}
-)
+_MARKUP_TYPES = frozenset({"text/html", "application/xhtml+xml", "text/plain", "text/markdown", ""})
 
 # Recognisable documents this endpoint cannot ingest. Naming them beats handing
 # the bytes to an HTML parser and storing whatever falls out.

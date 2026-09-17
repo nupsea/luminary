@@ -34,7 +34,6 @@ _background_tasks = task_registry(__name__)
 logger = logging.getLogger(__name__)
 
 
-
 _parser = DocumentParser()
 
 # No longer read by the chunkers -- `DocumentProfile.chunk_config` decides

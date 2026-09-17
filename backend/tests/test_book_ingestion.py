@@ -273,15 +273,24 @@ async def test_long_chapter_reads_back_verbatim(test_db):
 
     state = _make_state(
         doc_id,
-        [{"heading": "Chapter 1", "level": 1, "text": long_chapter,
-          "page_start": 0, "page_end": 0}],
+        [
+            {
+                "heading": "Chapter 1",
+                "level": 1,
+                "text": long_chapter,
+                "page_start": 0,
+                "page_end": 0,
+            }
+        ],
     )
     await _chunk_book(state, state["parsed_document"], doc_id)
 
     async with factory() as session:
         section = (
-            await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id))
-        ).scalars().one()
+            (await session.execute(select(SectionModel).where(SectionModel.document_id == doc_id)))
+            .scalars()
+            .one()
+        )
     assert section.body == long_chapter
     assert len(section.preview) == 10000
 

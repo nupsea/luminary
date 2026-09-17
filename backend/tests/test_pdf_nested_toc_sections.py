@@ -87,3 +87,23 @@ def test_a_flat_toc_is_unchanged(tmp_path):
     for token in TOKENS:
         holders = [s.heading for s in parsed.sections if token in s.text]
         assert len(holders) == 1, f"{token} stored in {len(holders)}: {holders}"
+
+
+def test_a_parent_sharing_its_childs_first_page_does_not_copy_it(tmp_path):
+    """A parent whose child opens on the same page owns no page, so it stays empty.
+
+    Widening its range to that page stored the page twice: on a 2,441-section
+    manual 579 such parents added 1.28M duplicated characters to the index.
+    """
+    same_page = [
+        [1, "Chapter One", 1],
+        [2, "Section 1.1", 1],
+        [2, "Section 1.2", 3],
+        [1, "Chapter Two", 4],
+        [2, "Section 2.1", 5],
+    ]
+    parsed = DocumentParser().parse(_pdf(tmp_path / "same_page.pdf", same_page), "pdf")
+
+    for token in TOKENS:
+        holders = [s.heading for s in parsed.sections if token in s.text]
+        assert len(holders) == 1, f"{token} stored in {len(holders)}: {holders}"

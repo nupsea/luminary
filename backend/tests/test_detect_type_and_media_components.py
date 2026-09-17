@@ -68,9 +68,9 @@ async def test_detect_type_creates_nothing(monkeypatch) -> None:
         lambda doc_id, coro: (launched.append(doc_id), coro.close()),
     )
     data_dir = Path(get_settings().DATA_DIR).expanduser()
-    raw_before = sorted(p.name for p in (data_dir / "raw").glob("*")) if (
-        data_dir / "raw"
-    ).exists() else []
+    raw_before = (
+        sorted(p.name for p in (data_dir / "raw").glob("*")) if (data_dir / "raw").exists() else []
+    )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
@@ -80,9 +80,9 @@ async def test_detect_type_creates_nothing(monkeypatch) -> None:
 
     assert resp.status_code == 200
     assert launched == [], "detect-type must not start an ingestion job"
-    raw_after = sorted(p.name for p in (data_dir / "raw").glob("*")) if (
-        data_dir / "raw"
-    ).exists() else []
+    raw_after = (
+        sorted(p.name for p in (data_dir / "raw").glob("*")) if (data_dir / "raw").exists() else []
+    )
     assert raw_before == raw_after, "detect-type must not leave a file behind"
 
 

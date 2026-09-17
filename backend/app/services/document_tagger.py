@@ -57,6 +57,7 @@ async def _count_chunks(doc_id: str) -> int:
             )
         ).scalar_one() or 0
 
+
 # Content-type aware entity-type selection. Tech writing rarely benefits from
 # PERSON / PLACE entities surfacing as tags (they're author cites, example
 # characters, stack locations); narrative content benefits from exactly those
@@ -75,6 +76,7 @@ def _allowed_entity_types_for(content_type: str | None) -> tuple[str, ...]:
     # plus anything unknown) gets characters and settings too.
     return ("PERSON", "PLACE", "CONCEPT")
 
+
 # Tag-side stoplist: slugs that survive normalization but would be noise as
 # browseable tags. Three buckets:
 #   - Generic role / placeholder nouns from technical writing examples.
@@ -86,38 +88,98 @@ def _allowed_entity_types_for(content_type: str | None) -> tuple[str, ...]:
 TAG_STOPLIST: frozenset[str] = frozenset(
     {
         # Generic roles
-        "user", "users", "admin", "admins", "admin-user", "end-user", "end-users",
-        "viewer", "worker", "workers", "member", "members", "person", "people",
-        "friend", "friends", "partner", "partners", "target", "crowd",
-        "author", "authors", "reader", "readers", "writer", "writers",
-        "employee", "employees", "customer", "customers", "client", "clients",
-        "invoker", "individual", "individuals",
+        "user",
+        "users",
+        "admin",
+        "admins",
+        "admin-user",
+        "end-user",
+        "end-users",
+        "viewer",
+        "worker",
+        "workers",
+        "member",
+        "members",
+        "person",
+        "people",
+        "friend",
+        "friends",
+        "partner",
+        "partners",
+        "target",
+        "crowd",
+        "author",
+        "authors",
+        "reader",
+        "readers",
+        "writer",
+        "writers",
+        "employee",
+        "employees",
+        "customer",
+        "customers",
+        "client",
+        "clients",
+        "invoker",
+        "individual",
+        "individuals",
         # Numbered placeholder variants (catches user1..user9 etc.)
         *(f"user{i}" for i in range(1, 10)),
         # Crypto/example names
-        "alice", "bob", "carol", "charlie", "dave", "eve", "mallory", "oscar",
-        "trent", "wendy", "peggy", "victor",
+        "alice",
+        "bob",
+        "carol",
+        "charlie",
+        "dave",
+        "eve",
+        "mallory",
+        "oscar",
+        "trent",
+        "wendy",
+        "peggy",
+        "victor",
         # NER artifacts / template fragments observed in the wild. The deeper
         # fix is to upgrade entity extraction itself; these are the specific
         # NER residues we've actually seen leak through.
-        "mention", "mentions", "name", "names", "role", "roles",
-        "thing", "things", "stuff", "item", "items", "example",
-        "r-name", "ne-role", "persons-name", "your-name", "your-role",
+        "mention",
+        "mentions",
+        "name",
+        "names",
+        "role",
+        "roles",
+        "thing",
+        "things",
+        "stuff",
+        "item",
+        "items",
+        "example",
+        "r-name",
+        "ne-role",
+        "persons-name",
+        "your-name",
+        "your-role",
         # Generic ambient concepts observed as noise in tech docs.
         # Intentionally NOT included: 'knowledge', 'idea', 'concept' --
         # they have legitimate topical uses in philosophy/epistemology.
-        "planning", "dream", "love", "mind", "thought", "thoughts", "meaning",
+        "planning",
+        "dream",
+        "love",
+        "mind",
+        "thought",
+        "thoughts",
+        "meaning",
     }
 )
 
 DOCUMENT_TAG_SPEC = tag_spec("document")
 
+
 def _system() -> str:
     return render_for(DOCUMENT_TAG_SPEC, "background")
 
+
 _USER_TMPL = (
-    "Title:\n{title}\n\nSummary:\n{summary}\n\nExcerpt:\n{excerpt}\n\n"
-    "Tags (JSON array, at most 5):"
+    "Title:\n{title}\n\nSummary:\n{summary}\n\nExcerpt:\n{excerpt}\n\nTags (JSON array, at most 5):"
 )
 
 
@@ -482,13 +544,15 @@ async def prune_auto_entity_tags() -> dict[str, int]:
         # tags as stale and strip them right back out.
         chunk_count_by_doc: dict[str, int] = {}
         if docs_with_entity_rows:
-            chunk_count_by_doc = dict((
+            chunk_count_by_doc = dict(
+                (
                     await session.execute(
                         select(ChunkModel.document_id, func.count(ChunkModel.id))
                         .where(ChunkModel.document_id.in_(docs_with_entity_rows))
                         .group_by(ChunkModel.document_id)
                     )
-                ).all())
+                ).all()
+            )
 
         # Per-doc set of slugs the CURRENT entity query would produce. Any
         # entity-1 index row for a slug NOT in this set is now stale.
@@ -534,9 +598,7 @@ async def prune_auto_entity_tags() -> dict[str, int]:
 
         for doc_id, to_drop in by_doc.items():
             doc = (
-                await session.execute(
-                    select(DocumentModel).where(DocumentModel.id == doc_id)
-                )
+                await session.execute(select(DocumentModel).where(DocumentModel.id == doc_id))
             ).scalar_one_or_none()
             if doc is None:
                 # Stale index row for a deleted doc -- clean up the orphan.
@@ -590,7 +652,5 @@ async def prune_auto_entity_tags() -> dict[str, int]:
 
         await session.commit()
 
-    logger.info(
-        "auto-tag prune: removed=%d touched=%d", pruned_total, len(docs_touched)
-    )
+    logger.info("auto-tag prune: removed=%d touched=%d", pruned_total, len(docs_touched))
     return {"pruned": pruned_total, "docs_touched": len(docs_touched)}

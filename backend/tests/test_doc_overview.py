@@ -39,8 +39,16 @@ async def test_db(tmp_path, monkeypatch):
 
 async def _seed_doc(factory):
     async with factory() as s:
-        s.add(DocumentModel(id="d1", title="Iceberg Book", format="pdf",
-                            content_type="book", file_path="/tmp/x.pdf", tags=["data"]))
+        s.add(
+            DocumentModel(
+                id="d1",
+                title="Iceberg Book",
+                format="pdf",
+                content_type="book",
+                file_path="/tmp/x.pdf",
+                tags=["data"],
+            )
+        )
         s.add(CollectionModel(id="col1", name="DATA-ENG", color="#6366F1"))
         await s.commit()
     graph_module._graph_service = None

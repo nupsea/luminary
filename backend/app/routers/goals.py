@@ -165,9 +165,7 @@ async def create_goal(
 
 
 @router.get("/{goal_id}", response_model=GoalResponse)
-async def get_goal(
-    goal_id: str, session: AsyncSession = Depends(get_db)
-) -> GoalResponse:
+async def get_goal(goal_id: str, session: AsyncSession = Depends(get_db)) -> GoalResponse:
     svc = LearningGoalsService(session)
     row = await svc.get_goal(goal_id)
     if row is None:
@@ -198,9 +196,7 @@ async def update_goal(
 
 
 @router.post("/{goal_id}/archive", response_model=GoalResponse)
-async def archive_goal(
-    goal_id: str, session: AsyncSession = Depends(get_db)
-) -> GoalResponse:
+async def archive_goal(goal_id: str, session: AsyncSession = Depends(get_db)) -> GoalResponse:
     svc = LearningGoalsService(session)
     try:
         row = await svc.archive_goal(goal_id)
@@ -210,9 +206,7 @@ async def archive_goal(
 
 
 @router.post("/{goal_id}/complete", response_model=GoalResponse)
-async def complete_goal(
-    goal_id: str, session: AsyncSession = Depends(get_db)
-) -> GoalResponse:
+async def complete_goal(goal_id: str, session: AsyncSession = Depends(get_db)) -> GoalResponse:
     svc = LearningGoalsService(session)
     try:
         row = await svc.complete_goal(goal_id)
@@ -222,9 +216,7 @@ async def complete_goal(
 
 
 @router.get("/{goal_id}/progress", response_model=ProgressResponse)
-async def get_progress(
-    goal_id: str, session: AsyncSession = Depends(get_db)
-) -> ProgressResponse:
+async def get_progress(goal_id: str, session: AsyncSession = Depends(get_db)) -> ProgressResponse:
     svc = LearningGoalsService(session)
     try:
         metrics = await svc.compute_progress(goal_id)
@@ -291,9 +283,7 @@ async def unlink_session(
 
 
 @router.delete("/{goal_id}")
-async def delete_goal(
-    goal_id: str, session: AsyncSession = Depends(get_db)
-) -> Response:
+async def delete_goal(goal_id: str, session: AsyncSession = Depends(get_db)) -> Response:
     svc = LearningGoalsService(session)
     deleted = await svc.delete_goal(goal_id)
     if not deleted:

@@ -35,9 +35,7 @@ class TestDuplicateQuestionsAreStructural:
 
 class TestSeparation:
     def test_a_metric_that_moves_separates(self):
-        verdict = separation(
-            {"duplicate_question_rate": 0.02}, {"duplicate_question_rate": 0.40}
-        )
+        verdict = separation({"duplicate_question_rate": 0.02}, {"duplicate_question_rate": 0.40})
         assert verdict["separated"]
         assert verdict["separating_metrics"] == ["duplicate_question_rate"]
 

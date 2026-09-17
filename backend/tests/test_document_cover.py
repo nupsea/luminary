@@ -95,7 +95,9 @@ async def test_get_document_cover_from_image_model(test_db):
     images_dir = tmp_path / "images" / doc_id
     images_dir.mkdir(parents=True, exist_ok=True)
     img_file = images_dir / "diagram.png"
-    img_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
+    img_file.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
 
     async with factory() as session:
         doc = DocumentModel(
@@ -126,6 +128,51 @@ async def test_get_document_cover_from_image_model(test_db):
         resp = await client.get(f"/documents/{doc_id}/cover")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "image/png"
+
+
+async def test_get_document_cover_epub(test_db):
+    """GET /documents/{id}/cover extracts embedded cover image from an EPUB."""
+    from io import BytesIO
+
+    from ebooklib import epub
+    from PIL import Image
+
+    _, factory, tmp_path = test_db
+    doc_id = str(uuid.uuid4())
+    epub_path = tmp_path / f"{doc_id}.epub"
+
+    book = epub.EpubBook()
+    book.set_identifier(doc_id)
+    book.set_title("Test EPUB Book")
+
+    buf = BytesIO()
+    Image.new("RGB", (60, 90), color="blue").save(buf, format="PNG")
+    dummy_png = buf.getvalue()
+
+    book.set_cover("cover.png", dummy_png)
+    epub.write_epub(str(epub_path), book)
+
+    async with factory() as session:
+        doc = DocumentModel(
+            id=doc_id,
+            title="Test EPUB Document",
+            format="epub",
+            content_type="book",
+            word_count=50,
+            page_count=0,
+            file_path=str(epub_path),
+            stage="ready",
+        )
+        session.add(doc)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/documents/{doc_id}/cover")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/webp"
+
+        cover_cached = tmp_path / "covers" / f"{doc_id}.webp"
+        assert cover_cached.is_file()
 
 
 async def test_get_document_cover_404(test_db):

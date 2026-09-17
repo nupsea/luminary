@@ -131,11 +131,7 @@ class ProgressService:
         # stability 0.0, so counting new cards would turn this into "share of my
         # library I have got round to", which is not mastery.
         cards = list(
-            (
-                await self._session.execute(
-                    select(FlashcardModel).where(FlashcardModel.reps > 0)
-                )
-            )
+            (await self._session.execute(select(FlashcardModel).where(FlashcardModel.reps > 0)))
             .scalars()
             .all()
         )
@@ -178,9 +174,7 @@ class ProgressService:
         # Zero is a real answer here, not a missing one: it means no card has got
         # there yet. Only report it once there is something to have got there from.
         if reviewed == 0:
-            return _absent(
-                "count", definition, "No cards reviewed yet.", sample_size=0
-            )
+            return _absent("count", definition, "No cards reviewed yet.", sample_size=0)
         return Metric(
             value=float(mature),
             unit="count",
@@ -192,9 +186,7 @@ class ProgressService:
     async def _due_today(self) -> Metric:
         now = datetime.now(UTC).replace(tzinfo=None)
         due = await self._scalar(
-            select(func.count())
-            .select_from(FlashcardModel)
-            .where(FlashcardModel.due_date <= now)
+            select(func.count()).select_from(FlashcardModel).where(FlashcardModel.due_date <= now)
         )
         total = await self._scalar(select(func.count()).select_from(FlashcardModel))
         return Metric(
@@ -221,9 +213,7 @@ class ProgressService:
                 unit="days",
                 sample_size=current,
                 definition="Consecutive days you have studied, counting today only once you have.",
-                basis=(
-                    "Includes today." if studied_today else "Today is not counted yet."
-                ),
+                basis=("Includes today." if studied_today else "Today is not counted yet."),
             ),
             Metric(
                 value=float(longest),
@@ -286,6 +276,7 @@ class ProgressService:
                 definition,
                 "Nothing recorded yet — this fills in as you read, write and review.",
             )
+
         # Under a minute, minutes round to zero -- which on screen is
         # indistinguishable from nothing recorded, the one confusion this whole
         # contract exists to prevent. The value stays truthful to its unit and
@@ -332,8 +323,7 @@ class ProgressService:
             unit="days",
             sample_size=_ACTIVITY_WINDOW_DAYS,
             definition=(
-                f"Days in the last {_ACTIVITY_WINDOW_DAYS} with a graded review or "
-                "recorded time."
+                f"Days in the last {_ACTIVITY_WINDOW_DAYS} with a graded review or recorded time."
             ),
             basis=f"{len(days)} of the last {_ACTIVITY_WINDOW_DAYS} days.",
         )

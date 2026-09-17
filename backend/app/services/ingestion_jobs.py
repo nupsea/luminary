@@ -41,9 +41,7 @@ class IngestionJobRegistry:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
-    def launch(
-        self, document_id: str, coro: Coroutine[Any, Any, None]
-    ) -> asyncio.Task[None]:
+    def launch(self, document_id: str, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Schedule ``coro`` as the ingestion task for ``document_id``.
 
         If a task is already running for the same id, the new coroutine is

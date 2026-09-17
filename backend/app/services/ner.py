@@ -398,8 +398,6 @@ def get_entity_extractor() -> "EntityExtractor":
     return _extractor
 
 
-
-
 class EntityExtractor:
     _model = None
     # When the model was last used, so an idle one can be given back. Measured

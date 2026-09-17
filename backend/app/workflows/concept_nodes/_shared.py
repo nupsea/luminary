@@ -33,18 +33,46 @@ _MATHY = re.compile(r"[()\\=]|script(script)?style|divided by|\bd[xy]\b|\blim\b"
 _MATH_ALNUM = re.compile(r"[\U0001D400-\U0001D7FF]")
 _GENERIC_STOP = frozenset(
     {
-        "performance", "thought", "information", "intelligence", "approach",
-        "proposed approach", "agreed", "affirmative", "affection", "for", "and",
-        "advanced systems", "advanced technologies", "new technologies", "true powers",
-        "critical information", "status information", "index information",
+        "performance",
+        "thought",
+        "information",
+        "intelligence",
+        "approach",
+        "proposed approach",
+        "agreed",
+        "affirmative",
+        "affection",
+        "for",
+        "and",
+        "advanced systems",
+        "advanced technologies",
+        "new technologies",
+        "true powers",
+        "critical information",
+        "status information",
+        "index information",
     }
 )
 # Source-code literals/keywords that surface as standalone "concepts" from code blocks but
 # carry no studyable meaning on their own (boolean/null literals, type keywords).
 _CODE_LITERALS = frozenset(
     {
-        "false", "true", "null", "none", "nil", "nan", "void", "undefined",
-        "dynamic", "static", "boolean", "int", "str", "char", "enum", "const",
+        "false",
+        "true",
+        "null",
+        "none",
+        "nil",
+        "nan",
+        "void",
+        "undefined",
+        "dynamic",
+        "static",
+        "boolean",
+        "int",
+        "str",
+        "char",
+        "enum",
+        "const",
     }
 )
 
@@ -60,17 +88,18 @@ def is_junk_entity(name: str) -> bool:
     n = name.strip().lower()
     if not n or n in _GENERIC_STOP or n in _CODE_LITERALS:
         return True
-    if n.startswith("-"):            # CLI flag fragment, e.g. "--acl-spec"
+    if n.startswith("-"):  # CLI flag fragment, e.g. "--acl-spec"
         return True
-    if "_" in n:                     # snake_case code identifier, e.g. "unique_files"
+    if "_" in n:  # snake_case code identifier, e.g. "unique_files"
         return True
-    if _MATH_ALNUM.search(name):     # unicode math-alphanumeric styled garbage
+    if _MATH_ALNUM.search(name):  # unicode math-alphanumeric styled garbage
         return True
     letters = sum(c.isalpha() for c in n)
     digits = sum(c.isdigit() for c in n)
     if letters == 0 or digits > letters:
         return True
     return bool(_MATHY.search(n))
+
 
 # --- entity-type policy (relevance lever 1; docs/concepts.md §2) ---
 # Concept-bearing types we keep as concept seeds.
@@ -89,7 +118,7 @@ CONCEPT_TYPES: frozenset[str] = frozenset(
 # Named-entity noise dropped by default (a history corpus might re-include PERSON/EVENT).
 NOISE_TYPES: frozenset[str] = frozenset({"PERSON", "ORGANIZATION", "PLACE", "DATE", "EVENT"})
 
-MIN_FREQUENCY = 2          # drop hapax entities
+MIN_FREQUENCY = 2  # drop hapax entities
 MIN_ENTITY_LEN = 3
 
 
@@ -97,12 +126,12 @@ PIPELINE_CONFIG = {
     # Concepts are cut to a target COUNT (maxclust ~n/4 entities), adaptive to library size
     # and clamped to the cap. Height/gap cuts are pathological on bge-small (outliers dominate
     # the tree top). The groupings still emerge from the data; only the count is bounded.
-    "concept_dedup_cutoff": 0.93,       # merge near-identical concepts (verify/dedup step)
-    "max_concepts_cap": 400,            # cap on studyable concepts
+    "concept_dedup_cutoff": 0.93,  # merge near-identical concepts (verify/dedup step)
+    "max_concepts_cap": 400,  # cap on studyable concepts
     # edges: each concept links to its top-K nearest neighbours above a cutoff (k-NN graph,
     # not all-pairs -- all-pairs exploded to ~75k edges, a hairball + slow persist).
-    "concept_edge_cutoff": 0.50,        # min centroid cosine for a concept<->concept link
-    "concept_edge_top_k": 6,            # nearest neighbours kept per concept
+    "concept_edge_cutoff": 0.50,  # min centroid cosine for a concept<->concept link
+    "concept_edge_top_k": 6,  # nearest neighbours kept per concept
 }
 
 # concept level (flat layer; levels 0/1 were retired upper tiers)
@@ -121,10 +150,10 @@ class ConceptPipelineState(TypedDict, total=False):
 
     dry_run: bool
     # select_entities -> :
-    entities: list[EntityRec]            # kept, deduped across docs
-    per_doc_entities: dict[str, list[str]]   # doc_id -> kept entity names
+    entities: list[EntityRec]  # kept, deduped across docs
+    per_doc_entities: dict[str, list[str]]  # doc_id -> kept entity names
     # embed_entities -> :
-    vectors: dict[str, list[float]]      # entity name -> embedding
+    vectors: dict[str, list[float]]  # entity name -> embedding
     # build_hierarchy -> : hierarchy {concepts}, lateral_edges
     # observability:
     diagnostics: dict[str, Any]

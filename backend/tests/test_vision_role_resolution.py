@@ -51,9 +51,7 @@ def _feasible(ram_gb: int, profile: str) -> list[dict]:
     return out
 
 
-@pytest.mark.parametrize(
-    ("ram_gb", "profile"), [(16, "standard"), (32, "performance")]
-)
+@pytest.mark.parametrize(("ram_gb", "profile"), [(16, "standard"), (32, "performance")])
 def test_every_profile_can_fill_every_role(ram_gb, profile):
     assert _feasible(ram_gb, profile), (
         f"the {profile} profile has no assignment covering all four roles on a "
@@ -103,9 +101,7 @@ class TestDefaultAndOverride:
     def test_the_default_is_host_aware(self, monkeypatch):
         import app.model_registry as reg
 
-        monkeypatch.setattr(
-            reg, "fits_host", lambda p, ram=None: p.resident_bytes < 4 * 1024**3
-        )
+        monkeypatch.setattr(reg, "fits_host", lambda p, ram=None: p.resident_bytes < 4 * 1024**3)
         chosen = default_vision_model()
         assert profile_for(chosen).resident_bytes < 4 * 1024**3
 
@@ -217,9 +213,7 @@ def test_an_8gb_host_resolves_every_role_to_one_model(monkeypatch):
 
     monkeypatch.setattr(memory_profile, "host_ram_gb", lambda: 8)
     monkeypatch.setattr(settings_service, "configured_vision_override", lambda: None)
-    monkeypatch.setattr(
-        settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b"
-    )
+    monkeypatch.setattr(settings_service, "get_local_chat_model", lambda: "ollama/qwen3.5:4b")
     monkeypatch.setattr(
         settings_service,
         "get_effective_routing",
@@ -271,9 +265,7 @@ class TestOneModelServesEveryRole:
     def test_a_generalist_must_be_able_to_do_both_jobs(self):
         assert all(p.multimodal for p in generalist_candidates(8))
 
-    def test_an_explicit_oversized_chat_choice_is_not_silently_downgraded(
-        self, monkeypatch
-    ):
+    def test_an_explicit_oversized_chat_choice_is_not_silently_downgraded(self, monkeypatch):
         """Same rule as vision: the default is narrowed by the host, a choice is not."""
         from app.services import model_router, settings_service
 

@@ -355,7 +355,6 @@ class ClusteringService:
             it["suggestion_id"]: it["note_ids"] for it in items if it.get("note_ids") is not None
         }
 
-
         created_ids: list[str] = []
 
         for sid in suggestion_ids:
@@ -518,7 +517,6 @@ class ClusteringService:
 
         Returns {"tags_renamed": int, "collections_renamed": int, "tags_merged": int}
         """
-
 
         tags_renamed = 0
         tags_merged = 0

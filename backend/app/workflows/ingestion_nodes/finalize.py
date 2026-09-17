@@ -119,9 +119,7 @@ async def _run_progressive_summarization(doc_id: str) -> None:
             )
 
     try:
-        rest_inserted = await section_svc.generate_progressive_rest(
-            doc_id, rest_units, next_index
-        )
+        rest_inserted = await section_svc.generate_progressive_rest(doc_id, rest_units, next_index)
         logger.info(
             "progressive summarize: %d remaining section summaries stored",
             rest_inserted,
@@ -196,7 +194,6 @@ async def error_finalize_node(state: IngestionState) -> IngestionState:
     Persists the human-readable error detail to DocumentModel.error_message so
     GET /documents/{id}/status can surface it to the UI (e.g. 'ffmpeg not found').
     """
-
 
     doc_id = state["document_id"]
     error_detail = state.get("error")
@@ -375,4 +372,3 @@ async def enrichment_enqueue_node(state: IngestionState) -> IngestionState:
             )
 
     return {**state, "status": "complete"}
-

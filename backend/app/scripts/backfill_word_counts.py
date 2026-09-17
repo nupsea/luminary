@@ -81,9 +81,7 @@ async def recount_all(*, apply: bool) -> list[Recount]:
         for doc in rows:
             path = Path(doc.file_path) if doc.file_path else None
             if path is None or not path.is_file():
-                results.append(
-                    Recount(doc.id, doc.title or "?", 0, reason="source file is gone")
-                )
+                results.append(Recount(doc.id, doc.title or "?", 0, reason="source file is gone"))
                 continue
             try:
                 count = await asyncio.to_thread(_word_count, path)

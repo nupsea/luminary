@@ -83,9 +83,7 @@ async def test_classify_only_can_run_the_fallback_the_chat_graph_runs(monkeypatc
         # A bare phrase the heuristic cannot place: catch-all, confidence 0.5.
         body = {"question": "the Vantari protocol against the Ostrek cipher"}
         without = (await client.post("/qa/classify-only", json=body)).json()
-        with_llm = (
-            await client.post("/qa/classify-only?llm_fallback=true", json=body)
-        ).json()
+        with_llm = (await client.post("/qa/classify-only?llm_fallback=true", json=body)).json()
 
     assert without["source"] == "heuristic"
     assert without["confidence"] < 0.7

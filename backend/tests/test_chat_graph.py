@@ -214,6 +214,7 @@ async def test_summary_question_resolves_targeted_book(test_db):
 
     # Ingest a mock document in the DB
     from app.models import DocumentModel
+
     async with factory() as session:
         doc = DocumentModel(
             id="odyssey-id",
@@ -245,6 +246,7 @@ async def test_summary_question_resolves_targeted_book_fuzzy(test_db):
     _, factory, _ = test_db
 
     from app.models import DocumentModel
+
     async with factory() as session:
         doc = DocumentModel(
             id="frankenstein-id",

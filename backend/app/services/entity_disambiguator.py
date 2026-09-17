@@ -118,9 +118,7 @@ _IRREGULAR_PLURALS: dict[str, str] = {
 
 def _fold_ascii(s: str) -> str:
     """Strip diacritics for comparison keys; never alters the stored name."""
-    return "".join(
-        ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch)
-    )
+    return "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
 
 
 def _singular_key(base: str) -> str:

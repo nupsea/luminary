@@ -38,7 +38,6 @@ async def notes_node(state: ChatState) -> dict:
     q = state.get("rewritten_question") or state["question"]
     logger.info("notes_node: query=%r", q[:80])
 
-
     try:
         results = await _note_search_module.get_note_search_service().search(q, k=5)
     except Exception:
@@ -55,7 +54,6 @@ async def notes_node(state: ChatState) -> dict:
         line = "[From your notes] " + r.content
         if i < 3:
             try:
-
                 ng_svc = _note_graph_module.get_note_graph_service()
                 entities = await ng_svc.get_entities_for_note(r.note_id)
                 if entities:
@@ -103,8 +101,6 @@ async def notes_gap_node(state: ChatState) -> dict:
     # auto-fetch notes from the document's auto-collection
     auto_collection_id: str | None = None
     try:
-
-
         async with get_session_factory()() as session:
             # Step 1: find auto-collection for this document
             coll_row = (
@@ -169,7 +165,6 @@ async def notes_gap_node(state: ChatState) -> dict:
         return {"answer": "__card__" + json.dumps(card), "chunks": []}
 
     try:
-
         report = await _gap_detector_module.get_gap_detector().detect_gaps(note_ids, document_id)
         card: dict = {
             "type": "gap_result",

@@ -44,6 +44,7 @@ async def test_db(tmp_path, monkeypatch):
     db_module._session_factory = factory
 
     from unittest.mock import MagicMock
+
     orig_lancedb = vs_module._lancedb_service
     orig_graph = graph_module._graph_service
     orig_embedder = embedder_module._embedding_service
@@ -56,6 +57,7 @@ async def test_db(tmp_path, monkeypatch):
 
     # Clean up note creation background tasks to avoid engine.dispose hang
     from app.routers.notes import _background_tasks
+
     await drain_background_tasks(_background_tasks)
 
     db_module._engine = orig_engine

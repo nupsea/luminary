@@ -39,6 +39,8 @@ interface MarkdownRendererProps {
   /** Lines of the original document preceding `children`, when this body is one
    * chunk of a note split around diagrams. */
   sourceLineOffset?: number
+  /** Parent document ID used to resolve relative image paths to document asset endpoints. */
+  documentId?: string
 }
 
 const IMAGE_SIZE_STYLE: Record<ImageSize, { maxWidth: string; maxHeight: string; objectFit: "contain" }> = {
@@ -218,7 +220,24 @@ function rehypeCleanTableWhitespace() {
   }
 }
 
-function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", reading = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0 }: MarkdownRendererProps) {
+function resolveImageUrl(src?: string, documentId?: string): string {
+  if (!src) return ""
+  if (
+    src.startsWith("http://") ||
+    src.startsWith("https://") ||
+    src.startsWith("data:") ||
+    src.startsWith("blob:")
+  ) {
+    return src
+  }
+  const clean = src.replace(/^\.?\//, "")
+  if (documentId) {
+    return `${API_BASE}/documents/${documentId}/asset/${clean}`
+  }
+  return src
+}
+
+function MarkdownBody({ children, className, validNoteIds, imageSize = "medium", reading = false, onNoteLinkClick, onSetImageSize, trackSourceLines = false, sourceLineOffset = 0, documentId }: MarkdownRendererProps) {
   // Only inline substitutions — line numbering must survive for scroll sync.
   const processed = preprocessLinks(children)
   const [sizeMenu, setSizeMenu] = useState<{ src: string; x: number; y: number } | null>(null)
@@ -269,13 +288,15 @@ function MarkdownBody({ children, className, validNoteIds, imageSize = "medium",
           img: ({ src, alt }) => {
             const parsed = parseImageAlt(alt)
             const size = parsed.size ?? imageSize
+            const resolvedSrc = resolveImageUrl(src, documentId)
             return (
               <img
-                src={src}
+                src={resolvedSrc}
                 alt={parsed.alt}
+                loading="lazy"
                 onClick={
-                  onSetImageSize && src
-                    ? (e) => setSizeMenu({ src, x: e.clientX, y: e.clientY })
+                  onSetImageSize && resolvedSrc
+                    ? (e) => setSizeMenu({ src: resolvedSrc, x: e.clientX, y: e.clientY })
                     : undefined
                 }
                 title={onSetImageSize ? "Click to set display size" : undefined}
@@ -364,12 +385,13 @@ export function MarkdownRenderer({
   onNoteLinkClick,
   onSetImageSize,
   trackSourceLines = false,
+  documentId,
 }: MarkdownRendererProps) {
   const diagrams = findExcalidrawDiagrams(children)
 
   if (diagrams.length === 0) {
     return (
-      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines}>
+      <MarkdownBody className={className} validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} documentId={documentId}>
         {children}
       </MarkdownBody>
     )
@@ -383,7 +405,7 @@ export function MarkdownRenderer({
         return (
           <div key={`${diagram.scenePath}-${diagram.start}`}>
             {before.trim() && (
-              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)}>
+              <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, previousEnd)} documentId={documentId}>
                 {before}
               </MarkdownBody>
             )}
@@ -399,7 +421,7 @@ export function MarkdownRenderer({
         )
       })}
       {children.substring(diagrams.at(-1)?.end ?? 0).trim() && (
-        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)}>
+        <MarkdownBody validNoteIds={validNoteIds} imageSize={imageSize} reading={reading} onNoteLinkClick={onNoteLinkClick} onSetImageSize={onSetImageSize} trackSourceLines={trackSourceLines} sourceLineOffset={lineOffsetAt(children, diagrams.at(-1)?.end ?? 0)} documentId={documentId}>
           {children.substring(diagrams.at(-1)?.end ?? 0)}
         </MarkdownBody>
       )}

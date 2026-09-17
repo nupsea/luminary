@@ -44,7 +44,9 @@ def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
             rec = by_name.get(name)
             if rec is None:
                 by_name[name] = EntityRec(
-                    name=name, type=r.get("type", ""), frequency=int(r.get("frequency", 1)),
+                    name=name,
+                    type=r.get("type", ""),
+                    frequency=int(r.get("frequency", 1)),
                     document_ids=[doc_id],
                 )
             else:
@@ -57,8 +59,8 @@ def _gather() -> tuple[dict[str, EntityRec], dict[str, list[dict]]]:
 async def select_entities(state: ConceptPipelineState) -> ConceptPipelineState:
     by_name, raw_per_doc = await asyncio.to_thread(_gather)
 
-    dropped: Counter = Counter()           # reason -> count
-    dropped_types: Counter = Counter()     # entity type -> count (for the noise breakdown)
+    dropped: Counter = Counter()  # reason -> count
+    dropped_types: Counter = Counter()  # entity type -> count (for the noise breakdown)
     kept: dict[str, EntityRec] = {}
     for name, rec in by_name.items():
         etype = rec["type"]

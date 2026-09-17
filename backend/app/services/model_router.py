@@ -118,9 +118,7 @@ def resolve(role: Role, *, background: bool = False) -> ModelChoice:
             if not fits:
                 reason = f"{configured} does not fit this host"
             elif not room_for_two:
-                reason = (
-                    f"this profile keeps one model resident, which {model} already is"
-                )
+                reason = f"this profile keeps one model resident, which {model} already is"
             else:
                 other = text_profile.id if text_profile is not None else "the text model"
                 reason = f"{configured} and {other} cannot both be resident on this host"
@@ -308,11 +306,7 @@ def warn_if_configuration_exceeds_host() -> list[str]:
         )
     ranked = ", ".join(TEXT_PREFERENCE)
     for role, detail in (report.get("unranked_text_roles") or {}).items():
-        kind = (
-            "a figure reader"
-            if detail["multimodal"]
-            else "a model never measured for text"
-        )
+        kind = "a figure reader" if detail["multimodal"] else "a model never measured for text"
         warnings.append(
             f"{role} answers with {detail['model']}, {kind}: it is not in the measured "
             f"text order ({ranked}), so the quality of what it writes is unknown"
@@ -417,8 +411,6 @@ def residency_report() -> dict[str, Any]:
                 "multimodal": bool(p.multimodal) if (p := profile_for(choice.model)) else False,
             }
             for role, choice in per_role.items()
-            if role in TEXT_ROLES
-            and choice.is_local
-            and not is_measured_text_model(choice.model)
+            if role in TEXT_ROLES and choice.is_local and not is_measured_text_model(choice.model)
         },
     }

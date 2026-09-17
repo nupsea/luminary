@@ -77,11 +77,7 @@ class OkfContextService:
         if not concept_ids:
             return ""
         concepts = list(
-            (
-                await session.execute(
-                    select(ConceptModel).where(ConceptModel.id.in_(concept_ids))
-                )
-            )
+            (await session.execute(select(ConceptModel).where(ConceptModel.id.in_(concept_ids))))
             .scalars()
             .all()
         )

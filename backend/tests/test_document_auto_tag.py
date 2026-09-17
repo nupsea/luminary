@@ -347,9 +347,7 @@ async def test_retag_all_queues_complete_docs_only(test_db, monkeypatch):
         seen.append(doc_id)
         return 0
 
-    monkeypatch.setattr(
-        "app.routers.documents.enrich_document_tags", _spy
-    )
+    monkeypatch.setattr("app.routers.documents.enrich_document_tags", _spy)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.post("/documents/retag-all")
@@ -383,12 +381,24 @@ async def test_entity_quality_gate_drops_noise(test_db, monkeypatch):
         "_fetch_entity_tags",
         lambda _d, _m, **_kw: [
             # Real concept tags (survive)
-            "Apache Iceberg", "data-lakehouse", "Delta Lake",
+            "Apache Iceberg",
+            "data-lakehouse",
+            "Delta Lake",
             # Stoplist hits (rejected)
-            "bob", "alice", "users", "user1", "admin-user", "friend",
-            "viewer", "member", "thought", "dream",
+            "bob",
+            "alice",
+            "users",
+            "user1",
+            "admin-user",
+            "friend",
+            "viewer",
+            "member",
+            "thought",
+            "dream",
             # NER artifacts -- normalizer + min-length reject
-            "r-.-name", "ne-.-role", "person's-name",
+            "r-.-name",
+            "ne-.-role",
+            "person's-name",
             # URL/template noise -- normalizer strips, min-length keeps short ones out
             "s3:/...",  # -> 's3', passes min-length 2, but useful enough that we let it through
             # All-digit slug (port number lookalike) -> rejected
@@ -410,15 +420,25 @@ async def test_entity_quality_gate_drops_noise(test_db, monkeypatch):
     assert "delta-lake" in kept
     # All noise shapes gone:
     for noise in {
-        "bob", "alice", "users", "user1", "admin-user", "friend",
-        "viewer", "member", "thought", "dream",
+        "bob",
+        "alice",
+        "users",
+        "user1",
+        "admin-user",
+        "friend",
+        "viewer",
+        "member",
+        "thought",
+        "dream",
         "9083",
     }:
         assert noise not in kept, f"stoplist/digit gate let {noise!r} through"
     # Normalizer rejections (these slugs don't survive normalization to a
     # meaningful form -- they collapse to empty or single-letter scraps):
     for artifact_in, _expected_dropped in [
-        ("r-.-name", None), ("ne-.-role", None), ("person's-name", None),
+        ("r-.-name", None),
+        ("ne-.-role", None),
+        ("person's-name", None),
     ]:
         assert normalize_tag_slug(artifact_in) not in kept
 
@@ -474,9 +494,7 @@ async def test_prune_auto_endpoint_removes_only_failing_entity_tags(test_db, mon
         "get_document_tagger",
         lambda: _FakeTagger([["python"]]),
     )
-    monkeypatch.setattr(
-        _doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: []
-    )
+    monkeypatch.setattr(_doc_tagger_module, "_fetch_entity_tags", lambda _d, _m, **_kw: [])
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         # Manual write first so 'users' has manual provenance via db_init backfill,
@@ -500,10 +518,15 @@ async def test_prune_auto_endpoint_removes_only_failing_entity_tags(test_db, mon
 
         now = _dt.now(UTC)
         for slug in ["iceberg", "bob", "friend"]:
-            s.add(_Prov(
-                document_id=doc_id, tag_full=slug,
-                source="auto", tagger_version="entity-1", created_at=now,
-            ))
+            s.add(
+                _Prov(
+                    document_id=doc_id,
+                    tag_full=slug,
+                    source="auto",
+                    tagger_version="entity-1",
+                    created_at=now,
+                )
+            )
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -541,9 +564,7 @@ async def test_prune_sweeps_failing_llm_tag(test_db, monkeypatch):
         await s.commit()
 
     # Bypass the runtime gate so we can seed an LLM row that would now fail.
-    monkeypatch.setattr(
-        _doc_tagger_module, "is_acceptable_auto_tag", lambda *_a, **_kw: True
-    )
+    monkeypatch.setattr(_doc_tagger_module, "is_acceptable_auto_tag", lambda *_a, **_kw: True)
     monkeypatch.setattr(
         _doc_tagger_module,
         "get_document_tagger",
@@ -643,10 +664,15 @@ async def test_prune_drops_entity_tags_no_longer_in_graph(test_db, monkeypatch):
 
         now = _dt.now(UTC)
         for slug in ["data-lakehouse", "raghu-ramakrishnan"]:
-            s.add(_Prov(
-                document_id=doc_id, tag_full=slug,
-                source="auto", tagger_version="entity-1", created_at=now,
-            ))
+            s.add(
+                _Prov(
+                    document_id=doc_id,
+                    tag_full=slug,
+                    source="auto",
+                    tagger_version="entity-1",
+                    created_at=now,
+                )
+            )
         await s.commit()
 
     # Today's graph rules would only return 'data-lakehouse' (CONCEPT) for a
@@ -682,9 +708,14 @@ async def test_prune_handles_orphaned_index_row(test_db):
     async with factory() as s:
         s.add(_make_doc(doc_id))
         # Directly insert an orphan index row for a stoplisted slug.
-        s.add(DocumentTagIndexModel(
-            document_id=doc_id, tag_full="bob", tag_root="bob", tag_parent="",
-        ))
+        s.add(
+            DocumentTagIndexModel(
+                document_id=doc_id,
+                tag_full="bob",
+                tag_root="bob",
+                tag_parent="",
+            )
+        )
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -717,9 +748,7 @@ async def test_prune_auto_is_idempotent(test_db, monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         # Force-bypass the runtime gate so we can seed a row that the prune
         # will then sweep.
-        monkeypatch.setattr(
-            _doc_tagger_module, "is_acceptable_auto_tag", lambda *_a, **_kw: True
-        )
+        monkeypatch.setattr(_doc_tagger_module, "is_acceptable_auto_tag", lambda *_a, **_kw: True)
         await c.post(f"/documents/{doc_id}/retag")
         # Reset to real gate for the prune itself.
         monkeypatch.undo()

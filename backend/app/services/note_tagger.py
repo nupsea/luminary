@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 
 NOTE_TAG_SPEC = tag_spec("note")
 
+
 def _system() -> str:
     return render_for(NOTE_TAG_SPEC, "background")
+
 
 _USER_TMPL = "Note:\n{content}\n\nTags (JSON array, at most 5):"
 

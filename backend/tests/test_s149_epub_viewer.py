@@ -146,6 +146,23 @@ def test_sanitize_keeps_code_em_pre():
     assert "<pre>" in result
 
 
+def test_sanitize_refuses_data_links_and_remote_images():
+    """`data:` is allowed so inlined figures render; it must not open a document.
+
+    A remote `src` would also make the reader fetch from the network whenever a
+    chapter opens, which a local-first reader never does on its own.
+    """
+    svc = EpubService()
+    result = svc.sanitize_html(
+        '<p><a href="data:text/html,<b>x</b>">link</a>'
+        '<img src="https://tracker.example/p.gif" alt="remote">'
+        '<img src="data:image/png;base64,AAAA" alt="inline"></p>'
+    )
+    assert "data:text/html" not in result
+    assert "tracker.example" not in result
+    assert 'src="data:image/png;base64,AAAA"' in result
+
+
 # HTTP endpoint tests
 
 

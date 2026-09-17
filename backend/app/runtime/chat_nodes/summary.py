@@ -50,7 +50,6 @@ async def _fetch_all_doc_executive_summaries() -> list[tuple[str, str]]:
     Returns an empty list if none exist.
     """
     async with get_session_factory()() as session:
-
         # Latest created_at per document_id
         latest_subq = (
             select(

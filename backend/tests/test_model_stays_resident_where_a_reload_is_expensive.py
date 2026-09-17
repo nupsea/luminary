@@ -126,9 +126,7 @@ class TestThePingYieldsToTheUser:
     async def test_no_ping_while_an_interactive_call_is_in_flight(self, monkeypatch):
         """One serving slot (I-31): a ping issued during an Ask is latency the
         user pays for a timer that call is already resetting."""
-        monkeypatch.setattr(
-            "app.services.llm_admission.under_interactive_pressure", lambda: True
-        )
+        monkeypatch.setattr("app.services.llm_admission.under_interactive_pressure", lambda: True)
         assert await model_keepwarm._ping_if_idle() is False
 
     @pytest.mark.asyncio
@@ -139,18 +137,14 @@ class TestThePingYieldsToTheUser:
         class _State:
             last_interactive_end = time.monotonic()
 
-        monkeypatch.setattr(
-            "app.services.llm_admission.under_interactive_pressure", lambda: False
-        )
+        monkeypatch.setattr("app.services.llm_admission.under_interactive_pressure", lambda: False)
         monkeypatch.setattr("app.services.llm_admission.current_state", lambda: _State())
         assert await model_keepwarm._ping_if_idle() is False
 
     @pytest.mark.asyncio
     async def test_an_idle_host_is_pinged_with_a_bounded_ping(self, monkeypatch):
         """It resets a timer; it does not produce text."""
-        monkeypatch.setattr(
-            "app.services.llm_admission.under_interactive_pressure", lambda: False
-        )
+        monkeypatch.setattr("app.services.llm_admission.under_interactive_pressure", lambda: False)
         monkeypatch.setattr("app.services.llm_admission.current_state", lambda: None)
 
         seen: dict = {}

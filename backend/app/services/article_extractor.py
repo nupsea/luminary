@@ -533,9 +533,7 @@ class ArticleExtractor:
         charge us for every nav logo and share widget trafilatura correctly
         removes, and a warning that cries wolf is not a warning.
         """
-        return [
-            _describe_block(body) for token, body in protected.items() if token not in markdown
-        ]
+        return [_describe_block(body) for token, body in protected.items() if token not in markdown]
 
     def _extraction_report(self, markdown: str, dropped: list[str], notes: list[str]) -> dict:
         """What arrived, and what did not.

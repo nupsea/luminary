@@ -14,12 +14,18 @@ from app.workflows.concept_pipeline import run_pipeline
 
 # two clearly distinct domains (galaxies), two themes (constellations) each
 _DOMAIN = {
-    "iceberg": ("data", "storage"), "parquet": ("data", "storage"),
-    "partitioning": ("data", "storage"), "replication": ("data", "reliab"),
-    "consensus": ("data", "reliab"), "quorum": ("data", "reliab"),
-    "dharma": ("phil", "spirit"), "karma": ("phil", "spirit"),
-    "moksha": ("phil", "spirit"), "logic": ("phil", "reason"),
-    "ethics": ("phil", "reason"), "epistemology": ("phil", "reason"),
+    "iceberg": ("data", "storage"),
+    "parquet": ("data", "storage"),
+    "partitioning": ("data", "storage"),
+    "replication": ("data", "reliab"),
+    "consensus": ("data", "reliab"),
+    "quorum": ("data", "reliab"),
+    "dharma": ("phil", "spirit"),
+    "karma": ("phil", "spirit"),
+    "moksha": ("phil", "spirit"),
+    "logic": ("phil", "reason"),
+    "ethics": ("phil", "reason"),
+    "epistemology": ("phil", "reason"),
 }
 _GAL = {"data": 0, "phil": 1}
 _CON = {"storage": 0, "reliab": 1, "spirit": 2, "reason": 3}
@@ -53,7 +59,8 @@ class _FakeGraph:
 async def _run(monkeypatch):
     monkeypatch.setattr(sel, "get_graph_service", lambda: _FakeGraph())
     monkeypatch.setattr(
-        emb, "get_embedding_service",
+        emb,
+        "get_embedding_service",
         lambda: type("E", (), {"encode": staticmethod(_encode)})(),
     )
     return await run_pipeline(dry_run=True)
@@ -77,17 +84,21 @@ def test_flat_concepts_with_no_cross_domain_edges(monkeypatch):
             return "data"
         return "phil"
 
-    bad = [
-        (a, b) for a, b, _w in state["lateral_edges"]
-        if domain_of(a) != domain_of(b)
-    ]
+    bad = [(a, b) for a, b, _w in state["lateral_edges"] if domain_of(a) != domain_of(b)]
     assert not bad, f"unrelated-domain edges leaked (data<->philosophy): {bad}"
 
 
 def _concept(centroid, entities, salience, con, gal, sun):
     return {
-        "level": 2, "label": "", "sun": sun, "entities": entities, "centroid": centroid,
-        "salience": float(salience), "document_ids": ["d"], "_con": con, "_gal": gal,
+        "level": 2,
+        "label": "",
+        "sun": sun,
+        "entities": entities,
+        "centroid": centroid,
+        "salience": float(salience),
+        "document_ids": ["d"],
+        "_con": con,
+        "_gal": gal,
     }
 
 
@@ -95,8 +106,8 @@ def test_dedup_merges_near_identical_keeps_distinct():
     from app.workflows.concept_nodes.build_hierarchy import _dedup_concepts
 
     base = [1.0, 0.0, 0.0, 0.0]
-    near = [0.99, 0.02, 0.0, 0.0]   # cosine ~1.0 with base -> merge
-    far = [0.0, 0.0, 1.0, 0.0]      # orthogonal -> stays distinct
+    near = [0.99, 0.02, 0.0, 0.0]  # cosine ~1.0 with base -> merge
+    far = [0.0, 0.0, 1.0, 0.0]  # orthogonal -> stays distinct
     concepts = [
         _concept(base, ["a"], 10, 0, 0, "a"),
         _concept(near, ["b"], 3, 1, 0, "b"),
@@ -106,9 +117,9 @@ def test_dedup_merges_near_identical_keeps_distinct():
 
     assert n == 1 and len(merged) == 2
     big = next(m for m in merged if "a" in m["entities"])
-    assert sorted(big["entities"]) == ["a", "b"]   # folded
+    assert sorted(big["entities"]) == ["a", "b"]  # folded
     assert big["sun"] == "a" and big["_con"] == 0  # most-salient member keeps identity
-    assert big["salience"] == 13.0                 # salience summed
+    assert big["salience"] == 13.0  # salience summed
     assert any(m["entities"] == ["z"] for m in merged)  # distinct concept untouched
 
 

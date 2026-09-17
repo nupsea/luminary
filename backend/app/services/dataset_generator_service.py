@@ -38,8 +38,6 @@ def _fire_and_forget(coro) -> None:  # type: ignore[no-untyped-def]
     fire_and_forget(coro, _background_tasks, label="dataset generator task")
 
 
-
-
 def target_count_for(size: str, document_count: int) -> int:
     if size not in SIZE_CONFIG:
         raise ValueError(f"invalid dataset size: {size}")
@@ -203,7 +201,9 @@ async def delete_dataset(session: AsyncSession, dataset_id: str) -> bool:
 
 async def count_questions(session: AsyncSession, dataset_id: str) -> int:
     result = await session.execute(
-        select(func.count()).select_from(GoldenQuestionModel).where(
+        select(func.count())
+        .select_from(GoldenQuestionModel)
+        .where(
             GoldenQuestionModel.dataset_id == dataset_id,
             GoldenQuestionModel.included.is_(True),
         )

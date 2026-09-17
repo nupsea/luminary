@@ -60,9 +60,7 @@ class AnnotationRepo:
         return result.scalars().all()
 
     async def delete(self, annotation_id: str) -> None:
-        row = await get_or_404(
-            self.session, AnnotationModel, annotation_id, name="Annotation"
-        )
+        row = await get_or_404(self.session, AnnotationModel, annotation_id, name="Annotation")
         await self.session.delete(row)
         await self.session.commit()
 

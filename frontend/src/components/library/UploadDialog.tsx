@@ -19,6 +19,8 @@ import {
 import { useIngestionJob, useIngestionTracker } from "@/hooks/ingestionTrackerCore"
 import { capabilityOf, useCapabilities } from "@/hooks/useSetup"
 import type { CapabilityKey } from "@/lib/setupApi"
+import { fetchOreillyStatus, isOreillyUrl, parseOreillyChapter } from "@/lib/oreillyApi"
+import { OreillyConnectModal } from "@/components/library/OreillyConnectModal"
 
 import {
   type Rejection,
@@ -261,6 +263,18 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     enabled: open,
   })
 
+  const [oreillyModalOpen, setOreillyModalOpen] = useState(false)
+  const [oreillyChapterOnly, setOreillyChapterOnly] = useState(true)
+  const { data: oreillyStatus } = useQuery({
+    queryKey: ["oreilly-status"],
+    queryFn: fetchOreillyStatus,
+    enabled: open,
+  })
+
+  const detectedChapter = useMemo(() => {
+    return isOreillyUrl(url) ? parseOreillyChapter(url) : null
+  }, [url])
+
   // Once the doc is accepted (trackedDocId set), assign it to the chosen collections
   // via the tested POST /documents/{id}/collections. Fires once per upload.
   useEffect(() => {
@@ -341,6 +355,7 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     setFileSizeMB(0)
     setTrackedDocId(null)
     setSelectedCollectionIds([])
+    setOreillyChapterOnly(true)
     assignedRef.current = false
   }
 
@@ -510,20 +525,37 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     await doSubmit(file, pasteLabel.trim(), pasteType)
   }
 
-  async function handleUrlSubmit() {
+  // `oreillyConnected` is passed by the connect modal: its success lands before the
+  // status query refetches, so the cached status would reopen the modal.
+  async function handleUrlSubmit({ oreillyConnected = false }: { oreillyConnected?: boolean } = {}) {
     const urlValue = url.trim()
     if (!urlValue) {
       setUrlError("Enter a URL")
       return
     }
     setUrlError("")
+
+    // If an O'Reilly URL is entered and not yet connected, open the connect modal
+    const connected = oreillyConnected || (oreillyStatus?.configured && oreillyStatus?.valid)
+    if (isOreillyUrl(urlValue) && !connected) {
+      setOreillyModalOpen(true)
+      return
+    }
+
     uploadStartRef.current = Date.now()
     setMode("uploading")
-    setDocTitle(urlValue)
-    logger.info("[Upload] url start", { url: urlValue })
+
+    let finalUrl = urlValue
+    if (isOreillyUrl(urlValue) && detectedChapter && !oreillyChapterOnly) {
+      // Strip chapter filename to ingest the full book
+      finalUrl = urlValue.replace(/\/[^/]+\.html?([#?].*)?$/i, "/")
+    }
+
+    setDocTitle(finalUrl)
+    logger.info("[Upload] url start", { url: finalUrl })
     try {
-      const { documentId, warnings } = await submitUrl(urlValue)
-      track(documentId, urlValue)
+      const { documentId, warnings } = await submitUrl(finalUrl)
+      track(documentId, finalUrl)
       setTrackedDocId(documentId)
       // The dialog closes immediately, so any extraction notices need a long
       // dwell to survive the transition and stay readable.
@@ -537,6 +569,11 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Couldn't add the document."
       logger.error("[Upload] url failed", { error_message: errMsg, url: urlValue })
+      if (isOreillyUrl(urlValue) && errMsg.toLowerCase().includes("cookie")) {
+        setOreillyModalOpen(true)
+        setMode("idle")
+        return
+      }
       setMode("error")
       setErrorMessage(errMsg)
       setErrorComponents(err instanceof ComponentsRequiredError ? err.components : [])
@@ -690,9 +727,49 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
                   {urlError && (
                     <p className="mt-1 text-xs text-red-600">{urlError}</p>
                   )}
+                  {url && isOreillyUrl(url) && (
+                    <div className="mt-2 space-y-2">
+                      {oreillyStatus?.configured && oreillyStatus?.valid ? (
+                        <div className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                          O'Reilly Book detected — Subscription Connected ({oreillyStatus.user ?? "Subscriber"})
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between rounded-md bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 text-xs text-red-300">
+                          <span>O'Reilly Book detected — Subscription cookies needed</span>
+                          <button
+                            type="button"
+                            onClick={() => setOreillyModalOpen(true)}
+                            className="font-medium text-red-400 hover:underline ml-2"
+                          >
+                            Connect
+                          </button>
+                        </div>
+                      )}
+
+                      {detectedChapter && (
+                        <div className="flex items-center justify-between rounded-md border border-border/80 bg-muted/40 px-2.5 py-2 text-xs">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={oreillyChapterOnly}
+                              onChange={(e) => setOreillyChapterOnly(e.target.checked)}
+                              className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
+                            />
+                            <span className="text-foreground">
+                              Ingest this chapter only: <code className="font-mono text-primary font-semibold">{detectedChapter}</code>
+                            </span>
+                          </label>
+                          <span className="text-[11px] text-muted-foreground">
+                            {oreillyChapterOnly ? "Fast (single chapter)" : "Full book"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {!url && !urlError && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Articles are extracted to Markdown. YouTube videos are transcribed. All processing is local.
+                      Articles are extracted to Markdown. YouTube videos and O'Reilly books are automatically detected. All processing is local.
                     </p>
                   )}
                 </div>
@@ -864,6 +941,17 @@ export function UploadDialog({ open, onClose }: UploadDialogProps) {
           </>
         )}
       </div>
+
+      <OreillyConnectModal
+        open={oreillyModalOpen}
+        onClose={() => setOreillyModalOpen(false)}
+        onSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: ["oreilly-status"] })
+          if (url.trim()) {
+            void handleUrlSubmit({ oreillyConnected: true })
+          }
+        }}
+      />
     </div>
   )
 }

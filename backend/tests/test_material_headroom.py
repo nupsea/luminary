@@ -61,28 +61,58 @@ async def _library(factory, *, chunks: int, used: list[int], section_split: int 
     section_a, section_b = str(uuid.uuid4()), str(uuid.uuid4())
     chunk_ids: list[str] = []
     async with factory() as s:
-        s.add(DocumentModel(
-            id=doc_id, title="Linear Programming", format="txt",
-            content_type="notes", created_at=NOW, file_path=f"/tmp/{doc_id}.txt"))
+        s.add(
+            DocumentModel(
+                id=doc_id,
+                title="Linear Programming",
+                format="txt",
+                content_type="notes",
+                created_at=NOW,
+                file_path=f"/tmp/{doc_id}.txt",
+            )
+        )
         for name, sid in (("One", section_a), ("Two", section_b)):
-            s.add(SectionModel(
-                id=sid, document_id=doc_id, heading=name, level=1,
-                section_order=0 if name == "One" else 1))
+            s.add(
+                SectionModel(
+                    id=sid,
+                    document_id=doc_id,
+                    heading=name,
+                    level=1,
+                    section_order=0 if name == "One" else 1,
+                )
+            )
         for i in range(chunks):
             cid = str(uuid.uuid4())
             chunk_ids.append(cid)
             in_b = section_split is not None and i >= section_split
-            s.add(ChunkModel(
-                id=cid, document_id=doc_id, chunk_index=i,
-                text=f"Passage {i} about vertices and feasible regions.",
-                section_id=section_b if in_b else section_a))
+            s.add(
+                ChunkModel(
+                    id=cid,
+                    document_id=doc_id,
+                    chunk_index=i,
+                    text=f"Passage {i} about vertices and feasible regions.",
+                    section_id=section_b if in_b else section_a,
+                )
+            )
         for i in used:
-            s.add(FlashcardModel(
-                id=str(uuid.uuid4()), document_id=doc_id, chunk_id=chunk_ids[i],
-                question=f"Q about passage {i}?", answer="A.",
-                source_excerpt="Passage.", fsrs_state="new", fsrs_stability=0.0,
-                fsrs_difficulty=0.0, due_date=NOW, reps=0, lapses=0, created_at=NOW,
-                source_chunk_ids=[chunk_ids[i]]))
+            s.add(
+                FlashcardModel(
+                    id=str(uuid.uuid4()),
+                    document_id=doc_id,
+                    chunk_id=chunk_ids[i],
+                    question=f"Q about passage {i}?",
+                    answer="A.",
+                    source_excerpt="Passage.",
+                    fsrs_state="new",
+                    fsrs_stability=0.0,
+                    fsrs_difficulty=0.0,
+                    due_date=NOW,
+                    reps=0,
+                    lapses=0,
+                    created_at=NOW,
+                    source_chunk_ids=[chunk_ids[i]],
+                )
+            )
         await s.commit()
     return doc_id, chunk_ids, section_a, section_b
 
@@ -120,13 +150,16 @@ async def test_headroom_is_scoped_to_a_section(test_db):
     """A chapter can be exhausted while the book is not."""
     _engine, factory, _tmp = test_db
     doc_id, _cids, section_a, section_b = await _library(
-        factory, chunks=4, used=[0, 1], section_split=2)
+        factory, chunks=4, used=[0, 1], section_split=2
+    )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        first = (await client.get(
-            f"/flashcards/{doc_id}/headroom", params={"section_id": section_a})).json()
-        second = (await client.get(
-            f"/flashcards/{doc_id}/headroom", params={"section_id": section_b})).json()
+        first = (
+            await client.get(f"/flashcards/{doc_id}/headroom", params={"section_id": section_a})
+        ).json()
+        second = (
+            await client.get(f"/flashcards/{doc_id}/headroom", params={"section_id": section_b})
+        ).json()
 
     assert first["unused_chunks"] == 0, "section one's two passages both have cards"
     assert second["unused_chunks"] == 2, "section two has none"
@@ -138,11 +171,24 @@ async def test_a_card_that_names_no_passage_is_reported_not_counted(test_db):
     _engine, factory, _tmp = test_db
     doc_id, chunk_ids, _a, _b = await _library(factory, chunks=3, used=[0])
     async with factory() as s:
-        s.add(FlashcardModel(
-            id=str(uuid.uuid4()), document_id=doc_id, chunk_id=chunk_ids[1],
-            question="Legacy card?", answer="A.", source_excerpt="Passage.",
-            fsrs_state="new", fsrs_stability=0.0, fsrs_difficulty=0.0,
-            due_date=NOW, reps=0, lapses=0, created_at=NOW, source_chunk_ids=None))
+        s.add(
+            FlashcardModel(
+                id=str(uuid.uuid4()),
+                document_id=doc_id,
+                chunk_id=chunk_ids[1],
+                question="Legacy card?",
+                answer="A.",
+                source_excerpt="Passage.",
+                fsrs_state="new",
+                fsrs_stability=0.0,
+                fsrs_difficulty=0.0,
+                due_date=NOW,
+                reps=0,
+                lapses=0,
+                created_at=NOW,
+                source_chunk_ids=None,
+            )
+        )
         await s.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -168,8 +214,10 @@ async def test_generate_reads_unused_material_when_asked(test_db):
     stub = AsyncMock(side_effect=_capture)
     with patch("app.services.flashcard.FlashcardService.generate", new=stub):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/flashcards/generate", json={
-                "document_id": doc_id, "count": 3, "avoid_used_material": True})
+            resp = await client.post(
+                "/flashcards/generate",
+                json={"document_id": doc_id, "count": 3, "avoid_used_material": True},
+            )
 
     assert resp.status_code == 201, resp.text
     assert seen["exclude"] == {chunk_ids[0], chunk_ids[1]}
@@ -190,9 +238,15 @@ async def test_generate_reads_the_selection_when_one_is_given(test_db):
     stub = AsyncMock(side_effect=_capture)
     with patch("app.services.flashcard.FlashcardService.generate", new=stub):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/flashcards/generate", json={
-                "document_id": doc_id, "count": 1, "avoid_used_material": True,
-                "context": "A vertex of the feasible region carries the optimum."})
+            resp = await client.post(
+                "/flashcards/generate",
+                json={
+                    "document_id": doc_id,
+                    "count": 1,
+                    "avoid_used_material": True,
+                    "context": "A vertex of the feasible region carries the optimum.",
+                },
+            )
 
     assert resp.status_code == 201, resp.text
     assert seen["exclude"] is None
@@ -213,8 +267,9 @@ async def test_generate_leaves_other_callers_alone(test_db):
     stub = AsyncMock(side_effect=_capture)
     with patch("app.services.flashcard.FlashcardService.generate", new=stub):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/flashcards/generate", json={
-                "document_id": doc_id, "count": 3})
+            resp = await client.post(
+                "/flashcards/generate", json={"document_id": doc_id, "count": 3}
+            )
 
     assert resp.status_code == 201, resp.text
     assert seen["exclude"] is None

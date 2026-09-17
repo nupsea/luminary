@@ -24,7 +24,7 @@ def test_the_readme_does_not_claim_the_keychain_unconditionally():
 
 
 def test_the_disclosure_names_the_install_it_applies_to():
-    """"Sometimes plaintext" is not actionable; a user needs to know if it is
+    """ "Sometimes plaintext" is not actionable; a user needs to know if it is
     them."""
     idx = README.find("plain text")
     nearby = README[max(0, idx - 400) : idx + 200]

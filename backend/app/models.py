@@ -595,9 +595,7 @@ class LearningGoalModel(Base):
     deck_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     collection_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # active|paused|completed|archived
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="active", index=True
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -1158,7 +1156,6 @@ class RecommendationFeedbackModel(Base):
     last_shown_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
 
 
 # Engagement: Streaks, XP, Achievements, Focus Sessions

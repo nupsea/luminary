@@ -89,10 +89,14 @@ async def test_deleting_a_card_takes_its_misconception_with_it(factory):
         await FlashcardRepo(session).delete_by_ids([card_id])
 
         left = (
-            await session.execute(
-                select(MisconceptionModel).where(MisconceptionModel.flashcard_id == card_id)
+            (
+                await session.execute(
+                    select(MisconceptionModel).where(MisconceptionModel.flashcard_id == card_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert left == [], "a correction note against a deleted card is unreadable"
 
 
@@ -130,8 +134,12 @@ async def test_deleting_a_card_keeps_the_review_that_happened(factory):
         await FlashcardRepo(session).delete_by_ids([card_id])
 
         kept = (
-            await session.execute(
-                select(ReviewEventModel).where(ReviewEventModel.flashcard_id == card_id)
+            (
+                await session.execute(
+                    select(ReviewEventModel).where(ReviewEventModel.flashcard_id == card_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(kept) == 1, "deleting a card must not erase the day it was studied"

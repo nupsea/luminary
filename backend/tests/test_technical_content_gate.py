@@ -39,9 +39,7 @@ class _FakeLLM:
     [("yes", True), ("Yes.", True), ("no", False), ("No", False), ("maybe", None)],
 )
 async def test_detect_technical_transcript_parses_reply(reply, expected):
-    with patch(
-        "app.services.llm.get_llm_service", return_value=_FakeLLM(reply)
-    ):
+    with patch("app.services.llm.get_llm_service", return_value=_FakeLLM(reply)):
         assert await detect_technical_transcript("some transcript text") is expected
 
 

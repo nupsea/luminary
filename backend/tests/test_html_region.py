@@ -79,7 +79,7 @@ class TestInteractiveFurniture:
         """Custom-element pages wrap the byline in a plain div inside a tag no
         tag list can anticipate, so the class is the only handle."""
         byline = (
-            "<dt-byline><div class=\"byline\">"
+            '<dt-byline><div class="byline">'
             '<div class="author"><a class="name">A Writer</a>'
             '<a class="affiliation">Some Lab</a></div>'
             '<div class="date">Oct. 13</div>'
@@ -119,7 +119,9 @@ class TestAmbiguouslyNamedContent:
     def test_a_papers_related_work_section_survives(self):
         section = (
             '<section class="related-work"><h2>Related work</h2>'
-            + "<p>" + ("Prior systems approached this differently. " * 30) + "</p>"
+            + "<p>"
+            + ("Prior systems approached this differently. " * 30)
+            + "</p>"
             + "</section>"
         )
         region = select_region(_page(f"<article>{PROSE}{section}</article>"))

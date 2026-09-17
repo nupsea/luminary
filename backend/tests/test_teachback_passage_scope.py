@@ -166,9 +166,7 @@ async def test_a_continuous_passage_needs_no_narrowing(db, label, indices, excer
     ],
 )
 @pytest.mark.asyncio
-async def test_an_unlocatable_card_keeps_everything_with_its_seams_marked(
-    db, label, excerpt
-):
+async def test_an_unlocatable_card_keeps_everything_with_its_seams_marked(db, label, excerpt):
     """Grading against too much beats grading against nothing. But four places in
     a document are not one passage, and the evaluator cannot see a gap that is
     not marked."""
@@ -249,9 +247,7 @@ class _Doc:
         ("a transcript", "transcript", None, "conversation"),
     ],
 )
-def test_a_recording_is_not_automatically_a_meeting(
-    label, content_type, has_speakers, expected
-):
+def test_a_recording_is_not_automatically_a_meeting(label, content_type, has_speakers, expected):
     from app.services.flashcard_prompts import _infer_genre
 
     assert _infer_genre(_Doc(content_type), has_speakers=has_speakers) == expected, label

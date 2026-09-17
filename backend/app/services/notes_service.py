@@ -167,7 +167,6 @@ async def sync_tag_index(note_id: str, tags: list[str], session: AsyncSession) -
 
     # Invalidate tag graph cache when tag index changes
     if removed or added:
-
         invalidate_tag_graph_cache()
 
 
@@ -320,7 +319,6 @@ async def upsert_note_graph(
 ) -> None:
     """Fire-and-forget: upsert Note node and edges in Kuzu graph."""
     try:
-
         await _note_graph_module.get_note_graph_service().upsert_note_node(
             note_id, content, document_id, tags, source_document_ids or []
         )
@@ -336,7 +334,6 @@ async def embed_and_store_note(note_id: str, content: str, document_id: str | No
     newer embedding with a stale one (race between create and rapid update).
     """
     try:
-
         loop = asyncio.get_event_loop()
         embedder = _embedder_module.get_embedding_service()
         vector = await loop.run_in_executor(None, lambda: embedder.encode([content])[0])

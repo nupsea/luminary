@@ -185,9 +185,7 @@ _EXECUTOR_JOIN_GRACE_S = 30.0
 SLOW_EXECUTOR_JOINS: list[str] = []
 _CURRENT_NODEID = ""
 
-_original_shutdown_default_executor = (
-    asyncio.base_events.BaseEventLoop.shutdown_default_executor
-)
+_original_shutdown_default_executor = asyncio.base_events.BaseEventLoop.shutdown_default_executor
 
 
 async def _bounded_shutdown_default_executor(self, timeout=None):
@@ -204,9 +202,7 @@ async def _bounded_shutdown_default_executor(self, timeout=None):
         SLOW_EXECUTOR_JOINS.append(f"{_CURRENT_NODEID} :: waited {elapsed:.1f}s")
 
 
-asyncio.base_events.BaseEventLoop.shutdown_default_executor = (
-    _bounded_shutdown_default_executor
-)
+asyncio.base_events.BaseEventLoop.shutdown_default_executor = _bounded_shutdown_default_executor
 
 
 def pytest_runtest_setup(item):
@@ -343,6 +339,7 @@ def _no_real_library_summary_generation():
     Neutralising the coroutine keeps the create_task call observable -- tests asserting
     that generation was fired still pass -- while the task completes instantly.
     """
+
     async def _noop() -> None:
         return
 
@@ -382,9 +379,7 @@ def _no_real_library_summary_refresh(request):
     async def _noop(self) -> None:
         return
 
-    with patch(
-        "app.services.summarizer.SummarizationService.refresh_library_summary", _noop
-    ):
+    with patch("app.services.summarizer.SummarizationService.refresh_library_summary", _noop):
         yield
 
 

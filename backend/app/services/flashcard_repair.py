@@ -35,9 +35,7 @@ async def repair_flashcard_tables(session: AsyncSession) -> dict[str, int]:
 
     Deterministic and idempotent: a second run reports zeroes.
     """
-    live_ids = set(
-        (await session.execute(select(FlashcardModel.id))).scalars().all()
-    )
+    live_ids = set((await session.execute(select(FlashcardModel.id))).scalars().all())
 
     # c2 is `flashcard_id` -- the virtual table is fts5(question, answer,
     # flashcard_id UNINDEXED), and an UNINDEXED column cannot be filtered on the
@@ -51,9 +49,7 @@ async def repair_flashcard_tables(session: AsyncSession) -> dict[str, int]:
 
     stale_rowids = [rowid for card_id, rowid in indexed.items() if card_id not in live_ids]
     for rowid in stale_rowids:
-        await session.execute(
-            text("DELETE FROM flashcards_fts WHERE rowid = :rid"), {"rid": rowid}
-        )
+        await session.execute(text("DELETE FROM flashcards_fts WHERE rowid = :rid"), {"rid": rowid})
 
     missing = live_ids - set(indexed)
     if missing:

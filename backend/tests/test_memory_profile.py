@@ -133,7 +133,6 @@ def test_residency_limit_follows_the_profile():
     assert memory_profile.max_resident_models("performance") == 2
 
 
-
 def test_the_retired_profile_is_gone_rather_than_hidden():
     """A name that still resolves invites code that branches on it again."""
     assert "low" not in memory_profile.PROFILES
@@ -200,8 +199,12 @@ async def test_the_residency_endpoint_reports_a_configuration_that_does_not_fit(
             "profile_suits_host": True,
             "host_ram_gb": 16,
             "roles": {
-                "chat": {"model": "ollama/qwen2.5:14b-instruct", "local": True,
-                         "resident_gb": 10.0, "fallback_reason": None},
+                "chat": {
+                    "model": "ollama/qwen2.5:14b-instruct",
+                    "local": True,
+                    "resident_gb": 10.0,
+                    "fallback_reason": None,
+                },
             },
             "resident_models": ["ollama/qwen2.5:14b-instruct", "ollama/qwen2.5vl:7b"],
             "resident_count": 2,

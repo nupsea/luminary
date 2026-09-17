@@ -48,9 +48,7 @@ def test_overlapping_chunks_do_not_read_as_duplication_loss():
 def test_dropped_half_of_a_document_is_visible_as_lost_retention():
     """The defect this leg exists to catch: text that never became a chunk is
     unreachable by any query, and no retrieval metric can report it."""
-    retention, _ = measure(
-        _SOURCE, ["The Time Traveller produced the machine and set the levers."]
-    )
+    retention, _ = measure(_SOURCE, ["The Time Traveller produced the machine and set the levers."])
     assert retention < 0.6
 
 

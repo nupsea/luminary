@@ -142,9 +142,7 @@ async def _fetch_contradiction_context(doc_ids: list[str]) -> str:
         # + doc-scope filter is done in Cypher, so only the edges we'll actually
         # use cross into Python (was: scan every SAME_CONCEPT edge in the library
         # and filter here).
-        relevant = await asyncio.to_thread(
-            svc.get_contradiction_edges_for_docs, doc_ids
-        )
+        relevant = await asyncio.to_thread(svc.get_contradiction_edges_for_docs, doc_ids)
         if not relevant:
             return ""
 
@@ -230,9 +228,7 @@ async def synthesize_node(state: ChatState) -> dict:
     # Indexed: each chunk carries an [S<n>] marker so a citation can name the chunk
     # it came from and have its excerpt filled in from that chunk (I-33).
     chunks_context, cited_chunks = (
-        pack_context_indexed(chunks_dicts, token_budget=token_budget)
-        if chunks_dicts
-        else ("", [])
+        pack_context_indexed(chunks_dicts, token_budget=token_budget) if chunks_dicts else ("", [])
     )
     logger.info(
         "synthesize_node: packed %d/%d passages into %d chars at budget %d (%s)",
@@ -287,7 +283,6 @@ async def synthesize_node(state: ChatState) -> dict:
         and _should_use_summary(question)
     ):
         try:
-
             exec_summary = await get_summarization_service()._fetch_cached(
                 state["doc_ids"][0], "executive"
             )

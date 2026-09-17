@@ -253,9 +253,7 @@ async def test_teachback_score_below_60_creates_misconception_rows(test_db):
     # hide a regression back to a separate rubric call.
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
-        mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, correction_response]
-        )
+        mock_llm.generate = AsyncMock(side_effect=[llm_eval_response, correction_response])
         mock_get_llm.return_value = mock_llm
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -315,9 +313,7 @@ async def test_teachback_score_below_60_creates_correction_flashcard(test_db):
     # hide a regression back to a separate rubric call.
     with patch("app.routers.study.get_llm_service") as mock_get_llm:
         mock_llm = AsyncMock()
-        mock_llm.generate = AsyncMock(
-            side_effect=[llm_eval_response, correction_response]
-        )
+        mock_llm.generate = AsyncMock(side_effect=[llm_eval_response, correction_response])
         mock_get_llm.return_value = mock_llm
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

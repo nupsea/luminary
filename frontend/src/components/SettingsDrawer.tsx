@@ -11,6 +11,7 @@ import { API_BASE } from "@/lib/config"
 import { getTheme, setTheme, type Theme } from "@/lib/theme"
 import { ModelsAndComponents } from "@/components/settings/ModelsAndComponents"
 import { type ModelDrift } from "@/components/settings/ModelDriftNotice"
+import { OreillySettings } from "@/components/settings/OreillySettings"
 import { ReportIssue } from "@/components/settings/ReportIssue"
 import type { components } from "@/types/api"
 
@@ -734,6 +735,14 @@ function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
 
           {/* Section 2.7: Retrieval — L3 reranker toggle */}
           <RetrievalControl />
+
+          <div className="border-t border-border" />
+
+          {/* Section 2.8: Subscriptions & Integrations */}
+          <section>
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Subscriptions & Integrations</h3>
+            <OreillySettings />
+          </section>
 
           <div className="border-t border-border" />
 

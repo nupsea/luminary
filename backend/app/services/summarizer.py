@@ -15,6 +15,7 @@ To avoid re-running the LLM on every user request:
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -175,6 +176,107 @@ LIBRARY_SYSTEM_PROMPTS: dict[str, str] = {
         f"and how they relate to each other. {_METADATA_IGNORE} {_MARKDOWN_INSTRUCTION}"
     ),
 }
+
+
+# Publisher furniture: carries nothing a summary of the work should repeat.
+_BOILERPLATE_HEADINGS = frozenset(
+    {
+        "praise",
+        "praise for the book",
+        "acknowledgments",
+        "acknowledgements",
+        "how to contact us",
+        "conventions used in this book",
+        "table of contents",
+        "about the author",
+        "about the authors",
+        "colophon",
+        "dedication",
+        "copyright",
+        "index",
+        "using code examples",
+    }
+)
+_BOILERPLATE_PREFIXES = ("praise for", "conventions used", "how to contact", "about the author")
+
+# Authored prose, so the detailed summary keeps it; the key points skip it
+# because it describes the book rather than saying what the book says.
+_FRONT_MATTER_HEADINGS = frozenset(
+    {
+        "foreword",
+        "preface",
+        "prerequisites",
+        "what this book is about",
+        "who this book is for",
+        "who this book is not for",
+        "navigating this book",
+        "note",
+        "tip",
+        "warning",
+        "caution",
+        "important",
+    }
+)
+
+_RE_CHAPTER_HEADING = re.compile(
+    r"^(?:chapter|part|appendix)\s+(?:\d+|[ivxlc]+|[a-z])\b", re.IGNORECASE
+)
+_RE_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_TAKEAWAY_TARGET_CHARS = 180
+
+
+def _is_boilerplate_heading(heading: str) -> bool:
+    h = heading.strip().lower()
+    if not h:
+        return False
+    return h in _BOILERPLATE_HEADINGS or h.startswith(_BOILERPLATE_PREFIXES)
+
+
+def _is_minor_heading(heading: str) -> bool:
+    """Front matter, admonitions and figure captions: kept in full, not a key topic."""
+    h = heading.strip().lower()
+    return h in _FRONT_MATTER_HEADINGS or bool(re.match(r"^figure\s+\d+[-.]\d+", h))
+
+
+def _without_boilerplate(rows: list[SectionSummaryModel]) -> list[SectionSummaryModel]:
+    """Drop publisher furniture, and the letter dividers of an index.
+
+    A lone letter is an index divider only after an "Index" heading: elsewhere it
+    is a chapter numeral, and "I" opens The Adventures of Sherlock Holmes.
+    """
+    kept: list[SectionSummaryModel] = []
+    in_index = False
+    for r in rows:
+        heading = (r.heading or "").strip()
+        if heading.lower() == "index":
+            in_index = True
+        elif not (in_index and len(heading) == 1 and heading.isalpha()):
+            in_index = False
+        if in_index or _is_boilerplate_heading(heading):
+            continue
+        if not (r.content or "").strip() or _is_metadata_section(r.heading, r.content):
+            continue
+        kept.append(r)
+    return kept
+
+
+def _leading_sentences(content: str) -> str:
+    """The first whole sentences of a section summary, up to about two.
+
+    Cut only at a sentence boundary: a clipped sentence reads as a claim the
+    summary never made.
+    """
+    result: list[str] = []
+    total = 0
+    for raw in _RE_SENTENCE_END.split(content.strip()):
+        sentence = raw.strip()
+        if not sentence:
+            continue
+        result.append(sentence)
+        total += len(sentence)
+        if total >= _TAKEAWAY_TARGET_CHARS or len(result) >= 2:
+            break
+    return " ".join(result)
 
 
 def _split_for_detail(text: str, budget_tokens: int = _DETAILED_BATCH_TOKENS) -> list[str]:
@@ -489,6 +591,79 @@ class SummarizationService:
         parts = [f"## {row.heading}\n{row.content}" for row in qualifying]
         return "\n\n".join(parts)
 
+    async def build_assembled_summary(self, document_id: str, mode: str) -> str | None:
+        """Assemble a summary from stored section summaries, without an LLM call.
+
+        detailed: every qualifying section summary in document order, whole,
+        grouped under its chapter. Only publisher boilerplate is left out.
+
+        executive: one entry per chapter, led by that chapter's opening
+        summary. Returns None when the document has no chapter headings, since
+        an extract of the first few sections would pass for key points of the
+        whole work; the caller then synthesises with the LLM.
+
+        No heading is invented (I-30): a section the source left unlabelled is
+        rendered without one.
+        """
+        async with get_session_factory()() as session:
+            result = await session.execute(
+                select(SectionSummaryModel)
+                .where(SectionSummaryModel.document_id == document_id)
+                .order_by(SectionSummaryModel.unit_index)
+            )
+            rows = list(result.scalars().all())
+
+        # Same floor as _build_section_summary_input, so the two never disagree
+        # about whether a document has usable section summaries.
+        rows = _without_boilerplate(rows)
+        if len(rows) < FAST_PATH_MIN_UNITS:
+            return None
+
+        # Rows before the first chapter heading stay as their own group so front
+        # matter and a preface are not lost from the detailed summary.
+        groups: list[tuple[str | None, list[SectionSummaryModel]]] = []
+        for r in rows:
+            heading = (r.heading or "").strip()
+            if _RE_CHAPTER_HEADING.match(heading):
+                groups.append((heading, [r]))
+            elif groups:
+                groups[-1][1].append(r)
+            else:
+                groups.append((None, [r]))
+        chapters = [(h, members) for h, members in groups if h is not None]
+
+        if mode == "detailed":
+            lines: list[str] = []
+            for chapter_heading, members in groups:
+                for i, r in enumerate(members):
+                    heading = (r.heading or "").strip()
+                    if chapter_heading is not None and i == 0:
+                        lines.append(f"## {heading}")
+                    elif heading:
+                        level = "###" if chapter_heading is not None else "##"
+                        lines.append(f"{level} {heading}")
+                    lines.append(r.content.strip())
+                    lines.append("")
+            return "\n".join(lines).strip()
+
+        if mode == "executive":
+            if not chapters:
+                return None
+            lines = ["### Key Takeaways by Chapter", ""]
+            for chapter_heading, members in chapters:
+                opening = members[0]
+                takeaway = _leading_sentences(opening.content)
+                topics = [
+                    (m.heading or "").strip()
+                    for m in members[1:]
+                    if (m.heading or "").strip() and not _is_minor_heading(m.heading)
+                ]
+                topics_suffix = f" *Topics: {', '.join(topics)}.*" if topics else ""
+                lines.append(f"- **{chapter_heading}**: {takeaway}{topics_suffix}")
+            return "\n".join(lines).strip()
+
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -548,13 +723,18 @@ class SummarizationService:
                 # assembled per-section text with a paraphrase of it. Neither
                 # branch streams, so the summary is sent as one event exactly as
                 # the cache path above does.
+                assembled = await self.build_assembled_summary(document_id, mode)
                 text = (
-                    section_input
-                    if section_input is not None
-                    else await self._generate_detailed(
-                        _truncate_to_budget(input_text),
-                        model,
-                        await self._fetch_profile(document_id),
+                    assembled
+                    if assembled is not None
+                    else (
+                        section_input
+                        if section_input is not None
+                        else await self._generate_detailed(
+                            _truncate_to_budget(input_text),
+                            model,
+                            await self._fetch_profile(document_id),
+                        )
                     )
                 )
                 summary_id = await self._store_summary(document_id, mode, text)
@@ -562,6 +742,17 @@ class SummarizationService:
                 done_evt = {"done": True, "summary_id": summary_id, "cached": False}
                 yield f"data: {json.dumps(done_evt)}\n\n"
                 return
+
+            # A first request is answered from the section summaries; an explicit
+            # refresh is the way to ask the LLM to synthesise instead.
+            if mode == "executive" and section_input is not None and not force_refresh:
+                assembled_exec = await self.build_assembled_summary(document_id, "executive")
+                if assembled_exec is not None:
+                    summary_id = await self._store_summary(document_id, mode, assembled_exec)
+                    yield f"data: {json.dumps({'token': assembled_exec})}\n\n"
+                    done_evt = {"done": True, "summary_id": summary_id, "cached": False}
+                    yield f"data: {json.dumps(done_evt)}\n\n"
+                    return
 
             llm = get_llm_service()
             system = _build_system_prompt(mode, await self._fetch_profile(document_id))
@@ -702,7 +893,8 @@ class SummarizationService:
             for mode in modes_needed:
                 try:
                     if mode in _ASSEMBLED_MODES and section_input is not None:
-                        text = section_input
+                        assembled = await self.build_assembled_summary(document_id, mode)
+                        text = assembled if assembled is not None else section_input
                     elif mode in _ASSEMBLED_MODES:
                         text = await self._generate_detailed(
                             _truncate_to_budget(input_text), model, profile

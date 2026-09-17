@@ -91,8 +91,16 @@ def test_prefilter_sparse_lineart_not_decorative() -> None:
     computational-graph figure: >5 unique colors and dominant white well under 99%.
     """
     img = PILImage.new("RGB", (200, 200), color=(255, 255, 255))
-    palette = [(0, 0, 0), (30, 30, 30), (60, 90, 200), (200, 40, 40),
-               (20, 140, 60), (120, 120, 120), (240, 160, 0), (90, 0, 140)]
+    palette = [
+        (0, 0, 0),
+        (30, 30, 30),
+        (60, 90, 200),
+        (200, 40, 40),
+        (20, 140, 60),
+        (120, 120, 120),
+        (240, 160, 0),
+        (90, 0, 140),
+    ]
     for y in range(24):
         for x in range(200):
             img.putpixel((x, y), palette[(x + y) % len(palette)])
@@ -291,9 +299,7 @@ async def test_enrich_sets_description_and_image_type(
     mock_embedder.encode.return_value = [[0.1] * 384]
 
     with (
-        patch(
-            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
-        ) as mock_llm,
+        patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -379,9 +385,7 @@ async def test_decorative_image_skips_llm(session_factory, tmp_path: Path) -> No
     mock_embedder.encode.return_value = [[0.0] * 384]
 
     with (
-        patch(
-            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
-        ) as mock_llm,
+        patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -471,9 +475,7 @@ async def test_images_fts_keyword_search(doc_and_image, session_factory, tmp_pat
     mock_embedder.encode.return_value = [[0.0] * 384]
 
     with (
-        patch(
-            "app.services.llm.litellm.acompletion", new_callable=AsyncMock
-        ) as mock_llm,
+        patch("app.services.llm.litellm.acompletion", new_callable=AsyncMock) as mock_llm,
         patch("app.database.get_session_factory", return_value=session_factory),
         patch("app.config.get_settings") as mock_settings,
         patch("app.services.vector_store.get_lancedb_service", return_value=mock_lancedb),
@@ -878,9 +880,7 @@ def test_merge_labels_dedupes_repeated_labels() -> None:
         "description": "An encoder stack.",
         "labels": ["Add & Norm", "Feed Forward", "Add & Norm", "Feed Forward", "Add & Norm"],
     }
-    assert _merge_labels(parsed) == (
-        "An encoder stack. Visible labels: Add & Norm, Feed Forward."
-    )
+    assert _merge_labels(parsed) == ("An encoder stack. Visible labels: Add & Norm, Feed Forward.")
 
 
 @pytest.mark.asyncio
