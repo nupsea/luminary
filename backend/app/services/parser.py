@@ -391,6 +391,28 @@ def _block_start_offsets(blocks: list[str]) -> list[int]:
     return offsets
 
 
+def _normalize_heading_text(text: str) -> str:
+    return _RE_WHITESPACE.sub(" ", text).strip().lower()
+
+
+def _find_heading_block(blocks: list[str], title: str, start_from: int = 0) -> int | None:
+    """Index of the block that opens `title`, searched from `start_from`.
+
+    A PDF heading is almost always its own block; when it is fused with its
+    first sentence (no blank line before the prose starts), a leading match
+    still counts, bounded so a short title cannot match deep inside a
+    paragraph that merely mentions it.
+    """
+    target = _normalize_heading_text(title)
+    if not target:
+        return None
+    for idx in range(start_from, len(blocks)):
+        candidate = _normalize_heading_text(blocks[idx])
+        if candidate.startswith(target) or target in candidate[: len(target) + 40]:
+            return idx
+    return None
+
+
 def _is_folio(text: str) -> bool:
     """A line that is only a number is a page number, not a heading.
 
@@ -544,26 +566,16 @@ class DocumentParser:
             sections: list[Section] = []
             raw_parts: list[str] = []
 
-            for i, (lv, ti, pg) in enumerate(toc):
-                # Up to the NEXT entry, whatever its level. Ending at the next
-                # same-or-higher level made a chapter span all its children and
-                # store their text as well as its own (#97). A parent whose
-                # first child opens on its own page therefore owns no whole page
-                # and gets empty text; that prose goes to the child.
-                next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
-                page_end = min(next_page - 1, total_pages)
+            # Filtered blocks for a page, computed once and shared: when two
+            # TOC entries start on the same physical page, both need this
+            # page's block list to find where each of them actually begins.
+            page_block_cache: dict[int, list[str]] = {}
 
-                texts: list[str] = []
-                # Index into `texts` at which each page after the first starts,
-                # so a per-chunk page can be recovered later. Without it every
-                # chunk in the section can only claim the section's start page.
-                page_start_blocks: list[int] = []
-
-                for page_offset, pn in enumerate(range(max(0, pg - 1), page_end)):
-                    if page_offset > 0:
-                        page_start_blocks.append(len(texts))
+            def _page_blocks(pn: int) -> list[str]:
+                if pn not in page_block_cache:
                     page_obj = doc[pn]
                     page_height = float(page_obj.rect.height) or 1.0
+                    blocks: list[str] = []
                     for block in page_obj.get_text("dict")["blocks"]:  # type: ignore[arg-type]
                         if block.get("type") != 0:
                             continue
@@ -579,7 +591,60 @@ class DocumentParser:
                                 continue
                             block_lines.append(line_text)
                         if block_lines:
-                            texts.append("\n".join(block_lines))
+                            blocks.append("\n".join(block_lines))
+                    page_block_cache[pn] = blocks
+                return page_block_cache[pn]
+
+            # First unclaimed block index per page, 0-based. Only ever
+            # nonzero for a page more than one TOC entry starts on -- the
+            # entry processed first claims a prefix of it, so the next
+            # sibling on that page must not repeat that prefix.
+            page_cursor: dict[int, int] = {}
+
+            for i, (lv, ti, pg) in enumerate(toc):
+                # Up to the NEXT entry, whatever its level. Ending at the next
+                # same-or-higher level made a chapter span all its children and
+                # store their text as well as its own (#97).
+                next_page = toc[i + 1][2] if i + 1 < len(toc) else total_pages + 1
+                page_end = min(next_page - 1, total_pages)
+                # True when the next TOC entry opens on this same page (a
+                # child, or an unrelated sibling in a dense layout): there is
+                # no whole page left for us, only whatever of this one page
+                # comes before that next entry's own heading.
+                shares_start_page = page_end < pg
+
+                texts: list[str] = []
+                # Index into `texts` at which each page after the first starts,
+                # so a per-chunk page can be recovered later. Without it every
+                # chunk in the section can only claim the section's start page.
+                page_start_blocks: list[int] = []
+
+                first_page_idx = max(0, pg - 1)
+                first_blocks = _page_blocks(first_page_idx)
+                cursor = page_cursor.get(first_page_idx, 0)
+                own_start = _find_heading_block(first_blocks, ti, cursor)
+                if own_start is None:
+                    own_start = cursor
+                if shares_start_page:
+                    next_title = toc[i + 1][1]
+                    own_end = _find_heading_block(first_blocks, next_title, own_start)
+                    if own_end is None:
+                        # Can't locate the sibling's own heading text on this
+                        # page (font/case mismatch, or the fixture never
+                        # prints headings at all): take the rest of the page
+                        # rather than duplicate it -- an empty later sibling
+                        # is the same shape of loss the old code already had,
+                        # never worse.
+                        own_end = len(first_blocks)
+                else:
+                    own_end = len(first_blocks)
+                page_cursor[first_page_idx] = max(page_cursor.get(first_page_idx, 0), own_end)
+                texts.extend(first_blocks[own_start:own_end])
+
+                if not shares_start_page:
+                    for pn in range(first_page_idx + 1, page_end):
+                        page_start_blocks.append(len(texts))
+                        texts.extend(_page_blocks(pn))
 
                 # Blocks are the layout's own paragraphs; a PDF text layer is
                 # hard-wrapped, so joining lines alone leaves no boundary and
