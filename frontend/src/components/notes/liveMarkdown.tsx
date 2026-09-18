@@ -240,17 +240,35 @@ class RenderedBlock extends WidgetType {
    * drag starting on plain text and crossing into the block already extends
    * correctly, because that tracking lives on `document`, outside this
    * widget's DOM. This replicates it for the one side `ignoreEvent` breaks.
+   *
+   * Throttled to one dispatch per frame, same as CodeMirror's own drag
+   * tracking: a raw mousemove listener can fire far more often than the
+   * browser paints, and each dispatch here is a full decoration recompute
+   * over a React-rendered widget (an image mid-reflow as it loads). Without
+   * the throttle those dispatches outrun layout and the selection background
+   * is drawn from a block-height cache the DOM has already moved past --
+   * a highlighted band floating away from the widget it belongs to.
    */
   private startDrag(view: EditorView, anchor: number) {
     this.endDrag?.()
-    const onMove = (event: MouseEvent) => {
-      const head = view.posAtCoords({ x: event.clientX, y: event.clientY })
+    let frame = 0
+    let pending: { x: number; y: number } | null = null
+    const flush = () => {
+      frame = 0
+      if (!pending) return
+      const head = view.posAtCoords(pending)
+      pending = null
       if (head !== null) view.dispatch({ selection: { anchor, head } })
+    }
+    const onMove = (event: MouseEvent) => {
+      pending = { x: event.clientX, y: event.clientY }
+      if (!frame) frame = requestAnimationFrame(flush)
     }
     const onUp = () => this.endDrag?.()
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
     this.endDrag = () => {
+      cancelAnimationFrame(frame)
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
       this.endDrag = null
